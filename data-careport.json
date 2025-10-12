@@ -1,0 +1,58 @@
+[
+  {
+    "id": "ERX-1754836719386",
+    "patientId": "P-0001",
+    "patient": "Sibusiso Mthembu",
+    "caseId": "C-1001",
+    "consultId": "CONS-2001",
+    "createdAt": "2025-08-10T14:38:39.386Z"
+  },
+  {
+    "id": "ERX-1754826015710",
+    "patientId": "P-0001",
+    "patient": "Sibusiso Mthembu",
+    "caseId": "C-1001",
+    "consultId": "CONS-2001",
+    "status": "queued",
+    "timeline": [
+      {
+        "t": "01:40 PM",
+        "label": "Queued in CarePort"
+      }
+    ],
+    "rider": {
+      "name": "(assigning…)",
+      "phone": "",
+      "vehicle": "",
+      "plate": ""
+    }
+  },
+  {
+    "id": "ERX-1001",
+    "patientId": "P-0001",
+    "patient": "Sibusiso Mthembu",
+    "caseId": "C-1001",
+    "consultId": "CONS-2001",
+    "status": "enroute",
+    "rider": {
+      "name": "Thabo Nkosi",
+      "phone": "+27 71 234 5678",
+      "vehicle": "Bike",
+      "plate": "GP-AB12CD"
+    },
+    "timeline": [
+      {
+        "t": "08:30",
+        "label": "Assigned rider"
+      },
+      {
+        "t": "08:45",
+        "label": "Picked up meds"
+      },
+      {
+        "t": "09:10",
+        "label": "En route to patient"
+      }
+    ]
+  }
+]

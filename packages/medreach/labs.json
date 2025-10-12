@@ -1,0 +1,76 @@
+{
+  "labs": [
+    {
+      "id": "lab-braam",
+      "name": "MedReach Braamfontein",
+      "city": "Johannesburg",
+      "contact": "+27 11 555 0123",
+      "logoUrl": "",
+      "tests": [
+        {
+          "code": "FBC",
+          "name": "Full Blood Count",
+          "priceZAR": 220,
+          "etaDays": 2
+        },
+        {
+          "code": "LIP",
+          "name": "Lipid Panel",
+          "priceZAR": 350,
+          "etaDays": 2
+        },
+        {
+          "code": "FBG",
+          "name": "Fasting Blood Glucose",
+          "priceZAR": 450,
+          "etaDays": 1
+        }
+      ]
+    },
+    {
+      "id": "lab-sandton",
+      "name": "MedReach Sandton",
+      "city": "Sandton",
+      "contact": "+27 11 555 0456",
+      "logoUrl": "",
+      "tests": [
+        {
+          "code": "A1C",
+          "name": "HbA1c",
+          "priceZAR": 280,
+          "etaDays": 1
+        }
+      ]
+    },
+    {
+      "id": "lancet-cresta",
+      "name": "Lancet Cresta",
+      "city": "Johannesburg",
+      "contact": "+27 11 700000",
+      "logoUrl": "",
+      "tests": [
+        {
+          "code": "",
+          "name": "",
+          "priceZAR": 0,
+          "etaDays": 1
+        }
+      ]
+    },
+    {
+      "id": "gaaga-lab-bryanston",
+      "name": "Gaaga Lab Bryanston",
+      "city": "Johannesburg",
+      "contact": "+27 11 7777777",
+      "logoUrl": "",
+      "tests": [
+        {
+          "code": "FBC",
+          "name": "Full Blood Count",
+          "priceZAR": 590,
+          "etaDays": 1
+        }
+      ]
+    }
+  ]
+}

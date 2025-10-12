@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------- Theme tokens ---------- */
+:root {
+  /* Light is default */
+  --bg: #f6f8fc;
+  --text: #0b1220;
+  --card: rgba(255,255,255,0.92);
+  --glass: rgba(255,255,255,0.80);
+  --grid: rgba(2, 6, 23, 0.06);
+  --border: rgba(10,13,20,0.12);
+  --glow: 0 0 20px rgba(56, 189, 248, 0.25), 0 0 40px rgba(56, 189, 248, 0.12);
+}
+
+[data-theme="dark"] {
+  --bg: #0a0f1a;
+  --text: #e5eefb;
+  --card: rgba(255,255,255,0.05);
+  --glass: rgba(255,255,255,0.06);
+  --grid: rgba(100, 200, 255, 0.06);
+  --border: rgba(255,255,255,0.08);
+}
+
+/* Base surface */
+html, body { background: var(--bg); color: var(--text); }
+
+/* Grid / glass / cards */
+.holo-grid {
+  position: relative;
+  background-image:
+    radial-gradient(var(--grid) 1px, transparent 1px),
+    radial-gradient(var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px, 24px 24px;
+  background-position: 0 0, 12px 12px;
+}
+.glass { background: var(--glass); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.35); }
+.card  { @apply rounded-2xl p-4 md:p-6; background: var(--card); border: 1px solid var(--border); }
+
+/* Neon accent */
+.neon { color: #9ae6ff; text-shadow: var(--glow); }
+
+/* Scanline overlay */
+.scanline { position: fixed; inset: 0; background: repeating-linear-gradient(to bottom, rgba(255,255,255,0.04) 0px, rgba(255,255,255,0.04) 1px, transparent 2px, transparent 4px); mix-blend-mode: overlay; opacity: .2; pointer-events: none; }
+
+.glow { box-shadow: 0 0 0 1px rgba(56,189,248,.35), var(--glow); }
+canvas { filter: drop-shadow(0 2px 10px rgba(0,0,0,.35)); }
+.bg-surface { background: var(--bg); }
+
+/* -------- Print-friendly page -------- */
+@media print {
+  /* hide chrome that wastes paper */
+  nav, aside, header, footer, .no-print { display: none !important; }
+
+  /* expand main content */
+  main { padding: 0 !important; }
+
+  /* paper colors */
+  html, body { background: #fff !important; color: #111 !important; }
+
+  /* plain cards */
+  .card, .glass { box-shadow: none !important; background: #fff !important; border-color: #ddd !important; }
+
+  /* charts without extra effects */
+  canvas { filter: none !important; }
+}

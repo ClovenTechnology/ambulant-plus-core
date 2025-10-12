@@ -1,0 +1,22 @@
+{
+  "reportAccessDays": 60,
+  "reportPermissions": {
+    "premium": {
+      "view": true,
+      "download": true,
+      "print": true
+    },
+    "free": {
+      "view": true,
+      "download": false,
+      "print": false
+    }
+  },
+  "pdfWatermark": {
+    "enabled": true,
+    "defaultText": "AMBULANT+ SAMPLE",
+    "careportText": "AMBULANT+ CAREPORT - SAMPLE",
+    "medreachText": "AMBULANT+ MEDREACH - SAMPLE"
+  },
+  "updatedAt": "2025-08-10T07:18:27.433Z"
+}

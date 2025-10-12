@@ -1,0 +1,31 @@
+[
+  {
+    "id": "enc1",
+    "startedAt": "2025-08-18T09:00:00Z",
+    "summary": "Initial consult for respiratory symptoms.",
+    "notes": [
+      {
+        "id": "n1",
+        "text": "Patient presented with cough and fever.",
+        "createdAt": "2025-08-18T09:10:00Z"
+      },
+      {
+        "id": "n2",
+        "text": "Lungs clear on auscultation. Ordered chest X-ray.",
+        "createdAt": "2025-08-18T09:20:00Z"
+      }
+    ]
+  },
+  {
+    "id": "enc2",
+    "startedAt": "2025-08-19T14:30:00Z",
+    "summary": "Follow-up on hypertension management.",
+    "notes": [
+      {
+        "id": "n3",
+        "text": "BP slightly elevated. Adjusted medication dosage.",
+        "createdAt": "2025-08-19T14:45:00Z"
+      }
+    ]
+  }
+]

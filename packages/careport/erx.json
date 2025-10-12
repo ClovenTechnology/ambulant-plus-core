@@ -1,0 +1,22 @@
+{
+  "outbox": [
+    {
+      "id": "ERX-1001",
+      "patientId": "PAT-001",
+      "patient": "Sibusiso Mthembu",
+      "items": [
+        {
+          "drug": "Amlodipine 5mg",
+          "qty": 30
+        }
+      ],
+      "status": "pending"
+    }
+  ],
+  "reprints": [
+    {
+      "id": "ERX-1001",
+      "requestedAt": "2025-08-09T19:15:10.651Z"
+    }
+  ]
+}

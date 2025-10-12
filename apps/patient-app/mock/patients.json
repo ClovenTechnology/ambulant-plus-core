@@ -1,0 +1,24 @@
+[
+  {
+    "id": "p001",
+    "name": "Adunni Balogun",
+    "age": 62,
+    "gender": "Female",
+    "vitals": {
+      "heartRate": 78,
+      "temperature": 36.8,
+      "bloodPressure": "128/82"
+    }
+  },
+  {
+    "id": "p002",
+    "name": "Obafemi Okonkwo",
+    "age": 45,
+    "gender": "Male",
+    "vitals": {
+      "heartRate": 85,
+      "temperature": 37.1,
+      "bloodPressure": "132/85"
+    }
+  }
+]

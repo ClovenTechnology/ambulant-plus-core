@@ -1,0 +1,106 @@
+{
+  "orders": [
+    {
+      "id": "ERX-1001",
+      "patient": "Thandi Mokoena",
+      "items": [
+        {
+          "drug": "Metformin 500mg",
+          "qty": 60
+        },
+        {
+          "drug": "Atorvastatin 20mg",
+          "qty": 30
+        }
+      ],
+      "status": "Accepted by Pharmacy",
+      "pharmacy": "HealthPlus Rosebank",
+      "notes": ""
+    },
+    {
+      "id": "ERX-1002",
+      "patient": "Kabelo van der Merwe",
+      "items": [
+        {
+          "drug": "Amlodipine 10mg",
+          "qty": 30
+        }
+      ],
+      "status": "Partially Fulfilled (First order only)",
+      "pharmacy": "CityMeds Sandton",
+      "notes": ""
+    },
+    {
+      "id": "SUP-ERX-1001",
+      "parentId": "ERX-1001",
+      "patient": "Thandi Mokoena",
+      "items": [
+        {
+          "drug": "Metformin 500mg",
+          "qty": 60
+        },
+        {
+          "drug": "Atorvastatin 20mg",
+          "qty": 30
+        }
+      ],
+      "status": "Awaiting Pharmacy Confirmation",
+      "pharmacy": "—",
+      "notes": ""
+    },
+    {
+      "id": "SUP-ERX-1001",
+      "parentId": "ERX-1001",
+      "patient": "Thandi Mokoena",
+      "items": [
+        {
+          "drug": "Metformin 500mg",
+          "qty": 60
+        },
+        {
+          "drug": "Atorvastatin 20mg",
+          "qty": 30
+        }
+      ],
+      "status": "Awaiting Patient Reorder",
+      "pharmacy": "—",
+      "notes": ""
+    },
+    {
+      "id": "SUP-ERX-1001",
+      "parentId": "ERX-1001",
+      "patient": "Thandi Mokoena",
+      "items": [
+        {
+          "drug": "Metformin 500mg",
+          "qty": 60
+        },
+        {
+          "drug": "Atorvastatin 20mg",
+          "qty": 30
+        }
+      ],
+      "status": "Awaiting Patient Reorder",
+      "pharmacy": "—",
+      "notes": ""
+    },
+    {
+      "id": "SUP-SUP-ERX-1001",
+      "parentId": "SUP-ERX-1001",
+      "patient": "Thandi Mokoena",
+      "items": [
+        {
+          "drug": "Metformin 500mg",
+          "qty": 60
+        },
+        {
+          "drug": "Atorvastatin 20mg",
+          "qty": 30
+        }
+      ],
+      "status": "Accepted by Pharmacy",
+      "pharmacy": "—",
+      "notes": ""
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "name": "@Ambulant+/clinical-codes",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Shared clinical code search (ICD-10, RxNorm) for all apps",
+  "engines": { "node": ">=18.17" },
+  "scripts": {
+    "// how to use": "Run *seed* now. Later, replace with real sources.",
+    "codes:icd10:seed": "node ./scripts/build-icd10.mjs --seed --out ./data/icd10.min.json.gz",
+    "codes:rxnorm:seed": "node ./scripts/build-rxnorm.mjs --seed --out ./data/rxnorm.min.json.gz",
+
+    "// build from real files (put sources under ./sources/)": "",
+    "codes:icd10:build": "node ./scripts/build-icd10.mjs --in ./sources/icd10.csv --out ./data/icd10.min.json.gz",
+    "codes:icd10:build:json": "node ./scripts/build-icd10.mjs --in ./sources/icd10.jsonl --out ./data/icd10.min.json.gz",
+    "codes:rxnorm:build": "node ./scripts/build-rxnorm.mjs --in ./sources/RXNCONSO.RRF --out ./data/rxnorm.min.json.gz",
+
+    "// optional convenience: seed if data files missing": "",
+    "codes:ensure": "node -e \"const fs=require('fs');const p=require('path');const need=(f)=>!fs.existsSync(p.resolve(__dirname,'data',f));const s=[];if(need('icd10.min.json.gz'))s.push('npm run codes:icd10:seed');if(need('rxnorm.min.json.gz'))s.push('npm run codes:rxnorm:seed');if(s.length){console.log('building seed datasets...');require('child_process').execSync(s.join(' && '),{stdio:'inherit'});}else{console.log('codes ok');}\"",
+
+    "codes:icd10:fetch": "node ./scripts/fetch-icd10-full.mjs --out ./sources/icd10.csv",
+    "codes:rxnorm:fetch-local": "node ./scripts/fetch-rxnorm-local.mjs",
+
+    "codes:rxnav:fetch": "node ./scripts/fetch-rxnorm-rxnav.mjs --out ./sources/rxnav-allconcepts.json",
+    "codes:rxnav:build": "node ./scripts/build-rxnorm-from-rxnav.mjs --in ./sources/rxnav-allconcepts.json --out ./data/rxnorm.min.json.gz",
+    "codes:rxnav:build:atc": "node ./scripts/build-rxnorm-from-rxnav.mjs --in ./sources/rxnav-allconcepts.json --out ./data/rxnorm.min.json.gz --with-atc --limit 20000",
+
+    "// convenience: fetch+build from RxNav in one go": "",
+    "codes:rxnav:refresh": "npm run codes:rxnav:fetch && npm run codes:rxnav:build",
+
+    "// convenience: fetch+build ICD-10 and RxNav end-to-end": "",
+    "codes:all:refresh": "npm run codes:icd10:fetch && npm run codes:icd10:build && npm run codes:rxnav:refresh"
+  }
+}

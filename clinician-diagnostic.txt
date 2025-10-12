@@ -1,0 +1,825 @@
+=== BASIC ===
+2025-08-24T05:28:19
+
+Microsoft Windows [Version 10.0.26100.4946]
+v20.19.4
+10.13.1
+
+=== WORKSPACES (depth0) ===
+Legend: production dependency, optional only, dev only
+
+ambulant-plus-scaffold@13.0.0-bi C:\Users\Cash\Downloads\ambulant-plus-scaffold (PRIVATE)
+
+dependencies:
+chart.js 4.5.0
+framer-motion 12.23.12
+react-chartjs-2 5.3.0
+zod 4.0.17
+
+devDependencies:
+@faker-js/faker 9.9.0
+tsx 4.20.4
+
+=== CLINICIAN package.json ===
+{
+    "name":  "clinician-app",
+    "version":  "13.0.0-bi",
+    "private":  true,
+    "scripts":  {
+                    "build":  "next build",
+                    "dev":  "next dev",
+                    "start":  "next start"
+                },
+    "dependencies":  {
+                         "livekit-client":  "^2.15.4",
+                         "livekit-server-sdk":  "^2.13.2",
+                         "next":  "14.1.0",
+                         "react":  "18.2.0",
+                         "react-dom":  "18.2.0",
+                         "tslib":  "^2.8.1"
+                     },
+    "devDependencies":  {
+                            "autoprefixer":  "^10.4.17",
+                            "postcss":  "^8.4.35",
+                            "tailwindcss":  "^3.4.3",
+                            "typescript":  "^5.3.0"
+                        }
+}
+
+=== NEXT/TS/TAILWIND CONFIGS ===
+import nextConfig from 'next';
+/** @type {import('next').NextConfig} */
+const config = {
+  transpilePackages: ['ambulant-mock-auth'],
+  webpack: (config) => {
+    // Use memory cache to avoid Windows rename issues in .next/cache
+    config.cache = { type: 'memory' };
+    return config;
+  },
+  experimental: { externalDir: true },
+};
+export default config;
+/** @type {import('tailwindcss').Config} */
+module.exports = { content: ["./app/**/*.{js,ts,jsx,tsx}","./components/**/*.{js,ts,jsx,tsx}"], theme: { extend: {} }, plugins: [], };
+{
+    "compilerOptions":  {
+                            "lib":  [
+                                        "dom",
+                                        "dom.iterable",
+                                        "esnext"
+                                    ],
+                            "allowJs":  true,
+                            "skipLibCheck":  true,
+                            "strict":  false,
+                            "noEmit":  true,
+                            "incremental":  true,
+                            "esModuleInterop":  true,
+                            "module":  "esnext",
+                            "moduleResolution":  "node",
+                            "resolveJsonModule":  true,
+                            "isolatedModules":  true,
+                            "jsx":  "preserve",
+                            "plugins":  [
+                                            {
+                                                "name":  "next"
+                                            }
+                                        ],
+                            "strictNullChecks":  true,
+                            "baseUrl":  ".",
+                            "paths":  {
+                                          "ambulant-mock-auth":  [
+                                                                     "src/mocks/ambulant-mock-auth.tsx"
+                                                                 ],
+                                          "@/*":  [
+                                                      "src/*"
+                                                  ]
+                                      }
+                        },
+    "include":  [
+                    "next-env.d.ts",
+                    ".next/types/**/*.ts",
+                    "**/*.ts",
+                    "**/*.tsx"
+                ],
+    "exclude":  [
+                    "node_modules"
+                ]
+}
+
+module.exports = { plugins: { tailwindcss: {}, autoprefixer: {}, }, };
+
+=== KEY ROUTES & COMPONENTS (first 120 lines) ===
+
+--- apps\clinician-app\app\appointments\reschedule\page.tsx ---
+"use client";
+import { useMemo, useState } from "react";
+const pendingLabs = [{ test:"HbA1c", eta:"48h" }, { test:"CRP", eta:"6h" }];
+
+export default function Reschedule(){
+  const today = new Date().toISOString().slice(0,10);
+  const [date, setDate] = useState(today);
+  const [note, setNote] = useState("");
+
+  const etaSummary = useMemo(()=> pendingLabs.map(l=> ${l.test} ()).join(", "), []);
+
+  function save(){
+    if(date < today){ alert("No backdating allowed"); return; }
+    alert(Follow‑up booked on . Notes: );
+  }
+
+  return (
+    <main className="p-6 space-y-4">
+      <h1 className="text-xl font-semibold">Book Follow‑up</h1>
+      <div className="text-sm text-gray-600">Lab ETAs: {etaSummary||"—"}</div>
+      <div className="grid md:grid-cols-3 gap-3">
+        <div>
+          <div className="text-xs text-gray-500 mb-1">Date</div>
+          <input type="date" className="border rounded px-2 py-1 w-full" min={today} value={date} onChange={e=>setDate(e.target.value)} />
+        </div>
+        <div className="md:col-span-2">
+          <div className="text-xs text-gray-500 mb-1">Notes (visible to patient)</div>
+          <textarea className="border rounded px-2 py-1 w-full h-24" value={note} onChange={e=>setNote(e.target.value)} />
+        </div>
+      </div>
+      <button className="border rounded px-3 py-1" onClick={save}>Confirm</button>
+    </main>
+  );
+}
+
+--- apps\clinician-app\app\appointments\page.tsx ---
+'use client'
+import { useState } from 'react'
+
+type Appt = {
+  id: string
+  patient: string
+  date: string
+  time: string
+  status: 'Booked' | 'In-Consult' | 'Completed' | 'Cancelled'
+}
+
+const MOCK: Appt[] = [
+  { id:'CA-5001', patient:'Lethu Mhlongo', date:'2025-08-08', time:'09:00', status:'Booked' },
+  { id:'CA-5002', patient:'Siyanda Maseko', date:'2025-08-08', time:'10:00', status:'Booked' },
+  { id:'CA-4988', patient:'Zinzi Ncube', date:'2025-08-07', time:'16:00', status:'Completed' },
+]
+
+export default function ClinicianAppointments(){
+  const [items, setItems] = useState<Appt[]>(MOCK)
+
+  const setStatus = (id:string, status:Appt['status']) => {
+    setItems(prev => prev.map(a => a.id === id ? { ...a, status } : a))
+  }
+
+  return (
+    <main className="p-6 space-y-4">
+      <h2 className="text-lg font-semibold">Appointments</h2>
+      <table className="w-full text-sm border">
+        <thead><tr className="text-left bg-gray-50">
+          <th className="p-2">ID</th><th className="p-2">Patient</th><th className="p-2">Date</th><th className="p-2">Time</th><th className="p-2">Status</th><th className="p-2">Actions</th>
+        </tr></thead>
+        <tbody>
+          {items.map(a => (
+            <tr key={a.id} className="border-t">
+              <td className="p-2">{a.id}</td>
+              <td className="p-2">{a.patient}</td>
+              <td className="p-2">{a.date}</td>
+              <td className="p-2">{a.time}</td>
+              <td className="p-2">{a.status}</td>
+              <td className="p-2 space-x-2">
+                <button className="px-2 py-1 border rounded" onClick={()=>setStatus(a.id,'In-Consult')}>Start</button>
+                <button className="px-2 py-1 border rounded" onClick={()=>setStatus(a.id,'Completed')}>Complete</button>
+                <button className="px-2 py-1 border rounded" onClick={()=>setStatus(a.id,'Cancelled')}>Cancel</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </main>
+  )
+}
+
+--- apps\clinician-app\app\call\[roomId]\page.tsx ---
+
+--- apps\clinician-app\app\careport\timeline\page.tsx ---
+\"use client\";
+import { useEffect, useState } from \"react\";
+function Timeline({ kind }: { kind:\"careport\"|\"medreach\" }){
+  const [items, setItems] = useState<any[]>([]);
+  const [id, setId] = useState<string>(kind === \"careport\" ? \"ERX-1001\" : \"LAB-2001\");
+  useEffect(()=>{
+    (async ()=>{
+      const res = await fetch(`/api/${kind}/timeline?id=${encodeURIComponent(id)}`, { cache:\"no-store\" });
+      const data = await res.json();
+      setItems(data.timeline||[]);
+    })();
+  }, [id, kind]);
+  return (
+    <main className=\"p-6 space-y-4\">
+      <h1 className=\"text-xl font-semibold\">{kind === \"careport\" ? \"CarePort Rider Timeline\" : \"MedReach Phlebotomist Timeline\"}</h1>
+      <input className=\"border px-2 py-1 rounded\" value={id} onChange={e=>setId(e.target.value)} />
+      <ul className=\"space-y-2 text-sm\">
+        {items.map((it, i)=>(
+          <li key={i} className=\"p-2 border rounded flex justify-between\">
+            <span>{it.status.replaceAll(\"_\",\" \")}</span>
+            <span className=\"text-gray-500\">{new Date(it.at).toLocaleString()}</span>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+export default function Page(){ return <Timeline kind=\"careport\"/>; }
+
+--- apps\clinician-app\app\consults\discharge\page.tsx ---
+"use client";
+import { useState } from "react";
+export default function Discharge(){
+  const [form,setForm]=useState({ diagnosis:"", plan:"", referral:"", noteType:"none", email:"", notes:"" });
+  async function submit(){
+    alert("Discharge saved and documents generated (stub).");
+  }
+  return (
+    <main className="p-6 space-y-3">
+      <h2 className="text-lg font-semibold">Discharge</h2>
+      <input className="border rounded px-2 py-1 w-full" placeholder="Diagnosis" value={form.diagnosis} onChange={e=>setForm({...form,diagnosis:e.target.value})}/>
+      <textarea className="border rounded px-2 py-1 w-full" placeholder="Treatment plan" rows={4} value={form.plan} onChange={e=>setForm({...form,plan:e.target.value})}/>
+      <input className="border rounded px-2 py-1 w-full" placeholder="Referral (optional)" value={form.referral} onChange={e=>setForm({...form,referral:e.target.value})}/>
+      <select className="border rounded px-2 py-1" value={form.noteType} onChange={e=>setForm({...form,noteType:e.target.value})}>
+        <option value="none">No note</option>
+        <option value="sick">Sick Note</option>
+        <option value="fitness">Fitness Certificate</option>
+      </select>
+      <input className="border rounded px-2 py-1 w-full" placeholder="Send securely to email (employer/insurer)" value={form.email} onChange={e=>setForm({...form,email:e.target.value})}/>
+      <textarea className="border rounded px-2 py-1 w-full" placeholder="Additional notes" rows={3} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})}/>
+      <button onClick={submit} className="border rounded px-3 py-2">Save & Send</button>
+    </main>
+  );
+}
+
+--- apps\clinician-app\app\dashboard\page.tsx ---
+'use client'
+import { useState } from 'react'
+
+type PatientItem = { id:string; name:string; reason:string; priority:'Normal'|'High' }
+const SAQ: Record<string, PatientItem[]> = {
+  'General': [
+    { id:'Q-101', name:'Sibusiso Mthembu', reason:'Hypertension follow-up', priority:'Normal' },
+    { id:'Q-102', name:'Ayanda Zulu', reason:'Medication review', priority:'High' }
+  ],
+  'Specialist': [
+    { id:'Q-201', name:'Bongiwe Naidoo', reason:'Endocrinology consult', priority:'Normal' }
+  ],
+  'Premium Only': [
+    { id:'Q-301', name:'Pieter Botha', reason:'Fertility coaching', priority:'High' }
+  ]
+}
+
+export default function Dashboard() {
+  const [tab, setTab] = useState<'General'|'Specialist'|'Premium Only'>('General')
+  const queue = SAQ[tab] || []
+  return (
+    <main className="p-6 space-y-4">
+      <h2 className="text-lg font-semibold">Clinician Dashboard</h2>
+
+      <div className="flex gap-2 text-sm">
+        {(['General','Specialist','Premium Only'] as const).map(t => (
+          <button key={t}
+            onClick={()=>setTab(t)}
+            className={`px-3 py-1 border rounded ${tab===t?'bg-black text-white':'bg-white'}`}
+          >{t}</button>
+        ))}
+      </div>
+
+      <div className="border rounded">
+        <div className="p-2 text-sm bg-gray-50 border-b">Queue — {tab}</div>
+        <ul className="divide-y">
+          {queue.map(item => (
+            <li key={item.id} className="p-3 flex items-center justify-between">
+              <div>
+                <div className="font-medium">{item.name}</div>
+                <div className="text-xs text-gray-600">{item.reason}</div>
+              </div>
+              <div className="text-xs px-2 py-1 border rounded">{item.priority}</div>
+            </li>
+          ))}
+          {queue.length===0 && <li className="p-3 text-sm text-gray-500">No patients in queue.</li>}
+        </ul>
+      </div>
+    </main>
+  )
+}
+
+--- apps\clinician-app\app\erx\new\page.tsx ---
+"use client";
+import { useMemo, useState } from "react";
+
+type Patient = { name:string; pid:string; caseId:string; consultId:string; date:string; address:string };
+const patient:Patient = { name:"Sibusiso Mthembu", pid:"P-0001", caseId:"C-1001", consultId:"CONS-2001", date:new Date().toISOString().slice(0,10), address:"123 Jozi Ave, GP" };
+
+const medsCatalog = Array.from({length:50},(_,i)=> Item  — 500mg tab);
+const labs = ["Ampath","Lancet","PathCare","NHLS","DueCare Labs"];
+const labTests = ["FBC","U&E","LFT","HbA1c","Lipid Profile","Thyroid Panel","CRP","D‑Dimer","COVID PCR","Urinalysis"];
+
+const labEtaMap:Record<string, Record<string,string>> = {
+  "Ampath": { "FBC":"24h", "U&E":"24h", "LFT":"24h", "HbA1c":"48h", "Lipid Profile":"48h", "Thyroid Panel":"72h", "CRP":"6h", "D‑Dimer":"6h", "COVID PCR":"24h", "Urinalysis":"12h" },
+  "Lancet": { "FBC":"24h","U&E":"24h","LFT":"24h","HbA1c":"48h","Lipid Profile":"48h","Thyroid Panel":"72h","CRP":"6h","D‑Dimer":"6h","COVID PCR":"24h","Urinalysis":"12h" },
+  "PathCare": { "FBC":"24h","U&E":"24h","LFT":"24h","HbA1c":"48h","Lipid Profile":"48h","Thyroid Panel":"72h","CRP":"6h","D‑Dimer":"6h","COVID PCR":"24h","Urinalysis":"12h" },
+  "NHLS": { "FBC":"24h","U&E":"24h","LFT":"24h","HbA1c":"48h","Lipid Profile":"48h","Thyroid Panel":"72h","CRP":"6h","D‑Dimer":"6h","COVID PCR":"24h","Urinalysis":"12h" },
+  "DueCare Labs": { "FBC":"24h","U&E":"24h","LFT":"24h","HbA1c":"24h","Lipid Profile":"24h","Thyroid Panel":"48h","CRP":"4h","D‑Dimer":"4h","COVID PCR":"12h","Urinalysis":"8h" },
+};
+
+export default function ErxNew(){
+  const [meds, setMeds] = useState<{name:string; dosage:string; freq:string; duration:string; note?:string}[]>([]);
+  const [curMed, setCurMed] = useState<{name:string; dosage:string; freq:string; duration:string; note?:string}>({name:"", dosage:"", freq:"", duration:""});
+  const [labSel, setLabSel] = useState(labs[0]);
+  const [labOrders, setLabOrders] = useState<{ test:string; lab:string; eta:string; note?:string }[]>([]);
+  const [labCur, setLabCur] = useState<{ test:string; lab:string; eta:string; note?:string }>({ test:"", lab:labSel, eta:"", note:"" });
+
+  function addMed(){
+    if(!curMed.name) return;
+    setMeds(prev=>[...prev, curMed]);
+    setCurMed({name:"",dosage:"",freq:"",duration:""});
+  }
+  function addLab(){
+    if(!labCur.test) return;
+    setLabOrders(prev=>[...prev, {...labCur, lab:labSel, eta: (labEtaMap[labSel]?.[labCur.test]||"—")}]);
+    setLabCur({ test:"", lab:labSel, eta:"", note:"" });
+  }
+
+  function send(where:"generic"|"careport"|"medreach"){
+    console.log("SEND", where, { patient, meds, labOrders });
+    alert(eRx sent → );
+  }
+
+  const medOptions = useMemo(()=> medsCatalog.map(m=><option key={m} value={m}>{m}</option>), []);
+  const labTestOptions = useMemo(()=> labTests.map(t=><option key={t} value={t}>{t}</option>), []);
+
+  return (
+    <main className="p-6 space-y-6">
+      <h1 className="text-xl font-semibold">eRx — Compose</h1>
+
+      <section className="rounded-xl border p-4 bg-white">
+        <div className="text-sm font-medium mb-2">Patient</div>
+        <div className="text-sm grid md:grid-cols-2 gap-2">
+          <div><span className="text-gray-500">Name:</span> <span className="font-medium">{patient.name}</span></div>
+          <div><span className="text-gray-500">Patient ID:</span> <span className="font-medium">{patient.pid}</span></div>
+          <div><span className="text-gray-500">Case ID:</span> <span className="font-medium">{patient.caseId}</span></div>
+          <div><span className="text-gray-500">Consult ID:</span> <span className="font-medium">{patient.consultId}</span></div>
+          <div><span className="text-gray-500">Date:</span> <span className="font-medium">{patient.date}</span></div>
+          <div><span className="text-gray-500">Address:</span> <span className="font-medium">{patient.address}</span></div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border p-4 bg-white space-y-3">
+        <div className="text-sm font-semibold">eRx</div>
+        <div className="text-sm text-gray-500">A) Pharmacy / Medication (CarePort)</div>
+
+        <div className="grid md:grid-cols-5 gap-2 items-center">
+          <label className="text-xs text-gray-500 md:col-span-1">Item</label>
+          <select className="border rounded px-2 py-1 md:col-span-2" value={curMed.name} onChange={e=>setCurMed({...curMed, name:e.target.value})}>
+            <option value="">Select a medication…</option>
+            {medOptions}
+          </select>
+          <label className="text-xs text-gray-500">Dosage</label>
+          <input className="border rounded px-2 py-1" placeholder="e.g. 1 tab" value={curMed.dosage} onChange={e=>setCurMed({...curMed, dosage:e.target.value})} />
+          <label className="text-xs text-gray-500">Frequency</label>
+          <input className="border rounded px-2 py-1" placeholder="e.g. bd" value={curMed.freq} onChange={e=>setCurMed({...curMed, freq:e.target.value})} />
+          <label className="text-xs text-gray-500">Duration</label>
+          <input className="border rounded px-2 py-1" placeholder="e.g. 5 days" value={curMed.duration} onChange={e=>setCurMed({...curMed, duration:e.target.value})} />
+          <label className="text-xs text-gray-500">Notes</label>
+          <input className="border rounded px-2 py-1" placeholder="optional" value={curMed.note||""} onChange={e=>setCurMed({...curMed, note:e.target.value})} />
+          <div />
+          <button className="border rounded px-3 py-1" onClick={addMed}>Add</button>
+        </div>
+
+        {meds.length>0 && (
+          <ul className="text-sm border rounded p-2 bg-gray-50">
+            {meds.map((m,i)=>(
+              <li key={i} className="py-1">{m.name} — {m.dosage}, {m.freq}, {m.duration} {m.note?• :""}</li>
+            ))}
+          </ul>
+        )}
+
+        <hr className="my-2" />
+        <div className="text-sm text-gray-500">B) Laboratory / Pathology (MedReach)</div>
+
+        <div className="grid md:grid-cols-4 gap-2 items-center">
+          <label className="text-xs text-gray-500">Lab</label>
+          <select className="border rounded px-2 py-1" value={labSel} onChange={e=>setLabSel(e.target.value)}>
+            {labs.map(l=><option key={l} value={l}>{l}</option>)}
+          </select>
+
+          <label className="text-xs text-gray-500">Test</label>
+          <select className="border rounded px-2 py-1" value={labCur.test} onChange={e=>setLabCur({...labCur, test:e.target.value, eta: (labEtaMap[labSel]?.[e.target.value]||"—")})}>
+            <option value="">Select a test…</option>
+            {labTestOptions}
+          </select>
+
+          <label className="text-xs text-gray-500">ETA</label>
+          <input className="border rounded px-2 py-1" value={labCur.eta} readOnly />
+          <label className="text-xs text-gray-500">Notes</label>
+          <input className="border rounded px-2 py-1 md:col-span-3" placeholder="optional instruction" value={labCur.note||""} onChange={e=>setLabCur({...labCur, note:e.target.value})} />
+
+          <div className="md:col-span-4">
+            <button className="border rounded px-3 py-1" onClick={addLab}>Add Test</button>
+          </div>
+        </div>
+
+        {labOrders.length>0 && (
+          <ul className="text-sm border rounded p-2 bg-gray-50">
+            {labOrders.map((l,i)=>(
+              <li key={i} className="py-1">{l.lab} — {l.test} • ETA {l.eta} {l.note?• :""}</li>
+            ))}
+
+--- apps\clinician-app\app\erx\outbox\page.tsx ---
+"use client";
+import { useEffect, useState } from "react";
+
+type Item = { id:string; patient:string; date:string; kind:"CarePort"|"MedReach"|"Generic"; total?:string };
+
+export default function Outbox(){
+  const [items, setItems] = useState<Item[]>([]);
+  const [err, setErr] = useState<string>("");
+
+  useEffect(()=>{
+    (async()=>{
+      try{
+        const r = await fetch("/api/erx/outbox", { cache:"no-store" });
+        const j = r.ok ? await r.json() : [];
+        setItems(Array.isArray(j)? j : []);
+      }catch(e:any){
+        setErr("Unable to load outbox (mock view shown).");
+        setItems([
+          { id:"RX-1001", patient:"Sibusiso Mthembu", date:new Date().toISOString().slice(0,10), kind:"CarePort", total:"R 180" },
+        ]);
+      }
+    })();
+  },[]);
+
+  return (
+    <main className="p-6 space-y-3">
+      <h1 className="text-xl font-semibold">eRx Outbox</h1>
+      {err && <div className="text-xs text-red-600">{err}</div>}
+      <table className="w-full text-sm border">
+        <thead className="bg-gray-50 text-left">
+          <tr>
+            <th className="py-2 px-2">ID</th>
+            <th className="px-2">Patient</th>
+            <th className="px-2">Date</th>
+            <th className="px-2">Channel</th>
+            <th className="px-2">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((x)=>(
+            <tr key={x.id} className="border-t">
+              <td className="py-2 px-2">{x.id}</td>
+              <td className="px-2">{x.patient}</td>
+              <td className="px-2">{x.date}</td>
+              <td className="px-2">{x.kind}</td>
+              <td className="px-2">{x.total||"—"}</td>
+            </tr>
+          ))}
+          {items.length===0 && (
+            <tr><td className="py-6 px-2 text-gray-500" colSpan={5}>No items yet.</td></tr>
+          )}
+        </tbody>
+      </table>
+    </main>
+  );
+}
+
+--- apps\clinician-app\app\medreach\timeline\page.tsx ---
+\"use client\";
+import { useEffect, useState } from \"react\";
+function Timeline({ kind }: { kind:\"medreach\"|\"medreach\" }){
+  const [items, setItems] = useState<any[]>([]);
+  const [id, setId] = useState<string>(kind === \"medreach\" ? \"ERX-1001\" : \"LAB-2001\");
+  useEffect(()=>{
+    (async ()=>{
+      const res = await fetch(`/api/${kind}/timeline?id=${encodeURIComponent(id)}`, { cache:\"no-store\" });
+      const data = await res.json();
+      setItems(data.timeline||[]);
+    })();
+  }, [id, kind]);
+  return (
+    <main className=\"p-6 space-y-4\">
+      <h1 className=\"text-xl font-semibold\">{kind === \"medreach\" ? \"MedReach Phlebotomist Timeline\" : \"MedReach Phlebotomist Timeline\"}</h1>
+      <input className=\"border px-2 py-1 rounded\" value={id} onChange={e=>setId(e.target.value)} />
+      <ul className=\"space-y-2 text-sm\">
+        {items.map((it, i)=>(
+          <li key={i} className=\"p-2 border rounded flex justify-between\">
+            <span>{it.status.replaceAll(\"_\",\" \")}</span>
+            <span className=\"text-gray-500\">{new Date(it.at).toLocaleString()}</span>
+          </li>
+        ))}
+      </ul>
+    </main>
+  );
+}
+export default function Page(){ return <Timeline kind=\"medreach\"/>; }
+
+--- apps\clinician-app\app\rtc\page.tsx ---
+import RemoteAudio from '@/components/rtc/RemoteAudio';
+'use client';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import LocalMedia from '@/components/rtc/LocalMedia';
+import RemoteVideo from '@/components/rtc/RemoteVideo';
+import DeviceSelect from '@/components/rtc/DeviceSelect';
+import OutputSelect from '@/components/rtc/OutputSelect';
+import ChatPanel from '@/components/rtc/ChatPanel';
+import StatsPanel from '@/components/rtc/StatsPanel';
+import Captions from '@/components/rtc/Captions';
+import { connectSignal, type SigMsg } from '@/lib/signal';
+import { buildIceServers } from '@/lib/ice';
+
+const ROLE = 'clinician' as const;
+const ROOM = 'demo-rtc';
+
+// Sender params: video-only, keep existing codecs, bail if missing, encodings guarded
+function applySenderParams(pc: RTCPeerConnection){
+  try{
+    pc.getSenders()
+      .filter(s => s.track?.kind === 'video' && typeof (s as any).getParameters === 'function')
+      .forEach(s=>{
+        try{
+          const cur = s.getParameters() as RTCRtpParameters;
+          // Some engines require codecs present in partial setParameters (Safari)
+          if(!cur || !Array.isArray((cur as any).codecs) || (cur as any).codecs.length === 0){
+            return; // nothing to do safely
+          }
+          const encs = Array.isArray(cur.encodings) ? [...cur.encodings] : [];
+          if(encs.length === 0) encs.push({});
+          encs[0] = { ...encs[0], maxBitrate: 1_000_000 }; // ~1 Mbps
+          // Pass through codecs; only set fields we modify
+          (s as any).setParameters({ codecs: (cur as any).codecs, encodings: encs });
+        }catch(e){ /* per-sender issue ignored */ }
+      });
+  }catch{}
+}
+
+export default function RTC(){
+  const [active, setActive] = useState(false);
+  const [micOn, setMicOn] = useState(true);
+  const [camOn, setCamOn] = useState(true);
+  const [remoteStream, setRemoteStream] = useState<MediaStream|null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream|null>(null);
+  const [deviceIds, setDeviceIds] = useState<{audioId:string|null; videoId:string|null}>({audioId:null, videoId:null});
+  const [log, setLog] = useState<string[]>([]);
+  const [sharing, setSharing] = useState(false);
+  const [remotePeerId, setRemotePeerId] = useState<string|null>(null);
+  const [waiting, setWaiting] = useState<boolean>(false);
+  const [remoteMuted, setRemoteMuted] = useState<boolean>(false);
+
+  // nice labels for chat
+  const SELF_NAME  = process.env.NEXT_PUBLIC_SELF_NAME  || 'Me';
+  const PEER_NAME  = process.env.NEXT_PUBLIC_PEER_NAME  || (ROLE === 'clinician' ? 'Patient' : 'Clinician');
+
+  const id = useMemo(()=> (typeof crypto!=='undefined' && 'randomUUID' in crypto) ? crypto.randomUUID() : Math.random().toString(36).slice(2), []);
+  const pcRef = useRef<RTCPeerConnection|null>(null);
+  const sigRef = useRef<ReturnType<typeof connectSignal>|null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement|null>(null);
+  const caller = true;
+  const polite = false;
+
+  const makingOffer = useRef(false);
+  const pendingIce = useRef<any[]>([]);
+
+  function append(msg:string){ setLog(l=>[...l, msg].slice(-400)); }
+
+  useEffect(()=>{
+    if(!active){
+      sigRef.current?.close(); sigRef.current = null;
+      if(pcRef.current){
+        try { pcRef.current.getSenders().forEach(s=>{ try{ s.track?.stop(); }catch{} }); } catch {}
+        try { pcRef.current.close(); } catch {}
+      }
+      pcRef.current = null;
+      setRemoteStream(null);
+      append('session: stopped');
+      return;
+    }
+
+    append('session: starting…');
+
+    const pc = new RTCPeerConnection({ iceServers: buildIceServers() });
+    pcRef.current = pc;
+
+    const inbound = new MediaStream();
+    setRemoteStream(inbound);
+
+    pc.ontrack = (ev)=>{
+      const s = ev.streams[0] ?? inbound;
+      if(ev.track && !s.getTracks().includes(ev.track)){ s.addTrack(ev.track); }
+      setRemoteStream(s);
+      append('webrtc: ontrack ('+ ev.track.kind +')');
+    };
+
+    pc.onicecandidate = (ev)=>{ if(ev.candidate){ sigRef.current?.send({ type:'ice', data: ev.candidate }); } };
+    pc.oniceconnectionstatechange = ()=> append('pc: ice=' + pc.iceConnectionState);
+    pc.onconnectionstatechange    = ()=> append('pc: conn=' + pc.connectionState);
+
+    pc.onnegotiationneeded = async ()=>{
+      try{
+        if(!caller) return;
+        if(pc.signalingState !== 'stable') return;
+        makingOffer.current = true;
+        const off = await pc.createOffer();
+        await pc.setLocalDescription(off);
+        sigRef.current?.send({ type:'offer', data: pc.localDescription });
+        append('signal: offer → (negotiationneeded)');
+      }catch(e){ console.error(e); }
+      finally { makingOffer.current = false; }
+    };
+
+    const sig = connectSignal('ws://localhost:8787', ROOM, id, async (m:SigMsg)=>{
+      try{
+        if(m.type==="_open"){ append('signal: connected');
+          sigRef.current?.send({ type:"join", room:ROOM, id, role: ROLE });
+          if(false){ sigRef.current?.send({ type:"knock" }); append('lobby: knocked') }
+          return;
+        }
+        if(m.type==="_close"){ append('signal: closed'); return; }
+
+--- apps\clinician-app\app\settings\consult\page.tsx ---
+\"use client\";
+import { useEffect, useState } from \"react\";
+type ConsultSettings = { defaultMinutes: number };
+export default function ConsultSettings(){
+  const [s, setS] = useState<ConsultSettings>({ defaultMinutes: 30 });
+  const [msg, setMsg] = useState(\"\"); const [loading, setLoading] = useState(true);
+  async function load(){
+    setLoading(true);
+    const res = await fetch(\"/api/settings/consult\", { cache:\"no-store\" });
+    const data = await res.json();
+    setS(data); setLoading(false);
+  }
+  useEffect(()=>{ load(); }, []);
+  async function save(){
+    setMsg(\"\"); 
+    const res = await fetch(\"/api/settings/consult\", {
+      method: \"POST\",
+      headers: { \"Content-Type\":\"application/json\" },
+      body: JSON.stringify(s)
+    });
+    setMsg(res.ok ? \"Saved.\" : \"Save failed.\");
+  }
+  if (loading) return <main className=\"p-6\">Loading…</main>;
+  return (
+    <main className=\"p-6 space-y-4\">
+      <h1 className=\"text-xl font-semibold\">Consultation Settings</h1>
+      <label className=\"text-sm flex items-center gap-2\">
+        <span>Default Consultation Length (minutes):</span>
+        <input type=\"number\" className=\"border px-2 py-1 w-24 rounded\"
+          value={s.defaultMinutes}
+          onChange={e=>setS({ defaultMinutes: parseInt(e.target.value||\"0\") })} />
+      </label>
+      <button className=\"px-3 py-2 border rounded\" onClick={save}>Save</button>
+      {msg && <div className=\"text-sm text-green-600\">{msg}</div>}
+    </main>
+  );
+}
+
+--- apps\clinician-app\app\settings\fees\page.tsx ---
+
+"use client"
+import { useState } from "react";
+
+export default function Fees(){
+  const [fee, setFee] = useState(550);
+  const [followupFee, setFollowupFee] = useState(350);
+  const [currency] = useState("ZAR");
+
+  return (
+    <main className="p-6 space-y-4">
+      <h1 className="text-xl font-semibold">Consultation Fees</h1>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <label className="text-sm">Standard Fee ({currency})<input className="border rounded px-2 py-1 w-full" type="number" value={fee} onChange={e=>setFee(parseInt(e.target.value||'0'))}/></label>
+        <label className="text-sm">Follow-up Fee ({currency})<input className="border rounded px-2 py-1 w-full" type="number" value={followupFee} onChange={e=>setFollowupFee(parseInt(e.target.value||'0'))}/></label>
+      </div>
+      <button className="px-3 py-2 border rounded">Save</button>
+    </main>
+  );
+}
+
+--- apps\clinician-app\app\settings\schedule\page.tsx ---
+
+"use client"
+import { useState } from "react";
+
+type Slot = { day:string; start:string; end:string; enabled:boolean };
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+export default function Schedule(){
+  const [slots, setSlots] = useState<Slot[]>(DAYS.map(d=>({ day:d, start:"09:00", end:"17:00", enabled: !["Sat","Sun"].includes(d) })));
+
+  function update(i:number, patch:Partial<Slot>){
+    setSlots(prev => prev.map((s,idx)=> idx===i ? { ...s, ...patch } : s));
+  }
+
+  return (
+    <main className="p-6 space-y-4">
+      <h1 className="text-xl font-semibold">Availability</h1>
+      <table className="w-full text-sm border">
+        <thead><tr className="text-left"><th className="py-2 px-2">Day</th><th className="py-2 px-2">Start</th><th className="py-2 px-2">End</th><th className="py-2 px-2">Enabled</th></tr></thead>
+        <tbody>
+          {slots.map((s,i)=>(
+            <tr key={i} className="border-t">
+              <td className="py-2 px-2">{s.day}</td>
+              <td className="py-2 px-2"><input type="time" value={s.start} onChange={e=>update(i,{start:e.target.value})} /></td>
+              <td className="py-2 px-2"><input type="time" value={s.end} onChange={e=>update(i,{end:e.target.value})} /></td>
+              <td className="py-2 px-2"><input type="checkbox" checked={s.enabled} onChange={e=>update(i,{enabled:e.target.checked})} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button className="px-3 py-2 border rounded">Save</button>
+    </main>
+  );
+}
+
+--- apps\clinician-app\app\sfu\[roomId]\page.tsx ---
+
+--- apps\clinician-app\app\layout.tsx ---
+import './globals.css';
+export const metadata = { title: 'Ambulant+', description: 'Contactless Medicine' };
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (<html lang="en"><body>{children}</body></html>);
+}
+
+--- apps\clinician-app\app\page.tsx ---
+import { redirect } from "next/navigation";
+export default function Home(){ redirect("/dashboard"); return null; }
+
+=== API ROUTES (headers only) ===
+- apps\clinician-app\app\api\careport\orders\route.ts
+- apps\clinician-app\app\api\careport\timeline\route.ts
+- apps\clinician-app\app\api\consults\discharge\route.ts
+- apps\clinician-app\app\api\devices\route.ts
+- apps\clinician-app\app\api\devices\stream\route.ts
+- apps\clinician-app\app\api\erx\outbox\route.ts
+- apps\clinician-app\app\api\erx\send\route.ts
+- apps\clinician-app\app\api\medreach\orders\route.ts
+- apps\clinician-app\app\api\medreach\timeline\route.ts
+- apps\clinician-app\app\api\notes\route.ts
+- apps\clinician-app\app\api\rtc\route.ts
+- apps\clinician-app\app\api\rtc\token\route.ts
+- apps\clinician-app\app\api\settings\consult\route.ts
+
+=== FILE TREE (no node_modules/.next) ===
+apps\clinician-app\.env.local
+apps\clinician-app\next-env.d.ts
+apps\clinician-app\next.config.mjs
+apps\clinician-app\package.json
+apps\clinician-app\postcss.config.js
+apps\clinician-app\tailwind.config.js
+apps\clinician-app\tsconfig.json
+apps\clinician-app\app\globals.css
+apps\clinician-app\app\layout.tsx
+apps\clinician-app\app\page.tsx
+apps\clinician-app\app\api\careport\orders\route.ts
+apps\clinician-app\app\api\careport\timeline\route.ts
+apps\clinician-app\app\api\consults\discharge\route.ts
+apps\clinician-app\app\api\devices\route.ts
+apps\clinician-app\app\api\devices\stream\route.ts
+apps\clinician-app\app\api\erx\outbox\route.ts
+apps\clinician-app\app\api\erx\send\route.ts
+apps\clinician-app\app\api\medreach\orders\route.ts
+apps\clinician-app\app\api\medreach\timeline\route.ts
+apps\clinician-app\app\api\notes\route.ts
+apps\clinician-app\app\api\rtc\route.ts
+apps\clinician-app\app\api\rtc\token\route.ts
+apps\clinician-app\app\api\settings\consult\route.ts
+apps\clinician-app\app\appointments\page.tsx
+apps\clinician-app\app\appointments\reschedule\page.tsx
+apps\clinician-app\app\call\[roomId]\page.tsx
+apps\clinician-app\app\careport\timeline\page.tsx
+apps\clinician-app\app\consults\discharge\page.tsx
+apps\clinician-app\app\dashboard\page.tsx
+apps\clinician-app\app\erx\new\page.tsx
+apps\clinician-app\app\erx\outbox\page.tsx
+apps\clinician-app\app\medreach\timeline\page.tsx
+apps\clinician-app\app\rtc\error.tsx
+apps\clinician-app\app\rtc\page.tsx
+apps\clinician-app\app\settings\consult\page.tsx
+apps\clinician-app\app\settings\fees\page.tsx
+apps\clinician-app\app\settings\schedule\page.tsx
+apps\clinician-app\app\sfu\[roomId]\caption-publisher.ts
+apps\clinician-app\app\sfu\[roomId]\page.tsx
+apps\clinician-app\app\sfu\[roomId]\_patch.tmp
+apps\clinician-app\src\components\.gitkeep
+apps\clinician-app\src\components\rtc\CaptionOverlay.tsx
+apps\clinician-app\src\components\rtc\Captions.tsx
+apps\clinician-app\src\components\rtc\CaptionsPanel.tsx
+apps\clinician-app\src\components\rtc\ChatPanel.tsx
+apps\clinician-app\src\components\rtc\DeviceSelect.tsx
+apps\clinician-app\src\components\rtc\LocalMedia.tsx
+apps\clinician-app\src\components\rtc\OutputSelect.tsx
+apps\clinician-app\src\components\rtc\RemoteAudio.tsx
+apps\clinician-app\src\components\rtc\RemoteVideo.tsx
+apps\clinician-app\src\components\rtc\StatsPanel.tsx
+apps\clinician-app\src\lib\ice.ts
+apps\clinician-app\src\lib\signal.ts
+apps\clinician-app\src\mocks\ambulant-mock-auth.tsx
+apps\clinician-app\src\pages\.gitkeep

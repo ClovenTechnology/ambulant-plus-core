@@ -1,0 +1,18 @@
+[
+  {
+    "id": "ord-001",
+    "createdAt": "2025-08-20T10:00:00Z",
+    "type": "Prescription",
+    "note": "Initial antibiotic course",
+    "meds": [
+      { "drug": "Amoxicillin 500mg", "sig": "Take 1 capsule TID x7 days" }
+    ]
+  },
+  {
+    "id": "ord-002",
+    "createdAt": "2025-08-20T14:00:00Z",
+    "type": "Lab",
+    "note": "Routine CBC and CMP",
+    "meds": []
+  }
+]

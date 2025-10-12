@@ -1,0 +1,18 @@
+port: 7880
+log_level: info
+
+keys:
+  devkey: secret
+
+rtc:
+  tcp_port: 7881
+  port_range_start: 7882
+  port_range_end: 7980
+  use_external_ip: true
+
+  # Advertise external TURN to clients (credentials are static here)
+  turn_servers:
+    - urls:
+        - turn:coturn:3478
+      username: devturn
+      credential: devturnpass

@@ -1,0 +1,39 @@
+import './globals.css';
+import Link from 'next/link';
+import ToastMount from '@/components/ToastMount';
+import dynamic from 'next/dynamic';
+
+// Avoid SSR for the badge since it polls client-side
+const TasksNavBadge = dynamic(() => import('@/components/TasksNavBadge'), { ssr: false });
+
+export const metadata = { title: 'Ambulant+', description: 'Contactless Medicine' };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <header className="border-b bg-white">
+          <nav className="max-w-6xl mx-auto px-4 py-3 flex items-center gap-4">
+            <Link href="/" className="font-semibold">Ambulant+</Link>
+            <div className="text-sm text-gray-400">|</div>
+            <div className="flex gap-3 text-sm items-center">
+              <Link href="/vitals" className="hover:underline">Vitals</Link>
+              <Link href="/appointments" className="hover:underline">Appointments</Link>
+              <Link href="/reports" className="hover:underline">Reports</Link>
+              <Link href="/televisit/demo-123" className="hover:underline">Televisit</Link>
+              <Link href="/encounters" className="hover:underline">Encounters</Link>
+              <Link href="/tasks" className="hover:underline flex items-center">
+                Tasks <TasksNavBadge />
+              </Link>
+            </div>
+          </nav>
+        </header>
+
+        <div className="min-h-[calc(100vh-52px)] bg-gray-50">{children}</div>
+
+        {/* global toasts */}
+        <ToastMount />
+      </body>
+    </html>
+  );
+}

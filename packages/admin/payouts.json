@@ -1,0 +1,35 @@
+{
+  "riderPayoutPercent": 70,
+  "pharmacyCommissionPercent": 0,
+  "platformCommissionPercent": 30,
+  "labCommissionPercent": 0,
+  "monthlyFees": {
+    "pharmacyZAR": 0,
+    "labZAR": 0
+  },
+  "clinicianErxCommissionPercent": 0,
+  "clinicianClasses": [
+    {
+      "id": "classA",
+      "name": "Class A — Doctors",
+      "enabled": true,
+      "rxPayoutPercent": 70
+    },
+    {
+      "id": "classB",
+      "name": "Class B — Allied Health",
+      "enabled": true,
+      "rxPayoutPercent": 70
+    },
+    {
+      "id": "classC",
+      "name": "Class C — Wellness",
+      "enabled": true,
+      "rxPayoutPercent": 70
+    }
+  ],
+  "deliveryModel": {
+    "baseFeeZAR": 30,
+    "perKmZAR": 5
+  }
+}

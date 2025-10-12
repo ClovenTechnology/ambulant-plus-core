@@ -1,0 +1,89 @@
+/* apps/patient-app/app/print.css */
+
+/* Ensure crisp colours and predictable page box */
+* {
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+/* A4 with comfortable margins */
+@page {
+  size: A4;
+  margin: 14mm 12mm;
+}
+
+/* Screen-only helpers */
+@media screen {
+  .print-show { display: none !important; }
+}
+
+/* Print rules */
+@media print {
+  :root { color-scheme: light; }
+
+  html, body {
+    background: #fff !important;
+  }
+
+  /* Hide chrome */
+  header, nav, .no-print, .print-hidden,
+  button, .btn, [role="button"] {
+    display: none !important;
+  }
+
+  /* Don’t append raw URLs after links */
+  a[href]::after {
+    content: "" !important;
+  }
+
+  /* Tidy containers */
+  .print-container {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+    box-shadow: none !important;
+  }
+
+  /* Cards and panels */
+  .print-card, .card, .panel, .box {
+    background: #fff !important;
+    border: 1px solid #ddd !important;
+    box-shadow: none !important;
+  }
+
+  /* Tables */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    border-spacing: 0 !important;
+  }
+
+  thead th {
+    background: #f4f4f4 !important;
+    border: 1px solid #ddd !important;
+  }
+
+  th, td {
+    border: 1px solid #ddd !important;
+    padding: 6px 8px !important;
+    vertical-align: top !important;
+  }
+
+  /* Typography scale (subtle, readable) */
+  h1 { font-size: 18pt !important; margin: 0 0 8pt 0 !important; }
+  h2 { font-size: 14pt !important; margin: 14pt 0 6pt 0 !important; }
+  h3 { font-size: 12pt !important; margin: 12pt 0 6pt 0 !important; }
+  p, li, td, th, small { font-size: 10pt !important; line-height: 1.35 !important; }
+
+  /* Utilities */
+  .page-break        { break-before: page !important; }
+  .avoid-break-inside{ break-inside: avoid !important; }
+  .muted             { color: #555 !important; }
+  .subtitle          { color: #666 !important; font-size: 10pt !important; }
+
+  /* Images/figures */
+  img, svg, canvas {
+    max-width: 100% !important;
+    height: auto !important;
+  }
+}

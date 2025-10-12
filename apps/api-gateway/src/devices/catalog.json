@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "vendors": [
+    {
+      "key": "linktop",
+      "name": "Linktop",
+      "categories": [
+        {
+          "key": "iomt",
+          "name": "Clinical IoMT",
+          "models": [
+            {
+              "key": "health-monitor",
+              "name": "6-in-1 Health Monitor",
+              "capabilities": ["bp_sys", "bp_dia", "spo2", "hr", "temp", "rr", "ppg", "ecg"],
+              "ingest_key": "linktop/iomt/health-monitor",
+              "pairing": {
+                "transport": "ble",
+                "notes": [
+                  "Enable Bluetooth & Location permissions on the phone.",
+                  "Open the device and ensure it is powered on.",
+                  "Stay within 2 meters during pairing.",
+                  "Measurements are forwarded to the room via IoMT gateway."
+                ]
+              }
+            },
+            {
+              "key": "stethoscope",
+              "name": "Digital Stethoscope (HC21)",
+              "capabilities": ["hr", "steth_rms"],
+              "ingest_key": "linktop/iomt/stethoscope",
+              "pairing": {
+                "transport": "ble",
+                "notes": [
+                  "Pair the stethoscope over Bluetooth.",
+                  "Use 'Publish Steth Audio' to stream auscultation to the visit.",
+                  "Tap landmarks (Apex/Base/RLL/LUL) while recording."
+                ]
+              }
+            },
+            {
+              "key": "otoscope",
+              "name": "HD Otoscope (NE20)",
+              "capabilities": ["otoscope_frame"],
+              "ingest_key": "linktop/iomt/otoscope",
+              "pairing": {
+                "transport": "ble-usb",
+                "notes": [
+                  "Connect via BLE or USB host (if supported).",
+                  "Use 'Publish Otoscope Video' to show live feed in the room.",
+                  "Tap 'Capture Still' to store a frame."
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "key": "wearable",
+          "name": "Wearables",
+          "models": [
+            {
+              "key": "nexring",
+              "name": "NexRing (RN SDK)",
+              "capabilities": ["hr", "hrv", "steps", "sleep_stage"],
+              "ingest_key": "linktop/wearable/nexring",
+              "pairing": {
+                "transport": "ble",
+                "notes": [
+                  "Pair the ring via the RN SDK screen.",
+                  "Background sync forwards summaries to the IoMT gateway.",
+                  "Shows baseline vs. today's deltas during consult."
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

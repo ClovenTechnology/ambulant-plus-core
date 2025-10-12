@@ -1,0 +1,96 @@
+function Spotlight({ participant }: { participant: Participant | null }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!participant) { if (videoRef.current) videoRef.current.srcObject = null; return; }
+
+    const attach = () => {
+      try {
+        const pubsFromVideoMap =
+          (participant as any)?.videoTracks && typeof (participant as any).videoTracks.values === "function"
+            ? Array.from((participant as any).videoTracks.values())
+            : [];
+
+        const pubsFromAll =
+          typeof (participant as any)?.getTrackPublications === "function"
+            ? (participant as any).getTrackPublications().filter((p: any) => p?.kind === Track.Kind.Video)
+            : [];
+
+        const pubs = [...pubsFromVideoMap, ...pubsFromAll];
+        const vpub = pubs.find((pub: any) => pub?.isSubscribed && pub?.videoTrack);
+
+        if (vpub?.videoTrack && videoRef.current) {
+          vpub.videoTrack.attach(videoRef.current);
+        }
+      } catch (e) {
+        console.warn("Spotlight attach skipped:", e);
+      }
+    };
+
+    attach();
+
+    const onSub = attach;
+    const onUnsub = () => { if (videoRef.current) videoRef.current.srcObject = null; };
+
+    (participant as any)?.on?.("trackSubscribed", onSub);
+    (participant as any)?.on?.("trackUnsubscribed", onUnsub);
+
+    return () => {
+      (participant as any)?.off?.("trackSubscribed", onSub);
+      (participant as any)?.off?.("trackUnsubscribed", onUnsub);
+    };
+  }, [participant]);
+
+  return <video ref={videoRef} autoPlay playsInline className="w-full aspect-video bg-black rounded" />;
+}
+
+function Tile({ participant }: { participant: RemoteParticipant }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!participant) return;
+
+    const attach = () => {
+      try {
+        const pubsFromVideoMap =
+          (participant as any)?.videoTracks && typeof (participant as any).videoTracks.values === "function"
+            ? Array.from((participant as any).videoTracks.values())
+            : [];
+
+        const pubsFromAll =
+          typeof (participant as any)?.getTrackPublications === "function"
+            ? (participant as any).getTrackPublications().filter((p: any) => p?.kind === Track.Kind.Video)
+            : [];
+
+        const pubs = [...pubsFromVideoMap, ...pubsFromAll];
+        const vpub = pubs.find((pub: any) => pub?.isSubscribed && pub?.videoTrack);
+
+        if (vpub?.videoTrack && videoRef.current) {
+          vpub.videoTrack.attach(videoRef.current);
+        }
+      } catch (e) {
+        console.warn("Tile attach skipped:", e);
+      }
+    };
+
+    attach();
+
+    const onSub = attach;
+    const onUnsub = () => { if (videoRef.current) videoRef.current.srcObject = null; };
+
+    (participant as any)?.on?.("trackSubscribed", onSub);
+    (participant as any)?.on?.("trackUnsubscribed", onUnsub);
+
+    return () => {
+      (participant as any)?.off?.("trackSubscribed", onSub);
+      (participant as any)?.off?.("trackUnsubscribed", onUnsub);
+    };
+  }, [participant]);
+
+  return (
+    <div className="p-2 border rounded">
+      <div className="text-xs text-gray-500 mb-1">{participant?.identity}</div>
+      <video ref={videoRef} autoPlay playsInline className="w-full aspect-video bg-black rounded" />
+    </div>
+  );
+}

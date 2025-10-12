@@ -1,0 +1,10 @@
+{
+  "name": "@ambulant/rtc",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "peerDependencies": {
+    "livekit-client": "^2.15.4"
+  }
+}

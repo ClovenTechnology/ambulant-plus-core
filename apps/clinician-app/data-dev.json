@@ -1,0 +1,21 @@
+{
+  "appointments": [
+    {
+      "id": "apt-io3t3s",
+      "patientName": "John Doe",
+      "clinicianName": "Dr. Ada",
+      "timeISO": "2025-09-05T09:54:51.018Z",
+      "roomId": "room-7t1ktv",
+      "status": "scheduled"
+    },
+    {
+      "id": "apt-1x4i6v",
+      "patientName": "Jane Smith",
+      "clinicianName": "Dr. Ada",
+      "timeISO": "2025-09-05T10:54:51.018Z",
+      "roomId": "room-8eo9ff",
+      "status": "scheduled"
+    }
+  ],
+  "erx": []
+}

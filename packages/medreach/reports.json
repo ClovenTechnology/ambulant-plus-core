@@ -1,0 +1,13 @@
+{
+  "reports": [
+    {
+      "id": "RPT-0001",
+      "patient": "Thandi Ndlovu",
+      "labId": "LAB-CT-01",
+      "test": "Full Blood Count",
+      "status": "ready",
+      "fileName": "",
+      "dateReady": "2025-08-09"
+    }
+  ]
+}

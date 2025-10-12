@@ -1,0 +1,29 @@
+[
+  {
+    "createdAt": "2025-08-10T14:46:29.842Z",
+    "id": "LAB-1754837189842",
+    "patientId": "P-0001",
+    "patient": "Sibusiso Mthembu",
+    "caseId": "C-1001",
+    "consultId": "CONS-2001"
+  },
+  {
+    "createdAt": "2025-08-10T11:47:54.465Z",
+    "id": "LAB-1754826011234",
+    "patientId": "P-0001",
+    "patient": "Sibusiso Mthembu",
+    "caseId": "C-1001",
+    "consultId": "CONS-2001",
+    "status": "requested",
+    "timeline": [
+      {
+        "t": "01:40 PM",
+        "label": "Requested MedReach visit"
+      }
+    ],
+    "phleb": {
+      "name": "(assigning…)",
+      "phone": ""
+    }
+  }
+]

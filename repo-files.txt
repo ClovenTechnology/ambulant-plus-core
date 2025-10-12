@@ -1,0 +1,1006 @@
+﻿.data\discharge\room-1.json
+.data\notes\room-1.json
+.data\rtc\room-1.json
+.data\settings\general.json
+.env
+.env.bridge
+.env.example
+.env.local
+.vercel\project.json
+api_code_index.txt
+apps\admin-dashboard\app\analytics\clinician-payouts\page.tsx
+apps\admin-dashboard\app\analytics\monthly\page.tsx
+apps\admin-dashboard\app\analytics\page.tsx
+apps\admin-dashboard\app\api\analytics\clinician-payouts.csv\route.ts
+apps\admin-dashboard\app\api\analytics\clinician-payouts\route.ts
+apps\admin-dashboard\app\api\analytics\models\[id]\predict\route.ts
+apps\admin-dashboard\app\api\analytics\monthly\route.ts
+apps\admin-dashboard\app\api\careport\orders\route.ts
+apps\admin-dashboard\app\api\devices\register\route.ts
+apps\admin-dashboard\app\api\devices\route.ts
+apps\admin-dashboard\app\api\devices\toggle\route.ts
+apps\admin-dashboard\app\api\devices\upload\route.ts
+apps\admin-dashboard\app\api\devtools\reset\route.ts
+apps\admin-dashboard\app\api\devtools\seed\route.ts
+apps\admin-dashboard\app\api\devtools\state\route.ts
+apps\admin-dashboard\app\api\insightcore\alerts\route.ts
+apps\admin-dashboard\app\api\insightcore\config\route.ts
+apps\admin-dashboard\app\api\labs\route.ts
+apps\admin-dashboard\app\api\labs\tests\route.ts
+apps\admin-dashboard\app\api\medreach\orders\route.ts
+apps\admin-dashboard\app\api\medreach\reports\file\route.ts
+apps\admin-dashboard\app\api\medreach\reports\route.ts
+apps\admin-dashboard\app\api\medreach\reports\upload\route.ts
+apps\admin-dashboard\app\api\settings\general\route.ts
+apps\admin-dashboard\app\api\settings\payouts\route.ts
+apps\admin-dashboard\app\careport\orders\page.tsx
+apps\admin-dashboard\app\cases\[encounterId]\page.tsx
+apps\admin-dashboard\app\consult\policy\page.tsx
+apps\admin-dashboard\app\devices\tester\page.tsx
+apps\admin-dashboard\app\globals.css
+apps\admin-dashboard\app\labs\page.tsx
+apps\admin-dashboard\app\layout.tsx
+apps\admin-dashboard\app\manifest.ts
+apps\admin-dashboard\app\medreach\orders\page.tsx
+apps\admin-dashboard\app\orders\page.tsx
+apps\admin-dashboard\app\page.tsx
+apps\admin-dashboard\app\reports\export\page.tsx
+apps\admin-dashboard\app\reports\upload\page.tsx
+apps\admin-dashboard\app\sdk\page.tsx
+apps\admin-dashboard\app\sdkupload\DeviceRow.tsx
+apps\admin-dashboard\app\sdkupload\list\page.tsx
+apps\admin-dashboard\app\sdkupload\page.tsx
+apps\admin-dashboard\app\sdkupload\upload\page.tsx
+apps\admin-dashboard\app\settings\dev-tools\page.tsx
+apps\admin-dashboard\app\settings\general\page.tsx
+apps\admin-dashboard\app\settings\insightcore\page.tsx
+apps\admin-dashboard\app\settings\insightcore\simulator\page.tsx
+apps\admin-dashboard\app\settings\payouts\page.tsx
+apps\admin-dashboard\components\InboxBell.tsx
+apps\admin-dashboard\env.local
+apps\admin-dashboard\middleware.ts
+apps\admin-dashboard\next-env.d.ts
+apps\admin-dashboard\package.json
+apps\admin-dashboard\postcss.config.js
+apps\admin-dashboard\src\lib\config.ts
+apps\admin-dashboard\tailwind.config.js
+apps\admin-dashboard\tsconfig.json
+apps\api-gateway\.env
+apps\api-gateway\app\api\admin\consult\policy\route.ts
+apps\api-gateway\app\api\appointments\[id]\cancel\route.ts
+apps\api-gateway\app\api\appointments\[id]\ics\route.ts
+apps\api-gateway\app\api\appointments\[id]\reschedule\route.ts
+apps\api-gateway\app\api\appointments\book\route.ts
+apps\api-gateway\app\api\appointments\events\route.ts
+apps\api-gateway\app\api\appointments\route.ts
+apps\api-gateway\app\api\careport\assign\route.ts
+apps\api-gateway\app\api\careport\location\route.ts
+apps\api-gateway\app\api\careport\stream\route.ts
+apps\api-gateway\app\api\clinicians\[id]\refunds\route.ts
+apps\api-gateway\app\api\clinicians\available\route.ts
+apps\api-gateway\app\api\clinicians\me\fees\route.ts
+apps\api-gateway\app\api\devices\attach\route.ts
+apps\api-gateway\app\api\devices\catalog\route.ts
+apps\api-gateway\app\api\devices\detach\route.ts
+apps\api-gateway\app\api\devices\get\route.ts
+apps\api-gateway\app\api\devices\ingest\route.ts
+apps\api-gateway\app\api\devices\list\route.ts
+apps\api-gateway\app\api\devices\register\route.ts
+apps\api-gateway\app\api\devices\unlink\route.ts
+apps\api-gateway\app\api\devices\vitals\route.ts
+apps\api-gateway\app\api\encounters\[id]\auto-close\route.ts
+apps\api-gateway\app\api\encounters\[id]\close\route.ts
+apps\api-gateway\app\api\encounters\route.ts
+apps\api-gateway\app\api\events\inbox\route.ts
+apps\api-gateway\app\api\medreach\assign\route.ts
+apps\api-gateway\app\api\medreach\location\route.ts
+apps\api-gateway\app\api\medreach\stream\route.ts
+apps\api-gateway\app\api\orders\erx\route.ts
+apps\api-gateway\app\api\orders\index\route.ts
+apps\api-gateway\app\api\orders\lab\route.ts
+apps\api-gateway\app\api\payments\[id]\refund\route.ts
+apps\api-gateway\app\api\payments\route.ts
+apps\api-gateway\app\api\payouts\clinicians\run\route.ts
+apps\api-gateway\app\api\payouts\run\route.ts
+apps\api-gateway\app\api\schedule\slots\batch\route.ts
+apps\api-gateway\app\api\schedule\slots\route.ts
+apps\api-gateway\app\api\settings\consult\route.ts
+apps\api-gateway\app\api\settings\schedule\route.ts
+apps\api-gateway\app\api\televisit\issue\route.ts
+apps\api-gateway\app\api\televisit\status\route.ts
+apps\api-gateway\app\api\televisit\stream\route.ts
+apps\api-gateway\app\api\webhooks\paystack\route.ts
+apps\api-gateway\env.local
+apps\api-gateway\eslint.config.mjs
+apps\api-gateway\next.config.js
+apps\api-gateway\next.config.ts
+apps\api-gateway\next-env.d.ts
+apps\api-gateway\package.json
+apps\api-gateway\postcss.config.mjs
+apps\api-gateway\prisma\dev.db
+apps\api-gateway\prisma\migrations\20250910152602_init\migration.sql
+apps\api-gateway\prisma\migrations\migration_lock.toml
+apps\api-gateway\prisma\schema.prisma
+apps\api-gateway\public\file.svg
+apps\api-gateway\public\globe.svg
+apps\api-gateway\public\next.svg
+apps\api-gateway\public\vercel.svg
+apps\api-gateway\public\window.svg
+apps\api-gateway\README.md
+apps\api-gateway\src\app\favicon.ico
+apps\api-gateway\src\app\globals.css
+apps\api-gateway\src\app\layout.tsx
+apps\api-gateway\src\app\page.tsx
+apps\api-gateway\src\appointmentsStore.ts
+apps\api-gateway\src\devices - Shortcut.lnk
+apps\api-gateway\src\devices\catalog.json
+apps\api-gateway\src\devices\registry.ts
+apps\api-gateway\src\devices\vendors\health-monitor.ts
+apps\api-gateway\src\devices\vendors\linktop\iomt\health-monitor.ts
+apps\api-gateway\src\devices\vendors\linktop\iomt\otoscope.ts
+apps\api-gateway\src\devices\vendors\linktop\iomt\stethoscope.ts
+apps\api-gateway\src\devices\vendors\linktop\wearable\nexring.ts
+apps\api-gateway\src\devices\vendors\nexring.ts
+apps\api-gateway\src\devices\vendors\nexring\ring.ts
+apps\api-gateway\src\devices\vendors\otoscope.ts
+apps\api-gateway\src\devices\vendors\stethoscope.ts
+apps\api-gateway\src\lib\anchor.ts
+apps\api-gateway\src\lib\auth.ts
+apps\api-gateway\src\lib\chain.ts
+apps\api-gateway\src\lib\db.ts
+apps\api-gateway\src\lib\events.ts
+apps\api-gateway\src\lib\inmem.ts
+apps\api-gateway\src\lib\join.ts
+apps\api-gateway\src\lib\payouts.ts
+apps\api-gateway\src\lib\settlement.ts
+apps\api-gateway\src\lib\slotgen.ts
+apps\api-gateway\src\lib\slots.ts
+apps\api-gateway\src\lib\sse.ts
+apps\api-gateway\src\lib\televisit-hub.ts
+apps\api-gateway\src\lib\time.ts
+apps\api-gateway\src\payments\index.ts
+apps\api-gateway\src\payments\provider.ts
+apps\api-gateway\src\payments\providers\paystack.ts
+apps\api-gateway\src\payments\refunds.ts
+apps\api-gateway\src\store\appointments.ts
+apps\api-gateway\src\store\consent.ts
+apps\api-gateway\src\store\consult.ts
+apps\api-gateway\src\store\devices.ts
+apps\api-gateway\src\store\payouts.ts
+apps\api-gateway\src\store\schedule.ts
+apps\api-gateway\src\store\settings.ts
+apps\api-gateway\tsconfig.json
+apps\clinician-app\.env.local
+apps\clinician-app\.npmrc
+apps\clinician-app\app\api\_lib\db.ts
+apps\clinician-app\app\api\_proxy\appointments\route.ts
+apps\clinician-app\app\api\_status\route.ts
+apps\clinician-app\app\api\_store.ts
+apps\clinician-app\app\api\appointments\[id]\cancel\_store.ts
+apps\clinician-app\app\api\appointments\[id]\ics\route.ts
+apps\clinician-app\app\api\appointments\[id]\reschedule\route.ts
+apps\clinician-app\app\api\appointments\[id]\route.ts
+apps\clinician-app\app\api\appointments\route.ts
+apps\clinician-app\app\api\appointments\today\route.ts
+apps\clinician-app\app\api\availability\[clinicianId]\route.ts
+apps\clinician-app\app\api\careport\orders\route.ts
+apps\clinician-app\app\api\careport\timeline\route.ts
+apps\clinician-app\app\api\consults\discharge\route.ts
+apps\clinician-app\app\api\devices\route.ts
+apps\clinician-app\app\api\devices\stream\route.ts
+apps\clinician-app\app\api\encounters\route.ts
+apps\clinician-app\app\api\erx\[id]\route.ts
+apps\clinician-app\app\api\erx\orders\route.ts
+apps\clinician-app\app\api\erx\outbox\route.ts
+apps\clinician-app\app\api\erx\route.ts
+apps\clinician-app\app\api\erx\send\route.ts
+apps\clinician-app\app\api\erx\timeline\route.ts
+apps\clinician-app\app\api\events\emit\route.ts
+apps\clinician-app\app\api\events\inbox\route.ts
+apps\clinician-app\app\api\healthz\route.ts
+apps\clinician-app\app\api\insightcore\query\route.ts
+apps\clinician-app\app\api\insightcore\route.ts
+apps\clinician-app\app\api\iomt\sse\route.ts
+apps\clinician-app\app\api\lab\orders\route.ts
+apps\clinician-app\app\api\lab\timeline\route.ts
+apps\clinician-app\app\api\medreach\orders\route.ts
+apps\clinician-app\app\api\medreach\timeline\route.ts
+apps\clinician-app\app\api\notes\route.ts
+apps\clinician-app\app\api\notify\appointment\route.ts
+apps\clinician-app\app\api\orders\index\route.ts
+apps\clinician-app\app\api\payments\[id]\refund\route.ts
+apps\clinician-app\app\api\payments\route.ts
+apps\clinician-app\app\api\pharmacy\dispense\route.ts
+apps\clinician-app\app\api\record\route.ts
+apps\clinician-app\app\api\rtc\route.ts
+apps\clinician-app\app\api\rtc\token\route.ts
+apps\clinician-app\app\api\settings\consult\route.ts
+apps\clinician-app\app\api\summary\[encounterId]\route.ts
+apps\clinician-app\app\appointments\[id]\page.tsx
+apps\clinician-app\app\appointments\page.tsx
+apps\clinician-app\app\appointments\reschedule\page.tsx
+apps\clinician-app\app\call\[roomId]\page.tsx
+apps\clinician-app\app\call-links\page.tsx
+apps\clinician-app\app\careport\page.tsx
+apps\clinician-app\app\careport\timeline\page.tsx
+apps\clinician-app\app\consults\discharge\page.tsx
+apps\clinician-app\app\dashboard\page.tsx
+apps\clinician-app\app\devices\page.tsx
+apps\clinician-app\app\encounters\[id]\page.tsx
+apps\clinician-app\app\encounters\page.tsx
+apps\clinician-app\app\erx\new\page.tsx
+apps\clinician-app\app\erx\outbox\page.tsx
+apps\clinician-app\app\globals.css
+apps\clinician-app\app\insightcore\page.tsx
+apps\clinician-app\app\layout.tsx
+apps\clinician-app\app\lib\apptStore.ts
+apps\clinician-app\app\lobby\page.tsx
+apps\clinician-app\app\manifest.ts
+apps\clinician-app\app\medreach\page.tsx
+apps\clinician-app\app\medreach\timeline\page.tsx
+apps\clinician-app\app\orders\new\page.tsx
+apps\clinician-app\app\page.tsx
+apps\clinician-app\app\record\page.tsx
+apps\clinician-app\app\rtc\error.tsx
+apps\clinician-app\app\rtc\page.tsx
+apps\clinician-app\app\settings\consult\CalendarPreview.tsx
+apps\clinician-app\app\settings\consult\page.tsx
+apps\clinician-app\app\settings\fees\page.tsx
+apps\clinician-app\app\settings\schedule\page.tsx
+apps\clinician-app\app\sfu\[roomId]\_patch.tmp
+apps\clinician-app\app\sfu\[roomId]\caption-publisher.ts
+apps\clinician-app\app\sfu\[roomId]\page.tsx
+apps\clinician-app\app\televisit\[id]\page.tsx
+apps\clinician-app\app\televisit\page.tsx
+apps\clinician-app\app\today\page.tsx
+apps\clinician-app\components\CalendarPreview.tsx
+apps\clinician-app\components\ClinicianVitalsPanel.tsx
+apps\clinician-app\components\ClinicianXRBridge.tsx
+apps\clinician-app\components\DeviceAttachmentsPanel.tsx
+apps\clinician-app\components\DeviceDock.tsx
+apps\clinician-app\components\EncounterHandoffBanner.tsx
+apps\clinician-app\components\HealthBadge.tsx
+apps\clinician-app\components\HoloVitalsOverlay.tsx
+apps\clinician-app\components\InboxBell.tsx
+apps\clinician-app\components\PatientXRBridge.tsx
+apps\clinician-app\components\SchedulePreview.tsx
+apps\clinician-app\components\Sparkline.tsx
+apps\clinician-app\components\ThemeSwitch.tsx
+apps\clinician-app\components\useVitalsSSE.ts
+apps\clinician-app\data-dev.json
+apps\clinician-app\lib\appointmentsStore.ts
+apps\clinician-app\middleware.ts
+apps\clinician-app\next.config.js
+apps\clinician-app\next.config.mjs.txt
+apps\clinician-app\next-env.d.ts
+apps\clinician-app\notes.json
+apps\clinician-app\package.json
+apps\clinician-app\postcss.config.js
+apps\clinician-app\src\components\AgendaList.tsx
+apps\clinician-app\src\components\rtc\CaptionOverlay.tsx
+apps\clinician-app\src\components\rtc\Captions.tsx
+apps\clinician-app\src\components\rtc\CaptionsPanel.tsx
+apps\clinician-app\src\components\rtc\ChatPanel.tsx
+apps\clinician-app\src\components\rtc\DeviceSelect.tsx
+apps\clinician-app\src\components\rtc\LocalMedia.tsx
+apps\clinician-app\src\components\rtc\OutputSelect.tsx
+apps\clinician-app\src\components\rtc\RemoteAudio.tsx
+apps\clinician-app\src\components\rtc\RemoteVideo.tsx
+apps\clinician-app\src\components\rtc\StatsPanel.tsx
+apps\clinician-app\src\components\SessionCountdown.tsx
+apps\clinician-app\src\lib\config.ts
+apps\clinician-app\src\lib\ice.ts
+apps\clinician-app\src\lib\sdk.ts
+apps\clinician-app\src\lib\signal.ts
+apps\clinician-app\src\lib\types.ts
+apps\clinician-app\src\mocks\ambulant-mock-auth.tsx
+apps\clinician-app\tailwind.config.js
+apps\clinician-app\tsconfig.json
+apps\patient-app\.env.local
+apps\patient-app\.npmrc.txt
+apps\patient-app\app - Shortcut.lnk
+apps\patient-app\app\_auth\AuthClientProvider.tsx
+apps\patient-app\app\allergies\allergies-client.tsx
+apps\patient-app\app\allergies\page.tsx
+apps\patient-app\app\allergies\print\page.tsx
+apps\patient-app\app\api\_store.ts
+apps\patient-app\app\api\allergies\route.ts
+apps\patient-app\app\api\appointments\[id]\ics\route.ts
+apps\patient-app\app\api\appointments\[id]\reschedule\route.ts
+apps\patient-app\app\api\appointments\[id]\route.ts
+apps\patient-app\app\api\appointments\appt-client.tsx
+apps\patient-app\app\api\appointments\enrich\route.ts
+apps\patient-app\app\api\appointments\latest\route.ts
+apps\patient-app\app\api\appointments\page.tsx
+apps\patient-app\app\api\appointments\route.ts
+apps\patient-app\app\api\availability\route.ts
+apps\patient-app\app\api\careport\orders\route.ts
+apps\patient-app\app\api\careport\reprint\route.ts
+apps\patient-app\app\api\careport\timeline\route.ts
+apps\patient-app\app\api\checkout\confirm\route.ts
+apps\patient-app\app\api\clinician\appointments\route.ts
+apps\patient-app\app\api\devices\route.ts
+apps\patient-app\app\api\devices\stream\route.ts
+apps\patient-app\app\api\encounters\[id]\route.ts
+apps\patient-app\app\api\encounters\route.ts
+apps\patient-app\app\api\encounters\store.ts
+apps\patient-app\app\api\erx\route.ts
+apps\patient-app\app\api\favourites\route.ts
+apps\patient-app\app\api\insightcore\alerts\route.ts
+apps\patient-app\app\api\insightcore\route.ts
+apps\patient-app\app\api\iomt\cmd\route.ts
+apps\patient-app\app\api\iomt\ingest\route.ts
+apps\patient-app\app\api\iomt\sse\route.ts
+apps\patient-app\app\api\iomt\stream\route.ts
+apps\patient-app\app\api\labs\route.ts
+apps\patient-app\app\api\me\route.ts
+apps\patient-app\app\api\medications\route.ts
+apps\patient-app\app\api\medreach\reports\file\route.ts
+apps\patient-app\app\api\medreach\reports\route.ts
+apps\patient-app\app\api\medreach\timeline\route.ts
+apps\patient-app\app\api\notes\route.ts
+apps\patient-app\app\api\notify\route.ts
+apps\patient-app\app\api\orders\[id]\route.ts
+apps\patient-app\app\api\orders\route.ts
+apps\patient-app\app\api\payments\route.ts
+apps\patient-app\app\api\profile\route.ts
+apps\patient-app\app\api\reports\file\route.ts
+apps\patient-app\app\api\reports\vitals\route.ts
+apps\patient-app\app\api\rtc\route.ts
+apps\patient-app\app\api\rtc\token\route.ts
+apps\patient-app\app\api\settings\general\route.ts
+apps\patient-app\app\api\settings\route.ts
+apps\patient-app\app\api\tasks\route.ts
+apps\patient-app\app\api\televisit\[id]\notes\route.ts
+apps\patient-app\app\api\televisit\[id]\page.tsx
+apps\patient-app\app\api\televisit\[id]\room-client.tsx
+apps\patient-app\app\api\televisit\[id]\televisit-client.tsx
+apps\patient-app\app\api\televisit\_components\Countdown.tsx
+apps\patient-app\app\api\televisit\_components\GettingReady.tsx
+apps\patient-app\app\api\televisit\issue\route.ts
+apps\patient-app\app\api\televisit\list\route.ts
+apps\patient-app\app\api\televisit\page.tsx
+apps\patient-app\app\api\televisit\status\route.ts
+apps\patient-app\app\api\televisit\televisit.env
+apps\patient-app\app\api\televisit\televisit.env.txt
+apps\patient-app\app\api\televisit\token\route.ts
+apps\patient-app\app\api\vitals\route.ts
+apps\patient-app\app\appointments\[id]\cancel\route.ts
+apps\patient-app\app\appointments\[id]\page.tsx
+apps\patient-app\app\appointments\new\page.tsx
+apps\patient-app\app\appointments\page.tsx
+apps\patient-app\app\auto-triage\page.tsx
+apps\patient-app\app\book\page.tsx
+apps\patient-app\app\calendar\page.tsx
+apps\patient-app\app\call\[roomId]\page.tsx
+apps\patient-app\app\careport\page.tsx
+apps\patient-app\app\careport\reorder\page.tsx
+apps\patient-app\app\careport\reprint\[id]\page.tsx
+apps\patient-app\app\careport\timeline\page.tsx
+apps\patient-app\app\careport\track\page.tsx
+apps\patient-app\app\charts\charts-client.tsx
+apps\patient-app\app\charts\lib\chart-helpers.ts
+apps\patient-app\app\charts\page.tsx
+apps\patient-app\app\checkout\page.tsx
+apps\patient-app\app\checkout\success\page.tsx
+apps\patient-app\app\clinicians\[id]\calendar\page.tsx
+apps\patient-app\app\clinicians\[id]\page.tsx
+apps\patient-app\app\clinicians\page.tsx
+apps\patient-app\app\dashboard\page.tsx
+apps\patient-app\app\dashboard\vitals\page.tsx
+apps\patient-app\app\devices\[id]\page.tsx
+apps\patient-app\app\devices\page.tsx
+apps\patient-app\app\devices\pair\page.tsx
+apps\patient-app\app\encounters\[id]\encounter-client.tsx
+apps\patient-app\app\encounters\[id]\not-found.tsx
+apps\patient-app\app\encounters\[id]\page.tsx
+apps\patient-app\app\encounters\[id]\print\page.tsx
+apps\patient-app\app\encounters\encounters-client.tsx
+apps\patient-app\app\encounters\page.tsx
+apps\patient-app\app\encounters\print\[id]\page.tsx
+apps\patient-app\app\encounters\print\page.tsx
+apps\patient-app\app\error.tsx
+apps\patient-app\app\globals.css
+apps\patient-app\app\insight.tsx
+apps\patient-app\app\iomt\page.tsx
+apps\patient-app\app\labs\page.tsx
+apps\patient-app\app\labs\print\page.tsx
+apps\patient-app\app\layout.tsx
+apps\patient-app\app\layout.tsx.bak
+apps\patient-app\app\manifest.ts
+apps\patient-app\app\medications\new\page.tsx
+apps\patient-app\app\medications\page.tsx
+apps\patient-app\app\medications\print\page.tsx
+apps\patient-app\app\medreach\page.tsx
+apps\patient-app\app\medreach\TelevisitJoin.tsx
+apps\patient-app\app\medreach\timeline\page.tsx
+apps\patient-app\app\myCare\page.tsx
+apps\patient-app\app\not-found.tsx
+apps\patient-app\app\orders\[id]\not-found.tsx
+apps\patient-app\app\orders\[id]\page.tsx
+apps\patient-app\app\orders\erx-composer.tsx
+apps\patient-app\app\orders\new\page.tsx
+apps\patient-app\app\orders\orders-client.tsx
+apps\patient-app\app\orders\page.tsx
+apps\patient-app\app\orders\print\page.tsx
+apps\patient-app\app\page.tsx
+apps\patient-app\app\print.css
+apps\patient-app\app\profile\page.tsx
+apps\patient-app\app\providers.tsx
+apps\patient-app\app\reports\[id]\page.tsx
+apps\patient-app\app\reports\page.tsx
+apps\patient-app\app\reports\print\page.tsx
+apps\patient-app\app\role\page.tsx
+apps\patient-app\app\room\[id]\page.tsx
+apps\patient-app\app\rtc\error.tsx
+apps\patient-app\app\rtc\page.tsx
+apps\patient-app\app\self-check\page.tsx
+apps\patient-app\app\settings\page.tsx
+apps\patient-app\app\sfu\[roomId]\_patch.tmp
+apps\patient-app\app\sfu\[roomId]\caption-publisher.ts
+apps\patient-app\app\sfu\[roomId]\page.tsx
+apps\patient-app\app\tasks\page.tsx
+apps\patient-app\app\televisit\[id]\page.tsx
+apps\patient-app\app\televisit\[id]\televisit-client.tsx
+apps\patient-app\app\televisit\page.tsx
+apps\patient-app\app\vitals\page.tsx
+apps\patient-app\app\vitals\pair\page.tsx
+apps\patient-app\app\vitals\snapshot\route.ts
+apps\patient-app\app\vitals\stream\route.ts
+apps\patient-app\app\vitals\vitals-client.tsx
+apps\patient-app\components\ActiveEncounterPicker.tsx
+apps\patient-app\components\AllergiesNavBadge.tsx
+apps\patient-app\components\calendar\CalendarClient.tsx
+apps\patient-app\components\ChartCard.tsx
+apps\patient-app\components\charts\BpChart.tsx
+apps\patient-app\components\charts\ChartsClient.tsx
+apps\patient-app\components\charts\export.ts
+apps\patient-app\components\charts\LiveVitalsChart.tsx
+apps\patient-app\components\charts\MeterDonut.tsx
+apps\patient-app\components\charts\MiniLineCard.tsx
+apps\patient-app\components\charts\page.tsx
+apps\patient-app\components\charts\SleepCard.tsx
+apps\patient-app\components\charts\sleepSeed.ts
+apps\patient-app\components\charts\Sparkline.tsx
+apps\patient-app\components\charts\Stat.tsx
+apps\patient-app\components\charts\useLiveVitals.ts
+apps\patient-app\components\ClinicianRefundPolicy.tsx
+apps\patient-app\components\clinicians\ClinicianCard.tsx
+apps\patient-app\components\clinicians\CliniciansClient.tsx
+apps\patient-app\components\common\BackLink.tsx
+apps\patient-app\components\context\ActiveEncounterContext.tsx
+apps\patient-app\components\context\ActiveEncounterPicker.tsx
+apps\patient-app\components\context\PlanContext.tsx
+apps\patient-app\components\CountdownBadge.tsx
+apps\patient-app\components\EncounterHandoffBanner.tsx
+apps\patient-app\components\ExitXRButton.tsx
+apps\patient-app\components\HeaderNav.tsx
+apps\patient-app\components\HoloVitalsOverlay.tsx
+apps\patient-app\components\home\HomeActions.tsx
+apps\patient-app\components\hooks\useFavourites.ts
+apps\patient-app\components\InboxBell.tsx
+apps\patient-app\components\iomt\BatteryIcon.tsx
+apps\patient-app\components\iomt\DeviceActions.tsx
+apps\patient-app\components\iomt\HMPane.tsx
+apps\patient-app\components\iomt\IoMTStripLite.tsx
+apps\patient-app\components\iomt\IoMTTabs.tsx
+apps\patient-app\components\iomt\OtoPane.tsx
+apps\patient-app\components\iomt\Pane.tsx
+apps\patient-app\components\iomt\StethoPane.tsx
+apps\patient-app\components\iomt\WearablePane.tsx
+apps\patient-app\components\IoMTTile.tsx
+apps\patient-app\components\LabsNavBadge.tsx
+apps\patient-app\components\Logo.tsx
+apps\patient-app\components\MedicationsNavBadge.tsx
+apps\patient-app\components\PlanBadge.tsx
+apps\patient-app\components\PlanToggle.tsx
+apps\patient-app\components\PrintButton.tsx
+apps\patient-app\components\Providers.tsx
+apps\patient-app\components\RefundPolicyPanel.tsx
+apps\patient-app\components\RoleSwitcher.tsx
+apps\patient-app\components\Sidebar.tsx
+apps\patient-app\components\Sparkline.tsx
+apps\patient-app\components\TasksNavBadge.tsx
+apps\patient-app\components\TelevisitCountdown.tsx
+apps\patient-app\components\TelevisitJoin.tsx
+apps\patient-app\components\ThemeSwitch.tsx
+apps\patient-app\components\toast.ts
+apps\patient-app\components\toast.tsx
+apps\patient-app\components\ToastMount.tsx
+apps\patient-app\components\useToast.ts
+apps\patient-app\components\useVitalsSSE.ts
+apps\patient-app\components\XRCanvas.tsx
+apps\patient-app\components\XRToggle.tsx
+apps\patient-app\data\mock-patient.json
+apps\patient-app\lib\appointmentsStore.ts
+apps\patient-app\lib\auth.ts
+apps\patient-app\lib\chart.ts
+apps\patient-app\lib\cleanText.ts
+apps\patient-app\lib\favsStore.ts
+apps\patient-app\lib\iomtBridge.ts
+apps\patient-app\lib\store.ts
+apps\patient-app\lib\useVitalsSSE.ts
+apps\patient-app\mock\clinicians.ts
+apps\patient-app\mock\encounters.json
+apps\patient-app\mock\encounters.ts
+apps\patient-app\mock\medical-aid.ts
+apps\patient-app\mock\orders.json
+apps\patient-app\mock\patients.json
+apps\patient-app\mock\selfcheck.ts
+apps\patient-app\next.config.js
+apps\patient-app\next.config.mjs
+apps\patient-app\next-env.d.ts
+apps\patient-app\package.json
+apps\patient-app\pnpm-lock.yaml
+apps\patient-app\postcss.config.cjs
+apps\patient-app\public\ambulant-logo.png.png
+apps\patient-app\public\favicon.ico
+apps\patient-app\public\reports\files\ERX-1001.pdf
+apps\patient-app\public\reports\files\LAB-2002.pdf
+apps\patient-app\public\RPT-1001.pdf
+apps\patient-app\public\RPT-1002.pdf
+apps\patient-app\README.txt
+apps\patient-app\scripts\hm_bridge.cjs
+apps\patient-app\scripts\mock_mqtt.cjs
+apps\patient-app\scripts\mock_mqtt.cjs.txt
+apps\patient-app\scripts\mock_mqtt.ts
+apps\patient-app\scripts\oto_bridge.cjs
+apps\patient-app\scripts\steth_bridge.cjs
+apps\patient-app\src\components\LabsNavBadge.tsx
+apps\patient-app\src\components\MedicationsNavBadge.tsx
+apps\patient-app\src\components\NavBar.tsx
+apps\patient-app\src\components\RoleSwitcher.tsx
+apps\patient-app\src\components\rtc\CaptionOverlay.tsx
+apps\patient-app\src\components\rtc\Captions.tsx
+apps\patient-app\src\components\rtc\CaptionsPanel.tsx
+apps\patient-app\src\components\rtc\ChatPanel.tsx
+apps\patient-app\src\components\rtc\DeviceSelect.tsx
+apps\patient-app\src\components\rtc\LocalMedia.tsx
+apps\patient-app\src\components\rtc\OutputSelect.tsx
+apps\patient-app\src\components\rtc\RemoteAudio.tsx
+apps\patient-app\src\components\rtc\RemoteVideo.tsx
+apps\patient-app\src\components\rtc\StatsPanel.tsx
+apps\patient-app\src\components\TasksNavBadge.tsx
+apps\patient-app\src\components\toast.tsx
+apps\patient-app\src\iomt\otoscopePublisher.ts
+apps\patient-app\src\iomt\stethoscopePublisher.ts
+apps\patient-app\src\iomt\stethSegments.ts
+apps\patient-app\src\lib\active-enc.ts
+apps\patient-app\src\lib\config.ts
+apps\patient-app\src\lib\date.ts
+apps\patient-app\src\lib\ice.ts
+apps\patient-app\src\lib\number.ts
+apps\patient-app\src\lib\orders-store.ts
+apps\patient-app\src\lib\safe-fetch.ts
+apps\patient-app\src\lib\signal.ts
+apps\patient-app\src\lib\store.local.ts
+apps\patient-app\src\mocks\ambulant-mock-auth.tsx
+apps\patient-app\src\pages\_app.tsx.bak
+apps\patient-app\src\styles\globals.css
+apps\patient-app\src\toast.tsx
+apps\patient-app\styles\globals.css
+apps\patient-app\tailwind.config.cjs
+apps\patient-app\tsconfig.json
+apps\patient-app\vendor-sdk\due-monitor\platform\android-sdk\Linktop Health SDK(for android) V2.7.1.zip
+apps\patient-app\vendor-sdk\due-monitor\platform\ios-sdk\Healthmonitor_SDK_iOS_4.4.zip
+apps\patient-app\vendor-sdk\due-otoscope\platform\android-sdk\Linktop NE20 Android SDK V1.0.6.zip
+apps\patient-app\vendor-sdk\due-otoscope\platform\android-sdk\Linktop NE20 Android SDK V1.0.7.zip
+apps\patient-app\vendor-sdk\due-otoscope\platform\ios-sdk\Otoscope_iOS_sdk_V1.2.zip
+apps\patient-app\vendor-sdk\due-stethoscope\platform\android-sdk\Linktop HC21 Stethoscope SDK(for android) V1.3.4.zip
+apps\patient-app\vendor-sdk\due-stethoscope\platform\ios-sdk\Stethoscope_iOS_SDK_V1.4.zip
+bridges\health-monitor-bridge.ts
+bridges\otoscope-bridge.ts
+bridges\ring-bridge.ts
+bridges\steth-bridge.ts
+captioner\app.py
+captioner\Dockerfile
+captioner\requirements.txt
+captioner-node\clinician-diagnostic.txt
+captioner-node\Dockerfile
+captioner-node\package.json
+captioner-node\src\index.ts
+captioner-node\tsconfig.json
+clinician-diagnostic.txt
+data-careport.json
+data-medreach.json
+docker-compose.livekit.yml
+docker-compose.yml
+docker-compose.yml.txt
+livekit.keys
+livekit.yaml
+merge-report.txt
+models\ggml-base.en.bin
+package.json
+packages\admin\payouts.json
+packages\admin\settings.json
+packages\ambulant-mock-auth\context\AuthContext.tsx
+packages\ambulant-mock-auth\package.json
+packages\ambulant-mock-auth\provider.tsx
+packages\api\package.json
+packages\api\src\client.ts
+packages\api\src\index.ts
+packages\careport\erx.json
+packages\careport\orders.json
+packages\env\package.json
+packages\env\src\index.ts
+packages\env\src\server.ts
+packages\insightcore\alerts.json
+packages\insightcore\config.json
+packages\iot-sdk\adapters\mock\stream.ts
+packages\iot-sdk\devices.json
+packages\iot-sdk\docs\README.md
+packages\iot-sdk\package.json
+packages\iot-sdk\src\index.ts
+packages\iot-sdk\tsconfig.json
+packages\medreach\labs.json
+packages\medreach\reports.json
+packages\medreach\uploads\LAB-NEW.pdf
+packages\medreach\uploads\LAB-NEW.png
+packages\medreach\uploads\RPT-NEW-ChatGPT_Image_Aug_8__2025__07_20_46_AM.png
+packages\medreach\uploads\thandi_fbc.png
+packages\mock\state.json
+packages\rtc\package.json
+packages\rtc\src\components\CaptionsOverlay.tsx
+packages\rtc\src\components\DeviceSettings.tsx
+packages\rtc\src\components\MonitorPanel.tsx
+packages\rtc\src\DeviceSettings.tsx
+packages\rtc\src\index.ts
+packages\rtc\src\iomt.ts
+packages\rtc\src\MonitorPanel.tsx
+packages\rtc-core\index.ts
+packages\rtc-core\package.json
+packages\rtc-shell\package.json
+packages\rtc-shell\src\index.tsx
+packages\rtc-shell\tsconfig.json
+packages\rtc-signaling\package.json
+packages\rtc-signaling\server.mjs
+packages\shared-runtime\package.json
+packages\shared-runtime\src\index.ts
+packages\shared-runtime\src\store.ts
+packages\shared-runtime\src\xrPayload.ts
+packages\types\package.json
+packages\types\src\index.ts
+packages\types\src\schemas.ts
+packages\ui\package.json
+packages\ui\src\index.ts
+packages\ui\src\pill.tsx
+packages\ui\src\session-timer.tsx
+packages\ui\src\tabs.tsx
+packages\ui\tsconfig.json
+packages\ui-shell\package.json
+packages\ui-shell\src\index.tsx
+packages\ui-shell\tsconfig.base.json
+PATCH_v15_2_README.txt
+pnpm-lock.yaml
+pnpm-workspace.yaml
+postcss.config.cjs
+postcss.config.js
+publish-test.mjs
+publish-test.mjs.txt
+README.md
+repo_scaffold.txt
+repo-files.txt
+repo-tree.txt
+sample-reports\careport-sample.pdf
+sample-reports\medreach-sample.pdf
+scripts\check-env.mjs
+scripts\hm_bridge.cjs
+scripts\oto_bridge.cjs
+scripts\seed.ts
+scripts\steth_bridge.cjs
+tailwind.config.js
+tools\signal-server\package.json
+tools\signal-server\package-lock.json
+tools\signal-server\server.mjs
+tsconfig.base.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\lib\ringSDK.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\.env
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\.eslintrc.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\.prettierrc.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\.watchmanconfig
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\__tests__\App.test.tsx
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\_bundle\config
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\.cmake\api\v1\query\client-agp\cache-v2
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\.cmake\api\v1\query\client-agp\cmakeFiles-v1
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\.cmake\api\v1\query\client-agp\codemodel-v2
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\.cmake\api\v1\reply\cache-v2-5fb9ac2f231ba7c2c7b2.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\.cmake\api\v1\reply\cmakeFiles-v1-b45005210893bf183433.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\.cmake\api\v1\reply\codemodel-v2-96757f76ace564e2c958.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\.cmake\api\v1\reply\directory-.-Debug-f5ebdc15457944623624.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\.cmake\api\v1\reply\index-2025-04-15T03-10-15-0917.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\additional_project_files.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\cmake_install.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeCache.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeCCompiler.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeCXXCompiler.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeDetermineCompilerABI_C.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeDetermineCompilerABI_CXX.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeSystem.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CompilerIdC\CMakeCCompilerId.c
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CompilerIdC\CMakeCCompilerId.o
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CompilerIdCXX\CMakeCXXCompilerId.cpp
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CompilerIdCXX\CMakeCXXCompilerId.o
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\cmake.check_cache
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\CMakeOutput.log
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\rules.ninja
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\CMakeFiles\TargetDirectories.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\configure_fingerprint.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\metadata_generation_command.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\prefab_config.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\arm64-v8a\symbol_folder_index.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\.cmake\api\v1\query\client-agp\cache-v2
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\.cmake\api\v1\query\client-agp\cmakeFiles-v1
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\.cmake\api\v1\query\client-agp\codemodel-v2
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\.cmake\api\v1\reply\cache-v2-a28d530930271c5ec579.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\.cmake\api\v1\reply\cmakeFiles-v1-cacaadd4b453a31f1d6d.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\.cmake\api\v1\reply\codemodel-v2-c66af227bc70d0721e1e.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\.cmake\api\v1\reply\directory-.-Debug-f5ebdc15457944623624.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\.cmake\api\v1\reply\index-2025-04-15T03-15-34-0898.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\additional_project_files.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\cmake_install.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeCache.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeCCompiler.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeCXXCompiler.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeDetermineCompilerABI_C.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeDetermineCompilerABI_CXX.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeSystem.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CompilerIdC\CMakeCCompilerId.c
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CompilerIdC\CMakeCCompilerId.o
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CompilerIdCXX\CMakeCXXCompilerId.cpp
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CompilerIdCXX\CMakeCXXCompilerId.o
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\cmake.check_cache
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\CMakeOutput.log
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\rules.ninja
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\CMakeFiles\TargetDirectories.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\configure_fingerprint.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\metadata_generation_command.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\prefab_config.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\armeabi-v7a\symbol_folder_index.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\Debug\3v2d6f39\hash_key.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\.cmake\api\v1\query\client-agp\cache-v2
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\.cmake\api\v1\query\client-agp\cmakeFiles-v1
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\.cmake\api\v1\query\client-agp\codemodel-v2
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\.cmake\api\v1\reply\cache-v2-52d0ff941ba00562c2bf.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\.cmake\api\v1\reply\cmakeFiles-v1-e172437c0a00dbbef054.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\.cmake\api\v1\reply\codemodel-v2-892065bca1b089d41d93.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\.cmake\api\v1\reply\directory-.-RelWithDebInfo-f5ebdc15457944623624.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\.cmake\api\v1\reply\index-2025-04-21T07-36-46-0419.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\additional_project_files.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\cmake_install.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeCache.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeCCompiler.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeCXXCompiler.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeDetermineCompilerABI_C.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeDetermineCompilerABI_CXX.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CMakeSystem.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CompilerIdC\CMakeCCompilerId.c
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CompilerIdC\CMakeCCompilerId.o
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CompilerIdCXX\CMakeCXXCompilerId.cpp
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\3.22.1-g37088a8\CompilerIdCXX\CMakeCXXCompilerId.o
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\cmake.check_cache
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\CMakeOutput.log
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\rules.ninja
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\CMakeFiles\TargetDirectories.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\configure_fingerprint.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\metadata_generation_command.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\prefab_config.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\arm64-v8a\symbol_folder_index.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\.cmake\api\v1\query\client-agp\cache-v2
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\.cmake\api\v1\query\client-agp\cmakeFiles-v1
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\.cmake\api\v1\query\client-agp\codemodel-v2
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\.cmake\api\v1\reply\cache-v2-be5f89878a8d3da2ce98.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\.cmake\api\v1\reply\cmakeFiles-v1-640646a6928dc2238357.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\.cmake\api\v1\reply\codemodel-v2-6bcc800f0ea0805f6c5b.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\.cmake\api\v1\reply\directory-.-RelWithDebInfo-f5ebdc15457944623624.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\.cmake\api\v1\reply\index-2025-04-21T07-36-51-0592.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\additional_project_files.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\cmake_install.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeCache.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeCCompiler.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeCXXCompiler.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeDetermineCompilerABI_C.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeDetermineCompilerABI_CXX.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CMakeSystem.cmake
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CompilerIdC\CMakeCCompilerId.c
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CompilerIdC\CMakeCCompilerId.o
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CompilerIdCXX\CMakeCXXCompilerId.cpp
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\3.22.1-g37088a8\CompilerIdCXX\CMakeCXXCompilerId.o
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\cmake.check_cache
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\CMakeOutput.log
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\rules.ninja
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\CMakeFiles\TargetDirectories.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\configure_fingerprint.bin
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\metadata_generation_command.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\prefab_config.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\armeabi-v7a\symbol_folder_index.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\.cxx\RelWithDebInfo\2l42464p\hash_key.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\CMakeLists.txt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\debug.keystore
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\libs\NskAlgoSdk.jar
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\proguard-rules.pro
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\debug\AndroidManifest.xml
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\debug\java\com\nexringrn\ReactNativeFlipper.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\AndroidManifest.xml
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\ecg\Constant.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\ecg\EcgListener.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\ecg\EcgManager.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\ecg\NativeEcgModule.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\fileutil\FileUtilModule.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smart\bp\BpModule.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smart\bp\listener\OnBPIDebugListener.kt
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smart\bp\SmartBPNative.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartringrn\BpReactPackage.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartringrn\EcgReactPackage.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartringrn\FileReactPackage.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartringrn\MainActivity.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartringrn\MainApplication.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartringrn\MyReactPackage.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartsleep\sleepstaging\HealthData.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartsleep\sleepstaging\NativeSleepModule.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartsleep\sleepstaging\SleepStagingNative.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartsleep\sleepstaging\SleepStagingResult.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartsleep\sleepstaging\SleepStagingType.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartsleep\sleepstaging\SlpWakeData.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartsleep\sleepstaging\Staging.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\java\com\smartsleep\sleepstaging\StagingData.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\jniLibs\arm64-v8a\libNskAlgo.so
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\jniLibs\arm64-v8a\libsleepstaging.so
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\jniLibs\arm64-v8a\libsmartbp.so
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\jniLibs\armeabi-v7a\libNskAlgo.so
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\jniLibs\armeabi-v7a\libsleepstaging.so
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\jniLibs\armeabi-v7a\libsmartbp.so
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\drawable\rn_edit_text_material.xml
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-hdpi\ic_launcher.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-hdpi\ic_launcher_round.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-mdpi\ic_launcher.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-mdpi\ic_launcher_round.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-xhdpi\ic_launcher.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-xhdpi\ic_launcher_round.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-xxhdpi\ic_launcher.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-xxhdpi\ic_launcher_round.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-xxxhdpi\ic_launcher.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\mipmap-xxxhdpi\ic_launcher_round.png
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\values\strings.xml
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\main\res\values\styles.xml
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\app\src\release\java\com\nexringrn\ReactNativeFlipper.java
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\gradle.properties
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\gradle\wrapper\gradle-wrapper.jar
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\gradle\wrapper\gradle-wrapper.properties
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\gradlew
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\gradlew.bat
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\local.properties
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\android\settings.gradle
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\App.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\app.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\babel.config.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\Gemfile
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\Gemfile.lock
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\index.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\.DS_Store
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\.xcode.env
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\Podfile
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\Podfile.lock
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN Tests\Info.plist
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN Tests\NexRingRNTests.m
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN.xcodeproj\project.pbxproj
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN.xcodeproj\project.xcworkspace\xcshareddata\IDEWorkspaceChecks.plist
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN.xcodeproj\project.xcworkspace\xcuserdata\linktop.xcuserdatad\UserInterfaceState.xcuserstate
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN.xcodeproj\xcshareddata\xcschemes\SmartRingRN.xcscheme
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN.xcodeproj\xcuserdata\linktop.xcuserdatad\xcschemes\xcschememanagement.plist
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN.xcworkspace\contents.xcworkspacedata
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN.xcworkspace\xcshareddata\IDEWorkspaceChecks.plist
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN.xcworkspace\xcuserdata\linktop.xcuserdatad\UserInterfaceState.xcuserstate
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\.DS_Store
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\AppDelegate.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\AppDelegate.mm
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\bloodpressure\.DS_Store
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\bloodpressure\BloodPressure.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\bloodpressure\libbplgorithm.a
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Images.xcassets\AppIcon.appiconset\Contents.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Images.xcassets\Contents.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Info.plist
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\LaunchScreen.storyboard
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\libNSKAlgoSDKECG\.DS_Store
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\libNSKAlgoSDKECG\libNSKAlgoSDKECG.a
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\libNSKAlgoSDKECG\NSKAlgoSDKECG.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\libNSKAlgoSDKECG\NSKAlgoSDKECGDelegate.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\main.m
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\SDKHealthMoniter.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\SDKHealthMoniter.m
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\SleepDataMoudle.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\SleepDataMoudle.m
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\.DS_Store
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\libSleepV4_60219b_20250711.a
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\ListUtils.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\NSDictionary+SleepUsed.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\SleepCmAstncData.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\SleepSourceData.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\SleepStageHeader.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\SleepStagingResultV2.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\SleepStagingV2.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\StagingDataV2.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\StagingListObj.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\Sleepv4\StagingSubObj.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\SmartBPWrapper.h
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\ios\SmartRingRN\SmartBPWrapper.m
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\jest.config.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\metro.config.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\package.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\package-lock.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\README.md
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\assets\Historical.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\assets\test.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\assets\wm_dump_06-11-2024-08-43.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\common\Constant.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\common\Type.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\Adjust86176Dialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\Characteristic.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\CustomButton.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\ecgAndPpgWave.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\ecgWave.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\ecgWave1.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\ExerciseDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\Header.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\MeasureTimingDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\MotionBarChart.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\NewHistoryDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\OldHistoryDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\RegisterDeviceDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\SportModeDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\StressLineChart.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\TabBar.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\TempLineChart.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\TestModeDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\UserBpDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\components\UserInfoDialog.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\common\pressureCommon.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\config\realmConfig.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\history.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\model\BloodPressureModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\model\HistoryModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\model\PressureModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\model\SleepModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\pressure.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\RealmManager.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\realmObj\allStressRecord.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\realmObj\baseLine.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\realmObj\bloodPressureRecord.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\realmObj\motionRecord.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\realmObj\stressRecord.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\db\sleep.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\http\axiosConfig.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\http\httpManager.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\http\otaModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\http\urlCommon.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\lib\ringSDK.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\model\HealthModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\module\BleModule.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\pages\BloodPressure.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\pages\Bluetooth.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\pages\ChargeOta.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\pages\Login.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\pages\Main.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\pages\Ota.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\pages\OtaDownLoad.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\pages\UpgradeProcess.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\redux\authSlice.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\redux\store.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\redux\variablesSlice.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\route\Route.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\arc4Util.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\chargeOtaUtil.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\dialogUtil.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\ecgUtils.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\FileUtils.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\ListenerUtils.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\loginUtil.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\OtaUtil.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\TimeFormat.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\utils\util.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\viewModel\bpViewModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\viewModel\HealthViewModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\viewModel\mainViewModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\src\viewModel\sleepViewModel.js
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\tsconfig.json
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\SmartRingRN\yarn.lock
+vendor\smart-ring-js-sdk\Smart Ring RN SDK_V1.3.7\version.md

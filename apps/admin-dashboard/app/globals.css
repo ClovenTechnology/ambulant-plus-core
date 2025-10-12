@@ -1,0 +1,16 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: light dark; }
+html, body { height: 100%; }
+body { @apply bg-gray-50 text-gray-900; }
+
+.container { @apply max-w-6xl mx-auto p-6; }
+.card { @apply bg-white border rounded-lg p-4; }
+.table { @apply w-full text-sm border; }
+.table thead { @apply bg-gray-50 text-left; }
+.table th, .table td { @apply p-2; }
+.btn { @apply inline-flex items-center justify-center rounded border px-3 py-1.5 text-sm; }
+.btn-primary { @apply bg-black text-white; }
+.badge { @apply px-2 py-0.5 text-xs rounded border; }

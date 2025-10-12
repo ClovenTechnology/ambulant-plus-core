@@ -1,0 +1,31 @@
+/* apps/clinician-app/app/globals.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+
+/* theme surface + effects to match patient */
+:root[data-theme='light'] {
+  --surface: #f8fafc;
+  --text: #0f172a;
+}
+:root[data-theme='dark'] {
+  --surface: #0b1020;
+  --text: #e5e7eb;
+}
+
+html, body { height: 100%; }
+body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+
+.bg-surface { background-color: var(--surface); color: var(--text); }
+.neon { text-shadow: 0 0 8px rgba(99, 102, 241, 0.55); }
+.glass { background: rgba(255,255,255,0.06); backdrop-filter: blur(8px); }
+.holo-grid { background-image:
+  radial-gradient(ellipse at top, rgba(99,102,241,.08), transparent 40%),
+  radial-gradient(ellipse at bottom, rgba(16,185,129,.06), transparent 40%);
+}
+.scanline {
+  position: fixed; inset: 0;
+  background-image: repeating-linear-gradient(transparent, transparent 2px, rgba(0,0,0,.03) 3px);
+  mix-blend-mode: overlay; opacity: .5;
+}

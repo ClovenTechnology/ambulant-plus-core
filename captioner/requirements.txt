@@ -1,0 +1,6 @@
+# LiveKit Python SDK for real-time participation (agents)
+livekit-agents>=0.6
+livekit>=0.16
+aiohttp>=3.9
+numpy>=1.26
+soundfile>=0.12

@@ -1,0 +1,31 @@
+=== BASIC ===
+2025-08-24T05:26:18
+
+Microsoft Windows [Version 10.0.26100.4946]
+v20.19.4
+10.13.1
+
+=== WORKSPACES (depth0) ===
+Legend: production dependency, optional only, dev only
+
+ambulant-plus-scaffold@13.0.0-bi C:\Users\Cash\Downloads\ambulant-plus-scaffold (PRIVATE)
+
+dependencies:
+chart.js 4.5.0
+framer-motion 12.23.12
+react-chartjs-2 5.3.0
+zod 4.0.17
+
+devDependencies:
+@faker-js/faker 9.9.0
+tsx 4.20.4
+
+=== CLINICIAN package.json ===
+
+=== NEXT/TS/TAILWIND CONFIGS ===
+
+=== KEY ROUTES & COMPONENTS (first 120 lines) ===
+
+=== API ROUTES (headers only) ===
+
+=== FILE TREE (no node_modules/.next) ===

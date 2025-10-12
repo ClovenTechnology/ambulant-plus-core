@@ -1,0 +1,10 @@
+{
+  "id": "patient-123",
+  "name": "Adebayo Ife",
+  "age": 34,
+  "vitals": {
+    "heartRate": 78,
+    "spo2": 98,
+    "temperature": 36.6
+  }
+}

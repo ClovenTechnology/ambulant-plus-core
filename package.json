@@ -1,0 +1,71 @@
+{
+  "name": "ambulant-plus-scaffold",
+  "version": "13.0.0-bi",
+  "private": true,
+  "packageManager": "pnpm@10.13.1",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=18.12",
+    "pnpm": ">=10.13.1"
+  },
+  "scripts": {
+    "prebuild": "node scripts/check-env.mjs",
+    "dev:clinician": "pnpm -C apps/clinician-app dev -- -p 3003",
+    "dev:admin": "pnpm -C apps/admin-app dev -- -p 3004",
+    "dev:patient": "pnpm -C apps/patient-app dev -- -p 3002",
+    "dev:mvp": "pnpm -C apps/patient-mvp dev -- -p 3013",
+    "bridge:ring": "tsx bridges/ring-bridge.ts",
+    "storybook": "storybook dev -p 6006 -s ./public",
+    "build-storybook": "storybook build",
+    "test-storybook": "test-storybook"
+  },
+  "dependencies": {
+    "@livekit/components-react": "^2.9.14",
+    "@livekit/components-styles": "^1.1.6",
+    "@prisma/client": "^5.22.0",
+    "@react-pdf/renderer": "^4.3.1",
+    "@react-three/drei": "^10.7.6",
+    "@react-three/fiber": "^8.18.0",
+    "@react-three/xr": "^2.1.0",
+    "@tanstack/react-query": "^5.90.2",
+    "chart.js": "^4.5.0",
+    "date-holidays": "^3.26.1",
+    "dotenv": "^17.2.1",
+    "downsample-lttb": "^0.0.1",
+    "downshift": "^9.0.10",
+    "framer-motion": "^12.23.12",
+    "html2canvas": "^1.4.1",
+    "jose": "^6.0.13",
+    "jspdf": "^3.0.3",
+    "jspdf-autotable": "^5.0.2",
+    "livekit-server-sdk": "^2.13.2",
+    "mqtt": "^5.14.0",
+    "next": "^15.5.2",
+    "qrcode": "^1.5.4",
+    "react-chartjs-2": "^5.3.0",
+    "recharts": "^3.2.0",
+    "smart-ring-js-sdk": "file:vendor/smart-ring-js-sdk",
+    "swr": "^2.3.6",
+    "three": "^0.160.0",
+    "zod": "^4.0.17"
+  },
+  "devDependencies": {
+    "@faker-js/faker": "^9.9.0",
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^20.19.13",
+    "autoprefixer": "^10.4.21",
+    "postcss": "^8.5.6",
+    "prisma": "^5.22.0",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.20.4",
+    "typescript": "^5.9.2"
+  },
+  "pnpm": {
+    "overrides": {
+      "livekit-client": "2.15.6"
+    }
+  }
+}

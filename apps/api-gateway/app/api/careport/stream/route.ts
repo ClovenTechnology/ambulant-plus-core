@@ -1,0 +1,46 @@
+import { NextRequest } from 'next/server';
+import { addClient } from '@/src/lib/sse';
+import { readIdentity } from '@/src/lib/identity';
+import { prisma } from '@/src/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  const orderId = req.nextUrl.searchParams.get('orderId') || '';
+  if (!orderId) return new Response('orderId required', { status: 400 });
+
+  // Authorize viewer against the delivery record
+  const who = readIdentity(req.headers);
+  const delivery = await prisma.delivery.findFirst({ where: { orderId } });
+  if (!delivery) return new Response('not found', { status: 404 });
+
+  const allowed =
+    who.role === 'admin' ||
+    (who.role === 'patient' && who.uid === delivery.patientId) ||
+    (who.role === 'clinician' && who.uid === delivery.clinicianId) ||
+    (who.role === 'rider' && who.uid === delivery.riderId);
+
+  if (!allowed) return new Response('forbidden', { status: 403 });
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const writer = controller as unknown as ReadableStreamDefaultWriter<Uint8Array>;
+      const remove = addClient(orderId, { id: crypto.randomUUID(), res: writer });
+      const enc = new TextEncoder();
+      writer.write(enc.encode(': connected\n\n'));
+      (req.signal as any).addEventListener('abort', () => {
+        remove();
+        controller.close();
+      });
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'content-type': 'text/event-stream',
+      'cache-control': 'no-cache',
+      connection: 'keep-alive',
+      'access-control-allow-origin': '*',
+    },
+  });
+}

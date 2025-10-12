@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "baseUrl": ".",
+    "paths": {
+      "@ambulant/ui/*": ["packages/ui/src/*"],
+      "@ambulant/rtc/*": ["packages/rtc/src/*"],
+      "@ambulant/types/*": ["packages/types/src/*"],
+      "@ambulant/api/*": ["packages/api/src/*"],
+      "@ambulant/env/*": ["packages/env/src/*"],
+      "@platform/*": ["packages/platform-bridge/src/*"],
+      "@devices/*": ["shared/devices/*"]
+    }
+  }
+}

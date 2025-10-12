@@ -1,0 +1,30 @@
+{
+  "alerts": [
+    {
+      "patient": "Lerato Mokoena",
+      "type": "glucose risk",
+      "score": 82,
+      "note": "Rising fasting trend"
+    },
+    {
+      "patient": "Kabelo Nkosi",
+      "type": "HRV low",
+      "score": 65,
+      "note": "Below baseline for 3 days"
+    },
+    {
+      "patient": "Nomsa Khumalo",
+      "type": "blood pressure",
+      "score": 74,
+      "note": "Evening spikes observed"
+    },
+    {
+      "id": "0a86883c-957c-4c60-98e4-d8afe09392d0",
+      "patient": "Thandi Mokoena",
+      "type": "Heart Risk",
+      "score": 0.72,
+      "ts": "2025-08-09T21:04:51.265Z",
+      "note": "Persistent tachycardia over threshold"
+    }
+  ]
+}

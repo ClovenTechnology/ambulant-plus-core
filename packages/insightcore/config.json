@@ -1,0 +1,22 @@
+{
+  "heartRate": {
+    "min": 50,
+    "max": 120
+  },
+  "spo2": {
+    "min": 92
+  },
+  "temperature": {
+    "max": 38
+  },
+  "glucoseInstability": {
+    "threshold": 0.7
+  },
+  "bp": {
+    "systolicMax": 140,
+    "diastolicMax": 90
+  },
+  "riskScoring": {
+    "alertScoreMin": 0.65
+  }
+}

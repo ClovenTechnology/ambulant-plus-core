@@ -1,0 +1,16 @@
+{
+  "name": "@ambulant/ui-shell",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.tsx",
+  "exports": {
+    ".": "./src/index.tsx"
+  },
+  "files": ["src"],
+  "peerDependencies": {
+    "next": "^13.4.0 || ^14.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  }
+}

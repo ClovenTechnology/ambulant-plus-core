@@ -1,0 +1,8 @@
+{
+  "name": "ambulant-mock-auth",
+  "main": "./provider.tsx",
+  "exports": {
+    ".": "./provider.tsx",
+    "./context/AuthContext": "./context/AuthContext.tsx"
+  }
+}
