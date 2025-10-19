@@ -1,50 +1,61 @@
+-- CreateEnum
+CREATE TYPE "MedicationStatus" AS ENUM ('Active', 'Completed', 'OnHold');
+
+-- CreateEnum
+CREATE TYPE "ReminderStatus" AS ENUM ('Pending', 'Taken', 'Missed');
+
 -- CreateTable
 CREATE TABLE "DeviceCatalog" (
-    "slug" TEXT NOT NULL PRIMARY KEY,
+    "slug" TEXT NOT NULL,
     "label" TEXT NOT NULL,
     "vendor" TEXT NOT NULL,
     "modality" TEXT NOT NULL,
     "transport" TEXT NOT NULL,
-    "services" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "services" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "DeviceCatalog_pkey" PRIMARY KEY ("slug")
 );
 
 -- CreateTable
 CREATE TABLE "UserDevice" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "catalogSlug" TEXT NOT NULL,
     "nickname" TEXT,
     "transport" TEXT NOT NULL,
-    "pairedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "identifiers" TEXT,
-    "meta" TEXT,
-    CONSTRAINT "UserDevice_catalogSlug_fkey" FOREIGN KEY ("catalogSlug") REFERENCES "DeviceCatalog" ("slug") ON DELETE RESTRICT ON UPDATE CASCADE
+    "pairedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastSeenAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "identifiers" JSONB,
+    "meta" JSONB,
+
+    CONSTRAINT "UserDevice_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Encounter" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "caseId" TEXT NOT NULL,
     "patientId" TEXT NOT NULL,
     "clinicianId" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    "status" TEXT NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+    "status" TEXT NOT NULL,
+
+    CONSTRAINT "Encounter_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Appointment" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "encounterId" TEXT NOT NULL,
     "sessionId" TEXT NOT NULL,
     "caseId" TEXT NOT NULL,
     "clinicianId" TEXT NOT NULL,
     "patientId" TEXT NOT NULL,
-    "startsAt" DATETIME NOT NULL,
-    "endsAt" DATETIME NOT NULL,
+    "startsAt" TIMESTAMP(3) NOT NULL,
+    "endsAt" TIMESTAMP(3) NOT NULL,
     "status" TEXT NOT NULL,
     "priceCents" INTEGER NOT NULL,
     "currency" TEXT NOT NULL,
@@ -53,12 +64,13 @@ CREATE TABLE "Appointment" (
     "paymentProvider" TEXT NOT NULL,
     "paymentRef" TEXT,
     "meta" TEXT,
-    CONSTRAINT "Appointment_encounterId_fkey" FOREIGN KEY ("encounterId") REFERENCES "Encounter" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+
+    CONSTRAINT "Appointment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ErxOrder" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "kind" TEXT NOT NULL,
     "encounterId" TEXT NOT NULL,
     "sessionId" TEXT NOT NULL,
@@ -67,13 +79,14 @@ CREATE TABLE "ErxOrder" (
     "clinicianId" TEXT NOT NULL,
     "drug" TEXT NOT NULL,
     "sig" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "ErxOrder_encounterId_fkey" FOREIGN KEY ("encounterId") REFERENCES "Encounter" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ErxOrder_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LabOrder" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "kind" TEXT NOT NULL,
     "encounterId" TEXT NOT NULL,
     "sessionId" TEXT NOT NULL,
@@ -81,47 +94,53 @@ CREATE TABLE "LabOrder" (
     "patientId" TEXT NOT NULL,
     "clinicianId" TEXT NOT NULL,
     "panel" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "LabOrder_encounterId_fkey" FOREIGN KEY ("encounterId") REFERENCES "Encounter" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "LabOrder_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Payment" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "encounterId" TEXT NOT NULL,
     "caseId" TEXT NOT NULL,
     "amountCents" INTEGER NOT NULL,
     "currency" TEXT NOT NULL,
     "status" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
     "meta" TEXT,
-    CONSTRAINT "Payment_encounterId_fkey" FOREIGN KEY ("encounterId") REFERENCES "Encounter" ("id") ON DELETE RESTRICT ON UPDATE CASCADE
+
+    CONSTRAINT "Payment_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Televisit" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "title" TEXT,
     "startsAtMs" BIGINT NOT NULL,
     "durationMin" INTEGER NOT NULL,
     "joinOpenLeadSec" INTEGER NOT NULL,
-    "joinCloseLagSec" INTEGER NOT NULL
+    "joinCloseLagSec" INTEGER NOT NULL,
+
+    CONSTRAINT "Televisit_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Ticket" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "visitId" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "token" TEXT NOT NULL,
     "issuedAt" BIGINT NOT NULL,
-    "expiresAt" BIGINT NOT NULL
+    "expiresAt" BIGINT NOT NULL,
+
+    CONSTRAINT "Ticket_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "RuntimeEvent" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "ts" BIGINT NOT NULL,
     "kind" TEXT NOT NULL,
     "encounterId" TEXT,
@@ -130,31 +149,104 @@ CREATE TABLE "RuntimeEvent" (
     "payload" TEXT,
     "targetPatientId" TEXT,
     "targetClinicianId" TEXT,
-    "targetAdmin" BOOLEAN DEFAULT false
+    "targetAdmin" BOOLEAN DEFAULT false,
+
+    CONSTRAINT "RuntimeEvent_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Medication" (
+    "id" TEXT NOT NULL,
+    "patientId" TEXT,
+    "name" TEXT NOT NULL,
+    "dose" TEXT,
+    "frequency" TEXT,
+    "route" TEXT,
+    "started" TIMESTAMP(3),
+    "lastFilled" TIMESTAMP(3),
+    "status" "MedicationStatus" NOT NULL,
+    "orderId" TEXT,
+    "source" TEXT,
+    "meta" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Medication_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "Reminder" (
+    "id" TEXT NOT NULL,
+    "medicationId" TEXT,
+    "patientId" TEXT,
+    "name" TEXT NOT NULL,
+    "dose" TEXT,
+    "time" TEXT,
+    "status" "ReminderStatus" NOT NULL,
+    "snoozedUntil" TIMESTAMP(3),
+    "source" TEXT,
+    "meta" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Reminder_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ClinicianProfile" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "displayName" TEXT,
     "specialty" TEXT,
+    "gender" TEXT,
+    "phone" TEXT,
+    "email" TEXT,
+    "photoUrl" TEXT,
+    "boardCertificateUrl" TEXT,
+    "boardCertificateNumber" TEXT,
+    "boardCertificateIssuer" TEXT,
+    "boardCertificateExpires" TIMESTAMP(3),
+    "idNumber" TEXT,
+    "idIssuingCountry" TEXT,
+    "idExpiry" TIMESTAMP(3),
+    "qualification" TEXT,
+    "qualificationYear" INTEGER,
+    "qualificationInstitution" TEXT,
+    "otherQualifications" TEXT,
+    "addressLine1" TEXT,
+    "addressLine2" TEXT,
+    "city" TEXT,
+    "postalCode" TEXT,
+    "country" TEXT,
     "feeCents" INTEGER NOT NULL DEFAULT 0,
     "currency" TEXT NOT NULL DEFAULT 'ZAR',
     "payoutAccountId" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "piInsuranceProvider" TEXT,
+    "piInsurancePolicyName" TEXT,
+    "piInsuranceCoverType" TEXT,
+    "piInsuranceExpiry" TIMESTAMP(3),
+    "piInsuranceNumber" TEXT,
+    "trainingScheduledAt" TIMESTAMP(3),
+    "trainingCompleted" BOOLEAN NOT NULL DEFAULT false,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "disabled" BOOLEAN NOT NULL DEFAULT false,
+    "archived" BOOLEAN NOT NULL DEFAULT false,
+    "meta" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ClinicianProfile_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "PatientProfile" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "name" TEXT,
     "contactEmail" TEXT,
     "phone" TEXT,
     "primaryComm" TEXT,
-    "dob" DATETIME,
+    "dob" TIMESTAMP(3),
     "idNumber" TEXT,
     "addressLine1" TEXT,
     "addressLine2" TEXT,
@@ -165,13 +257,15 @@ CREATE TABLE "PatientProfile" (
     "weightKg" INTEGER,
     "photoUrl" TEXT,
     "allergies" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PatientProfile_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Device" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "deviceId" TEXT NOT NULL,
     "secret" TEXT NOT NULL,
     "patientId" TEXT,
@@ -179,36 +273,42 @@ CREATE TABLE "Device" (
     "vendor" TEXT,
     "category" TEXT,
     "model" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Device_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "VitalSample" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "patientId" TEXT NOT NULL,
     "deviceId" TEXT NOT NULL,
-    "t" DATETIME NOT NULL,
+    "t" TIMESTAMP(3) NOT NULL,
     "vType" TEXT NOT NULL,
-    "valueNum" REAL NOT NULL,
+    "valueNum" DOUBLE PRECISION NOT NULL,
     "unit" TEXT,
-    "roomId" TEXT
+    "roomId" TEXT,
+
+    CONSTRAINT "VitalSample_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ConsentGrant" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "patientId" TEXT NOT NULL,
     "delegateId" TEXT NOT NULL,
     "scope" TEXT NOT NULL,
-    "startsAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "endsAt" DATETIME,
-    "revokedAt" DATETIME
+    "startsAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "endsAt" TIMESTAMP(3),
+    "revokedAt" TIMESTAMP(3),
+
+    CONSTRAINT "ConsentGrant_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "EhrIndex" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "recordId" TEXT NOT NULL,
     "patientHash" TEXT NOT NULL,
     "clinicianHash" TEXT NOT NULL,
@@ -217,32 +317,38 @@ CREATE TABLE "EhrIndex" (
     "kind" TEXT NOT NULL,
     "chain" TEXT NOT NULL DEFAULT 'offchain-dev',
     "txId" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "EhrIndex_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "PharmacyPartner" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "contact" TEXT,
     "active" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "PharmacyPartner_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LabPartner" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "name" TEXT NOT NULL,
     "contact" TEXT,
     "active" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "LabPartner_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Delivery" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "orderId" TEXT NOT NULL,
     "encounterId" TEXT NOT NULL,
     "patientId" TEXT NOT NULL,
@@ -251,13 +357,15 @@ CREATE TABLE "Delivery" (
     "partnerId" TEXT,
     "status" TEXT NOT NULL,
     "priceCents" INTEGER NOT NULL DEFAULT 0,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Delivery_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Draw" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "orderId" TEXT NOT NULL,
     "encounterId" TEXT NOT NULL,
     "patientId" TEXT NOT NULL,
@@ -265,106 +373,124 @@ CREATE TABLE "Draw" (
     "phlebId" TEXT,
     "partnerId" TEXT,
     "status" TEXT NOT NULL,
-    "scheduledAt" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "scheduledAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Draw_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "LocationPing" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "kind" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
     "orderId" TEXT,
-    "lat" REAL NOT NULL,
-    "lng" REAL NOT NULL,
-    "at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "lat" DOUBLE PRECISION NOT NULL,
+    "lng" DOUBLE PRECISION NOT NULL,
+    "at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "LocationPing_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "Payout" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "role" TEXT NOT NULL,
     "entityId" TEXT NOT NULL,
-    "periodStart" DATETIME NOT NULL,
-    "periodEnd" DATETIME NOT NULL,
+    "periodStart" TIMESTAMP(3) NOT NULL,
+    "periodEnd" TIMESTAMP(3) NOT NULL,
     "amountCents" INTEGER NOT NULL,
     "currency" TEXT NOT NULL DEFAULT 'ZAR',
     "status" TEXT NOT NULL DEFAULT 'pending',
-    "meta" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "meta" JSONB,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "Payout_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "AuditEvent" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "kind" TEXT NOT NULL,
     "actorId" TEXT,
     "actorRole" TEXT,
     "subjectId" TEXT,
-    "meta" TEXT,
-    "at" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "meta" JSONB,
+    "at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "AuditEvent_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "EncounterAnchor" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "encounterId" TEXT NOT NULL,
     "contentHash" TEXT NOT NULL,
     "chain" TEXT NOT NULL,
     "txId" TEXT,
-    "anchoredAt" DATETIME,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "anchoredAt" TIMESTAMP(3),
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "EncounterAnchor_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ClinicianSchedule" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "country" TEXT NOT NULL DEFAULT 'ZA',
     "timezone" TEXT NOT NULL DEFAULT 'Africa/Johannesburg',
     "template" TEXT NOT NULL,
     "exceptions" TEXT NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ClinicianSchedule_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "AdminConsultPolicy" (
-    "id" TEXT NOT NULL PRIMARY KEY DEFAULT 'singleton',
+    "id" TEXT NOT NULL DEFAULT 'singleton',
     "minStandardMinutes" INTEGER NOT NULL DEFAULT 30,
     "minFollowupMinutes" INTEGER NOT NULL DEFAULT 15,
     "bufferAfterMinutes" INTEGER NOT NULL DEFAULT 5,
     "joinGracePatientMin" INTEGER NOT NULL DEFAULT 5,
     "joinGraceClinicianMin" INTEGER NOT NULL DEFAULT 5,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "AdminConsultPolicy_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ClinicianConsultSettings" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "defaultStandardMin" INTEGER NOT NULL DEFAULT 45,
     "defaultFollowupMin" INTEGER NOT NULL DEFAULT 20,
     "minAdvanceMinutes" INTEGER NOT NULL DEFAULT 30,
     "maxAdvanceDays" INTEGER NOT NULL DEFAULT 30,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ClinicianConsultSettings_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateTable
 CREATE TABLE "ClinicianRefundPolicy" (
-    "id" TEXT NOT NULL PRIMARY KEY,
+    "id" TEXT NOT NULL,
     "userId" TEXT NOT NULL,
     "within24hPercent" INTEGER NOT NULL DEFAULT 50,
     "noShowPercent" INTEGER NOT NULL DEFAULT 0,
     "clinicianMissPercent" INTEGER NOT NULL DEFAULT 100,
     "networkProrate" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "ClinicianRefundPolicy_pkey" PRIMARY KEY ("id")
 );
 
 -- CreateIndex
@@ -422,7 +548,34 @@ CREATE INDEX "RuntimeEvent_targetPatientId_idx" ON "RuntimeEvent"("targetPatient
 CREATE INDEX "RuntimeEvent_targetClinicianId_idx" ON "RuntimeEvent"("targetClinicianId");
 
 -- CreateIndex
+CREATE INDEX "Medication_patientId_idx" ON "Medication"("patientId");
+
+-- CreateIndex
+CREATE INDEX "Medication_status_idx" ON "Medication"("status");
+
+-- CreateIndex
+CREATE INDEX "Medication_createdAt_idx" ON "Medication"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "Reminder_patientId_idx" ON "Reminder"("patientId");
+
+-- CreateIndex
+CREATE INDEX "Reminder_status_idx" ON "Reminder"("status");
+
+-- CreateIndex
+CREATE INDEX "Reminder_time_idx" ON "Reminder"("time");
+
+-- CreateIndex
+CREATE INDEX "Reminder_createdAt_idx" ON "Reminder"("createdAt");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "ClinicianProfile_userId_key" ON "ClinicianProfile"("userId");
+
+-- CreateIndex
+CREATE INDEX "ClinicianProfile_specialty_idx" ON "ClinicianProfile"("specialty");
+
+-- CreateIndex
+CREATE INDEX "ClinicianProfile_status_idx" ON "ClinicianProfile"("status");
 
 -- CreateIndex
 CREATE INDEX "ClinicianProfile_feeCents_idx" ON "ClinicianProfile"("feeCents");
@@ -585,3 +738,27 @@ CREATE UNIQUE INDEX "ClinicianRefundPolicy_userId_key" ON "ClinicianRefundPolicy
 
 -- CreateIndex
 CREATE INDEX "ClinicianRefundPolicy_userId_idx" ON "ClinicianRefundPolicy"("userId");
+
+-- AddForeignKey
+ALTER TABLE "UserDevice" ADD CONSTRAINT "UserDevice_catalogSlug_fkey" FOREIGN KEY ("catalogSlug") REFERENCES "DeviceCatalog"("slug") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Appointment" ADD CONSTRAINT "Appointment_encounterId_fkey" FOREIGN KEY ("encounterId") REFERENCES "Encounter"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ErxOrder" ADD CONSTRAINT "ErxOrder_encounterId_fkey" FOREIGN KEY ("encounterId") REFERENCES "Encounter"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "LabOrder" ADD CONSTRAINT "LabOrder_encounterId_fkey" FOREIGN KEY ("encounterId") REFERENCES "Encounter"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Payment" ADD CONSTRAINT "Payment_encounterId_fkey" FOREIGN KEY ("encounterId") REFERENCES "Encounter"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Medication" ADD CONSTRAINT "Medication_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "PatientProfile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Reminder" ADD CONSTRAINT "Reminder_medicationId_fkey" FOREIGN KEY ("medicationId") REFERENCES "Medication"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "Reminder" ADD CONSTRAINT "Reminder_patientId_fkey" FOREIGN KEY ("patientId") REFERENCES "PatientProfile"("id") ON DELETE SET NULL ON UPDATE CASCADE;
