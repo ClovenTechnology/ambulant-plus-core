@@ -1,11 +1,12 @@
-﻿import './globals.css';
+﻿// apps/patient-app/app/layout.tsx
+import './globals.css';
 import './print.css';
 import Link from 'next/link';
 import nextDynamic from 'next/dynamic';
 import Sidebar from '../components/Sidebar';
 
 // Providers / pickers
-import { ToastProvider } from '../components/ToastMount';
+import { ToastProvider } from '../components/ToastProvider';
 import { ActiveEncounterProvider } from '../components/context/ActiveEncounterContext';
 import { PlanProvider } from '../components/context/PlanContext';
 import PlanToggle from '../components/PlanToggle';

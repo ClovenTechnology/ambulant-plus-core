@@ -58,7 +58,7 @@ export default function CarePortPage() {
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
       <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">CarePort â€” Dispatch</h1>
+        <h1 className="text-2xl font-bold">CarePort Dispatch</h1>
         <div className="flex gap-2">
           <Link href="/careport/timeline" className="px-3 py-2 border rounded bg-white hover:bg-gray-50 text-sm">
             Track
@@ -98,7 +98,7 @@ export default function CarePortPage() {
                   disabled={loading || status === 'Delivered'}
                   className="px-3 py-2 border rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50"
                 >
-                  {status === 'Delivered' ? 'Delivered' : loading ? 'Dispatchingâ€¦' : 'Dispatch via CarePort'}
+                  {status === 'Delivered' ? 'Delivered' : loading ? 'Dispatching...' : 'Dispatch via CarePort'}
                 </button>
                 <span
                   className={`text-sm px-2 py-1 rounded-full border

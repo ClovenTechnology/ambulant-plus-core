@@ -1,0 +1,1 @@
+"ambulant" "md5$(echo -n supersecretpgambulant | md5sum | awk '{print $1}')"

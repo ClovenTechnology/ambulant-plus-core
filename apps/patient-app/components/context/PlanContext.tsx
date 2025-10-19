@@ -1,3 +1,4 @@
+// apps/patient-app/components/context/PlanContext.tsx
 'use client';
 
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
@@ -25,22 +26,22 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
 
   const setPlan = (p: Plan) => {
     setPlanState(p);
-    try {
-      localStorage.setItem(LS_KEY, p);
-    } catch {}
+    try { localStorage.setItem(LS_KEY, p); } catch {}
   };
 
-  const value = useMemo<Ctx>(
-    () => ({ plan, isPremium: plan === 'premium', setPlan }),
-    [plan]
-  );
+  const value = useMemo<Ctx>(() => ({ plan, isPremium: plan === 'premium', setPlan }), [plan]);
 
   return <PlanCtx.Provider value={value}>{children}</PlanCtx.Provider>;
 }
 
-// ← Add this
+/**
+ * usePlan - hook to consume the Plan context.
+ * Throws a helpful error if used outside the PlanProvider.
+ */
 export function usePlan() {
   const ctx = useContext(PlanCtx);
-  if (!ctx) throw new Error('usePlan must be used within PlanProvider');
+  if (!ctx) {
+    throw new Error('usePlan must be used within a PlanProvider');
+  }
   return ctx;
 }

@@ -3,119 +3,75 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = env("DATABASE_URL")
+  provider          = "postgresql"
+  url               = env("DATABASE_URL")
+  shadowDatabaseUrl = env("SHADOW_DATABASE_URL")
 }
 
-/* =========================
-   Enums (guard rails)
-   ========================= */
-enum CaseStatus {
-  open
-  closed
-  archived
-}
-
-enum EncounterStatus {
-  open
-  closed
-}
-
-/* =========================
-   Cases
-   ========================= */
-model Case {
-  id         String     @id @default(cuid())
-  patientId  String
-  title      String
-  status     CaseStatus @default(open) // guard rail: enum instead of free-form string
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
-
-  encounters Encounter[]
-
-  @@index([patientId, status])
-}
-
-/* =========================
-   Device catalog & user devices
-   ========================= */
+// ===== Device catalog & user devices =====
 model DeviceCatalog {
-  slug        String   @id
+  slug        String       @id
   label       String
   vendor      String
   modality    String
   transport   String
-  services    String? // was Json?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  services    Json?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
   userDevices UserDevice[]
 }
 
 model UserDevice {
-  id          String   @id @default(cuid())
+  id          String        @id @default(cuid())
   userId      String
   catalogSlug String
   nickname    String?
   transport   String
-  pairedAt    DateTime @default(now())
-  lastSeenAt  DateTime @default(now())
-  identifiers String? // was Json?
-  meta        String? // was Json?
+  pairedAt    DateTime      @default(now())
+  lastSeenAt  DateTime      @default(now())
+  identifiers Json?
+  meta        Json?
 
-  catalog DeviceCatalog @relation(fields: [catalogSlug], references: [slug])
+  catalog     DeviceCatalog @relation(fields: [catalogSlug], references: [slug])
 
   @@index([userId])
   @@index([catalogSlug])
 }
 
-/* =========================
-   Core models
-   ========================= */
+// ===== Core models =====
 model Encounter {
-  id          String            @id @default(cuid())  // was manual; now system-generated
+  id          String   @id
   caseId      String
   patientId   String
   clinicianId String?
-  createdAt   DateTime          @default(now())
-  updatedAt   DateTime          @updatedAt
-  status      EncounterStatus   // 'open' | 'closed' (enum guard rail)
-
-  case        Case              @relation(fields: [caseId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  status      String   // 'open' | 'closed'
 
   appointments Appointment[]
-  erxOrders    ErxOrder[]   // legacy single-drug orders (kept)
-  erxScripts   ErxScript[]  // new multi-line scripts
+  erxOrders    ErxOrder[]
   labOrders    LabOrder[]
   payments     Payment[]
-
-  @@index([caseId])
-  @@index([patientId])
-  @@index([clinicianId])
-  @@index([status])
 }
 
 model Appointment {
-  id                 String   @id @default(cuid())
-  encounterId        String
-  sessionId          String
-  caseId             String
-  clinicianId        String
-  patientId          String
-  startsAt           DateTime
-  endsAt             DateTime
-  status             String   // 'pending' | 'confirmed' | 'canceled' | 'completed'
-  roomId             String?
-  reason             String?    // <-- newly added first-class column
+  id          String   @id
+  encounterId String
+  sessionId   String
+  caseId      String
+  clinicianId String
+  patientId   String
+  startsAt    DateTime
+  endsAt      DateTime
+  status      String   // 'pending' | 'confirmed' | 'canceled' | 'completed'
+
   priceCents         Int
-  currency           String // 'ZAR'
+  currency           String   // 'ZAR'
   platformFeeCents   Int
   clinicianTakeCents Int
-  paymentProvider    String // 'paystack' | 'stripe' | 'flutterwave' | 'manual'
+  paymentProvider    String   // 'paystack' | 'stripe' | 'flutterwave' | 'manual'
   paymentRef         String?
-  meta               Json? // changed to Json? so objects can be stored directly
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  meta               String?  // JSON-as-text
 
   encounter Encounter @relation(fields: [encounterId], references: [id])
 
@@ -125,11 +81,8 @@ model Appointment {
   @@index([status])
 }
 
-/* =========================
-   eRx (legacy single-drug)
-   ========================= */
 model ErxOrder {
-  id          String    @id
+  id          String   @id
   kind        String
   encounterId String
   sessionId   String
@@ -138,7 +91,7 @@ model ErxOrder {
   clinicianId String
   drug        String
   sig         String
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
   encounter   Encounter @relation(fields: [encounterId], references: [id])
 
   @@index([patientId])
@@ -146,68 +99,8 @@ model ErxOrder {
   @@index([createdAt])
 }
 
-/* =========================
-   eRx (multi-line scripts)
-   ========================= */
-model ErxScript {
-  id            String   @id @default(cuid())
-  encounterId   String
-  sessionId     String?
-  caseId        String?
-  patientId     String
-  clinicianId   String
-  allergiesJson String?
-  notes         String?
-  status        String      // 'draft' | 'sent' | 'dispensed' | 'canceled'
-  channel       String?     // 'CarePort' | 'MedReach' | 'Generic'
-  dispenseCode  String?     // pharmacy code / OTP
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-
-  encounter Encounter @relation(fields: [encounterId], references: [id])
-  items     ErxItem[]
-  timeline  ErxEvent[]
-
-  @@index([patientId])
-  @@index([clinicianId])
-  @@index([status])
-  @@index([createdAt])
-}
-
-model ErxItem {
-  id        String    @id @default(cuid())
-  scriptId  String
-  drugName  String
-  dose      String?   // "500 mg"
-  route     String?   // "PO"
-  frequency String?   // "TID"
-  duration  String?   // "7 days"
-  quantity  String?   // "21 tablets"
-  refills   Int       @default(0)
-  notes     String?
-
-  script ErxScript @relation(fields: [scriptId], references: [id])
-
-  @@index([scriptId])
-}
-
-model ErxEvent {
-  id       String    @id @default(cuid())
-  scriptId String
-  status   String    // REQUESTED | PHARMACY_MATCHED | RIDER_ASSIGNED | EN_ROUTE | DELIVERED | CANCELED
-  at       DateTime  @default(now())
-  meta     String?   // JSON-as-text
-
-  script ErxScript @relation(fields: [scriptId], references: [id])
-
-  @@index([scriptId, at])
-}
-
-/* =========================
-   Labs
-   ========================= */
 model LabOrder {
-  id          String    @id
+  id          String   @id
   kind        String
   encounterId String
   sessionId   String
@@ -215,7 +108,7 @@ model LabOrder {
   patientId   String
   clinicianId String
   panel       String
-  createdAt   DateTime  @default(now())
+  createdAt   DateTime @default(now())
   encounter   Encounter @relation(fields: [encounterId], references: [id])
 
   @@index([patientId])
@@ -223,28 +116,22 @@ model LabOrder {
   @@index([createdAt])
 }
 
-/* =========================
-   Payments
-   ========================= */
 model Payment {
-  id          String    @id
+  id          String   @id
   encounterId String
   caseId      String
   amountCents Int
   currency    String
-  status      String // 'initiated' | 'captured' | 'refunded' | 'failed'
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  meta        String? // was Json?
+  status      String   // 'initiated' | 'captured' | 'refunded' | 'failed'
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  meta        String?
   encounter   Encounter @relation(fields: [encounterId], references: [id])
 
   @@index([status])
   @@index([updatedAt])
 }
 
-/* =========================
-   Televisit / Tickets / Events
-   ========================= */
 model Televisit {
   id              String  @id
   title           String?
@@ -255,7 +142,7 @@ model Televisit {
 }
 
 model Ticket {
-  id        String @id
+  id        String   @id
   visitId   String
   userId    String
   token     String
@@ -270,7 +157,7 @@ model RuntimeEvent {
   encounterId       String?
   patientId         String?
   clinicianId       String?
-  payload           String? // JSON-as-text
+  payload           String?  // JSON-as-text
   targetPatientId   String?
   targetClinicianId String?
   targetAdmin       Boolean? @default(false)
@@ -281,28 +168,125 @@ model RuntimeEvent {
   @@index([targetClinicianId])
 }
 
-/* =========================
-   Profiles
-   ========================= */
-model ClinicianProfile {
-  id              String   @id @default(cuid())
-  userId          String   @unique
-  displayName     String?
-  specialty       String?
-  feeCents        Int      @default(0)
-  currency        String   @default("ZAR")
-  payoutAccountId String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+// ===== Medications & Reminders (new) =====
 
+enum MedicationStatus {
+  Active
+  Completed
+  OnHold
+}
+
+enum ReminderStatus {
+  Pending
+  Taken
+  Missed
+}
+
+model Medication {
+  id         String   @id @default(cuid())
+  patientId  String?              // link to patient (optional in demo)
+  patient    PatientProfile? @relation(fields: [patientId], references: [id])
+  name       String
+  dose       String?
+  frequency  String?              // e.g. 'BID', 'OD'
+  route      String?              // e.g. PO, IV
+  started    DateTime?            // when therapy started
+  lastFilled DateTime?            // last pharmacy fill
+  status     MedicationStatus     // 'Active' | 'Completed' | 'OnHold'
+  orderId    String?              // optional external order id (eRx)
+  source     String?              // 'erx' | 'manual' | 'import'
+  meta       Json?                // arbitrary metadata
+  reminders  Reminder[]           // back-relation
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Reminder {
+  id           String   @id @default(cuid())
+  medicationId String?              // optional link to Medication
+  medication   Medication? @relation(fields: [medicationId], references: [id])
+  patientId    String?              // owner patient id (optional)
+  patient      PatientProfile? @relation(fields: [patientId], references: [id])
+  name         String               // e.g. 'Lisinopril'
+  dose         String?
+  time         String?              // scheduled time (HH:MM) or textual
+  status       ReminderStatus       // 'Pending' | 'Taken' | 'Missed'
+  snoozedUntil DateTime?            // when snooze expires (nullable)
+  source       String?              // 'manual' | 'erx' | 'import'
+  meta         Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([patientId])
+  @@index([status])
+  @@index([time])
+  @@index([createdAt])
+}
+
+// ===== Profiles ===== 
+model ClinicianProfile {
+  id                      String   @id @default(cuid())
+  userId                  String   @unique
+  displayName             String?
+  specialty               String?
+  gender                  String?
+  phone                   String?
+  email                   String?
+  photoUrl                String?
+  boardCertificateUrl     String?
+  boardCertificateNumber  String?
+  boardCertificateIssuer  String?
+  boardCertificateExpires DateTime?
+  idNumber                String?
+  idIssuingCountry        String?
+  idExpiry                DateTime?
+  qualification           String?
+  qualificationYear       Int?
+  qualificationInstitution String?
+  otherQualifications     String?
+  addressLine1            String?
+  addressLine2            String?
+  city                    String?
+  postalCode              String?
+  country                 String?
+
+  // Financial / payout
+  feeCents                Int      @default(0)
+  currency                String   @default("ZAR")
+  payoutAccountId         String?
+
+  // Professional Indemnity / Malpractice insurance
+  piInsuranceProvider     String?
+  piInsurancePolicyName   String?
+  piInsuranceCoverType    String?
+  piInsuranceExpiry       DateTime?
+  piInsuranceNumber       String?
+
+  // Training & lifecycle
+  trainingScheduledAt     DateTime?
+  trainingCompleted       Boolean  @default(false)
+  status                  String   @default("pending") // 'pending'|'approved'|'rejected'|'active'|'suspended'|'archived'
+  disabled                Boolean  @default(false)
+  archived                Boolean  @default(false)
+
+  meta                    Json?
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
+
+  @@index([specialty])
+  @@index([status])
   @@index([feeCents])
 }
 
 model PatientProfile {
   id                   String   @id @default(cuid())
   userId               String   @unique
-  name                 String?
-  contactEmail         String?
+  name                 String?   // added for signup form
+  contactEmail         String?   // email field
   phone                String?
   primaryComm          String?
   dob                  DateTime?
@@ -315,14 +299,14 @@ model PatientProfile {
   heightCm             Int?
   weightKg             Int?
   photoUrl             String?
-  allergies            String? // JSON-as-text
+  allergies            String?  // JSON-as-text array
+  medications          Medication[]
+  reminders            Reminder[]
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 }
 
-/* =========================
-   Devices & Vitals
-   ========================= */
+// ===== Devices & Vitals =====
 model Device {
   id        String   @id @default(cuid())
   deviceId  String   @unique
@@ -354,17 +338,15 @@ model VitalSample {
   @@index([deviceId, t])
 }
 
-/* =========================
-   Delegations & Records
-   ========================= */
+// ===== Delegations & Records ===== 
 model ConsentGrant {
-  id         String   @id @default(cuid())
-  patientId  String
-  delegateId String
-  scope      String
-  startsAt   DateTime @default(now())
-  endsAt     DateTime?
-  revokedAt  DateTime?
+  id          String   @id @default(cuid())
+  patientId   String
+  delegateId  String
+  scope       String
+  startsAt    DateTime @default(now())
+  endsAt      DateTime?
+  revokedAt   DateTime?
 
   @@index([patientId])
   @@index([delegateId])
@@ -389,9 +371,7 @@ model EhrIndex {
   @@index([txId])
 }
 
-/* =========================
-   Partners
-   ========================= */
+// ===== Partners ===== 
 model PharmacyPartner {
   id        String   @id @default(cuid())
   name      String
@@ -416,9 +396,7 @@ model LabPartner {
   @@index([name])
 }
 
-/* =========================
-   Logistics
-   ========================= */
+// ===== Logistics ===== 
 model Delivery {
   id          String   @id @default(cuid())
   orderId     String
@@ -428,9 +406,9 @@ model Delivery {
   riderId     String?
   partnerId   String?
   status      String
-  priceCents  Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  priceCents  Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([encounterId])
   @@index([orderId])
@@ -452,7 +430,7 @@ model Draw {
   partnerId   String?
   status      String
   scheduledAt DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([encounterId])
@@ -466,9 +444,7 @@ model Draw {
   @@index([createdAt])
 }
 
-/* =========================
-   Location tracking
-   ========================= */
+// ===== Location tracking ===== 
 model LocationPing {
   id       String   @id @default(cuid())
   kind     String
@@ -483,9 +459,7 @@ model LocationPing {
   @@index([at])
 }
 
-/* =========================
-   Finance
-   ========================= */
+// ===== Finance ===== 
 model Payout {
   id          String   @id @default(cuid())
   role        String
@@ -495,7 +469,7 @@ model Payout {
   amountCents Int
   currency    String   @default("ZAR")
   status      String   @default("pending")
-  meta        String?  // was Json?
+  meta        Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
@@ -510,7 +484,7 @@ model AuditEvent {
   actorId   String?
   actorRole String?
   subjectId String?
-  meta      String?  // was Json?
+  meta      Json?
   at        DateTime @default(now())
 
   @@index([kind, at])
@@ -532,9 +506,7 @@ model EncounterAnchor {
   @@index([txId])
 }
 
-/* =========================
-   Schedule & Consult Policies
-   ========================= */
+// ===== New: Schedule & Consult Policies ===== 
 model ClinicianSchedule {
   id         String   @id @default(cuid())
   userId     String   @unique

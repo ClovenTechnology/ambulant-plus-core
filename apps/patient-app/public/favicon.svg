@@ -1,0 +1,5 @@
+<!-- small favicon -->
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48" role="img" aria-label="Ambulant+">
+  <rect width="48" height="48" rx="8" fill="#0ea5a4"></rect>
+  <path d="M18 10c-4 0-7 3-7 7v6H10c-2 0-4 2-4 4v8c0 2 2 4 4 4h6v6c0 4 3 7 7 7h12c4 0 7-3 7-7V36c0-4-3-7-7-7h-6v-6c0-4-3-7-7-7H18z" fill="#fff" transform="scale(.5) translate(4 4)"></path>
+</svg>

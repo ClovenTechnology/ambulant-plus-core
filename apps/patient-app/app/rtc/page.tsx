@@ -1,19 +1,24 @@
-﻿"use client";
-
-import RemoteAudio from '@/src/components/rtc/RemoteAudio';
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿// apps/patient-app/app/rtc/page.tsx
+import RemoteAudio from '@/components/rtc/RemoteAudio';
+'use client';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import LocalMedia from '@/src/components/rtc/LocalMedia';
 import RemoteVideo from '@/src/components/rtc/RemoteVideo';
+import DeviceSelect from '@/src/components/rtc/DeviceSelect';
+import OutputSelect from '@/src/components/rtc/OutputSelect';
 import ChatPanel from '@/src/components/rtc/ChatPanel';
 import StatsPanel from '@/src/components/rtc/StatsPanel';
 import Captions from '@/src/components/rtc/Captions';
-import { connectSignal, type SigMsg } from '@lib/signal';
+import { connectSignal, type SigMsg } from '@/src/lib/signal';
 import { buildIceServers } from '@/src/lib/ice';
-import { DeviceSettings } from "@ambulant/rtc";
+
+// NEW: XR provider + hook
+import { XRProvider, useXR } from '@/components/xr/XRContext';
 
 const ROLE = 'patient' as const;
 const ROOM = 'demo-rtc';
 
+// Sender params: video-only, keep existing codecs, bail if missing, encodings guarded
 function applySenderParams(pc: RTCPeerConnection){
   try{
     pc.getSenders()
@@ -21,17 +26,22 @@ function applySenderParams(pc: RTCPeerConnection){
       .forEach(s=>{
         try{
           const cur = s.getParameters() as RTCRtpParameters;
-          if(!cur || !Array.isArray((cur as any).codecs) || (cur as any).codecs.length === 0){ return; }
+          if(!cur || !Array.isArray((cur as any).codecs) || (cur as any).codecs.length === 0){
+            return;
+          }
           const encs = Array.isArray(cur.encodings) ? [...cur.encodings] : [];
           if(encs.length === 0) encs.push({});
           encs[0] = { ...encs[0], maxBitrate: 1_000_000 };
           (s as any).setParameters({ codecs: (cur as any).codecs, encodings: encs });
-        }catch{}
+        }catch(e){ /* per-sender issue ignored */ }
       });
   }catch{}
 }
 
-export default function RTC(){
+function RTCInner(){
+  // useXR hook for toggling exposure
+  const { setXrStream, setVideoSrc, setExposeToWindow, exposeToWindow, videoSrc } = useXR();
+
   const [active, setActive] = useState(false);
   const [micOn, setMicOn] = useState(true);
   const [camOn, setCamOn] = useState(true);
@@ -44,8 +54,6 @@ export default function RTC(){
   const [waiting, setWaiting] = useState<boolean>(true);
   const [remoteMuted, setRemoteMuted] = useState<boolean>(false);
 
-  const [settings, setSettings] = useState<{ micId?: string; camId?: string; sinkId?: string }>({});
-
   const SELF_NAME  = process.env.NEXT_PUBLIC_SELF_NAME  || 'Me';
   const PEER_NAME  = process.env.NEXT_PUBLIC_PEER_NAME  || (ROLE === 'clinician' ? 'Patient' : 'Clinician');
 
@@ -53,26 +61,13 @@ export default function RTC(){
   const pcRef = useRef<RTCPeerConnection|null>(null);
   const sigRef = useRef<ReturnType<typeof connectSignal>|null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement|null>(null);
-  const caller = false;  const polite = true;
+  const caller = false;
+  const polite = true;
 
   const makingOffer = useRef(false);
   const pendingIce = useRef<any[]>([]);
-  function append(msg:string){ setLog(l=>[...l, msg].slice(-400)); }
 
-  useEffect(()=>{
-    if (settings?.micId || settings?.camId) {
-      setDeviceIds({ audioId: settings.micId ?? null, videoId: settings.camId ?? null });
-    }
-    (async()=>{
-      const medias = [...Array.from(document.querySelectorAll("video")), ...Array.from(document.querySelectorAll("audio"))] as HTMLMediaElement[];
-      for (const el of medias) {
-        // @ts-ignore
-        if (settings?.sinkId && typeof (el as any).setSinkId === "function") {
-          try { await (el as any).setSinkId(settings.sinkId); } catch {}
-        }
-      }
-    })();
-  }, [settings]);
+  function append(msg:string){ setLog(l=>[...l, msg].slice(-400)); }
 
   useEffect(()=>{
     if(!active){
@@ -87,7 +82,7 @@ export default function RTC(){
       return;
     }
 
-    append('session: starting');
+    append('session: starting…');
 
     const pc = new RTCPeerConnection({ iceServers: buildIceServers() });
     pcRef.current = pc;
@@ -114,7 +109,7 @@ export default function RTC(){
         const off = await pc.createOffer();
         await pc.setLocalDescription(off);
         sigRef.current?.send({ type:'offer', data: pc.localDescription });
-        append('signal: offer â†’ (negotiationneeded)');
+        append('signal: offer → (negotiationneeded)');
       }catch(e){ console.error(e); }
       finally { makingOffer.current = false; }
     };
@@ -131,13 +126,17 @@ export default function RTC(){
 
         if(m.type==='admitted'){ append('lobby: admitted'); setWaiting(false); return; }
         if(m.type==='rejected'){ append('lobby: rejected'); setWaiting(true); return; }
+        if(m.type==='knock' && ROLE==='clinician'){ append('lobby: knock from '+(m.id||'peer')); setRemotePeerId(m.id||null); return; }
 
         if(m.type==='join'){ setRemotePeerId(m.id||null); append('peer join: ' + (m.id ?? 'unknown')); }
 
         if(m.type==='ctrl' && m.key==='remote-mic'){
           const wantOff = !!m.off;
           setRemoteMuted(wantOff);
-          if(localStream){ localStream.getAudioTracks().forEach(t=> t.enabled = !wantOff && micOn); }
+          if(localStream){
+            localStream.getAudioTracks().forEach(t=> t.enabled = !wantOff && micOn);
+          }
+          if(ROLE==='patient'){ setMicOn(!wantOff); }
           return;
         }
 
@@ -145,20 +144,25 @@ export default function RTC(){
         if(m.type==='chat'){ (window as any).__chatAdd?.({ id: m.id||'peer', text: m.text||'', ts: Date.now(), mine:false }); return; }
 
         if(m.type==='offer'){
-          append('signal: offer');
+          append('signal: offer ←');
           const offer = m.data as RTCSessionDescriptionInit;
           const isCollision = makingOffer.current || pc.signalingState !== 'stable';
+
           if(isCollision){
-            if(!polite){ append('negotiation: glare (impolite ignores)'); return; }
+            if(!polite){
+              append('negotiation: glare (impolite ignores)');
+              return;
+            }
             append('negotiation: glare (polite rolls back)');
             await pc.setLocalDescription({ type:'rollback' } as RTCSessionDescriptionInit);
           }
+
           await pc.setRemoteDescription(offer);
           const ans = await pc.createAnswer();
           append('webrtc: created answer');
           await pc.setLocalDescription(ans);
           sigRef.current?.send({ type:'answer', data: pc.localDescription });
-          append('signal: answer â†’');
+          append('signal: answer →');
 
           if(pc.remoteDescription){
             for(const c of pendingIce.current.splice(0)){
@@ -167,7 +171,7 @@ export default function RTC(){
           }
         }
         else if(m.type==='answer'){
-          append('signal: answer');
+          append('signal: answer ←');
           if(pc.signalingState === 'have-local-offer'){
             await pc.setRemoteDescription(m.data as RTCSessionDescriptionInit);
           }else{
@@ -175,13 +179,18 @@ export default function RTC(){
           }
         }
         else if(m.type==='ice' && m.data){
-          if(pc.remoteDescription) { await pc.addIceCandidate(m.data); } else { pendingIce.current.push(m.data); }
+          if(pc.remoteDescription) {
+            await pc.addIceCandidate(m.data);
+          } else {
+            pendingIce.current.push(m.data);
+          }
         }
       }catch(e){ console.error(e); append('error: '+(e as Error).message); }
     });
     sigRef.current = sig;
   }, [active]);
 
+  // local tracks / params
   useEffect(()=>{
     const pc = pcRef.current;
     if(!pc || !active) return;
@@ -194,7 +203,11 @@ export default function RTC(){
       localStream.getAudioTracks().forEach(t => t.enabled = micOn && !remoteMuted);
       localStream.getVideoTracks().forEach(t => t.enabled = camOn);
       localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+      append('webrtc: local tracks ready (' + localStream.getTracks().map(t=>t.kind).join(',') + ')');
       applySenderParams(pc);
+      append('webrtc: sender params applied');
+    }else{
+      append('webrtc: no local tracks');
     }
   }, [localStream, active, micOn, camOn, remoteMuted, deviceIds.audioId, deviceIds.videoId]);
 
@@ -211,6 +224,7 @@ export default function RTC(){
         const sendA = pc.getSenders().find(s=>s.track?.kind==='audio');
         if(sendA && a) await sendA.replaceTrack(a);
         v?.addEventListener('ended', ()=>{ setSharing(false); });
+        append('share: screen on');
       }catch{}
     }else{
       setSharing(false);
@@ -221,6 +235,7 @@ export default function RTC(){
         if(sendV && v) await sendV.replaceTrack(v);
         const sendA = pc.getSenders().find(s=>s.track?.kind==='audio');
         if(sendA && a) await sendA.replaceTrack(a);
+        append('share: screen off');
       }
     }
   }
@@ -229,11 +244,51 @@ export default function RTC(){
   function sendChat(t:string){ sigRef.current?.send({ type:"chat", text:t }); }
   function setTyping(on:boolean){ sigRef.current?.send({ type:"typing", on }); }
 
-  function toggleRemoteMic(){ /* clinician-only in the other page; no-op here */ }
+  function toggleRemoteMic(){
+    if(ROLE!=='clinician' || !remotePeerId) return;
+    const nextOff = !remoteMuted;
+    setRemoteMuted(nextOff);
+    sigRef.current?.send({ type:"ctrl", key:"remote-mic", off: nextOff, target: remotePeerId });
+  }
+
+  // whenever remoteStream changes we keep the provider in sync when exposing
+  useEffect(() => {
+    // set provider stream only if user toggled expose
+    if (remoteStream && exposeToWindow) {
+      try {
+        setXrStream(remoteStream);
+        (window as any).__XR_STREAM = remoteStream;
+      } catch {}
+    } else if (!remoteStream && exposeToWindow) {
+      // clear provider if stream ended
+      try {
+        setXrStream(null);
+        delete (window as any).__XR_STREAM;
+      } catch {}
+    }
+  }, [remoteStream, exposeToWindow, setXrStream]);
+
+  // UI: add "Expose Remote to XR" toggle that sets provider and window.__XR_STREAM
+  const [exposeToggle, setExposeToggle] = useState(false);
+  useEffect(() => {
+    setExposeToWindow(exposeToggle);
+    if (exposeToggle && remoteStream) {
+      try {
+        setXrStream(remoteStream);
+        (window as any).__XR_STREAM = remoteStream;
+      } catch {}
+    } else {
+      try {
+        setXrStream(null);
+        delete (window as any).__XR_STREAM;
+      } catch {}
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [exposeToggle]);
 
   return (
     <main className='p-6 space-y-4'>
-      <h1 className='text-xl font-semibold'>Patient RTC</h1>
+      <h1 className='text-xl font-semibold'>Patient — RTC</h1>
 
       <div className='flex gap-4 flex-col md:flex-row'>
         <div className='md:w-1/2 space-y-3'>
@@ -242,18 +297,33 @@ export default function RTC(){
             <div className='flex gap-2 flex-wrap'>
               { !active
                 ? <button className='border rounded px-3 py-1' onClick={()=>setActive(true)}>Start Session</button>
-                : <button className='border rounded px-3 py-1' onClick={()=>setActive(false)}>Leave</button> }
+                : <button className='border rounded px-3 py-1' onClick={()=>setActive(false)}>End Session</button> }
               <button className='border rounded px-3 py-1' onClick={()=>setMicOn(v=>!v)}>{ micOn ? 'Mute Mic' : 'Unmute Mic' }</button>
               <button className='border rounded px-3 py-1' onClick={()=>setCamOn(v=>!v)}>{ camOn ? 'Camera Off' : 'Camera On' }</button>
               <button className='border rounded px-3 py-1' onClick={toggleShare}>{ sharing ? 'Stop Share' : 'Share Screen' }</button>
+
+              {/* NEW: expose remote stream to XR */}
+              <button
+                className={`border rounded px-3 py-1 ${exposeToggle ? 'bg-blue-600 text-white' : ''}`}
+                onClick={() => setExposeToggle(v => !v)}
+                title="Expose remote stream to XR (window.__XR_STREAM)"
+              >
+                { exposeToggle ? 'Stop Expose to XR' : 'Expose Remote to XR' }
+              </button>
+
+              { ROLE==='clinician' &&
+                <button className='border rounded px-3 py-1' onClick={toggleRemoteMic}>
+                  { remoteMuted ? 'Unmute Patient' : 'Mute Patient' }
+                </button> }
             </div>
-            <div className='text-xs opacity-70'>Room: {ROOM} Role: {ROLE}</div>
+            <div className='text-xs opacity-70'>Room: {ROOM} • Role: {ROLE}</div>
           </div>
 
           <details className='border rounded p-3'>
-            <summary className='cursor-pointer select-none'>Device Settings</summary>
-            <div className='mt-2'>
-              <DeviceSettings value={settings} onChange={setSettings} />
+            <summary className='cursor-pointer select-none'>Devices</summary>
+            <div className='mt-2 grid md:grid-cols-2 gap-3'>
+              <DeviceSelect audioId={deviceIds.audioId} videoId={deviceIds.videoId} onChange={setDeviceIds} />
+              <OutputSelect videoRef={remoteVideoRef} />
             </div>
           </details>
 
@@ -270,7 +340,7 @@ export default function RTC(){
 
           <div className='space-y-2'>
             <div className='text-sm font-medium'>Remote Preview</div>
-            <RemoteVideo/>
+            <RemoteVideo onStream={setRemoteStream} />
           </div>
         </div>
 
@@ -307,5 +377,14 @@ export default function RTC(){
         </div>
       </div>
     </main>
+  );
+}
+
+export default function RTC(){
+  // Wrap the original RTC UI in XRProvider so the expose button works.
+  return (
+    <XRProvider>
+      <RTCInner />
+    </XRProvider>
   );
 }

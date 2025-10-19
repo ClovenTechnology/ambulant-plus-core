@@ -1,0 +1,5 @@
+[35mapps/admin-dashboard/app/manifest.ts[m[36m:[m[32m13[m[36m:[m      { src: "/[1;31micon-192.png[m", sizes: "192x192", type: "image/png" },
+[35mapps/clinician-app/app/manifest.ts[m[36m:[m[32m12[m[36m:[m      { src: "/[1;31micon-192.png[m", sizes: "192x192", type: "image/png" },
+[35mapps/patient-app/app/manifest.ts[m[36m:[m[32m13[m[36m:[m      { src: "/[1;31micon-192.png[m", sizes: "192x192", type: "image/png" },
+[35mapps/patient-app/public/sw.js[m[36m:[m[32m19[m[36m:[m    icon: '/[1;31micon-192.png[m',
+[35mapps/patient-app/public/sw.js[m[36m:[m[32m20[m[36m:[m    badge: '/[1;31micon-192.png[m',

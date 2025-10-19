@@ -1,4 +1,4 @@
-// DEV-ONLY in-memory store (survives hot reload via globalThis)
+//apps/clinician-app/lib/appointmentsStore.ts DEV-ONLY in-memory store (survives hot reload via globalThis)
 export type Appointment = {
   id: string;
   patientId?: string;

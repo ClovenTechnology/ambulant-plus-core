@@ -1,12 +1,10 @@
-﻿// apps/patient-app/app/clinicians/page.tsx
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from '@/components/ToastMount';
 import { usePlan } from '@/components/context/PlanContext';
-import { CLINICIANS } from '@/mock/clinicians';
 import cleanText from '@/lib/cleanText';
 
 const UI_CLASSES = ['Doctors', 'Allied Health', 'Wellness'] as const;
@@ -31,6 +29,19 @@ const HOVER_MENUS: Record<UIClass, string[]> = {
   Wellness: ['Chiropractor', 'Dieticians', 'Lifestyle'],
 };
 
+type ClinicianItem = {
+  id: string;
+  name: string;
+  specialty: string;
+  location: string;
+  cls?: 'Doctor' | 'Allied Health' | 'Wellness';
+  gender?: string;
+  priceZAR?: number;
+  rating?: number;
+  online?: boolean;
+  // any other fields returned by your API
+};
+
 export default function CliniciansPage() {
   const router = useRouter();
   const { isPremium } = usePlan();
@@ -51,6 +62,10 @@ export default function CliniciansPage() {
   const [page, setPage] = useState(1);
   const [favs, setFavs] = useState<string[]>([]);
   const [showFavsOnly, setShowFavsOnly] = useState(false);
+
+  // Clinicians loaded from API
+  const [allClinicians, setAllClinicians] = useState<ClinicianItem[]>([]);
+  const [loading, setLoading] = useState(false);
 
   // bootstrap from URL once
   useEffect(() => {
@@ -81,26 +96,60 @@ export default function CliniciansPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sp]);
 
-  // favs
+  // load favourites from localStorage
   useEffect(() => {
     try { const raw = localStorage.getItem(FAV_KEY); if (raw) setFavs(JSON.parse(raw)); } catch {}
   }, []);
-  useEffect(() => { localStorage.setItem(FAV_KEY, JSON.stringify(favs)); }, [favs]);
+  useEffect(() => { try { localStorage.setItem(FAV_KEY, JSON.stringify(favs)); } catch {} }, [favs]);
   const toggleFav = (id: string) =>
     setFavs(prev => (prev.includes(id) ? prev.filter(f => f !== id) : [...prev, id]));
 
+  // Fetch clinicians from server API (client-side)
+  useEffect(() => {
+    let mounted = true;
+    const ac = new AbortController();
+    async function load() {
+      setLoading(true);
+      try {
+        const res = await fetch('/api/clinicians', { cache: 'no-store', signal: ac.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const list: ClinicianItem[] = Array.isArray(data) ? data : (Array.isArray(data?.clinicians) ? data.clinicians : []);
+        if (!mounted) return;
+        // sanitize text fields a bit
+        setAllClinicians(list.map(c => ({
+          ...c,
+          name: cleanText(c.name ?? ''),
+          specialty: cleanText(c.specialty ?? ''),
+          location: cleanText(c.location ?? ''),
+          rating: typeof c.rating === 'number' ? c.rating : (c as any).rating ? Number((c as any).rating) : 0,
+          online: Boolean((c as any).online),
+        })));
+      } catch (err) {
+        // If the API isn't available, keep an empty list (or consider fallback to bundled mocks)
+        console.warn('Failed to fetch clinicians from /api/clinicians', err);
+        if (mounted) setAllClinicians([]);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    }
+    load();
+    return () => { mounted = false; ac.abort(); };
+  }, []);
+
   // tab-scoped options
   const scoped = useMemo(
-    () => CLINICIANS
-      .filter(c => c.cls === toDataClass(tab))
-      .map(c => ({
-        ...c,
-        // sanitize text fields to kill mojibake
-        name: cleanText(c.name),
-        specialty: cleanText(c.specialty),
-        location: cleanText(c.location),
-      })),
-    [tab]
+    () =>
+      allClinicians
+        .filter(c => (c.cls ?? c?.cls) === toDataClass(tab) || (c.cls == null && toDataClass(tab) === 'Doctor')) // fallback behavior
+        .map(c => ({
+          ...c,
+          // sanitize text fields to kill mojibake
+          name: cleanText(c.name),
+          specialty: cleanText(c.specialty),
+          location: cleanText(c.location),
+        })),
+    [allClinicians, tab]
   );
 
   useEffect(() => {
@@ -138,14 +187,14 @@ export default function CliniciansPage() {
     if (filters.specialty) L = L.filter(c => c.specialty === filters.specialty);
     if (filters.gender)    L = L.filter(c => (c.gender || '').trim() === filters.gender);
     if (filters.location)  L = L.filter(c => c.location === filters.location);
-    if (filters.price)     L = L.filter(c => c.priceZAR <= filters.price);
+    if (filters.price)     L = L.filter(c => (c.priceZAR ?? Infinity) <= filters.price);
     if (onlineOnly)        L = L.filter(c => c.online);
     if (showFavsOnly)      L = L.filter(c => favs.includes(c.id));
 
     switch (filters.sort) {
       case 'name':  L = [...L].sort((a, b) => a.name.localeCompare(b.name)); break;
-      case 'price': L = [...L].sort((a, b) => a.priceZAR - b.priceZAR); break;
-      default:      L = [...L].sort((a, b) => b.rating - a.rating);
+      case 'price': L = [...L].sort((a, b) => (a.priceZAR ?? 0) - (b.priceZAR ?? 0)); break;
+      default:      L = [...L].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0));
     }
     return L;
   }, [scoped, filters, onlineOnly, showFavsOnly, favs]);
@@ -278,22 +327,23 @@ export default function CliniciansPage() {
       )}
 
       <div className="bg-white rounded-lg border divide-y">
-        {paginated.length === 0 ? (
+        {loading ? (
+          <div className="p-6 text-gray-500">Loading clinicians…</div>
+        ) : paginated.length === 0 ? (
           <div className="p-6 text-gray-500">No clinicians match these filters.</div>
         ) : (
           paginated.map(c => (
             <div key={c.id} className="p-4 flex items-center justify-between">
               <div className="flex gap-3 items-center">
                 <div className="h-10 w-10 rounded-full bg-indigo-600 text-white grid place-items-center font-semibold">
-                  {c.name.split(' ').map(p => p[0]).join('').toUpperCase()}
+                  { (c.name || '').split(' ').map(p => p[0]).join('').toUpperCase() }
                 </div>
                 <div>
                   <div className="font-medium">{c.name}</div>
                   <div className="text-sm text-gray-600">
                     {c.specialty} • {c.location}
                   </div>
-                  <div className="text-xs text-amber-700 mt-1">★ {c.rating.toFixed(1)}</div>
-                  {/* Price (ZAR) */}
+                  <div className="text-xs text-amber-700 mt-1">★ {(c.rating ?? 0).toFixed(1)}</div>
                   {'priceZAR' in c ? (
                     <div className="text-xs text-gray-700 mt-1">From <b>R{Number(c.priceZAR).toFixed(0)}</b> / consult</div>
                   ) : null}

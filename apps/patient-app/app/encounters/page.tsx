@@ -50,7 +50,7 @@ export default async function EncountersPage() {
             <div className="text-sm text-zinc-500">Updated {new Date(c.updatedAt).toLocaleString()}</div>
             {c.latestEncounter && (
               <div className="text-[13px] mt-1 text-zinc-600">
-                Last encounter: {new Date(c.latestEncounter.start).toLocaleString()} Â· {c.latestEncounter.mode ?? 'â€”'}
+                Last encounter: {new Date(c.latestEncounter.start).toLocaleString()} Â· {c.latestEncounter.mode ?? '”'}
               </div>
             )}
           </li>

@@ -24,7 +24,7 @@ const neon = {
 };
 
 const fmt = (x?: number, unit?: string) =>
-  typeof x === 'number' && Number.isFinite(x) ? `${x}${unit ? ` ${unit}` : ''}` : 'â€”';
+  typeof x === 'number' && Number.isFinite(x) ? `${x}${unit ? ` ${unit}` : ''}` : '”';
 
 function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
   return (
@@ -72,7 +72,7 @@ export default function ChartsPage() {
           <h1 className="text-2xl font-bold text-slate-900">Live Vitals</h1>
           <p className="text-slate-500">
             Streaming from IoMT{' '}
-            {live ? <span className="ml-2 inline-flex items-center text-emerald-600">â— live</span> : <span className="ml-2 text-rose-600">â— offline</span>}
+            {live ? <span className="ml-2 inline-flex items-center text-emerald-600"> live</span> : <span className="ml-2 text-rose-600"> offline</span>}
           </p>
         </div>
       </motion.div>
@@ -80,12 +80,12 @@ export default function ChartsPage() {
       {/* quick-glance stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
         <Stat label="HR" value={fmt(data.latest.hr, 'bpm')} />
-        <Stat label="SpOâ‚‚" value={fmt(data.latest.spo2, '%')} />
+        <Stat label="SpO2‚‚" value={fmt(data.latest.spo2, '%')} />
         <Stat label="SYS" value={fmt(data.latest.sys)} sub="mmHg" />
         <Stat label="DIA" value={fmt(data.latest.dia)} sub="mmHg" />
         <Stat label="MAP" value={fmt(data.latest.map)} sub="mmHg" />
         <Stat label="RR" value={fmt(data.latest.rr, 'rpm')} />
-        <Stat label="Temp" value={fmt(data.latest.temp, 'Â°C')} />
+        <Stat label="Temp" value={fmt(data.latest.temp, '°C')} />
         <Stat label="Glucose" value={fmt(data.latest.glucose, 'mg/dL')} />
       </div>
 
@@ -107,22 +107,22 @@ export default function ChartsPage() {
       <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
         <div className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur sci-glow">
           <div className="text-xs text-slate-400">Steps</div>
-          <div className="text-xl font-semibold text-slate-200">{data.latest?.steps?.toLocaleString?.() ?? 'â€”'}</div>
+          <div className="text-xl font-semibold text-slate-200">{data.latest?.steps?.toLocaleString?.() ?? '”'}</div>
           <Sparkline labels={data.labels} values={data.steps.map((p) => p.v)} color={neon.steps} />
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur sci-glow">
           <div className="text-xs text-slate-400">Calories</div>
-          <div className="text-xl font-semibold text-slate-200">{data.latest?.calories ?? 'â€”'} kcal</div>
+          <div className="text-xl font-semibold text-slate-200">{data.latest?.calories ?? '”'} kcal</div>
           <Sparkline labels={data.labels} values={data.calories.map((p) => p.v)} color={neon.calories} />
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur sci-glow">
           <div className="text-xs text-slate-400">Distance</div>
-          <div className="text-xl font-semibold text-slate-200">{data.latest?.distance ?? 'â€”'} km</div>
+          <div className="text-xl font-semibold text-slate-200">{data.latest?.distance ?? '”'} km</div>
           <Sparkline labels={data.labels} values={data.distance.map((p) => p.v)} color={neon.distance} />
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur sci-glow">
           <div className="text-xs text-slate-400">Temp</div>
-          <div className="text-xl font-semibold text-slate-200">{fmt(data.latest?.temp, 'Â°C')}</div>
+          <div className="text-xl font-semibold text-slate-200">{fmt(data.latest?.temp, '°C')}</div>
           <Sparkline labels={data.labels} values={data.temp.map((p) => p.v)} color={neon.temp} />
         </div>
         <div className="rounded-2xl border border-white/10 bg-white/5 p-3 backdrop-blur sci-glow">
@@ -149,7 +149,7 @@ export default function ChartsPage() {
           max={140}
           flagText={flags.HR_HIGH ? 'HR HIGH' : flags.HR_LOW ? 'HR LOW' : undefined}
         />
-        <MeterDonut label="SpOâ‚‚" value={data.latest?.spo2 ?? 0} max={100} color={neon.spo2} unit="%" />
+        <MeterDonut label="SpO2" value={data.latest?.spo2 ?? 0} max={100} color={neon.spo2} unit="%" />
         <MiniLineCard
           title="Respiratory Rate"
           unit=" rpm"
@@ -162,7 +162,7 @@ export default function ChartsPage() {
         />
         <MiniLineCard
           title="Temperature"
-          unit=" Â°C"
+          unit=" °C"
           labels={data.labels}
           values={data.temp.map((p) => p.v)}
           color={neon.temp}
@@ -176,7 +176,7 @@ export default function ChartsPage() {
           <div className="flex items-baseline justify-between">
             <div className="text-xs text-slate-400">Blood Pressure</div>
             <div className="text-sm font-semibold text-slate-200" suppressHydrationWarning>
-              {data.latest ? `${fmt(data.latest.sys)}/${fmt(data.latest.dia)} Â· MAP ${fmt(data.latest.map)}` : 'â€”'}
+              {data.latest ? `${fmt(data.latest.sys)}/${fmt(data.latest.dia)} · MAP ${fmt(data.latest.map)}` : '”'}
             </div>
           </div>
           <div className="h-28 mt-2">
@@ -206,7 +206,7 @@ export default function ChartsPage() {
         <MeterDonut label="Calories" value={data.latest?.calories ?? 0} max={2500} color={neon.calories} unit="" />
         <MeterDonut label="Distance (km)" value={data.latest?.distance ?? 0} max={8} color={neon.distance} unit="" />
 
-        {/* Sleep â€“ seed until live */}
+        {/* Sleep “ seed until live */}
         <SleepCard sleep={sleepData} />
       </div>
 
@@ -300,12 +300,12 @@ function BedsideMonitor({
     labels,
     datasets: [
       { label: 'HR (bpm)', data: hr, borderColor: colors.hr, pointRadius: 0, tension: 0.35 },
-      { label: 'SpOâ‚‚ (%)', data: spo2, borderColor: colors.spo2, pointRadius: 0, tension: 0.35 },
+      { label: 'SpO2 (%)', data: spo2, borderColor: colors.spo2, pointRadius: 0, tension: 0.35 },
       { label: 'SYS (mmHg)', data: sys, borderColor: colors.sys, pointRadius: 0, tension: 0.35 },
       { label: 'DIA (mmHg)', data: dia, borderColor: colors.dia, pointRadius: 0, tension: 0.35 },
       { label: 'MAP (mmHg)', data: mapv, borderColor: colors.map, pointRadius: 0, borderDash: [6, 4], tension: 0.35 },
       { label: 'RR (rpm)', data: rr, borderColor: colors.rr, pointRadius: 0, tension: 0.35 },
-      { label: 'Temp (Â°C)', data: temp, borderColor: colors.temp, pointRadius: 0, tension: 0.35 },
+      { label: 'Temp (°C)', data: temp, borderColor: colors.temp, pointRadius: 0, tension: 0.35 },
       { label: 'Glucose (mg/dL)', data: glucose, borderColor: colors.glucose, pointRadius: 0, tension: 0.35 },
     ],
   };

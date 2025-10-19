@@ -1,0 +1,8 @@
+<!-- 192x192 placeholder icon -->
+<svg xmlns="http://www.w3.org/2000/svg" width="192" height="192" viewBox="0 0 192 192" role="img" aria-label="Ambulant+">
+  <rect width="192" height="192" rx="28" fill="#0ea5a4"></rect>
+  <g fill="#fff" transform="translate(36 36)">
+    <rect x="10" y="10" width="110" height="110" rx="14" fill-opacity="0.08"></rect>
+    <path d="M60 12c-8.8 0-16 7.2-16 16v14H30c-6.6 0-12 5.4-12 12v28c0 6.6 5.4 12 12 12h14v14c0 8.8 7.2 16 16 16h28c8.8 0 16-7.2 16-16V84c0-8.8-7.2-16-16-16H86V54c0-8.8-7.2-16-16-16H60z" fill="#ffffff"></path>
+  </g>
+</svg>

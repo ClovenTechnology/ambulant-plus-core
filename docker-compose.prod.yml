@@ -1,0 +1,117 @@
+version: "3.8"
+
+services:
+  postgres:
+    image: timescale/timescaledb:latest-pg14
+    container_name: ambulant_postgres
+    environment:
+      POSTGRES_USER: ambulant
+      POSTGRES_PASSWORD: supersecretpg
+      POSTGRES_DB: ambulant
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db-init/init-prod.sql:/docker-entrypoint-initdb.d/init-prod.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ambulant -d ambulant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: ambulant_pgbouncer
+    depends_on:
+      - postgres
+    volumes:
+      - ./pgbouncer/pgbouncer.ini:/etc/pgbouncer/pgbouncer.ini:ro
+      - ./pgbouncer/userlist.txt:/etc/pgbouncer/userlist.txt:ro
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+    ports:
+      - "6432:6432"
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ambulant_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "admin@local"
+      PGADMIN_DEFAULT_PASSWORD: "admin"
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: ambulant_minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    volumes:
+      - minio_data:/data
+    command: server /data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    restart: unless-stopped
+
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: livekit
+    command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      - LIVEKIT_KEYS=devkey: secret
+    ports:
+      - "7880:7880"
+      - "7881:7881"
+      - "7882-7980:7882-7980/udp"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    depends_on:
+      - coturn
+      - postgres
+    restart: unless-stopped
+
+  coturn:
+    image: instrumentisto/coturn:latest
+    container_name: coturn
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --realm=turn.local
+      - --user=devturn:devturnpass
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --listening-port=3478
+      - --min-port=49152
+      - --max-port=49999
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    restart: unless-stopped
+
+  pgbackups:
+    image: alpine:3.18
+    container_name: ambulant_pgbackups
+    depends_on:
+      - postgres
+    volumes:
+      - ./backups:/backups
+      - ./scripts/pgbackup.sh:/usr/local/bin/pgbackup.sh:ro
+    entrypoint: ["/usr/local/bin/pgbackup.sh"]
+    env_file:
+      - .env.production
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  minio_data:
+  backups:

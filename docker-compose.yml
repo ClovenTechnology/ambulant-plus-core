@@ -1,12 +1,88 @@
+version: "3.8"
+
 services:
+  postgres:
+    image: timescale/timescaledb:latest-pg14
+    container_name: ambulant_postgres
+    environment:
+      - POSTGRES_USER=ambulant
+      - POSTGRES_PASSWORD=supersecretpg
+      - POSTGRES_DB=ambulant
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db-init/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ambulant -d ambulant"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: ambulant_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: "admin@local"
+      PGADMIN_DEFAULT_PASSWORD: "admin"
+    ports:
+      - "8080:80"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
   livekit:
     image: livekit/livekit-server:latest
-    container_name: livekit-dev
-    command: ["--dev"]
+    container_name: livekit
+    command: ["--config", "/etc/livekit.yaml"]
+    environment:
+      - LIVEKIT_KEYS=devkey: secret
     ports:
       - "7880:7880"
       - "7881:7881"
       - "7882-7980:7882-7980/udp"
-    environment:
-      LIVEKIT_KEYS: "devkey: secret"
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    depends_on:
+      - coturn
+      - postgres
     restart: unless-stopped
+
+  coturn:
+    image: instrumentisto/coturn:latest
+    container_name: coturn
+    command:
+      - -n
+      - --log-file=stdout
+      - --fingerprint
+      - --lt-cred-mech
+      - --realm=turn.local
+      - --user=devturn:devturnpass
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --listening-port=3478
+      - --min-port=49152
+      - --max-port=49999
+    ports:
+      - "3478:3478/udp"
+      - "3478:3478/tcp"
+    restart: unless-stopped
+
+  egress:
+    image: livekit/egress:latest
+    container_name: livekit-egress
+    environment:
+      - LIVEKIT_URL=ws://livekit:7880
+      - LIVEKIT_API_KEY=devkey
+      - LIVEKIT_API_SECRET=secret
+      - LK_LOG_LEVEL=info
+    volumes:
+      - ./recordings:/output
+    depends_on:
+      - livekit
+    restart: unless-stopped
+
+volumes:
+  pgdata:

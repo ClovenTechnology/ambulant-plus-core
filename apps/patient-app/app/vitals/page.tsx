@@ -51,7 +51,7 @@ export default function VitalsPage() {
 
       <section className="p-4 bg-white border rounded-lg overflow-x-auto">
         {loading ? (
-          <div className="text-sm text-gray-500">Loading..¦</div>
+          <div className="text-sm text-gray-500">Loading...</div>
         ) : rows.length === 0 ? (
           <div className="text-sm text-gray-500">No vitals recorded.</div>
         ) : (
@@ -61,9 +61,9 @@ export default function VitalsPage() {
                 <th className="py-2 pr-2">Collected</th>
                 <th className="py-2 pr-2">HR (bpm)</th>
                 <th className="py-2 pr-2">BP (mmHg)</th>
-                <th className="py-2 pr-2">SpO2‚‚ (%)</th>
+                <th className="py-2 pr-2">SpO2 (%)</th>
                 <th className="py-2 pr-2">Temp (°C)</th>
-                <th className="py-2 pr-2">BMI</th>
+                <th className="py-2 pr-2">BMI (kg/m)</th>
               </tr>
             </thead>
             <tbody>

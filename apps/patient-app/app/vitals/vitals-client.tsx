@@ -6,7 +6,7 @@ type Vital = {
   ts: string;             // ISO date
   hr?: number;            // bpm
   spo2?: number;          // %
-  temp_c?: number;        // Â°C
+  temp_c?: number;        // °C
   sys?: number; dia?: number; // BP
   bmi?: number;
   source?: "manual" | "iomt";
@@ -23,11 +23,11 @@ function Tile({
       <div className="text-xs text-gray-500">
         {label}{" "}
         {via ? (
-          <span className="text-[10px] text-gray-400">â€¢ via {via}</span>
+          <span className="text-[10px] text-gray-400"> via {via}</span>
         ) : null}
       </div>
       <div className="text-xl font-semibold">
-        {value ?? "â€”"}
+        {value ?? "”"}
         {unit ? ` ${unit}` : ""}
       </div>
     </div>
@@ -68,7 +68,7 @@ export default function VitalsClient({ initial = [] as Vital[] }) {
   }, []);
 
   function fmtDate(iso?: string) {
-    if (!iso) return "â€”";
+    if (!iso) return "”";
     const d = new Date(iso);
     return d.toLocaleString();
   }
@@ -145,7 +145,7 @@ export default function VitalsClient({ initial = [] as Vital[] }) {
             disabled={pending}
             className="px-3 py-2 rounded-md bg-black text-white text-sm disabled:opacity-50"
           >
-            {pending ? "Addingâ€¦" : "Add Reading"}
+            {pending ? "Adding" : "Add Reading"}
           </button>
         </div>
       </header>
@@ -160,11 +160,11 @@ export default function VitalsClient({ initial = [] as Vital[] }) {
         </div>
       ) : (
         <>
-          <Section title={`Latest â€¢ ${fmtDate(latest?.ts)}`}>
+          <Section title={`Latest ${fmtDate(latest?.ts)}`}>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <Tile label="Heart Rate" value={latest?.hr} unit="bpm" via={latest?.source} />
-              <Tile label="SpOâ‚‚" value={latest?.spo2} unit="%" via={latest?.source} />
-              <Tile label="Temperature" value={latest?.temp_c} unit="Â°C" via={latest?.source} />
+              <Tile label="SpO2" value={latest?.spo2} unit="%" via={latest?.source} />
+              <Tile label="Temperature" value={latest?.temp_c} unit="°C" via={latest?.source} />
               <Tile label="Systolic BP" value={latest?.sys} unit="mmHg" via={latest?.source} />
               <Tile label="Diastolic BP" value={latest?.dia} unit="mmHg" via={latest?.source} />
               <Tile label="BMI" value={latest?.bmi} via={latest?.source} />
@@ -178,9 +178,9 @@ export default function VitalsClient({ initial = [] as Vital[] }) {
                   <tr className="text-left text-gray-600">
                     <th className="px-3 py-2 font-medium">When</th>
                     <th className="px-3 py-2 font-medium">HR</th>
-                    <th className="px-3 py-2 font-medium">SpOâ‚‚</th>
-                    <th className="px-3 py-2 font-medium">Temp (Â°C)</th>
-                    <th className="px-3 py-2 font-medium">BP (mmHg)</th>
+                    <th className="px-3 py-2 font-medium">SpO2</th>
+                    <th className="px-3 py-2 font-medium">Temp(°C)</th>
+                    <th className="px-3 py-2 font-medium">BP(mmHg)</th>
                     <th className="px-3 py-2 font-medium">BMI</th>
                     <th className="px-3 py-2 font-medium">Source</th>
                   </tr>
@@ -189,15 +189,15 @@ export default function VitalsClient({ initial = [] as Vital[] }) {
                   {sorted.slice(0, 8).map((v, i) => (
                     <tr key={v.ts + i} className="border-t">
                       <td className="px-3 py-2">{fmtDate(v.ts)}</td>
-                      <td className="px-3 py-2">{v.hr ?? "â€”"}</td>
-                      <td className="px-3 py-2">{v.spo2 ?? "â€”"}</td>
-                      <td className="px-3 py-2">{v.temp_c ?? "â€”"}</td>
+                      <td className="px-3 py-2">{v.hr ?? "”"}</td>
+                      <td className="px-3 py-2">{v.spo2 ?? "”"}</td>
+                      <td className="px-3 py-2">{v.temp_c ?? "”"}</td>
                       <td className="px-3 py-2">
-                        {v.sys && v.dia ? `${v.sys}/${v.dia}` : "â€”"}
+                        {v.sys && v.dia ? `${v.sys}/${v.dia}` : "”"}
                       </td>
-                      <td className="px-3 py-2">{v.bmi ?? "â€”"}</td>
+                      <td className="px-3 py-2">{v.bmi ?? "”"}</td>
                       <td className="px-3 py-2 uppercase text-xs text-gray-500">
-                        {v.source ?? "â€”"}
+                        {v.source ?? "”"}
                       </td>
                     </tr>
                   ))}

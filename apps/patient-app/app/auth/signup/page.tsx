@@ -1,67 +1,55 @@
+// apps/clinician-app/app/auth/signup/page.tsx
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 
-export default function SignUpPage() {
-  const router = useRouter();
-  const [email, setEmail] = useState('');
+export default function ClinicianSignupPage() {
   const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
+  const [specialty, setSpecialty] = useState('');
+  const [fee, setFee] = useState(650);
+  const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
-  async function handleSubmit(e: React.FormEvent) {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setErr(null);
+    setMsg(null);
     setLoading(true);
     try {
-      const res = await fetch('/api/auth/signup', {
+      const res = await fetch('/api/clinicians', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name, phone }),
+        body: JSON.stringify({ name, specialty, feeZAR: fee }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || 'Signup failed');
-      // Save token/profile
-      localStorage.setItem('mycare.token', data.token);
-      localStorage.setItem('mycare.profile', JSON.stringify(data.profile));
-      router.push('/myCare');
-    } catch (er: any) {
-      setErr(er?.message || 'Signup failed');
+      if (!res.ok) {
+        setMsg(`Error: ${data.error || 'failed'}`);
+      } else {
+        setMsg(`✅ Signed up as ${data.clinician?.displayName ?? data.clinician?.userId ?? 'clinician'}`);
+        setName('');
+        setSpecialty('');
+        setFee(650);
+      }
+    } catch (err: any) {
+      setMsg(`Error: ${err?.message ?? 'network error'}`);
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
-    <main className="p-6 max-w-md mx-auto">
-      <h1 className="text-xl font-semibold mb-4">Sign up</h1>
+    <main className="p-6 max-w-lg mx-auto">
+      <h1 className="text-2xl font-bold mb-4">Clinician Signup</h1>
       <form onSubmit={handleSubmit} className="space-y-3">
-        <label className="block">
-          <div className="text-sm text-slate-700">Full name</div>
-          <input value={name} onChange={e => setName(e.target.value)} className="w-full border rounded p-2" />
-        </label>
-        <label className="block">
-          <div className="text-sm text-slate-700">Email</div>
-          <input value={email} onChange={e => setEmail(e.target.value)} type="email" className="w-full border rounded p-2" />
-        </label>
-        <label className="block">
-          <div className="text-sm text-slate-700">Phone</div>
-          <input value={phone} onChange={e => setPhone(e.target.value)} className="w-full border rounded p-2" />
-        </label>
-
-        {err && <div className="text-sm text-rose-600">{err}</div>}
-
+        <input value={name} onChange={e => setName(e.target.value)} placeholder="Full Name" className="w-full border p-2 rounded" required />
+        <input value={specialty} onChange={e => setSpecialty(e.target.value)} placeholder="Specialty" className="w-full border p-2 rounded" required />
+        <input type="number" value={fee} onChange={e => setFee(Number(e.target.value))} placeholder="Consult Fee (R)" className="w-full border p-2 rounded" />
         <div className="flex gap-2">
-          <button disabled={loading} type="submit" className="px-4 py-2 rounded bg-indigo-600 text-white">
-            {loading ? 'Signing up…' : 'Sign up'}
-          </button>
-          <button type="button" onClick={() => router.push('/auth/login')} className="px-4 py-2 rounded border">
-            Already have account
+          <button type="submit" className="px-4 py-2 bg-indigo-600 text-white rounded" disabled={loading}>
+            {loading ? 'Signing up…' : 'Sign Up'}
           </button>
         </div>
       </form>
+      {msg && <div className="mt-3 text-sm">{msg}</div>}
     </main>
   );
 }

@@ -50,7 +50,7 @@ export default function EncountersClient({ initial }: { initial: Encounter[] }) 
           className="px-3 py-2 border rounded bg-white hover:bg-gray-50 text-sm disabled:opacity-50"
           disabled={loading}
         >
-          {loading ? 'Refreshingâ€¦' : 'Refresh'}
+          {loading ? 'Refreshing...' : 'Refresh'}
         </button>
       </div>
 
@@ -69,9 +69,9 @@ export default function EncountersClient({ initial }: { initial: Encounter[] }) 
             <li key={e.id} className="p-4 border rounded-lg bg-white">
               <div className="flex flex-wrap items-center gap-2 text-xs text-gray-500">
                 <span>{new Date(e.ts).toLocaleString()}</span>
-                <span>â€¢</span>
+                <span></span>
                 <span className="uppercase">{e.source}</span>
-                {e.visitId ? (<><span>â€¢</span><span>Visit: {e.visitId}</span></>) : null}
+                {e.visitId ? (<><span></span><span>Visit: {e.visitId}</span></>) : null}
               </div>
               <div className="mt-2 whitespace-pre-wrap text-sm">{e.text}</div>
             </li>

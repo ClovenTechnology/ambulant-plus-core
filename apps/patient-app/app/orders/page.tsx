@@ -69,7 +69,7 @@ export default function OrdersListPage() {
         <div className="text-gray-500 text-sm">No orders yet.</div>
       ) : null}
 
-      {loading ? <div className="text-sm text-gray-500">Loadingâ€¦</div> : null}
+      {loading ? <div className="text-sm text-gray-500">Loading...</div> : null}
 
       {hasRows ? (
         <section className="grid md:grid-cols-2 gap-4">
@@ -82,7 +82,7 @@ export default function OrdersListPage() {
                     <div className="font-medium">{r.title || r.id}</div>
                     {r.details ? <div className="text-gray-600">{r.details}</div> : null}
                     <div className="text-xs text-gray-500">
-                      {r.encounterId} â€¢ {r.sessionId} â€¢ {prettyDate(r.createdAt)}
+                      {r.encounterId}  {r.sessionId}  {prettyDate(r.createdAt)}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">
@@ -103,7 +103,7 @@ export default function OrdersListPage() {
                   <div>
                     <div className="font-medium">{r.title || r.id}</div>
                     <div className="text-xs text-gray-500">
-                      {r.encounterId} â€¢ {r.sessionId} â€¢ {prettyDate(r.createdAt)}
+                      {r.encounterId}  {r.sessionId}  {prettyDate(r.createdAt)}
                     </div>
                   </div>
                   <div className="flex flex-col items-end gap-1">

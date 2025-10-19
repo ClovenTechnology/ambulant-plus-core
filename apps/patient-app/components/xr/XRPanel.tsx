@@ -1,3 +1,4 @@
+// apps/patient-app/components/xr/XRPanel.tsx
 'use client';
 
 import { Suspense } from 'react';
@@ -19,7 +20,14 @@ export default function XRPanel({ videoTrack, onExit }: Props) {
           XR Scene — {videoTrack ? 'Live video mapped' : 'Preview (no session)'}
         </div>
         <button
-          onClick={onExit}
+          onClick={() => {
+            // tell any XR components to cleanup (textures, video)
+            try {
+              window.dispatchEvent(new Event('xr-exit'));
+            } catch {}
+            // call parent callback so app layer hides the panel / routes back
+            onExit();
+          }}
           className="px-3 py-1.5 rounded-full bg-white/90 text-gray-900 shadow border text-sm hover:bg-white"
           aria-label="Exit XR"
           title="Exit XR"
@@ -33,7 +41,7 @@ export default function XRPanel({ videoTrack, onExit }: Props) {
           <ambientLight intensity={0.6} />
           <directionalLight position={[3, 3, 3]} intensity={0.6} />
           <Suspense fallback={null}>
-            <XRScene videoTrack={videoTrack || null} />
+            <XRScene videoSrc={videoTrack ? undefined : undefined} />
           </Suspense>
         </XR>
       </Canvas>
