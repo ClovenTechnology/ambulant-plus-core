@@ -1,3 +1,4 @@
+// apps/admin-dashboard/app/api/analytics/clinician-payouts/route.ts
 import { NextResponse } from 'next/server'
 export async function GET(){
   return NextResponse.json({

@@ -1,3 +1,4 @@
+// apps/clinician-app/app/api/_proxy/patient/[patientId]/cases/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 const GATEWAY = process.env.GATEWAY_URL || process.env.APIGW_BASE || process.env.NEXT_PUBLIC_APIGW_BASE || 'http://localhost:3010';
 

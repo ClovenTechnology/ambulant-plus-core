@@ -1,6 +1,5 @@
 // apps/clinician-app/app/api/erx/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { readDb, writeDb, Erx } from '../_lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,50 +7,53 @@ export const dynamic = 'force-dynamic';
 const GW = process.env.APIGW_BASE?.replace(/\/+$/, '');
 
 export async function GET() {
+  // Compatibility: prefer gateway list if available; otherwise fall back to legacy local store
   if (GW) {
     const r = await fetch(`${GW}/api/erx`, { cache: 'no-store' }).catch(() => null);
-    if (r?.ok) return NextResponse.json(await r.json());
+    if (r?.ok) return NextResponse.json(await r.json(), { status: r.status });
   }
-  // fallback: legacy file DB
-  const db = await readDb();
-  return NextResponse.json(db.erx);
+  // Legacy local store (unchanged behavior)
+  try {
+    const r = await fetch(`${process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || ''}/api/erx/outbox`, {
+      cache: 'no-store'
+    }).catch(() => null);
+    if (r?.ok) return NextResponse.json(await r.json(), { status: 200 });
+  } catch {}
+  return NextResponse.json([], { status: 200 });
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
+  const encounterId = body?.encounterId;
 
-  // If we have gateway, forward in a backward-compatible shape
+  if (!encounterId) {
+    return NextResponse.json(
+      { ok: false, error: 'encounterId is required on /api/erx. The endpoint now routes via /api/encounters/:id/erx.' },
+      { status: 400 }
+    );
+  }
+
+  // Prefer API Gateway for system-of-record
   if (GW) {
-    const r = await fetch(`${GW}/api/erx`, {
+    const r = await fetch(`${GW}/api/encounters/${encodeURIComponent(encounterId)}/erx`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify(body)
     }).catch(() => null);
 
     if (r?.ok) return NextResponse.json(await r.json(), { status: r.status });
-    // fall through to local mock if gw failed
+    // If gateway fails, fall through to local route to avoid blocking clinicians.
   }
 
-  // ---- fallback legacy mock (unchanged) ----
-  if (!body.appointmentId || !Array.isArray(body.meds))
-    return NextResponse.json({ error: 'appointmentId & meds[] required' }, { status: 400 });
+  // Local system-of-truth (same app), which writes through the encounter-aware handler you added.
+  const r2 = await fetch(`${process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || ''}/api/encounters/${encodeURIComponent(encounterId)}/erx`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store'
+  }).catch(() => null);
 
-  const db = await readDb();
-  const appt = db.appointments.find(a => a.id === body.appointmentId);
-  if (!appt) return NextResponse.json({ error: 'appointment not found' }, { status: 404 });
+  if (r2?.ok) return NextResponse.json(await r2.json(), { status: r2.status });
 
-  const erx: Erx = {
-    id: `rx-${Math.random().toString(36).slice(2,10)}`,
-    appointmentId: appt.id,
-    patientName: appt.patientName,
-    clinicianName: appt.clinicianName,
-    meds: body.meds,
-    status: 'sent',
-    createdAt: new Date().toISOString(),
-    dispenseCode: Math.random().toString(36).slice(2,7).toUpperCase(),
-  };
-
-  db.erx.unshift(erx);
-  await writeDb(db);
-  return NextResponse.json(erx, { status: 201 });
+  return NextResponse.json({ ok: false, error: 'Failed to send eRx' }, { status: 502 });
 }

@@ -1,3 +1,4 @@
+// apps/patient-app/app/televisit/[id]/televisit-client.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -5,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 const STUN = [{ urls: 'stun:stun.l.google.com:19302' }];
 
 type Msg =
-  | { type: 'hello' }
+  | { type: 'hello'; from?: string }
   | { type: 'offer'; sdp: RTCSessionDescriptionInit }
   | { type: 'answer'; sdp: RTCSessionDescriptionInit }
   | { type: 'ice'; candidate: RTCIceCandidateInit }
@@ -13,7 +14,6 @@ type Msg =
 
 function serializeCandidate(c: RTCIceCandidate): RTCIceCandidateInit {
   // Ensure plain JSON (works across BroadcastChannel)
-  // Some browsers have c.toJSON(); otherwise pick fields
   // @ts-ignore
   if (typeof c.toJSON === 'function') return c.toJSON();
   return {
@@ -25,90 +25,144 @@ function serializeCandidate(c: RTCIceCandidate): RTCIceCandidateInit {
 }
 
 export default function TelevisitClient({ id }: { id: string }) {
-  const [status, setStatus] = useState<'idle'|'preview'|'calling'|'connected'>('idle');
+  const [status, setStatus] = useState<'idle' | 'preview' | 'calling' | 'connected'>('idle');
+
   const localVideo = useRef<HTMLVideoElement | null>(null);
   const remoteVideo = useRef<HTMLVideoElement | null>(null);
+
   const pcRef = useRef<RTCPeerConnection | null>(null);
   const bcRef = useRef<BroadcastChannel | null>(null);
+
   const streamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
 
-  useEffect(() => {
-    const bc = new BroadcastChannel(`televisit-${id}`);
-    bcRef.current = bc;
-    bc.postMessage({ type: 'hello' } as Msg);
+  const ensurePreview = async () => {
+    if (streamRef.current) return streamRef.current;
 
-    bc.onmessage = async (ev: MessageEvent<Msg>) => {
-      const msg = ev.data;
-      const pc = pcRef.current;
-      if (!msg) return;
-
-      if (msg.type === 'offer' && pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-        const ans = await pc.createAnswer();
-        await pc.setLocalDescription(ans);
-        bc.postMessage({ type: 'answer', sdp: ans } as Msg);
-      } else if (msg.type === 'answer' && pc) {
-        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
-      } else if (msg.type === 'ice' && pc && msg.candidate) {
-        try {
-          await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
-        } catch {}
-      }
-    };
-
-    return () => { bc.close(); };
-  }, [id]);
-
-  async function ensurePreview() {
-    if (streamRef.current) return;
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
     streamRef.current = stream;
+
     if (localVideo.current) {
       localVideo.current.srcObject = stream;
-      await localVideo.current.play().catch(()=>{});
+      await localVideo.current.play().catch(() => {});
     }
-    setStatus(prev => (prev === 'idle' ? 'preview' : prev));
-  }
 
-  async function startCall() {
-    await ensurePreview();
+    setStatus((prev) => (prev === 'idle' ? 'preview' : prev));
+    return stream;
+  };
+
+  const ensurePC = async () => {
+    if (pcRef.current) return pcRef.current;
+
     const pc = new RTCPeerConnection({ iceServers: STUN });
     pcRef.current = pc;
 
-    // Local tracks
-    streamRef.current!.getTracks().forEach(t => pc.addTrack(t, streamRef.current!));
+    const local = await ensurePreview();
+    local.getTracks().forEach((t) => pc.addTrack(t, local));
 
-    // Remote tracks
     const remoteStream = new MediaStream();
+    remoteStreamRef.current = remoteStream;
+
     pc.ontrack = (e) => {
-      e.streams[0]?.getTracks().forEach(t => remoteStream.addTrack(t));
+      e.streams[0]?.getTracks().forEach((t) => remoteStream.addTrack(t));
       if (remoteVideo.current) {
         remoteVideo.current.srcObject = remoteStream;
-        remoteVideo.current.play().catch(()=>{});
+        remoteVideo.current.play().catch(() => {});
       }
       setStatus('connected');
     };
 
-    // SERIALISED ICE
     pc.onicecandidate = (e) => {
       if (e.candidate && bcRef.current) {
-        bcRef.current.postMessage({ type: 'ice', candidate: serializeCandidate(e.candidate) });
+        bcRef.current.postMessage({ type: 'ice', candidate: serializeCandidate(e.candidate) } as Msg);
       }
     };
 
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+        setStatus('preview');
+      }
+    };
+
+    return pc;
+  };
+
+  const closePC = () => {
+    try {
+      pcRef.current?.close();
+    } catch {}
+    pcRef.current = null;
+    remoteStreamRef.current = null;
+    if (remoteVideo.current) remoteVideo.current.srcObject = null;
+  };
+
+  useEffect(() => {
+    const bc = new BroadcastChannel(`televisit-${id}`);
+    bcRef.current = bc;
+
+    bc.postMessage({ type: 'hello' } as Msg);
+
+    bc.onmessage = async (ev: MessageEvent<Msg>) => {
+      const msg = ev.data;
+      if (!msg) return;
+
+      if (msg.type === 'offer') {
+        const pc = await ensurePC();
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+        const ans = await pc.createAnswer();
+        await pc.setLocalDescription(ans);
+        bc.postMessage({ type: 'answer', sdp: ans } as Msg);
+        setStatus('calling');
+      }
+
+      if (msg.type === 'answer') {
+        const pc = pcRef.current;
+        if (!pc) return;
+        await pc.setRemoteDescription(new RTCSessionDescription(msg.sdp));
+      }
+
+      if (msg.type === 'ice') {
+        const pc = pcRef.current;
+        if (!pc || !msg.candidate) return;
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(msg.candidate));
+        } catch {}
+      }
+
+      if (msg.type === 'bye') {
+        closePC();
+      }
+    };
+
+    return () => {
+      try {
+        bc.postMessage({ type: 'bye' } as Msg);
+      } catch {}
+      bc.close();
+      closePC();
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+      if (localVideo.current) localVideo.current.srcObject = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+
+  const startCall = async () => {
+    const pc = await ensurePC();
     setStatus('calling');
 
-    // Make an offer
     const offer = await pc.createOffer();
     await pc.setLocalDescription(offer);
-    bcRef.current?.postMessage({ type: 'offer', sdp: offer });
-  }
+    bcRef.current?.postMessage({ type: 'offer', sdp: offer } as Msg);
+  };
 
-  function hangup() {
-    try { pcRef.current?.close(); } catch {}
-    pcRef.current = null;
+  const hangup = () => {
+    try {
+      bcRef.current?.postMessage({ type: 'bye' } as Msg);
+    } catch {}
+    closePC();
     setStatus('preview');
-  }
+  };
 
   return (
     <div className="space-y-3">
@@ -122,12 +176,10 @@ export default function TelevisitClient({ id }: { id: string }) {
       </div>
 
       <div className="flex gap-2">
-        <button
-          className="px-3 py-2 border rounded"
-          onClick={ensurePreview}
-        >
+        <button className="px-3 py-2 border rounded" onClick={ensurePreview}>
           {status === 'idle' ? 'Enable Camera' : 'Camera On'}
         </button>
+
         <button
           className="px-3 py-2 border rounded bg-emerald-600 text-white disabled:opacity-50"
           onClick={startCall}
@@ -135,11 +187,8 @@ export default function TelevisitClient({ id }: { id: string }) {
         >
           {status === 'connected' ? 'Connected' : status === 'calling' ? 'Calling…' : 'Start Call'}
         </button>
-        <button
-          className="px-3 py-2 border rounded"
-          onClick={hangup}
-          disabled={status !== 'connected' && status !== 'calling'}
-        >
+
+        <button className="px-3 py-2 border rounded" onClick={hangup} disabled={status !== 'connected' && status !== 'calling'}>
           Hang up
         </button>
       </div>

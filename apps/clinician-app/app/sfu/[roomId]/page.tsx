@@ -1,21 +1,14 @@
 // apps/clinician-app/app/sfu/[roomId]/page.tsx
 'use client';
 
+import type React from 'react';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
-import {
-  Room,
-  RoomEvent,
-  RemoteParticipant,
-  DataPacket_Kind,
-  ConnectionQuality,
-  Participant,
-} from 'livekit-client';
+import { Room, RoomEvent, DataPacket_Kind, ConnectionQuality } from 'livekit-client';
 
-import { connectRoom } from '@ambulant/rtc';
-import ClinicianVitalsPanel from '../../../components/ClinicianVitalsPanel';
+import { connectRoom, getOrCreateUid, mintRtcToken } from '@ambulant/rtc';
 
 // Shared atoms
 import { Field } from '@/components/shared/Field';
@@ -23,52 +16,68 @@ import { Tile } from '@/components/shared/Tile';
 import { TextBlock } from '@/components/shared/TextBlock';
 
 // Shared UI / layout bits
-import {
-  Card,
-  Tabs,
-  Collapse,
-  Badge,
-  Icon,
-  IconBtn,
-  Skeleton,
-} from '@/components/ui';
+import { Card, Tabs, Collapse, Icon, Skeleton } from '@/components/ui';
 import { CollapseBtn } from '@/components/ui/CollapseBtn';
 
 import RecordingBanner from '@/components/RecordingBanner';
-import SessionConclusions from '@/components/SessionConclusions';
 
-import IntegratedIoMTs from '@/components/IntegratedIoMTs';
-import SmartWearablesPanel from '@/components/SmartWearablesPanel';
-
-import { useAutocomplete, icdSearch, rxnormSearch } from '@/src/hooks/useAutocomplete';
-import type { ICD10Hit, RxNormHit } from '@/src/hooks/useAutocomplete';
-import { InsightPanel, InsightReply } from '@/components/sfu/InsightPanel';
+import { useAutocomplete, icdSearch } from '@/src/hooks/useAutocomplete';
+import type { ICD10Hit } from '@/src/hooks/useAutocomplete';
 import { useUiPrefs } from '@/hooks/useUiPrefs';
 
 import { normalizeVitals } from '@/lib/sfu/vitals';
+import AllergiesPanel, { type NewAllergyDraft } from '@/components/AllergiesPanel';
+
+// New local modules
+import VideoDock from './VideoDock';
+import ErxComposer, { type ErxSummary, type SoapState } from './ErxComposer';
+import InsightPane from './InsightPane';
+import ReferralPanel from './ReferralPanel';
+import { usePatientContext, type PatientAllergyBrief } from './patientContext';
+
+// History sections
+import CasesHistory from '@/components/cases';
+import ConditionsHistory from '@/components/conditions';
+import MedicationsHistory from '@/components/medications';
+import AllergiesHistory from '@/components/allergies';
+import OperationsHistory from '@/components/operations';
+import VaccinationsHistory from '@/components/vaccinations';
+import LabsHistory from '@/components/labs';
 
 /* ---------------------------
    Small Toast system (local)
-----------------------------*/
+-----------------------------*/
+type ToastKind = 'info' | 'success' | 'warning' | 'error';
+
 type Toast = {
   id: string;
   title?: string;
   body: string;
-  kind?: 'info' | 'success' | 'warning' | 'error';
+  kind?: ToastKind;
   ttl?: number;
 };
-function ToastViewport({ toasts, onClose }: { toasts: Toast[]; onClose: (id: string) => void }) {
+
+function ToastViewport({
+  toasts,
+  onClose,
+}: {
+  toasts: Toast[];
+  onClose: (id: string) => void;
+}) {
   return (
     <div className="fixed z-[1000] bottom-4 right-4 flex flex-col gap-2">
-      {toasts.map(t => (
+      {toasts.map((t) => (
         <div
           key={t.id}
           className={[
             'min-w-[240px] max-w-[360px] rounded-lg border shadow bg-white px-3 py-2',
-            t.kind === 'success' ? 'border-emerald-200' :
-            t.kind === 'warning' ? 'border-amber-200' :
-            t.kind === 'error'   ? 'border-rose-200' :
-                                   'border-gray-200'
+            t.kind === 'success'
+              ? 'border-emerald-200'
+              : t.kind === 'warning'
+              ? 'border-amber-200'
+              : t.kind === 'error'
+              ? 'border-rose-200'
+              : 'border-gray-200',
           ].join(' ')}
           role="status"
           aria-live="polite"
@@ -76,7 +85,12 @@ function ToastViewport({ toasts, onClose }: { toasts: Toast[]; onClose: (id: str
           {t.title && <div className="text-sm font-semibold mb-0.5">{t.title}</div>}
           <div className="text-sm text-gray-700">{t.body}</div>
           <div className="mt-2 text-right">
-            <button className="text-xs text-gray-500 hover:text-gray-800" onClick={() => onClose(t.id)}>Dismiss</button>
+            <button
+              className="text-xs text-gray-500 hover:text-gray-800"
+              onClick={() => onClose(t.id)}
+            >
+              Dismiss
+            </button>
           </div>
         </div>
       ))}
@@ -89,6 +103,7 @@ function ToastViewport({ toasts, onClose }: { toasts: Toast[]; onClose: (id: str
 // =========================
 
 type RightTab = 'soap' | 'erx' | 'conclusions' | 'insight' | 'history';
+type SpecialistTab = 'dental' | 'physio' | 'xray' | 'ent' | 'optometry';
 
 type Vitals = {
   ts?: number;
@@ -100,13 +115,6 @@ type Vitals = {
   dia?: number;
 };
 
-const DRUG_SUGGESTIONS: string[] = [
-  'Amoxicillin 500 mg capsule',
-  'Paracetamol 500 mg tablet',
-  'Ibuprofen 200 mg tablet',
-  'Azithromycin 250 mg tablet',
-  'Metformin 500 mg tablet',
-];
 const ICD10_SUGGESTIONS: string[] = [
   'J20.9 — Acute bronchitis, unspecified',
   'R50.9 — Fever, unspecified',
@@ -126,18 +134,99 @@ function normalize(s: string) {
   return (s ?? '').replace(/\s+/g, ' ').trim();
 }
 
+// Helper: read join JWT from session (visitId/roomId variants)
+function readJoinJwtFromSession(visitId: string, roomId: string) {
+  if (typeof window === 'undefined') return '';
+  const keys = [
+    `televisit_join_${visitId}`,
+    `televisit_join_${roomId}`,
+    `ambulant_join_${visitId}`,
+    `ambulant_join_${roomId}`,
+    `ambulant_join_token_${visitId}`,
+    `ambulant_join_token_${roomId}`,
+    'ambulant_join_token',
+  ];
+  for (const k of keys) {
+    try {
+      const v = sessionStorage.getItem(k);
+      if (v && v.trim()) return v.trim();
+    } catch {}
+  }
+  return '';
+}
+
 // Dynamic DeviceSettings (with safe fallback)
 function SafeDeviceSettings() {
   return <div className="text-sm text-gray-600">Safe device settings (fallback)</div>;
 }
-const DeviceSettings = dynamic(async () => {
-  try {
-    const m = await import('@ambulant/rtc');
-    return { default: m.DeviceSettings };
-  } catch {
-    return { default: SafeDeviceSettings };
-  }
-}, { ssr: false });
+const DeviceSettings = dynamic(
+  async () => {
+    try {
+      const m = await import('@ambulant/rtc');
+      return { default: m.DeviceSettings };
+    } catch {
+      return { default: SafeDeviceSettings };
+    }
+  },
+  { ssr: false }
+);
+
+// Lazy-loaded heavy panels
+const SessionConclusions = dynamic(() => import('@/components/SessionConclusions'), {
+  ssr: false,
+});
+
+const IntegratedIoMTs = dynamic(() => import('@/components/IntegratedIoMTs'), {
+  ssr: false,
+});
+
+const SmartWearablesPanel = dynamic(() => import('@/components/SmartWearablesPanel'), {
+  ssr: false,
+});
+
+const ClinicianVitalsPanel = dynamic(() => import('../../../components/ClinicianVitalsPanel'), {
+  ssr: false,
+  loading: () => <Skeleton height="h-40" />,
+});
+
+/* -----------------------------
+   Specialist Workspaces (SFU)
+   Mounted inside the SFU page
+------------------------------ */
+const DentalWorkspaceSFU = dynamic(() => import('../../workspaces/dental/sfu/page'), {
+  ssr: false,
+  loading: () => <Skeleton height="h-40" />,
+});
+
+const PhysioWorkspaceSFU = dynamic(() => import('../../workspaces/physio/sfu/page'), {
+  ssr: false,
+  loading: () => <Skeleton height="h-40" />,
+});
+
+const XrayWorkspaceSFU = dynamic(() => import('../../workspaces/x-ray/sfu/page'), {
+  ssr: false,
+  loading: () => <Skeleton height="h-40" />,
+});
+
+const EntWorkspaceSFU = dynamic(() => import('../../workspaces/ent/sfu/page'), {
+  ssr: false,
+  loading: () => <Skeleton height="h-40" />,
+});
+
+const OptometryWorkspaceSFU = dynamic(() => import('../../workspaces/optometry/sfu/page'), {
+  ssr: false,
+  loading: () => <Skeleton height="h-40" />,
+});
+
+// =========================
+/* Video Docking (page-level) */
+// =========================
+type VideoDockMode = 'docked' | 'undocked';
+type VideoDockSide = 'center' | 'left';
+
+function clamp(n: number, min: number, max: number) {
+  return Math.max(min, Math.min(max, n));
+}
 
 // =========================
 /* Page Component */
@@ -147,36 +236,128 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const { roomId } = params;
   const searchParams = useSearchParams();
   const wsUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL as string | undefined;
-  const identity = useMemo(() => `clinician-${Math.random().toString(36).slice(2, 7)}`, []);
 
-  // Fake appt meta
-  const appt = useMemo(() => ({
-    id: `sfu-${roomId}`,
-    when: new Date().toISOString(),
-    patientId: 'pt-dev',
-    patientName: 'Demo Patient',
-    clinicianName: 'Demo Clinician',
-    reason: 'Acute bronchitis (demo)',
-    status: 'In progress',
-    roomId,
-  }), [roomId]);
+  // Centralized patient context (profile / meds / allergies)
+  const {
+    profile,
+    patientProfile,
+    patientProfileError,
+    patientMeds,
+    medsError,
+    patientAllergies,
+    allergiesError,
+    allergiesLoading,
+    allergiesFromLive,
+    patientId,
+    patientName,
+    encounterId,
+    refreshAllergies,
+    setPatientAllergies,
+  } = usePatientContext(roomId, searchParams);
 
-  // Room & connection state
+  // Other URL params
+  const clinicianIdParam = searchParams.get('clinicianId') || 'clinician-local-001';
+  const clinicNameParam = searchParams.get('clinicName') || undefined;
+  const clinicAddressParam = searchParams.get('clinicAddress') || undefined;
+
+  // Fake appt meta (patient-aware; profile can override labels)
+  const appt = useMemo(
+    () => ({
+      id: `sfu-${roomId}`,
+      when: new Date().toISOString(),
+      patientId,
+      patientName,
+      clinicianName: searchParams.get('clinicianName') || 'Demo Clinician',
+      reason: searchParams.get('reason') || 'Acute bronchitis (demo)',
+      status: 'In progress',
+      roomId,
+    }),
+    [roomId, patientId, patientName, searchParams]
+  );
+
+  // Derived allergy views
+  const allergySummary = useMemo(() => {
+    if (!patientAllergies || patientAllergies.length === 0) return 'No allergies recorded';
+    const top = patientAllergies
+      .filter((a) => (a.status ?? '').toLowerCase() !== 'entered-in-error')
+      .slice(0, 3)
+      .map((a) => {
+        const sev = a.severity ? ` (${a.severity})` : '';
+        const rxn = a.reaction ? ` — ${a.reaction}` : '';
+        return `${a.substance}${sev}${rxn}`;
+      });
+    const base = top.join(', ');
+    const more =
+      patientAllergies.length > top.length ? ` +${patientAllergies.length - top.length} more` : '';
+    return base + more;
+  }, [patientAllergies]);
+
+  const allergyCounts = useMemo(() => {
+    const list = patientAllergies || [];
+    const total = list.length;
+    const active = list.filter((a) => (a.status ?? '').toLowerCase() === 'active').length;
+    const resolved = list.filter((a) => {
+      const s = (a.status ?? '').toLowerCase();
+      return s.startsWith('resolv') || s === 'inactive';
+    }).length;
+    return { total, active, resolved };
+  }, [patientAllergies]);
+
+  const activeMeds = useMemo(
+    () => (patientMeds || []).filter((m) => (m.status || '').toLowerCase() === 'active' || !m.status),
+    [patientMeds]
+  );
+
+  // ------------------ Room & connection state ------------------
   const [room, setRoom] = useState<Room | null>(null);
-  const [state, setState] = useState<'disconnected' | 'connecting' | 'connected' | 'reconnecting'>('disconnected');
+  const [state, setState] = useState<'disconnected' | 'connecting' | 'connected' | 'reconnecting'>(
+    'disconnected'
+  );
   const [quality, setQuality] = useState<ConnectionQuality | undefined>(undefined);
+
+  // Auto-reconnect tracking
+  const manualLeaveRef = useRef(false);
+  const hasEverConnectedRef = useRef(false);
+  const reconnectTimerRef = useRef<number | null>(null);
+
+  // Audit helper (PII-light)
+  const audit = useCallback(
+    async (action: string, extra: Record<string, unknown> = {}) => {
+      try {
+        const payload = {
+          action,
+          ts: new Date().toISOString(),
+          roomId,
+          patientId,
+          clinicianId: clinicianIdParam,
+          ...extra,
+        };
+        await fetch('/api/audit-log', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } catch {
+        // best-effort only
+      }
+    },
+    [roomId, patientId, clinicianIdParam]
+  );
 
   // Toaster
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const pushToast = useCallback((body: string, kind: Toast['kind'] = 'info', title?: string, ttl = 4200) => {
-    const id = `${Date.now()}-${Math.random().toString(36).slice(2,6)}`;
-    const t: Toast = { id, body, kind, title, ttl };
-    setToasts(prev => [...prev, t]);
-    if (ttl) {
-      window.setTimeout(() => setToasts(prev => prev.filter(x => x.id !== id)), ttl);
-    }
-  }, []);
-  const closeToast = (id: string) => setToasts(prev => prev.filter(x => x.id !== id));
+  const pushToast = useCallback(
+    (body: string, kind: ToastKind = 'info', title?: string, ttl = 4200) => {
+      const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+      const t: Toast = { id, body, kind, title, ttl };
+      setToasts((prev) => [...prev, t]);
+      if (ttl && typeof window !== 'undefined') {
+        window.setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), ttl);
+      }
+    },
+    []
+  );
+  const closeToast = (id: string) => setToasts((prev) => prev.filter((x) => x.id !== id));
 
   // Media toggles
   const [micOn, setMicOn] = useState(false);
@@ -186,37 +367,34 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const [showOverlay, setShowOverlay] = useState(true);
   const [captionsOn, setCaptionsOn] = useState(false);
   const [showVitals, setShowVitals] = useState(true);
-  const [showVitalsOverlay, setShowVitalsOverlay] = useState(false); // NEW: Stream overlay toggle
+  const [showVitalsOverlay, setShowVitalsOverlay] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [xrEnabled, setXrEnabled] = useState(false);
 
-  // Active speaker / raised hand
-  const [remoteSpeaking, setRemoteSpeaking] = useState(false);
+  // Raised hand
   const [handRaised, setHandRaised] = useState(false);
   const handTimerRef = useRef<number | null>(null);
 
   // UI prefs
   const { state: ui, set: setUi } = useUiPrefs();
-  const {
-    presentation,
-    dense,
-    leftCollapsed,
-    rightCollapsed,
-    chatVisible,
-    rightTab,
-    pip,
-    rightPanelsOpen,
-  } = ui;
+  const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, rightTab, pip, rightPanelsOpen } =
+    ui;
+
+  // NEW: narrow video / wider notes toggle
+  const [videoNarrow, setVideoNarrow] = useState(false);
 
   // Local collapse states
   const [leftInfoOpen, setLeftInfoOpen] = useState(true);
   const [rightIomtOpen, setRightIomtOpen] = useState(true);
+  const [currentMedsOpen, setCurrentMedsOpen] = useState(true);
+  const [allergiesOpen, setAllergiesOpen] = useState(true);
+
+  // NEW: Specialist Workspaces
+  const [specialistOpen, setSpecialistOpen] = useState(true);
+  const [specialistTab, setSpecialistTab] = useState<SpecialistTab>('dental');
 
   // Refs
   const videoCardRef = useRef<HTMLDivElement | null>(null);
-  const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
-  const audioSinkRef = useRef<HTMLAudioElement | null>(null);
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
 
   // Chat
@@ -231,146 +409,256 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   // Vitals
   const [vitals, setVitals] = useState<Vitals>({});
 
-  // eRx / SOAP / Lab state
-  type RxRow = { drug: string; dose: string; route: string; freq: string; duration: string; qty: string; refills: number; notes?: string };
-  const [rxRows, setRxRows] = useState<RxRow[]>([{ drug: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0 }]);
-  const addRxRow = () => setRxRows((r) => [...r, { drug: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0 }]);
-  const removeRxRow = (i: number) => setRxRows((r) => r.filter((_, j) => j !== i));
-
-  const [soap, setSoap] = useState({ s: '', o: '', a: '', p: '' });
+  // SOAP / meds / education
+  const [soap, setSoap] = useState<SoapState>({ s: '', o: '', a: '', p: '', icd10Code: undefined });
   const [currentMeds, setCurrentMeds] = useState<string>('');
+  const [patientEducation, setPatientEducation] = useState<string>('');
 
+  // eRx summary (meds + labs) from ErxComposer
+  const [erxSummary, setErxSummary] = useState<ErxSummary>({ meds: [], labs: [] });
+
+  // =========================
+  // VIDEO DOCK / UNDOCK (no new routes; least invasive)
+  // =========================
+  const VIDEO_DOCK_KEY = useMemo(() => `sfu-video-dock-v1-${roomId}`, [roomId]);
+  const [videoDockMode, setVideoDockMode] = useState<VideoDockMode>('docked');
+  const [videoDockSide, setVideoDockSide] = useState<VideoDockSide>('center');
+
+  const [floatPos, setFloatPos] = useState<{ xPct: number; yPct: number }>({ xPct: 78, yPct: 70 });
+  const floatDragRef = useRef<{
+    active: boolean;
+    startX: number;
+    startY: number;
+    startXPct: number;
+    startYPct: number;
+  } | null>(null);
+
+  // Load dock prefs
   useEffect(() => {
     try {
+      if (typeof window === 'undefined') return;
+      const raw = localStorage.getItem(VIDEO_DOCK_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as any;
+      const mode: VideoDockMode = parsed?.mode === 'undocked' ? 'undocked' : 'docked';
+      const side: VideoDockSide = parsed?.side === 'left' ? 'left' : 'center';
+      const xPct = typeof parsed?.xPct === 'number' ? parsed.xPct : undefined;
+      const yPct = typeof parsed?.yPct === 'number' ? parsed.yPct : undefined;
+
+      setVideoDockMode(mode);
+      setVideoDockSide(side);
+      if (typeof xPct === 'number' && typeof yPct === 'number') {
+        setFloatPos({ xPct: clamp(xPct, 5, 95), yPct: clamp(yPct, 8, 95) });
+      }
+    } catch {
+      // ignore
+    }
+  }, [VIDEO_DOCK_KEY]);
+
+  // Persist dock prefs
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
+      localStorage.setItem(
+        VIDEO_DOCK_KEY,
+        JSON.stringify({
+          mode: videoDockMode,
+          side: videoDockSide,
+          xPct: floatPos.xPct,
+          yPct: floatPos.yPct,
+        })
+      );
+    } catch {
+      // ignore
+    }
+  }, [VIDEO_DOCK_KEY, videoDockMode, videoDockSide, floatPos]);
+
+  // If entering presentation, force docked-center (fullscreen expects non-floating)
+  useEffect(() => {
+    if (!presentation) return;
+    setVideoDockMode('docked');
+    setVideoDockSide('center');
+  }, [presentation]);
+
+  const dockCenter = () => {
+    setVideoDockMode('docked');
+    setVideoDockSide('center');
+    pushToast('Video docked (center).', 'info', 'Video Dock');
+  };
+  const dockLeft = () => {
+    setVideoDockMode('docked');
+    setVideoDockSide('left');
+    pushToast('Video docked (left).', 'info', 'Video Dock');
+  };
+  const undockVideo = () => {
+    if (presentation) return;
+    setVideoDockMode('undocked');
+    pushToast('Video undocked (floating).', 'info', 'Video Dock');
+  };
+
+  const startFloatDrag = (clientX: number, clientY: number) => {
+    if (typeof window === 'undefined') return;
+    floatDragRef.current = {
+      active: true,
+      startX: clientX,
+      startY: clientY,
+      startXPct: floatPos.xPct,
+      startYPct: floatPos.yPct,
+    };
+  };
+
+  const moveFloatDrag = (clientX: number, clientY: number) => {
+    if (!floatDragRef.current?.active) return;
+    if (typeof window === 'undefined') return;
+
+    const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
+    const vh = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
+
+    const dx = clientX - floatDragRef.current.startX;
+    const dy = clientY - floatDragRef.current.startY;
+
+    const nextX = floatDragRef.current.startXPct + (dx / vw) * 100;
+    const nextY = floatDragRef.current.startYPct + (dy / vh) * 100;
+
+    setFloatPos({ xPct: clamp(nextX, 5, 95), yPct: clamp(nextY, 8, 95) });
+  };
+
+  const endFloatDrag = () => {
+    if (floatDragRef.current) floatDragRef.current.active = false;
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onMove = (e: MouseEvent) => moveFloatDrag(e.clientX, e.clientY);
+    const onUp = () => endFloatDrag();
+    const onTouchMove = (e: TouchEvent) => {
+      const t = e.touches?.[0];
+      if (!t) return;
+      moveFloatDrag(t.clientX, t.clientY);
+    };
+    const onTouchEnd = () => endFloatDrag();
+
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('touchmove', onTouchMove, { passive: true });
+    window.addEventListener('touchend', onTouchEnd);
+    window.addEventListener('mouseleave', onUp);
+
+    return () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('touchmove', onTouchMove as any);
+      window.removeEventListener('touchend', onTouchEnd);
+      window.removeEventListener('mouseleave', onUp);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [floatPos.xPct, floatPos.yPct]);
+
+  // Persist SOAP + meds per-room (fallback / notes)
+  useEffect(() => {
+    try {
+      if (typeof window === 'undefined') return;
       const saved = localStorage.getItem(`sfu-soap-v2-${roomId}`);
       if (saved) {
         const parsed = JSON.parse(saved);
         setSoap(parsed?.soap ?? parsed);
         if (parsed?.currentMeds !== undefined) setCurrentMeds(parsed.currentMeds);
+        if (parsed?.patientEducation !== undefined) setPatientEducation(parsed.patientEducation);
       }
-    } catch {}
+    } catch {
+      // ignore
+    }
   }, [roomId]);
+
   useEffect(() => {
-    try { localStorage.setItem(`sfu-soap-v2-${roomId}`, JSON.stringify({ soap, currentMeds })); } catch {}
-  }, [soap, currentMeds, roomId]);
-
-  type LabRow = { test: string; priority: '' | 'Routine' | 'Urgent' | 'Stat'; specimen: string; icd: string; instructions?: string };
-  const [labRows, setLabRows] = useState<LabRow[]>([{ test: '', priority: '', specimen: '', icd: '', instructions: '' }]);
-  const addLabRow = () => setLabRows((r) => [...r, { test: '', priority: '', specimen: '', icd: '', instructions: '' }]);
-  const removeLabRow = (i: number) => setLabRows((r) => r.filter((_, j) => j !== i));
-
-  // eRx results & actions (restored)
-  type ErxResult = { id: string; status: string; dispenseCode: string; error?: string };
-  const [erxResult, setErxResult] = useState<ErxResult | null>(null);
-  const sendErx = async () => {
     try {
-      setErxResult({
-        id: `rx-${Date.now()}`,
-        status: 'Queued',
-        dispenseCode: '—',
-      });
-      pushToast('eRx request queued (demo).', 'success');
+      if (typeof window === 'undefined') return;
+      localStorage.setItem(
+        `sfu-soap-v2-${roomId}`,
+        JSON.stringify({
+          soap,
+          currentMeds,
+          patientEducation,
+        })
+      );
     } catch {
-      setErxResult({ id: '', status: 'Failed', dispenseCode: '', error: 'Failed to send eRx' });
-      pushToast('Failed to send eRx.', 'error');
+      // ignore
     }
-  };
-  const pushOrder = (dest: 'CarePort' | 'MedReach') => {
-    pushToast(`Order pushed to ${dest} (demo).`, 'success');
-  };
+  }, [soap, currentMeds, patientEducation, roomId]);
 
-  // Insight
-  const [insightBusy, setInsightBusy] = useState(false);
-  const [insight, setInsight] = useState<InsightReply | null>(null);
+  // Pre-populate Allergies text in SOAP from patient allergies
+  useEffect(() => {
+    if (!patientAllergies || patientAllergies.length === 0) return;
+    setSoap((prev) => {
+      if (prev.o) return prev;
+      const text = patientAllergies
+        .map((a) => {
+          const sev = a.severity ? ` [${a.severity}]` : '';
+          const rxn = a.reaction ? ` — ${a.reaction}` : '';
+          return `${a.substance}${sev}${rxn}`;
+        })
+        .join('\n');
+      return { ...prev, o: text };
+    });
+  }, [patientAllergies]);
 
-  async function analyzeWithInsight() {
-    setInsightBusy(true);
-    try {
-      const payload = { soap, patient: appt.patientName, clinician: appt.clinicianName, reason: appt.reason, meds: rxRows };
-      const res = await fetch('/api/insightcore', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const raw = await res.json().catch(() => ({} as any));
-      const data =
-        (raw && (raw.summary || raw.goals || raw.notes) && raw) ||
-        (raw && raw.data && (raw.data.summary || raw.data.goals || raw.data.notes) && raw.data);
-      if (data) setInsight(data as any);
-      else {
-        setInsight({
-          summary: `Suggested plan for ${appt.patientName}: Dx ${soap.a || soap.p || '—'}.`,
-          goals: ['Symptom reduction in 7d', 'Adherence ≥85%', 'Follow-up in 10–14d'],
-          notes: 'Review red flags, hydration, follow-up, etc.',
-        });
-      }
-    } catch {
-      setInsight({
-        summary: `Suggested plan for ${appt.patientName}: Dx ${soap.a || soap.p || '—'}.`,
-        goals: ['Symptom reduction in 7d', 'Adherence ≥85%', 'Follow-up in 10–14d'],
-        notes: 'Insight service unavailable—using fallback plan.',
-      });
-    } finally {
-      setInsightBusy(false);
+  // Symptoms ICD-10 autocomplete (SOAP S)
+  const icdSympAuto = useAutocomplete<ICD10Hit>(icdSearch);
+  const [sympCode, setSympCode] = useState<string>('');
+  const icdSympOptions = icdSympAuto.opts.map((h) => ({
+    code: h.code,
+    text: `${h.code} — ${h.title}`,
+  }));
+  const icdSympOptionsFinal = icdSympOptions.length
+    ? icdSympOptions
+    : ICD10_SUGGESTIONS.map((t, i) => ({ code: t.split(' ')[0] || `SUG-${i}`, text: t }));
+  const [sympOpen, setSympOpen] = useState(false);
+  const [sympActive, setSympActive] = useState(-1);
+
+  // Current meds list fallback
+  const currentMedsList = useMemo(
+    () =>
+      (currentMeds || '')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
+    [currentMeds]
+  );
+
+  // Vitals graph lazy mount
+  function useDeferredMount<T extends HTMLElement>(onceInView = true) {
+    const ref = useRef<T | null>(null);
+    const [mounted, setMounted] = useState(false);
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      if (!ref.current) return;
+      const el = ref.current;
+      const io = new IntersectionObserver(
+        ([e]) => {
+          if (e.isIntersecting) {
+            setMounted(true);
+            if (onceInView) io.disconnect();
+          }
+        },
+        { rootMargin: '200px' }
+      );
+      io.observe(el);
+      return () => io.disconnect();
+    }, [onceInView]);
+    return { ref, mounted } as const;
+  }
+  const vitalsGraphHolder = useDeferredMount<HTMLDivElement>();
+
+  // Poor network → toast
+  const prevQualityRef = useRef<ConnectionQuality | undefined>(undefined);
+  useEffect(() => {
+    if (quality === ConnectionQuality.Poor && prevQualityRef.current !== ConnectionQuality.Poor) {
+      pushToast('Network quality is poor. Video/audio may be degraded.', 'warning', 'Poor Network');
     }
-  }
-  function acceptInsight() {
-    if (!insight) return;
-    const text = [
-      insight.summary ? `Summary: ${insight.summary}` : '',
-      insight.goals?.length ? `Goals:\n- ${insight.goals.join('\n- ')}` : '',
-      insight.notes ? `Notes: ${insight.notes}` : '',
-    ].filter(Boolean).join('\n\n');
-    setSoap(s => ({ ...s, p: s.p ? `${s.p}\n\n---\n${text}` : text }));
-    pushToast('Insight accepted into Plan.', 'success');
-  }
-  function adjustInsight() {
-    if (!insight) return;
-    const text = [
-      insight.summary ? `Summary: ${insight.summary}` : '',
-      insight.goals?.length ? `Goals:\n- ${insight.goals.join('\n- ')}` : '',
-      insight.notes ? `Notes: ${insight.notes}` : '',
-    ].filter(Boolean).join('\n\n');
-    setSoap(s => ({ ...s, p: s.p ? `${s.p}\n\n---\n${text}` : text }));
-    setUi('rightTab', 'soap');
-    pushToast('Insight copied to Plan. Edit in SOAP tab.', 'info');
-  }
-  function declineInsight() {
-    setInsight(null);
-    pushToast('Insight declined.', 'warning');
-  }
+    prevQualityRef.current = quality;
+  }, [quality, pushToast]);
 
-  // Room helpers
-  function firstRemote(r: Room): RemoteParticipant | undefined {
-    const anyRoom = r as any;
-    if (typeof anyRoom.getParticipants === 'function') {
-      const arr = anyRoom.getParticipants();
-      if (Array.isArray(arr) && arr.length) return arr[0] as RemoteParticipant;
-    }
-    const maps = [anyRoom.remoteParticipants, anyRoom.participants];
-    for (const m of maps) {
-      if (m && typeof m.values === 'function') {
-        const it = m.values();
-        const n = it.next();
-        if (!n.done) return n.value as RemoteParticipant;
-      }
-    }
-    return undefined;
-  }
-
-  const attach = useCallback(() => {
-    if (!room) return;
-    const rp = firstRemote(room);
-    if (rp) {
-      const rvpub = [...rp.videoTrackPublications.values()].find(p => p.isSubscribed && p.videoTrack);
-      if (rvpub && remoteVideoRef.current) rvpub.videoTrack?.attach(remoteVideoRef.current);
-      const rapub = [...rp.audioTrackPublications.values()].find(p => p.isSubscribed && p.audioTrack);
-      if (rapub && audioSinkRef.current) rapub.audioTrack?.attach(audioSinkRef.current);
-    }
-    const localPubV = [...room.localParticipant.videoTrackPublications.values()].find(p => p.track);
-    if (localPubV && localVideoRef.current) localPubV.videoTrack?.attach(localVideoRef.current);
-  }, [room]);
-
+  // Publish data controls
   const publishControl = async (type: string, value: boolean | string) => {
     if (!room) return;
     try {
@@ -385,109 +673,156 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   };
 
   const wireRoomEvents = (r: Room) => {
-    r.on(RoomEvent.TrackSubscribed, attach)
-     .on(RoomEvent.TrackUnsubscribed, attach)
-     .on(RoomEvent.LocalTrackPublished, attach)
-     .on(RoomEvent.ParticipantConnected, attach)
-     .on(RoomEvent.ParticipantDisconnected, attach)
-     .on(RoomEvent.ConnectionStateChanged, () => setState(r.state as any))
-     .on(RoomEvent.ConnectionQualityChanged, (_p, q) => setQuality(q))
-     .on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
-       const someoneRemoteSpeaking = speakers.some(p => p.sid !== r.localParticipant.sid);
-       setRemoteSpeaking(someoneRemoteSpeaking);
-     })
-     .on(RoomEvent.DataReceived, (payload, _p, _kind, topic) => {
-       try {
-         const text = new TextDecoder().decode(payload);
-         const data = JSON.parse(text);
+    r.on(RoomEvent.ConnectionStateChanged, () => setState(r.state as any))
+      .on(RoomEvent.ConnectionQualityChanged, (_p, q) => setQuality(q))
+      .on(RoomEvent.DataReceived, (payload, _p, _kind, topic) => {
+        try {
+          const text = new TextDecoder().decode(payload);
+          const data = JSON.parse(text);
 
-         if (topic === 'vitals') {
-           const v = normalizeVitals(data);
-           setVitals(v);
-           return;
-         }
+          if (topic === 'vitals') {
+            const v = normalizeVitals(data);
+            setVitals(v);
+            return;
+          }
 
-         if (topic === 'chat') {
-           if (data?.type === 'typing') {
-             setTypingNote('Patient is typing…');
-             if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
-             typingTimerRef.current = window.setTimeout(() => setTypingNote(null), 3000);
-             return;
-           }
-           if (typeof data?.text === 'string') {
-             setChat(c => [...c, { from: data.from || 'remote', text: data.text }]);
-             const atBottom = chatBoxRef.current
-               ? chatBoxRef.current.scrollHeight - chatBoxRef.current.scrollTop - chatBoxRef.current.clientHeight < 8
-               : true;
-             if (!chatVisible || !atBottom) setUnread(u => u + 1);
-             return;
-           }
-         }
+          if (topic === 'chat') {
+            if (data?.type === 'typing') {
+              setTypingNote('Patient is typing…');
+              if (typingTimerRef.current && typeof window !== 'undefined') window.clearTimeout(typingTimerRef.current);
+              if (typeof window !== 'undefined') {
+                typingTimerRef.current = window.setTimeout(() => setTypingNote(null), 3000);
+              }
+              return;
+            }
+            if (typeof data?.text === 'string') {
+              setChat((c) => [...c, { from: data.from || 'remote', text: data.text }]);
+              const atBottom = chatBoxRef.current
+                ? chatBoxRef.current.scrollHeight - chatBoxRef.current.scrollTop - chatBoxRef.current.clientHeight < 8
+                : true;
+              if (!chatVisible || !atBottom) setUnread((u) => u + 1);
+              return;
+            }
+          }
 
-         if (topic === 'control') {
-           const v = data?.value;
-           if (data?.type === 'overlay') { setShowOverlay(!!v); pushToast(`Patient ${v ? 'enabled' : 'disabled'} overlay.`, 'info'); }
-           if (data?.type === 'captions') { setCaptionsOn(!!v); pushToast(`Patient ${v ? 'enabled' : 'disabled'} captions.`, 'info'); }
-           if (data?.type === 'vitals') { setShowVitals(!!v); pushToast(`Patient ${v ? 'showed' : 'hid'} vitals.`, 'info'); }
-           if (data?.type === 'vitalsOverlay') { setShowVitalsOverlay(!!v); pushToast(`Patient ${v ? 'enabled' : 'disabled'} stream vitals overlay.`, 'info'); }
-           if (data?.type === 'recording') { setIsRecording(!!v); pushToast(`Patient ${v ? 'started' : 'stopped'} recording.`, v ? 'warning' : 'info'); }
-           if (data?.type === 'xr') { setXrEnabled(!!v); pushToast(`Patient ${v ? 'enabled' : 'disabled'} XR broadcast.`, 'info'); }
-           if (data?.type === 'screenshare') { pushToast(`Patient ${v ? 'started' : 'stopped'} screen sharing.`, 'info'); }
-           if (data?.type === 'hand') {
-             if (handTimerRef.current) window.clearTimeout(handTimerRef.current);
-             setHandRaised(!!v);
-             if (v) {
-               pushToast('Patient raised their hand.', 'info');
-               handTimerRef.current = window.setTimeout(() => setHandRaised(false), 5000);
-             } else {
-               pushToast('Patient lowered their hand.', 'info');
-             }
-           }
-           if (data?.type === 'export' && typeof v === 'string') {
-             pushToast(`Patient exported ${v}.`, 'success');
-           }
-         }
-       } catch (err) {
-         console.warn('[DataReceived] parse error:', err);
-       }
-     });
+          if (topic === 'control') {
+            const v = data?.value;
+            if (data?.type === 'overlay') {
+              setShowOverlay(!!v);
+              pushToast(`Patient ${v ? 'enabled' : 'disabled'} overlay.`, 'info');
+            }
+            if (data?.type === 'captions') {
+              setCaptionsOn(!!v);
+              pushToast(`Patient ${v ? 'enabled' : 'disabled'} captions.`, 'info');
+            }
+            if (data?.type === 'vitals') {
+              setShowVitals(!!v);
+              pushToast(`Patient ${v ? 'showed' : 'hid'} vitals.`, 'info');
+            }
+            if (data?.type === 'vitalsOverlay') {
+              setShowVitalsOverlay(!!v);
+              pushToast(`Patient ${v ? 'enabled' : 'disabled'} stream vitals overlay.`, 'info');
+            }
+            if (data?.type === 'recording') {
+              setIsRecording(!!v);
+              pushToast(`Patient ${v ? 'started' : 'stopped'} recording.`, v ? 'warning' : 'info');
+            }
+            if (data?.type === 'xr') {
+              setXrEnabled(!!v);
+              pushToast(`Patient ${v ? 'enabled' : 'disabled'} XR broadcast.`, 'info');
+            }
+            if (data?.type === 'screenshare') {
+              pushToast(`Patient ${v ? 'started' : 'stopped'} screen sharing.`, 'info');
+            }
+            if (data?.type === 'hand') {
+              if (handTimerRef.current && typeof window !== 'undefined') window.clearTimeout(handTimerRef.current);
+              setHandRaised(!!v);
+              if (v) {
+                pushToast('Patient raised their hand.', 'info');
+                if (typeof window !== 'undefined') {
+                  handTimerRef.current = window.setTimeout(() => setHandRaised(false), 5000);
+                }
+              } else {
+                pushToast('Patient lowered their hand.', 'info');
+              }
+            }
+            if (data?.type === 'export' && typeof v === 'string') {
+              pushToast(`Patient exported ${v}.`, 'success');
+            }
+          }
+        } catch (err) {
+          console.warn('[DataReceived] parse error:', err);
+        }
+      });
   };
 
   // Join/leave
   const join = async () => {
     if (!wsUrl) return pushToast('Missing NEXT_PUBLIC_LIVEKIT_URL', 'error');
-    if (state !== 'disconnected') return;
-    setState('connecting');
-    try {
-      const token = await fetch('/api/rtc/token', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ roomId, identity, room: roomId, user: identity }),
-      }).then(r => {
-        if (!r.ok) throw new Error(`token fetch HTTP ${r.status}`);
-        return r.json();
-      }).then(j => j.token as string);
+    if (state === 'connecting' || state === 'connected') return;
 
-      const r = await connectRoom(wsUrl, token, { autoSubscribe: true });
+    manualLeaveRef.current = false;
+    setState('connecting');
+
+    try {
+      const uid = getOrCreateUid('ambulant_uid');
+      const visitId =
+        searchParams.get('visitId') || searchParams.get('visit') || searchParams.get('v') || roomId;
+
+      // allow query token, else sessionStorage
+      const direct = searchParams.get('joinToken') || searchParams.get('jt') || '';
+      const joinToken = (direct || readJoinJwtFromSession(visitId, roomId)).trim();
+
+      if (!joinToken) {
+        setState('disconnected');
+        pushToast('Missing join token (open via Televisit Join so it stores sessionStorage).', 'error');
+        return;
+      }
+
+      const rtc = await mintRtcToken({
+        roomId,
+        visitId,
+        uid,
+        role: 'clinician',
+        joinToken,
+        identity: uid,
+        name: uid,
+      });
+
+      const livekitUrl = (rtc as any)?.wsUrl || wsUrl;
+      const token = rtc.token;
+
+      const r = await connectRoom(livekitUrl, token, { autoSubscribe: true });
       wireRoomEvents(r);
       setRoom(r);
       setState('connected');
+
       await r.localParticipant.setMicrophoneEnabled(true);
       await r.localParticipant.setCameraEnabled(true);
+
       setMicOn(true);
       setCamOn(true);
       setQuality(r.localParticipant.connectionQuality);
-      attach();
+
+      hasEverConnectedRef.current = true;
       pushToast('Connected to room.', 'success');
+      audit('room.join', { netQuality: r.localParticipant.connectionQuality });
     } catch (err: any) {
       console.error('[Join] error', err);
       setState('disconnected');
       pushToast(`Failed to join room: ${err?.message || err}`, 'error');
+      audit('room.join.error', { message: err?.message || String(err) });
     }
   };
 
   const leave = async () => {
-    try { await room?.disconnect(); } catch {}
+    manualLeaveRef.current = true;
+    audit('room.leave', { reason: 'manual' });
+    try {
+      await room?.disconnect();
+    } catch {
+      // ignore
+    }
     setRoom(null);
     setState('disconnected');
     setMicOn(false);
@@ -502,13 +837,28 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   ) => {
     setter(next);
     publishControl(key, next);
+
     const label =
-      key === 'overlay' ? 'overlay' :
-      key === 'captions' ? 'captions' :
-      key === 'vitals' ? 'vitals' :
-      key === 'vitalsOverlay' ? 'vitals stream overlay' :
-      key === 'recording' ? 'recording' : 'XR broadcast';
-    pushToast(`${next ? 'Enabled' : 'Disabled'} ${label}.`, key === 'recording' ? (next ? 'warning' : 'info') : 'info');
+      key === 'overlay'
+        ? 'overlay'
+        : key === 'captions'
+        ? 'captions'
+        : key === 'vitals'
+        ? 'vitals'
+        : key === 'vitalsOverlay'
+        ? 'vitals stream overlay'
+        : key === 'recording'
+        ? 'recording'
+        : 'XR broadcast';
+
+    pushToast(
+      `${next ? 'Enabled' : 'Disabled'} ${label}.`,
+      key === 'recording' ? (next ? 'warning' : 'info') : 'info'
+    );
+
+    if (key === 'recording') {
+      audit(next ? 'recording.start' : 'recording.stop');
+    }
   };
 
   const sendMsg = async () => {
@@ -521,11 +871,9 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         DataPacket_Kind.RELIABLE,
         'chat'
       );
-      setChat(c => [...c, { from: 'me', text }]);
+      setChat((c) => [...c, { from: 'me', text }]);
       setMsg('');
-      if (chatBoxRef.current) {
-        chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
-      }
+      if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
     } catch (e) {
       console.warn('chat publish error', e);
       pushToast('Failed to send message.', 'error');
@@ -541,7 +889,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       return;
     }
     const now = Date.now();
-    if (now - typingThrottledRef.current > 1000) {
+    if (now - typingThrottledRef.current > 1200) {
       typingThrottledRef.current = now;
       publishControl('typing', true);
     }
@@ -549,18 +897,29 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   const enterPresentation = async () => {
     setUi('presentation', true);
+    setVideoDockMode('docked');
+    setVideoDockSide('center');
+
     if (videoCardRef.current && !document.fullscreenElement) {
-      try { await (videoCardRef.current as any).requestFullscreen?.(); } catch {}
+      try {
+        await (videoCardRef.current as any).requestFullscreen?.();
+      } catch {
+        // ignore
+      }
     }
   };
   const exitPresentation = async () => {
     setUi('presentation', false);
     if (document.fullscreenElement) {
-      try { await document.exitFullscreen(); } catch {}
+      try {
+        await document.exitFullscreen();
+      } catch {
+        // ignore
+      }
     }
   };
 
-  // Mic/cam toggles (with a11y)
+  // Mic/cam toggles
   const toggleMic = () => {
     const next = !micOn;
     setMicOn(next);
@@ -571,128 +930,64 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     const next = !camOn;
     setCamOn(next);
     room?.localParticipant.setCameraEnabled(next).catch(() => {});
-    attach();
     pushToast(next ? 'Camera on.' : 'Camera off.', 'info');
   };
 
-  // Draggable video + LOCK
-  const [videoFloating, setVideoFloating] = useState(false);
-  const [videoFloatLocked, setVideoFloatLocked] = useState(true);
-  const [videoPos, setVideoPos] = useState<{ xPct: number; yPct: number }>({ xPct: 10, yPct: 10 });
-  const draggingRef = useRef<{ active: boolean; dx: number; dy: number } | null>(null);
+  // =========================
+  // Layout grid calc (supports dock-left and undocked)
+  // =========================
+  const videoIsDocked = videoDockMode === 'docked' || presentation;
+  const videoIsUndocked = !presentation && videoDockMode === 'undocked';
+  const dockToLeft = videoIsDocked && videoDockSide === 'left' && !presentation;
 
-  const toggleFloatLock = () => {
-    if (draggingRef.current) draggingRef.current.active = false;
-    setVideoFloatLocked(prev => {
-      const next = !prev;
-      if (next) setVideoFloating(false);
-      else setVideoFloating(true);
-      return next;
-    });
-  };
+  const showLeftInfo = !presentation && !leftCollapsed;
+  const showRightPane = !presentation && !rightCollapsed;
 
-  const startDragVideo = (clientX: number, clientY: number) => {
-    if (videoFloatLocked) return;
-    setVideoFloating(true);
-    draggingRef.current = { active: true, dx: clientX, dy: clientY };
-  };
-  const moveDragVideo = (clientX: number, clientY: number) => {
-    if (!draggingRef.current?.active || videoFloatLocked) return;
-    const vw = Math.max(document.documentElement.clientWidth, window.innerWidth || 0);
-    const vh = Math.max(document.documentElement.clientHeight, window.innerHeight || 0);
-    const w = Math.min(vw, 960);
-    const h = (w * 9) / 16;
-    const x = ((clientX - w * 0.5) / vw) * 100;
-    const y = ((clientY - h * 0.5) / vh) * 100;
-    const clamp = (v: number, min: number, max: number) => Math.max(min, Math.min(max, v));
-    setVideoPos({ xPct: clamp(x, 0, 100), yPct: clamp(y, 0, 100) });
-  };
-  const endDragVideo = () => { if (draggingRef.current) draggingRef.current.active = false; };
+  // If dock-left, we keep a left column even when leftCollapsed (video column still exists).
+  const showLeftColumn = !presentation && (showLeftInfo || dockToLeft);
 
-  useEffect(() => {
-    const up = () => endDragVideo();
-    const leave = () => endDragVideo();
-    window.addEventListener('mouseup', up);
-    window.addEventListener('touchend', up);
-    window.addEventListener('mouseleave', leave);
-    return () => {
-      window.removeEventListener('mouseup', up);
-      window.removeEventListener('touchend', up);
-      window.removeEventListener('mouseleave', leave);
-    };
-  }, []);
-
-  // Touch hover helper for video controls/padlock
-  const [showVControls, setShowVControls] = useState(false);
-  const touchTimerRef = useRef<number | null>(null);
-  const touchKick = () => {
-    setShowVControls(true);
-    if (touchTimerRef.current) window.clearTimeout(touchTimerRef.current);
-    touchTimerRef.current = window.setTimeout(() => setShowVControls(false), 2500);
-  };
-  const hoverOpacity = showVControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
-
-  // Deferred mount helper
-  function useDeferredMount<T extends HTMLElement>(onceInView = true) {
-    const ref = useRef<T | null>(null);
-    const [mounted, setMounted] = useState(false);
-    useEffect(() => {
-      if (!ref.current) return;
-      const el = ref.current;
-      const io = new IntersectionObserver(([e]) => {
-        if (e.isIntersecting) {
-          setMounted(true);
-          if (onceInView) io.disconnect();
-        }
-      }, { rootMargin: '200px' });
-      io.observe(el);
-      return () => io.disconnect();
-    }, [onceInView]);
-    return { ref, mounted } as const;
-  }
-  const vitalsGraphHolder = useDeferredMount<HTMLDivElement>();
-
-  // Layout grid calc
+  // Column template
   const gridCols = presentation
     ? 'grid-cols-1'
-    : leftCollapsed && rightCollapsed
-      ? 'grid-cols-1'
-      : leftCollapsed
-        ? 'lg:grid-cols-[2fr_1.2fr]'
-        : rightCollapsed
-          ? 'lg:grid-cols-[1.2fr_2fr]'
-          : 'lg:grid-cols-[1.2fr_2fr_1.2fr]';
+    : showLeftColumn && showRightPane
+    ? dockToLeft
+      ? // left(video+optional info), main(workspaces), right(notes)
+        'lg:grid-cols-[1.05fr_2.15fr_1.2fr]'
+      : // original-ish
+        'lg:grid-cols-[1.2fr_2fr_1.2fr]'
+    : showLeftColumn && !showRightPane
+    ? dockToLeft
+      ? // left(video), main(workspaces) -> maximize workspace
+        'lg:grid-cols-[1.0fr_3.0fr]'
+      : // left(info), main(video+workspaces)
+      videoNarrow
+      ? 'lg:grid-cols-[0.9fr_2.6fr]'
+      : 'lg:grid-cols-[1.2fr_2fr]'
+    : !showLeftColumn && showRightPane
+    ? // main + right
+      videoNarrow
+      ? 'lg:grid-cols-[2.6fr_0.9fr]'
+      : 'lg:grid-cols-[2fr_1.2fr]'
+    : 'grid-cols-1';
 
-  // Autocomplete wiring (Symptoms for Sub card; Dx moved to conclusions)
-  const icdSympAuto = useAutocomplete<ICD10Hit>(icdSearch);
-  const [sympCode, setSympCode] = useState<string>('');
-  const icdSympOptions = icdSympAuto.opts.map(h => ({ code: h.code, text: `${h.code} — ${h.title}` }));
-
-  const icdSympOptionsFinal = icdSympOptions.length
-    ? icdSympOptions
-    : ICD10_SUGGESTIONS.map((t, i) => ({ code: t.split(' ')[0] || `SUG-${i}`, text: t }));
-
-  const rxAuto = useAutocomplete<RxNormHit>(rxnormSearch);
-  const rxOptionsFinal: { name: string; rxcui?: string }[] =
-    rxAuto.opts.length ? (rxAuto.opts as RxNormHit[]) : DRUG_SUGGESTIONS.map((name) => ({ name }));
-
-  // -------- Current Meds list (read-only) ----------
-  const currentMedsList = useMemo(
-    () => (currentMeds || '')
-      .split('\n')
-      .map(s => s.trim())
-      .filter(Boolean),
-    [currentMeds]
-  );
-
-  // Poor network → toast (once per transition into Poor)
-  const prevQualityRef = useRef<ConnectionQuality | undefined>(undefined);
+  // Auto-reconnect on unexpected drop
   useEffect(() => {
-    if (quality === ConnectionQuality.Poor && prevQualityRef.current !== ConnectionQuality.Poor) {
-      pushToast('Network quality is poor. Video/audio may be degraded.', 'warning', 'Poor Network');
-    }
-    prevQualityRef.current = quality;
-  }, [quality, pushToast]);
+    if (typeof window === 'undefined') return;
+    if (state !== 'disconnected') return;
+    if (!hasEverConnectedRef.current) return;
+    if (manualLeaveRef.current) return;
+
+    if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+    reconnectTimerRef.current = window.setTimeout(() => {
+      setState('reconnecting');
+      join();
+    }, 5000);
+
+    return () => {
+      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
 
   // Keyboard shortcuts + help modal
   const [helpOpen, setHelpOpen] = useState(false);
@@ -700,30 +995,269 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
       const isTyping = tag === 'input' || tag === 'textarea';
+
+      if (e.key === 'Escape') {
+        if (helpOpen) {
+          setHelpOpen(false);
+          e.preventDefault();
+        }
+        return;
+      }
+
       if (!e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.key === '?' || (e.shiftKey && e.key === '/')) {
-          setHelpOpen(v => !v);
+          setHelpOpen((v) => !v);
           e.preventDefault();
           return;
         }
         if (isTyping) return;
         const lower = e.key.toLowerCase();
-        if (lower === 'm') { toggleMic(); e.preventDefault(); }
-        if (lower === 'v') { toggleCam(); e.preventDefault(); }
-        if (lower === 'c') { toggleAndBroadcast('captions', !captionsOn, setCaptionsOn); e.preventDefault(); }
-        if (lower === 'o') { toggleAndBroadcast('overlay', !showOverlay, setShowOverlay); e.preventDefault(); }
-        if (lower === 'h') { toggleAndBroadcast('vitals', !showVitals, setShowVitals); e.preventDefault(); }
-        if (lower === 's') { toggleAndBroadcast('vitalsOverlay', !showVitalsOverlay, setShowVitalsOverlay); e.preventDefault(); }
-        if (lower === 'r') { toggleAndBroadcast('recording', !isRecording, setIsRecording); e.preventDefault(); }
-        if (lower === 'x') { toggleAndBroadcast('xr', !xrEnabled, setXrEnabled); e.preventDefault(); }
-        if (lower === 'f') { (presentation ? exitPresentation() : enterPresentation()); e.preventDefault(); }
-        if (lower === 'l') { setUi('leftCollapsed', !leftCollapsed); e.preventDefault(); }
-        if (lower === 'k') { setUi('rightCollapsed', !rightCollapsed); e.preventDefault(); }
+        if (lower === 'm') {
+          toggleMic();
+          e.preventDefault();
+        }
+        if (lower === 'v') {
+          toggleCam();
+          e.preventDefault();
+        }
+        if (lower === 'c') {
+          toggleAndBroadcast('captions', !captionsOn, setCaptionsOn);
+          e.preventDefault();
+        }
+        if (lower === 'o') {
+          toggleAndBroadcast('overlay', !showOverlay, setShowOverlay);
+          e.preventDefault();
+        }
+        if (lower === 'h') {
+          toggleAndBroadcast('vitals', !showVitals, setShowVitals);
+          e.preventDefault();
+        }
+        if (lower === 's') {
+          toggleAndBroadcast('vitalsOverlay', !showVitalsOverlay, setShowVitalsOverlay);
+          e.preventDefault();
+        }
+        if (lower === 'r') {
+          toggleAndBroadcast('recording', !isRecording, setIsRecording);
+          e.preventDefault();
+        }
+        if (lower === 'x') {
+          toggleAndBroadcast('xr', !xrEnabled, setXrEnabled);
+          e.preventDefault();
+        }
+        if (lower === 'f') {
+          presentation ? exitPresentation() : enterPresentation();
+          e.preventDefault();
+        }
+        if (lower === 'l') {
+          setUi('leftCollapsed', !leftCollapsed);
+          e.preventDefault();
+        }
+        if (lower === 'k') {
+          setUi('rightCollapsed', !rightCollapsed);
+          e.preventDefault();
+        }
       }
     };
+    if (typeof window === 'undefined') return;
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [captionsOn, showOverlay, showVitals, showVitalsOverlay, isRecording, xrEnabled, presentation, leftCollapsed, rightCollapsed]);
+  }, [
+    captionsOn,
+    showOverlay,
+    showVitals,
+    showVitalsOverlay,
+    isRecording,
+    xrEnabled,
+    presentation,
+    leftCollapsed,
+    rightCollapsed,
+    helpOpen,
+    setUi,
+  ]);
+
+  // =========================
+  // Helpers for allergies (refresh / export / status / create)
+  // =========================
+
+  const handleRefreshAllergies = async () => {
+    try {
+      await refreshAllergies();
+      pushToast('Allergies refreshed.', 'success');
+    } catch {
+      pushToast('Failed to refresh allergies.', 'error');
+    }
+  };
+
+  const handleExportAllergies = () => {
+    publishControl('export', 'allergies');
+    pushToast('Allergies exported (demo).', 'success');
+  };
+
+  const handleMarkAllergyStatus = async (id: string, status: 'Active' | 'Resolved') => {
+    try {
+      const res = await fetch(`/api/allergies/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const updated = await res.json().catch(() => null);
+      setPatientAllergies((prev) =>
+        (prev || []).map((a) =>
+          a.id === id
+            ? {
+                ...a,
+                status: updated?.status ?? status,
+                severity: updated?.severity ?? a.severity,
+                reaction: updated?.reaction ?? a.reaction,
+              }
+            : a
+        )
+      );
+      pushToast(`Allergy marked ${status.toLowerCase()}.`, 'success');
+    } catch (err) {
+      console.error('[handleMarkAllergyStatus] failed', err);
+      pushToast('Failed to update allergy status.', 'error');
+    }
+  };
+
+  const handleCreateAllergy = async (draft: NewAllergyDraft) => {
+    try {
+      const payload = {
+        patientId: profile.id,
+        substance: draft.substance.trim(),
+        reaction: draft.reaction.trim() || null,
+        severity: draft.severity,
+        status: draft.status || 'Active',
+      };
+
+      const res = await fetch('/api/allergies', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const created = await res.json().catch(() => null);
+
+      const newBrief: PatientAllergyBrief = {
+        id: String(created?.id ?? created?.allergyId ?? `alg-${Date.now()}`),
+        substance: created?.substance ?? payload.substance,
+        reaction: created?.reaction ?? payload.reaction,
+        severity: created?.severity ?? payload.severity,
+        criticality: created?.criticality ?? null,
+        status: created?.status ?? payload.status,
+        recordedAt: created?.recordedAt ?? new Date().toISOString(),
+      };
+
+      setPatientAllergies((prev) => [...(prev || []), newBrief]);
+      pushToast('Allergy added.', 'success');
+    } catch (err) {
+      console.error('[handleCreateAllergy] failed', err);
+      pushToast('Failed to add allergy.', 'error');
+      throw err;
+    }
+  };
+
+  // -------------------------
+  // Encounter summary (used in referral email/SMS)
+  // -------------------------
+  const encounterSummary = useMemo(() => {
+    const lines: string[] = [];
+    lines.push(`Reason for visit: ${appt.reason || '—'}`);
+    if (soap.s) lines.push(`Subjective / Symptoms:\n${soap.s}`);
+    if (soap.a) lines.push(`Assessment:\n${soap.a}`);
+    if (soap.p) lines.push(`Plan / Treatment:\n${soap.p}`);
+    if (patientEducation) lines.push(`Patient Education:\n${patientEducation}`);
+
+    const medsOrdered = erxSummary.meds;
+    if (medsOrdered.length) {
+      lines.push(
+        'Medications prescribed:\n' +
+          medsOrdered
+            .map((r) => {
+              const parts = [r.drug, r.dose, r.route, r.freq, r.duration].filter(Boolean).join(' · ');
+              return `• ${parts}`;
+            })
+            .join('\n')
+      );
+    }
+
+    const labsOrdered = erxSummary.labs;
+    if (labsOrdered.length) {
+      lines.push(
+        'Lab tests ordered:\n' +
+          labsOrdered
+            .map((l) => {
+              const parts = [l.test, l.priority, l.specimen, l.icd].filter(Boolean).join(' · ');
+              return `• ${parts}`;
+            })
+            .join('\n')
+      );
+    }
+
+    if (patientAllergies && patientAllergies.length) {
+      const algs = patientAllergies
+        .filter((a) => (a.status ?? '').toLowerCase() !== 'entered-in-error')
+        .map((a) => {
+          const sev = a.severity ? ` [${a.severity}]` : '';
+          const rxn = a.reaction ? ` — ${a.reaction}` : '';
+          return `• ${a.substance}${sev}${rxn}`;
+        });
+      lines.push('Recorded allergies:\n' + algs.join('\n'));
+    }
+
+    return lines.join('\n\n');
+  }, [appt.reason, soap.s, soap.a, soap.p, patientEducation, erxSummary, patientAllergies]);
+
+  // -------------------------
+  // End Session -> callback from SessionConclusions
+  // -------------------------
+  const handleSessionEnd = useCallback(() => {
+    if (!encounterId) {
+      pushToast(
+        'Session ended. Draft kept locally, but no encounterId was provided so the server was not updated.',
+        'info',
+        'Session ended'
+      );
+      audit('encounter.end.local-only', {});
+      return;
+    }
+
+    pushToast('Session ended and encounter marked complete.', 'success', 'Encounter closed');
+    audit('encounter.end', { encounterId });
+  }, [encounterId, audit, pushToast]);
+
+  // =========================
+  // Render helpers
+  // =========================
+  const VideoDockNode = (
+    <VideoDock
+      room={room}
+      vitals={vitals}
+      dense={dense}
+      presentation={presentation}
+      patientName={profile.name}
+      micOn={micOn}
+      camOn={camOn}
+      showOverlay={showOverlay}
+      showVitals={showVitals}
+      showVitalsOverlay={showVitalsOverlay}
+      captionsOn={captionsOn}
+      isRecording={isRecording}
+      xrEnabled={xrEnabled}
+      pip={pip}
+      onToggleMic={toggleMic}
+      onToggleCam={toggleCam}
+      onToggleOverlay={(next) => toggleAndBroadcast('overlay', next, setShowOverlay)}
+      onToggleVitals={(next) => toggleAndBroadcast('vitals', next, setShowVitals)}
+      onToggleVitalsOverlay={(next) => toggleAndBroadcast('vitalsOverlay', next, setShowVitalsOverlay)}
+      onToggleCaptions={(next) => toggleAndBroadcast('captions', next, setCaptionsOn)}
+      onToggleRecording={(next) => toggleAndBroadcast('recording', next, setIsRecording)}
+      onToggleXr={(next) => toggleAndBroadcast('xr', next, setXrEnabled)}
+      onEnterPresentation={enterPresentation}
+      onExitPresentation={exitPresentation}
+    />
+  );
 
   // =========================
   // Render
@@ -739,13 +1273,74 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         <div className="flex items-center gap-2">
           {/* Status / QoS pills */}
           <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border">
-            <span className={`h-2 w-2 rounded-full ${state==='connected'?'bg-emerald-500':state==='connecting'?'bg-amber-500':'bg-slate-400'}`} />
+            <span
+              className={`h-2 w-2 rounded-full ${
+                state === 'connected'
+                  ? 'bg-emerald-500'
+                  : state === 'connecting'
+                  ? 'bg-amber-500'
+                  : 'bg-slate-400'
+              }`}
+            />
             {state}
           </span>
+
           {quality !== undefined && (
-            <span className={`text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${quality===ConnectionQuality.Poor?'border-amber-300 bg-amber-50 text-amber-800':'border-gray-200 bg-white text-gray-700'}`}>
+            <span
+              className={`text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${
+                quality === ConnectionQuality.Poor
+                  ? 'border-amber-300 bg-amber-50 text-amber-800'
+                  : 'border-gray-200 bg-white text-gray-700'
+              }`}
+            >
               Net: {ConnectionQuality[quality]}
             </span>
+          )}
+
+          {/* Video dock controls */}
+          {!presentation && (
+            <>
+              {videoIsUndocked ? (
+                <>
+                  <button
+                    onClick={dockCenter}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+                    title="Dock video (center)"
+                  >
+                    <Icon name="collapse" />
+                    Dock
+                  </button>
+                  <button
+                    onClick={dockLeft}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+                    title="Dock video to left column"
+                  >
+                    <Icon name="collapse" />
+                    Dock Left
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button
+                    onClick={undockVideo}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+                    title="Undock video (floating)"
+                  >
+                    <Icon name="expand" />
+                    Undock
+                  </button>
+
+                  <button
+                    onClick={() => (videoDockSide === 'left' ? dockCenter() : dockLeft())}
+                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+                    title={videoDockSide === 'left' ? 'Dock video to center column' : 'Dock video to left column'}
+                  >
+                    <Icon name={videoDockSide === 'left' ? 'expand' : 'collapse'} />
+                    {videoDockSide === 'left' ? 'Dock Center' : 'Dock Left'}
+                  </button>
+                </>
+              )}
+            </>
           )}
 
           <button
@@ -767,6 +1362,18 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
             title="Toggle density"
           >
             {dense ? 'Comfort' : 'Compact'}
+          </button>
+
+          {/* Wider notes / narrow video toggle */}
+          <button
+            onClick={() => setVideoNarrow((v) => !v)}
+            aria-pressed={videoNarrow}
+            aria-label={videoNarrow ? 'Use normal layout' : 'Narrow side column(s)'}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+            title={videoNarrow ? 'Normal columns' : 'Wider center'}
+          >
+            <Icon name={videoNarrow ? 'collapse' : 'expand'} />
+            {videoNarrow ? 'Normal Layout' : 'Wider Center'}
           </button>
 
           <button
@@ -795,9 +1402,21 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
             Back
           </Link>
 
-          {state !== 'connected'
-            ? <button onClick={join} className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 shadow-sm hover:bg-blue-100 text-sm">Join</button>
-            : <button onClick={leave} className="px-3 py-1.5 rounded-full border border-red-200 bg-red-50 shadow-sm hover:bg-red-100 text-sm">Leave</button>}
+          {state !== 'connected' ? (
+            <button
+              onClick={join}
+              className="px-3 py-1.5 rounded-full border border-blue-200 bg-blue-50 shadow-sm hover:bg-blue-100 text-sm"
+            >
+              Join
+            </button>
+          ) : (
+            <button
+              onClick={leave}
+              className="px-3 py-1.5 rounded-full border border-red-200 bg-red-50 shadow-sm hover:bg-red-100 text-sm"
+            >
+              Leave
+            </button>
+          )}
         </div>
       </header>
 
@@ -810,147 +1429,244 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
       <RecordingBanner
         active={isRecording}
-        onDismiss={() => { setIsRecording(false); publishControl('recording', false); }}
+        onDismiss={() => {
+          setIsRecording(false);
+          publishControl('recording', false);
+        }}
       />
 
-      <div className={`transition-all duration-300 container mx-auto ${dense ? 'px-3 py-3' : 'px-4 py-6'} ${presentation ? 'max-w-[1400px]' : ''}`}>
+      <div
+        className={`transition-all duration-300 container mx-auto ${dense ? 'px-3 py-3' : 'px-4 py-6'} ${
+          presentation ? 'max-w-[1400px]' : ''
+        }`}
+      >
         <div className={`grid md:gap-6 gap-3 transition-[grid-template-columns] duration-300 ${gridCols}`}>
-
-          {/* LEFT */}
-          {!presentation && !leftCollapsed && (
+          {/* LEFT COLUMN */}
+          {!presentation && showLeftColumn && (
             <div className="flex flex-col space-y-4">
-              <Card
-                title="Session Information"
-                dense={dense}
-                gradient
-                toolbar={<CollapseBtn open={leftInfoOpen} onClick={() => setLeftInfoOpen(v => !v)} />}
-              >
-                <Collapse open={leftInfoOpen}>
-                  <Field label="Patient Name" value={appt.patientName} />
-                  <Field label="Patient ID" value={appt.patientId} />
-                  <Field label="Case Name" value={appt.reason} bold />
-                  <Field label="Session ID" value={<span className="font-mono">{appt.id}</span>} />
-                  <Field label="Session Date" value={new Date(appt.when).toLocaleString()} />
-                  <Field label="Clinician" value={appt.clinicianName} />
-                  <Field label="Status" value={appt.status} />
-                </Collapse>
-              </Card>
-
-              {showVitals && (
-                <Card title="Live Monitor (via SFU)" dense={dense} gradient toolbar={<CollapseBtn open={true} onClick={() => setShowVitals(v => !v)} />}>
-                  <Collapse open={true}>
-                    <div className={`grid grid-cols-2 ${dense ? 'gap-2' : 'gap-3'}`}>
-                      <Tile label="HR" value={`${num2(vitals.hr)} bpm`} />
-                      <Tile label="SpO₂" value={`${num2(vitals.spo2)} %`} />
-                      <Tile label="Temp" value={`${num2(vitals.tempC)} °C`} />
-                      <Tile label="RR" value={`${num2(vitals.rr)} /min`} />
-                      <Tile label="BP" value={fmtBP(vitals.sys, vitals.dia)} />
-                    </div>
-                  </Collapse>
-                </Card>
+              {/* If dock-left, video lives here (fixed column; never overlays content) */}
+              {!videoIsUndocked && dockToLeft && (
+                <div className="sticky top-4 z-20" ref={videoCardRef}>
+                  {VideoDockNode}
+                </div>
               )}
 
-              <Card title="Integrated IoMTs" dense={dense} gradient>
-                <IntegratedIoMTs roomId={roomId} patientId={appt.patientId} dense={dense} defaultOpen />
-              </Card>
+              {/* Left info content remains optional */}
+              {!presentation && !leftCollapsed && (
+                <>
+                  <Card
+                    title="Session Information"
+                    dense={dense}
+                    gradient
+                    toolbar={<CollapseBtn open={leftInfoOpen} onClick={() => setLeftInfoOpen((v) => !v)} />}
+                  >
+                    <Collapse open={leftInfoOpen}>
+                      {(patientProfileError || medsError || allergiesError) && (
+                        <div className="mb-2 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1 space-y-0.5">
+                          {patientProfileError && <div>{patientProfileError}</div>}
+                          {medsError && <div>{medsError}</div>}
+                          {allergiesError && <div>{allergiesError}</div>}
+                        </div>
+                      )}
 
-              <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen />
+                      <Field label="Patient Name" value={profile.name} />
+                      <Field label="Patient ID" value={profile.id} />
+                      {profile.mrn && <Field label="MRN" value={profile.mrn} />}
+
+                      <Field
+                        label="Demographics"
+                        value={
+                          [
+                            profile.dob ? `DOB: ${new Date(profile.dob).toLocaleDateString()}` : null,
+                            profile.gender ? `Sex: ${profile.gender}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || '—'
+                        }
+                      />
+
+                      <Field
+                        label="Allergies"
+                        value={
+                          !patientAllergies || patientAllergies.length === 0
+                            ? 'No allergies recorded'
+                            : `${allergySummary} · ${allergyCounts.total} total, ${allergyCounts.active} active, ${allergyCounts.resolved} resolved`
+                        }
+                      />
+
+                      <Field
+                        label="Active Medications"
+                        value={activeMeds.length ? `${activeMeds.length} active on file` : 'None recorded'}
+                      />
+
+                      <Field label="Case Name" value={appt.reason} bold />
+                      <Field label="Session ID" value={<span className="font-mono">{appt.id}</span>} />
+                      <Field label="Session Date" value={new Date(appt.when).toLocaleString()} />
+                      <Field label="Clinician" value={appt.clinicianName} />
+                      <Field label="Status" value={appt.status} />
+
+                      {(profile.phone || profile.email) && (
+                        <Field
+                          label="Contact"
+                          value={[
+                            profile.phone ? `Tel: ${profile.phone}` : null,
+                            profile.email ? `Email: ${profile.email}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')}
+                        />
+                      )}
+                    </Collapse>
+                  </Card>
+
+                  {showVitals && (
+                    <Card
+                      title="Live Monitor (via SFU)"
+                      dense={dense}
+                      gradient
+                      toolbar={<CollapseBtn open={true} onClick={() => setShowVitals((v) => !v)} />}
+                    >
+                      <Collapse open={true}>
+                        <div
+                          className={`grid grid-cols-2 ${dense ? 'gap-2' : 'gap-3'}`}
+                          role="group"
+                          aria-label="Live vital signs from connected devices"
+                        >
+                          <Tile label="HR" value={`${num2(vitals.hr)} bpm`} />
+                          <Tile label="SpO₂" value={`${num2(vitals.spo2)} %`} />
+                          <Tile label="Temp" value={`${num2(vitals.tempC)} °C`} />
+                          <Tile label="RR" value={`${num2(vitals.rr)} /min`} />
+                          <Tile label="BP" value={fmtBP(vitals.sys, vitals.dia)} />
+                        </div>
+                      </Collapse>
+                    </Card>
+                  )}
+
+                  <Card title="Integrated IoMTs" dense={dense} gradient>
+                    <IntegratedIoMTs roomId={roomId} patientId={profile.id} dense={dense} defaultOpen />
+                  </Card>
+
+                  <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen patientId={profile.id} />
+                </>
+              )}
             </div>
           )}
 
-          {/* CENTER (video docked here) */}
+          {/* MAIN COLUMN (Video in center if docked-center; Specialist Workspaces always here) */}
           <div className="flex flex-col space-y-4">
-            <div className="sticky top-4 z-20">
-              <Card title={`Consultation — ${appt.patientName}`} dense={dense} gradient>
-                <div
-                  ref={videoCardRef}
-                  onDoubleClick={() => (presentation ? exitPresentation() : enterPresentation())}
-                  className={`relative aspect-video w-full rounded-lg overflow-hidden bg-black ring-1 ring-gray-200 group ${presentation ? 'cursor-zoom-out' : 'cursor-default'}`}
-                >
-                  <video
-                    ref={remoteVideoRef}
-                    autoPlay
-                    playsInline
-                    className={`w-full h-full object-cover ring-1 ring-black/10 ${remoteSpeaking ? 'outline outline-4 outline-emerald-400 outline-offset-0 transition-[outline] duration-200' : ''}`}
-                  />
-                  <video
-                    ref={localVideoRef}
-                    autoPlay
-                    playsInline
-                    muted
-                    className="absolute rounded border border-white/80 shadow-lg object-cover w-40 h-28"
-                    style={{ left: `${pip.x}%`, top: `${pip.y}%` }}
-                    title="Local preview"
-                  />
-                  <audio ref={audioSinkRef} autoPlay />
+            {/* Docked-center video lives here (fixed split layout; never overlays content) */}
+            {!presentation && !videoIsUndocked && !dockToLeft && (
+              <div className="sticky top-4 z-20" ref={videoCardRef}>
+                {VideoDockNode}
+              </div>
+            )}
 
-                  {/* RESTORED: Controls bar */}
-                  <div
-                    className={`absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-white/85 backdrop-blur rounded-full px-2 py-2 shadow ${hoverOpacity} transition-opacity duration-200`}
-                  >
-                    <IconBtn onClick={toggleMic} aria-label={micOn ? 'Mute mic' : 'Unmute mic'} aria-pressed={micOn} role="switch" aria-checked={micOn}>
-                      <Icon name="mic" toggledName="mic-off" toggled={!micOn} />
-                    </IconBtn>
-                    <IconBtn onClick={toggleCam} aria-label={camOn ? 'Stop camera' : 'Start camera'} aria-pressed={camOn} role="switch" aria-checked={camOn}>
-                      <Icon name="video" toggledName="video-off" toggled={!camOn} />
-                    </IconBtn>
-                    <IconBtn title={showVitals ? 'Hide vitals' : 'Show vitals'} aria-pressed={showVitals} onClick={() => toggleAndBroadcast('vitals', !showVitals, setShowVitals)}>
-                      <Icon name="heart" />
-                    </IconBtn>
-                    <IconBtn title={captionsOn ? 'Disable captions' : 'Enable captions'} aria-pressed={captionsOn} onClick={() => toggleAndBroadcast('captions', !captionsOn, setCaptionsOn)}>
-                      <Icon name="cc" />
-                    </IconBtn>
-                    <IconBtn title={showOverlay ? 'Disable overlay' : 'Enable overlay'} aria-pressed={showOverlay} onClick={() => toggleAndBroadcast('overlay', !showOverlay, setShowOverlay)}>
-                      <Icon name="layers" />
-                    </IconBtn>
-                    <IconBtn
-                      title={showVitalsOverlay ? 'Hide vitals stream overlay' : 'Show vitals stream overlay'}
-                      aria-pressed={showVitalsOverlay}
-                      onClick={() => toggleAndBroadcast('vitalsOverlay', !showVitalsOverlay, setShowVitalsOverlay)}
-                    >
-                      <Icon name="vitals-overlay" />
-                    </IconBtn>
-                    <IconBtn title={isRecording ? 'Stop recording' : 'Start recording'} aria-pressed={isRecording} onClick={() => toggleAndBroadcast('recording', !isRecording, setIsRecording)}>
-                      <Icon name="rec" />
-                    </IconBtn>
-                    <IconBtn title={xrEnabled ? 'Disable XR broadcast' : 'Enable XR broadcast'} aria-pressed={xrEnabled} onClick={() => toggleAndBroadcast('xr', !xrEnabled, setXrEnabled)}>
-                      <Icon name="xr" />
-                    </IconBtn>
+            {/* Presentation always shows video in-flow */}
+            {presentation && (
+              <div className="sticky top-4 z-20" ref={videoCardRef}>
+                {VideoDockNode}
+              </div>
+            )}
+
+            {/* Specialist Workspaces pane */}
+            {!presentation && (
+              <Card
+                title="Specialist Workspaces"
+                dense={dense}
+                gradient
+                toolbar={<CollapseBtn open={specialistOpen} onClick={() => setSpecialistOpen((v) => !v)} />}
+              >
+                <Collapse open={specialistOpen}>
+                  <div className={dense ? 'p-2' : 'p-3'}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-xs text-gray-500">
+                          One SFU session, multiple specialty stations. Same patient + encounter context.
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-2">
+                          <span className="text-[11px] px-2 py-0.5 rounded-full border bg-white text-gray-700">
+                            Room: <span className="font-mono">{roomId}</span>
+                          </span>
+                          {encounterId ? (
+                            <span className="text-[11px] px-2 py-0.5 rounded-full border bg-white text-gray-700">
+                              Encounter: <span className="font-mono">{encounterId}</span>
+                            </span>
+                          ) : (
+                            <span className="text-[11px] px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800">
+                              No encounterId in URL (workspace may run in demo mode)
+                            </span>
+                          )}
+                          <span className="text-[11px] px-2 py-0.5 rounded-full border bg-white text-gray-700">
+                            Patient: <span className="font-medium">{profile.name}</span>
+                          </span>
+                          {videoIsUndocked && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-800">
+                              Video: Floating (undocked)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 flex items-center gap-2">
+                        <button
+                          type="button"
+                          className="text-xs px-2 py-1 rounded border bg-white hover:bg-gray-50"
+                          onClick={() => {
+                            pushToast(
+                              'Specialist workspaces are mounted inside this SFU session. Use the tabs to switch stations.',
+                              'info',
+                              'Specialist Workspaces'
+                            );
+                          }}
+                          title="What is this?"
+                        >
+                          Help
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="mt-3 rounded border bg-white shadow-sm">
+                      <div className="flex items-center justify-between p-1">
+                        <Tabs<SpecialistTab>
+                          active={specialistTab}
+                          onChange={(k) => setSpecialistTab(k)}
+                          items={[
+                            { key: 'dental', label: 'Dental' },
+                            { key: 'physio', label: 'Physio' },
+                            { key: 'xray', label: 'X-Ray' },
+                            { key: 'ent', label: 'ENT' },
+                            { key: 'optometry', label: 'Optometry' },
+                          ]}
+                        />
+                      </div>
+                      <div className={dense ? 'p-2' : 'p-3'}>
+                        {specialistTab === 'dental' && <DentalWorkspaceSFU />}
+                        {specialistTab === 'physio' && <PhysioWorkspaceSFU />}
+                        {specialistTab === 'xray' && <XrayWorkspaceSFU />}
+                        {specialistTab === 'ent' && <EntWorkspaceSFU />}
+                        {specialistTab === 'optometry' && <OptometryWorkspaceSFU />}
+                      </div>
+                    </div>
                   </div>
-
-                  {/* RESTORED: Transparent vitals stream overlay */}
-                  {showVitalsOverlay && <VitalsStreamOverlay vitals={vitals} />}
-
-                  {/* Badges */}
-                  <div className="absolute top-3 right-3 flex gap-1 drop-shadow-sm pointer-events-none">
-                    <Badge label="Vitals" active={showVitals} color="emerald" />
-                    <Badge label="Captions" active={captionsOn} color="indigo" />
-                    <Badge label="Overlay" active={showOverlay} color="sky" />
-                    <Badge label="Stream" active={showVitalsOverlay} color="emerald" />
-                    {isRecording && <Badge label="● Recording" active color="red" />}
-                    <Badge label="XR" active={xrEnabled} color="gray" />
-                  </div>
-                </div>
+                </Collapse>
               </Card>
-            </div>
+            )}
           </div>
 
-          {/* RIGHT */}
+          {/* RIGHT COLUMN */}
           {!presentation && !rightCollapsed && (
             <div className="flex flex-col space-y-4">
-              {/* Section title */}
               <div className="px-2">
                 <div className="text-sm font-semibold text-gray-800">SOAP, Insights, History</div>
               </div>
 
-              {/* Tabs (Sub, eRx, Conclusions, Insight, History) */}
               <div className="shadow-sm bg-white rounded">
                 <div className="flex items-center justify-between p-1">
                   <Tabs<RightTab>
                     active={rightTab}
-                    onChange={key => setUi('rightTab', key)}
+                    onChange={(key) => setUi('rightTab', key)}
                     items={[
-                      { key: 'soap', label: 'Sub' },            // renamed label only
+                      { key: 'soap', label: 'Sub' },
                       { key: 'erx', label: 'eRx' },
                       { key: 'conclusions', label: 'Conclusions' },
                       { key: 'insight', label: 'Insight' },
@@ -973,225 +1689,315 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                 <>
                   {rightTab === 'soap' && (
                     <Card title="Clerk Desk" dense={dense} gradient>
-                      <div className="text-xs text-gray-500 mb-2">Quickly capture symptoms, allergies, HPI and codes. Free text always allowed.</div>
-
-                      {/* Current Medication — read-only list */}
-                      <div className="mb-2">
-                        <div className="text-xs text-gray-500 mb-1">Current Medication</div>
-                        {currentMedsList.length === 0 ? (
-                          <div className="text-sm text-gray-600 italic">No medications recorded yet.</div>
-                        ) : (
-                          <ul className="list-disc pl-5 text-sm text-gray-800">
-                            {currentMedsList.map((m, i) => (<li key={`${m}-${i}`}>{m}</li>))}
-                          </ul>
-                        )}
+                      <div className="text-xs text-gray-500 mb-2">
+                        Quickly capture symptoms, allergies, HPI and codes. Free text always allowed.
                       </div>
 
-                      {/* Symptoms */}
-                      <div className="mt-2 space-y-1">
-                        <div className="text-xs text-gray-500">Symptoms (ICD-10 autocomplete; free text allowed)</div>
-                        <input
-                          list="icd10-suggest-symptoms"
-                          className="w-full border rounded px-2 py-1 text-sm"
-                          value={icdSympAuto.q || soap.s}
-                          onChange={(e) => {
-                            icdSympAuto.setQ(e.target.value);
-                            setSympCode('');
-                            setSoap(s => ({ ...s, s: e.target.value }));
-                          }}
-                          onFocus={(e) => { const v = e.currentTarget.value; if (v) icdSympAuto.setQ(v); }}
-                          onBlur={(e) => {
-                            const v = e.currentTarget.value.trim();
-                            const direct = v.split(' ')[0];
-                            if (direct) { setSympCode(direct); return; }
-                            const norm = v.toLowerCase();
-                            const opt = icdSympOptionsFinal.find(o =>
-                              o.text.toLowerCase().startsWith(norm) || o.code.toLowerCase() === norm
-                            );
-                            if (opt) setSympCode(opt.code);
-                          }}
-                          placeholder="Type to search ICD-10 (free text allowed)"
-                          aria-label="Symptoms"
-                          autoComplete="off"
-                          autoCorrect="off"
-                          autoCapitalize="off"
-                        />
-                        <datalist id="icd10-suggest-symptoms">
-                          {icdSympOptionsFinal.map(o => <option key={o.code} value={o.text} />)}
-                        </datalist>
-                        {sympCode && (
-                          <div className="text-[11px] text-gray-600">
-                            Selected code: <span className="font-mono">{sympCode}</span>
+                      {/* Current Medication */}
+                      <div className="mb-2 border rounded bg-white">
+                        <div className="flex items-center justify-between px-2 py-1">
+                          <div className="flex flex-col">
+                            <span className="text-xs font-medium text-gray-700">Current Medication</span>
+                            <span className="text-[11px] text-gray-500">From patient profile</span>
                           </div>
-                        )}
+                          <div className="flex items-center gap-2">
+                            {medsError && (
+                              <span className="text-[10px] text-amber-700 border border-amber-200 bg-amber-50 rounded-full px-2 py-0.5">
+                                Demo
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => setCurrentMedsOpen((v) => !v)}
+                              className="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100"
+                              aria-expanded={currentMedsOpen}
+                            >
+                              {currentMedsOpen ? 'Hide' : 'Show'}
+                              <Icon name={currentMedsOpen ? 'collapse' : 'expand'} />
+                            </button>
+                          </div>
+                        </div>
+                        <Collapse open={currentMedsOpen}>
+                          <div className="border-t px-3 py-2">
+                            {activeMeds.length > 0 ? (
+                              <ul className="list-disc pl-5 text-sm text-gray-800 space-y-0.5">
+                                {activeMeds.map((m) => (
+                                  <li key={m.id}>
+                                    <span className="font-medium">{m.name}</span>
+                                    {m.dose && <span className="text-gray-700"> · {m.dose}</span>}
+                                    {m.frequency && <span className="text-gray-700"> · {m.frequency}</span>}
+                                    {m.route && <span className="text-gray-500"> · {m.route}</span>}
+                                    {m.status && m.status.toLowerCase() !== 'active' && (
+                                      <span className="ml-1 text-[11px] text-gray-500">({m.status})</span>
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : currentMedsList.length === 0 ? (
+                              <div className="text-sm text-gray-600 italic">No medications recorded yet.</div>
+                            ) : (
+                              <ul className="list-disc pl-5 text-sm text-gray-800">
+                                {currentMedsList.map((m, i) => (
+                                  <li key={`${m}-${i}`}>{m}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                        </Collapse>
                       </div>
 
-                      <TextBlock label="Allergies" value={soap.o} onChange={v => setSoap({ ...soap, o: v })} />
-                      <TextBlock label="Presenting Complaints" value={soap.a} onChange={v => setSoap({ ...soap, a: v })} />
-                      <TextBlock label="History of Present Illness (HPI)" value={soap.p} onChange={v => setSoap({ ...soap, p: v })} multiline />
+                      {/* Allergies structured panel */}
+                      <div className="mt-2 border rounded bg-white">
+                        <div className="flex items-center justify-between px-2 py-1">
+                          <div className="text-xs font-medium text-gray-700">Allergies</div>
+                          <div className="flex items-center gap-2">
+                            {allergiesFromLive ? (
+                              <span className="text-[10px] text-emerald-700 border border-emerald-200 bg-emerald-50 rounded-full px-2 py-0.5">
+                                Live
+                              </span>
+                            ) : allergiesError ? (
+                              <span className="text-[10px] text-amber-700 border border-amber-200 bg-amber-50 rounded-full px-2 py-0.5">
+                                Demo
+                              </span>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => setAllergiesOpen((v) => !v)}
+                              className="text-[11px] inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-gray-200 bg-gray-50 hover:bg-gray-100"
+                              aria-expanded={allergiesOpen}
+                            >
+                              {allergiesOpen ? 'Hide' : 'Show'}
+                              <Icon name={allergiesOpen ? 'collapse' : 'expand'} />
+                            </button>
+                          </div>
+                        </div>
+                        <Collapse open={allergiesOpen}>
+                          <div className="border-t px-2 py-2">
+                            <AllergiesPanel
+                              allergies={patientAllergies || []}
+                              loading={allergiesLoading}
+                              error={allergiesError ?? undefined}
+                              onRefresh={handleRefreshAllergies}
+                              onExport={handleExportAllergies}
+                              onMarkStatus={handleMarkAllergyStatus}
+                              onCreate={handleCreateAllergy}
+                            />
+                          </div>
+                        </Collapse>
+                      </div>
 
-                      {/* NOTE: Diagnosis moved to SessionConclusions as requested */}
-
-                      <TextBlock label="Patient Education" value="" onChange={() => {}} multiline />
-                    </Card>
-                  )}
-
-                  {rightTab === 'erx' && (
-                    <Card
-                      title="eRx Composer"
-                      dense={dense}
-                      gradient
-                      toolbar={<button className="text-xs px-2 py-1 border rounded" onClick={sendErx}>Send eRx</button>}
-                    >
-                      <div className="text-xs text-gray-500 mb-2">Add one or more drugs and optional lab tests. We’ll package routing when you send eRx.</div>
-
-                      {/* Legacy datalists kept (safe no-op) */}
-                      <datalist id="drug-suggest">
-                        {DRUG_SUGGESTIONS.map(d => <option key={d} value={d} />)}
-                      </datalist>
-                      <datalist id="icd10-suggest">
-                        {ICD10_SUGGESTIONS.map(c => <option key={c} value={c} />)}
-                      </datalist>
-
-                      {/* RxNorm shared datalist */}
-                      <datalist id="rxnorm-suggest">
-                        {rxOptionsFinal.map((o, k) => (
-                          <option key={`${o.rxcui || k}-${o.name}`} value={o.name || ''} />
-                        ))}
-                      </datalist>
-
-                      {/* Pharmacy */}
-                      {rxRows.map((r, i) => (
-                        <div key={i} className="mt-2 space-y-2 border rounded p-2 bg-white">
+                      {/* Symptoms ICD-10 combobox */}
+                      <div className="mt-3 space-y-1">
+                        <div className="text-xs text-gray-500">Symptoms (ICD-10 autocomplete; free text allowed)</div>
+                        <div className="relative">
                           <input
-                            className="border rounded px-2 py-1 w-full"
-                            placeholder="Drug (start typing…)"
-                            list="rxnorm-suggest"
-                            value={r.drug}
-                            onFocus={(e) => {
-                              const v = e.currentTarget.value;
-                              if (v) rxAuto.setQ(v);
-                            }}
+                            className="w-full border rounded px-2 py-1 text-sm"
+                            role="combobox"
+                            aria-expanded={sympOpen}
+                            aria-controls="icd10-symptoms-listbox"
+                            aria-autocomplete="list"
+                            value={icdSympAuto.q || soap.s}
                             onChange={(e) => {
                               const v = e.target.value;
-                              rxAuto.setQ(v);
-                              setRxRows((x) => x.map((y, j) => j === i ? { ...y, drug: v } : y));
+                              icdSympAuto.setQ(v);
+                              setSympCode('');
+                              setSympOpen(true);
+                              setSympActive(-1);
+                              setSoap((s) => ({ ...s, s: v }));
                             }}
-                            onBlur={(e) => {
-                              const pickedName = normalize(e.currentTarget.value);
-                              if (!pickedName) return;
-                              const opts = (rxAuto.opts as RxNormHit[]) || [];
-                              const picked =
-                                opts.find(o => normalize(o.name || '').toLowerCase() === pickedName.toLowerCase()) ||
-                                opts.find(o => normalize(o.name || '').toLowerCase().startsWith(pickedName.toLowerCase()));
-                              if (picked?.rxcui) {
-                                setRxRows(x => x.map((y,j) => j===i ? { ...y, notes: y.notes || `RxCUI:${picked.rxcui}` } : y));
+                            onFocus={(e) => {
+                              const v = e.currentTarget.value;
+                              if (v) icdSympAuto.setQ(v);
+                              if (icdSympOptionsFinal.length) setSympOpen(true);
+                            }}
+                            onKeyDown={(e) => {
+                              if (!icdSympOptionsFinal.length) return;
+                              if (e.key === 'ArrowDown') {
+                                e.preventDefault();
+                                setSympOpen(true);
+                                setSympActive((a) => {
+                                  const next = a + 1;
+                                  return next >= icdSympOptionsFinal.length ? icdSympOptionsFinal.length - 1 : next;
+                                });
+                              } else if (e.key === 'ArrowUp') {
+                                e.preventDefault();
+                                setSympOpen(true);
+                                setSympActive((a) => (a <= 0 ? 0 : a - 1));
+                              } else if (e.key === 'Enter') {
+                                if (sympOpen && sympActive >= 0 && sympActive < icdSympOptionsFinal.length) {
+                                  e.preventDefault();
+                                  const o = icdSympOptionsFinal[sympActive];
+                                  icdSympAuto.setQ(o.text);
+                                  setSoap((s) => ({ ...s, s: o.text, icd10Code: o.code }));
+                                  setSympCode(o.code);
+                                  setSympOpen(false);
+                                }
+                              } else if (e.key === 'Escape') {
+                                setSympOpen(false);
                               }
                             }}
+                            onBlur={(e) => {
+                              setTimeout(() => setSympOpen(false), 120);
+                              const v = e.currentTarget.value.trim();
+                              if (!v) return;
+                              const direct = v.split(/\s+/)[0];
+                              const norm = v.toLowerCase();
+
+                              const opt =
+                                icdSympOptionsFinal.find((o) => o.code.toLowerCase() === norm) ||
+                                icdSympOptionsFinal.find((o) => o.code.toLowerCase() === direct.toLowerCase()) ||
+                                icdSympOptionsFinal.find(
+                                  (o) =>
+                                    o.text.toLowerCase().startsWith(norm) || o.text.toLowerCase().includes(norm)
+                                );
+
+                              if (opt) {
+                                setSympCode(opt.code);
+                                setSoap((s) => ({ ...s, icd10Code: opt.code }));
+                              }
+                            }}
+                            placeholder="Type to search ICD-10 (free text allowed)"
+                            aria-label="Symptoms"
                             autoComplete="off"
                             autoCorrect="off"
                             autoCapitalize="off"
                           />
-                          <div className="grid md:grid-cols-6 gap-2">
-                            <input className="border rounded px-2 py-1" placeholder="Dose" value={r.dose} onChange={(e)=>setRxRows(x=>x.map((y,j)=>j===i?{...y, dose:e.target.value}:y))} />
-                            <input className="border rounded px-2 py-1" placeholder="Route" value={r.route} onChange={(e)=>setRxRows(x=>x.map((y,j)=>j===i?{...y, route:e.target.value}:y))} />
-                            <input className="border rounded px-2 py-1" placeholder="Frequency" value={r.freq} onChange={(e)=>setRxRows(x=>x.map((y,j)=>j===i?{...y, freq:e.target.value}:y))} />
-                            <input className="border rounded px-2 py-1" placeholder="Duration" value={r.duration} onChange={(e)=>setRxRows(x=>x.map((y,j)=>j===i?{...y, duration:e.target.value}:y))} />
-                            <input className="border rounded px-2 py-1" placeholder="Qty" value={r.qty} onChange={(e)=>setRxRows(x=>x.map((y,j)=>j===i?{...y, qty:e.target.value}:y))} />
-                            <input className="border rounded px-2 py-1" type="number" placeholder="Refills" value={r.refills} onChange={(e)=>setRxRows(x=>x.map((y,j)=>j===i?{...y, refills:Number(e.target.value)||0}:y))} />
-                          </div>
-                          <div className="grid grid-cols-12 gap-2 items-center">
-                            <input className="border rounded px-2 py-1 col-span-10" placeholder="Notes (optional)" value={r.notes || ''} onChange={(e) => setRxRows((x) => x.map((y, j) => j === i ? { ...y, notes: e.target.value } : y))} />
-                            <div className="col-span-2 flex justify-end">
-                              <button className="px-2 py-1 border rounded text-xs" onClick={() => removeRxRow(i)}>Remove</button>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
 
-                      <div className="pt-2 flex flex-wrap gap-2">
-                        <button className="px-2 py-1 border rounded text-xs" onClick={addRxRow}>Add drug</button>
-                        <button className="px-2 py-1 border rounded text-xs" onClick={() => pushOrder('CarePort')}>Push to CarePort</button>
-                        <button className="px-2 py-1 border rounded text-xs" onClick={() => pushOrder('MedReach')}>Push to MedReach</button>
-                      </div>
-
-                      {/* Laboratory */}
-                      <div className="text-sm font-semibold mt-4">Laboratory</div>
-                      <div className="text-xs text-gray-500 mb-1">Test name on its own line; then Priority, Specimen, ICD-10 on one row; optional instructions below.</div>
-
-                      {labRows.map((r, i) => (
-                        <div key={i} className="mt-2 space-y-2 border rounded p-2 bg-white">
-                          <input className="border rounded px-2 py-1 w-full" placeholder="Test name (e.g., CBC, CMP, SARS-CoV-2 PCR)" value={r.test} onChange={(e) => setLabRows((x) => x.map((y, j) => j === i ? { ...y, test: e.target.value } : y))} />
-                          <div className="grid md:grid-cols-4 gap-2 items-center">
-                            <select className="border rounded px-2 py-1" value={r.priority} onChange={(e) => setLabRows((x) => x.map((y, j) => j === i ? { ...y, priority: e.target.value as LabRow['priority'] } : y))}>
-                              <option value="">Priority</option>
-                              <option value="Routine">Routine</option>
-                              <option value="Urgent">Urgent</option>
-                              <option value="Stat">Stat</option>
-                            </select>
-                            <input className="border rounded px-2 py-1" placeholder="Specimen (e.g., blood, urine)" value={r.specimen} onChange={(e) => setLabRows((x) => x.map((y, j) => j === i ? { ...y, specimen: e.target.value } : y))} />
-                            <input className="border rounded px-2 py-1" list="icd10-suggest" placeholder="ICD-10 (optional)" value={r.icd} onChange={(e) => setLabRows((x) => x.map((y, j) => j === i ? { ...y, icd: e.target.value } : y))} />
-                            <div className="flex justify-end">
-                              <button className="px-2 py-1 border rounded text-xs" onClick={() => removeLabRow(i)}>Remove</button>
-                            </div>
-                          </div>
-                          <input className="border rounded px-2 py-1 w-full" placeholder="Instructions / clinical info (optional)" value={r.instructions || ''} onChange={(e) => setLabRows((x) => x.map((y, j) => j === i ? { ...y, instructions: e.target.value } : y))} />
-                        </div>
-                      ))}
-
-                      <div className="pt-2 flex flex-wrap gap-2">
-                        <button className="px-2 py-1 border rounded text-xs" onClick={addLabRow}>Add test</button>
-                      </div>
-
-                      {erxResult && (
-                        <div className="mt-3 border rounded p-3 bg-white text-sm">
-                          {erxResult.error ? <div className="text-red-600">{erxResult.error}</div> : (
-                            <>
-                              <div>eRx ID: <b>{erxResult.id}</b></div>
-                              <div>Status: <b>{erxResult.status}</b></div>
-                              <div>Dispense Code: <b>{erxResult.dispenseCode}</b></div>
-                            </>
+                          {sympOpen && icdSympOptionsFinal.length > 0 && (
+                            <ul
+                              id="icd10-symptoms-listbox"
+                              role="listbox"
+                              className="absolute z-20 mt-1 max-h-56 w-full overflow-auto rounded border bg-white shadow text-sm"
+                            >
+                              {icdSympOptionsFinal.map((o, idx) => (
+                                <li
+                                  key={o.code + idx}
+                                  id={`icd10-symp-${idx}`}
+                                  role="option"
+                                  aria-selected={idx === sympActive}
+                                  className={`px-2 py-1 cursor-pointer ${
+                                    idx === sympActive ? 'bg-blue-50' : 'hover:bg-gray-50'
+                                  }`}
+                                  onMouseDown={(ev) => ev.preventDefault()}
+                                  onClick={() => {
+                                    icdSympAuto.setQ(o.text);
+                                    setSoap((s) => ({ ...s, s: o.text, icd10Code: o.code }));
+                                    setSympCode(o.code);
+                                    setSympOpen(false);
+                                  }}
+                                >
+                                  <span className="font-mono text-xs mr-1">{o.code}</span>
+                                  <span>{o.text.replace(/^([A-Z0-9.]+)\s+—\s*/, '')}</span>
+                                </li>
+                              ))}
+                            </ul>
                           )}
                         </div>
-                      )}
+
+                        {sympCode && (
+                          <div className="text-[11px] text-gray-600">
+                            Selected ICD-10 code: <span className="font-mono">{sympCode}</span>
+                          </div>
+                        )}
+                      </div>
+
+                      <TextBlock
+                        label="Presenting Complaints"
+                        value={soap.a}
+                        onChange={(v) => setSoap({ ...soap, a: v })}
+                      />
+                      <TextBlock
+                        label="History of Present Illness (HPI)"
+                        value={soap.p}
+                        onChange={(v) => setSoap({ ...soap, p: v })}
+                        multiline
+                      />
+                      <TextBlock
+                        label="Patient Education"
+                        value={patientEducation}
+                        onChange={setPatientEducation}
+                        multiline
+                      />
                     </Card>
+                  )}
+
+                  {rightTab === 'erx' && (
+                    <ErxComposer
+                      dense={dense}
+                      soap={soap}
+                      profile={profile}
+                      appt={appt}
+                      encounterId={encounterId}
+                      patientId={patientId}
+                      clinicianId={clinicianIdParam}
+                      patientAllergies={patientAllergies}
+                      allergiesFromLive={allergiesFromLive}
+                      icd10Suggestions={ICD10_SUGGESTIONS}
+                      onToast={pushToast}
+                      onAudit={audit}
+                      onSummaryChange={setErxSummary}
+                    />
                   )}
 
                   {rightTab === 'conclusions' && (
                     <Card title="Conclusions" dense={dense} gradient>
-                      <div className="text-xs text-gray-500 mb-2">Summarize and finalize. You can also prepare referrals below.</div>
+                      <div className="text-xs text-gray-500 mb-2">
+                        Summarize and finalize. You can also prepare referrals below.
+                      </div>
                       <SessionConclusions
-                        clinicianId={searchParams.get('clinicianId') || 'clinician-local-001'}
-                        encounterId={searchParams.get('encounterId') || ''}
+                        clinicianId={clinicianIdParam}
+                        clinicianName={appt.clinicianName}
+                        encounterId={encounterId || ''}
                         apptStartISO={appt.when}
-                        referralSlot={<ReferralPanel />}
+                        referralSlot={
+                          <ReferralPanel
+                            encounterId={encounterId || undefined}
+                            patient={{ id: profile.id, name: profile.name }}
+                            clinician={{ id: clinicianIdParam, name: appt.clinicianName }}
+                            summary={encounterSummary}
+                            onNotify={(body, kind, title) => pushToast(body, kind, title)}
+                            onAudit={audit}
+                          />
+                        }
+                        patientId={profile.id}
+                        patientName={profile.name}
+                        clinicName={clinicNameParam}
+                        clinicLogoUrl="/logo.png"
+                        clinicAddress={clinicAddressParam}
+                        onEnd={handleSessionEnd}
                       />
                     </Card>
                   )}
 
                   {rightTab === 'insight' && (
-                    <Card title="InsightCore" dense={dense} gradient>
-                      <div className="text-xs text-gray-500 mb-2">Draft AI assistance. Review suggestions carefully before accepting.</div>
-                      <InsightPanel insight={insight} busy={insightBusy} onAnalyze={analyzeWithInsight} />
-                      <div className="mt-2 flex gap-2">
-                        <button className="px-2 py-1 border rounded text-xs" onClick={acceptInsight} disabled={!insight}>Accept</button>
-                        <button className="px-2 py-1 border rounded text-xs" onClick={adjustInsight} disabled={!insight}>Adjust</button>
-                        <button className="px-2 py-1 border rounded text-xs" onClick={declineInsight} disabled={!insight}>Decline</button>
-                      </div>
-                    </Card>
+                    <InsightPane
+                      dense={dense}
+                      soap={soap}
+                      patientEducation={patientEducation}
+                      profile={profile}
+                      appt={{ reason: appt.reason, clinicianName: appt.clinicianName, patientName: appt.patientName }}
+                      patientAllergies={patientAllergies}
+                      onChangeSoap={(next) => setSoap(next)}
+                      onChangePatientEducation={setPatientEducation}
+                      onToast={pushToast}
+                      onShowSoapTab={() => setUi('rightTab', 'soap')}
+                    />
                   )}
 
-                  {/* History tab */}
                   {rightTab === 'history' && (
                     <Card title="History" dense={dense} gradient>
-                      <div className="text-xs text-gray-500 mb-2">Past clinical data will appear here when available.</div>
+                      <div className="text-xs text-gray-500 mb-2">
+                        Longitudinal view of the patient: cases, chronic conditions, medications, allergies, labs,
+                        vaccinations and procedures.
+                      </div>
                       <div className="space-y-3">
-                        <HistoryPane title="Cases" />
-                        <HistoryPane title="Conditions" />
-                        <HistoryPane title="Pharm. Prescriptions" />
-                        <HistoryPane title="Lab. Investigations" />
-                        <HistoryPane title="Operations" />
-                        <HistoryPane title="Vaccinations" />
+                        <CasesHistory patientId={profile.id} defaultOpen />
+                        <ConditionsHistory patientId={profile.id} defaultOpen />
+                        <MedicationsHistory patientId={profile.id} defaultOpen />
+                        <AllergiesHistory patientId={profile.id} />
+                        <LabsHistory patientId={profile.id} />
+                        <OperationsHistory patientId={profile.id} />
+                        <VaccinationsHistory patientId={profile.id} />
                       </div>
                     </Card>
                   )}
@@ -1200,10 +2006,27 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
               {/* Room Chat */}
               <Card
-                title={<span>Room Chat {unread > 0 ? <span className="ml-1 inline-flex items-center justify-center text-[11px] leading-none px-1.5 py-0.5 rounded-full bg-red-600 text-white">{unread}</span> : null}</span>}
+                title={
+                  <span>
+                    Room Chat{' '}
+                    {unread > 0 ? (
+                      <span className="ml-1 inline-flex items-center justify-center text-[11px] leading-none px-1.5 py-0.5 rounded-full bg-red-600 text-white">
+                        {unread}
+                      </span>
+                    ) : null}
+                  </span>
+                }
                 dense={dense}
                 gradient
-                toolbar={<CollapseBtn open={chatVisible} onClick={() => { setUi('chatVisible', !chatVisible); if (!chatVisible) setUnread(0); }} />}
+                toolbar={
+                  <CollapseBtn
+                    open={chatVisible}
+                    onClick={() => {
+                      setUi('chatVisible', !chatVisible);
+                      if (!chatVisible) setUnread(0);
+                    }}
+                  />
+                }
               >
                 <Collapse open={chatVisible}>
                   <div
@@ -1235,12 +2058,18 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                       onKeyDown={onChatKey}
                       rows={2}
                       className="border rounded px-2 py-1 text-sm flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 resize-y"
-                      placeholder={state === 'connected' ? 'Type message… (Enter to send, Shift+Enter for newline)' : 'Join the room to send messages'}
+                      placeholder={
+                        state === 'connected'
+                          ? 'Type message… (Enter to send, Shift+Enter for newline)'
+                          : 'Join the room to send messages'
+                      }
                       aria-label="Type chat message"
                       disabled={state !== 'connected'}
                     />
                     <button
-                      onClick={() => { if (!msgSending) sendMsg(); }}
+                      onClick={() => {
+                        if (!msgSending) sendMsg();
+                      }}
                       disabled={msgSending || state !== 'connected' || !msg.trim()}
                       title={state === 'connected' ? 'Send message' : 'Join to send messages'}
                       className="px-3 py-1.5 border rounded bg-blue-50 hover:bg-blue-100 disabled:opacity-50"
@@ -1252,18 +2081,20 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                 </Collapse>
               </Card>
 
-              {/* Bottom: Bedside Monitor */}
+              {/* Bedside Monitor */}
               <section ref={vitalsGraphHolder.ref}>
                 <Card
                   title="Bedside Monitor (live)"
                   dense={dense}
                   gradient
-                  toolbar={<CollapseBtn open={rightIomtOpen} onClick={() => setRightIomtOpen(v => !v)} />}
+                  toolbar={<CollapseBtn open={rightIomtOpen} onClick={() => setRightIomtOpen((v) => !v)} />}
                 >
                   <Collapse open={rightIomtOpen}>
                     {vitalsGraphHolder.mounted ? (
                       <ClinicianVitalsPanel room={room} defaultCollapsed={false} maxPoints={240} showDockBadge={false} />
-                    ) : <Skeleton height="h-40" />}
+                    ) : (
+                      <Skeleton height="h-40" />
+                    )}
                   </Collapse>
                 </Card>
               </section>
@@ -1272,27 +2103,112 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         </div>
       </div>
 
+      {/* Floating (Undocked) video pane — overlays by design */}
+      {videoIsUndocked && (
+        <div
+          className="fixed z-[900] w-[min(520px,92vw)]"
+          style={{
+            left: `${floatPos.xPct}%`,
+            top: `${floatPos.yPct}%`,
+            transform: 'translate(-50%, -50%)',
+          }}
+        >
+          <div className="rounded-xl shadow-2xl">
+            {/* Drag handle */}
+            <div
+              className="flex items-center justify-between px-3 py-2 rounded-t-xl border border-gray-200 bg-white cursor-move select-none"
+              onMouseDown={(e) => startFloatDrag(e.clientX, e.clientY)}
+              onTouchStart={(e) => {
+                const t = e.touches?.[0];
+                if (!t) return;
+                startFloatDrag(t.clientX, t.clientY);
+              }}
+              title="Drag to move floating video"
+            >
+              <div className="text-xs text-gray-600">
+                Floating Video <span className="text-gray-400">· drag to move</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  className="text-xs px-2 py-1 rounded border bg-white hover:bg-gray-50"
+                  onClick={dockCenter}
+                  title="Dock to center"
+                >
+                  Dock
+                </button>
+                <button
+                  className="text-xs px-2 py-1 rounded border bg-white hover:bg-gray-50"
+                  onClick={dockLeft}
+                  title="Dock to left"
+                >
+                  Dock Left
+                </button>
+              </div>
+            </div>
+
+            {/* Content */}
+            <div ref={videoCardRef} className="rounded-b-xl overflow-hidden">
+              {VideoDockNode}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Help modal */}
       {helpOpen && (
-        <div className="fixed inset-0 z-[1000] grid place-items-center bg-black/40 p-4" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+        <div
+          className="fixed inset-0 z-[1000] grid place-items-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Keyboard shortcuts"
+        >
           <div className="w-full max-w-md rounded-lg bg-white shadow border p-4">
             <div className="flex items-center justify-between mb-2">
               <div className="text-sm font-semibold">Keyboard Shortcuts</div>
-              <button className="text-xs text-gray-500 hover:text-gray-800" onClick={() => setHelpOpen(false)}>Close</button>
+              <button className="text-xs text-gray-500 hover:text-gray-800" onClick={() => setHelpOpen(false)}>
+                Close
+              </button>
             </div>
             <ul className="text-sm space-y-1">
-              <li><b>M</b> — Toggle mic</li>
-              <li><b>V</b> — Toggle camera</li>
-              <li><b>C</b> — Toggle captions</li>
-              <li><b>O</b> — Toggle overlay</li>
-              <li><b>H</b> — Toggle vitals</li>
-              <li><b>S</b> — Toggle vitals stream overlay</li>
-              <li><b>R</b> — Toggle recording</li>
-              <li><b>X</b> — Toggle XR broadcast</li>
-              <li><b>F</b> — Full screen</li>
-              <li><b>L</b> — Toggle left pane</li>
-              <li><b>K</b> — Toggle right pane</li>
-              <li><b>?</b> — Show this help</li>
+              <li>
+                <b>M</b> — Toggle mic
+              </li>
+              <li>
+                <b>V</b> — Toggle camera
+              </li>
+              <li>
+                <b>C</b> — Toggle captions
+              </li>
+              <li>
+                <b>O</b> — Toggle overlay
+              </li>
+              <li>
+                <b>H</b> — Toggle vitals
+              </li>
+              <li>
+                <b>S</b> — Toggle vitals stream overlay
+              </li>
+              <li>
+                <b>R</b> — Toggle recording
+              </li>
+              <li>
+                <b>X</b> — Toggle XR broadcast
+              </li>
+              <li>
+                <b>F</b> — Full screen
+              </li>
+              <li>
+                <b>L</b> — Toggle left pane
+              </li>
+              <li>
+                <b>K</b> — Toggle right pane
+              </li>
+              <li>
+                <b>?</b> — Show this help
+              </li>
+              <li>
+                <b>Esc</b> — Close this help
+              </li>
             </ul>
           </div>
         </div>
@@ -1300,307 +2216,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
       {/* Toasts */}
       <ToastViewport toasts={toasts} onClose={closeToast} />
-    </div>
-  );
-}
-
-/** ---------- Transparent Vitals Stream Overlay (middle-right) ---------- */
-function VitalsStreamOverlay({ vitals }: { vitals: Vitals }) {
-  const rows: { key: string; label: string; value: string; icon?: JSX.Element }[] = [
-    { key: 'BP',   label: 'BP',   value: fmtBP(vitals.sys, vitals.dia) },
-    { key: 'SpO2', label: 'SpO₂', value: Number.isFinite(vitals.spo2 as number) ? `${num2(vitals.spo2)} %` : '—' },
-    { key: 'Temp', label: 'Temp', value: Number.isFinite(vitals.tempC as number) ? `${num2(vitals.tempC)} °C` : '—' },
-    { key: 'HR',   label: 'HR',   value: Number.isFinite(vitals.hr as number) ? `${num2(vitals.hr)} bpm` : '—' },
-    { key: 'RR',   label: 'RR',   value: Number.isFinite(vitals.rr as number) ? `${num2(vitals.rr)} /min` : '—' },
-  ];
-
-  return (
-    <div
-      className="absolute right-3 top-1/2 -translate-y-1/2 z-20 pointer-events-none select-none"
-      aria-hidden="true"
-    >
-      <div className="flex flex-col gap-1 text-white drop-shadow">
-        {rows.map(r => (
-          <div key={r.key} className="flex items-center gap-2">
-            <span className="text-[11px] opacity-90">{r.label}</span>
-            <span className="text-sm font-semibold">{r.value}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-/** ---------- Simple History Pane (placeholder) ---------- */
-function HistoryPane({ title }: { title: string }) {
-  return (
-    <div className="border rounded bg-white p-2">
-      <div className="text-sm font-medium mb-1">{title}</div>
-      <div className="text-xs text-gray-500 flex items-center gap-2">
-        <span aria-hidden>🗂️</span>
-        <span className="italic">No records to display.</span>
-      </div>
-    </div>
-  );
-}
-
-/** ---------- Referral Panel (Internal + External) ---------- */
-function ReferralPanel() {
-  type Clin = {
-    id: string; name: string; specialty: string; location: string;
-    gender?: string; cls?: 'Doctor' | 'Allied Health' | 'Wellness';
-    priceZAR?: number; rating?: number; online?: boolean;
-  };
-  const UI_CLASSES = ['Doctors', 'Allied Health', 'Wellness'] as const;
-  type UIClass = typeof UI_CLASSES[number];
-  const toDataClass = (tab: UIClass): Clin['cls'] => (tab === 'Doctors' ? 'Doctor' : tab);
-
-  const [rawList, setRawList] = useState<Clin[]>([]);
-  const [loading, setLoading] = useState<boolean>(false);
-
-  // Filters
-  const [tab, setTab] = useState<UIClass>('Doctors');
-  const [filters, setFilters] = useState({ q: '', specialty: '', gender: '', location: '' });
-
-  // Exclusivity: internal vs external
-  const [mode, setMode] = useState<'internal' | 'external' | null>(null);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const r = await fetch('/api/clinicians?limit=500', { cache: 'no-store' });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const js = await r.json();
-        const items = (js?.items || []) as Clin[];
-        if (!Array.isArray(items) || items.length === 0) throw new Error('empty');
-        setRawList(
-          items.map((c: any) => ({
-            id: c.id,
-            name: c.name,
-            specialty: c.specialty || '',
-            location: c.location || '',
-            gender: (c.gender || '').trim(),
-            cls: c.cls || 'Doctor',
-            priceZAR: c.priceZAR,
-            rating: c.rating,
-            online: c.online,
-          }))
-        );
-      } catch {
-        const mock: Clin[] = [
-          { id: 'clin-za-001', name: 'Dr Ama Ndlovu', specialty: 'GP', location: 'Johannesburg', gender: 'Female', cls: 'Doctor', priceZAR: 500, rating: 4.7, online: true },
-          { id: 'clin-za-002', name: 'Dr Jane Smith', specialty: 'Cardiology', location: 'Cape Town', gender: 'Female', cls: 'Doctor', priceZAR: 850, rating: 4.8, online: true },
-          { id: 'clin-za-003', name: 'Dr Adam Lee', specialty: 'ENT', location: 'Johannesburg', gender: 'Male', cls: 'Doctor', priceZAR: 700, rating: 4.6, online: true },
-          { id: 'clin-za-101', name: 'RN T. Dube', specialty: 'Nurse', location: 'Durban', gender: 'Male', cls: 'Allied Health', priceZAR: 300, rating: 4.5, online: false },
-          { id: 'clin-za-201', name: 'Coach L. Maseko', specialty: 'Therapist', location: 'Pretoria', gender: 'Female', cls: 'Wellness', priceZAR: 400, rating: 4.4, online: true },
-        ];
-        setRawList(mock);
-      } finally { setLoading(false); }
-    })();
-  }, []);
-
-  const scoped = useMemo(() => rawList.filter(c => c.cls === toDataClass(tab)), [rawList, tab]);
-
-  const specialties = useMemo(
-    () => Array.from(new Set(scoped.map(c => c.specialty))).filter(Boolean),
-    [scoped]
-  );
-  const genders = useMemo(() => {
-    const set = new Set(scoped.map(c => (c.gender || '').trim()).filter(Boolean));
-    const arr = Array.from(set);
-    return arr.length ? arr : ['Male', 'Female', 'Other'];
-  }, [scoped]);
-  const locations = useMemo(
-    () => Array.from(new Set(scoped.map(c => c.location))).filter(Boolean),
-    [scoped]
-  );
-
-  const filtered = useMemo(() => {
-    let L = scoped;
-    const q = filters.q.trim().toLowerCase();
-    if (q) L = L.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      c.specialty.toLowerCase().includes(q) ||
-      c.location.toLowerCase().includes(q)
-    );
-    if (filters.specialty) L = L.filter(c => c.specialty === filters.specialty);
-    if (filters.gender)    L = L.filter(c => (c.gender || '').trim() === filters.gender);
-    if (filters.location)  L = L.filter(c => c.location === filters.location);
-    L = [...L].sort((a, b) => (b.rating || 0) - (a.rating || 0));
-    return L;
-  }, [scoped, filters]);
-
-  const [selId, setSelId] = useState<string>('');
-  const sel = filtered.find(c => c.id === selId) || null;
-
-  // External manual
-  const [extName, setExtName] = useState('');
-  const [extEmail, setExtEmail] = useState('');
-  const [extPhone, setExtPhone] = useState('');
-
-  const emailOk = useMemo(() => {
-    if (!extEmail.trim()) return false;
-    const re = /^[^\s"<>@]+@[^\s"<>@]+\.[A-Za-z]{2,}$/;
-    return re.test(extEmail.trim());
-  }, [extEmail]);
-  const phoneOk = useMemo(() => /^\d{7,15}$/.test(extPhone), [extPhone]);
-
-  useEffect(() => { if (selId) setMode('internal'); }, [selId]);
-  useEffect(() => { if (extName || extEmail || extPhone) setMode('external'); }, [extName, extEmail, extPhone]);
-
-  const disableInternal = mode === 'external';
-  const disableExternal = mode === 'internal';
-
-  return (
-    <div className="space-y-4">
-      {/* Internal referral */}
-      <div className={`border rounded p-3 ${disableInternal ? 'opacity-60' : ''}`}>
-        <div className="flex items-center justify-between mb-2">
-          <div className="text-sm font-medium">Refer within Ambulant+</div>
-          <div className="flex items-center gap-2">
-            {(['Doctors','Allied Health','Wellness'] as const).map(cls => (
-              <button
-                key={cls}
-                onClick={() => { setTab(cls); setSelId(''); setMode('internal'); }}
-                className={`px-2 py-1 text-xs rounded-full border ${tab === cls ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-100'}`}
-                disabled={disableInternal}
-              >
-                {cls}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* Filters */}
-        <div className="grid md:grid-cols-4 gap-2 mb-2">
-          <input
-            type="text"
-            placeholder="Search name or specialty"
-            value={filters.q}
-            onChange={e => { setFilters(f => ({ ...f, q: e.target.value })); setMode('internal'); }}
-            className="rounded border p-2 text-sm"
-            disabled={disableInternal || loading}
-          />
-          <select
-            value={filters.specialty}
-            onChange={e => { setFilters(f => ({ ...f, specialty: e.target.value })); setMode('internal'); }}
-            className="rounded border p-2 text-sm"
-            disabled={disableInternal || loading}
-          >
-            <option value="">All Specialties</option>
-            {specialties.map(s => <option key={s} value={s}>{s}</option>)}
-          </select>
-          <select
-            value={filters.gender}
-            onChange={e => { setFilters(f => ({ ...f, gender: e.target.value })); setMode('internal'); }}
-            className="rounded border p-2 text-sm"
-            disabled={disableInternal || loading}
-          >
-            <option value="">Any Gender</option>
-            {genders.map(g => <option key={g} value={g}>{g}</option>)}
-          </select>
-          <select
-            value={filters.location}
-            onChange={e => { setFilters(f => ({ ...f, location: e.target.value })); setMode('internal'); }}
-            className="rounded border p-2 text-sm"
-            disabled={disableInternal || loading}
-          >
-            <option value="">Any Location</option>
-            {locations.map(l => <option key={l} value={l}>{l}</option>)}
-          </select>
-        </div>
-
-        <div className="grid md:grid-cols-2 gap-2 items-end">
-          <label className="text-xs flex flex-col">
-            <span className="text-gray-600 mb-1">Select Clinician</span>
-            <select
-              className="border rounded px-2 py-1"
-              value={selId}
-              onChange={(e) => { setSelId(e.target.value); setMode('internal'); }}
-              disabled={loading || disableInternal}
-              aria-label="Select clinician for internal referral"
-            >
-              <option value="">{loading ? 'Loading…' : 'Choose a clinician'}</option>
-              {filtered.map(c => (
-                <option key={c.id} value={c.id}>
-                  {c.name} — {c.specialty || '—'} — {c.location || '—'} ({c.id})
-                </option>
-              ))}
-            </select>
-          </label>
-
-        <div className="flex justify-end">
-            <button
-              className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-              disabled={!sel || disableInternal}
-              onClick={() => {
-                if (!sel) return;
-                alert(`Internal referral prepared for ${sel.name} (${sel.id})`);
-              }}
-            >
-              Prepare Referral
-            </button>
-          </div>
-        </div>
-
-        {sel && (
-          <div className="mt-3 rounded border bg-white p-2 text-sm">
-            <div className="grid md:grid-cols-2 gap-2">
-              <div><b>Name</b><div>{sel.name}</div></div>
-              <div><b>Clinician ID</b><div className="font-mono">{sel.id}</div></div>
-              <div><b>Specialty</b><div>{sel.specialty || '—'}</div></div>
-              <div><b>Location</b><div>{sel.location || '—'}</div></div>
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* External referral */}
-      <div className={`border rounded p-3 ${disableExternal ? 'opacity-60' : ''}`}>
-        <div className="text-sm font-medium mb-2">Refer outside Ambulant+</div>
-        <div className="grid md:grid-cols-3 gap-2">
-          <input
-            className="border rounded px-2 py-1"
-            placeholder="Clinician name"
-            value={extName}
-            onChange={(e)=>{ setExtName(e.target.value); setMode('external'); setSelId(''); }}
-            disabled={disableExternal}
-          />
-          <input
-            className="border rounded px-2 py-1"
-            placeholder="Email"
-            type="email"
-            value={extEmail}
-            onChange={(e)=>{ setExtEmail(e.target.value); setMode('external'); setSelId(''); }}
-            disabled={disableExternal}
-            aria-invalid={!!extEmail && (!/^[^\s"<>@]+@[^\s"<>@]+\.[A-Za-z]{2,}$/.test(extEmail)).toString()}
-          />
-          <input
-            className="border rounded px-2 py-1"
-            placeholder="Mobile (digits only)"
-            inputMode="numeric"
-            value={extPhone}
-            onChange={(e)=>{
-              const digitsOnly = e.target.value.replace(/\D+/g,'');
-              setExtPhone(digitsOnly);
-              setMode('external'); setSelId('');
-            }}
-            disabled={disableExternal}
-          />
-        </div>
-        <div className="mt-2 flex justify-end">
-          <button
-            className="px-3 py-2 rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
-            disabled={disableExternal || !extName || !/^[^\s"<>@]+@[^\s"<>@]+\.[A-Za-z]{2,}$/.test(extEmail) || (extPhone ? !/^\d{7,15}$/.test(extPhone) : false)}
-            onClick={() => {
-              alert(`External referral prepared for ${extName} (${extEmail}${extPhone ? `, ${extPhone}` : ''})`);
-            }}
-          >
-            Prepare Referral
-          </button>
-        </div>
-      </div>
     </div>
   );
 }

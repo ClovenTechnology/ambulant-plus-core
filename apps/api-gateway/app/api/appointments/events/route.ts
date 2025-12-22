@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/appointments/events/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { settleAppointment } from '@/src/lib/settlement';
 

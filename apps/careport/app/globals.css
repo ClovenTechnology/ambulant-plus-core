@@ -1,0 +1,17 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Global defaults must be inside a Tailwind layer in v4 */
+@layer base {
+  html, body {
+    background-color: #f9fafb;
+    color: #111827;
+    font-family: system-ui, sans-serif;
+    line-height: 1.5;
+  }
+
+  a {
+    @apply text-indigo-600 hover:text-indigo-700 underline underline-offset-2;
+  }
+}

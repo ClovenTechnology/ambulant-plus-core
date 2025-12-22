@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/clinicians/available/route.ts
 import { NextResponse } from 'next/server';
 
 // however you load clinicians:

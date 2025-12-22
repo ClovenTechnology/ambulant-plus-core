@@ -19,7 +19,7 @@ function getClient() {
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
-  const id  = body?.id ?? body?.deviceId; // <â€” tolerate either
+  const id  = body?.id ?? body?.deviceId; // < tolerate either
   const cmd = body?.cmd;
   const payload = body?.payload;
 

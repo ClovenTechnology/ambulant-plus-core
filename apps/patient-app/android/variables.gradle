@@ -1,0 +1,22 @@
+// Centralized Android versions for the project
+ext {
+  minSdkVersion = 24
+  compileSdkVersion = 34
+  targetSdkVersion  = 34
+
+  // Common AndroidX/material deps used by Capacitor template(s)
+  androidxActivityVersion        = '1.7.2'
+  androidxAppCompatVersion       = '1.6.1'
+  androidxCoordinatorLayoutVersion = '1.2.0'
+  androidxCoreVersion            = '1.9.0'
+  androidxFragmentVersion        = '1.5.7'
+  coreSplashScreenVersion        = '1.0.1'
+  materialVersion                = '1.9.0'
+
+  // Test libs (kept for completeness)
+  junitVersion                   = '4.13.2'
+  androidxJunitVersion           = '1.1.5'
+  androidxEspressoCoreVersion    = '3.5.1'
+}
+
+

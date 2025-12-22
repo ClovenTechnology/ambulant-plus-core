@@ -1,24 +1,37 @@
 // apps/patient-app/src/lib/prisma.ts
 /**
  * Minimal safe prisma client shim for the patient-app.
- * NOTE: In this monorepo the canonical Prisma client + migrations live under `apps/api-gateway`.
- * Prefer calling the API gateway from patient-app server routes instead of importing Prisma directly.
+ * In this monorepo the canonical Prisma client + migrations live elsewhere.
+ * During web dev we tolerate Prisma not being generated.
  */
 
-import { PrismaClient } from '@prisma/client';
+let _prisma: any | null = null;
 
-declare global {
-  // use a global to avoid re-creating client during HMR in dev
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  var __prismaClient__: PrismaClient | undefined;
+export function getPrisma() {
+  if (_prisma) return _prisma;
+  try {
+    // Lazy require keeps Next dev server from crashing if @prisma/client isn't generated
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { PrismaClient } = require('@prisma/client');
+    // Reuse a global in dev to avoid creating extra connections on HMR
+    // eslint-disable-next-line no-var
+    var globalAny = global as any;
+    _prisma =
+      globalAny.__patientPrisma__ ??
+      new PrismaClient({
+        log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
+      });
+    if (process.env.NODE_ENV !== 'production') globalAny.__patientPrisma__ = _prisma;
+  } catch (e) {
+    // Not available — return null and let callers short-circuit or stub
+    if (process.env.NODE_ENV === 'development') {
+      console.warn('Prisma client not available (ok in dev without DB).');
+    }
+    _prisma = null;
+  }
+  return _prisma;
 }
 
-export const prisma: PrismaClient =
-  globalThis.__prismaClient__ ??
-  new PrismaClient({
-    log: process.env.NODE_ENV === 'development' ? ['query', 'error'] : ['error'],
-  });
-
-if (process.env.NODE_ENV !== 'production') {
-  globalThis.__prismaClient__ = prisma;
-}
+// Export a stable handle so `import { prisma }` works
+export const prisma = getPrisma();
+export default prisma;

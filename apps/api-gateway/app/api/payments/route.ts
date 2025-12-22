@@ -19,7 +19,12 @@ export async function POST(req: NextRequest) {
   const encounterId = b.encounterId ?? 'enc-za-001';
 
   const provider = getProvider();
-  const res = await provider.capture({ encounterId, amountCents, currency, meta: b.meta });
+  const res = await provider.capture({
+    encounterId,
+    amountCents,
+    currency,
+    meta: b.meta,
+  });
 
   const pay = await prisma.payment.create({
     data: {
@@ -29,7 +34,14 @@ export async function POST(req: NextRequest) {
       amountCents,
       currency,
       status: res.status === 'captured' ? 'captured' : 'failed',
-      meta: { ...b.meta, providerRef: res.providerRef },
+      meta: {
+        ...(b.meta ?? {}),
+        // funding hints for claims
+        paymentMethod: b.meta?.paymentMethod ?? b.paymentMethod ?? 'self-pay-card',
+        membershipId: b.meta?.membershipId ?? b.membershipId ?? null,
+        voucherCode: b.meta?.voucherCode ?? b.voucherCode ?? null,
+        providerRef: res.providerRef,
+      },
     },
   });
 
@@ -44,7 +56,10 @@ export async function POST(req: NextRequest) {
     },
   });
 
-  const patientId = who.role === 'patient' ? (who.uid ?? b.patientId ?? 'pt-za-001') : (b.patientId ?? 'pt-za-001');
+  const patientId =
+    who.role === 'patient'
+      ? (who.uid ?? b.patientId ?? 'pt-za-001')
+      : (b.patientId ?? 'pt-za-001');
   const clinicianId = b.clinicianId ?? 'clin-za-001';
 
   await emitEvent({
@@ -56,5 +71,8 @@ export async function POST(req: NextRequest) {
     targets: { admin: true, patientId },
   });
 
-  return NextResponse.json(pay, { status: 201, headers: { 'access-control-allow-origin': '*' } });
+  return NextResponse.json(pay, {
+    status: 201,
+    headers: { 'access-control-allow-origin': '*' },
+  });
 }

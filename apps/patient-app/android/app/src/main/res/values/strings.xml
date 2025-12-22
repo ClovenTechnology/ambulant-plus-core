@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Ambulant Patient</string>
+    <string name="title_activity_main">Ambulant Patient</string>
+    <string name="package_name">com.ambulant.patient</string>
+    <string name="custom_url_scheme">com.ambulant.patient</string>
+</resources>

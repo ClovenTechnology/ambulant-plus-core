@@ -1,0 +1,85 @@
+// scripts/insightcoreHeatmapCron.ts
+import { PrismaClient } from '@prisma/client';
+import { startOfISOWeek, subWeeks } from 'date-fns';
+import { computeSyndromeHeatmapForRange } from '../src/insightcore/syndromeHeatmap'; // your existing pipeline
+
+const prisma = new PrismaClient();
+
+/**
+ * Decide which week to compute.
+ *
+ * Example strategy:
+ * - Every night at 02:00, compute the previous ISO week.
+ * - You can also recompute the last N weeks if you want to backfill.
+ */
+function getTargetWeek(): { weekStart: Date; weekEnd: Date } {
+  const now = new Date();
+  const thisWeekStart = startOfISOWeek(now);
+  const lastWeekStart = subWeeks(thisWeekStart, 1);
+  const lastWeekEnd = thisWeekStart; // [lastWeekStart, thisWeekStart)
+  return { weekStart: lastWeekStart, weekEnd: lastWeekEnd };
+}
+
+async function run() {
+  const { weekStart, weekEnd } = getTargetWeek();
+  console.log(
+    `[InsightCoreHeatmap] Computing week ${weekStart.toISOString()} – ${weekEnd.toISOString()}`
+  );
+
+  // 1) Run your existing live pipeline for that range
+  const cells = await computeSyndromeHeatmapForRange(weekStart, weekEnd);
+
+  if (!cells.length) {
+    console.log('[InsightCoreHeatmap] No cells for this week – nothing to upsert.');
+    return;
+  }
+
+  // 2) For simplicity: delete any existing rows for that week, then bulk-insert
+  // (if you care about write volume, you can switch to upsert by composite keys)
+  await prisma.insightCoreHeatmap.deleteMany({
+    where: {
+      weekStart,
+    },
+  });
+
+  // 3) Create new rows
+  await prisma.insightCoreHeatmap.createMany({
+    data: cells.map((c) => ({
+      weekStart: c.weekStart,
+      country: c.country,
+      region: c.region ?? null,
+      district: c.district ?? null,
+      postalCode: c.postalCode ?? null,
+      syndrome: c.syndrome,
+      ageBand: c.ageBand ?? null,
+      gender: c.gender ?? null,
+      encounterCount: c.encounterCount,
+      finalDiagnosisCount: c.finalDiagnosisCount,
+      ruledOutCount: c.ruledOutCount,
+      distinctPatients: c.distinctPatients,
+      positiveLabCount: c.positiveLabCount,
+      alertCount: c.alertCount,
+      population: c.population ?? null,
+      incidencePer100k: c.incidencePer100k ?? null,
+      alertRatePer100k: c.alertRatePer100k ?? null,
+      riskScore: c.riskScore ?? null,
+      trendVsPrevWeek: c.trendVsPrevWeek ?? null,
+      zScore: c.zScore ?? null,
+      meta: c.meta ?? undefined,
+    })),
+    skipDuplicates: true, // in case of reruns
+  });
+
+  console.log(
+    `[InsightCoreHeatmap] Stored ${cells.length} cells for week ${weekStart.toISOString()}`
+  );
+}
+
+run()
+  .catch((err) => {
+    console.error('[InsightCoreHeatmap] Failed', err);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

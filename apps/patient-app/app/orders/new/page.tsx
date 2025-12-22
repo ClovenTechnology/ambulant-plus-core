@@ -20,11 +20,11 @@ export default function NewErxPage() {
   const [busy, setBusy] = useState(false);
 
   function buildSummary(d: Draft) {
-    const parts = [`New eRx: ${d.drug} â€” ${d.sig}`];
+    const parts = [`New eRx: ${d.drug}” ${d.sig}`];
     if (d.qty) parts.push(`Qty ${d.qty}`);
     if (typeof d.refills === 'number') parts.push(`Refills ${d.refills}`);
     if (d.note?.trim()) parts.push(`Note: ${d.note.trim()}`);
-    return parts.join(' â€¢ ');
+    return parts.join(' ');
   }
 
   async function maybeDropNoteToActiveEncounter(summary: string) {
@@ -146,7 +146,7 @@ export default function NewErxPage() {
           <textarea
             value={draft.note ?? ''}
             onChange={e => setDraft({ ...draft, note: e.target.value })}
-            placeholder="Additional context for the pharmacyâ€¦"
+            placeholder="Additional context for the pharmacy"
             className="w-full border rounded px-3 py-2 min-h-[90px]"
           />
         </label>
@@ -157,7 +157,7 @@ export default function NewErxPage() {
             disabled={busy}
             className="px-3 py-2 border rounded bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
           >
-            {busy ? 'Submittingâ€¦' : 'Submit eRx'}
+            {busy ? 'Submitting...' : 'Submit eRx'}
           </button>
           <button
             type="button"

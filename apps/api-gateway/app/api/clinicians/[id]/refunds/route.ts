@@ -1,4 +1,4 @@
-// apps/api-gateway/app/api/clinicians/[id]/refund-policy/route.ts
+// apps/api-gateway/app/api/clinicians/[id]/refunds/route.ts (I think this file needs to be corrected)
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 

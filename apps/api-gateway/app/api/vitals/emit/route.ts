@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/vitals/emit/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { pushVital } from '@/src/lib/sseBus';
 

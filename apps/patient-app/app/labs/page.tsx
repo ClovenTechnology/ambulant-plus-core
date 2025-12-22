@@ -79,11 +79,11 @@ function Drawer({
           <div className="grid grid-cols-2 gap-3">
             <div>
               <div className="text-xs text-gray-500">Sample</div>
-              <div>{lab.sample ?? <span className="text-gray-400">â€”</span>}</div>
+              <div>{lab.sample ?? <span className="text-gray-400">”</span>}</div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Performer</div>
-              <div>{lab.performer ?? <span className="text-gray-400">â€”</span>}</div>
+              <div>{lab.performer ?? <span className="text-gray-400">”</span>}</div>
             </div>
           </div>
 
@@ -97,13 +97,13 @@ function Drawer({
                     {lab.unit ? <span className="text-gray-500"> {lab.unit}</span> : null}
                   </>
                 ) : (
-                  <span className="text-gray-400">â€”</span>
+                  <span className="text-gray-400">”</span>
                 )}
               </div>
             </div>
             <div>
               <div className="text-xs text-gray-500">Reference</div>
-              <div>{lab.reference ?? <span className="text-gray-400">â€”</span>}</div>
+              <div>{lab.reference ?? <span className="text-gray-400">”</span>}</div>
             </div>
           </div>
 
@@ -166,7 +166,7 @@ export default function LabsPage() {
           >
             Print Labs
           </a>
-          <div className="text-sm text-gray-500">Mock data â€¢ Demo-only</div>
+          <div className="text-sm text-gray-500">Mock data  Demo-only</div>
         </div>
       </div>
 
@@ -190,7 +190,7 @@ export default function LabsPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search tests or resultsâ€¦"
+            placeholder="Search tests or results"
             className="border rounded px-3 py-2 text-sm w-64"
           />
           <button
@@ -205,7 +205,7 @@ export default function LabsPage() {
       {/* Table / empty state */}
       <section className="bg-white border rounded-lg overflow-hidden">
         {rows === null ? (
-          <div className="p-6 text-gray-600">Loadingâ€¦</div>
+          <div className="p-6 text-gray-600">Loading...</div>
         ) : filtered.length === 0 ? (
           <div className="p-6 text-gray-500">No labs match your filters.</div>
         ) : (
@@ -238,12 +238,12 @@ export default function LabsPage() {
                           {r.unit ? <span className="text-gray-500"> {r.unit}</span> : null}
                         </>
                       ) : (
-                        <span className="text-gray-400">â€”</span>
+                        <span className="text-gray-400">”</span>
                       )}
                     </td>
-                    <td className="px-4 py-3">{r.reference ?? <span className="text-gray-400">â€”</span>}</td>
-                    <td className="px-4 py-3">{r.sample ?? <span className="text-gray-400">â€”</span>}</td>
-                    <td className="px-4 py-3">{r.performer ?? <span className="text-gray-400">â€”</span>}</td>
+                    <td className="px-4 py-3">{r.reference ?? <span className="text-gray-400">”</span>}</td>
+                    <td className="px-4 py-3">{r.sample ?? <span className="text-gray-400">”</span>}</td>
+                    <td className="px-4 py-3">{r.performer ?? <span className="text-gray-400">”</span>}</td>
                     <td className="px-4 py-3">
                       <button
                         onClick={() => onRowOpen(r)}

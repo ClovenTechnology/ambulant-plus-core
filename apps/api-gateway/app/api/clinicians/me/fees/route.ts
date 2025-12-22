@@ -1,3 +1,4 @@
+//apps/api-gateway/app/api/clinicians/me/fees/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { readIdentity } from '@/src/lib/identity';
 import { getClinician, setClinicianFee } from '@/src/store/appointments';

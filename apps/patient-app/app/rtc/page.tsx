@@ -1,6 +1,6 @@
 ﻿// apps/patient-app/app/rtc/page.tsx
-import RemoteAudio from '@/components/rtc/RemoteAudio';
 'use client';
+import RemoteAudio from '@/components/rtc/RemoteAudio';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import LocalMedia from '@/src/components/rtc/LocalMedia';
 import RemoteVideo from '@/src/components/rtc/RemoteVideo';

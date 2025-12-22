@@ -9,13 +9,20 @@ type Slot = { start: string; end: string; booked: boolean; patientId?: string };
 
 const MOCK_PATIENTS = ['patient-001', 'patient-002', 'patient-003', 'patient-004', 'patient-005'];
 
+type AppointmentFormProps = {
+  clinicianId?: string;
+  onSaved?: (payload: any) => void | Promise<void>;
+  /** Optional: ISO timestamps used to pre-fill the selected slot (from CalendarPreview) */
+  prefillStartIso?: string;
+  prefillEndIso?: string;
+};
+
 export default function AppointmentForm({
   clinicianId = 'clin-za-001',
-  onSaved = (v: any) => {},
-}: {
-  clinicianId?: string;
-  onSaved?: (v: any) => void;
-}) {
+  onSaved = () => {},
+  prefillStartIso,
+  prefillEndIso,
+}: AppointmentFormProps) {
   const [patientId, setPatientId] = useState('');
   const [startsAt, setStartsAt] = useState('');
   const [endsAt, setEndsAt] = useState('');
@@ -28,6 +35,12 @@ export default function AppointmentForm({
   const [startDayOffset, setStartDayOffset] = useState(0);
   const daysToShow = 7;
   const slotDuration = 30; // minutes
+
+  // When CalendarPreview passes a new slot, pre-fill the form
+  useEffect(() => {
+    if (prefillStartIso) setStartsAt(prefillStartIso);
+    if (prefillEndIso) setEndsAt(prefillEndIso);
+  }, [prefillStartIso, prefillEndIso]);
 
   const generateMockSlots = (baseDate: Date) => {
     const mock: Slot[] = [];
@@ -45,7 +58,9 @@ export default function AppointmentForm({
             start: start.toISOString(),
             end: end.toISOString(),
             booked,
-            patientId: booked ? patientNames[Math.floor(Math.random() * patientNames.length)] : undefined,
+            patientId: booked
+              ? patientNames[Math.floor(Math.random() * patientNames.length)]
+              : undefined,
           });
         }
       }
@@ -71,6 +86,7 @@ export default function AppointmentForm({
 
   useEffect(() => {
     loadSlots();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clinicianId, startDayOffset]);
 
   const submit = async () => {
@@ -81,15 +97,22 @@ export default function AppointmentForm({
     setBusy(true);
     setErr(null);
     try {
-      const body = { clinicianId, patientId, startsAt, endsAt, reason };
-      const r = await fetch(`${GATEWAY}/api/appointments`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      if (!r.ok) throw new Error(await r.text().catch(() => `HTTP ${r.status}`));
-      const j = await r.json().catch(() => ({}));
-      onSaved(j);
+      const payload = {
+        clinicianId,
+        patientId,
+        patientName: patientId,
+        startsAt,
+        endsAt,
+        start: startsAt,
+        end: endsAt,
+        reason,
+      };
+
+      const result = onSaved?.(payload);
+      if (result && typeof (result as any).then === 'function') {
+        await (result as Promise<any>);
+      }
+
       setPatientId('');
       setStartsAt('');
       setEndsAt('');
@@ -114,13 +137,15 @@ export default function AppointmentForm({
     return d;
   });
 
-  const timeLabels = [];
+  const timeLabels: string[] = [];
   for (let h = 0; h < 24; h++) {
     timeLabels.push(`${h.toString().padStart(2, '0')}:00`);
     timeLabels.push(`${h.toString().padStart(2, '0')}:30`);
   }
 
-  const filteredPatients = MOCK_PATIENTS.filter(p => p.toLowerCase().includes(patientId.toLowerCase()));
+  const filteredPatients = MOCK_PATIENTS.filter((p) =>
+    p.toLowerCase().includes(patientId.toLowerCase()),
+  );
 
   return (
     <div className="bg-white rounded p-4 flex flex-col gap-3">
@@ -135,13 +160,13 @@ export default function AppointmentForm({
             <input
               className="mt-1 w-full border rounded px-3 py-2"
               value={patientId}
-              onChange={e => setPatientId(e.target.value)}
+              onChange={(e) => setPatientId(e.target.value)}
               placeholder="Type to search patient..."
             />
           </label>
           {patientId && filteredPatients.length > 0 && (
             <ul className="absolute z-20 bg-white border w-full mt-1 max-h-32 overflow-auto rounded shadow">
-              {filteredPatients.map(p => (
+              {filteredPatients.map((p) => (
                 <li
                   key={p}
                   className="px-2 py-1 cursor-pointer hover:bg-gray-100"
@@ -159,18 +184,40 @@ export default function AppointmentForm({
           <input
             className="mt-1 w-full border rounded px-3 py-2"
             value={reason}
-            onChange={e => setReason(e.target.value)}
+            onChange={(e) => setReason(e.target.value)}
             placeholder="Consult / Follow-up"
           />
         </label>
       </div>
 
+      {/* Slot summary (if pre-filled) */}
+      {startsAt && (
+        <div className="text-xs text-gray-600">
+          Selected slot:{' '}
+          <span className="font-mono">
+            {new Date(startsAt).toLocaleString([], {
+              weekday: 'short',
+              month: 'short',
+              day: 'numeric',
+              hour: '2-digit',
+              minute: '2-digit',
+            })}
+          </span>
+        </div>
+      )}
+
       {/* Navigation */}
       <div className="flex justify-between">
-        <button onClick={() => setStartDayOffset(startDayOffset - daysToShow)} className="px-2 py-1 border rounded">
+        <button
+          onClick={() => setStartDayOffset(startDayOffset - daysToShow)}
+          className="px-2 py-1 border rounded"
+        >
           {'<'} Previous
         </button>
-        <button onClick={() => setStartDayOffset(startDayOffset + daysToShow)} className="px-2 py-1 border rounded">
+        <button
+          onClick={() => setStartDayOffset(startDayOffset + daysToShow)}
+          className="px-2 py-1 border rounded"
+        >
           Next {'>'}
         </button>
       </div>
@@ -180,56 +227,93 @@ export default function AppointmentForm({
         <div className="grid grid-cols-[80px_repeat(7,1fr)] border-b sticky top-0 z-10 bg-gray-50">
           <div className="border-r px-2 py-1 text-xs font-medium">Time</div>
           {dayLabels.map((d, i) => (
-            <div key={i} className="px-2 py-1 text-xs font-medium text-center border-r">
-              {d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' })}
+            <div
+              key={i}
+              className="px-2 py-1 text-xs font-medium text-center border-r"
+            >
+              {d.toLocaleDateString(undefined, {
+                weekday: 'short',
+                month: 'short',
+                day: 'numeric',
+              })}
             </div>
           ))}
         </div>
 
-        <div className="grid grid-cols-[80px_repeat(7,1fr)]">
-          {timeLabels.map((t, rowIdx) => (
-            <React.Fragment key={rowIdx}>
-              <div className="border-t border-r px-2 py-1 text-xs font-mono bg-gray-50 sticky left-0 z-0">{t}</div>
-              {dayLabels.map((d, colIdx) => {
-                const slot = slots.find(s => {
-                  const sDate = new Date(s.start);
-                  return sDate.getDate() === d.getDate() && sDate.getHours() === parseInt(t.split(':')[0]) && sDate.getMinutes() === parseInt(t.split(':')[1]);
-                });
-                const isSelected = slot && slot.start === startsAt;
-                const now = new Date();
-                const isPast = slot && new Date(slot.end) < now;
+        {loadingSlots ? (
+          <div className="p-3 text-xs text-gray-500">Loading slots…</div>
+        ) : (
+          <div className="grid grid-cols-[80px_repeat(7,1fr)]">
+            {timeLabels.map((t, rowIdx) => (
+              <React.Fragment key={rowIdx}>
+                <div className="border-t border-r px-2 py-1 text-xs font-mono bg-gray-50 sticky left-0 z-0">
+                  {t}
+                </div>
+                {dayLabels.map((d, colIdx) => {
+                  const [hStr, mStr] = t.split(':');
+                  const hour = parseInt(hStr, 10);
+                  const minute = parseInt(mStr, 10);
 
-                const tooltip = slot
-                  ? slot.booked
-                    ? `Booked: ${slot.patientId}`
-                    : `${new Date(slot.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} - ${new Date(slot.end).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
-                  : '';
+                  const slot = slots.find((s) => {
+                    const sDate = new Date(s.start);
+                    return (
+                      sDate.getDate() === d.getDate() &&
+                      sDate.getMonth() === d.getMonth() &&
+                      sDate.getFullYear() === d.getFullYear() &&
+                      sDate.getHours() === hour &&
+                      sDate.getMinutes() === minute
+                    );
+                  });
 
-                let dotColor = '';
-                if (!slot || isPast) dotColor = 'bg-gray-300';
-                else if (slot.booked) dotColor = 'bg-red-500';
-                else if (isSelected) dotColor = 'bg-indigo-500 animate-pulse-glow';
-                else dotColor = 'bg-green-500';
+                  const isSelected = slot && slot.start === startsAt;
+                  const now = new Date();
+                  const isPast = slot && new Date(slot.end) < now;
 
-                return (
-                  <button
-                    key={colIdx}
-                    onClick={() => slot && selectSlot(slot)}
-                    disabled={!slot || slot.booked || isPast}
-                    className="border-t border-r w-full h-10 flex items-center justify-center text-xs relative hover:bg-gray-50 transition-colors"
-                    title={tooltip}
-                  >
-                    <span
-                      className={`w-3 h-3 rounded-full ${dotColor} mr-1`}
-                      style={{ transition: 'all 0.2s ease' }}
-                    ></span>
-                    <span>{slot ? new Date(slot.start).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span>
-                  </button>
-                );
-              })}
-            </React.Fragment>
-          ))}
-        </div>
+                  const tooltip = slot
+                    ? slot.booked
+                      ? `Booked: ${slot.patientId}`
+                      : `${new Date(slot.start).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })} - ${new Date(slot.end).toLocaleTimeString([], {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}`
+                    : '';
+
+                  let dotColor = '';
+                  if (!slot || isPast) dotColor = 'bg-gray-300';
+                  else if (slot.booked) dotColor = 'bg-red-500';
+                  else if (isSelected) dotColor = 'bg-indigo-500 animate-pulse-glow';
+                  else dotColor = 'bg-green-500';
+
+                  return (
+                    <button
+                      key={colIdx}
+                      onClick={() => slot && selectSlot(slot)}
+                      disabled={!slot || slot.booked || isPast}
+                      className="border-t border-r w-full h-10 flex items-center justify-center text-xs relative hover:bg-gray-50 transition-colors"
+                      title={tooltip}
+                    >
+                      <span
+                        className={`w-3 h-3 rounded-full ${dotColor} mr-1`}
+                        style={{ transition: 'all 0.2s ease' }}
+                      ></span>
+                      <span>
+                        {slot
+                          ? new Date(slot.start).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })
+                          : ''}
+                      </span>
+                    </button>
+                  );
+                })}
+              </React.Fragment>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="flex justify-end gap-2 mt-2">
@@ -244,15 +328,26 @@ export default function AppointmentForm({
         >
           Clear
         </button>
-        <button onClick={submit} disabled={busy} className="px-3 py-1 rounded bg-indigo-600 text-white">
+        <button
+          onClick={submit}
+          disabled={busy}
+          className="px-3 py-1 rounded bg-indigo-600 text-white disabled:opacity-60"
+        >
           {busy ? 'Saving…' : 'Save Appointment'}
         </button>
       </div>
 
       <style jsx>{`
         @keyframes glowPulse {
-          0%, 100% { box-shadow: 0 0 2px 0 rgba(99, 102, 241, 0.6); transform: scale(1); }
-          50% { box-shadow: 0 0 6px 2px rgba(99, 102, 241, 0.9); transform: scale(1.1); }
+          0%,
+          100% {
+            box-shadow: 0 0 2px 0 rgba(99, 102, 241, 0.6);
+            transform: scale(1);
+          }
+          50% {
+            box-shadow: 0 0 6px 2px rgba(99, 102, 241, 0.9);
+            transform: scale(1.1);
+          }
         }
         .animate-pulse-glow {
           animation: glowPulse 1s infinite;

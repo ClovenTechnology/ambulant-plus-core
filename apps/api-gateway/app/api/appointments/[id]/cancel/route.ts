@@ -1,3 +1,4 @@
+// apps/app-gateway/app/api/appointments/[id]/cancel/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { updateApptStatus } from '@/src/appointmentsStore';
 

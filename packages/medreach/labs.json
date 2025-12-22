@@ -71,6 +71,14 @@
           "etaDays": 1
         }
       ]
+    },
+    {
+      "id": "medreach-durbs",
+      "name": "MedReach Durbs",
+      "city": "Du",
+      "contact": "s",
+      "logoUrl": "",
+      "tests": []
     }
   ]
 }

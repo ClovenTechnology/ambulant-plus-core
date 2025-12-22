@@ -26,7 +26,6 @@ type RefundsCfg = {
 };
 
 async function readClinicianRefunds(clinicianId: string): Promise<RefundsCfg> {
-  // Defaults if no explicit policy
   const base: RefundsCfg = {
     within24hPercent: 50,
     noShowPercent: 0,
@@ -71,11 +70,9 @@ function computeRefundCents(
 async function recordRefundPayment(appt: any, cents: number, key: string, reason: string) {
   if (cents <= 0) return;
 
-  // make an idempotent id using appointment + reason + key
   const hash = nodeCrypto.createHash('sha1').update(`${appt.id}:${reason}:${key}`).digest('hex').slice(0, 10);
   const id = `rf-${hash}`;
 
-  // If already exists, skip
   const exists = await prisma.payment.findUnique({ where: { id } }).catch(() => null);
   if (exists) return;
 
@@ -84,11 +81,114 @@ async function recordRefundPayment(appt: any, cents: number, key: string, reason
       id,
       encounterId: appt.encounterId,
       caseId: appt.caseId,
-      amountCents: -Math.abs(cents), // negative captured payment to offset payout sums
-      currency: appt.currency || 'ZAR',  // ← fallback to ZAR
+      amountCents: -Math.abs(cents),
+      currency: appt.currency || 'ZAR',
       status: 'captured',
       meta: JSON.stringify({ appointmentId: appt.id, reason }),
     },
+  });
+}
+
+/** ----- Shop: mark order paid + decrement stock (idempotent) ----- */
+async function handleShopChargeSuccess(reference: string, data: any) {
+  await prisma.$transaction(async (tx) => {
+    // Order reference could be stored in sessionId OR be equal to id (depending on your init)
+    let order = await tx.shopOrder.findFirst({
+      where: { sessionId: reference },
+      include: { items: true },
+    });
+
+    if (!order) {
+      order = await tx.shopOrder.findUnique({
+        where: { id: reference },
+        include: { items: true },
+      }) as any;
+    }
+
+    if (!order) return; // not a shop payment
+
+    // Idempotency: Paystack retries
+    if (order.status === 'PAID') return;
+
+    // Optional amount safety: Paystack amount is "kobo"/cents
+    const paidAmountZar = typeof data?.amount === 'number' ? Math.round(data.amount / 100) : null;
+    const paidCurrency = String(data?.currency || order.currency || 'ZAR');
+    if (paidAmountZar !== null && paidAmountZar !== order.totalZar) {
+      throw new Error(`Shop amount mismatch (paid ${paidAmountZar} vs expected ${order.totalZar})`);
+    }
+    if (paidCurrency && paidCurrency !== order.currency) {
+      throw new Error(`Shop currency mismatch (paid ${paidCurrency} vs expected ${order.currency})`);
+    }
+
+    // Decrement inventory for tracked variants
+    for (const it of order.items) {
+      if (!it.variantId) continue;
+
+      const variant = await tx.shopVariant.findUnique({
+        where: { id: it.variantId },
+        include: { product: true },
+      });
+
+      if (!variant) continue;
+
+      // If stock is untracked, skip
+      if (variant.stockQty == null) continue;
+
+      const allowBackorder = variant.allowBackorder ?? variant.product.allowBackorder;
+      const nextQty = (variant.stockQty ?? 0) - it.quantity;
+
+      if (!allowBackorder && nextQty < 0) {
+        throw new Error(`Insufficient stock for SKU ${variant.sku}`);
+      }
+
+      await tx.shopVariant.update({
+        where: { id: variant.id },
+        data: { stockQty: nextQty },
+      });
+
+      await tx.shopInventoryMovement.create({
+        data: {
+          variantId: variant.id,
+          delta: -it.quantity,
+          reason: 'sale',
+          note: `Order ${order.id}`,
+        },
+      });
+    }
+
+    const paidAt = data?.paid_at ? new Date(String(data.paid_at)) : new Date();
+
+    await tx.shopOrder.update({
+      where: { id: order.id },
+      data: {
+        status: 'PAID',
+        paidAt,
+        // Paystack doesn't always give a receipt URL; keep meta for receipts page aggregation
+        providerMeta: {
+          ...(order.providerMeta as any),
+          paystack: {
+            id: data?.id ?? null,
+            reference: data?.reference ?? null,
+            channel: data?.channel ?? null,
+            paid_at: data?.paid_at ?? null,
+            gateway_response: data?.gateway_response ?? null,
+            authorization: data?.authorization ?? null,
+            customer: data?.customer ?? null,
+          },
+        },
+      },
+    });
+
+    await tx.auditEvent.create({
+      data: {
+        kind: 'shop_order_paid',
+        actorId: null,
+        actorRole: 'system',
+        subjectId: order.id,
+        meta: { reference },
+        at: new Date(),
+      },
+    }).catch(() => {});
   });
 }
 
@@ -109,41 +209,55 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'bad_json' }, { status: 400 });
   }
 
-  // Paystack canonical fields
-  const event = String(body?.event || body?.type || ''); // e.g., 'charge.success'
+  const event = String(body?.event || body?.type || '');
   const data  = body?.data || {};
   const reference: string = String(data?.reference || body?.reference || '');
 
-  // Find appointment mapped by paymentRef
+  // === Appointment mapping by paymentRef ===
   const appt = reference
     ? await prisma.appointment.findFirst({ where: { paymentRef: reference } })
     : null;
 
-  // Not our payment? Acknowledge to avoid retries; ops can reconcile later.
-  if (!appt) return NextResponse.json({ ok: true, info: 'no_appointment_for_reference' });
-
   // === Provider capture ===
   if (event === 'charge.success') {
-    if (appt.status !== 'confirmed') {
-      await prisma.appointment.update({ where: { id: appt.id }, data: { status: 'confirmed' } });
+    // 1) Appointment payment success
+    if (appt) {
+      if (appt.status !== 'confirmed') {
+        await prisma.appointment.update({ where: { id: appt.id }, data: { status: 'confirmed' } });
+      }
+
+      await prisma.auditEvent.create({
+        data: {
+          kind: 'payment_captured',
+          actorId: null,
+          actorRole: 'system',
+          subjectId: appt.id,
+          meta: JSON.stringify({ provider: 'paystack', reference }),
+        },
+      }).catch(() => {});
+
+      return NextResponse.json({ ok: true, kind: 'appointment' });
     }
 
-    // Audit
-    await prisma.auditEvent.create({
-      data: {
-        kind: 'payment_captured',
-        actorId: null,
-        actorRole: 'system',
-        subjectId: appt.id,
-        meta: JSON.stringify({ provider: 'paystack', reference }),
-      },
-    }).catch(() => {});
+    // 2) Shop order payment success (NEW)
+    if (reference) {
+      try {
+        await handleShopChargeSuccess(reference, data);
+        return NextResponse.json({ ok: true, kind: 'shop' });
+      } catch (e: any) {
+        // still ack to avoid infinite retries; ops can reconcile
+        console.error('[paystack][shop] error', e);
+        return NextResponse.json({ ok: true, kind: 'shop_failed', error: e?.message || 'shop_failed' });
+      }
+    }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, kind: 'unknown_reference' });
   }
 
+  // If not appointment and not charge.success, we ignore shop and keep your appointment ops events:
+  if (!appt) return NextResponse.json({ ok: true, info: 'no_appointment_for_reference' });
+
   // === Ops-driven events (your backend can POST these) ===
-  // Supported kinds: event.cancel, event.no_show, event.clinician_miss, event.network_interrupted
   const kind = String(body?.kind || '');
   const isOpsEvent = [
     'event.cancel',
@@ -160,16 +274,13 @@ export async function POST(req: NextRequest) {
     else if (kind === 'event.clinician_miss') refundKind = 'clinician_miss';
     else if (kind === 'event.network_interrupted') refundKind = 'network_interrupted';
 
-    // cancel <24h needs timing check
     const now = Date.now();
     const startMs = new Date(appt.startsAt as any).getTime();
     const within24h = (startMs - now) <= 24 * 60 * 60 * 1000;
     if (refundKind === 'cancel_lt24h' && !within24h) {
-      // If not within 24h, treat as no refund (you can expand policy later).
       return NextResponse.json({ ok: true, info: 'cancel_ge24h_no_refund' });
     }
 
-    // For network prorate, caller may send minutes used/total
     const elapsedMin = Number(body?.minutes_used ?? body?.elapsed_minutes);
     const totalMin   = Number(body?.total_minutes ?? body?.planned_minutes);
     const plannedMs  = Number.isFinite(totalMin) ? totalMin * 60_000 : undefined;
@@ -177,25 +288,21 @@ export async function POST(req: NextRequest) {
 
     const refundCents = computeRefundCents(refundKind, appt.priceCents, refunds, { elapsedMs, plannedMs });
 
-    // Attempt provider refund (best effort)
     if (refundCents > 0 && reference) {
       try {
         const provider = getProvider();
         await provider.refund(reference, refundCents);
       } catch {
-        // swallow; we'll still write our internal record so ops can reconcile
+        // best-effort
       }
     }
 
-    // Record internal negative payment so payout sums net correctly
     await recordRefundPayment(appt, refundCents, reference || kind, refundKind);
 
-    // Optional appointment status tweak for cancel
     if (kind === 'event.cancel' && appt.status !== 'canceled') {
       await prisma.appointment.update({ where: { id: appt.id }, data: { status: 'canceled' } }).catch(()=>{});
     }
 
-    // Audit
     await prisma.auditEvent.create({
       data: {
         kind: 'payment_refunded',
@@ -209,6 +316,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, refund_cents: refundCents });
   }
 
-  // Ignore other events but ack
   return NextResponse.json({ ok: true });
 }

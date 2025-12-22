@@ -60,7 +60,7 @@ export const serviceMap: Record<string, DeviceSpec> = {
   },
 
   // ------------------------
-  // Health Monitor
+  // Health Monitor (Linktop vendor service)
   // ------------------------
   'duecare.health-monitor': {
     id: 'duecare.health-monitor',
@@ -70,24 +70,30 @@ export const serviceMap: Record<string, DeviceSpec> = {
     category: 'Vitals Monitor',
     filters: {
       services: [
-        '0000180d-0000-1000-8000-00805f9b34fb',
-        '00001810-0000-1000-8000-00805f9b34fb',
-        '0000180f-0000-1000-8000-00805f9b34fb',
+        // Vendor primary service per SDK
         '0000fff0-0000-1000-8000-00805f9b34fb',
+        // Keep SIG services only if your specific HW exposes them (optional)
+        // '0000180d-0000-1000-8000-00805f9b34fb',
+        // '00001810-0000-1000-8000-00805f9b34fb',
+        // '0000180f-0000-1000-8000-00805f9b34fb',
+        // Fallback vendor endpoints sometimes observed on OEM builds:
         '0000ffe0-0000-1000-8000-00805f9b34fb',
         '0000ffd0-0000-1000-8000-00805f9b34fb',
       ],
     },
     characteristics: {
-      hr: { uuid: '00002a37-0000-1000-8000-00805f9b34fb', mode: 'notify', sampleHz: 1 },
-      bp: { uuid: '00002a35-0000-1000-8000-00805f9b34fb', mode: 'notify', sampleHz: 'spot' },
-      batt: { uuid: '00002a19-0000-1000-8000-00805f9b34fb', mode: 'read' },
-      ecg_wave: { uuid: '0000fff1-0000-1000-8000-00805f9b34fb', mode: 'notify', sampleHz: 250, notes: 'ECG waveform' },
-      spo2_wave: { uuid: '0000fff2-0000-1000-8000-00805f9b34fb', mode: 'notify', sampleHz: 25, notes: 'SpO2/PPG waveform' },
-      hr_measure: { uuid: '0000fff3-0000-1000-8000-00805f9b34fb', mode: 'notify', notes: 'Derived HR' },
-      vendor_ctrl: { uuid: '0000fff4-0000-1000-8000-00805f9b34fb', mode: 'write', notes: 'Start/Stop commands' },
-      temp: { uuid: '0000ffe1-0000-1000-8000-00805f9b34fb', mode: 'notify', sampleHz: 'spot', notes: 'Body temperature (°C/°F)' },
-      glucose: { uuid: '0000ffd1-0000-1000-8000-00805f9b34fb', mode: 'notify', sampleHz: 'spot', notes: 'Blood glucose (mg/dL / mmol/L)' },
+      // Single multiplexed notify stream (SDK listens here)
+      vendor_notify: { uuid: '0000fff4-0000-1000-8000-00805f9b34fb', mode: 'notify', notes: 'Multiplexed frames (ECG/PPG/derived HR/etc.)' },
+
+      // Control/write channel (start/stop, mode, etc.)
+      vendor_ctrl:   { uuid: '0000fff1-0000-1000-8000-00805f9b34fb', mode: 'write', notes: 'Start/Stop/control' },
+
+      // Thermometer handshake/confirm (if present on HW)
+      therm_confirm: { uuid: '0000fff5-0000-1000-8000-00805f9b34fb', mode: 'notify', notes: 'Thermometer connect/confirm' },
+
+      // Optional: If your device *also* emits these as dedicated notifies, keep them
+      temp:    { uuid: '0000ffe1-0000-1000-8000-00805f9b34fb', mode: 'notify', sampleHz: 'spot', notes: 'Body temperature (°C/°F) [fallback]' },
+      glucose: { uuid: '0000ffd1-0000-1000-8000-00805f9b34fb', mode: 'notify', sampleHz: 'spot', notes: 'Blood glucose (mg/dL / mmol/L) [fallback]' },
     },
     console: { panels: ['vitals', 'ecg', 'ppg'] },
   },
@@ -101,7 +107,6 @@ export const serviceMap: Record<string, DeviceSpec> = {
     vendor: 'DueCare/Linktop',
     transport: 'usb',
     category: 'Otoscope',
-    // SDK provides: captureStill(path), startRecording(path), stopRecording()
     console: { panels: ['video'] },
   },
 
@@ -156,6 +161,5 @@ export const serviceMap: Record<string, DeviceSpec> = {
   },
 };
 
-// alias exports
 export const DEVICE_MAP = serviceMap;
 export type DeviceKey = keyof typeof serviceMap;

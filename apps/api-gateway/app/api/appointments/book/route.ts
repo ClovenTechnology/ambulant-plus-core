@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/appointments/book/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { split } from '@ambulant/payments/src/utils';
 import { paystackCharge } from '@ambulant/payments/src/providers/paystack';

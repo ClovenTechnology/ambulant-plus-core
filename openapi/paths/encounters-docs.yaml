@@ -1,0 +1,377 @@
+# openapi/paths/encounters-docs.yaml
+openapi: 3.0.3
+info:
+  title: Ambulant+ Encounter Documentation APIs
+  version: 1.0.0
+
+paths:
+  /api/encounters/{encounterId}/erx:
+    post:
+      summary: Create an electronic prescription (eRx) for an encounter
+      operationId: createEncounterErx
+      parameters:
+        - name: encounterId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ErxRequest'
+      responses:
+        '201':
+          description: eRx created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErxResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Server error
+
+  /api/encounters/{encounterId}/sicknote:
+    post:
+      summary: Create a sick note for an encounter
+      operationId: createEncounterSickNote
+      parameters:
+        - name: encounterId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SickNoteRequest'
+      responses:
+        '201':
+          description: Sick note created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SickNoteResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Server error
+
+  /api/encounters/{encounterId}/fitness:
+    post:
+      summary: Create a fitness certificate for an encounter
+      operationId: createEncounterFitnessCertificate
+      parameters:
+        - name: encounterId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FitnessCertificateRequest'
+      responses:
+        '201':
+          description: Fitness certificate created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FitnessCertificateResponse'
+        '400':
+          description: Invalid request
+        '500':
+          description: Server error
+
+components:
+  schemas:
+    Coding:
+      type: object
+      properties:
+        system:
+          type: string
+          example: http://www.nlm.nih.gov/research/umls/rxnorm
+        code:
+          type: string
+          example: '12345'
+        display:
+          type: string
+          example: Amoxicillin 500 mg capsule
+      required: [system, code, display]
+
+    PatientRef:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required: [id]
+
+    ClinicianRef:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required: [id]
+
+    ErxMedication:
+      type: object
+      properties:
+        coding:
+          type: array
+          items:
+            $ref: '#/components/schemas/Coding'
+        formText:
+          type: string
+          example: tablet
+        doseText:
+          type: string
+          example: 500 mg
+        routeText:
+          type: string
+          example: Oral
+        frequencyText:
+          type: string
+          example: 1 tab BID
+        durationText:
+          type: string
+          example: 5 days
+        quantity:
+          type: object
+          properties:
+            value:
+              type: number
+            unit:
+              type: string
+            text:
+              type: string
+              example: 15 tablets
+        repeats:
+          type: integer
+          example: 0
+        note:
+          type: string
+      required: [coding]
+
+    ErxLab:
+      type: object
+      properties:
+        testText:
+          type: string
+          example: HbA1c
+        priority:
+          type: string
+          enum: [Routine, Urgent, Stat]
+        specimenText:
+          type: string
+          example: Blood
+        icd10:
+          $ref: '#/components/schemas/Coding'
+        note:
+          type: string
+
+    ErxAllergy:
+      type: object
+      properties:
+        coding:
+          type: array
+          items:
+            $ref: '#/components/schemas/Coding'
+        substanceText:
+          type: string
+          example: Penicillin
+        reactionText:
+          type: string
+        severity:
+          type: string
+        status:
+          type: string
+      required: [substanceText]
+
+    ErxRequest:
+      type: object
+      properties:
+        encounterId:
+          type: string
+        patient:
+          $ref: '#/components/schemas/PatientRef'
+        clinician:
+          $ref: '#/components/schemas/ClinicianRef'
+        reason:
+          type: string
+        medications:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErxMedication'
+        labs:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErxLab'
+        allergies:
+          type: array
+          items:
+            $ref: '#/components/schemas/ErxAllergy'
+        note:
+          type: string
+      required:
+        - encounterId
+        - patient
+        - clinician
+        - medications
+
+    ErxResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          example: Created
+        dispenseCode:
+          type: string
+          example: PENDING
+        message:
+          type: string
+
+    SickNoteRequest:
+      type: object
+      properties:
+        encounterId:
+          type: string
+        patient:
+          $ref: '#/components/schemas/PatientRef'
+        clinician:
+          $ref: '#/components/schemas/ClinicianRef'
+        diagnosis:
+          type: object
+          properties:
+            primary:
+              $ref: '#/components/schemas/Coding'
+            secondary:
+              type: array
+              items:
+                $ref: '#/components/schemas/Coding'
+        reason:
+          type: string
+        text:
+          type: string
+          description: Render-ready sick note body text
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        issuedAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [Draft, Final]
+        note:
+          type: string
+      required:
+        - encounterId
+        - patient
+        - clinician
+        - text
+
+    SickNoteResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        encounterId:
+          type: string
+        status:
+          type: string
+        issuedAt:
+          type: string
+          format: date-time
+        startDate:
+          type: string
+          format: date
+        endDate:
+          type: string
+          format: date
+        diagnosisCode:
+          type: string
+        diagnosisText:
+          type: string
+
+    FitnessCertificateRequest:
+      type: object
+      properties:
+        encounterId:
+          type: string
+        patient:
+          $ref: '#/components/schemas/PatientRef'
+        clinician:
+          $ref: '#/components/schemas/ClinicianRef'
+        diagnosis:
+          type: object
+          properties:
+            primary:
+              $ref: '#/components/schemas/Coding'
+            secondary:
+              type: array
+              items:
+                $ref: '#/components/schemas/Coding'
+        text:
+          type: string
+          description: Render-ready fitness certificate body text
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+        issuedAt:
+          type: string
+          format: date-time
+        restrictions:
+          type: string
+        allowedActivities:
+          type: string
+        status:
+          type: string
+          enum: [Draft, Final]
+        note:
+          type: string
+      required:
+        - encounterId
+        - patient
+        - clinician
+        - text
+
+    FitnessCertificateResponse:
+      type: object
+      properties:
+        id:
+          type: string
+        encounterId:
+          type: string
+        status:
+          type: string
+        issuedAt:
+          type: string
+          format: date-time
+        validFrom:
+          type: string
+          format: date
+        validTo:
+          type: string
+          format: date
+        diagnosisCode:
+          type: string
+        diagnosisText:
+          type: string

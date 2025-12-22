@@ -1,0 +1,24 @@
+pluginManagement {
+  repositories {
+    gradlePluginPortal()
+    google()
+    mavenCentral()
+  }
+}
+
+dependencyResolutionManagement {
+  // Capacitor’s :capacitor-android declares google() in its build.gradle
+  // Allow project repositories to coexist with settings repositories
+  repositoriesMode.set(RepositoriesMode.PREFER_SETTINGS)
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+rootProject.name = "AmbulantPatient"
+include(":app")
+
+// Point settings at Capacitor’s Gradle scripts under THIS app’s node_modules
+// Load Capacitor’s local settings file that was generated in this android/ folder
+apply from: new File(settingsDir, 'capacitor.settings.gradle')

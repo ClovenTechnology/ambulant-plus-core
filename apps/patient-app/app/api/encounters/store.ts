@@ -1,75 +1,185 @@
 ﻿// apps/patient-app/app/api/encounters/store.ts
+// In-memory fallback store for encounters/cases (dev only).
+// Export functions used by the route: listEncounters(), listCases(), getEncounter(), getCase()
+
 import crypto from 'node:crypto';
 
-export type Encounter = {
+export type MockClinician = { id: string; name: string; specialty?: string };
+export type MockEncounter = {
   id: string;
-  status: 'Triage' | 'Consult' | 'Completed';
-  startedAt: string;     // ISO
-  updatedAt: string;     // ISO
-  summary?: string;
-  notes: Array<{ id: string; ts: string; text: string; source?: string; visitId?: string }>;
-  vitals?: { hr?: number; sys?: number; dia?: number; spo2?: number; temp_c?: number };
+  caseId: string;
+  start: string; // ISO
+  stop?: string;
+  mode?: 'chat' | 'audio' | 'video' | 'in-person';
+  status?: 'Completed' | 'InProgress' | 'Scheduled';
+  clinician?: MockClinician;
+  notes?: string;
+  devices?: string[];
+  caseTitle?: string;
+  caseStatus?: 'Open' | 'Closed' | 'Referred';
 };
 
-// Inâ€‘memory demo data
-let ENCOUNTERS: Encounter[] = [
+export type MockCase = {
+  id: string;
+  title?: string;
+  status: 'Open' | 'Closed' | 'Referred';
+  updatedAt: string;
+  encounters: MockEncounter[];
+};
+
+// small helpers
+const now = Date.now();
+function iso(d: Date) { return new Date(d).toISOString(); }
+function daysAgo(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return d; }
+
+// Seed data (stable-ish)
+const CASES: MockCase[] = [
   {
-    id: 'enc-1001',
-    status: 'Consult',
-    startedAt: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-    updatedAt: new Date(Date.now() - 1000 * 60 * 10).toISOString(),
-    summary: 'Followâ€‘up for cough and fatigue.',
-    notes: [
-      { id: crypto.randomUUID(), ts: new Date(Date.now() - 1000 * 60 * 55).toISOString(), text: 'Triage intake complete.' },
-      { id: crypto.randomUUID(), ts: new Date(Date.now() - 1000 * 60 * 20).toISOString(), text: 'Televisit connected, discussed symptoms.', source: 'televisit', visitId: 'demo-123' },
+    id: 'CASE-24001',
+    title: 'Hypertension follow-up',
+    status: 'Open',
+    updatedAt: iso(daysAgo(0)),
+    encounters: [
+      {
+        id: 'ENC-24001-1',
+        caseId: 'CASE-24001',
+        start: iso(new Date(now - 1000 * 60 * 50)),
+        stop: iso(new Date(now - 1000 * 60 * 20)),
+        mode: 'video',
+        status: 'Completed',
+        clinician: { id: 'CLN-001', name: 'Dr. A. Moyo', specialty: 'Cardiology' },
+        notes: 'BP improved; adjust meds.',
+        devices: ['Health Monitor', 'NexRing'],
+      },
     ],
-    vitals: { hr: 78, sys: 126, dia: 81, spo2: 98, temp_c: 36.9 },
   },
   {
-    id: 'enc-1002',
-    status: 'Triage',
-    startedAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-    updatedAt: new Date().toISOString(),
-    notes: [],
+    id: 'CASE-23987',
+    title: 'Post-viral cough',
+    status: 'Closed',
+    updatedAt: iso(daysAgo(6)),
+    encounters: [
+      {
+        id: 'ENC-23987-1',
+        caseId: 'CASE-23987',
+        start: iso(daysAgo(7)),
+        stop: iso(daysAgo(7)),
+        mode: 'chat',
+        status: 'Completed',
+        clinician: { id: 'CLN-014', name: 'Dr. N. Jacobs', specialty: 'Internal Medicine' },
+        notes: 'Reassurance + inhaler',
+        devices: ['Health Monitor', 'Digital Stethoscope'],
+      },
+      {
+        id: 'ENC-23987-2',
+        caseId: 'CASE-23987',
+        start: iso(daysAgo(6)),
+        stop: iso(daysAgo(6)),
+        mode: 'audio',
+        status: 'Completed',
+        clinician: { id: 'CLN-014', name: 'Dr. N. Jacobs', specialty: 'Internal Medicine' },
+        notes: 'Symptoms resolved; close case',
+        devices: ['Health Monitor'],
+      },
+    ],
+  },
+  {
+    id: 'CASE-23992',
+    title: 'Post-viral cough',
+    status: 'Open',
+    updatedAt: iso(daysAgo(15)),
+    encounters: [
+      {
+        id: 'ENC-23992-1',
+        caseId: 'CASE-23992',
+        start: iso(daysAgo(15)),
+        stop: iso(daysAgo(15)),
+        mode: 'video',
+        status: 'Completed',
+        clinician: { id: 'CLN-018', name: 'Dr. P. Mazula', specialty: 'Internal Medicine' },
+        notes: 'Reassurance + inhaler Referred to Pulmonologist Dr. N. Moloyi Pulmonology',
+        devices: ['Health Monitor'],
+      },
+      {
+        id: 'ENC-23992-2',
+        caseId: 'CASE-23992',
+        start: iso(daysAgo(22)),
+        stop: iso(daysAgo(22)),
+        mode: 'video, audio, chat',
+        status: 'Completed',
+        clinician: { id: 'CLN-019', name: 'Dr. N. Moloyi', specialty: 'Pulmonology' },
+        notes: 'Suspected Accute Bronchitis; case referred to Pulmonologist',
+        devices: ['Health Monitor', 'NexRing', 'Digital Stethoscope', 'HD Otoscope'],
+      },
+    ],
+  },  {
+    id: 'CASE-23810',
+    title: 'Headache & dizziness',
+    status: 'Referred',
+    updatedAt: iso(daysAgo(14)),
+    encounters: [
+      {
+        id: 'ENC-23810-1',
+        caseId: 'CASE-23810',
+        start: iso(daysAgo(15)),
+        stop: iso(daysAgo(15)),
+        mode: 'video',
+        status: 'Completed',
+        clinician: { id: 'CLN-033', name: 'Dr. T. Dlamini', specialty: 'Neurology' },
+        notes: 'Refer to neuro clinic',
+        devices: ['Health Monitor'],
+      },
+    ],
   },
 ];
 
-export function listEncounters(): Encounter[] {
+export function listCases(): MockCase[] {
+  // Return a shallow clone so callers don't mutate the module state
+  return CASES.map(c => ({ ...c, encounters: [...c.encounters] }));
+}
+
+export function listEncounters(): MockEncounter[] {
+  const all: MockEncounter[] = [];
+  for (const c of CASES) {
+    for (const e of c.encounters) {
+      all.push({ ...e, caseTitle: c.title, caseStatus: c.status });
+    }
+  }
   // newest first
-  return [...ENCOUNTERS].sort((a, b) => (b.updatedAt.localeCompare(a.updatedAt)));
+  return all.sort((a, b) => new Date(b.stop ?? b.start).getTime() - new Date(a.stop ?? a.start).getTime());
 }
 
-export function getEncounter(id: string): Encounter | undefined {
-  return ENCOUNTERS.find(e => e.id === id);
+export function getCase(id: string): MockCase | undefined {
+  return CASES.find(c => c.id === id);
 }
 
-export function addNoteToEncounter(encId: string, note: { ts: string; text: string; source?: string; visitId?: string }) {
-  const enc = getEncounter(encId);
-  if (!enc) return undefined;
-
-  // simple duplicate guard: same text within last 2 minutes
-  const twoMinAgo = Date.now() - 120000;
-  const dup = enc.notes.find(n => n.text.trim() === note.text.trim() && new Date(n.ts).getTime() >= twoMinAgo);
-  if (dup) return { dup: true, enc };
-
-  const row = { id: crypto.randomUUID(), ...note };
-  enc.notes.unshift(row);
-  enc.updatedAt = new Date().toISOString();
-  return { enc, note: row };
+export function getEncounter(id: string): MockEncounter | undefined {
+  return listEncounters().find(e => e.id === id);
 }
 
-export function createEncounter(payload: Partial<Encounter>): Encounter {
-  const id = payload.id ?? `enc-${crypto.randomUUID().slice(0, 8)}`;
-  const now = new Date().toISOString();
-  const enc: Encounter = {
+// allow adding a mock encounter (useful for testing)
+export function addEncounter(payload: Partial<MockEncounter>): MockEncounter {
+  const id = payload.id ?? `ENC-${crypto.randomUUID().slice(0,8)}`;
+  const start = payload.start ?? new Date().toISOString();
+  const enc: MockEncounter = {
     id,
-    status: payload.status ?? 'Triage',
-    startedAt: payload.startedAt ?? now,
-    updatedAt: now,
-    summary: payload.summary ?? '',
-    notes: payload.notes ?? [],
-    vitals: payload.vitals ?? {},
+    caseId: payload.caseId ?? 'CASE-UNKNOWN',
+    start,
+    stop: payload.stop,
+    mode: payload.mode ?? 'chat',
+    status: payload.status ?? 'Completed',
+    clinician: payload.clinician,
+    notes: payload.notes,
+    devices: payload.devices,
   };
-  ENCOUNTERS.unshift(enc);
+
+  // find or create case
+  let c = CASES.find(x => x.id === enc.caseId);
+  if (!c) {
+    c = { id: enc.caseId, title: payload.caseTitle ?? enc.caseId, status: (payload.caseStatus as any) ?? 'Open', updatedAt: start, encounters: [] };
+    CASES.unshift(c);
+  }
+  c.encounters.unshift(enc);
+  c.updatedAt = enc.stop ?? enc.start;
   return enc;
 }

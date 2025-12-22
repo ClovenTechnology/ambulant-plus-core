@@ -1,42 +1,30 @@
+// apps/api-gateway/app/api/settings/consult/admin/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminPolicy, getClinicianConsult, setClinicianConsult } from '@/src/store/consult';
+import { requireAdmin } from '@/src/auth'; // implement this
+import { saveAdminConsultSettings } from '@/src/store/consult'; // implement persistence layer
 
-function who(h: Headers){ 
-  return { uid: h.get('x-uid') || '', role: h.get('x-role') || '' }; 
-}
+export async function PUT(req: NextRequest) {
+  try {
+    // Example: require an admin session/token - implement requireAdmin appropriately
+    const adminUser = await requireAdmin(req);
+    if (!adminUser) return NextResponse.json({ message: 'unauthorized' }, { status: 401 });
 
-export async function GET(req: NextRequest){
-  const { uid, role } = who(req.headers);
-  if (!uid || role !== 'clinician') return NextResponse.json({ error:'unauthorized' }, { status:401 });
+    const body = await req.json().catch(() => ({}));
+    // Validate numeric ranges
+    const admin = {
+      bufferAfterMinutes: Math.max(0, Number(body.admin?.bufferAfterMinutes ?? 0)),
+      joinGracePatientMin: Math.max(0, Number(body.admin?.joinGracePatientMin ?? 0)),
+      joinGraceClinicianMin: Math.max(0, Number(body.admin?.joinGraceClinicianMin ?? 0)),
+      minStandardMinutes: Math.max(1, Number(body.admin?.minStandardMinutes ?? 15)),
+      minFollowupMinutes: Math.max(1, Number(body.admin?.minFollowupMinutes ?? 5)),
+    };
 
-  const [admin, clin] = await Promise.all([getAdminPolicy(), getClinicianConsult(uid)]);
-  return NextResponse.json({
-    admin,              // read-only constraints
-    clinician: clin,    // raw clinician config
-    effective: {
-      standardMinutes: Math.max(clin.defaultStandardMin, admin.minStandardMinutes),
-      followupMinutes: Math.max(clin.defaultFollowupMin, admin.minFollowupMinutes),
-      bufferAfterMinutes: admin.bufferAfterMinutes,
-      joinGracePatientMin: admin.joinGracePatientMin,
-      joinGraceClinicianMin: admin.joinGraceClinicianMin,
-      minAdvanceMinutes: clin.minAdvanceMinutes,
-      maxAdvanceDays: clin.maxAdvanceDays,
-    }
-  });
-}
+    // Persist — implement saveAdminConsultSettings to write to DB
+    await saveAdminConsultSettings(admin);
 
-export async function PUT(req: NextRequest){
-  const { uid, role } = who(req.headers);
-  if (!uid || role !== 'clinician') return NextResponse.json({ error:'unauthorized' }, { status:401 });
-
-  const body = await req.json();
-  const admin = await getAdminPolicy();
-  await setClinicianConsult(uid, {
-    defaultStandardMin: Number(body?.clinician?.defaultStandardMin ?? 45),
-    defaultFollowupMin: Number(body?.clinician?.defaultFollowupMin ?? 20),
-    minAdvanceMinutes: Number(body?.clinician?.minAdvanceMinutes ?? 30),
-    maxAdvanceDays: Number(body?.clinician?.maxAdvanceDays ?? 30),
-  }, admin);
-
-  return NextResponse.json({ ok:true });
+    return NextResponse.json({ admin }, { status: 200 });
+  } catch (err: any) {
+    console.error('admin save error', err);
+    return NextResponse.json({ message: 'server_error', error: String(err?.message || err) }, { status: 500 });
+  }
 }

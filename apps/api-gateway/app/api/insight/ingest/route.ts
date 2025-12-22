@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/insight/ingest/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';

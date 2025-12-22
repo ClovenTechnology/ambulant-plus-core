@@ -1,0 +1,3314 @@
+=== InsightCore Audit Dump ===
+
+--- API files (matched) ---
+
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\appointments\events\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\clinicians\[id]\availability\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\clinicians\available\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\devices\pair\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\devices\vitals\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\encounters\[id]\auto-close\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\encounters\[id]\close\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\encounters\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\events\emit\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\events\inbox\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\events\stream\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\insight\frame\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\insight\ingest\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\insight\stream\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\vitals\emit\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\vitals\sse\route.ts
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\appointments\events\route.ts ---
+
+// apps/api-gateway/app/api/appointments/events/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { settleAppointment } from '@/src/lib/settlement';
+
+export async function POST(req: NextRequest){
+  const b = await req.json();
+  const apptId = String(b.appointment_id || '');
+  const kind   = String(b.kind || ''); // 'cancel_lt24h'|'no_show'|'clinician_miss'|'network_interrupt'
+  const elapsed = b.elapsed_minutes ? Number(b.elapsed_minutes) : undefined;
+  if (!apptId || !kind) return NextResponse.json({ error:'missing fields' }, { status:400 });
+
+  const result = await settleAppointment(apptId, {
+    reason: kind as any,
+    elapsedMinutes: elapsed,
+  });
+
+  return NextResponse.json({ ok:true, result });
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\clinicians\available\route.ts ---
+
+// apps/api-gateway/app/api/clinicians/available/route.ts
+import { NextResponse } from 'next/server';
+
+// however you load clinicians:
+type Clin = {
+  id: string;
+  status: 'online_available'|'in_consult'|'wrap_up'|'on_break';
+  login_at: number;
+  returned_to_available_at?: number;
+  sessions_assigned_today: number;
+  last_assigned_at?: number;
+  rank_at_login?: number;
+};
+
+function score(c: Clin, now: number) {
+  const minutes_since_last = c.last_assigned_at ? (now - c.last_assigned_at)/60000 : 9999;
+  const idle_minutes = c.returned_to_available_at
+    ? (now - c.returned_to_available_at)/60000
+    : (now - c.login_at)/60000;
+  const login_bias = c.rank_at_login ?? 0;
+  return 3*c.sessions_assigned_today + (-0.02*minutes_since_last) + (-0.01*idle_minutes) + 0.5*login_bias;
+}
+
+export async function GET() {
+  const clinicians: Clin[] = await loadFromYourStore(); // implement
+  const now = Date.now();
+
+  const visible = clinicians
+    .filter(c => c.status === 'online_available')
+    .map(c => ({ ...c, score: score(c, now) }))
+    .sort((a, b) => a.score - b.score);
+
+  return NextResponse.json(visible);
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\clinicians\[id]\availability\route.ts ---
+
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\devices\pair\route.ts ---
+
+import { NextRequest, NextResponse } from 'next/server';
+import { pairUserDevice } from '@/src/lib/devices';
+
+export const dynamic = 'force-dynamic';
+
+export async function POST(req: NextRequest) {
+  const uid = req.headers.get('x-uid') || 'pt-za-001';
+  const b = await req.json().catch(()=>({}));
+  try {
+    const rec = await pairUserDevice(uid, b.deviceId, b.meta);
+    return NextResponse.json({ ok: true, id: rec.id });
+  } catch (e:any) {
+    return NextResponse.json({ ok:false, error: e.message || 'pair_failed' }, { status: 400 });
+  }
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\devices\vitals\route.ts ---
+
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/src/lib/db";
+
+function who(h: Headers) { return { uid: h.get("x-uid"), role: h.get("x-role") }; }
+
+export async function GET(req: NextRequest) {
+  const { uid, role } = who(req.headers);
+  if (!uid || !role) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const url = new URL(req.url);
+  const deviceId = url.searchParams.get("device_id") ?? undefined;
+  const patientId = url.searchParams.get("patient_id") ?? undefined;
+  const roomId = url.searchParams.get("room_id") ?? undefined;
+  const type = url.searchParams.get("type") ?? undefined;
+  const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit") || 100)));
+  const sinceIso = url.searchParams.get("since") ?? undefined;
+
+  // Basic access rules: patient can only read own; clinician/admin unrestricted
+  if (role === "patient" && patientId && patientId !== uid) {
+    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+  if (role === "patient" && !patientId && deviceId) {
+    const d = await prisma.device.findUnique({ where: { deviceId } });
+    if (!d || d.patientId !== uid) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  }
+
+  const where: any = {};
+  if (deviceId) where.deviceId = deviceId;
+  if (patientId) where.patientId = patientId;
+  if (roomId) where.roomId = roomId;
+  if (type) where.vType = type;
+  if (sinceIso) where.t = { gte: new Date(sinceIso) };
+
+  const rows = await prisma.vitalSample.findMany({
+    where,
+    orderBy: { t: "desc" },
+    take: limit,
+  });
+
+  return NextResponse.json({
+    items: rows.map(r => ({
+      t: r.t.toISOString(),
+      type: r.vType,
+      value: r.valueNum,
+      unit: r.unit ?? undefined,
+      device_id: r.deviceId,
+      room_id: r.roomId ?? undefined,
+    })),
+  });
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\encounters\[id]\auto-close\route.ts ---
+
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\encounters\[id]\close\route.ts ---
+
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\encounters\route.ts ---
+
+//apps/api-gateway/app/api/encounters/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function GET() {
+  const rows = await prisma.encounter.findMany({ orderBy: { updatedAt: 'desc' } });
+  return NextResponse.json(rows, { headers: { 'access-control-allow-origin': '*' } });
+}
+
+export async function POST(req: NextRequest) {
+  const b = await req.json().catch(()=> ({}));
+  const id = b.id ?? `enc-za-${Math.floor(100 + Math.random()*900)}`;
+  const row = await prisma.encounter.create({
+    data: {
+      id,
+      caseId: b.caseId ?? 'case-za-001',
+      patientId: b.patientId ?? 'pt-za-001',
+      clinicianId: b.clinicianId ?? 'clin-za-001',
+      status: 'open'
+    }
+  });
+  return NextResponse.json(row, { status: 201, headers: { 'access-control-allow-origin': '*' } });
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\events\emit\route.ts ---
+
+// apps/api-gateway/app/api/events/emit/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'POST,OPTIONS',
+      'access-control-allow-headers': 'content-type,x-uid,x-role,x-org',
+    },
+  });
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const b = await req.json().catch(() => ({}));
+    const orgId = req.headers.get('x-org') || b.orgId || 'org-default';
+
+    // accepted input shape (flexible)
+    // {
+    //   kind: string,
+    //   encounterId?: string, patientId?: string, clinicianId?: string,
+    //   payload?: any,
+    //   targets?: { patientId?: string, clinicianId?: string, admin?: boolean }
+    // }
+    const kind = String(b.kind || '').trim();
+    if (!kind) {
+      return NextResponse.json({ error: 'missing_kind' }, { status: 400, headers: { 'access-control-allow-origin': '*'} });
+    }
+
+    const row = await prisma.runtimeEvent.create({
+      data: {
+        ts: BigInt(Date.now()),
+        kind,
+        encounterId: b.encounterId ? String(b.encounterId) : null,
+        patientId: b.patientId ? String(b.patientId) : null,
+        clinicianId: b.clinicianId ? String(b.clinicianId) : null,
+        payload: b.payload ? JSON.stringify(b.payload) : null,
+        targetPatientId: b.targets?.patientId ? String(b.targets.patientId) : null,
+        targetClinicianId: b.targets?.clinicianId ? String(b.targets.clinicianId) : null,
+        targetAdmin: Boolean(b.targets?.admin),
+        orgId,
+      },
+    });
+
+    return NextResponse.json({ ok: true, event: { id: row.id, kind: row.kind, ts: row.ts.toString() } }, {
+      headers: { 'access-control-allow-origin': '*' },
+    });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: 'event_emit_failed', detail: err?.message || String(err) },
+      { status: 400, headers: { 'access-control-allow-origin': '*' } }
+    );
+  }
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\events\inbox\route.ts ---
+
+// apps/api-gateway/app/api/events/inbox/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { readInbox } from '@/src/lib/events';
+import { readIdentity } from '@/src/lib/identity';
+
+export async function GET(req: NextRequest) {
+  const who = readIdentity(req.headers as any);
+  const u = new URL(req.url);
+  const afterId = u.searchParams.get('afterId') || undefined;
+
+  let patientId = u.searchParams.get('patientId') || undefined;
+  let clinicianId = u.searchParams.get('clinicianId') || undefined;
+  let admin = u.searchParams.get('admin') === '1' || u.searchParams.get('admin') === 'true';
+
+  if (who.role === 'patient') {
+    patientId = who.uid ?? patientId ?? undefined;
+    admin = false;
+    clinicianId = undefined;
+  } else if (who.role === 'clinician') {
+    clinicianId = who.uid ?? clinicianId ?? undefined;
+    admin = false;
+    patientId = undefined;
+  } else if (who.role === 'admin') {
+    admin = true;
+  } else {
+    return NextResponse.json({ events: [] }, { headers: { 'access-control-allow-origin': '*' } });
+  }
+
+  const data = readInbox({ afterId, patientId, clinicianId, admin });
+  return NextResponse.json(data, { headers: { 'access-control-allow-origin': '*' } });
+}
+export const dynamic = 'force-dynamic';
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\events\stream\route.ts ---
+
+// apps/api-gateway/app/api/events/stream/route.ts
+import { NextRequest } from 'next/server';
+import { prisma } from '@/src/lib/db';
+
+export const dynamic = 'force-dynamic';
+
+type Opts = {
+  clinicianId?: string;
+  patientId?: string;
+  orgId?: string;
+  kinds?: string[];
+};
+
+export async function GET(req: NextRequest) {
+  const u = new URL(req.url);
+  const q: Opts = {
+    clinicianId: u.searchParams.get('clinicianId') || undefined,
+    patientId: u.searchParams.get('patientId') || undefined,
+    orgId: u.searchParams.get('orgId') || undefined,
+    kinds: (u.searchParams.get('kinds') || '').split(',').filter(Boolean),
+  };
+
+  const headers = new Headers({
+    'content-type': 'text/event-stream',
+    'cache-control': 'no-cache, no-transform',
+    'connection': 'keep-alive',
+    'access-control-allow-origin': '*',
+  });
+
+  let lastTs = BigInt(Date.now() - 60_000); // start from last 60s
+  let closed = false;
+
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const encoder = new TextEncoder();
+
+      function send(type: string, data: unknown) {
+        controller.enqueue(encoder.encode(`event: ${type}\n`));
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+      }
+
+      // heartbeat
+      const hb = setInterval(() => {
+        if (!closed) controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
+      }, 15000);
+
+      async function pump() {
+        while (!closed) {
+          const where: any = { ts: { gt: lastTs } };
+          if (q.orgId) where.orgId = q.orgId;
+          if (q.clinicianId) where.targetClinicianId = q.clinicianId;
+          if (q.patientId) where.targetPatientId = q.patientId;
+          if (q.kinds?.length) where.kind = { in: q.kinds };
+
+          const rows = await prisma.runtimeEvent.findMany({
+            where,
+            orderBy: { ts: 'asc' },
+            take: 100,
+          });
+
+          for (const r of rows) {
+            lastTs = r.ts;
+            const payload = (() => {
+              try { return r.payload ? JSON.parse(r.payload) : null; } catch { return r.payload; }
+            })();
+            send(r.kind, { id: r.id, ts: r.ts.toString(), kind: r.kind, payload });
+          }
+
+          // backoff a bit
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+      }
+
+      pump().catch(() => {});
+
+      // cleanup
+      // @ts-ignore - controller has no 'closed' event in types; rely on cancel
+      stream.cancel = () => {
+        closed = true;
+        clearInterval(hb);
+      };
+    },
+    cancel() { closed = true; },
+  });
+
+  return new Response(stream, { headers });
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\insight\frame\route.ts ---
+
+// apps/api-gateway/app/api/insight/frame/route.ts
+export const dynamic = 'force-dynamic';
+
+declare const global: any;
+if (!global.__INSIGHT_CLIENTS__) global.__INSIGHT_CLIENTS__ = [];
+type Client = { id: string; session: string; controller: ReadableStreamDefaultController<Uint8Array> };
+const getClients = (): Client[] => global.__INSIGHT_CLIENTS__ || [];
+
+function sse(data: any, event?: string) {
+  const head = event ? `event: ${event}\n` : '';
+  return new TextEncoder().encode(`${head}data: ${JSON.stringify(data)}\n\n`);
+}
+
+export async function OPTIONS() {
+  return new Response(null, {
+    status: 204,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'content-type, authorization',
+    },
+  });
+}
+
+export async function POST(req: Request) {
+  const b = await req.json().catch(() => null) as any;
+  if (!b || !b.kind) {
+    return new Response(JSON.stringify({ error: 'bad_request' }), {
+      status: 400,
+      headers: { 'Access-Control-Allow-Origin': '*', 'content-type': 'application/json' },
+    });
+  }
+
+  const session = b.sessionId || b.roomId || b.session || 'default';
+  const kind = String(b.kind);
+  const ts = Number.isFinite(b.ts) ? b.ts : Date.now();
+  const sampleRate = b.sampleRate;
+  const cadenceHz  = b.cadenceHz;
+  const payloadB64 = b.payloadB64 || (typeof b.payload === 'string' ? b.payload : undefined);
+  const mime = b.mime || (kind.includes('photo') || kind.includes('image') ? 'image/jpeg' : undefined);
+
+  // Lightweight demo annotation
+  let annotation: any = null;
+  if (kind.includes('steth') || kind === 'pcm' || kind === 'stethoscope_pcm16') {
+    annotation = { type: 'audio', label: 'murmur: none', conf: 0.92 };
+  } else if (kind.includes('ecg')) {
+    annotation = { type: 'ecg', label: 'rhythm: sinus', hr: 72, arrhythmia: 'none', conf: 0.88 };
+  } else if (kind.includes('ppg')) {
+    annotation = { type: 'ppg', label: 'signal ok', spo2_est: 97, hr: 70 };
+  } else if (kind.includes('photo') || kind.includes('image') || kind.includes('video') || kind.includes('otoscope')) {
+    annotation = { type: 'image', label: 'no otitis detected', conf: 0.81 };
+  }
+
+  // Broadcast raw frame + annotation
+  for (const c of getClients()) {
+    if (c.session === session) {
+      try {
+        c.controller.enqueue(sse({ kind, ts, sampleRate, cadenceHz, b64: payloadB64, mime }, 'frame'));
+        if (annotation) c.controller.enqueue(sse({ kind, ts, annotation }, 'ai'));
+      } catch {}
+    }
+  }
+
+  return new Response(JSON.stringify({ ok: true, annotation }), {
+    headers: { 'content-type': 'application/json', 'Access-Control-Allow-Origin': '*' },
+  });
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\insight\ingest\route.ts ---
+
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+// Prefer server-only env; fall back to NEXT_PUBLIC for back-compat
+const CORE =
+  process.env.INSIGHTCORE_URL ||
+  process.env.NEXT_PUBLIC_INSIGHTCORE_URL ||
+  'http://localhost:8788';
+
+const KEY =
+  process.env.INSIGHTCORE_KEY ||
+  process.env.NEXT_PUBLIC_INSIGHTCORE_KEY ||
+  '';
+
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+
+  // If caller sent its own Authorization, pass it through; else use KEY if present
+  const auth = req.headers.get('authorization') || (KEY ? `Bearer ${KEY}` : undefined);
+
+  const r = await fetch(`${CORE.replace(/\/+$/,'')}/ingest`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(auth ? { authorization: auth } : {}),
+    },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
+
+  if (!r.ok) {
+    const text = await r.text().catch(() => '');
+    return NextResponse.json(
+      { ok: false, error: `InsightCore ${r.status}`, detail: text || undefined },
+      { status: 500 }
+    );
+  }
+
+  const j = await r.json().catch(() => ({}));
+  return NextResponse.json({ ok: true, ...j });
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\insight\stream\route.ts ---
+
+// apps/api-gateway/app/api/insight/stream/route.ts
+export const dynamic = 'force-dynamic';
+
+declare const global: any;
+if (!global.__INSIGHT_CLIENTS__) global.__INSIGHT_CLIENTS__ = [];
+type Client = { id: string; session: string; controller: ReadableStreamDefaultController<Uint8Array> };
+
+function sse(data: any, event?: string) {
+  const head = event ? `event: ${event}\n` : '';
+  return new TextEncoder().encode(`${head}data: ${JSON.stringify(data)}\n\n`);
+}
+
+export async function GET(req: Request) {
+  const url = new URL(req.url);
+  const session = url.searchParams.get('session') || url.searchParams.get('roomId') || 'default';
+  const id = Math.random().toString(36).slice(2);
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const client: Client = { id, session, controller };
+      (global.__INSIGHT_CLIENTS__ as Client[]).push(client);
+      controller.enqueue(sse({ hello: 'insight-stream', session }, 'ready'));
+
+      const ping = setInterval(() => {
+        try { controller.enqueue(sse({ t: Date.now() }, 'ping')); } catch {}
+      }, 15000);
+
+      (req as any).signal?.addEventListener?.('abort', () => {
+        clearInterval(ping);
+        const arr = global.__INSIGHT_CLIENTS__ as Client[];
+        const idx = arr.findIndex((c) => c.id === id);
+        if (idx >= 0) arr.splice(idx, 1);
+        try { controller.close(); } catch {}
+      });
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\vitals\emit\route.ts ---
+
+// apps/api-gateway/app/api/vitals/emit/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { pushVital } from '@/src/lib/sseBus';
+
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: {
+      'access-control-allow-origin': '*',
+      'access-control-allow-methods': 'POST,OPTIONS',
+      'access-control-allow-headers': 'content-type'
+    }
+  });
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const b = await req.json();
+    const v = {
+      roomId: String(b.roomId || ''),
+      type: String(b.type || ''),
+      value: Number(b.value),
+      unit: b.unit ? String(b.unit) : undefined,
+      t: b.t ? String(b.t) : new Date().toISOString(),
+    };
+    if (!v.roomId || !v.type || Number.isNaN(v.value)) {
+      return NextResponse.json({ error: 'bad_vital' }, { status: 400, headers: { 'access-control-allow-origin': '*' } });
+    }
+    pushVital(v);
+    return NextResponse.json({ ok: true }, { headers: { 'access-control-allow-origin': '*' } });
+  } catch (e:any) {
+    return NextResponse.json({ error: 'bad_request', detail: e?.message }, { status: 400, headers: { 'access-control-allow-origin': '*' } });
+  }
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\api-gateway\app\api\vitals\sse\route.ts ---
+
+// apps/api-gateway/app/api/vitals/sse/route.ts
+import { NextRequest } from 'next/server';
+import { subscribe, getHistory } from '@/src/lib/sseBus';
+
+export const runtime = 'nodejs'; // ensure streaming works
+export const dynamic = 'force-dynamic';
+
+export async function GET(req: NextRequest) {
+  const roomId = req.nextUrl.searchParams.get('room_id') || '';
+  if (!roomId) {
+    return new Response('missing room_id', { status: 400 });
+  }
+
+  const encoder = new TextEncoder();
+  let keep: ReturnType<typeof setInterval> | null = null;
+  let unsub: (() => void) | null = null;
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const send = (obj: any) =>
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
+
+      // send last few on connect
+      for (const v of getHistory(roomId)) send(v);
+
+      unsub = subscribe(roomId, send);
+
+      // initial comment + keepalive
+      controller.enqueue(encoder.encode(':ok\n\n'));
+      keep = setInterval(
+        () => controller.enqueue(encoder.encode(':keepalive\n\n')),
+        25_000,
+      );
+    },
+    cancel() {
+      if (keep) clearInterval(keep);
+      if (unsub) unsub();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
+}
+
+--- Admin files (matched) ---
+
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\analytics\clinician-payouts\page.tsx
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\analytics\monthly\page.tsx
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\analytics\page.tsx
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\analytics\clinician-payouts.csv\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\analytics\clinician-payouts\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\analytics\models\[id]\predict\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\analytics\monthly\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\insightcore\alerts\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\insightcore\config\route.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\settings\insightcore\page.tsx
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\settings\insightcore\simulator\page.tsx
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\components\JobStatusChip.tsx
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\bailout-to-client-rendering.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\components\Overlay\maintain--tab-focus.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\BuildError.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\Errors.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RootLayoutError.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\CallStackFrame.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\ComponentStackFrameRow.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\FrameworkIcon.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\GroupedStackFrames.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\index.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\searchparams-bailout-proxy.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\static-generation-bailout.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\static-generation-searchparams-bailout-provider.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\detect-domain-locale.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\get-domain-locale.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\normalize-trailing-slash.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\compiled\@next\font\dist\format-available-values.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\lib\wait.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\app-render\make-get-server-inserted-html.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\app-render\rsc\taint.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\app-render\server-inserted-html.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\future\route-modules\app-page\vendored\contexts\html-context.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\future\route-modules\app-page\vendored\contexts\server-inserted-html.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\future\route-modules\pages\vendored\contexts\html-context.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\future\route-modules\pages\vendored\contexts\server-inserted-html.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\htmlescape.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\lib\squoosh\main.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\web\internal-edge-wait-until.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\html-context.shared-runtime.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\i18n\detect-domain-locale.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\is-plain-object.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\lazy-dynamic\bailout-to-csr.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\lazy-dynamic\dynamic-bailout-to-csr.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\page-path\remove-page-path-tail.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\router\utils\remove-trailing-slash.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\server-inserted-html.shared-runtime.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\telemetry\events\swc-load-failure.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\postcss\lib\container.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\colors.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\defaultConfig.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\defaultTheme.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\loadConfig.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\nesting\index.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\plugin.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\resolveConfig.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\src\lib\load-config.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\src\value-parser\index.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\stubs\tailwind.config.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\config.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\generated\colors.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\generated\corePluginList.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\generated\default-theme.d.ts
+C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\index.d.ts
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\analytics\clinician-payouts\page.tsx ---
+
+'use client'
+import { useEffect, useState } from 'react'
+type Row = { classId:string; name:string; consultations:number; revenueZAR:number; rxPayoutPercent:number; payoutZAR:number }
+export default function ClinicianPayouts(){
+  const [rows,setRows] = useState<Row[]>([])
+  const [total,setTotal] = useState<number>(0)
+  useEffect(()=>{
+    fetch('/api/analytics/clinician-payouts',{cache:'no-store'}).then(r=>r.json()).then(d=>{ setRows(d.classes||[]); setTotal(d.totalPayoutZAR||0) })
+  },[])
+  return (<main className="p-6 space-y-4">
+    <h1 className="text-lg font-semibold">Clinician Payouts (last 30 days)</h1>
+    <table className="w-full text-sm border">
+      <thead className="bg-gray-50"><tr className="text-left">
+        <th className="p-2">Class</th><th className="p-2">Consultations</th><th className="p-2">Revenue (ZAR)</th><th className="p-2">Rx Payout %</th><th className="p-2">Payout (ZAR)</th>
+      </tr></thead>
+      <tbody>
+        {rows.map(r=>(<tr key={r.classId} className="border-t">
+          <td className="p-2">{r.name}</td><td className="p-2">{r.consultations}</td><td className="p-2">{r.revenueZAR.toLocaleString()}</td><td className="p-2">{r.rxPayoutPercent}%</td><td className="p-2">{r.payoutZAR.toLocaleString()}</td>
+        </tr>))}
+        {rows.length===0 && <tr><td className="p-2 text-gray-500" colSpan={5}>No data.</td></tr>}
+      </tbody>
+      <tfoot><tr className="border-t font-semibold"><td className="p-2" colSpan={4}>Total</td><td className="p-2">{total.toLocaleString()}</td></tr></tfoot>
+    </table>
+  </main>)
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\analytics\monthly\page.tsx ---
+
+'use client'
+import { useEffect, useState } from 'react'
+export default function Monthly(){
+  const [data,setData] = useState<any>(null)
+  useEffect(()=>{ fetch('/api/analytics/monthly',{cache:'no-store'}).then(r=>r.json()).then(setData)},[])
+  if(!data) return <main className="p-6">Loading…</main>
+  return (<main className="p-6 space-y-4">
+    <h1 className="text-lg font-semibold">Monthly Summary</h1>
+    <div className="grid md:grid-cols-4 gap-4">
+      {['revenueZAR','deliveries','labTests','consultations'].map(k=>(
+        <div key={k} className="border rounded p-4 bg-white">
+          <div className="text-xs text-gray-500">{k}</div>
+          <div className="text-xl font-semibold">{String(data[k])}</div>
+        </div>
+      ))}
+    </div>
+  </main>)
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\analytics\page.tsx ---
+
+"use client";
+import { useEffect, useMemo, useRef, useState } from "react";
+
+type Kpi = { label:string; value:string|number; sub?:string };
+const provinces = ["Gauteng","KZN","WC","EC","FS","MP","NW","NC","LP"];
+const genders = ["All","Male","Female","Other"];
+
+function mockKpis():Kpi[]{
+  return [
+    {label:"Total Revenue", value:"R 1,240,000", sub:"+12% MoM"},
+    {label:"Patients", value: 18240, sub:"+4%"},
+    {label:"Clinicians", value: 1260, sub:"A:420 • B:620 • C:220"},
+    {label:"IoMT Devices", value: 9, sub:"Active: 7"},
+    {label:"Rx Revenue", value:"R 310,500"},
+    {label:"Total Payout", value:"R 870,000"},
+    {label:"CarePort Revenue", value:"R 182,400", sub:"incl. riders"},
+
+    {label:"MedReach Revenue", value:"R 226,900"},
+    {label:"# Rider Payouts (CarePort)", value: 742},
+    {label:"# Phleb Payouts (MedReach)", value: 311},
+    {label:"Ambulant+ Earnings (net)", value:"R 344,800"},
+    {label:"Total Refunds", value:"R 12,600"},
+  ];
+}
+
+function drawChart(canvas:HTMLCanvasElement, data:number[]){
+  const ctx = canvas.getContext("2d")!;
+  const w = canvas.width = canvas.clientWidth;
+  const h = canvas.height = 260;
+  ctx.clearRect(0,0,w,h);
+  const pad = 32;
+  const max = Math.max(...data, 1);
+  const stepX = (w - pad*2) / (data.length-1);
+  // axes
+  ctx.strokeStyle = "#e5e7eb"; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(pad, h-pad); ctx.lineTo(w-pad, h-pad); ctx.stroke();
+  // line
+  ctx.beginPath();
+  data.forEach((v,i)=>{
+    const x = pad + i*stepX;
+    const y = h - pad - (v/max)*(h-pad*2);
+    if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+  });
+  ctx.strokeStyle = "#111827"; ctx.lineWidth = 2; ctx.stroke();
+}
+
+export default function Analytics(){
+  const [prov, setProv] = useState("Gauteng");
+  const [city, setCity] = useState("All");
+  const [gender, setGender] = useState("All");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const data = useMemo(()=> Array.from({length:12},(_,i)=> Math.round(50+Math.sin(i/2)*30 + Math.random()*20 )),[prov,city,gender,from,to]);
+
+  useEffect(()=>{
+    if(canvasRef.current) drawChart(canvasRef.current, data);
+  },[data]);
+
+  const kpis = mockKpis();
+
+  return (
+    <main className="p-6 space-y-6">
+      <h1 className="text-xl font-semibold">Analytics</h1>
+
+      <section className="grid sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-6 gap-3">
+        {kpis.map((k,i)=>(
+          <div key={i} className="rounded-2xl border p-4 bg-white shadow-sm">
+            <div className="text-xs text-gray-500">{k.label}</div>
+            <div className="text-2xl font-semibold">{k.value}</div>
+            {k.sub && <div className="text-xs text-gray-400 mt-1">{k.sub}</div>}
+          </div>
+        ))}
+      </section>
+
+      <section className="rounded-2xl border p-4 bg-white shadow-sm space-y-4">
+        <div className="grid sm:grid-cols-5 gap-3">
+          <select className="border rounded px-2 py-1" value={prov} onChange={e=>setProv(e.target.value)}>
+            {provinces.map(p=><option key={p}>{p}</option>)}
+          </select>
+          <input className="border rounded px-2 py-1" placeholder="City/Town (All)" value={city} onChange={e=>setCity(e.target.value)} />
+          <select className="border rounded px-2 py-1" value={gender} onChange={e=>setGender(e.target.value)}>
+            {genders.map(g=><option key={g}>{g}</option>)}
+          </select>
+          <input type="date" className="border rounded px-2 py-1" value={from} onChange={e=>setFrom(e.target.value)} />
+          <input type="date" className="border rounded px-2 py-1" value={to} onChange={e=>setTo(e.target.value)} />
+        </div>
+        <div className="w-full"><canvas ref={canvasRef} className="w-full" /></div>
+      </section>
+    </main>
+  );
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\analytics\clinician-payouts\route.ts ---
+
+import { NextResponse } from 'next/server'
+export async function GET(){
+  return NextResponse.json({
+    period: 'last_30_days',
+    classes: [
+      { classId:'classA', name:'Class A — Doctors', consultations: 124, revenueZAR: 186000, rxPayoutPercent: 70, payoutZAR: 130200 },
+      { classId:'classB', name:'Class B — Allied Health', consultations: 92, revenueZAR: 69000, rxPayoutPercent: 70, payoutZAR: 48300 },
+      { classId:'classC', name:'Class C — Wellness', consultations: 48, revenueZAR: 24000, rxPayoutPercent: 70, payoutZAR: 16800 }
+    ],
+    totalPayoutZAR: 195300
+  })
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\analytics\clinician-payouts.csv\route.ts ---
+
+import { NextResponse } from 'next/server'
+export async function GET(){
+  const rows = [
+    { classId:'classA', name:'Class A — Doctors', consultations:124, revenueZAR:186000, rxPayoutPercent:70, payoutZAR:130200 },
+    { classId:'classB', name:'Class B — Allied Health', consultations:92, revenueZAR:69000, rxPayoutPercent:70, payoutZAR:48300 },
+    { classId:'classC', name:'Class C — Wellness', consultations:48, revenueZAR:24000, rxPayoutPercent:70, payoutZAR:16800 }
+  ]
+  const header = 'classId,name,consultations,revenueZAR,rxPayoutPercent,payoutZAR\n'
+  const body = rows.map(r=>[r.classId,r.name,r.consultations,r.revenueZAR,r.rxPayoutPercent,r.payoutZAR].join(',')).join('\n')
+  return new NextResponse(header+body+'\n', { headers: { 'Content-Type':'text/csv; charset=utf-8' } })
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\analytics\models\[id]\predict\route.ts ---
+
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\analytics\monthly\route.ts ---
+
+import { NextResponse } from 'next/server'
+export async function GET(){
+  return NextResponse.json({
+    month: '2025-08',
+    revenueZAR: 512000,
+    deliveries: 842,
+    labTests: 391,
+    consultations: 1260
+  })
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\insightcore\alerts\route.ts ---
+
+import { NextRequest, NextResponse } from 'next/server'
+import { promises as fs } from 'fs'
+import path from 'path'
+import crypto from 'crypto'
+
+const alertsPath = path.join(process.cwd(), '../../packages/insightcore/alerts.json')
+
+async function readJsonSafe(file:string){
+  const txt = await fs.readFile(file, 'utf-8').then(t=>t.replace(/^\uFEFF/, ''))
+  return JSON.parse(txt)
+}
+
+export async function GET(){
+  const data = await readJsonSafe(alertsPath).catch(()=>({alerts:[]}))
+  return NextResponse.json(data)
+}
+
+export async function POST(req: NextRequest){
+  const body = await req.json()
+  const data = await readJsonSafe(alertsPath).catch(()=>({alerts:[]}))
+  data.alerts.push({
+    id: crypto.randomUUID(),
+    patient: body.patient || '',
+    type: body.type || 'Alert',
+    score: Number(body.score || 0),
+    ts: new Date().toISOString(),
+    note: body.note || ''
+  })
+  await fs.writeFile(alertsPath, JSON.stringify(data, null, 2), 'utf-8')
+  return NextResponse.json({ ok: true })
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\api\insightcore\config\route.ts ---
+
+import { NextRequest, NextResponse } from 'next/server'
+import { promises as fs } from 'fs'; import path from 'path'
+const cfgPath = path.join(process.cwd(),'../../packages/insightcore/config.json')
+async function readJsonSafe(f:string){ const t=await fs.readFile(f,'utf-8'); return JSON.parse(t.replace(/^\uFEFF/,'')) }
+export async function GET(){ return NextResponse.json(await readJsonSafe(cfgPath)) }
+export async function PUT(req:NextRequest){ const body=await req.json(); await fs.writeFile(cfgPath,JSON.stringify(body,null,2),'utf-8'); return NextResponse.json({ok:true}) }
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\settings\insightcore\simulator\page.tsx ---
+
+'use client'
+import { useEffect, useState } from 'react'
+
+type Alert = { id:string; patient:string; type:string; score:number; ts:string; note?:string }
+
+export default function AlertSimulator(){
+  const [alerts,setAlerts] = useState<Alert[]>([])
+  const [patient,setPatient] = useState('Thandi Mokoena')
+  const [type,setType] = useState('Heart Risk')
+  const [score,setScore] = useState(0.72)
+  const [note,setNote] = useState('Persistent tachycardia over threshold')
+
+  async function load(){
+    const d = await fetch('/api/insightcore/alerts',{cache:'no-store'}).then(r=>r.json())
+    setAlerts(d.alerts || [])
+  }
+  useEffect(()=>{ load() }, [])
+
+  async function push(){
+    const res = await fetch('/api/insightcore/alerts', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ patient, type, score, note })
+    })
+    if(res.ok) load()
+  }
+
+  return (
+    <main className="p-6 space-y-4">
+      <h1 className="text-lg font-semibold">InsightCore — Alert Simulator</h1>
+      <div className="border rounded p-4 bg-white grid md:grid-cols-2 gap-4 text-sm">
+        <label className="flex flex-col">Patient<input className="border rounded px-2 py-1" value={patient} onChange={e=>setPatient(e.target.value)} /></label>
+        <label className="flex flex-col">Type<input className="border rounded px-2 py-1" value={type} onChange={e=>setType(e.target.value)} /></label>
+        <label className="flex flex-col">Score<input type="number" step="0.01" className="border rounded px-2 py-1" value={score} onChange={e=>setScore(parseFloat(e.target.value))} /></label>
+        <label className="flex flex-col">Note<input className="border rounded px-2 py-1" value={note} onChange={e=>setNote(e.target.value)} /></label>
+        <button onClick={push} className="px-3 py-2 border rounded bg-black text-white w-max">Generate Alert</button>
+      </div>
+
+      <div className="border rounded p-4 bg-white">
+        <div className="font-medium mb-2">Recent Alerts</div>
+        <ul className="divide-y text-sm">
+          {alerts.slice().reverse().map(a => (
+            <li key={a.id} className="py-2 flex items-center justify-between">
+              <div>
+                <div className="font-medium">{a.type} — {a.patient}</div>
+                <div className="text-xs text-gray-600">{a.ts} • score {a.score.toFixed(2)}</div>
+              </div>
+              <div className="text-xs border rounded px-2 py-1">{a.note}</div>
+            </li>
+          ))}
+          {alerts.length===0 && <li className="py-2 text-gray-500">No alerts yet.</li>}
+        </ul>
+      </div>
+    </main>
+  )
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\app\settings\insightcore\page.tsx ---
+
+'use client'
+import { useEffect, useState } from 'react'
+type Cfg = Record<string, any>
+export default function InsightCoreSettings(){
+  const [cfg,setCfg]=useState<Cfg|null>(null),[saving,setSaving]=useState(false),[saved,setSaved]=useState(false)
+  useEffect(()=>{fetch('/api/insightcore/config',{cache:'no-store'}).then(r=>r.json()).then(setCfg)},[])
+  function update(p:string,v:any){ if(!cfg) return; const n=structuredClone(cfg),k=p.split('.'); let c:any=n; for(let i=0;i<k.length-1;i++) c=c[k[i]]; c[k.at(-1)!]=v; setCfg(n)}
+  async function save(){ setSaving(true); setSaved(false); const res=await fetch('/api/insightcore/config',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(cfg)}); setSaving(false); setSaved(res.ok)}
+  if(!cfg) return <main className="p-6">Loading...</main>
+  return (<main className="p-6 space-y-6">
+    <h1 className="text-lg font-semibold">InsightCore Thresholds</h1>
+    <section className="grid md:grid-cols-2 gap-4">
+      <Card title="Heart Rate"><Number label="Min" value={cfg.heartRate.min} onChange={v=>update('heartRate.min',v)}/><Number label="Max" value={cfg.heartRate.max} onChange={v=>update('heartRate.max',v)}/></Card>
+      <Card title="SpO₂"><Number label="Min" value={cfg.spo2.min} onChange={v=>update('spo2.min',v)}/></Card>
+      <Card title="Temperature"><Number label="Max (°C)" value={cfg.temperature.max} onChange={v=>update('temperature.max',v)}/></Card>
+      <Card title="Blood Pressure"><Number label="Systolic Max" value={cfg.bp.systolicMax} onChange={v=>update('bp.systolicMax',v)}/><Number label="Diastolic Max" value={cfg.bp.diastolicMax} onChange={v=>update('bp.diastolicMax',v)}/></Card>
+      <Card title="Glucose Instability"><Number step={0.05} label="Threshold" value={cfg.glucoseInstability.threshold} onChange={v=>update('glucoseInstability.threshold',v)}/></Card>
+      <Card title="Risk Scoring"><Number step={0.01} label="Alert Score Min" value={cfg.riskScoring.alertScoreMin} onChange={v=>update('riskScoring.alertScoreMin',v)}/></Card>
+    </section>
+    <div className="flex gap-2"><button onClick={save} className="px-4 py-2 border rounded bg-black text-white" disabled={saving}>{saving?'Saving…':'Save Changes'}</button>{saved&&<span className="text-green-700 text-sm mt-2">Saved ✓</span>}</div>
+  </main>)}
+function Card({title,children}:{title:string,children:any}){return <div className="border rounded p-4 bg-white"><div className="font-medium mb-2">{title}</div><div className="grid grid-cols-2 gap-2">{children}</div></div>}
+function Number({label,value,onChange,step=1}:{label:string,value:number,onChange:(v:number)=>void,step?:number}){return <label className="text-sm flex items-center gap-2"><span className="w-36 text-gray-600">{label}</span><input type="number" step={step} value={value} onChange={e=>onChange(parseFloat(e.target.value))} className="border rounded px-2 py-1 w-32"/></label>}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\components\JobStatusChip.tsx ---
+
+// apps/admin-dashboard/components/JobStatusChip.tsx
+'use client';
+
+import type { JobStatus } from '@shared/fsm';
+import { getStatusLabel, getStatusClasses } from '@shared/fsm';
+
+type Props = {
+  status: JobStatus;
+  compact?: boolean;
+};
+
+export default function JobStatusChip({ status, compact }: Props) {
+  return (
+    <span
+      className={
+        (compact ? 'px-1.5 py-0.5' : 'px-2 py-0.5') +
+        ' inline-flex items-center rounded-full text-[10px] font-medium border ' +
+        getStatusClasses(status)
+      }
+    >
+      {getStatusLabel(status)}
+    </span>
+  );
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\components\Overlay\maintain--tab-focus.d.ts ---
+
+export default function ({ context }?: {
+    context: any;
+}): {
+    disengage: () => void;
+};
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\CallStackFrame.d.ts ---
+
+import React from 'react';
+import { type OriginalStackFrame } from '../../helpers/stack-frame';
+export declare const CallStackFrame: React.FC<{
+    frame: OriginalStackFrame;
+}>;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\ComponentStackFrameRow.d.ts ---
+
+import type { ComponentStackFrame } from '../../helpers/parse-component-stack';
+export declare function ComponentStackFrameRow({ componentStackFrame, }: {
+    componentStackFrame: ComponentStackFrame;
+}): import("react/jsx-runtime").JSX.Element;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\FrameworkIcon.d.ts ---
+
+import type { StackFramesGroup } from '../../helpers/group-stack-frames-by-framework';
+export declare function FrameworkIcon({ framework, }: {
+    framework: NonNullable<StackFramesGroup['framework']>;
+}): import("react/jsx-runtime").JSX.Element;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\GroupedStackFrames.d.ts ---
+
+import type { StackFramesGroup } from '../../helpers/group-stack-frames-by-framework';
+export declare function GroupedStackFrames({ groupedStackFrames, all, }: {
+    groupedStackFrames: StackFramesGroup[];
+    all: boolean;
+}): import("react/jsx-runtime").JSX.Element;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RuntimeError\index.d.ts ---
+
+import * as React from 'react';
+import type { ReadyRuntimeError } from '../../helpers/getErrorByType';
+export type RuntimeErrorProps = {
+    error: ReadyRuntimeError;
+};
+declare const RuntimeError: React.FC<RuntimeErrorProps>;
+export declare const styles: string;
+export { RuntimeError };
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\BuildError.d.ts ---
+
+import * as React from 'react';
+import type { VersionInfo } from '../../../../../server/dev/parse-version-info';
+export type BuildErrorProps = {
+    message: string;
+    versionInfo?: VersionInfo;
+};
+export declare const BuildError: React.FC<BuildErrorProps>;
+export declare const styles: string;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\Errors.d.ts ---
+
+import * as React from 'react';
+import type { UnhandledErrorAction, UnhandledRejectionAction } from '../error-overlay-reducer';
+import type { VersionInfo } from '../../../../../server/dev/parse-version-info';
+export type SupportedErrorEvent = {
+    id: number;
+    event: UnhandledErrorAction | UnhandledRejectionAction;
+};
+export type ErrorsProps = {
+    errors: SupportedErrorEvent[];
+    initialDisplayState: DisplayState;
+    versionInfo?: VersionInfo;
+};
+type DisplayState = 'minimized' | 'fullscreen' | 'hidden';
+export declare const Errors: React.FC<ErrorsProps>;
+export declare const styles: string;
+export {};
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\react-dev-overlay\internal\container\RootLayoutError.d.ts ---
+
+import React from 'react';
+export type RootLayoutErrorProps = {
+    missingTags: string[];
+};
+export declare const RootLayoutError: React.FC<RootLayoutErrorProps>;
+export declare const styles: string;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\bailout-to-client-rendering.d.ts ---
+
+export declare function bailoutToClientRendering(reason: string): void | never;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\searchparams-bailout-proxy.d.ts ---
+
+export declare function createSearchParamsBailoutProxy(): {};
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\static-generation-bailout.d.ts ---
+
+import type { AppConfigDynamic } from '../../build/utils';
+declare class StaticGenBailoutError extends Error {
+    readonly code = "NEXT_STATIC_GEN_BAILOUT";
+}
+export declare function isStaticGenBailoutError(error: unknown): error is StaticGenBailoutError;
+type BailoutOpts = {
+    dynamic?: AppConfigDynamic;
+    link?: string;
+};
+export type StaticGenerationBailout = (reason: string, opts?: BailoutOpts) => boolean | never;
+export declare const staticGenerationBailout: StaticGenerationBailout;
+export {};
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\components\static-generation-searchparams-bailout-provider.d.ts ---
+
+import React from 'react';
+export default function StaticGenerationSearchParamsBailoutProvider({ Component, propsForComponent, isStaticGeneration, }: {
+    Component: React.ComponentType<any>;
+    propsForComponent: any;
+    isStaticGeneration: boolean;
+}): import("react/jsx-runtime").JSX.Element;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\detect-domain-locale.d.ts ---
+
+import type { detectDomainLocale as Fn } from '../shared/lib/i18n/detect-domain-locale';
+export declare const detectDomainLocale: typeof Fn;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\get-domain-locale.d.ts ---
+
+import type { DomainLocale } from '../server/config';
+export declare function getDomainLocale(path: string, locale?: string | false, locales?: string[], domainLocales?: DomainLocale[]): string | false;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\client\normalize-trailing-slash.d.ts ---
+
+/**
+ * Normalizes the trailing slash of a path according to the `trailingSlash` option
+ * in `next.config.js`.
+ */
+export declare const normalizePathTrailingSlash: (path: string) => string;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\compiled\@next\font\dist\format-available-values.d.ts ---
+
+/**
+ * Formats an array of values into a string that can be used error messages.
+ * ["a", "b", "c"] => "`a`, `b`, `c`"
+ */
+export declare const formatAvailableValues: (values: string[]) => string;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\lib\wait.d.ts ---
+
+/**
+ * Wait for a given number of milliseconds and then resolve.
+ *
+ * @param ms the number of milliseconds to wait
+ */
+export declare function wait(ms: number): Promise<unknown>;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\app-render\rsc\taint.d.ts ---
+
+type Reference = object;
+type TaintableUniqueValue = string | bigint | ArrayBufferView;
+export declare const taintObjectReference: (message: string | undefined, object: Reference) => void;
+export declare const taintUniqueValue: (message: string | undefined, lifetime: Reference, value: TaintableUniqueValue) => void;
+export {};
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\app-render\make-get-server-inserted-html.d.ts ---
+
+import React from 'react';
+export declare function makeGetServerInsertedHTML({ polyfills, renderServerInsertedHTML, hasPostponed, }: {
+    polyfills: JSX.IntrinsicElements['script'][];
+    renderServerInsertedHTML: () => React.ReactNode;
+    hasPostponed: boolean;
+}): (serverCapturedErrors: Error[]) => Promise<string>;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\app-render\server-inserted-html.d.ts ---
+
+/// <reference types="react" />
+export declare function createServerInsertedHTML(): {
+    ServerInsertedHTMLProvider({ children }: {
+        children: JSX.Element;
+    }): import("react/jsx-runtime").JSX.Element;
+    renderServerInsertedHTML(): import("react/jsx-runtime").JSX.Element[];
+};
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\future\route-modules\app-page\vendored\contexts\html-context.d.ts ---
+
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\future\route-modules\app-page\vendored\contexts\server-inserted-html.d.ts ---
+
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\future\route-modules\pages\vendored\contexts\html-context.d.ts ---
+
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\future\route-modules\pages\vendored\contexts\server-inserted-html.d.ts ---
+
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\lib\squoosh\main.d.ts ---
+
+/// <reference types="node" />
+type RotateOperation = {
+    type: 'rotate';
+    numRotations: number;
+};
+type ResizeOperation = {
+    type: 'resize';
+} & ({
+    width: number;
+    height?: never;
+} | {
+    height: number;
+    width?: never;
+} | {
+    width: number;
+    height: number;
+});
+export type Operation = RotateOperation | ResizeOperation;
+export type Encoding = 'jpeg' | 'png' | 'webp' | 'avif';
+export declare function getMetadata(buffer: Buffer): Promise<{
+    width: number;
+    height: number;
+}>;
+export declare function processBuffer(buffer: Buffer, operations: Operation[], encoding: Encoding, quality: number): Promise<Buffer>;
+export declare function decodeBuffer(buffer: Buffer): Promise<import("./image_data").default>;
+export {};
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\web\internal-edge-wait-until.d.ts ---
+
+export declare function internal_getCurrentFunctionWaitUntil(): Promise<void> | null;
+export declare function internal_runWithWaitUntil<T>(fn: () => T): T;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\server\htmlescape.d.ts ---
+
+export declare const ESCAPE_REGEX: RegExp;
+export declare function htmlEscapeJsonString(str: string): string;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\i18n\detect-domain-locale.d.ts ---
+
+import type { DomainLocale } from '../../../server/config-shared';
+export declare function detectDomainLocale(domainItems?: DomainLocale[], hostname?: string, detectedLocale?: string): DomainLocale | undefined;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\lazy-dynamic\bailout-to-csr.d.ts ---
+
+/** An error that should be thrown when we want to bail out to client-side rendering. */
+export declare class BailoutToCSRError extends Error {
+    readonly reason: string;
+    readonly digest = "BAILOUT_TO_CLIENT_SIDE_RENDERING";
+    constructor(reason: string);
+}
+/** Checks if a passed argument is an error that is thrown if we want to bail out to client-side rendering. */
+export declare function isBailoutToCSRError(err: unknown): err is BailoutToCSRError;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\lazy-dynamic\dynamic-bailout-to-csr.d.ts ---
+
+import type { ReactElement } from 'react';
+interface BailoutToCSRProps {
+    reason: string;
+    children: ReactElement;
+}
+/**
+ * If rendered on the server, this component throws an error
+ * to signal Next.js that it should bail out to client-side rendering instead.
+ */
+export declare function BailoutToCSR({ reason, children }: BailoutToCSRProps): ReactElement<any, string | import("react").JSXElementConstructor<any>>;
+export {};
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\page-path\remove-page-path-tail.d.ts ---
+
+/**
+ * Removes the file extension for a page and the trailing `index` if it exists
+ * making sure to not return an empty string. The page head is not touched
+ * and returned as it is passed. Examples:
+ *   - `/foo/bar/baz/index.js` -> `/foo/bar/baz`
+ *   - `/foo/bar/baz.js` -> `/foo/bar/baz`
+ *
+ * @param pagePath A page to a page file (absolute or relative)
+ * @param options.extensions Extensions allowed for the page.
+ * @param options.keepIndex When true the trailing `index` is _not_ removed.
+ */
+export declare function removePagePathTail(pagePath: string, options: {
+    extensions: ReadonlyArray<string>;
+    keepIndex?: boolean;
+}): string;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\router\utils\remove-trailing-slash.d.ts ---
+
+/**
+ * Removes the trailing slash for a given route or page path. Preserves the
+ * root page. Examples:
+ *   - `/foo/bar/` -> `/foo/bar`
+ *   - `/foo/bar` -> `/foo/bar`
+ *   - `/` -> `/`
+ */
+export declare function removeTrailingSlash(route: string): string;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\html-context.shared-runtime.d.ts ---
+
+/// <reference types="react" />
+import type { BuildManifest } from '../../server/get-page-files';
+import type { ServerRuntime } from 'next/types';
+import type { NEXT_DATA } from './utils';
+import type { FontConfig } from '../../server/font-utils';
+import type { NextFontManifest } from '../../build/webpack/plugins/next-font-manifest-plugin';
+export type HtmlProps = {
+    __NEXT_DATA__: NEXT_DATA;
+    strictNextHead: boolean;
+    dangerousAsPath: string;
+    docComponentsRendered: {
+        Html?: boolean;
+        Main?: boolean;
+        Head?: boolean;
+        NextScript?: boolean;
+    };
+    buildManifest: BuildManifest;
+    ampPath: string;
+    inAmpMode: boolean;
+    hybridAmp: boolean;
+    isDevelopment: boolean;
+    dynamicImports: string[];
+    assetPrefix?: string;
+    canonicalBase: string;
+    headTags: any[];
+    unstable_runtimeJS?: false;
+    unstable_JsPreload?: false;
+    assetQueryString: string;
+    scriptLoader: {
+        afterInteractive?: string[];
+        beforeInteractive?: any[];
+        worker?: any[];
+    };
+    locale?: string;
+    disableOptimizedLoading?: boolean;
+    styles?: React.ReactElement[] | React.ReactFragment;
+    head?: Array<JSX.Element | null>;
+    crossOrigin?: 'anonymous' | 'use-credentials' | '' | undefined;
+    optimizeCss?: any;
+    optimizeFonts?: FontConfig;
+    nextConfigOutput?: 'standalone' | 'export';
+    nextScriptWorkers?: boolean;
+    runtime?: ServerRuntime;
+    hasConcurrentFeatures?: boolean;
+    largePageDataBytes?: number;
+    nextFontManifest?: NextFontManifest;
+};
+export declare const HtmlContext: import("react").Context<HtmlProps | undefined>;
+export declare function useHtmlContext(): HtmlProps;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\is-plain-object.d.ts ---
+
+export declare function getObjectClassLabel(value: any): string;
+export declare function isPlainObject(value: any): boolean;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\shared\lib\server-inserted-html.shared-runtime.d.ts ---
+
+import React from 'react';
+export type ServerInsertedHTMLHook = (callbacks: () => React.ReactNode) => void;
+export declare const ServerInsertedHTMLContext: React.Context<ServerInsertedHTMLHook | null>;
+export declare function useServerInsertedHTML(callback: () => React.ReactNode): void;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\next\dist\telemetry\events\swc-load-failure.d.ts ---
+
+export type EventSwcLoadFailure = {
+    eventName: string;
+    payload: {
+        platform: string;
+        arch: string;
+        nodeVersion: string;
+        nextVersion: string;
+        wasm?: 'enabled' | 'fallback' | 'failed';
+        glibcVersion?: string;
+        installedSwcPackages?: string;
+        nativeBindingsErrorCode?: string;
+    };
+};
+export declare function eventSwcLoadFailure(event?: EventSwcLoadFailure['payload']): Promise<void>;
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\postcss\lib\container.d.ts ---
+
+import AtRule from './at-rule.js'
+import Comment from './comment.js'
+import Declaration from './declaration.js'
+import Node, { ChildNode, ChildProps, NodeProps } from './node.js'
+import { Root } from './postcss.js'
+import Rule from './rule.js'
+
+declare namespace Container {
+  export type ContainerWithChildren<Child extends Node = ChildNode> = {
+    nodes: Child[]
+  } & (
+    | AtRule
+    | Root
+    | Rule
+  )
+
+  export interface ValueOptions {
+    /**
+     * String that’s used to narrow down values and speed up the regexp search.
+     */
+    fast?: string
+
+    /**
+     * An array of property names.
+     */
+    props?: readonly string[]
+  }
+
+  export interface ContainerProps extends NodeProps {
+    nodes?: readonly (ChildProps | Node)[]
+  }
+
+  /**
+   * All types that can be passed into container methods to create or add a new
+   * child node.
+   */
+  export type NewChild =
+    | ChildProps
+    | Node
+    | readonly ChildProps[]
+    | readonly Node[]
+    | readonly string[]
+    | string
+    | undefined
+
+  // eslint-disable-next-line @typescript-eslint/no-use-before-define
+  export { Container_ as default }
+}
+
+/**
+ * The `Root`, `AtRule`, and `Rule` container nodes
+ * inherit some common methods to help work with their children.
+ *
+ * Note that all containers can store any content. If you write a rule inside
+ * a rule, PostCSS will parse it.
+ */
+declare abstract class Container_<Child extends Node = ChildNode> extends Node {
+  /**
+   * An array containing the container’s children.
+   *
+   * ```js
+   * const root = postcss.parse('a { color: black }')
+   * root.nodes.length           //=> 1
+   * root.nodes[0].selector      //=> 'a'
+   * root.nodes[0].nodes[0].prop //=> 'color'
+   * ```
+   */
+  nodes: Child[] | undefined
+
+  /**
+   * The container’s first child.
+   *
+   * ```js
+   * rule.first === rules.nodes[0]
+   * ```
+   */
+  get first(): Child | undefined
+
+  /**
+   * The container’s last child.
+   *
+   * ```js
+   * rule.last === rule.nodes[rule.nodes.length - 1]
+   * ```
+   */
+  get last(): Child | undefined
+  /**
+   * Inserts new nodes to the end of the container.
+   *
+   * ```js
+   * const decl1 = new Declaration({ prop: 'color', value: 'black' })
+   * const decl2 = new Declaration({ prop: 'background-color', value: 'white' })
+   * rule.append(decl1, decl2)
+   *
+   * root.append({ name: 'charset', params: '"UTF-8"' })  // at-rule
+   * root.append({ selector: 'a' })                       // rule
+   * rule.append({ prop: 'color', value: 'black' })       // declaration
+   * rule.append({ text: 'Comment' })                     // comment
+   *
+   * root.append('a {}')
+   * root.first.append('color: black; z-index: 1')
+   * ```
+   *
+   * @param nodes New nodes.
+   * @return This node for methods chain.
+   */
+  append(...nodes: Container.NewChild[]): this
+  assign(overrides: Container.ContainerProps | object): this
+  clone(overrides?: Partial<Container.ContainerProps>): this
+
+  cloneAfter(overrides?: Partial<Container.ContainerProps>): this
+
+  cloneBefore(overrides?: Partial<Container.ContainerProps>): this
+  /**
+   * Iterates through the container’s immediate children,
+   * calling `callback` for each child.
+   *
+   * Returning `false` in the callback will break iteration.
+   *
+   * This method only iterates through the container’s immediate children.
+   * If you need to recursively iterate through all the container’s descendant
+   * nodes, use `Container#walk`.
+   *
+   * Unlike the for `{}`-cycle or `Array#forEach` this iterator is safe
+   * if you are mutating the array of child nodes during iteration.
+   * PostCSS will adjust the current index to match the mutations.
+   *
+   * ```js
+   * const root = postcss.parse('a { color: black; z-index: 1 }')
+   * const rule = root.first
+   *
+   * for (const decl of rule.nodes) {
+   *   decl.cloneBefore({ prop: '-webkit-' + decl.prop })
+   *   // Cycle will be infinite, because cloneBefore moves the current node
+   *   // to the next index
+   * }
+   *
+   * rule.each(decl => {
+   *   decl.cloneBefore({ prop: '-webkit-' + decl.prop })
+   *   // Will be executed only for color and z-index
+   * })
+   * ```
+   *
+   * @param callback Iterator receives each node and index.
+   * @return Returns `false` if iteration was broke.
+   */
+  each(
+    callback: (node: Child, index: number) => false | void
+  ): false | undefined
+
+  /**
+   * Returns `true` if callback returns `true`
+   * for all of the container’s children.
+   *
+   * ```js
+   * const noPrefixes = rule.every(i => i.prop[0] !== '-')
+   * ```
+   *
+   * @param condition Iterator returns true or false.
+   * @return Is every child pass condition.
+   */
+  every(
+    condition: (node: Child, index: number, nodes: Child[]) => boolean
+  ): boolean
+  /**
+   * Returns a `child`’s index within the `Container#nodes` array.
+   *
+   * ```js
+   * rule.index( rule.nodes[2] ) //=> 2
+   * ```
+   *
+   * @param child Child of the current container.
+   * @return Child index.
+   */
+  index(child: Child | number): number
+
+  /**
+   * Insert new node after old node within the container.
+   *
+   * @param oldNode Child or child’s index.
+   * @param newNode New node.
+   * @return This node for methods chain.
+   */
+  insertAfter(oldNode: Child | number, newNode: Container.NewChild): this
+
+  /**
+   * Traverses the container’s descendant nodes, calling callback
+   * for each comment node.
+   *
+   * Like `Container#each`, this method is safe
+   * to use if you are mutating arrays during iteration.
+   *
+   * ```js
+   * root.walkComments(comment => {
+   *   comment.remove()
+   * })
+   * ```
+   *
+   * @param callback Iterator receives each node and index.
+   * @return Returns `false` if iteration was broke.
+   */
+
+  /**
+   * Insert new node before old node within the container.
+   *
+   * ```js
+   * rule.insertBefore(decl, decl.clone({ prop: '-webkit-' + decl.prop }))
+   * ```
+   *
+   * @param oldNode Child or child’s index.
+   * @param newNode New node.
+   * @return This node for methods chain.
+   */
+  insertBefore(oldNode: Child | number, newNode: Container.NewChild): this
+  /**
+   * Inserts new nodes to the start of the container.
+   *
+   * ```js
+   * const decl1 = new Declaration({ prop: 'color', value: 'black' })
+   * const decl2 = new Declaration({ prop: 'background-color', value: 'white' })
+   * rule.prepend(decl1, decl2)
+   *
+   * root.append({ name: 'charset', params: '"UTF-8"' })  // at-rule
+   * root.append({ selector: 'a' })                       // rule
+   * rule.append({ prop: 'color', value: 'black' })       // declaration
+   * rule.append({ text: 'Comment' })                     // comment
+   *
+   * root.append('a {}')
+   * root.first.append('color: black; z-index: 1')
+   * ```
+   *
+   * @param nodes New nodes.
+   * @return This node for methods chain.
+   */
+  prepend(...nodes: Container.NewChild[]): this
+
+  /**
+   * Add child to the end of the node.
+   *
+   * ```js
+   * rule.push(new Declaration({ prop: 'color', value: 'black' }))
+   * ```
+   *
+   * @param child New node.
+   * @return This node for methods chain.
+   */
+  push(child: Child): this
+
+  /**
+   * Removes all children from the container
+   * and cleans their parent properties.
+   *
+   * ```js
+   * rule.removeAll()
+   * rule.nodes.length //=> 0
+   * ```
+   *
+   * @return This node for methods chain.
+   */
+  removeAll(): this
+
+  /**
+   * Removes node from the container and cleans the parent properties
+   * from the node and its children.
+   *
+   * ```js
+   * rule.nodes.length  //=> 5
+   * rule.removeChild(decl)
+   * rule.nodes.length  //=> 4
+   * decl.parent        //=> undefined
+   * ```
+   *
+   * @param child Child or child’s index.
+   * @return This node for methods chain.
+   */
+  removeChild(child: Child | number): this
+
+  replaceValues(
+    pattern: RegExp | string,
+    replaced: { (substring: string, ...args: any[]): string } | string
+  ): this
+  /**
+   * Passes all declaration values within the container that match pattern
+   * through callback, replacing those values with the returned result
+   * of callback.
+   *
+   * This method is useful if you are using a custom unit or function
+   * and need to iterate through all values.
+   *
+   * ```js
+   * root.replaceValues(/\d+rem/, { fast: 'rem' }, string => {
+   *   return 15 * parseInt(string) + 'px'
+   * })
+   * ```
+   *
+   * @param pattern      Replace pattern.
+   * @param {object} options             Options to speed up the search.
+   * @param replaced   String to replace pattern or callback
+   *                                     that returns a new value. The callback
+   *                                     will receive the same arguments
+   *                                     as those passed to a function parameter
+   *                                     of `String#replace`.
+   * @return This node for methods chain.
+   */
+  replaceValues(
+    pattern: RegExp | string,
+    options: Container.ValueOptions,
+    replaced: { (substring: string, ...args: any[]): string } | string
+  ): this
+
+  /**
+   * Returns `true` if callback returns `true` for (at least) one
+   * of the container’s children.
+   *
+   * ```js
+   * const hasPrefix = rule.some(i => i.prop[0] === '-')
+   * ```
+   *
+   * @param condition Iterator returns true or false.
+   * @return Is some child pass condition.
+   */
+  some(
+    condition: (node: Child, index: number, nodes: Child[]) => boolean
+  ): boolean
+
+  /**
+   * Traverses the container’s descendant nodes, calling callback
+   * for each node.
+   *
+   * Like container.each(), this method is safe to use
+   * if you are mutating arrays during iteration.
+   *
+   * If you only need to iterate through the container’s immediate children,
+   * use `Container#each`.
+   *
+   * ```js
+   * root.walk(node => {
+   *   // Traverses all descendant nodes.
+   * })
+   * ```
+   *
+   * @param callback Iterator receives each node and index.
+   * @return  Returns `false` if iteration was broke.
+   */
+  walk(
+    callback: (node: ChildNode, index: number) => false | void
+  ): false | undefined
+
+  /**
+   * Traverses the container’s descendant nodes, calling callback
+   * for each at-rule node.
+   *
+   * If you pass a filter, iteration will only happen over at-rules
+   * that have matching names.
+   *
+   * Like `Container#each`, this method is safe
+   * to use if you are mutating arrays during iteration.
+   *
+   * ```js
+   * root.walkAtRules(rule => {
+   *   if (isOld(rule.name)) rule.remove()
+   * })
+   *
+   * let first = false
+   * root.walkAtRules('charset', rule => {
+   *   if (!first) {
+   *     first = true
+   *   } else {
+   *     rule.remove()
+   *   }
+   * })
+   * ```
+   *
+   * @param name     String or regular expression to filter at-rules by name.
+   * @param callback Iterator receives each node and index.
+   * @return Returns `false` if iteration was broke.
+   */
+  walkAtRules(
+    nameFilter: RegExp | string,
+    callback: (atRule: AtRule, index: number) => false | void
+  ): false | undefined
+  walkAtRules(
+    callback: (atRule: AtRule, index: number) => false | void
+  ): false | undefined
+
+  walkComments(
+    callback: (comment: Comment, indexed: number) => false | void
+  ): false | undefined
+  walkComments(
+    callback: (comment: Comment, indexed: number) => false | void
+  ): false | undefined
+
+  /**
+   * Traverses the container’s descendant nodes, calling callback
+   * for each declaration node.
+   *
+   * If you pass a filter, iteration will only happen over declarations
+   * with matching properties.
+   *
+   * ```js
+   * root.walkDecls(decl => {
+   *   checkPropertySupport(decl.prop)
+   * })
+   *
+   * root.walkDecls('border-radius', decl => {
+   *   decl.remove()
+   * })
+   *
+   * root.walkDecls(/^background/, decl => {
+   *   decl.value = takeFirstColorFromGradient(decl.value)
+   * })
+   * ```
+   *
+   * Like `Container#each`, this method is safe
+   * to use if you are mutating arrays during iteration.
+   *
+   * @param prop     String or regular expression to filter declarations
+   *                 by property name.
+   * @param callback Iterator receives each node and index.
+   * @return Returns `false` if iteration was broke.
+   */
+  walkDecls(
+    propFilter: RegExp | string,
+    callback: (decl: Declaration, index: number) => false | void
+  ): false | undefined
+  walkDecls(
+    callback: (decl: Declaration, index: number) => false | void
+  ): false | undefined
+  /**
+   * Traverses the container’s descendant nodes, calling callback
+   * for each rule node.
+   *
+   * If you pass a filter, iteration will only happen over rules
+   * with matching selectors.
+   *
+   * Like `Container#each`, this method is safe
+   * to use if you are mutating arrays during iteration.
+   *
+   * ```js
+   * const selectors = []
+   * root.walkRules(rule => {
+   *   selectors.push(rule.selector)
+   * })
+   * console.log(`Your CSS uses ${ selectors.length } selectors`)
+   * ```
+   *
+   * @param selector String or regular expression to filter rules by selector.
+   * @param callback Iterator receives each node and index.
+   * @return Returns `false` if iteration was broke.
+   */
+  walkRules(
+    selectorFilter: RegExp | string,
+    callback: (rule: Rule, index: number) => false | void
+  ): false | undefined
+  walkRules(
+    callback: (rule: Rule, index: number) => false | void
+  ): false | undefined
+  /**
+   * An internal method that converts a {@link NewChild} into a list of actual
+   * child nodes that can then be added to this container.
+   *
+   * This ensures that the nodes' parent is set to this container, that they use
+   * the correct prototype chain, and that they're marked as dirty.
+   *
+   * @param mnodes The new node or nodes to add.
+   * @param sample A node from whose raws the new node's `before` raw should be
+   *               taken.
+   * @param type   This should be set to `'prepend'` if the new nodes will be
+   *               inserted at the beginning of the container.
+   * @hidden
+   */
+  protected normalize(
+    nodes: Container.NewChild,
+    sample: Node | undefined,
+    type?: 'prepend' | false
+  ): Child[]
+}
+
+declare class Container<
+  Child extends Node = ChildNode
+> extends Container_<Child> {}
+
+export = Container
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\nesting\index.d.ts ---
+
+import type { AcceptedPlugin, PluginCreator } from 'postcss'
+
+declare const plugin: PluginCreator<AcceptedPlugin | string | void>
+export = plugin
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\src\lib\load-config.ts ---
+
+import jitiFactory from 'jiti'
+import { transform } from 'sucrase'
+
+import { Config } from '../../types/config'
+
+let jiti: ReturnType<typeof jitiFactory> | null = null
+
+// @internal
+// This WILL be removed in some future release
+// If you rely on this your stuff WILL break
+export function useCustomJiti(_jiti: () => ReturnType<typeof jitiFactory>) {
+  jiti = _jiti()
+}
+
+function lazyJiti() {
+  return (
+    jiti ??
+    (jiti = jitiFactory(__filename, {
+      interopDefault: true,
+      transform: (opts) => {
+        // Sucrase can't transform import.meta so we have to use Babel
+        if (opts.source.includes('import.meta')) {
+          return require('jiti/dist/babel.js')(opts)
+        }
+
+        return transform(opts.source, {
+          transforms: ['typescript', 'imports'],
+        })
+      },
+    }))
+  )
+}
+
+export function loadConfig(path: string): Config {
+  let config = (function () {
+    if (!path) return {}
+
+    try {
+      return require(path)
+    } catch {
+      return lazyJiti()(path)
+    }
+  })()
+
+  return config.default ?? config
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\src\value-parser\index.d.ts ---
+
+declare namespace postcssValueParser {
+  interface BaseNode {
+    /**
+     * The offset, inclusive, inside the CSS value at which the node starts.
+     */
+    sourceIndex: number
+
+    /**
+     * The offset, exclusive, inside the CSS value at which the node ends.
+     */
+    sourceEndIndex: number
+
+    /**
+     * The node's characteristic value
+     */
+    value: string
+  }
+
+  interface ClosableNode {
+    /**
+     * Whether the parsed CSS value ended before the node was properly closed
+     */
+    unclosed?: true
+  }
+
+  interface AdjacentAwareNode {
+    /**
+     * The token at the start of the node
+     */
+    before: string
+
+    /**
+     * The token at the end of the node
+     */
+    after: string
+  }
+
+  interface CommentNode extends BaseNode, ClosableNode {
+    type: 'comment'
+  }
+
+  interface DivNode extends BaseNode, AdjacentAwareNode {
+    type: 'div'
+  }
+
+  interface FunctionNode extends BaseNode, ClosableNode, AdjacentAwareNode {
+    type: 'function'
+
+    /**
+     * Nodes inside the function
+     */
+    nodes: Node[]
+  }
+
+  interface SpaceNode extends BaseNode {
+    type: 'space'
+  }
+
+  interface StringNode extends BaseNode, ClosableNode {
+    type: 'string'
+
+    /**
+     * The quote type delimiting the string
+     */
+    quote: '"' | "'"
+  }
+
+  interface UnicodeRangeNode extends BaseNode {
+    type: 'unicode-range'
+  }
+
+  interface WordNode extends BaseNode {
+    type: 'word'
+  }
+
+  /**
+   * Any node parsed from a CSS value
+   */
+  type Node =
+    | CommentNode
+    | DivNode
+    | FunctionNode
+    | SpaceNode
+    | StringNode
+    | UnicodeRangeNode
+    | WordNode
+
+  interface CustomStringifierCallback {
+    /**
+     * @param node The node to stringify
+     * @returns The serialized CSS representation of the node
+     */
+    (nodes: Node): string | undefined
+  }
+
+  interface WalkCallback {
+    /**
+     * @param node  The currently visited node
+     * @param index The index of the node in the series of parsed nodes
+     * @param nodes The series of parsed nodes
+     * @returns Returning `false` will prevent traversal of descendant nodes (only applies if `bubble` was set to `true` in the `walk()` call)
+     */
+    (node: Node, index: number, nodes: Node[]): void | boolean
+  }
+
+  /**
+   * A CSS dimension, decomposed into its numeric and unit parts
+   */
+  interface Dimension {
+    number: string
+    unit: string
+  }
+
+  /**
+   * A wrapper around a parsed CSS value that allows for inspecting and walking nodes
+   */
+  interface ParsedValue {
+    /**
+     * The series of parsed nodes
+     */
+    nodes: Node[]
+
+    /**
+     * Walk all parsed nodes, applying a callback
+     *
+     * @param callback A visitor callback that will be executed for each node
+     * @param bubble   When set to `true`, walking will be done inside-out instead of outside-in
+     */
+    walk(callback: WalkCallback, bubble?: boolean): this
+  }
+
+  interface ValueParser {
+    /**
+     * Decompose a CSS dimension into its numeric and unit part
+     *
+     * @param value The dimension to decompose
+     * @returns An object representing `number` and `unit` part of the dimension or `false` if the decomposing fails
+     */
+    unit(value: string): Dimension | false
+
+    /**
+     * Serialize a series of nodes into a CSS value
+     *
+     * @param nodes  The nodes to stringify
+     * @param custom A custom stringifier callback
+     * @returns The generated CSS value
+     */
+    stringify(nodes: Node | Node[], custom?: CustomStringifierCallback): string
+
+    /**
+     * Walk a series of nodes, applying a callback
+     *
+     * @param nodes    The nodes to walk
+     * @param callback A visitor callback that will be executed for each node
+     * @param bubble   When set to `true`, walking will be done inside-out instead of outside-in
+     */
+    walk(nodes: Node[], callback: WalkCallback, bubble?: boolean): void
+
+    /**
+     * Parse a CSS value into a series of nodes to operate on
+     *
+     * @param value The value to parse
+     */
+    new (value: string): ParsedValue
+
+    /**
+     * Parse a CSS value into a series of nodes to operate on
+     *
+     * @param value The value to parse
+     */
+    (value: string): ParsedValue
+  }
+}
+
+declare const postcssValueParser: postcssValueParser.ValueParser
+
+export = postcssValueParser
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\stubs\tailwind.config.ts ---
+
+import type { Config } from 'tailwindcss'
+
+export default __CONFIG__ satisfies Config
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\generated\colors.d.ts ---
+
+export interface DefaultColors {
+  inherit: 'inherit'
+  current: 'currentColor'
+  transparent: 'transparent'
+  black: '#000'
+  white: '#fff'
+  slate: {
+    '50': '#f8fafc'
+    '100': '#f1f5f9'
+    '200': '#e2e8f0'
+    '300': '#cbd5e1'
+    '400': '#94a3b8'
+    '500': '#64748b'
+    '600': '#475569'
+    '700': '#334155'
+    '800': '#1e293b'
+    '900': '#0f172a'
+    '950': '#020617'
+  }
+  gray: {
+    '50': '#f9fafb'
+    '100': '#f3f4f6'
+    '200': '#e5e7eb'
+    '300': '#d1d5db'
+    '400': '#9ca3af'
+    '500': '#6b7280'
+    '600': '#4b5563'
+    '700': '#374151'
+    '800': '#1f2937'
+    '900': '#111827'
+    '950': '#030712'
+  }
+  zinc: {
+    '50': '#fafafa'
+    '100': '#f4f4f5'
+    '200': '#e4e4e7'
+    '300': '#d4d4d8'
+    '400': '#a1a1aa'
+    '500': '#71717a'
+    '600': '#52525b'
+    '700': '#3f3f46'
+    '800': '#27272a'
+    '900': '#18181b'
+    '950': '#09090b'
+  }
+  neutral: {
+    '50': '#fafafa'
+    '100': '#f5f5f5'
+    '200': '#e5e5e5'
+    '300': '#d4d4d4'
+    '400': '#a3a3a3'
+    '500': '#737373'
+    '600': '#525252'
+    '700': '#404040'
+    '800': '#262626'
+    '900': '#171717'
+    '950': '#0a0a0a'
+  }
+  stone: {
+    '50': '#fafaf9'
+    '100': '#f5f5f4'
+    '200': '#e7e5e4'
+    '300': '#d6d3d1'
+    '400': '#a8a29e'
+    '500': '#78716c'
+    '600': '#57534e'
+    '700': '#44403c'
+    '800': '#292524'
+    '900': '#1c1917'
+    '950': '#0c0a09'
+  }
+  red: {
+    '50': '#fef2f2'
+    '100': '#fee2e2'
+    '200': '#fecaca'
+    '300': '#fca5a5'
+    '400': '#f87171'
+    '500': '#ef4444'
+    '600': '#dc2626'
+    '700': '#b91c1c'
+    '800': '#991b1b'
+    '900': '#7f1d1d'
+    '950': '#450a0a'
+  }
+  orange: {
+    '50': '#fff7ed'
+    '100': '#ffedd5'
+    '200': '#fed7aa'
+    '300': '#fdba74'
+    '400': '#fb923c'
+    '500': '#f97316'
+    '600': '#ea580c'
+    '700': '#c2410c'
+    '800': '#9a3412'
+    '900': '#7c2d12'
+    '950': '#431407'
+  }
+  amber: {
+    '50': '#fffbeb'
+    '100': '#fef3c7'
+    '200': '#fde68a'
+    '300': '#fcd34d'
+    '400': '#fbbf24'
+    '500': '#f59e0b'
+    '600': '#d97706'
+    '700': '#b45309'
+    '800': '#92400e'
+    '900': '#78350f'
+    '950': '#451a03'
+  }
+  yellow: {
+    '50': '#fefce8'
+    '100': '#fef9c3'
+    '200': '#fef08a'
+    '300': '#fde047'
+    '400': '#facc15'
+    '500': '#eab308'
+    '600': '#ca8a04'
+    '700': '#a16207'
+    '800': '#854d0e'
+    '900': '#713f12'
+    '950': '#422006'
+  }
+  lime: {
+    '50': '#f7fee7'
+    '100': '#ecfccb'
+    '200': '#d9f99d'
+    '300': '#bef264'
+    '400': '#a3e635'
+    '500': '#84cc16'
+    '600': '#65a30d'
+    '700': '#4d7c0f'
+    '800': '#3f6212'
+    '900': '#365314'
+    '950': '#1a2e05'
+  }
+  green: {
+    '50': '#f0fdf4'
+    '100': '#dcfce7'
+    '200': '#bbf7d0'
+    '300': '#86efac'
+    '400': '#4ade80'
+    '500': '#22c55e'
+    '600': '#16a34a'
+    '700': '#15803d'
+    '800': '#166534'
+    '900': '#14532d'
+    '950': '#052e16'
+  }
+  emerald: {
+    '50': '#ecfdf5'
+    '100': '#d1fae5'
+    '200': '#a7f3d0'
+    '300': '#6ee7b7'
+    '400': '#34d399'
+    '500': '#10b981'
+    '600': '#059669'
+    '700': '#047857'
+    '800': '#065f46'
+    '900': '#064e3b'
+    '950': '#022c22'
+  }
+  teal: {
+    '50': '#f0fdfa'
+    '100': '#ccfbf1'
+    '200': '#99f6e4'
+    '300': '#5eead4'
+    '400': '#2dd4bf'
+    '500': '#14b8a6'
+    '600': '#0d9488'
+    '700': '#0f766e'
+    '800': '#115e59'
+    '900': '#134e4a'
+    '950': '#042f2e'
+  }
+  cyan: {
+    '50': '#ecfeff'
+    '100': '#cffafe'
+    '200': '#a5f3fc'
+    '300': '#67e8f9'
+    '400': '#22d3ee'
+    '500': '#06b6d4'
+    '600': '#0891b2'
+    '700': '#0e7490'
+    '800': '#155e75'
+    '900': '#164e63'
+    '950': '#083344'
+  }
+  sky: {
+    '50': '#f0f9ff'
+    '100': '#e0f2fe'
+    '200': '#bae6fd'
+    '300': '#7dd3fc'
+    '400': '#38bdf8'
+    '500': '#0ea5e9'
+    '600': '#0284c7'
+    '700': '#0369a1'
+    '800': '#075985'
+    '900': '#0c4a6e'
+    '950': '#082f49'
+  }
+  blue: {
+    '50': '#eff6ff'
+    '100': '#dbeafe'
+    '200': '#bfdbfe'
+    '300': '#93c5fd'
+    '400': '#60a5fa'
+    '500': '#3b82f6'
+    '600': '#2563eb'
+    '700': '#1d4ed8'
+    '800': '#1e40af'
+    '900': '#1e3a8a'
+    '950': '#172554'
+  }
+  indigo: {
+    '50': '#eef2ff'
+    '100': '#e0e7ff'
+    '200': '#c7d2fe'
+    '300': '#a5b4fc'
+    '400': '#818cf8'
+    '500': '#6366f1'
+    '600': '#4f46e5'
+    '700': '#4338ca'
+    '800': '#3730a3'
+    '900': '#312e81'
+    '950': '#1e1b4b'
+  }
+  violet: {
+    '50': '#f5f3ff'
+    '100': '#ede9fe'
+    '200': '#ddd6fe'
+    '300': '#c4b5fd'
+    '400': '#a78bfa'
+    '500': '#8b5cf6'
+    '600': '#7c3aed'
+    '700': '#6d28d9'
+    '800': '#5b21b6'
+    '900': '#4c1d95'
+    '950': '#2e1065'
+  }
+  purple: {
+    '50': '#faf5ff'
+    '100': '#f3e8ff'
+    '200': '#e9d5ff'
+    '300': '#d8b4fe'
+    '400': '#c084fc'
+    '500': '#a855f7'
+    '600': '#9333ea'
+    '700': '#7e22ce'
+    '800': '#6b21a8'
+    '900': '#581c87'
+    '950': '#3b0764'
+  }
+  fuchsia: {
+    '50': '#fdf4ff'
+    '100': '#fae8ff'
+    '200': '#f5d0fe'
+    '300': '#f0abfc'
+    '400': '#e879f9'
+    '500': '#d946ef'
+    '600': '#c026d3'
+    '700': '#a21caf'
+    '800': '#86198f'
+    '900': '#701a75'
+    '950': '#4a044e'
+  }
+  pink: {
+    '50': '#fdf2f8'
+    '100': '#fce7f3'
+    '200': '#fbcfe8'
+    '300': '#f9a8d4'
+    '400': '#f472b6'
+    '500': '#ec4899'
+    '600': '#db2777'
+    '700': '#be185d'
+    '800': '#9d174d'
+    '900': '#831843'
+    '950': '#500724'
+  }
+  rose: {
+    '50': '#fff1f2'
+    '100': '#ffe4e6'
+    '200': '#fecdd3'
+    '300': '#fda4af'
+    '400': '#fb7185'
+    '500': '#f43f5e'
+    '600': '#e11d48'
+    '700': '#be123c'
+    '800': '#9f1239'
+    '900': '#881337'
+    '950': '#4c0519'
+  }
+  /** @deprecated As of Tailwind CSS v2.2, `lightBlue` has been renamed to `sky`. Update your configuration file to silence this warning. */ lightBlue: DefaultColors['sky']
+  /** @deprecated As of Tailwind CSS v3.0, `warmGray` has been renamed to `stone`. Update your configuration file to silence this warning. */ warmGray: DefaultColors['stone']
+  /** @deprecated As of Tailwind CSS v3.0, `trueGray` has been renamed to `neutral`. Update your configuration file to silence this warning. */ trueGray: DefaultColors['neutral']
+  /** @deprecated As of Tailwind CSS v3.0, `coolGray` has been renamed to `gray`. Update your configuration file to silence this warning. */ coolGray: DefaultColors['gray']
+  /** @deprecated As of Tailwind CSS v3.0, `blueGray` has been renamed to `slate`. Update your configuration file to silence this warning. */ blueGray: DefaultColors['slate']
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\generated\corePluginList.d.ts ---
+
+export type CorePluginList = 'preflight' | 'container' | 'accessibility' | 'pointerEvents' | 'visibility' | 'position' | 'inset' | 'isolation' | 'zIndex' | 'order' | 'gridColumn' | 'gridColumnStart' | 'gridColumnEnd' | 'gridRow' | 'gridRowStart' | 'gridRowEnd' | 'float' | 'clear' | 'margin' | 'boxSizing' | 'lineClamp' | 'display' | 'aspectRatio' | 'size' | 'height' | 'maxHeight' | 'minHeight' | 'width' | 'minWidth' | 'maxWidth' | 'flex' | 'flexShrink' | 'flexGrow' | 'flexBasis' | 'tableLayout' | 'captionSide' | 'borderCollapse' | 'borderSpacing' | 'transformOrigin' | 'translate' | 'rotate' | 'skew' | 'scale' | 'transform' | 'animation' | 'cursor' | 'touchAction' | 'userSelect' | 'resize' | 'scrollSnapType' | 'scrollSnapAlign' | 'scrollSnapStop' | 'scrollMargin' | 'scrollPadding' | 'listStylePosition' | 'listStyleType' | 'listStyleImage' | 'appearance' | 'columns' | 'breakBefore' | 'breakInside' | 'breakAfter' | 'gridAutoColumns' | 'gridAutoFlow' | 'gridAutoRows' | 'gridTemplateColumns' | 'gridTemplateRows' | 'flexDirection' | 'flexWrap' | 'placeContent' | 'placeItems' | 'alignContent' | 'alignItems' | 'justifyContent' | 'justifyItems' | 'gap' | 'space' | 'divideWidth' | 'divideStyle' | 'divideColor' | 'divideOpacity' | 'placeSelf' | 'alignSelf' | 'justifySelf' | 'overflow' | 'overscrollBehavior' | 'scrollBehavior' | 'textOverflow' | 'hyphens' | 'whitespace' | 'textWrap' | 'wordBreak' | 'borderRadius' | 'borderWidth' | 'borderStyle' | 'borderColor' | 'borderOpacity' | 'backgroundColor' | 'backgroundOpacity' | 'backgroundImage' | 'gradientColorStops' | 'boxDecorationBreak' | 'backgroundSize' | 'backgroundAttachment' | 'backgroundClip' | 'backgroundPosition' | 'backgroundRepeat' | 'backgroundOrigin' | 'fill' | 'stroke' | 'strokeWidth' | 'objectFit' | 'objectPosition' | 'padding' | 'textAlign' | 'textIndent' | 'verticalAlign' | 'fontFamily' | 'fontSize' | 'fontWeight' | 'textTransform' | 'fontStyle' | 'fontVariantNumeric' | 'lineHeight' | 'letterSpacing' | 'textColor' | 'textOpacity' | 'textDecoration' | 'textDecorationColor' | 'textDecorationStyle' | 'textDecorationThickness' | 'textUnderlineOffset' | 'fontSmoothing' | 'placeholderColor' | 'placeholderOpacity' | 'caretColor' | 'accentColor' | 'opacity' | 'backgroundBlendMode' | 'mixBlendMode' | 'boxShadow' | 'boxShadowColor' | 'outlineStyle' | 'outlineWidth' | 'outlineOffset' | 'outlineColor' | 'ringWidth' | 'ringColor' | 'ringOpacity' | 'ringOffsetWidth' | 'ringOffsetColor' | 'blur' | 'brightness' | 'contrast' | 'dropShadow' | 'grayscale' | 'hueRotate' | 'invert' | 'saturate' | 'sepia' | 'filter' | 'backdropBlur' | 'backdropBrightness' | 'backdropContrast' | 'backdropGrayscale' | 'backdropHueRotate' | 'backdropInvert' | 'backdropOpacity' | 'backdropSaturate' | 'backdropSepia' | 'backdropFilter' | 'transitionProperty' | 'transitionDelay' | 'transitionDuration' | 'transitionTimingFunction' | 'willChange' | 'contain' | 'content' | 'forcedColorAdjust'
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\generated\default-theme.d.ts ---
+
+type CSSDeclarationList = Record<string, string>
+export type DefaultTheme = {
+  animation: Record<'none' | 'spin' | 'ping' | 'pulse' | 'bounce', string>
+  aria: Record<
+    | 'busy'
+    | 'checked'
+    | 'disabled'
+    | 'expanded'
+    | 'hidden'
+    | 'pressed'
+    | 'readonly'
+    | 'required'
+    | 'selected',
+    string
+  >
+  aspectRatio: Record<'auto' | 'square' | 'video', string>
+  backgroundImage: Record<
+    | 'none'
+    | 'gradient-to-t'
+    | 'gradient-to-tr'
+    | 'gradient-to-r'
+    | 'gradient-to-br'
+    | 'gradient-to-b'
+    | 'gradient-to-bl'
+    | 'gradient-to-l'
+    | 'gradient-to-tl',
+    string
+  >
+  backgroundPosition: Record<
+    | 'bottom'
+    | 'center'
+    | 'left'
+    | 'left-bottom'
+    | 'left-top'
+    | 'right'
+    | 'right-bottom'
+    | 'right-top'
+    | 'top',
+    string
+  >
+  backgroundSize: Record<'auto' | 'cover' | 'contain', string>
+  blur: Record<'0' | 'none' | 'sm' | 'DEFAULT' | 'md' | 'lg' | 'xl' | '2xl' | '3xl', string>
+  borderRadius: Record<
+    'none' | 'sm' | 'DEFAULT' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | 'full',
+    string
+  >
+  borderWidth: Record<'0' | '2' | '4' | '8' | 'DEFAULT', string>
+  boxShadow: Record<'sm' | 'DEFAULT' | 'md' | 'lg' | 'xl' | '2xl' | 'inner' | 'none', string>
+  brightness: Record<
+    '0' | '50' | '75' | '90' | '95' | '100' | '105' | '110' | '125' | '150' | '200',
+    string
+  >
+  columns: Record<
+    | '1'
+    | '2'
+    | '3'
+    | '4'
+    | '5'
+    | '6'
+    | '7'
+    | '8'
+    | '9'
+    | '10'
+    | '11'
+    | '12'
+    | 'auto'
+    | '3xs'
+    | '2xs'
+    | 'xs'
+    | 'sm'
+    | 'md'
+    | 'lg'
+    | 'xl'
+    | '2xl'
+    | '3xl'
+    | '4xl'
+    | '5xl'
+    | '6xl'
+    | '7xl',
+    string
+  >
+  content: Record<'none', string>
+  contrast: Record<'0' | '50' | '75' | '100' | '125' | '150' | '200', string>
+  cursor: Record<
+    | 'auto'
+    | 'default'
+    | 'pointer'
+    | 'wait'
+    | 'text'
+    | 'move'
+    | 'help'
+    | 'not-allowed'
+    | 'none'
+    | 'context-menu'
+    | 'progress'
+    | 'cell'
+    | 'crosshair'
+    | 'vertical-text'
+    | 'alias'
+    | 'copy'
+    | 'no-drop'
+    | 'grab'
+    | 'grabbing'
+    | 'all-scroll'
+    | 'col-resize'
+    | 'row-resize'
+    | 'n-resize'
+    | 'e-resize'
+    | 's-resize'
+    | 'w-resize'
+    | 'ne-resize'
+    | 'nw-resize'
+    | 'se-resize'
+    | 'sw-resize'
+    | 'ew-resize'
+    | 'ns-resize'
+    | 'nesw-resize'
+    | 'nwse-resize'
+    | 'zoom-in'
+    | 'zoom-out',
+    string
+  >
+  dropShadow: Record<'sm' | 'DEFAULT' | 'md' | 'lg' | 'xl' | '2xl' | 'none', string | string[]>
+  flex: Record<'1' | 'auto' | 'initial' | 'none', string>
+  flexGrow: Record<'0' | 'DEFAULT', string>
+  flexShrink: Record<'0' | 'DEFAULT', string>
+  fontFamily: Record<'sans' | 'serif' | 'mono', string[]>
+  fontSize: Record<
+    | 'xs'
+    | 'sm'
+    | 'base'
+    | 'lg'
+    | 'xl'
+    | '2xl'
+    | '3xl'
+    | '4xl'
+    | '5xl'
+    | '6xl'
+    | '7xl'
+    | '8xl'
+    | '9xl',
+    [string, { lineHeight: string }]
+  >
+  fontWeight: Record<
+    | 'thin'
+    | 'extralight'
+    | 'light'
+    | 'normal'
+    | 'medium'
+    | 'semibold'
+    | 'bold'
+    | 'extrabold'
+    | 'black',
+    string
+  >
+  gradientColorStopPositions: Record<
+    | '0%'
+    | '5%'
+    | '10%'
+    | '15%'
+    | '20%'
+    | '25%'
+    | '30%'
+    | '35%'
+    | '40%'
+    | '45%'
+    | '50%'
+    | '55%'
+    | '60%'
+    | '65%'
+    | '70%'
+    | '75%'
+    | '80%'
+    | '85%'
+    | '90%'
+    | '95%'
+    | '100%',
+    string
+  >
+  grayscale: Record<'0' | 'DEFAULT', string>
+  gridAutoColumns: Record<'auto' | 'min' | 'max' | 'fr', string>
+  gridAutoRows: Record<'auto' | 'min' | 'max' | 'fr', string>
+  gridColumn: Record<
+    | 'auto'
+    | 'span-1'
+    | 'span-2'
+    | 'span-3'
+    | 'span-4'
+    | 'span-5'
+    | 'span-6'
+    | 'span-7'
+    | 'span-8'
+    | 'span-9'
+    | 'span-10'
+    | 'span-11'
+    | 'span-12'
+    | 'span-full',
+    string
+  >
+  gridColumnEnd: Record<
+    '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '11' | '12' | '13' | 'auto',
+    string
+  >
+  gridColumnStart: Record<
+    '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '11' | '12' | '13' | 'auto',
+    string
+  >
+  gridRow: Record<
+    | 'auto'
+    | 'span-1'
+    | 'span-2'
+    | 'span-3'
+    | 'span-4'
+    | 'span-5'
+    | 'span-6'
+    | 'span-7'
+    | 'span-8'
+    | 'span-9'
+    | 'span-10'
+    | 'span-11'
+    | 'span-12'
+    | 'span-full',
+    string
+  >
+  gridRowEnd: Record<
+    '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '11' | '12' | '13' | 'auto',
+    string
+  >
+  gridRowStart: Record<
+    '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '11' | '12' | '13' | 'auto',
+    string
+  >
+  gridTemplateColumns: Record<
+    '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '11' | '12' | 'none' | 'subgrid',
+    string
+  >
+  gridTemplateRows: Record<
+    '1' | '2' | '3' | '4' | '5' | '6' | '7' | '8' | '9' | '10' | '11' | '12' | 'none' | 'subgrid',
+    string
+  >
+  hueRotate: Record<'0' | '15' | '30' | '60' | '90' | '180', string>
+  invert: Record<'0' | 'DEFAULT', string>
+  keyframes: Record<'spin' | 'ping' | 'pulse' | 'bounce', Record<string, CSSDeclarationList>>
+  letterSpacing: Record<'tighter' | 'tight' | 'normal' | 'wide' | 'wider' | 'widest', string>
+  lineHeight: Record<
+    | '3'
+    | '4'
+    | '5'
+    | '6'
+    | '7'
+    | '8'
+    | '9'
+    | '10'
+    | 'none'
+    | 'tight'
+    | 'snug'
+    | 'normal'
+    | 'relaxed'
+    | 'loose',
+    string
+  >
+  listStyleType: Record<'none' | 'disc' | 'decimal', string>
+  listStyleImage: Record<'none', string>
+  lineClamp: Record<'1' | '2' | '3' | '4' | '5' | '6', string>
+  objectPosition: Record<
+    | 'bottom'
+    | 'center'
+    | 'left'
+    | 'left-bottom'
+    | 'left-top'
+    | 'right'
+    | 'right-bottom'
+    | 'right-top'
+    | 'top',
+    string
+  >
+  opacity: Record<
+    | '0'
+    | '5'
+    | '10'
+    | '15'
+    | '20'
+    | '25'
+    | '30'
+    | '35'
+    | '40'
+    | '45'
+    | '50'
+    | '55'
+    | '60'
+    | '65'
+    | '70'
+    | '75'
+    | '80'
+    | '85'
+    | '90'
+    | '95'
+    | '100',
+    string
+  >
+  order: Record<
+    | '1'
+    | '2'
+    | '3'
+    | '4'
+    | '5'
+    | '6'
+    | '7'
+    | '8'
+    | '9'
+    | '10'
+    | '11'
+    | '12'
+    | 'first'
+    | 'last'
+    | 'none',
+    string
+  >
+  outlineOffset: Record<'0' | '1' | '2' | '4' | '8', string>
+  outlineWidth: Record<'0' | '1' | '2' | '4' | '8', string>
+  ringOffsetWidth: Record<'0' | '1' | '2' | '4' | '8', string>
+  ringWidth: Record<'0' | '1' | '2' | '4' | '8' | 'DEFAULT', string>
+  rotate: Record<'0' | '1' | '2' | '3' | '6' | '12' | '45' | '90' | '180', string>
+  saturate: Record<'0' | '50' | '100' | '150' | '200', string>
+  scale: Record<'0' | '50' | '75' | '90' | '95' | '100' | '105' | '110' | '125' | '150', string>
+  screens: Record<'sm' | 'md' | 'lg' | 'xl' | '2xl', string>
+  sepia: Record<'0' | 'DEFAULT', string>
+  skew: Record<'0' | '1' | '2' | '3' | '6' | '12', string>
+  spacing: Record<
+    | '0'
+    | '1'
+    | '2'
+    | '3'
+    | '4'
+    | '5'
+    | '6'
+    | '7'
+    | '8'
+    | '9'
+    | '10'
+    | '11'
+    | '12'
+    | '14'
+    | '16'
+    | '20'
+    | '24'
+    | '28'
+    | '32'
+    | '36'
+    | '40'
+    | '44'
+    | '48'
+    | '52'
+    | '56'
+    | '60'
+    | '64'
+    | '72'
+    | '80'
+    | '96'
+    | 'px'
+    | '0.5'
+    | '1.5'
+    | '2.5'
+    | '3.5',
+    string
+  >
+  strokeWidth: Record<'0' | '1' | '2', string>
+  textDecorationThickness: Record<'0' | '1' | '2' | '4' | '8' | 'auto' | 'from-font', string>
+  textUnderlineOffset: Record<'0' | '1' | '2' | '4' | '8' | 'auto', string>
+  transformOrigin: Record<
+    | 'center'
+    | 'top'
+    | 'top-right'
+    | 'right'
+    | 'bottom-right'
+    | 'bottom'
+    | 'bottom-left'
+    | 'left'
+    | 'top-left',
+    string
+  >
+  transitionDelay: Record<
+    '0' | '75' | '100' | '150' | '200' | '300' | '500' | '700' | '1000',
+    string
+  >
+  transitionDuration: Record<
+    '0' | '75' | '100' | '150' | '200' | '300' | '500' | '700' | '1000' | 'DEFAULT',
+    string
+  >
+  transitionProperty: Record<
+    'none' | 'all' | 'DEFAULT' | 'colors' | 'opacity' | 'shadow' | 'transform',
+    string
+  >
+  transitionTimingFunction: Record<'DEFAULT' | 'linear' | 'in' | 'out' | 'in-out', string>
+  willChange: Record<'auto' | 'scroll' | 'contents' | 'transform', string>
+  zIndex: Record<'0' | '10' | '20' | '30' | '40' | '50' | 'auto', string>
+}
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\config.d.ts ---
+
+import type { CorePluginList } from './generated/corePluginList'
+import type { DefaultColors } from './generated/colors'
+
+// Helpers
+type Expand<T> = T extends object
+  ? T extends infer O
+    ? { [K in keyof O]: Expand<O[K]> }
+    : never
+  : T
+type KeyValuePair<K extends keyof any = string, V = string> = Record<K, V>
+interface RecursiveKeyValuePair<K extends keyof any = string, V = string> {
+  [key: string]: V | RecursiveKeyValuePair<K, V>
+}
+export type ResolvableTo<T> = T | ((utils: PluginUtils) => T)
+type CSSRuleObject = RecursiveKeyValuePair<string, null | string | string[]>
+
+interface PluginUtils {
+  colors: DefaultColors
+  theme(path: string, defaultValue?: unknown): any
+  breakpoints<I = Record<string, unknown>, O = I>(arg: I): O
+  rgb(arg: string): (arg: Partial<{ opacityVariable: string; opacityValue: number }>) => string
+  hsl(arg: string): (arg: Partial<{ opacityVariable: string; opacityValue: number }>) => string
+}
+
+// Content related config
+type FilePath = string
+type RawFile = { raw: string; extension?: string }
+type ExtractorFn = (content: string) => string[]
+type TransformerFn = (content: string) => string
+type ContentConfig =
+  | (FilePath | RawFile)[]
+  | {
+      files: (FilePath | RawFile)[]
+      relative?: boolean
+      extract?: ExtractorFn | { [extension: string]: ExtractorFn }
+      transform?: TransformerFn | { [extension: string]: TransformerFn }
+    }
+
+// Important related config
+type ImportantConfig = boolean | string
+
+// Prefix related config
+type PrefixConfig = string
+
+// Separator related config
+type SeparatorConfig = string
+
+// Safelist related config
+type SafelistConfig = string | { pattern: RegExp; variants?: string[] }
+
+// Blocklist related config
+type BlocklistConfig = string
+
+// Presets related config
+type PresetsConfig = Partial<Config>
+
+// Future related config
+type FutureConfigValues =
+  | 'hoverOnlyWhenSupported'
+  | 'respectDefaultRingColorOpacity'
+  | 'disableColorOpacityUtilitiesByDefault'
+  | 'relativeContentPathsByDefault'
+type FutureConfig = Expand<'all' | Partial<Record<FutureConfigValues, boolean>>> | []
+
+// Experimental related config
+type ExperimentalConfigValues = 'optimizeUniversalDefaults' | 'matchVariant'
+type ExperimentalConfig = Expand<'all' | Partial<Record<ExperimentalConfigValues, boolean>>> | []
+
+// DarkMode related config
+type DarkModeConfig =
+  // Use the `media` query strategy.
+  | 'media'
+  // Use the `class` strategy, which requires a `.dark` class on the `html`.
+  | 'class'
+  // Use the `class` strategy with a custom class instead of `.dark`.
+  | ['class', string]
+  // Use the `selector` strategy — same as `class` but uses `:where()` for more predicable behavior
+  | 'selector'
+  // Use the `selector` strategy with a custom selector instead of `.dark`.
+  | ['selector', string]
+  // Use the `variant` strategy, which allows you to completely customize the selector
+  // It takes a string or an array of strings, which are passed directly to `addVariant()`
+  | ['variant', string | string[]]
+
+type Screen = { raw: string } | { min: string } | { max: string } | { min: string; max: string }
+type ScreensConfig = string[] | KeyValuePair<string, string | Screen | Screen[]>
+
+// Theme related config
+export interface ThemeConfig {
+  // Responsiveness
+  screens: ResolvableTo<ScreensConfig>
+  supports: ResolvableTo<Record<string, string>>
+  data: ResolvableTo<Record<string, string>>
+
+  // Reusable base configs
+  colors: ResolvableTo<RecursiveKeyValuePair>
+  spacing: ResolvableTo<KeyValuePair>
+
+  // Components
+  container: ResolvableTo<
+    Partial<{
+      screens: ScreensConfig
+      center: boolean
+      padding: string | Record<string, string>
+    }>
+  >
+
+  // Utilities
+  inset: ThemeConfig['spacing']
+  zIndex: ResolvableTo<KeyValuePair>
+  order: ResolvableTo<KeyValuePair>
+  gridColumn: ResolvableTo<KeyValuePair>
+  gridColumnStart: ResolvableTo<KeyValuePair>
+  gridColumnEnd: ResolvableTo<KeyValuePair>
+  gridRow: ResolvableTo<KeyValuePair>
+  gridRowStart: ResolvableTo<KeyValuePair>
+  gridRowEnd: ResolvableTo<KeyValuePair>
+  margin: ThemeConfig['spacing']
+  aspectRatio: ResolvableTo<KeyValuePair>
+  height: ThemeConfig['spacing']
+  maxHeight: ThemeConfig['spacing']
+  minHeight: ResolvableTo<KeyValuePair>
+  width: ThemeConfig['spacing']
+  maxWidth: ResolvableTo<KeyValuePair>
+  minWidth: ResolvableTo<KeyValuePair>
+  flex: ResolvableTo<KeyValuePair>
+  flexShrink: ResolvableTo<KeyValuePair>
+  flexGrow: ResolvableTo<KeyValuePair>
+  flexBasis: ThemeConfig['spacing']
+  borderSpacing: ThemeConfig['spacing']
+  transformOrigin: ResolvableTo<KeyValuePair>
+  translate: ThemeConfig['spacing']
+  rotate: ResolvableTo<KeyValuePair>
+  skew: ResolvableTo<KeyValuePair>
+  scale: ResolvableTo<KeyValuePair>
+  animation: ResolvableTo<KeyValuePair>
+  keyframes: ResolvableTo<KeyValuePair<string, KeyValuePair<string, KeyValuePair>>>
+  cursor: ResolvableTo<KeyValuePair>
+  scrollMargin: ThemeConfig['spacing']
+  scrollPadding: ThemeConfig['spacing']
+  listStyleType: ResolvableTo<KeyValuePair>
+  columns: ResolvableTo<KeyValuePair>
+  gridAutoColumns: ResolvableTo<KeyValuePair>
+  gridAutoRows: ResolvableTo<KeyValuePair>
+  gridTemplateColumns: ResolvableTo<KeyValuePair>
+  gridTemplateRows: ResolvableTo<KeyValuePair>
+  gap: ThemeConfig['spacing']
+  space: ThemeConfig['spacing']
+  divideWidth: ThemeConfig['borderWidth']
+  divideColor: ThemeConfig['borderColor']
+  divideOpacity: ThemeConfig['borderOpacity']
+  borderRadius: ResolvableTo<KeyValuePair>
+  borderWidth: ResolvableTo<KeyValuePair>
+  borderColor: ThemeConfig['colors']
+  borderOpacity: ThemeConfig['opacity']
+  backgroundColor: ThemeConfig['colors']
+  backgroundOpacity: ThemeConfig['opacity']
+  backgroundImage: ResolvableTo<KeyValuePair>
+  gradientColorStops: ThemeConfig['colors']
+  backgroundSize: ResolvableTo<KeyValuePair>
+  backgroundPosition: ResolvableTo<KeyValuePair>
+  fill: ThemeConfig['colors']
+  stroke: ThemeConfig['colors']
+  strokeWidth: ResolvableTo<KeyValuePair>
+  objectPosition: ResolvableTo<KeyValuePair>
+  padding: ThemeConfig['spacing']
+  textIndent: ThemeConfig['spacing']
+  fontFamily: ResolvableTo<
+    KeyValuePair<
+      string,
+      | string
+      | string[]
+      | [
+          fontFamily: string | string[],
+          configuration: Partial<{
+            fontFeatureSettings: string
+            fontVariationSettings: string
+          }>
+        ]
+    >
+  >
+  fontSize: ResolvableTo<
+    KeyValuePair<
+      string,
+      | string
+      | [fontSize: string, lineHeight: string]
+      | [
+          fontSize: string,
+          configuration: Partial<{
+            lineHeight: string
+            letterSpacing: string
+            fontWeight: string | number
+          }>
+        ]
+    >
+  >
+  fontWeight: ResolvableTo<KeyValuePair>
+  lineHeight: ResolvableTo<KeyValuePair>
+  letterSpacing: ResolvableTo<KeyValuePair>
+  textColor: ThemeConfig['colors']
+  textOpacity: ThemeConfig['opacity']
+  textDecorationColor: ThemeConfig['colors']
+  textDecorationThickness: ResolvableTo<KeyValuePair>
+  textUnderlineOffset: ResolvableTo<KeyValuePair>
+  placeholderColor: ThemeConfig['colors']
+  placeholderOpacity: ThemeConfig['opacity']
+  caretColor: ThemeConfig['colors']
+  accentColor: ThemeConfig['colors']
+  opacity: ResolvableTo<KeyValuePair>
+  boxShadow: ResolvableTo<KeyValuePair<string, string | string[]>>
+  boxShadowColor: ThemeConfig['colors']
+  outlineWidth: ResolvableTo<KeyValuePair>
+  outlineOffset: ResolvableTo<KeyValuePair>
+  outlineColor: ThemeConfig['colors']
+  ringWidth: ResolvableTo<KeyValuePair>
+  ringColor: ThemeConfig['colors']
+  ringOpacity: ThemeConfig['opacity']
+  ringOffsetWidth: ResolvableTo<KeyValuePair>
+  ringOffsetColor: ThemeConfig['colors']
+  blur: ResolvableTo<KeyValuePair>
+  brightness: ResolvableTo<KeyValuePair>
+  contrast: ResolvableTo<KeyValuePair>
+  dropShadow: ResolvableTo<KeyValuePair<string, string | string[]>>
+  grayscale: ResolvableTo<KeyValuePair>
+  hueRotate: ResolvableTo<KeyValuePair>
+  invert: ResolvableTo<KeyValuePair>
+  saturate: ResolvableTo<KeyValuePair>
+  sepia: ResolvableTo<KeyValuePair>
+  backdropBlur: ThemeConfig['blur']
+  backdropBrightness: ThemeConfig['brightness']
+  backdropContrast: ThemeConfig['contrast']
+  backdropGrayscale: ThemeConfig['grayscale']
+  backdropHueRotate: ThemeConfig['hueRotate']
+  backdropInvert: ThemeConfig['invert']
+  backdropOpacity: ThemeConfig['opacity']
+  backdropSaturate: ThemeConfig['saturate']
+  backdropSepia: ThemeConfig['sepia']
+  transitionProperty: ResolvableTo<KeyValuePair>
+  transitionTimingFunction: ResolvableTo<KeyValuePair>
+  transitionDelay: ResolvableTo<KeyValuePair>
+  transitionDuration: ResolvableTo<KeyValuePair>
+  willChange: ResolvableTo<KeyValuePair>
+  content: ResolvableTo<KeyValuePair>
+}
+
+interface CustomThemeConfig extends ThemeConfig {
+  [key: string]: any
+}
+
+// Core plugins related config
+type CorePluginsConfig = CorePluginList[] | Expand<Partial<Record<CorePluginList, boolean>>>
+
+// Plugins related config
+type ValueType =
+  | 'any'
+  | 'color'
+  | 'url'
+  | 'image'
+  | 'length'
+  | 'percentage'
+  | 'position'
+  | 'lookup'
+  | 'generic-name'
+  | 'family-name'
+  | 'number'
+  | 'line-width'
+  | 'absolute-size'
+  | 'relative-size'
+  | 'shadow'
+export interface PluginAPI {
+  // for registering new static utility styles
+  addUtilities(
+    utilities: CSSRuleObject | CSSRuleObject[],
+    options?: Partial<{
+      respectPrefix: boolean
+      respectImportant: boolean
+    }>
+  ): void
+  // for registering new dynamic utility styles
+  matchUtilities<T = string, U = string>(
+    utilities: KeyValuePair<
+      string,
+      (value: T | string, extra: { modifier: U | string | null }) => CSSRuleObject | null
+    >,
+    options?: Partial<{
+      respectPrefix: boolean
+      respectImportant: boolean
+      type: ValueType | ValueType[]
+      values: KeyValuePair<string, T>
+      modifiers: 'any' | KeyValuePair<string, U>
+      supportsNegativeValues: boolean
+    }>
+  ): void
+  // for registering new static component styles
+  addComponents(
+    components: CSSRuleObject | CSSRuleObject[],
+    options?: Partial<{
+      respectPrefix: boolean
+      respectImportant: boolean
+    }>
+  ): void
+  // for registering new dynamic component styles
+  matchComponents<T = string, U = string>(
+    components: KeyValuePair<
+      string,
+      (value: T | string, extra: { modifier: U | string | null }) => CSSRuleObject | null
+    >,
+    options?: Partial<{
+      respectPrefix: boolean
+      respectImportant: boolean
+      type: ValueType | ValueType[]
+      values: KeyValuePair<string, T>
+      modifiers: 'any' | KeyValuePair<string, U>
+      supportsNegativeValues: boolean
+    }>
+  ): void
+  // for registering new base styles
+  addBase(base: CSSRuleObject | CSSRuleObject[]): void
+  // for registering custom variants
+  addVariant(name: string, definition: string | string[] | (() => string) | (() => string)[]): void
+  matchVariant<T = string>(
+    name: string,
+    cb: (value: T | string, extra: { modifier: string | null }) => string | string[],
+    options?: {
+      values?: KeyValuePair<string, T>
+      sort?(
+        a: { value: T | string; modifier: string | null },
+        b: { value: T | string; modifier: string | null }
+      ): number
+    }
+  ): void
+  // for looking up values in the user’s theme configuration
+  theme: <TDefaultValue = Config['theme']>(
+    path?: string,
+    defaultValue?: TDefaultValue
+  ) => TDefaultValue
+  // for looking up values in the user’s Tailwind configuration
+  config: <TDefaultValue = Config>(path?: string, defaultValue?: TDefaultValue) => TDefaultValue
+  // for checking if a core plugin is enabled
+  corePlugins(path: string): boolean
+  // for manually escaping strings meant to be used in class names
+  e: (className: string) => string
+}
+export type PluginCreator = (api: PluginAPI) => void
+export type PluginsConfig = (
+  | PluginCreator
+  | { handler: PluginCreator; config?: Partial<Config> | undefined }
+  | {
+      (options: any): {
+        handler: PluginCreator;
+        config?: Partial<Config> | undefined;
+      };
+      __isOptionsFunction: true
+    }
+)[]
+
+// Top level config related
+interface RequiredConfig {
+  content: ContentConfig
+}
+
+interface OptionalConfig {
+  important: Partial<ImportantConfig>
+  prefix: Partial<PrefixConfig>
+  separator: Partial<SeparatorConfig>
+  safelist: Array<SafelistConfig>
+  blocklist: Array<BlocklistConfig>
+  presets: Array<PresetsConfig>
+  future: Partial<FutureConfig>
+  experimental: Partial<ExperimentalConfig>
+  darkMode: Partial<DarkModeConfig>
+  theme: Partial<CustomThemeConfig & { extend: Partial<CustomThemeConfig> }>
+  corePlugins: Partial<CorePluginsConfig>
+  plugins: Partial<PluginsConfig>
+  // Custom
+  [key: string]: any
+}
+
+export type Config = RequiredConfig & Partial<OptionalConfig>
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\types\index.d.ts ---
+
+import type { PluginCreator } from 'postcss'
+import type { Config } from './config.d'
+
+declare const plugin: PluginCreator<string | Config | { config: string | Config }>
+
+declare type _Config = Config
+declare namespace plugin {
+  export type { _Config as Config }
+}
+
+export = plugin
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\colors.d.ts ---
+
+import type { DefaultColors } from './types/generated/colors'
+declare const colors: DefaultColors
+export = colors
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\defaultConfig.d.ts ---
+
+import type { Config } from './types/config'
+declare const config: Config
+export = config
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\defaultTheme.d.ts ---
+
+import type { Config } from './types/config'
+import { DefaultTheme } from './types/generated/default-theme'
+declare const theme: Config['theme'] & DefaultTheme
+export = theme
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\loadConfig.d.ts ---
+
+import type { Config } from './types/config'
+
+declare function loadConfig(path: string): Config
+export = loadConfig
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\plugin.d.ts ---
+
+import type { Config, PluginCreator } from './types/config'
+type Plugin = {
+  withOptions<T>(
+    plugin: (options: T) => PluginCreator,
+    config?: (options: T) => Partial<Config>
+  ): { (options: T): { handler: PluginCreator; config?: Partial<Config> }; __isOptionsFunction: true }
+  (plugin: PluginCreator, config?: Partial<Config>): { handler: PluginCreator; config?: Partial<Config> }
+}
+
+declare const plugin: Plugin
+export = plugin
+
+--- C:\Users\Cash\Downloads\ambulant-plus-scaffold\apps\admin-dashboard\node_modules\tailwindcss\resolveConfig.d.ts ---
+
+import { Config, ResolvableTo, ThemeConfig } from './types/config'
+import { DefaultTheme } from './types/generated/default-theme'
+import { DefaultColors } from './types/generated/colors'
+
+type ResolvedConfig<T extends Config> = Omit<T, 'theme'> & {
+  theme: MergeThemes<
+    UnwrapResolvables<Omit<T['theme'], 'extend'>>,
+    T['theme'] extends { extend: infer TExtend } ? UnwrapResolvables<TExtend> : {}
+  >
+}
+
+type UnwrapResolvables<T> = {
+  [K in keyof T]: T[K] extends ResolvableTo<infer R> ? R : T[K]
+}
+
+type ThemeConfigResolved = UnwrapResolvables<ThemeConfig>
+type DefaultThemeFull = DefaultTheme & { colors: DefaultColors }
+
+type MergeThemes<Overrides extends object, Extensions extends object> = {
+  [K in keyof ThemeConfigResolved | keyof Overrides]: (K extends keyof Overrides
+    ? Overrides[K]
+    : K extends keyof DefaultThemeFull
+    ? DefaultThemeFull[K]
+    : K extends keyof ThemeConfigResolved
+    ? ThemeConfigResolved[K]
+    : never) &
+    (K extends keyof Extensions ? Extensions[K] : {})
+}
+
+declare function resolveConfig<T extends Config>(config: T): ResolvedConfig<T>
+export = resolveConfig

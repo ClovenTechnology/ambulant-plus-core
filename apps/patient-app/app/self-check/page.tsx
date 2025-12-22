@@ -1,393 +1,191 @@
-﻿'use client';
+﻿//apps/patient-app/app/self-check/page.tsx
+'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import { toast } from '../../components/ToastMount';
-import { DEFAULT_THRESHOLDS, type Thresholds } from '../../mock/selfcheck';
-import PillRemindersWrapper from '@/components/PillRemindersWrapper';
-import { Pill } from '@/types';
+import React, { useMemo } from 'react';
 
-type Entry = {
-  date: string;
-  hr?: number;
-  spo2?: number;
-  sys?: number;
-  dia?: number;
-  note?: string;
-};
+import SelfCheckStepper from '@/components/selfcheck/SelfCheckStepper';
+import type { SelfCheckStep } from '@/components/selfcheck/SelfCheckStepper';
 
-const LS_KEY = 'ambulant.selfcheck';
-const PILLS_KEY = 'ambulant.manual-pills';
+import SelfCheckHeader from '@/components/selfcheck/SelfCheckHeader';
+import SelfCheckRightRail from '@/components/selfcheck/SelfCheckRightRail';
 
-function today() { return new Date().toISOString().slice(0,10); }
-function inRange(v: number|undefined, min: number, max: number) {
-  if (v == null || Number.isNaN(v)) return true;
-  return v >= min && v <= max;
-}
+import SelfCheckVitalsStep from '@/components/selfcheck/steps/SelfCheckVitalsStep';
+import SelfCheckSymptomsStep from '@/components/selfcheck/steps/SelfCheckSymptomsStep';
+import SelfCheckResultsStep from '@/components/selfcheck/steps/SelfCheckResultsStep';
+
+import { useNow } from '@/src/hooks/selfcheck/useNow';
+import { useSelfCheckState } from '@/src/hooks/selfcheck/useSelfCheckState';
+
+import useBodyMapHints from '@/src/hooks/selfcheck/useBodyMapHints';
+import type { BodyHint } from '@/components/selfcheck/BodyMap2D';
 
 export default function SelfCheckPage() {
-  const [cfg, setCfg] = useState<Thresholds>(DEFAULT_THRESHOLDS);
-  const [list, setList] = useState<Entry[]>([]);
-  const [e, setE] = useState<Entry>({ date: today() });
-  const [manualPills, setManualPills] = useState<Pill[]>([]);
-  const [erxPills, setErxPills] = useState<Pill[]>([]);
-  const [creating, setCreating] = useState(false);
-  const [undoBuffer, setUndoBuffer] = useState<{ action: 'create'|'delete'; pills: Pill[] } | null>(null);
+  const now = useNow(1000);
+  const sc = useSelfCheckState();
 
-  // Load local storage
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(LS_KEY); if (raw) setList(JSON.parse(raw));
-      const pillsRaw = localStorage.getItem(PILLS_KEY);
-      if (pillsRaw) {
-        const parsed = JSON.parse(pillsRaw);
-        if (Array.isArray(parsed)) setManualPills(parsed.filter((p:any) => p && p.id && p.name));
-      }
-      const cfgRaw = localStorage.getItem('ambulant.selfcheck.cfg'); if (cfgRaw) setCfg(JSON.parse(cfgRaw));
-    } catch (err) { console.warn('Failed to load local storage', err); }
-  }, []);
+  // ✅ Smart hints resolver (vitals + symptoms → per-area coaching hints)
+  const getBodyHint = useBodyMapHints({ vitals: sc.vitals, symptoms: sc.symptoms });
 
-  // Persist
-  useEffect(() => { try { localStorage.setItem(LS_KEY, JSON.stringify(list)); } catch {} }, [list]);
-  useEffect(() => { try { localStorage.setItem(PILLS_KEY, JSON.stringify(manualPills)); } catch {} }, [manualPills]);
-  useEffect(() => { try { localStorage.setItem('ambulant.selfcheck.cfg', JSON.stringify(cfg)); } catch {} }, [cfg]);
+  // ✅ Adapter: your areas are now front/back keys like "front:shoulders"
+  const getHintForKey = useMemo(() => {
+    return (k: string): BodyHint | null => {
+      const parts = String(k).split(':');
+      if (parts.length < 2) return null;
 
-  // Fetch erx
-  useEffect(() => {
-    async function fetchErx() {
+      const side = parts[0] as 'front' | 'back';
+      const area = parts.slice(1).join(':') as any;
+
+      if (side !== 'front' && side !== 'back') return null;
+
       try {
-        const res = await fetch('/api/erx');
-        if (!res.ok) throw new Error('Failed to fetch eRx');
-        const data: any = await res.json();
-        if (Array.isArray(data)) {
-          const safe = data
-            .filter((p:any) => p && (p.id || p.drug))
-            .map((p:any) => ({
-              id: String(p.id ?? crypto.randomUUID()),
-              name: String(p.name ?? p.drug ?? 'Unknown'),
-              dose: String(p.dose ?? (p.sig ?? '')),
-              time: String((p as any).time ?? ''),
-              status: (p.status ?? 'Pending') as Pill['status'],
-            }));
-          setErxPills(safe);
-        }
-      } catch (err) {
-        console.warn('Error fetching eRx pills', err);
-        setErxPills([]);
+        return getBodyHint({ area, side });
+      } catch {
+        return null;
       }
-    }
-    fetchErx();
-  }, []);
+    };
+  }, [getBodyHint]);
 
-  const flags = useMemo(() => ({
-    hr:   !inRange(e.hr,   cfg.hr.min,  cfg.hr.max),
-    spo2: !inRange(e.spo2, cfg.spo2.min, cfg.spo2.max),
-    sys:  !inRange(e.sys,  cfg.sys.min, cfg.sys.max),
-    dia:  !inRange(e.dia,  cfg.dia.min, cfg.dia.max),
-  }), [e, cfg]);
-
-  function save() {
-    setList(prev => {
-      const others = prev.filter(x => x.date !== e.date);
-      return [...others, e].sort((a,b)=>a.date.localeCompare(b.date));
+  async function copySummary() {
+    await sc.safeCopy({
+      vitals: sc.vitals,
+      symptoms: sc.symptoms,
+      bmi: sc.bmi,
+      bodyAreas: sc.areas, // front/back keys
+      bodyAreasLegacy: sc.areas.map((k) => k.split(':')[1]),
+      score: sc.analyzer.healthScore,
+      risk: sc.analyzer.riskLabel,
+      analyzedAt: sc.lastAnalyzedAt ? new Date(sc.lastAnalyzedAt).toISOString() : null,
     });
-    const anyFlag = Object.values(flags).some(Boolean);
-    if (anyFlag) toast('Some values are out of range — keep monitoring', 'error');
-    else toast('Daily check saved', 'success');
   }
 
-  // prompt clinician
-  const promptDoctor = useMemo(() => {
-    const lastN = [...list].reverse().slice(0, cfg.repeatDays);
-    if (lastN.length < cfg.repeatDays) return false;
-    return lastN.every(it => {
-      const f = {
-        hr: !inRange(it.hr, cfg.hr.min, cfg.hr.max),
-        spo2: !inRange(it.spo2, cfg.spo2.min, cfg.spo2.max),
-        sys: !inRange(it.sys, cfg.sys.min, cfg.sys.max),
-        dia: !inRange(it.dia, cfg.dia.min, cfg.dia.max),
-      };
-      return Object.values(f).some(Boolean);
-    });
-  }, [list, cfg]);
-
-  useEffect(() => { if (promptDoctor) toast('Repeated out-of-range readings — please see a clinician', 'error'); }, [promptDoctor]);
-
-  // Create manual pill: optimistic local + server PUT -> reconcile
-  const addManualPill = async (pill: Partial<Pill>) => {
-    const toCreate: Pill = {
-      id: pill.id ?? crypto.randomUUID(),
-      name: String(pill.name ?? 'New Pill'),
-      dose: String(pill.dose ?? ''),
-      time: String(pill.time ?? new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' })),
-      status: (pill.status ?? 'Pending') as Pill['status'],
-    };
-
-    // optimistic local add
-    setManualPills(prev => {
-      const updated = [...prev, toCreate];
-      try { localStorage.setItem(PILLS_KEY, JSON.stringify(updated)); } catch {}
-      return updated;
-    });
-
-    // set undo buffer for create
-    setUndoBuffer({ action: 'create', pills: [toCreate] });
-
-    // analytics event for creation (fire-and-forget)
-    try {
-      fetch('/api/analytics', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'manual_pill_create', props: { id: toCreate.id, name: toCreate.name }, ts: Date.now() }) });
-    } catch {}
-
-    setCreating(true);
-    try {
-      const res = await fetch('/api/reminders/confirm', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(toCreate),
-      });
-      if (!res.ok) {
-        toast('Saved locally (server failed)', 'warning');
-        return;
-      }
-      const data = await res.json().catch(() => null);
-      // reconcile server returned items when available
-      if (data?.created) {
-        setManualPills(prev => {
-          // remove optimistic with same id(s)
-          const ids = data.created.map((c:any) => String(c.id));
-          const filtered = prev.filter(p => !ids.includes(p.id));
-          const createdNormalized: Pill[] = data.created.map((c:any) => ({
-            id: String(c.id),
-            name: String(c.name ?? c.drug ?? 'Unknown'),
-            dose: String(c.dose ?? ''),
-            time: String(c.time ?? ''),
-            status: (c.status ?? 'Pending') as Pill['status'],
-          }));
-          const merged = [...filtered, ...createdNormalized];
-          try { localStorage.setItem(PILLS_KEY, JSON.stringify(merged)); } catch {}
-          return merged;
-        });
-        toast('Manual reminder synced', 'success');
-      } else if (data?.created?.length === 0 && data?.created === undefined) {
-        // no created info — leave optimistic
-        toast('Manual reminder created (server accepted)', 'success');
-      }
-    } catch (err) {
-      console.warn('Network error creating reminder', err);
-      toast('Saved locally (network error)', 'warning');
-    } finally {
-      setCreating(false);
-      // clear undo buffer after a short window (user can click undo from toast if they want)
-      setTimeout(() => setUndoBuffer(null), 10_000);
-    }
+  const completed: Partial<Record<SelfCheckStep, boolean>> = {
+    data: sc.step !== 'data',
+    symptoms: sc.step === 'results' || sc.hasAnalyzed,
+    results: sc.hasAnalyzed,
   };
 
-  // Delete manual pill (local + server)
-  const deleteManualPill = async (id: string) => {
-    const target = manualPills.find(p => p.id === id);
-    if (!target) return;
-    // optimistic remove
-    setManualPills(prev => {
-      const updated = prev.filter(p => p.id !== id);
-      try { localStorage.setItem(PILLS_KEY, JSON.stringify(updated)); } catch {}
-      return updated;
-    });
-
-    // set undo buffer
-    setUndoBuffer({ action: 'delete', pills: [target] });
-
-    // show toast with undo
-    toast(`${target.name} removed — undo?`, 'info');
-
-    // attempt server delete
-    try {
-      const res = await fetch('/api/reminders/confirm', {
-        method: 'DELETE',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      if (!res.ok) {
-        toast('Deleted locally (server failed)', 'warning');
-      } else {
-        // analytics
-        try {
-          fetch('/api/analytics', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ event: 'manual_pill_delete', props: { id, name: target.name }, ts: Date.now() }) });
-        } catch {}
-      }
-    } catch (err) {
-      console.warn('Network error deleting reminder', err);
-      toast('Deleted locally (network error)', 'warning');
-    }
-
-    // allow undo window: 8s
-    setTimeout(() => {
-      // if still same undo buffer -> clear permanently (can't undo)
-      setUndoBuffer(prev => (prev && prev.action === 'delete' && prev.pills[0].id === id ? null : prev));
-    }, 8000);
-  };
-
-  // Undo handler for both create and delete (reverts last optimistic action)
-  const handleUndo = async () => {
-    if (!undoBuffer) return;
-    if (undoBuffer.action === 'create') {
-      // remove created pills (local) and call DELETE to server
-      const ids = undoBuffer.pills.map(p => p.id);
-      setManualPills(prev => {
-        const updated = prev.filter(p => !ids.includes(p.id));
-        try { localStorage.setItem(PILLS_KEY, JSON.stringify(updated)); } catch {}
-        return updated;
-      });
-      try { await fetch('/api/reminders/confirm', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) }); } catch {}
-      toast('Create undone', 'success');
-    } else if (undoBuffer.action === 'delete') {
-      // re-add deleted pills locally and call PUT to server
-      const toReAdd = undoBuffer.pills;
-      setManualPills(prev => {
-        const updated = [...prev, ...toReAdd];
-        try { localStorage.setItem(PILLS_KEY, JSON.stringify(updated)); } catch {}
-        return updated;
-      });
-      try { await fetch('/api/reminders/confirm', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(toReAdd) }); } catch {}
-      toast('Delete undone', 'success');
-    }
-    setUndoBuffer(null);
+  const onStep = (s: SelfCheckStep) => {
+    if (s === 'results' && !sc.canOpenResults) return;
+    sc.setStep(s);
   };
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
-      <header className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Self-Check</h1>
-        <div className="text-sm text-gray-500">Guided daily vitals with soft alerts</div>
-      </header>
+    <div id="selfcheck-root" className="min-h-screen bg-slate-50 text-slate-900 p-4">
+      <div className="max-w-6xl mx-auto space-y-4">
+        <SelfCheckHeader now={now} bmi={sc.bmi ?? null} />
 
-      <section className="grid md:grid-cols-3 gap-4">
-        <div className="bg-white border rounded p-4 space-y-3">
-          <div className="font-medium">Today’s Readings</div>
-          <label className="block">
-            <div className="text-sm text-gray-600 mb-1">Date</div>
-            <input type="date" value={e.date} onChange={ev=>setE({...e, date: ev.target.value})} className="w-full border rounded px-3 py-2"/>
-          </label>
+        <SelfCheckStepper
+          step={sc.step}
+          onStep={onStep}
+          completed={completed}
+          canGoResults={sc.canOpenResults}
+          lockedHint="Run Analyze to unlock results."
+        />
 
-          <div className="grid grid-cols-2 gap-3">
-            {['hr','spo2','sys','dia'].map((field) => {
-              const label = field.toUpperCase();
-              const val = (e as any)[field] ?? '';
-              const flag = (flags as any)[field];
-              return (
-                <label key={field} className="block">
-                  <div className="text-sm text-gray-600 mb-1">{label}</div>
-                  <input type="number" value={val} onChange={ev=>setE({...e, [field]: Number(ev.target.value||0)})}
-                         className={`w-full border rounded px-3 py-2 ${flag ? 'border-rose-400 bg-rose-50' : ''}`} />
-                </label>
-              );
-            })}
-          </div>
-
-          <label className="block">
-            <div className="text-sm text-gray-600 mb-1">Note</div>
-            <textarea value={e.note ?? ''} onChange={ev=>setE({...e, note: ev.target.value})}
-                      className="w-full border rounded px-3 py-2 min-h-[80px]" />
-          </label>
-
-          <button onClick={save} className="px-3 py-2 border rounded bg-indigo-600 text-white hover:bg-indigo-700">Save Today</button>
-
-          {/* Add Manual Pill */}
-          <div className="mt-2 flex gap-2">
-            <button
-              onClick={() => addManualPill({ name: 'New Pill', dose: '100 mg', time: new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }), status: 'Pending' })}
-              disabled={creating}
-              className="px-3 py-2 border rounded bg-green-600 text-white hover:bg-green-700"
-            >
-              {creating ? 'Adding…' : 'Add Manual Pill'}
-            </button>
-
-            {undoBuffer && (
-              <button onClick={handleUndo} className="px-3 py-2 border rounded bg-yellow-500 text-white">
-                Undo
-              </button>
+        <div className="grid grid-cols-1 lg:grid-cols-10 gap-6">
+          {/* Left */}
+          <div className="lg:col-span-7 space-y-4">
+            {sc.step === 'data' && (
+              <SelfCheckVitalsStep
+                vitals={sc.vitals}
+                setVitals={(updater) => sc.setVitals(updater)}
+                abnormal={sc.abnormal}
+                riskColor={sc.riskColor}
+                riskLabel={sc.analyzer.riskLabel}
+                busy={!!sc.analyzer.busy}
+                onNext={() => sc.setStep('symptoms')}
+                onAnalyze={sc.runAnalyze}
+              />
             )}
-          </div>
-        </div>
 
-        <div className="bg-white border rounded p-4 space-y-3 md:col-span-2">
-          <div className="font-medium">History</div>
-          <div className="overflow-auto">
-            <table className="w-full text-sm border rounded">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="text-left p-2">Date</th>
-                  <th className="text-left p-2">HR</th>
-                  <th className="text-left p-2">SpO₂</th>
-                  <th className="text-left p-2">SYS</th>
-                  <th className="text-left p-2">DIA</th>
-                  <th className="text-left p-2">Note</th>
-                </tr>
-              </thead>
-              <tbody>
-                {[...list].reverse().map((r,i)=>(
-                  <tr key={i} className="border-t">
-                    <td className="p-2">{r.date}</td>
-                    <td className={`p-2 ${!inRange(r.hr, cfg.hr.min, cfg.hr.max)?'text-rose-600 font-medium':''}`}>{r.hr ?? '—'}</td>
-                    <td className={`p-2 ${!inRange(r.spo2, cfg.spo2.min, cfg.spo2.max)?'text-rose-600 font-medium':''}`}>{r.spo2 ?? '—'}</td>
-                    <td className={`p-2 ${!inRange(r.sys, cfg.sys.min, cfg.sys.max)?'text-rose-600 font-medium':''}`}>{r.sys ?? '—'}</td>
-                    <td className={`p-2 ${!inRange(r.dia, cfg.dia.min, cfg.dia.max)?'text-rose-600 font-medium':''}`}>{r.dia ?? '—'}</td>
-                    <td className="p-2">{r.note ?? ''}</td>
-                  </tr>
-                ))}
-                {list.length===0 && (<tr><td colSpan={6} className="p-3 text-gray-500">No entries yet.</td></tr>)}
-              </tbody>
-            </table>
-          </div>
-        </div>
+            {sc.step === 'symptoms' && (
+              <SelfCheckSymptomsStep
+                gender={sc.gender}
+                view={sc.view}
+                areas={sc.areas}
+                onChangeGender={sc.setGender}
+                onChangeView={sc.setView}
+                onToggleArea={sc.toggleArea}
+                symptoms={sc.symptoms}
+                setSymptoms={(updater) => sc.setSymptoms(updater)}
+                busy={!!sc.analyzer.busy}
+                onBack={() => sc.setStep('data')}
+                onAnalyze={sc.runAnalyze}
+                // ✅ smart hints for both tooltip + hint strip
+                getHintForKey={getHintForKey}
+              />
+            )}
 
-        {/* Pill Reminders */}
-        <div className="bg-white border rounded p-4 space-y-3 md:col-span-3">
-          <div className="font-medium">Pill Reminders (Manual + eRx)</div>
-
-          {/* Small editor list for manual pills */}
-          <div className="mb-3">
-            <div className="text-xs text-gray-600 mb-2">Manual reminders</div>
-            {manualPills.length === 0 ? (
-              <div className="text-gray-500 text-sm">No manual reminders yet.</div>
-            ) : (
-              <div className="space-y-2">
-                {manualPills.map(p => (
-                  <div key={p.id} className="flex items-center justify-between p-2 border rounded">
-                    <div>
-                      <div className="font-medium">{p.name}</div>
-                      <div className="text-xs text-gray-500">{p.dose} • {p.time}</div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => {
-                          // quick edit inline: prompt for name (simple)
-                          const newName = prompt('Edit reminder name', p.name);
-                          if (!newName || newName.trim() === '') return;
-                          const updated = manualPills.map(x => x.id === p.id ? { ...x, name: newName } : x);
-                          setManualPills(updated);
-                          try { localStorage.setItem(PILLS_KEY, JSON.stringify(updated)); } catch {}
-                          // sync small PUT to server (idempotent)
-                          fetch('/api/reminders/confirm', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: p.id, name: newName }) }).catch(()=>{});
-                        }}
-                        className="px-2 py-1 text-xs border rounded"
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => deleteManualPill(p.id)}
-                        className="px-2 py-1 text-xs border rounded bg-rose-500 text-white"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                ))}
+            {/* Hard guard: if you somehow get to results without analyzing */}
+            {sc.step === 'results' && !sc.hasAnalyzed && (
+              <div className="bg-white/80 border border-slate-200 rounded-2xl shadow-sm p-4">
+                <div className="text-lg font-semibold text-slate-900">Results are locked</div>
+                <div className="text-sm text-slate-600 mt-1">
+                  Run analysis first, then we’ll generate your score, trends, and action plan.
+                </div>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={() => sc.setStep('symptoms')}
+                    className="px-4 py-2 rounded-xl bg-white border border-slate-200 text-slate-800 font-semibold hover:bg-slate-50"
+                    type="button"
+                  >
+                    Go back
+                  </button>
+                  <button
+                    onClick={sc.runAnalyze}
+                    disabled={!!sc.analyzer.busy}
+                    className="px-4 py-2 rounded-xl bg-cyan-600 text-white font-semibold hover:opacity-95 disabled:opacity-50"
+                    type="button"
+                  >
+                    {sc.analyzer.busy ? 'Checking…' : 'Analyze now'}
+                  </button>
+                </div>
               </div>
             )}
+
+            {sc.step === 'results' && sc.hasAnalyzed && (
+              <SelfCheckResultsStep
+                vitals={sc.vitals}
+                symptomsSelected={sc.selectedSymptoms}
+                areas={sc.areas}
+                busy={!!sc.analyzer.busy}
+                riskColor={sc.riskColor}
+                riskLabel={sc.analyzer.riskLabel}
+                riskLevel={sc.analyzer.riskLevel}
+                healthScore={sc.analyzer.healthScore}
+                recommendations={sc.analyzer.recommendations}
+                explanations={sc.analyzer.explanations}
+                confidence={sc.confidence}
+                timeline={sc.timeline}
+                onAdjustSymptoms={() => sc.setStep('symptoms')}
+                onCopy={copySummary}
+              />
+            )}
           </div>
 
-          <PillRemindersWrapper manualPills={manualPills} erxPills={erxPills} />
+          {/* Right */}
+          <div className="lg:col-span-3">
+            <SelfCheckRightRail
+              cardio={sc.cardioAnalytics.cardio}
+              hypeIndex={sc.cardioAnalytics.hypeIndex}
+              stress={sc.stressAnalytics}
+              trendSummary={sc.trendSummary}
+              areas={sc.areas}
+              gender={sc.gender}
+              view={sc.view}
+              busy={!!sc.analyzer.busy}
+              onAnalyze={sc.runAnalyze}
+              onCopy={copySummary}
+            />
+          </div>
         </div>
-      </section>
-    </main>
+      </div>
+
+      {sc.analyzer.healthScore > 85 && (
+        <div className="pointer-events-none fixed inset-0 -z-0 opacity-20">
+          <div className="absolute inset-0 bg-gradient-to-tr from-cyan-200 via-transparent to-violet-200" />
+        </div>
+      )}
+    </div>
   );
 }

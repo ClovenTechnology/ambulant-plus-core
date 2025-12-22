@@ -1,3 +1,4 @@
+//apps/clinician-app/app/api/events/inbox/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { readInbox } from '@runtime/store';
 

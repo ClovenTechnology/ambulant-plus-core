@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/codes/icd10/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { searchICD10, loadICD10FromGzip, getICD10Data } from '@packages/clinical-codes/src/icd10';
 import { join } from 'node:path';

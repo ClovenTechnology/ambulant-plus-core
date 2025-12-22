@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/devices/stream/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 

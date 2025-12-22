@@ -1,183 +1,304 @@
-﻿import { NextResponse } from 'next/server';
+﻿// apps/patient-app/app/api/encounters/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { getPrisma } from '@/src/lib/prisma';
+import * as store from './store';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-type Encounter = {
-  id: string;
-  caseId: string;
-  start: string; // ISO
-  stop?: string; // ISO
-  mode: 'chat' | 'audio' | 'video';
-  status: 'Completed' | 'InProgress';
-  clinician: { id: string; name: string; specialty: string };
-  notes?: string;
-  devices?: string[]; // e.g. ["Health Monitor", "NexRing"]
-};
+function clampScore(n: any) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return null;
+  const i = Math.round(v);
+  if (i < 1 || i > 5) return null;
+  return i as 1 | 2 | 3 | 4 | 5;
+}
 
-type Case = {
-  id: string;
-  title: string;
-  status: 'Open' | 'Closed' | 'Referred';
-  updatedAt: string;           // last activity across encounters
-  encounters: Encounter[];
-};
-
-// ---- Mock seed (stable timestamps near "now") -----------------------------
-
-function iso(d: Date) { return new Date(d).toISOString(); }
-function daysAgo(n: number) { const d = new Date(); d.setDate(d.getDate() - n); return d; }
-const now = new Date();
-
-const MOCK: Case[] = [
-  {
-    id: 'CASE-24001',
-    title: 'Hypertension follow-up',
-    status: 'Open',
-    updatedAt: iso(daysAgo(0)), // today
-    encounters: [
-      {
-        id: 'ENC-24001-1',
-        caseId: 'CASE-24001',
-        start: iso(new Date(now.getTime() - 1000 * 60 * 50)),
-        stop:  iso(new Date(now.getTime() - 1000 * 60 * 20)),
-        mode: 'video',
-        status: 'Completed',
-        clinician: { id: 'CLN-001', name: 'Dr. A. Moyo', specialty: 'Cardiology' },
-        notes: 'BP improved; adjust meds.',
-        devices: ['Health Monitor', 'NexRing']
-      }
-    ]
-  },
-  {
-    id: 'CASE-23987',
-    title: 'Post-viral cough',
-    status: 'Closed',
-    updatedAt: iso(daysAgo(6)),
-    encounters: [
-      {
-        id: 'ENC-23987-1',
-        caseId: 'CASE-23987',
-        start: iso(daysAgo(7)),
-        stop:  iso(daysAgo(7)),
-        mode: 'chat',
-        status: 'Completed',
-        clinician: { id: 'CLN-014', name: 'Dr. N. Jacobs', specialty: 'Internal Medicine' },
-        notes: 'Reassurance + inhaler',
-        devices: ['Health Monitor']
-      },
-      {
-        id: 'ENC-23987-2',
-        caseId: 'CASE-23987',
-        start: iso(daysAgo(6)),
-        stop:  iso(daysAgo(6)),
-        mode: 'audio',
-        status: 'Completed',
-        clinician: { id: 'CLN-014', name: 'Dr. N. Jacobs', specialty: 'Internal Medicine' },
-        notes: 'Symptoms resolved; close case',
-        devices: []
-      }
-    ]
-  },
-  {
-    id: 'CASE-23810',
-    title: 'Headache & dizziness',
-    status: 'Referred',
-    updatedAt: iso(daysAgo(14)),
-    encounters: [
-      {
-        id: 'ENC-23810-1',
-        caseId: 'CASE-23810',
-        start: iso(daysAgo(15)),
-        stop:  iso(daysAgo(15)),
-        mode: 'video',
-        status: 'Completed',
-        clinician: { id: 'CLN-033', name: 'Dr. T. Dlamini', specialty: 'Neurology' },
-        notes: 'Refer to neuro clinic',
-        devices: ['Health Monitor']
-      }
-    ]
+function extractRating(e: any) {
+  // rating JSON / object
+  const r = e?.rating ?? e?.patientRating ?? null;
+  if (r && typeof r === 'object') {
+    const s = clampScore((r as any).score);
+    if (s) {
+      return {
+        score: s,
+        comment: (r as any).comment ?? undefined,
+        createdAt: String(
+          (r as any).createdAt ??
+            e?.ratingCreatedAt ??
+            e?.updatedAt ??
+            e?.stop ??
+            e?.start ??
+            new Date().toISOString(),
+        ),
+      };
+    }
   }
-];
 
-// Ensure updatedAt reflects the most recent encounter end/start
-function normalizeCases(cases: Case[]): Case[] {
-  return cases.map(c => {
-    const latest = [...c.encounters].sort((a, b) =>
-      new Date(b.stop ?? b.start).getTime() - new Date(a.stop ?? a.start).getTime()
-    )[0];
-    const updatedAt = latest ? (latest.stop ?? latest.start) : c.updatedAt;
-    return { ...c, updatedAt };
-  });
+  // scalar fields (common patterns)
+  const s =
+    clampScore(e?.ratingScore) ??
+    clampScore(e?.rating_score) ??
+    clampScore(e?.ratingValue) ??
+    clampScore(e?.rating_value);
+
+  if (!s) return null;
+
+  const comment =
+    (typeof e?.ratingComment === 'string' ? e.ratingComment : null) ??
+    (typeof e?.rating_comment === 'string' ? e.rating_comment : null) ??
+    (typeof e?.comment === 'string' ? e.comment : null) ??
+    undefined;
+
+  const createdAt =
+    e?.ratingCreatedAt ??
+    e?.rating_created_at ??
+    e?.ratedAt ??
+    e?.rated_at ??
+    e?.updatedAt ??
+    e?.stop ??
+    e?.start ??
+    new Date().toISOString();
+
+  return {
+    score: s,
+    comment,
+    createdAt: String(createdAt),
+  };
 }
 
-function toLatestSummary(c: Case) {
-  const latest = [...c.encounters].sort((a, b) =>
-    new Date(b.stop ?? b.start).getTime() - new Date(a.stop ?? a.start).getTime()
-  )[0];
-  return latest
-    ? {
-        id: latest.id,
-        start: latest.start,
-        stop: latest.stop,
-        mode: latest.mode,
-        status: latest.status
-      }
-    : null;
+/**
+ * Query params:
+ * - mode=cases (default) | sessions (flatten encounters)
+ * - status=Open|Closed|Referred
+ * - limit=N
+ */
+function shapeEncounterForClient(e: any, caseId: string) {
+  const rating = extractRating(e);
+
+  return {
+    id: e.id,
+    caseId,
+    start: e.start,
+    stop: e.stop ?? null,
+    mode: e.mode ?? null,
+    status: e.status ?? null,
+    clinician: e.clinician
+      ? {
+          id: e.clinician.id,
+          name: e.clinician.name,
+          specialty: e.clinician.specialty ?? null,
+        }
+      : undefined,
+    devices: e.devices ?? undefined,
+    notes: e.notes ?? undefined,
+    vitals: e.vitals ?? undefined,
+
+    rating: rating ?? null,
+  };
 }
 
-export async function GET(req: Request) {
+function shapeCaseForClient(c: any) {
+  const rawEncounters = Array.isArray(c.encounters) ? c.encounters : [];
+  const encounters = rawEncounters
+    .map((e: any) => shapeEncounterForClient(e, c.id))
+    .sort(
+      (a: any, b: any) =>
+        new Date(b.start ?? 0).getTime() - new Date(a.start ?? 0).getTime(),
+    );
+
+  const latestEncounter = encounters[0] ?? null;
+
+  return {
+    id: c.id,
+    title: c.title ?? c.name ?? null,
+    status: c.status ?? 'Open',
+    updatedAt:
+      c.updatedAt ??
+      latestEncounter?.stop ??
+      latestEncounter?.start ??
+      new Date().toISOString(),
+    encountersCount: encounters.length,
+    latestEncounter,
+    encounters,
+  };
+}
+
+export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const mode = url.searchParams.get('mode');         // "sessions" to flatten
-  const status = url.searchParams.get('status');     // "Open" | "Closed" | "Referred"
+  const mode = url.searchParams.get('mode'); // 'sessions' to flatten
+  const status = url.searchParams.get('status') ?? undefined;
   const limit = Number(url.searchParams.get('limit') ?? 0);
 
-  // Mocks default ON; set USE_MOCKS=0 to disable later.
-  const useMocks = (process.env.USE_MOCKS ?? '1') === '1';
+  const useMocks = (process.env.USE_MOCKS ?? '0') === '1';
 
-  if (!useMocks) {
-    // Real backend placeholder
-    return NextResponse.json({ cases: [] }, { headers: { 'Cache-Control': 'no-store' } });
-  }
+  // === Try DB first (if Prisma exists) ===
+  try {
+    if (!useMocks) {
+      const prisma = getPrisma();
+      if (!prisma) throw new Error('no-prisma');
 
-  // Work with mocks
-  let cases = normalizeCases(MOCK);
+      const cases = await prisma.case.findMany({
+        where: status ? { status } : undefined,
+        include: { encounters: { include: { clinician: true } } },
+        orderBy: { updatedAt: 'desc' },
+        take: limit > 0 ? limit : undefined,
+      });
 
-  if (status && ['Open', 'Closed', 'Referred'].includes(status)) {
-    cases = cases.filter(c => c.status === status);
-  }
+      if (!cases || cases.length === 0) throw new Error('no-cases');
 
-  // Sort by recency (updatedAt desc)
-  cases.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      const normalized = cases.map((c: any) => {
+        const latest = [...(c.encounters ?? [])].sort(
+          (a: any, b: any) =>
+            new Date(b.stop ?? b.start).getTime() -
+            new Date(a.stop ?? a.start).getTime(),
+        )[0];
+        const updatedAt = latest
+          ? latest.stop ?? latest.start
+          : c.updatedAt ?? new Date().toISOString();
+        return { ...c, updatedAt };
+      });
 
-  if (limit > 0) cases = cases.slice(0, limit);
+      if (mode === 'sessions') {
+        const encounters = normalized
+          .flatMap((c: any) =>
+            (c.encounters ?? []).map((e: any) => {
+              const rating = extractRating(e);
+              return {
+                id: e.id,
+                caseId: c.id,
+                caseTitle: c.title ?? c.name,
+                caseStatus: c.status,
+                start: e.start,
+                stop: e.stop,
+                mode: e.mode,
+                status: e.status,
+                clinician: e.clinician
+                  ? {
+                      id: e.clinician.id,
+                      name: e.clinician.name,
+                      specialty: e.clinician.specialty,
+                    }
+                  : undefined,
+                devices: e.devices ?? undefined,
+                notes: e.notes ?? undefined,
+                vitals: e.vitals ?? undefined,
+                rating: rating ?? null,
+              };
+            }),
+          )
+          .sort(
+            (a: any, b: any) =>
+              new Date(b.stop ?? b.start).getTime() -
+              new Date(a.stop ?? a.start).getTime(),
+          );
 
-  if (mode === 'sessions') {
-    // Flatten encounters across cases, newest first
-    const encounters: (Encounter & { caseStatus: Case['status']; caseTitle: string })[] = [];
-    for (const c of cases) {
-      for (const e of c.encounters) {
-        encounters.push({
-          ...e,
-          caseStatus: c.status,
-          caseTitle: c.title
-        });
+        return NextResponse.json(
+          { encounters },
+          { headers: { 'Cache-Control': 'no-store' } },
+        );
       }
+
+      const shaped = normalized.map(shapeCaseForClient);
+      return NextResponse.json(
+        { cases: shaped },
+        { headers: { 'Cache-Control': 'no-store' } },
+      );
     }
-    encounters.sort((a, b) =>
-      new Date(b.stop ?? b.start).getTime() - new Date(a.stop ?? a.start).getTime()
+  } catch (err: any) {
+    console.warn(
+      '[encounters] prisma read failed or empty, falling back to mock store',
+      err?.message ?? err,
     );
-    return NextResponse.json({ encounters }, { headers: { 'Cache-Control': 'no-store' } });
   }
 
-  // Default: cases with summary
-  const shaped = cases.map(c => ({
-    id: c.id,
-    title: c.title,
-    status: c.status,
-    updatedAt: c.updatedAt,
-    encountersCount: c.encounters.length,
-    latestEncounter: toLatestSummary(c)
-  }));
+  // === Fallback to in-memory/mock store ===
+  try {
+    const rawCases = store.listCases ? store.listCases() : null;
+    if (rawCases && rawCases.length) {
+      let cases = rawCases.map((c: any) => ({
+        ...c,
+        encounters: c.encounters ?? [],
+      }));
+      if (status) cases = cases.filter((c: any) => c.status === status);
+      if (limit > 0) cases = cases.slice(0, limit);
 
-  return NextResponse.json({ cases: shaped }, { headers: { 'Cache-Control': 'no-store' } });
+      if (mode === 'sessions') {
+        const encounters = cases
+          .flatMap((c: any) =>
+            (c.encounters ?? []).map((e: any) => {
+              const rating = extractRating(e);
+              return {
+                id: e.id,
+                caseId: c.id,
+                caseTitle: c.title,
+                caseStatus: c.status,
+                start: e.start,
+                stop: e.stop,
+                mode: e.mode,
+                status: e.status,
+                clinician: e.clinician ?? undefined,
+                devices: e.devices ?? undefined,
+                notes: e.notes ?? undefined,
+                vitals: e.vitals ?? undefined,
+                rating: rating ?? null,
+              };
+            }),
+          )
+          .sort(
+            (a: any, b: any) =>
+              new Date(b.stop ?? b.start).getTime() -
+              new Date(a.stop ?? a.start).getTime(),
+          );
+        return NextResponse.json({ encounters });
+      }
+
+      const shaped = cases.map(shapeCaseForClient);
+      return NextResponse.json({ cases: shaped });
+    }
+
+    // Build from encounters-only store
+    const encs = store.listEncounters ? store.listEncounters() : [];
+    const grouped: Record<string, any> = {};
+    for (const e of encs) {
+      const caseId = e.caseId ?? e.case ?? 'CASE-UNKNOWN';
+      grouped[caseId] =
+        grouped[caseId] ??
+        {
+          id: caseId,
+          title: e.caseTitle ?? `Case ${caseId}`,
+          status: e.caseStatus ?? 'Open',
+          encounters: [],
+        };
+      grouped[caseId].encounters.push(e);
+    }
+    let casesArr = Object.values(grouped);
+    if (status) casesArr = casesArr.filter((c: any) => c.status === status);
+    if (limit > 0) casesArr = casesArr.slice(0, limit);
+
+    if (mode === 'sessions') {
+      const encounters = casesArr.flatMap((c: any) =>
+        (c.encounters ?? []).map((e: any) => {
+          const rating = extractRating(e);
+          return {
+            ...e,
+            caseId: c.id,
+            caseTitle: c.title,
+            caseStatus: c.status,
+            rating: rating ?? null,
+          };
+        }),
+      );
+      return NextResponse.json({ encounters });
+    }
+
+    const shaped = casesArr.map(shapeCaseForClient);
+    return NextResponse.json({ cases: shaped });
+  } catch (err: any) {
+    console.error('[encounters] fallback store failed', err);
+    return NextResponse.json(
+      { error: 'encounters_unavailable', detail: String(err?.message ?? err) },
+      { status: 502 },
+    );
+  }
 }

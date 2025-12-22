@@ -1,0 +1,29 @@
+[
+  {
+    "id": "demo-pen",
+    "patientId": "pt-dev",
+    "substance": "Penicillin",
+    "reaction": "Rash / urticaria",
+    "severity": "Moderate",
+    "status": "Active",
+    "recordedAt": "2025-11-25T16:03:29.410Z"
+  },
+  {
+    "id": "demo-nuts",
+    "patientId": "pt-dev",
+    "substance": "Peanuts",
+    "reaction": "Lip swelling",
+    "severity": "Mild",
+    "status": "Active",
+    "recordedAt": "2025-11-25T16:03:29.410Z"
+  },
+  {
+    "id": "alg-1764086609410-c0jp",
+    "patientId": "pt-dev",
+    "substance": "dd",
+    "reaction": "xx",
+    "severity": "Mild",
+    "status": "Resolved",
+    "recordedAt": "2025-11-25T16:03:29.410Z"
+  }
+]

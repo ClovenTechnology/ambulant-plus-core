@@ -1,4 +1,5 @@
-﻿import { NextRequest, NextResponse } from "next/server";
+﻿//apps/patient-app/app/api/reports/file/route.ts
+import { NextRequest, NextResponse } from "next/server";
 import { promises as fs } from "fs";
 import path from "path";
 async function watermarkPdf(buffer: Uint8Array, text: string){

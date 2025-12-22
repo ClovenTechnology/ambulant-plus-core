@@ -1,3 +1,4 @@
+// apps/clinician-app/src/components/AgendaList.tsx
 'use client'
 import { useRouter } from 'next/navigation'
 import { sdk } from '@/src/lib/sdk'

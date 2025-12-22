@@ -1,48 +1,77 @@
+// apps/api-gateway/app/api/schedule/slots/batch/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminPolicy, getClinicianConsult } from '@/src/store/consult';
-import { generateSlotsForDate } from '@/src/lib/slotgen';
+import { addDays, startOfDay } from '@/src/time';
+import { getEffectiveConsultConfig, generateSlotsForDate } from '@/src/consult/engine';
 
-// TODO: swap with your real work-hours + exceptions + holidays fetchers
-async function getWorkHours(clinicianId: string, dateISO: string) {
-  // Example: 08:00–17:00
-  return { startMin: 8 * 60, endMin: 17 * 60 };
+export const dynamic = 'force-dynamic';
+
+type BatchParams = {
+  start?: string;
+  days?: number;
+  clinicianId?: string;
+};
+
+async function parseParams(req: NextRequest): Promise<BatchParams> {
+  if (req.method === 'GET') {
+    const q = req.nextUrl.searchParams;
+    return {
+      start: q.get('start') ?? undefined,
+      days: q.get('days') ? Number(q.get('days')) : undefined,
+      clinicianId: q.get('clinicianId') ?? q.get('clinician_id') ?? undefined,
+    };
+  } else {
+    // POST
+    try {
+      const body = await req.json().catch(() => ({}));
+      return {
+        start: body.start,
+        days: typeof body.days === 'number' ? body.days : undefined,
+        clinicianId: body.clinicianId || body.clinician_id,
+      };
+    } catch {
+      return {};
+    }
+  }
 }
-async function getExceptions(clinicianId: string, dateISO: string) {
-  return [] as Array<{ fromISO: string; toISO: string }>;
-}
-async function getHolidayDatesForRange(country: string, startISO: string, days: number) {
-  return [] as string[];
+
+export async function handleBatch(req: NextRequest) {
+  const { start, days = 42, clinicianId } = await parseParams(req);
+
+  if (!start || !clinicianId) {
+    return NextResponse.json({ error: 'missing_start_or_clinicianId' }, { status: 400 });
+  }
+
+  const safeDays = Math.max(1, Math.min(62, Number(days || 42)));
+
+  try {
+    const startDay = startOfDay(new Date(start));
+    const cfg = await getEffectiveConsultConfig(clinicianId); // should return effective admin+clinician config
+
+    const out: Record<string, any[]> = {};
+    for (let i = 0; i < safeDays; i++) {
+      const d = addDays(startDay, i);
+      const key = d.toISOString().slice(0, 10);
+      const slotObjs = generateSlotsForDate(d, cfg).map((s) => ({
+        start: s.start.toISOString(),
+        end: s.end.toISOString(),
+        label: s.label,
+        // include status/metadata if generateSlots provides it
+        ...(s.status ? { status: s.status } : {}),
+      }));
+      out[key] = slotObjs;
+    }
+
+    return NextResponse.json({ slots: out });
+  } catch (err: any) {
+    console.error('slots/batch error', err);
+    return NextResponse.json({ error: 'server_error', message: String(err?.message || err) }, { status: 500 });
+  }
 }
 
 export async function GET(req: NextRequest) {
-  const clinicianId = String(req.nextUrl.searchParams.get('clinician_id') || '');
-  const dateISO = String(req.nextUrl.searchParams.get('date') || '');
-  const kind = String(req.nextUrl.searchParams.get('kind') || 'standard'); // 'standard' | 'followup'
-  if (!clinicianId || !dateISO) return NextResponse.json({ error: 'missing_params' }, { status: 400 });
+  return handleBatch(req);
+}
 
-  const [admin, clin, hours, excs, holidays] = await Promise.all([
-    getAdminPolicy(), getClinicianConsult(clinicianId),
-    getWorkHours(clinicianId, dateISO),
-    getExceptions(clinicianId, dateISO),
-    getHolidayDatesForRange('ZA', dateISO, 1),
-  ]);
-
-  const durationMin = Math.max(
-    kind === 'followup' ? clin.defaultFollowupMin : clin.defaultStandardMin,
-    kind === 'followup' ? admin.minFollowupMinutes : admin.minStandardMinutes,
-  );
-
-  const slots = generateSlotsForDate({
-    dateISO,
-    workStartMin: hours.startMin,
-    workEndMin: hours.endMin,
-    durationMin,
-    bufferAfterMin: admin.bufferAfterMinutes,
-    minAdvanceMinutes: clin.minAdvanceMinutes,
-    maxAdvanceDays: clin.maxAdvanceDays,
-    exceptions: excs,
-    holidayDates: holidays,
-  });
-
-  return NextResponse.json({ date: dateISO, slots });
+export async function POST(req: NextRequest) {
+  return handleBatch(req);
 }

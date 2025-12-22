@@ -34,7 +34,10 @@ export async function POST(req: NextRequest) {
     });
 
     // send invites (best-effort) - use templated email/SMS
-    const link = `${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/training/schedule?clinicianId=${encodeURIComponent(rec.id)}`;
+    const link = `${
+      process.env.NEXT_PUBLIC_BASE_URL ?? ''
+    }/training/schedule?clinicianId=${encodeURIComponent(rec.id)}`;
+
     if (email) {
       const subject = 'Ambulant+ — Complete your training to go live';
       const html = `<p>Hi ${name || ''},</p>
@@ -82,7 +85,26 @@ export async function PATCH(req: NextRequest) {
     if (!id) return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 });
 
     const data: any = {};
-    if (body.status) data.status = body.status;
+
+    if (body.status) {
+      const status = String(body.status);
+      data.status = status;
+
+      // keep boolean flags roughly in sync
+      if (status === 'disabled') {
+        data.disabled = true;
+        data.archived = false;
+      } else if (status === 'archived') {
+        data.archived = true;
+        data.disabled = false;
+      } else {
+        // active, pending, disciplinary, rejected, etc
+        data.disabled = false;
+        // only clear archived when explicitly re-activating
+        if (status === 'active' || status === 'pending') data.archived = false;
+      }
+    }
+
     if (typeof body.trainingCompleted === 'boolean') data.trainingCompleted = body.trainingCompleted;
     if (body.trainingScheduledAt) data.trainingScheduledAt = new Date(body.trainingScheduledAt);
     if (typeof body.disabled === 'boolean') data.disabled = body.disabled;
@@ -103,10 +125,15 @@ export async function DELETE(req: NextRequest) {
     if (!isAdmin) return NextResponse.json({ ok: false, error: 'admin_required' }, { status: 403 });
 
     const url = new URL(req.url);
-    const id = url.searchParams.get('id') || (await req.json().catch(() => ({})).then((b:any)=>b?.id));
+    const id =
+      url.searchParams.get('id') ||
+      (await req.json().catch(() => ({})).then((b: any) => b?.id));
     if (!id) return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 });
 
-    const profile = await prisma.clinicianProfile.update({ where: { id }, data: { status: 'archived' } });
+    const profile = await prisma.clinicianProfile.update({
+      where: { id },
+      data: { status: 'archived', archived: true, disabled: false },
+    });
     return NextResponse.json({ ok: true, clinician: profile });
   } catch (err: any) {
     console.error('clinicians DELETE error', err);

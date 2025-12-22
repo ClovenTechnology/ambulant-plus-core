@@ -1,0 +1,66 @@
+plugins {
+  id 'com.android.application'
+  id 'org.jetbrains.kotlin.android'
+}
+apply from: "../variables.gradle"
+
+def MIN_SDK     = (rootProject.hasProperty('ext') && rootProject.ext.has('minSdkVersion'))       ? rootProject.ext.minSdkVersion    : 24
+def COMPILE_SDK = (rootProject.hasProperty('ext') && rootProject.ext.has('compileSdkVersion'))   ? rootProject.ext.compileSdkVersion: 34
+def TARGET_SDK  = (rootProject.hasProperty('ext') && rootProject.ext.has('targetSdkVersion'))    ? rootProject.ext.targetSdkVersion : 34
+
+android {
+  namespace "com.ambulant.patient"
+  compileSdkVersion COMPILE_SDK
+
+  defaultConfig {
+    applicationId "com.ambulant.patient"
+    minSdkVersion MIN_SDK
+    targetSdkVersion TARGET_SDK
+    versionCode 1
+    versionName "1.0"
+    testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+  }
+
+  buildTypes {
+    release {
+      minifyEnabled false
+      proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+    }
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+  kotlinOptions { jvmTarget = '17' }
+
+  packagingOptions {
+    resources { excludes += ['META-INF/*'] }
+  }
+}
+
+dependencies {
+  implementation "androidx.core:core-ktx:1.13.1"
+  implementation "androidx.appcompat:appcompat:1.7.0"
+  implementation "com.google.android.material:material:1.12.0"
+  implementation 'androidx.core:core-splashscreen:1.0.1'
+  implementation 'androidx.annotation:annotation:1.8.2' // UVC SDK requires this
+
+  // Capacitor
+  implementation project(':capacitor-android')
+  implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk8:1.9.24"
+
+  // Linktop Health Monitor vendor libs
+  implementation files('libs/BleDev_release_v2.7.1.aar')
+  implementation files('libs/CssServer_release_v2.6.4.aar')
+  implementation files('libs/CssSocket_release_v2.6.4.aar')
+
+  // Digital Stethoscope
+  implementation files('libs/stethoscope_v1.3.4_release.aar')
+
+  // Otoscope (UVC) — keep ONLY ONE active AAR
+  // implementation files('libs/libUvcSdk_v1.0.6_release.aar')
+  implementation files('libs/libUvcSdk_v1.0.7_release.aar')
+
+  // NexRing – React Native SDK (JS); no AAR here. We use Web Bluetooth in the web layer.
+}

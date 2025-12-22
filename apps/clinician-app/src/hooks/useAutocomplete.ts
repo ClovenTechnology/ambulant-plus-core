@@ -3,8 +3,25 @@
 
 import { useEffect, useState } from 'react';
 
-export type ICD10Hit = { code: string; title: string; synonyms?: string[] };
-export type RxNormHit = { rxcui?: string; name?: string; title?: string; tty?: string };
+export type ICD10Hit = {
+  code: string;
+  title: string;
+  synonyms?: string[];
+  chapter?: string;
+  block?: string;
+  score?: number;
+};
+
+export type RxNormHit = {
+  rxcui: string;
+  name: string;
+  title?: string;
+  tty?: string;
+  genericName?: string;
+  strength?: string;
+  doseForm?: string;
+  route?: string;
+};
 
 export function useDebounced<T>(value: T, delay = 250) {
   const [v, setV] = useState(value);
@@ -29,7 +46,10 @@ export function useAutocomplete<T>(
 
   useEffect(() => {
     (async () => {
-      if (!deb || (typeof deb === 'string' && deb.length < min)) { setOpts([]); return; }
+      if (!deb || (typeof deb === 'string' && deb.length < min)) {
+        setOpts([]);
+        return;
+      }
       setBusy(true);
       try {
         const list = await search(String(deb));
@@ -46,11 +66,15 @@ export function useAutocomplete<T>(
 }
 
 /** Client-side ranked ICD-10 search against /api/codes/icd10 */
-export async function icdSearch(q: string) {
-  const res = await fetch(`/api/codes/icd10?q=${encodeURIComponent(q)}`, { cache: 'no-store' });
+export async function icdSearch(q: string): Promise<ICD10Hit[]> {
+  const res = await fetch(
+    `/api/codes/icd10?q=${encodeURIComponent(q)}&limit=25`,
+    { cache: 'no-store' },
+  );
   if (!res.ok) return [] as ICD10Hit[];
   const js = await res.json();
   const hits = (js?.results ?? []) as ICD10Hit[];
+
   const s = q.toLowerCase();
   hits.sort((a, b) => {
     const ax = `${a.code} ${a.title}`.toLowerCase();
@@ -59,17 +83,47 @@ export async function icdSearch(q: string) {
     const bp = bx.startsWith(s) ? 0 : bx.includes(s) ? 1 : 2;
     return ap - bp;
   });
-  return hits.slice(0, 20);
+
+  return hits.slice(0, 25);
 }
 
-/** RxNorm search against /api/codes/rxnorm (normalized name) */
-export async function rxnormSearch(q: string) {
-  const res = await fetch(`/api/codes/rxnorm?q=${encodeURIComponent(q)}`, { cache: 'no-store' });
+/** RxNorm search against /api/codes/rxnorm (prefer generics) */
+export async function rxnormSearch(q: string): Promise<RxNormHit[]> {
+  const res = await fetch(
+    `/api/codes/rxnorm?q=${encodeURIComponent(q)}&limit=25&preferGeneric=1`,
+    { cache: 'no-store' },
+  );
   if (!res.ok) return [] as RxNormHit[];
   const js = await res.json();
-  const hits = (js?.results ?? []) as RxNormHit[];
+
+  // API shape: { ok: true, items: [...] }
+  const hits = (js?.items ?? js?.results ?? []) as any[];
+
   return hits
-    .filter((x) => !!(x.name || x.title))
-    .map((x) => ({ ...x, name: x.name || x.title })) // normalize
-    .slice(0, 25);
+    .filter((x) => x && (x.name || x.title || x.rxnavName))
+    .map((x) => ({
+      rxcui: String(x.rxcui ?? ''),
+      name: x.name || x.title || x.rxnavName || '',
+      title: x.title,
+      tty: x.tty,
+      genericName: x.genericName,
+      strength: x.strength,
+      doseForm: x.doseForm,
+      route: x.route,
+    }))
+    .filter((x) => x.rxcui && x.name)
+    .slice(0, 50);
+}
+
+/** Sigs suggestions for a given RxCUI, from /api/codes/sigs */
+export async function sigsForRxCui(rxCui: string): Promise<string[]> {
+  const rr = rxCui.trim();
+  if (!rr) return [];
+  const res = await fetch(
+    `/api/codes/sigs?rxCui=${encodeURIComponent(rr)}&limit=10`,
+    { cache: 'no-store' },
+  );
+  if (!res.ok) return [];
+  const js = await res.json();
+  return Array.isArray(js?.items) ? (js.items as string[]) : [];
 }

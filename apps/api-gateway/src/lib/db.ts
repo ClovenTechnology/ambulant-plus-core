@@ -1,11 +1,4 @@
-import { PrismaClient } from '@/prisma/client';
-
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-
-export const prisma =
-  globalForPrisma.prisma ??
-  new PrismaClient({
-    log: ['error', 'warn'],
-  });
-
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+// apps/api-gateway/src/lib/db.ts
+// Keep this file only for backwards-compat imports.
+// Canonical Prisma singleton lives in: src/lib/prisma.ts
+export { prisma } from './prisma';

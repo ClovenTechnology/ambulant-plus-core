@@ -117,7 +117,7 @@ export default function PairDevicePage() {
                   disabled={busy}
                   className="px-3 py-1 border rounded bg-black text-white"
                 >
-                  {busy ? 'Registeringâ€¦' : 'Register Device'}
+                  {busy ? 'Registering...' : 'Register Device'}
                 </button>
               </div>
             </section>
@@ -156,7 +156,7 @@ function Selector({
         onChange={e => onChange(e.target.value)}
         className="w-full border rounded px-2 py-1"
       >
-        <option value="">{disabled ? 'â€”' : 'Selectâ€¦'}</option>
+        <option value="">{disabled ? 'â€”' : 'Select'}</option>
         {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
       </select>
     </label>

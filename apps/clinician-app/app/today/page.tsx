@@ -1,3 +1,4 @@
+// apps/clinician-app/app/today/page.tsx
 'use client';
 
 import { useEffect, useState, useMemo } from 'react';
@@ -6,12 +7,15 @@ import AgendaList from '@/src/components/AgendaList';
 import SessionCountdown from '@/src/components/SessionCountdown';
 import NoteForm from '@/components/forms/NoteForm';
 
+type AlertSeverity = 'low' | 'moderate' | 'high' | 'critical';
+
 type PatientAlert = {
   id: string;
   patientName: string;
-  type: 'vitals' | 'message' | 'lab';
+  type: 'vitals' | 'message' | 'lab' | 'multifactor';
   message: string;
   timestamp: string;
+  severity: AlertSeverity;
 };
 
 export default function TodayPage() {
@@ -19,9 +23,10 @@ export default function TodayPage() {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Appointment | null>(null);
   const [alerts, setAlerts] = useState<PatientAlert[]>([]);
+  const [alertsError, setAlertsError] = useState<string | null>(null);
   const [showNoteForm, setShowNoteForm] = useState(false);
 
-  const clinicianId = 'clin-demo'; // TODO: get from auth/session
+  const clinicianId = 'clin-demo'; // TODO: derive from auth/session
 
   // Fetch today's appointments
   useEffect(() => {
@@ -40,46 +45,141 @@ export default function TodayPage() {
     fetchAppointments();
   }, [clinicianId]);
 
-  // Mock patient alerts (replace with real API)
+  // Fetch real InsightCore alerts for this clinician
   useEffect(() => {
-    const mock: PatientAlert[] = [
-      { id: 'a1', patientName: 'Nomsa Dlamini', type: 'vitals', message: 'BP elevated: 150/95', timestamp: new Date().toISOString() },
-      { id: 'a2', patientName: 'Thabo Mbeki', type: 'message', message: 'Patient sent a follow-up question', timestamp: new Date().toISOString() },
-    ];
-    setAlerts(mock);
-  }, []);
+    let cancelled = false;
+
+    async function fetchAlerts() {
+      try {
+        setAlertsError(null);
+        const res = await fetch(
+          `/api/insightcore/alerts?clinicianId=${encodeURIComponent(clinicianId)}&limit=10`,
+          { cache: 'no-store' },
+        );
+        const data = await res.json();
+        if (cancelled) return;
+
+        const incoming = (data.alerts || []) as any[];
+
+        const mapped: PatientAlert[] = incoming.map((a) => ({
+          id: String(a.id || crypto.randomUUID()),
+          patientName: a.patientName || 'Unknown patient',
+          type:
+            a.type === 'lab'
+              ? 'lab'
+              : a.type === 'message'
+              ? 'message'
+              : a.type === 'vitals'
+              ? 'vitals'
+              : 'multifactor',
+          message: a.title || a.message || 'InsightCore alert',
+          timestamp: a.ts || new Date().toISOString(),
+          severity: (a.severity as AlertSeverity) || 'moderate',
+        }));
+
+        setAlerts(mapped);
+      } catch (e: any) {
+        if (cancelled) return;
+        console.error('Failed to fetch InsightCore alerts', e);
+        setAlertsError('Unable to load InsightCore alerts right now.');
+      }
+    }
+
+    fetchAlerts();
+    const timer = setInterval(fetchAlerts, 60_000); // refresh every 60s
+
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [clinicianId]);
 
   const nextAppointment = useMemo(() => {
     const upcoming = appointments
-      .filter(a => new Date(a.startsAt) > new Date())
+      .filter((a) => new Date(a.startsAt) > new Date())
       .sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
     return upcoming[0] ?? null;
   }, [appointments]);
+
+  function severityClass(severity: AlertSeverity): string {
+    switch (severity) {
+      case 'critical':
+        return 'border-red-600 bg-red-50';
+      case 'high':
+        return 'border-amber-500 bg-amber-50';
+      case 'moderate':
+        return 'border-yellow-400 bg-yellow-50';
+      case 'low':
+      default:
+        return 'border-sky-300 bg-sky-50';
+    }
+  }
+
+  function severityLabel(severity: AlertSeverity): string {
+    switch (severity) {
+      case 'critical':
+        return 'Critical';
+      case 'high':
+        return 'High';
+      case 'moderate':
+        return 'Medium';
+      case 'low':
+      default:
+        return 'Low';
+    }
+  }
 
   return (
     <main className="p-6 max-w-7xl mx-auto space-y-6">
       {/* Header */}
       <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <h1 className="text-3xl font-semibold text-slate-900">Today's Agenda</h1>
-        <div className="text-sm text-gray-600">{appointments.length} appointments scheduled</div>
+        <h1 className="text-3xl font-semibold text-slate-900">Today&apos;s Agenda</h1>
+        <div className="text-sm text-gray-600">
+          {appointments.length} appointments scheduled
+        </div>
       </header>
 
       {/* Alerts */}
-      {alerts.length > 0 && (
-        <section className="space-y-2">
+      <section className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
           <h2 className="text-lg font-medium text-slate-800">Patient Alerts</h2>
+          {alertsError && (
+            <span className="text-xs text-rose-600">{alertsError}</span>
+          )}
+        </div>
+        {alerts.length === 0 ? (
+          <div className="text-xs text-gray-500">
+            No InsightCore alerts for you right now.
+          </div>
+        ) : (
           <ul className="grid sm:grid-cols-2 gap-2">
-            {alerts.map(alert => (
-              <li key={alert.id} className="p-3 border rounded bg-red-50 text-sm flex flex-col sm:flex-row sm:justify-between sm:items-center">
-                <div>
-                  <span className="font-medium">{alert.patientName}</span>: {alert.message}
+            {alerts.map((alert) => (
+              <li
+                key={alert.id}
+                className={`p-3 border rounded text-sm flex flex-col gap-1 ${severityClass(
+                  alert.severity,
+                )}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="font-medium">
+                    {alert.patientName}{' '}
+                    <span className="text-xs text-gray-600">
+                      • {alert.type === 'multifactor' ? 'InsightCore' : alert.type}
+                    </span>
+                  </div>
+                  <span className="text-[11px] rounded-full border border-black/10 px-2 py-0.5">
+                    {severityLabel(alert.severity)}
+                  </span>
                 </div>
-                <time className="text-xs text-gray-500">{new Date(alert.timestamp).toLocaleTimeString()}</time>
+                <div className="text-gray-800">{alert.message}</div>
+                <time className="text-xs text-gray-500">
+                  {new Date(alert.timestamp).toLocaleTimeString()}
+                </time>
               </li>
             ))}
           </ul>
-        </section>
-      )}
+        )}
+      </section>
 
       {/* Main Grid */}
       <div className="grid lg:grid-cols-[2fr_1fr] gap-6">
@@ -97,7 +197,10 @@ export default function TodayPage() {
         <aside className="space-y-6">
           {/* Countdown / next session */}
           <div className="sticky top-6">
-            <SessionCountdown appointment={selected ?? nextAppointment ?? undefined} loading={loading} />
+            <SessionCountdown
+              appointment={selected ?? nextAppointment ?? undefined}
+              loading={loading}
+            />
           </div>
 
           {/* Quick actions */}
@@ -107,7 +210,9 @@ export default function TodayPage() {
               <div className="flex flex-col gap-2">
                 <button
                   className="px-3 py-2 bg-indigo-600 text-white rounded"
-                  onClick={() => window.open(`/sfu/room-${selected.id}`, '_blank')}
+                  onClick={() =>
+                    window.open(`/sfu/room-${selected.id}`, '_blank')
+                  }
                 >
                   Join Televisit
                 </button>
@@ -121,13 +226,13 @@ export default function TodayPage() {
             </div>
           )}
 
-          {/* AI Insights Placeholder */}
+          {/* AI Suggestions placeholder (can later be wired to InsightCore /query) */}
           <div className="p-3 border rounded bg-gray-50">
             <h2 className="font-medium text-slate-800">AI Suggestions</h2>
             <ul className="text-sm list-disc list-inside text-gray-700">
-              <li>Review abnormal BP readings for patient XYZ</li>
-              <li>Follow-up with patients flagged as high-risk</li>
-              <li>Send medication reminders for pending prescriptions</li>
+              <li>Review patients with critical InsightCore alerts.</li>
+              <li>Prioritise follow-ups for uncontrolled blood pressure.</li>
+              <li>Check adherence for high-risk chronic patients.</li>
             </ul>
           </div>
         </aside>
@@ -143,10 +248,7 @@ export default function TodayPage() {
             >
               ✕
             </button>
-            <NoteForm
-              clinicianId={clinicianId}
-              onSaved={() => setShowNoteForm(false)}
-            />
+            <NoteForm clinicianId={clinicianId} onSaved={() => setShowNoteForm(false)} />
           </div>
         </div>
       )}

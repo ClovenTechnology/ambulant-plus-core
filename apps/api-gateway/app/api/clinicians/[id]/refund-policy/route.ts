@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/clinicians/[id]/refunds-policy/route.ts 
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 

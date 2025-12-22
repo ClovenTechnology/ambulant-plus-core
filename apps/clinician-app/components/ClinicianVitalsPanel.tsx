@@ -1,7 +1,7 @@
 // apps/clinician-app/components/ClinicianVitalsPanel.tsx
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Room } from 'livekit-client';
 import { DataPacket_Kind, RoomEvent } from 'livekit-client';
 
@@ -14,8 +14,8 @@ type Vitals = {
   rr?: number;
   bpSys?: number;
   bpDia?: number;
-  map?: number;        // optional, we derive if absent
-  glucose?: number;    // optional
+  map?: number; // optional, we derive if absent
+  glucose?: number; // optional
 };
 
 type Props = {
@@ -49,32 +49,47 @@ export default function ClinicianVitalsPanel({
   const [temp, setTemp] = useState<number[]>([]);
   const [glucose, setGlucose] = useState<number[]>([]);
 
-  const latest = useMemo(() => ({
-    hr: hr.at(-1),
-    spo2: spo2.at(-1),
-    sys: sys.at(-1),
-    dia: dia.at(-1),
-    map: mapv.at(-1),
-    rr: rr.at(-1),
-    temp: temp.at(-1),
-    glucose: glucose.at(-1),
-  }), [hr, spo2, sys, dia, mapv, rr, temp, glucose]);
+  const latest = useMemo(
+    () => ({
+      hr: hr.at(-1),
+      spo2: spo2.at(-1),
+      sys: sys.at(-1),
+      dia: dia.at(-1),
+      map: mapv.at(-1),
+      rr: rr.at(-1),
+      temp: temp.at(-1),
+      glucose: glucose.at(-1),
+    }),
+    [hr, spo2, sys, dia, mapv, rr, temp, glucose]
+  );
 
   // When patient pushes data on topic "vitals", we collect it here.
   useEffect(() => {
     if (!room) return;
-    const onData = (payload: Uint8Array, _p: any, _kind: DataPacket_Kind, topic?: string) => {
+    const onData = (
+      payload: Uint8Array,
+      _p: any,
+      _kind: DataPacket_Kind,
+      topic?: string
+    ) => {
       if (topic !== 'vitals') return;
       try {
         const text = new TextDecoder().decode(payload);
         const v: Vitals = JSON.parse(text) || {};
         const ts = typeof v.ts === 'number' ? v.ts : Date.now();
 
-        const label = new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const label = new Date(ts).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        });
 
         const add = (setter: (f: any) => void, value?: number) =>
           setter((arr: number[]) => {
-            const next = [...arr, Number.isFinite(value!) ? Number(value) : NaN].slice(-maxPoints);
+            const next = [
+              ...arr,
+              Number.isFinite(value!) ? Number(value) : NaN,
+            ].slice(-maxPoints);
             return next;
           });
 
@@ -83,7 +98,14 @@ export default function ClinicianVitalsPanel({
         add(setSpO2, v.spo2);
         add(setSYS, v.bpSys ?? (v as any).sys);
         add(setDIA, v.bpDia ?? (v as any).dia);
-        add(setMAP, v.map ?? deriveMAP(v.bpSys ?? (v as any).sys, v.bpDia ?? (v as any).dia));
+        add(
+          setMAP,
+          v.map ??
+            deriveMAP(
+              v.bpSys ?? (v as any).sys,
+              v.bpDia ?? (v as any).dia
+            )
+        );
         add(setRR, v.rr);
         add(setTemp, v.tempC ?? (v as any).temp);
         add(setGlucose, v.glucose);
@@ -92,13 +114,20 @@ export default function ClinicianVitalsPanel({
       } catch (err) {
         // ignore bad packets; keep the panel stable
         // eslint-disable-next-line no-console
-        console.warn('[ClinicianVitalsPanel] Data parse error', err);
+        console.warn(
+          '[ClinicianVitalsPanel] Data parse error',
+          err
+        );
       }
     };
 
     room.on(RoomEvent.DataReceived, onData);
     return () => {
-      try { room.off(RoomEvent.DataReceived, onData); } catch {}
+      try {
+        room.off(RoomEvent.DataReceived, onData);
+      } catch {
+        // ignore
+      }
     };
   }, [room, maxPoints]);
 
@@ -106,12 +135,21 @@ export default function ClinicianVitalsPanel({
   const sendControl = async (value: boolean) => {
     if (!room) return;
     try {
-      const payload = new TextEncoder().encode(JSON.stringify({ type: 'vitals', value }));
-      await room.localParticipant.publishData(payload, DataPacket_Kind.RELIABLE, 'control');
+      const payload = new TextEncoder().encode(
+        JSON.stringify({ type: 'vitals', value })
+      );
+      await room.localParticipant.publishData(
+        payload,
+        DataPacket_Kind.RELIABLE,
+        'control'
+      );
       setLive(value);
     } catch (err) {
       // eslint-disable-next-line no-console
-      console.warn('[ClinicianVitalsPanel] control publish error', err);
+      console.warn(
+        '[ClinicianVitalsPanel] control publish error',
+        err
+      );
     }
   };
 
@@ -132,14 +170,22 @@ export default function ClinicianVitalsPanel({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <div className="text-sm font-semibold">Monitor</div>
-          <span className={`text-xs px-2 py-0.5 rounded ${live ? 'bg-emerald-600/80' : 'bg-slate-700/80'}`}>
+          <span
+            className={`text-xs px-2 py-0.5 rounded ${
+              live
+                ? 'bg-emerald-600/80'
+                : 'bg-slate-700/80'
+            }`}
+          >
             {live ? 'live' : 'idle'}
           </span>
           {showDockBadge && (
             <button
-              onClick={() => setCollapsed(v => !v)}
+              onClick={() => setCollapsed((v) => !v)}
               className="text-xs px-2 py-0.5 rounded border border-slate-600 hover:bg-slate-800"
-              title={collapsed ? 'Show monitor' : 'Hide monitor'}
+              title={
+                collapsed ? 'Show monitor' : 'Hide monitor'
+              }
             >
               {collapsed ? 'Show' : 'Hide'}
             </button>
@@ -186,18 +232,32 @@ export default function ClinicianVitalsPanel({
 
           {/* Tiles */}
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3">
-            <Tile label="HR"   value={fmt(latest.hr, 'bpm')} />
-            <Tile label="SpO₂" value={fmt(latest.spo2, '%')} />
-            <Tile label="BP"   value={fmtBP(latest.sys, latest.dia)} />
-            <Tile label="MAP"  value={fmt(latest.map, 'mmHg')} />
-            <Tile label="RR"   value={fmt(latest.rr, 'rpm')} />
-            <Tile label="Temp" value={fmt(latest.temp, '°C')} />
-            <Tile label="Glucose" value={fmt(latest.glucose, 'mg/dL')} />
+            <Tile label="HR" value={fmtHR(latest.hr)} />
+            <Tile
+              label="SpO₂"
+              value={fmtSpO2(latest.spo2)}
+            />
+            <Tile
+              label="BP"
+              value={fmtBP(latest.sys, latest.dia)}
+            />
+            <Tile label="MAP" value={fmtMAP(latest.map)} />
+            <Tile label="RR" value={fmtRR(latest.rr)} />
+            <Tile
+              label="Temp"
+              value={fmtTemp(latest.temp)}
+            />
+            <Tile
+              label="Glucose"
+              value={fmtGlu(latest.glucose)}
+            />
           </div>
 
           {!labels.length && (
             <div className="mt-3 text-xs text-slate-400">
-              Waiting for patient vitals… use <span className="text-slate-200">Start</span> to request streaming.
+              Waiting for patient vitals… use{' '}
+              <span className="text-slate-200">Start</span> to
+              request streaming.
             </div>
           )}
         </>
@@ -207,62 +267,193 @@ export default function ClinicianVitalsPanel({
 }
 
 /** ---------- tiny presentational helpers ---------- */
-function Tile({ label, value }: { label: string; value: string }) {
+
+const DASH = '—';
+
+function Tile({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
   return (
     <div className="rounded-xl border border-slate-800/40 bg-slate-950/40 p-3">
-      <div className="text-[11px] text-slate-400">{label}</div>
-      <div className="text-lg font-semibold text-slate-100">{value}</div>
+      <div className="text-[11px] text-slate-400">
+        {label}
+      </div>
+      <div className="text-lg font-semibold text-slate-100">
+        {value}
+      </div>
     </div>
   );
 }
-const fmt = (x?: number, unit?: string) =>
-  Number.isFinite(x!) ? `${Math.round((x as number) * 10) / 10}${unit ? ` ${unit}` : ''}` : '—';
+
+function fmtNum(x?: number, digits = 0) {
+  return typeof x === 'number' && Number.isFinite(x)
+    ? x.toFixed(digits)
+    : DASH;
+}
+
+const fmtHR = (x?: number) => `${fmtNum(x, 0)} bpm`;
+const fmtSpO2 = (x?: number) => `${fmtNum(x, 0)} %`;
+const fmtRR = (x?: number) => `${fmtNum(x, 0)} /min`;
+const fmtTemp = (x?: number) => `${fmtNum(x, 1)} °C`;
+const fmtMAP = (x?: number) => `${fmtNum(x, 0)} mmHg`;
+const fmtGlu = (x?: number) => `${fmtNum(x, 1)} mmol/L`;
+
 const fmtBP = (s?: number, d?: number) =>
-  Number.isFinite(s!) && Number.isFinite(d!) ? `${Math.round(s!)} / ${Math.round(d!)} mmHg` : '—/— mmHg';
+  Number.isFinite(s as number) &&
+  Number.isFinite(d as number)
+    ? `${Math.round(s!)} / ${Math.round(d!)} mmHg`
+    : '—/— mmHg';
+
 const deriveMAP = (s?: number, d?: number) =>
-  Number.isFinite(s!) && Number.isFinite(d!) ? (d! + (s! - d!) / 3) : undefined;
+  Number.isFinite(s as number) && Number.isFinite(d as number)
+    ? d! + (s! - d!) / 3
+    : undefined;
 
 /** ---------- inline bedside monitor (Chart.js) ---------- */
 function BedsideMonitor({
-  labels, hr, spo2, sys, dia, mapv, rr, temp, glucose, colors,
+  labels,
+  hr,
+  spo2,
+  sys,
+  dia,
+  mapv,
+  rr,
+  temp,
+  glucose,
+  colors,
 }: {
   labels: string[];
-  hr: number[]; spo2: number[]; sys: number[]; dia: number[]; mapv: number[];
-  rr: number[]; temp: number[]; glucose: number[];
+  hr: number[];
+  spo2: number[];
+  sys: number[];
+  dia: number[];
+  mapv: number[];
+  rr: number[];
+  temp: number[];
+  glucose: number[];
   colors: Record<string, string>;
 }) {
   // lazy require to avoid SSR whining
   const { Line } = require('react-chartjs-2');
   const {
-    Chart: ChartJS, CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend,
+    Chart: ChartJS,
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    Filler,
+    Tooltip,
+    Legend,
   } = require('chart.js');
-  ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Filler, Tooltip, Legend);
+  ChartJS.register(
+    CategoryScale,
+    LinearScale,
+    PointElement,
+    LineElement,
+    Filler,
+    Tooltip,
+    Legend
+  );
 
   const data = {
     labels,
     datasets: [
-      { label: 'HR (bpm)', data: hr, borderColor: colors.hr, pointRadius: 0, tension: 0.35 },
-      { label: 'SpO₂ (%)', data: spo2, borderColor: colors.spo2, pointRadius: 0, tension: 0.35 },
-      { label: 'SYS (mmHg)', data: sys, borderColor: colors.sys, pointRadius: 0, tension: 0.35 },
-      { label: 'DIA (mmHg)', data: dia, borderColor: colors.dia, pointRadius: 0, tension: 0.35 },
-      { label: 'MAP (mmHg)', data: mapv, borderColor: colors.map, borderDash: [6, 4], pointRadius: 0, tension: 0.35 },
-      { label: 'RR (rpm)', data: rr, borderColor: colors.rr, pointRadius: 0, tension: 0.35 },
-      { label: 'Temp (°C)', data: temp, borderColor: colors.temp, pointRadius: 0, tension: 0.35 },
-      { label: 'Glucose (mg/dL)', data: glucose, borderColor: colors.glucose, pointRadius: 0, tension: 0.35 },
+      {
+        label: 'HR (bpm)',
+        data: hr,
+        borderColor: colors.hr,
+        pointRadius: 0,
+        tension: 0.35,
+      },
+      {
+        label: 'SpO₂ (%)',
+        data: spo2,
+        borderColor: colors.spo2,
+        pointRadius: 0,
+        tension: 0.35,
+      },
+      {
+        label: 'SYS (mmHg)',
+        data: sys,
+        borderColor: colors.sys,
+        pointRadius: 0,
+        tension: 0.35,
+      },
+      {
+        label: 'DIA (mmHg)',
+        data: dia,
+        borderColor: colors.dia,
+        pointRadius: 0,
+        tension: 0.35,
+      },
+      {
+        label: 'MAP (mmHg)',
+        data: mapv,
+        borderColor: colors.map,
+        borderDash: [6, 4],
+        pointRadius: 0,
+        tension: 0.35,
+      },
+      {
+        label: 'RR (/min)',
+        data: rr,
+        borderColor: colors.rr,
+        pointRadius: 0,
+        tension: 0.35,
+      },
+      {
+        label: 'Temp (°C)',
+        data: temp,
+        borderColor: colors.temp,
+        pointRadius: 0,
+        tension: 0.35,
+      },
+      {
+        label: 'Glucose (mmol/L)',
+        data: glucose,
+        borderColor: colors.glucose,
+        pointRadius: 0,
+        tension: 0.35,
+      },
     ],
   };
   const options = {
     animation: { duration: 0 },
     responsive: true,
     plugins: {
-      legend: { display: true, position: 'top' as const, labels: { color: '#cbd5e1' } },
+      legend: {
+        display: true,
+        position: 'top' as const,
+        labels: { color: '#cbd5e1' },
+      },
       tooltip: { enabled: true },
     },
     scales: {
-      x: { ticks: { color: '#94a3b8', maxRotation: 0, autoSkip: true }, grid: { color: 'rgba(148,163,184,0.08)' } },
-      y: { ticks: { color: '#94a3b8' }, grid: { color: 'rgba(148,163,184,0.08)' } },
+      x: {
+        ticks: {
+          color: '#94a3b8',
+          maxRotation: 0,
+          autoSkip: true,
+        },
+        grid: {
+          color: 'rgba(148,163,184,0.08)',
+        },
+      },
+      y: {
+        ticks: { color: '#94a3b8' },
+        grid: {
+          color: 'rgba(148,163,184,0.08)',
+        },
+      },
     },
-    elements: { line: { borderWidth: 2 }, point: { radius: 0 } },
+    elements: {
+      line: { borderWidth: 2 },
+      point: { radius: 0 },
+    },
     maintainAspectRatio: false,
   };
   return <Line data={data} options={options as any} />;

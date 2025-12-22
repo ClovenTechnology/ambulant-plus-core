@@ -1,3 +1,4 @@
+# /ambulant-plus-scaffold/docker-compose.prod.yaml
 version: "3.8"
 
 services:
@@ -65,7 +66,7 @@ services:
     container_name: livekit
     command: ["--config", "/etc/livekit.yaml"]
     environment:
-      - LIVEKIT_KEYS=devkey: secret
+      LIVEKIT_KEYS: "devkey: secret"
     ports:
       - "7880:7880"
       - "7881:7881"

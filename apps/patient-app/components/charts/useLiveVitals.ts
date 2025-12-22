@@ -78,15 +78,38 @@ function broadcastVitals(latest: DataShape['latest']) {
       glucose: latest.glucose,
     },
   };
-  try { window.postMessage(payload, '*'); } catch {}
-  try { window.top && window.top !== window && window.top.postMessage(payload, '*'); } catch {}
-  try { window.parent && window.parent !== window && window.parent.postMessage(payload, '*'); } catch {}
-  try { window.opener && window.opener.postMessage(payload, '*'); } catch {}
+  try {
+    window.postMessage(payload, '*');
+  } catch {}
+  try {
+    window.top && window.top !== window && window.top.postMessage(payload, '*');
+  } catch {}
+  try {
+    window.parent && window.parent !== window && window.parent.postMessage(payload, '*');
+  } catch {}
+  try {
+    window.opener && window.opener.postMessage(payload, '*');
+  } catch {}
   try {
     const bc = new BroadcastChannel('ambulant-iomt');
     bc.postMessage(payload);
     setTimeout(() => bc.close(), 50);
   } catch {}
+}
+
+function buildTimes(now: number, windowPoints: number, secondsPerPoint: number) {
+  const period = secondsPerPoint * 1000;
+  const times: number[] = [];
+  // oldest -> newest
+  for (let i = windowPoints; i > 0; i--) {
+    times.push(now - i * period);
+  }
+  return times;
+}
+
+function fmtLabel(t: number) {
+  // keep it compact and consistent
+  return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
 }
 
 export default function useLiveVitals(windowPoints = 120, secondsPerPoint = 1) {
@@ -95,30 +118,30 @@ export default function useLiveVitals(windowPoints = 120, secondsPerPoint = 1) {
   // pre-seed series
   const [data, setData] = useState<DataShape>(() => {
     const now = Date.now();
-    const labels: string[] = [];
-    const seed = (start: number, fn: () => number): Series => {
-      const arr: Series = [];
-      for (let i = windowPoints; i > 0; i--) {
-        const t = start - i * 1000 * secondsPerPoint;
-        arr.push({ t, v: fn() });
-        labels.push(new Date(t).toLocaleTimeString());
-      }
-      return arr;
-    };
+    const times = buildTimes(now, windowPoints, secondsPerPoint);
+    const labels = times.map(fmtLabel);
+
+    const seed = (fn: () => number): Series => times.map((t) => ({ t, v: fn() }));
 
     // SA baselines (resting adult)
-    const hr = seed(now, () => 72 + rnd(2));
-    const spo2 = seed(now, () => 97 + rnd(0.4));
-    const sys = seed(now, () => 116 + rnd(4));
-    const dia = seed(now, () => 74 + rnd(3));
-    const map = seed(now, () => Math.round(((sys.at(-1)?.v ?? 116) + 2 * (dia.at(-1)?.v ?? 74)) / 3));
-    const rr = seed(now, () => 16 + rnd(1));
-    const temp = seed(now, () => 36.8 + rnd(0.1));
-    const glucose = seed(now, () => 94 + rnd(3));
+    const hr = seed(() => round1(72 + rnd(2)));
+    const spo2 = seed(() => round1(97 + rnd(0.4)));
+    const sys = seed(() => round1(116 + rnd(4)));
+    const dia = seed(() => round1(74 + rnd(3)));
 
-    const steps = seed(now, () => Math.max(0, Math.round(6000 + rnd(600))));
-    const calories = seed(now, () => Math.max(0, Math.round(1800 + rnd(150))));
-    const distance = seed(now, () => Math.max(0, round1(5.2 + rnd(0.6))));
+    // MAP should correspond point-by-point to SYS/DIA (not one constant)
+    const map = times.map((t, i) => ({
+      t,
+      v: Math.round(((sys[i]?.v ?? 116) + 2 * (dia[i]?.v ?? 74)) / 3),
+    }));
+
+    const rr = seed(() => round1(16 + rnd(1)));
+    const temp = seed(() => round1(36.8 + rnd(0.1)));
+    const glucose = seed(() => Math.round(94 + rnd(3)));
+
+    const steps = seed(() => Math.max(0, Math.round(6000 + rnd(600))));
+    const calories = seed(() => Math.max(0, Math.round(1800 + rnd(150))));
+    const distance = seed(() => Math.max(0, round1(5.2 + rnd(0.6))));
 
     const latest = {
       hr: hr.at(-1)!.v,
@@ -136,8 +159,17 @@ export default function useLiveVitals(windowPoints = 120, secondsPerPoint = 1) {
 
     return {
       labels,
-      hr, spo2, sys, dia, map, rr, temp, glucose,
-      steps, calories, distance,
+      hr,
+      spo2,
+      sys,
+      dia,
+      map,
+      rr,
+      temp,
+      glucose,
+      steps,
+      calories,
+      distance,
       latest,
       sleep: {
         totalHours: 6.8,
@@ -156,15 +188,17 @@ export default function useLiveVitals(windowPoints = 120, secondsPerPoint = 1) {
 
   // cadence timer
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
   useEffect(() => {
     if (!live) return;
+
     const period = secondsPerPoint * 1000;
 
     timerRef.current = setInterval(() => {
       setData((d) => {
-        // random-walk targets
         const next = { ...d };
 
+        // random-walk targets
         const hr = clamp(d.latest.hr + rnd(1.5), 58, 135);
         const spo2 = clamp(d.latest.spo2 + rnd(0.25), 93, 100);
         const sys = clamp(d.latest.sys + rnd(2.5), 90, 180);
@@ -191,8 +225,9 @@ export default function useLiveVitals(windowPoints = 120, secondsPerPoint = 1) {
         next.calories = push(d.calories, calories);
         next.distance = push(d.distance, distance);
 
+        // labels MUST stay aligned to windowPoints
         const t = Date.now();
-        const labels = [...d.labels, new Date(t).toLocaleTimeString()];
+        const labels = [...d.labels, fmtLabel(t)];
         if (labels.length > windowPoints) labels.shift();
         next.labels = labels;
 
@@ -210,14 +245,17 @@ export default function useLiveVitals(windowPoints = 120, secondsPerPoint = 1) {
           distance: next.distance.at(-1)!.v,
         };
 
-        // broadcast for clinician SFU / workspace shells
         broadcastVitals(next.latest);
-
         return next;
       });
     }, period);
 
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
+    };
   }, [live, secondsPerPoint, windowPoints]);
 
   // flags

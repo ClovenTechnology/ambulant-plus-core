@@ -21,7 +21,8 @@ let LABS: LabRow[] = [
     date: new Date(Date.now() - 1000 * 60 * 60 * 20).toISOString(),
     status: 'Completed',
     result: 'WBC 6.2; Hgb 13.8; Plt 250',
-    performer: 'Ambulant+ Lab',
+    reference: 'erx-663580',
+    performer: 'Ampath Illovo',
     sample: 'Venous blood',
   },
   {
@@ -31,8 +32,8 @@ let LABS: LabRow[] = [
     status: 'Completed',
     result: '5.4',
     unit: 'mmol/L',
-    reference: '3.9â€“5.5',
-    performer: 'Ambulant+ Lab',
+    reference: 'erx-367280',
+    performer: 'Lancet Sandton',
     sample: 'Capillary blood',
   },
   {
@@ -40,6 +41,7 @@ let LABS: LabRow[] = [
     test: 'HbA1c',
     date: new Date(Date.now() - 1000 * 60 * 60 * 3).toISOString(),
     status: 'Pending',
+    reference: 'erx-309880',
     performer: 'Ambulant+ Lab',
     sample: 'Venous blood',
   },
@@ -50,7 +52,8 @@ let LABS: LabRow[] = [
     status: 'Completed',
     result: 'TC 4.5; LDL 2.7; HDL 1.2; TG 1.0',
     unit: 'mmol/L',
-    performer: 'Ambulant+ Lab',
+    reference: 'erx-907280',
+    performer: 'Clifton Diagnostic',
     sample: 'Serum',
   },
   {
@@ -58,7 +61,8 @@ let LABS: LabRow[] = [
     test: 'COVID-19 PCR',
     date: new Date(Date.now() - 1000 * 60 * 60 * 2).toISOString(),
     status: 'Cancelled',
-    performer: 'Ambulant+ Lab',
+    reference: 'erx-364890',
+    performer: 'Lancet Cresta',
     sample: 'Nasopharyngeal swab',
   },
 ];

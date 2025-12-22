@@ -17,17 +17,17 @@ let ERX_LIST: Rx[] = [];
 // helper to build absolute base URL (works behind proxies)
 function baseUrl() {
   const h = headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3002';
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3000';
   const proto = h.get('x-forwarded-proto') ?? 'http';
   return `${proto}://${host}`;
 }
 
 // British-style compact summary for encounter note
 function rxSummary(rx: Rx) {
-  const qty = rx.qty != null ? ` â€¢ Qty ${rx.qty}` : '';
-  const ref = rx.refills != null ? ` â€¢ Refills ${rx.refills}` : '';
-  const note = rx.note ? ` â€” ${rx.note}` : '';
-  return `New eRx: ${rx.drug} â€” ${rx.sig}${qty}${ref}${note}`;
+  const qty = rx.qty != null ? `  Qty ${rx.qty}` : '';
+  const ref = rx.refills != null ? ` Refills ${rx.refills}` : '';
+  const note = rx.note ? ` ${rx.note}` : '';
+  return `New eRx: ${rx.drug} ${rx.sig}${qty}${ref}${note}`;
 }
 
 // GET: list all eRx (simple)
@@ -71,10 +71,10 @@ export async function POST(req: Request) {
             source: 'erx',
           }),
         });
-        // We ignore non-OK here on purpose (donâ€™t block the eRx flow)
+        // We ignore non-OK here on purpose (dont block the eRx flow)
         await res.text().catch(() => {});
       } catch {
-        // swallow â€“ printing or UI will still proceed
+        // swallow printing or UI will still proceed
       }
     }
 

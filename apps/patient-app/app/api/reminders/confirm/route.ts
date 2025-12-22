@@ -13,12 +13,17 @@ async function forward(path: string, init: RequestInit = {}) {
   try {
     return new NextResponse(text ? JSON.parse(text) : {}, {
       status: res.status,
-      headers: { 'Cache-Control': 'no-store', 'content-type': res.headers.get('content-type') ?? 'application/json' },
+      headers: {
+        'Cache-Control': 'no-store',
+        'content-type': res.headers.get('content-type') ?? 'application/json',
+      },
     });
   } catch {
     return new NextResponse(text, { status: res.status });
   }
 }
+
+// Simple proxy for legacy confirm flows
 
 export async function GET() {
   return forward('/api/reminders');
@@ -26,19 +31,31 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  return forward('/api/reminders/confirm', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  // NOTE: APIGW POST /api/reminders expects { action, ids, ... }
+  return forward('/api/reminders', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function PUT(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  return forward('/api/reminders', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return forward('/api/reminders', {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }
 
 export async function DELETE(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
-  // preserve query id parameters if present
   const url = new URL(req.url);
   const qs = url.searchParams.toString();
   const path = qs ? `/api/reminders?${qs}` : '/api/reminders';
-  return forward(path, { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  return forward(path, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
 }

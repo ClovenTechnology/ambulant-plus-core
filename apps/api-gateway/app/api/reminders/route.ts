@@ -1,21 +1,26 @@
 // apps/api-gateway/app/api/reminders/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { verifyAdminRequest } from '../utils/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// GET -> list reminders, optional ?source=erx
+// GET -> list reminders, optional ?source=erx&medicationId=...
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const source = url.searchParams.get('source');
-    const where = source ? { source } : undefined;
+    const source = url.searchParams.get('source') || undefined;
+    const medicationId = url.searchParams.get('medicationId') || undefined;
+
+    const where: any = {};
+    if (source) where.source = source;
+    if (medicationId) where.medicationId = medicationId;
+
     const reminders = await prisma.reminder.findMany({
-      where,
+      where: Object.keys(where).length ? where : undefined,
       orderBy: { createdAt: 'desc' },
     });
+
     return NextResponse.json({ ok: true, reminders });
   } catch (err: any) {
     console.error('reminders GET error', err);
@@ -23,13 +28,14 @@ export async function GET(req: NextRequest) {
   }
 }
 
-// POST -> batch actions (confirm / snooze) -- keep similar contract
+// POST -> batch actions (confirm / snooze)
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({} as any));
     const action = String(body?.action ?? '').toLowerCase();
     const ids = body?.ids ?? (body?.id ? [body.id] : []);
-    if (!action || !['confirm','snooze'].includes(action)) {
+
+    if (!action || !['confirm', 'snooze'].includes(action)) {
       return NextResponse.json({ ok: false, error: 'Invalid action' }, { status: 400 });
     }
     if (!ids || ids.length === 0) {
@@ -39,14 +45,26 @@ export async function POST(req: NextRequest) {
     const results: Record<string, any> = {};
     for (const id of ids) {
       const r = await prisma.reminder.findUnique({ where: { id } });
-      if (!r) { results[id] = { ok: false, error: 'not_found' }; continue; }
+      if (!r) {
+        results[id] = { ok: false, error: 'not_found' };
+        continue;
+      }
+
       if (action === 'confirm') {
-        const updated = await prisma.reminder.update({ where: { id }, data: { status: 'Taken', snoozedUntil: null } });
+        const updated = await prisma.reminder.update({
+          where: { id },
+          data: { status: 'Taken', snoozedUntil: null },
+        });
         results[id] = { ok: true, reminder: updated };
       } else {
-        const snoozeMinutes = Number.isFinite(Number(body?.snoozeMinutes)) ? Math.max(1, Number(body.snoozeMinutes)) : 15;
+        const snoozeMinutes = Number.isFinite(Number(body?.snoozeMinutes))
+          ? Math.max(1, Number(body.snoozeMinutes))
+          : 15;
         const snoozedUntil = new Date(Date.now() + snoozeMinutes * 60 * 1000);
-        const updated = await prisma.reminder.update({ where: { id }, data: { status: 'Pending', snoozedUntil } });
+        const updated = await prisma.reminder.update({
+          where: { id },
+          data: { status: 'Pending', snoozedUntil },
+        });
         results[id] = { ok: true, reminder: updated };
       }
     }
@@ -59,13 +77,33 @@ export async function POST(req: NextRequest) {
 }
 
 // PUT -> create reminders (single or array)
+// accepts medicationId, patientId, and schedule metadata
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({} as any));
     const items = Array.isArray(body) ? body : [body];
     const created: any[] = [];
-    for (const it of items) {
-      if (!it?.name) continue;
+
+    for (const raw of items) {
+      const it = raw ?? {};
+      if (!it.name) continue;
+
+      const meta: any =
+        it.meta && typeof it.meta === 'object' ? { ...it.meta } : {};
+
+      if (it.durationDays != null) {
+        meta.durationDays = Number(it.durationDays);
+      }
+      if (it.frequencyPerDay != null) {
+        meta.frequencyPerDay = Number(it.frequencyPerDay);
+      }
+      if (it.encounterId) {
+        meta.encounterId = String(it.encounterId);
+      }
+      if (it.medicationId) {
+        meta.medicationId = String(it.medicationId);
+      }
+
       const r = await prisma.reminder.create({
         data: {
           name: String(it.name),
@@ -74,10 +112,15 @@ export async function PUT(req: NextRequest) {
           status: it?.status ?? 'Pending',
           snoozedUntil: it?.snoozedUntil ? new Date(it.snoozedUntil) : null,
           source: it?.source ?? 'manual',
+          medicationId: it?.medicationId ?? null,
+          patientId: it?.patientId ?? null,
+          meta,
         },
       });
+
       created.push(r);
     }
+
     return NextResponse.json({ ok: true, created });
   } catch (err: any) {
     console.error('reminders PUT error', err);
@@ -91,11 +134,18 @@ export async function DELETE(req: NextRequest) {
     const url = new URL(req.url);
     const idsFromQs = url.searchParams.getAll('id') || [];
     const body = await req.json().catch(() => ({} as any));
-    const ids = [...(body?.ids || (body?.id ? [body.id] : [])), ...idsFromQs].filter(Boolean);
-    if (!ids.length) return NextResponse.json({ ok: false, error: 'id(s) required' }, { status: 400 });
+    const ids = [
+      ...(body?.ids || (body?.id ? [body.id] : [])),
+      ...idsFromQs,
+    ].filter(Boolean);
+
+    if (!ids.length) {
+      return NextResponse.json({ ok: false, error: 'id(s) required' }, { status: 400 });
+    }
 
     const removed: string[] = [];
     const notFound: string[] = [];
+
     for (const id of ids) {
       try {
         await prisma.reminder.delete({ where: { id } });
@@ -104,6 +154,7 @@ export async function DELETE(req: NextRequest) {
         notFound.push(id);
       }
     }
+
     return NextResponse.json({ ok: true, removed, notFound });
   } catch (err: any) {
     console.error('reminders DELETE error', err);

@@ -1,0 +1,64 @@
+{
+  "clinicianPlans": [
+    {
+      "id": "solo",
+      "actor": "clinician",
+      "label": "Solo (Free)",
+      "description": "Single clinician, no additional admin staff. Ideal for early adopters testing Ambulant+.",
+      "currency": "ZAR",
+      "monthlySubscriptionZar": 0,
+      "payoutSharePct": 0.8,
+      "includedAdminSlots": 0,
+      "maxAdminSlots": 1,
+      "extraAdminSlotZar": null,
+      "recommendedFor": "Part-time virtual clinics and side practices.",
+      "highlight": false,
+      "enabled": true
+    },
+    {
+      "id": "starter",
+      "actor": "clinician",
+      "label": "Starter (Premium)",
+      "description": "Clinician + 1 admin assistant for booking, follow-ups and Smart ID dispatch.",
+      "currency": "ZAR",
+      "monthlySubscriptionZar": 399,
+      "payoutSharePct": 0.82,
+      "includedAdminSlots": 1,
+      "maxAdminSlots": 2,
+      "extraAdminSlotZar": 149,
+      "recommendedFor": "Solo practices with one receptionist or practice manager.",
+      "highlight": true,
+      "enabled": true
+    },
+    {
+      "id": "team",
+      "actor": "clinician",
+      "label": "Team",
+      "description": "Designed for small group practices with shared admin pool.",
+      "currency": "ZAR",
+      "monthlySubscriptionZar": 799,
+      "payoutSharePct": 0.84,
+      "includedAdminSlots": 3,
+      "maxAdminSlots": 5,
+      "extraAdminSlotZar": 129,
+      "recommendedFor": "2–4 clinicians sharing 2–3 admin assistants.",
+      "highlight": false,
+      "enabled": true
+    },
+    {
+      "id": "group",
+      "actor": "clinician",
+      "label": "Group",
+      "description": "High-volume multi-disciplinary practices with more complex admin workflows.",
+      "currency": "ZAR",
+      "monthlySubscriptionZar": 1499,
+      "payoutSharePct": 0.86,
+      "includedAdminSlots": 5,
+      "maxAdminSlots": 10,
+      "extraAdminSlotZar": 99,
+      "recommendedFor": "Clinics with centralised admin/call-centre staff.",
+      "highlight": false,
+      "enabled": true
+    }
+  ]
+}

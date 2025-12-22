@@ -7,7 +7,7 @@ export default function GlobalNotFound() {
       <h1 className="text-4xl font-bold text-red-600">404</h1>
       <h2 className="text-2xl font-semibold">Page Not Found</h2>
       <p className="text-gray-600 max-w-md">
-        The page youâ€™re looking for doesnâ€™t exist or may have been moved.
+        The page you're looking for doesn't exist or may have been moved. Contact Ambulant+ Support at support@cloventechnology.com if in need of any assistance.
       </p>
       <Link
         href="/"

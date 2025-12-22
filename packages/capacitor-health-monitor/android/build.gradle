@@ -1,0 +1,42 @@
+buildscript {
+  repositories {
+    google()
+    mavenCentral()
+  }
+}
+
+apply plugin: 'com.android.library'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+android {
+  namespace "com.ambulant.healthmonitor"
+  compileSdk 34
+
+  defaultConfig {
+    minSdk 24
+    targetSdk 34
+    consumerProguardFiles 'consumer-rules.pro'
+  }
+
+  packagingOptions {
+    // prevent META-INF collisions some vendor AARs ship
+    pickFirst 'META-INF/*'
+  }
+}
+
+repositories {
+  google()
+  mavenCentral()
+  // << add this
+  flatDir {
+    dirs 'libs'
+  }
+}
+
+dependencies {
+  implementation "com.getcapacitor:capacitor-android:5.0.0"
+  // If you included the vendor AARs:
+  implementation files('libs/BleDev_release_v2.7.1.aar')
+  implementation files('libs/CssServer_release_v2.6.4.aar')
+  implementation files('libs/CssSocket_release_v2.6.4.aar')
+}

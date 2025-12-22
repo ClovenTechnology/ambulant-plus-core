@@ -1,11 +1,11 @@
 {
-  "riderPayoutPercent": 70,
-  "pharmacyCommissionPercent": 0,
-  "platformCommissionPercent": 30,
-  "labCommissionPercent": 0,
+  "riderPayoutPercent": 40,
+  "pharmacyCommissionPercent": 10,
+  "platformCommissionPercent": 8,
+  "labCommissionPercent": 12,
   "monthlyFees": {
-    "pharmacyZAR": 0,
-    "labZAR": 0
+    "pharmacyZAR": 1200,
+    "labZAR": 1800
   },
   "clinicianErxCommissionPercent": 0,
   "clinicianClasses": [
@@ -19,17 +19,30 @@
       "id": "classB",
       "name": "Class B — Allied Health",
       "enabled": true,
-      "rxPayoutPercent": 70
+      "rxPayoutPercent": 65
     },
     {
       "id": "classC",
       "name": "Class C — Wellness",
       "enabled": true,
+      "rxPayoutPercent": 60
+    },
+    {
+      "id": "d4738e3c-7e84-4bb2-900c-98cd195a8ba3",
+      "name": "New clinician class",
+      "enabled": true,
+      "rxPayoutPercent": 70
+    },
+    {
+      "id": "5f892515-fc49-43ac-b103-ef15275e226f",
+      "name": "New clinician class",
+      "enabled": true,
       "rxPayoutPercent": 70
     }
   ],
   "deliveryModel": {
-    "baseFeeZAR": 30,
-    "perKmZAR": 5
-  }
+    "baseFeeZAR": 45,
+    "perKmZAR": 6.5
+  },
+  "clinicianConsultPayoutPercent": 70
 }

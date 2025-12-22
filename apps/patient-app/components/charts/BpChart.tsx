@@ -1,27 +1,39 @@
+// apps/patient-app/components/charts/BpChart.tsx
 'use client';
 
 import React, { useMemo, useRef, useState } from 'react';
 import { exportCsv, exportSvgAsPng } from './export';
 
-export type BpPoint = { ts: number; sys: number; dia: number };
+export type BpPoint = { ts: number | string; sys: number; dia: number };
 
-export default function BpChart({ data }: { data: BpPoint[] }) {
-  const pad = 36, H = 280, W = 820;
-  const svgRef = useRef<SVGSVGElement>(null);
+export default function BpChart({ data = [] }: { data?: BpPoint[] }) {
+  const pad = 36;
+  const H = 280;
+  const W = 820;
+  const svgRef = useRef<SVGSVGElement | null>(null);
+
+  // defensive: if data empty provide single dummy point so paths don't blow up
+  const safeData = data && data.length ? data : [{ ts: Date.now(), sys: 120, dia: 80 }];
 
   const [hi, lo] = useMemo(() => {
-    const s = Math.max(...data.map(d => d.sys), 140);
-    const i = Math.min(...data.map(d => d.dia), 55);
+    const sysVals = safeData.map(d => Number(d.sys ?? 0));
+    const diaVals = safeData.map(d => Number(d.dia ?? 0));
+    const maxSys = sysVals.length ? Math.max(...sysVals) : 140;
+    const minDia = diaVals.length ? Math.min(...diaVals) : 55;
+    const s = Math.max(maxSys, 140);
+    const i = Math.min(minDia, 55);
     const top = Math.ceil((s + 10) / 5) * 5;
     const bot = Math.floor((i - 10) / 5) * 5;
-    return [top, bot];
+    // ensure non-zero span
+    const safeTop = top <= bot ? bot + 20 : top;
+    return [safeTop, bot];
   }, [data]);
 
-  const x = (i: number) => pad + (i * (W - pad * 2)) / Math.max(1, data.length - 1);
-  const y = (v: number) => pad + ( (hi - v) * (H - pad * 2) ) / Math.max(1, hi - lo);
+  const x = (i: number) => pad + (i * (W - pad * 2)) / Math.max(1, safeData.length - 1);
+  const y = (v: number) => pad + ((hi - v) * (H - pad * 2)) / Math.max(1, hi - lo);
 
-  const sysPath = useMemo(() => data.map((d, i) => `${i ? 'L' : 'M'} ${x(i)} ${y(d.sys)}`).join(' '), [data]);
-  const diaPath = useMemo(() => data.map((d, i) => `${i ? 'L' : 'M'} ${x(i)} ${y(d.dia)}`).join(' '), [data]);
+  const sysPath = useMemo(() => safeData.map((d, i) => `${i ? 'L' : 'M'} ${x(i)} ${y(Number(d.sys))}`).join(' '), [safeData, hi, lo]);
+  const diaPath = useMemo(() => safeData.map((d, i) => `${i ? 'L' : 'M'} ${x(i)} ${y(Number(d.dia))}`).join(' '), [safeData, hi, lo]);
 
   const [iHover, setIHover] = useState<number | null>(null);
 
@@ -29,8 +41,8 @@ export default function BpChart({ data }: { data: BpPoint[] }) {
     const b = svgRef.current?.getBoundingClientRect();
     if (!b) return null;
     const rel = px - b.left;
-    let best = 0, dist = 1e12;
-    for (let i = 0; i < data.length; i++) {
+    let best = 0, dist = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < safeData.length; i++) {
       const dx = Math.abs(x(i) - rel);
       if (dx < dist) { dist = dx; best = i; }
     }
@@ -41,14 +53,13 @@ export default function BpChart({ data }: { data: BpPoint[] }) {
     if (svgRef.current) exportSvgAsPng(svgRef.current, 'bp-chart.png');
   }
   function onExportCsv() {
-    exportCsv('bp.csv', data.map(d => ({
-      timestamp: new Date(d.ts).toISOString(), systolic: d.sys, diastolic: d.dia,
+    exportCsv('bp.csv', safeData.map(d => ({
+      timestamp: new Date(Number(d.ts)).toISOString(), systolic: d.sys, diastolic: d.dia,
     })));
   }
 
   return (
     <div className="relative rounded-2xl border bg-[#0b1020] text-white p-4 overflow-hidden">
-      {/* neon grid aura */}
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_rgba(34,211,238,0.06),_transparent_60%)]" />
 
       <div className="mb-3 flex items-center justify-between">
@@ -86,39 +97,39 @@ export default function BpChart({ data }: { data: BpPoint[] }) {
         </defs>
 
         {/* horizontal grid */}
-        {Array.from({ length: Math.floor((hi - lo)/5)+1 }).map((_,k) => {
-          const val = lo + k*5;
+        {Array.from({ length: Math.floor((hi - lo) / 5) + 1 }).map((_, k) => {
+          const val = lo + k * 5;
           return (
             <g key={k}>
-              <line x1={pad} x2={W-pad} y1={y(val)} y2={y(val)} stroke="#1f2a44" strokeWidth={1}/>
-              <text x={6} y={y(val)+3} fontSize={10} fill="#6b7280">{val}</text>
+              <line x1={pad} x2={W - pad} y1={y(val)} y2={y(val)} stroke="#1f2a44" strokeWidth={1} />
+              <text x={6} y={y(val) + 3} fontSize={10} fill="#6b7280">{val}</text>
             </g>
           );
         })}
 
         {/* SYS / DIA lines */}
-        <path d={sysPath} fill="none" stroke="url(#sys-grad)" strokeWidth={2.5} filter="url(#glow)"/>
-        <path d={diaPath} fill="none" stroke="url(#dia-grad)" strokeWidth={2.5} filter="url(#glow)"/>
+        <path d={sysPath} fill="none" stroke="url(#sys-grad)" strokeWidth={2.5} filter="url(#glow)" />
+        <path d={diaPath} fill="none" stroke="url(#dia-grad)" strokeWidth={2.5} filter="url(#glow)" />
 
         {/* vertical connecting bars */}
-        {data.map((d, i) => (
+        {safeData.map((d, i) => (
           <line
             key={i}
             x1={x(i)} x2={x(i)}
-            y1={y(d.sys)} y2={y(d.dia)}
-            stroke={iHover===i ? '#a5b4fc' : '#64748b'}
-            strokeOpacity={iHover===i ? 0.9 : 0.35}
-            strokeWidth={iHover===i ? 2 : 1}
+            y1={y(Number(d.sys))} y2={y(Number(d.dia))}
+            stroke={iHover === i ? '#a5b4fc' : '#64748b'}
+            strokeOpacity={iHover === i ? 0.9 : 0.35}
+            strokeWidth={iHover === i ? 2 : 1}
           />
         ))}
 
         {/* animated dots */}
-        {data.map((d,i) => (
+        {safeData.map((d, i) => (
           <g key={i}>
-            <circle cx={x(i)} cy={y(d.sys)} r={iHover===i ? 4.5 : 3.2} fill="#ef4444">
+            <circle cx={x(i)} cy={y(Number(d.sys))} r={iHover === i ? 4.5 : 3.2} fill="#ef4444">
               <animate attributeName="r" values="3.2;3.8;3.2" dur="2s" repeatCount="indefinite" />
             </circle>
-            <circle cx={x(i)} cy={y(d.dia)} r={iHover===i ? 4.5 : 3.2} fill="#3b82f6">
+            <circle cx={x(i)} cy={y(Number(d.dia))} r={iHover === i ? 4.5 : 3.2} fill="#3b82f6">
               <animate attributeName="r" values="3.2;3.8;3.2" dur="2s" repeatCount="indefinite" />
             </circle>
           </g>
@@ -126,20 +137,20 @@ export default function BpChart({ data }: { data: BpPoint[] }) {
       </svg>
 
       {/* unified tooltip with BOTH values + timestamp */}
-      {iHover !== null && (
+      {iHover !== null && safeData[iHover] && (
         <div
           className="absolute pointer-events-none bg-black/80 backdrop-blur rounded-md px-2.5 py-1.5 text-[12px] shadow-lg"
           style={{
-            left: `calc(${(x(iHover)/W)*100}% - 60px)`,
-            top: `calc(${(y((data[iHover].sys + data[iHover].dia)/2)/H)*100}% - 48px)`,
+            left: `calc(${(x(iHover) / W) * 100}% - 60px)`,
+            top: `calc(${(y((Number(safeData[iHover].sys) + Number(safeData[iHover].dia)) / 2) / H) * 100}% - 48px)`,
           }}
         >
           <div className="font-semibold">
-            {new Date(data[iHover].ts).toLocaleString()}
+            {new Date(Number(safeData[iHover].ts)).toLocaleString()}
           </div>
           <div className="flex gap-2 mt-0.5">
-            <span className="text-red-400">SYS: {data[iHover].sys}</span>
-            <span className="text-blue-300">DIA: {data[iHover].dia}</span>
+            <span className="text-red-400">SYS: {safeData[iHover].sys}</span>
+            <span className="text-blue-300">DIA: {safeData[iHover].dia}</span>
           </div>
         </div>
       )}

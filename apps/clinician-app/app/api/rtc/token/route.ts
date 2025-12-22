@@ -1,42 +1,65 @@
-import { NextRequest } from 'next/server';
-import { SignJWT } from 'jose';
+// apps/clinician-app/app/api/rtc/token/route.ts
+import { NextRequest, NextResponse } from 'next/server';
 
-async function createToken(room: string, user: string) {
-  const apiKey = process.env.LIVEKIT_API_KEY || 'devkey';
-  const apiSecret = process.env.LIVEKIT_API_SECRET || 'secret';
-  const now = Math.floor(Date.now() / 1000);
-  const payload: any = {
-    video: { room, roomJoin: true, canPublish: true, canSubscribe: true, canPublishData: true },
-    sub: user,
-    iss: apiKey,
-    nbf: now,
-    exp: now + 3600,
-  };
-  return await new SignJWT(payload)
-    .setProtectedHeader({ alg: 'HS256' })
-    .sign(new TextEncoder().encode(apiSecret));
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function trimSlash(s: string) {
+  return s.replace(/\/+$/, '');
+}
+
+function pickBase() {
+  return (
+    process.env.APIGW_BASE_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    ''
+  ).trim();
 }
 
 export async function POST(req: NextRequest) {
-  try {
-    const { roomId, room, user, identity } = await req.json();
-    const token = await createToken(roomId || room || 'room-1001', identity || user || 'guest');
-    return Response.json({ token });
-  } catch (e) {
-    console.error('Token POST error', e);
-    return new Response('Token generation failed', { status: 500 });
+  const base = pickBase();
+  if (!base) {
+    return NextResponse.json(
+      { ok: false, error: 'Missing APIGW_BASE_URL (or NEXT_PUBLIC_APIGW_BASE)' },
+      { status: 500 },
+    );
   }
+
+  const url = `${trimSlash(base)}/api/rtc/token`;
+
+  const uid = req.headers.get('x-uid') || '';
+  const role = req.headers.get('x-role') || '';
+  const joinToken = req.headers.get('x-join-token') || '';
+
+  let bodyText = '';
+  try {
+    bodyText = await req.text();
+  } catch {
+    bodyText = '';
+  }
+
+  const upstream = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-uid': uid,
+      'x-role': role,
+      'x-join-token': joinToken,
+    },
+    body: bodyText || '{}',
+    cache: 'no-store',
+  });
+
+  const text = await upstream.text().catch(() => '');
+  return new NextResponse(text, {
+    status: upstream.status,
+    headers: {
+      'content-type': upstream.headers.get('content-type') || 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
 }
 
-export async function GET(req: NextRequest) {
-  try {
-    const { searchParams } = new URL(req.url);
-    const room = searchParams.get('room') || 'room-1001';
-    const user = searchParams.get('user') || 'guest';
-    const token = await createToken(room, user);
-    return Response.json({ token });
-  } catch (e) {
-    console.error('Token GET error', e);
-    return new Response('Token generation failed', { status: 500 });
-  }
+export async function GET() {
+  return NextResponse.json({ ok: false, error: 'Method not allowed. Use POST.' }, { status: 405 });
 }

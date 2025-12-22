@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Generic UVC class filter (video class = 239/2/1 is common; some libs also accept 14/1) -->
+  <!-- This is a broad filter; you can narrow down with vendor-id/product-id if needed. -->
+  <usb-device class="239" subclass="2" protocol="1" />
+  <usb-device class="14" subclass="1" />
+</resources>

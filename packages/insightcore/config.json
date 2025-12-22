@@ -9,12 +9,12 @@
   "temperature": {
     "max": 38
   },
-  "glucoseInstability": {
-    "threshold": 0.7
-  },
   "bp": {
     "systolicMax": 140,
     "diastolicMax": 90
+  },
+  "glucoseInstability": {
+    "threshold": 0.7
   },
   "riskScoring": {
     "alertScoreMin": 0.65

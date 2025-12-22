@@ -1,3 +1,4 @@
+//apps/api-gateway/app/api/encounters/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 
