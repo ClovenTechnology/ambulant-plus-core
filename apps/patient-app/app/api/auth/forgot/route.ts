@@ -5,17 +5,14 @@ import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-type ForgotBody = {
-  email?: string;
-};
+type ForgotBody = { email?: string };
 
 function json(status: number, body: any) {
   return NextResponse.json(body, {
     status,
-    headers: {
-      'cache-control': 'no-store, max-age=0',
-    },
+    headers: { 'cache-control': 'no-store, max-age=0' },
   });
 }
 
@@ -35,35 +32,22 @@ function b64url(buf: Buffer) {
     .replace(/=+$/g, '');
 }
 
-function b64urlJson(obj: any) {
-  return b64url(Buffer.from(JSON.stringify(obj), 'utf8'));
-}
-
-/**
- * Minimal HS256 JWT signer (no deps)
- * Payload should include exp (unix seconds)
- */
-function signJwtHs256(payload: any, secret: string) {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const h = b64urlJson(header);
-  const p = b64urlJson(payload);
-  const data = `${h}.${p}`;
-  const sig = crypto.createHmac('sha256', secret).update(data).digest();
-  return `${data}.${b64url(sig)}`;
-}
-
 function randomToken(bytes = 32) {
   return b64url(crypto.randomBytes(bytes));
 }
 
-// Prisma singleton (safe in dev)
+function sha256Hex(s: string) {
+  return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+}
+
+// Prisma singleton
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 const prisma = globalForPrisma.prisma ?? new PrismaClient();
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 /**
- * In-memory rate limit fallback (works in dev / single instance).
- * For production multi-instance, replace with Redis/Upstash/etc.
+ * In-memory rate limit fallback (dev/single instance).
+ * For multi-instance prod, replace with Redis/Upstash.
  */
 type Bucket = { count: number; resetAt: number };
 const RL = (globalThis as any).__AMB_RL__ ?? new Map<string, Bucket>();
@@ -89,6 +73,17 @@ function getOriginFromRequest() {
   return `${proto}://${host}`;
 }
 
+function escapeHtml(s: string) {
+  return String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+function escapeAttr(s: string) {
+  return escapeHtml(s).replace(/'/g, '&#39;');
+}
+
 function buildResetEmailText(params: {
   resetUrl: string;
   expiryHours: number;
@@ -109,10 +104,6 @@ For your security:
 - This link expires in ${params.expiryHours} hours and can be used only once.
 - If you didn’t request a password reset, you can ignore this email. Your password will remain unchanged.
 - Do not share this link with anyone. Ambulant+ staff will never ask you for your password.
-
-Having trouble?
-- If the link doesn’t work, copy and paste it into your browser.
-- If you suspect unauthorized activity, reset your password immediately and contact support.
 
 Support: ${params.supportEmail}
 
@@ -146,11 +137,9 @@ function buildResetEmailHtml(params: {
     <div style="max-width:640px;margin:0 auto;padding:28px 16px;">
       <div style="padding:18px 20px;background:#ffffff;border:1px solid #e2e8f0;border-radius:18px;">
         <div style="font-size:12px;font-weight:800;color:#64748b;letter-spacing:0.02em;">Ambulant+</div>
-        <h1 style="margin:10px 0 0 0;font-size:22px;line-height:1.25;color:#0f172a;">
-          Reset your password
-        </h1>
+        <h1 style="margin:10px 0 0 0;font-size:22px;line-height:1.25;color:#0f172a;">Reset your password</h1>
+
         <p style="margin:10px 0 0 0;font-size:14px;line-height:1.6;color:#334155;">
-          We received a request to reset the password for your Ambulant+ account.
           If an account exists for this email address, you can reset your password using the secure button below.
         </p>
 
@@ -164,20 +153,6 @@ function buildResetEmailHtml(params: {
 
         <p style="margin:14px 0 0 0;font-size:12px;line-height:1.6;color:#64748b;">
           This link expires in <strong>${params.expiryHours} hours</strong> and can be used only once.
-        </p>
-
-        <div style="margin:16px 0 0 0;padding:12px 14px;border-radius:14px;background:#f1f5f9;border:1px solid #e2e8f0;">
-          <div style="font-size:12px;font-weight:800;color:#0f172a;">Security tips</div>
-          <ul style="margin:8px 0 0 18px;padding:0;color:#334155;font-size:12px;line-height:1.6;">
-            <li>If you didn’t request this, ignore this email — your password will remain unchanged.</li>
-            <li>Do not share this link. Ambulant+ staff will never ask you for your password.</li>
-            <li>If the button doesn’t work, copy and paste the URL into your browser.</li>
-          </ul>
-        </div>
-
-        <p style="margin:16px 0 0 0;font-size:12px;line-height:1.6;color:#64748b;">
-          If you suspect unauthorized activity, reset your password immediately and contact support:
-          <strong>${escapeHtml(params.supportEmail)}</strong>
         </p>
 
         <hr style="border:none;border-top:1px solid #e2e8f0;margin:18px 0;" />
@@ -201,27 +176,9 @@ function buildResetEmailHtml(params: {
 </html>`;
 }
 
-function escapeHtml(s: string) {
-  return String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-function escapeAttr(s: string) {
-  // good enough for href/text attributes
-  return escapeHtml(s).replace(/'/g, '&#39;');
-}
-
-async function sendEmailViaWebhook(args: {
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-}) {
+async function sendEmailViaWebhook(args: { to: string; subject: string; html: string; text: string }) {
   const url = process.env.AUTH_EMAIL_WEBHOOK_URL || process.env.EMAIL_WEBHOOK_URL;
   if (!url) {
-    // Dev-friendly: don’t hard-fail, just log
     console.warn('[auth/forgot] EMAIL_WEBHOOK_URL not set; skipping email send.');
     return { ok: true, skipped: true };
   }
@@ -239,7 +196,6 @@ async function sendEmailViaWebhook(args: {
       subject: args.subject,
       html: args.html,
       text: args.text,
-      // optional metadata
       tags: ['auth', 'password-reset'],
     }),
   });
@@ -267,147 +223,78 @@ export async function POST(req: Request) {
 
   const email = normalizeEmail(body?.email || '');
 
-  // Always use a generic success response (prevents enumeration)
+  // Generic response (prevents enumeration)
   const genericOk = () =>
     json(200, {
       ok: true,
       message: 'If an account exists for that email, a reset link has been sent.',
     });
 
-  // Basic input validation (still generic response)
-  if (!email || !looksLikeEmail(email)) {
-    return genericOk();
-  }
+  if (!email || !looksLikeEmail(email)) return genericOk();
 
-  // Rate limit parameters (tune as needed)
-  const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-  const IP_LIMIT = 12; // per 15 min
-  const EMAIL_LIMIT = 6; // per 15 min
-  const COOLDOWN_MS = 60 * 1000; // 1 minute per (email+ip) to reduce spam bursts
+  // Rate limit
+  const WINDOW_MS = 15 * 60 * 1000;
+  const IP_LIMIT = 12;
+  const EMAIL_LIMIT = 6;
+  const COOLDOWN_MS = 60 * 1000;
 
-  // Rate limit keys (don’t reveal to client)
   const ipKey = `forgot:ip:${ip}`;
   const emailKey = `forgot:email:${email}`;
   const comboKey = `forgot:combo:${ip}:${email}`;
 
-  // Cooldown bucket (simple: max 1 hit per minute)
-  const comboLimited = hitLimit(comboKey, 1, COOLDOWN_MS);
-
-  // Window limits
-  const ipLimited = hitLimit(ipKey, IP_LIMIT, WINDOW_MS);
-  const emailLimited = hitLimit(emailKey, EMAIL_LIMIT, WINDOW_MS);
-
-  // If rate-limited, still return the same generic message (no enumeration)
-  if (comboLimited || ipLimited || emailLimited) {
+  if (hitLimit(comboKey, 1, COOLDOWN_MS) || hitLimit(ipKey, IP_LIMIT, WINDOW_MS) || hitLimit(emailKey, EMAIL_LIMIT, WINDOW_MS)) {
     return genericOk();
   }
 
-  // Determine base URL for links
   const baseUrl =
     process.env.APP_BASE_URL ||
     process.env.NEXT_PUBLIC_APP_URL ||
     process.env.NEXT_PUBLIC_SITE_URL ||
     getOriginFromRequest();
 
-  if (!baseUrl) {
-    // Still generic response (no leakage)
-    console.warn('[auth/forgot] No base URL available to build reset link.');
-    return genericOk();
-  }
+  if (!baseUrl) return genericOk();
 
-  // Find user (best effort, but do not reveal existence)
-  let user: any = null;
-  try {
-    const pr = prisma as any;
-    user =
-      (await pr?.user?.findUnique?.({ where: { email } }).catch(() => null)) ||
-      (await pr?.user?.findFirst?.({ where: { email } }).catch(() => null));
-  } catch {
-    user = null;
-  }
+  // Only proceed if AuthCredential exists (but never reveal outcome)
+  const cred = await prisma.authCredential.findUnique({ where: { email } }).catch(() => null);
+  if (!cred || cred.disabled) return genericOk();
 
-  // If user does not exist: do nothing; still return OK (prevents enumeration)
-  if (!user) return genericOk();
-
-  // Token expiry (default 2 hours)
+  // TTL (default 2h, clamp 15m..24h)
   const ttlMin = Number(process.env.AUTH_RESET_TOKEN_TTL_MIN || '120');
-  const ttlMs = Math.max(15, Math.min(ttlMin, 24 * 60)) * 60 * 1000; // clamp 15min..24h
+  const ttlMs = Math.max(15, Math.min(ttlMin, 24 * 60)) * 60 * 1000;
   const expiryHours = Math.round(ttlMs / (60 * 60 * 1000));
 
-  // Prefer JWT (time-limited) when secret is available.
-  // Else fallback to opaque token stored in DB (if you have passwordResetToken model).
-  const jwtSecret = process.env.AUTH_RESET_TOKEN_SECRET;
+  // Generate opaque token + store ONLY hash
+  const rawToken = randomToken(32);
+  const tokenHash = sha256Hex(rawToken);
+  const expiresAt = new Date(Date.now() + ttlMs);
 
-  let token = '';
-  let tokenMode: 'jwt' | 'opaque' = 'jwt';
+  // Keep a single active token per email (simple + clean)
+  await prisma.passwordResetToken.deleteMany({ where: { email } }).catch(() => null);
 
-  if (jwtSecret) {
-    const now = Math.floor(Date.now() / 1000);
-    const exp = now + Math.floor(ttlMs / 1000);
-    token = signJwtHs256(
-      {
-        email, // used by /api/auth/reset verify
-        iat: now,
-        exp,
-        jti: randomToken(16),
+  await prisma.passwordResetToken
+    .create({
+      data: {
+        tokenHash,
+        email,
+        expiresAt,
+        usedAt: null,
+        requestedByIp: ip,
+        requestedByUa: ua,
+        orgId: cred.orgId || 'org-default',
       },
-      jwtSecret,
-    );
-    tokenMode = 'jwt';
-  } else {
-    token = randomToken(32);
-    tokenMode = 'opaque';
+    })
+    .catch(() => null);
 
-    // Store token so /api/auth/reset can validate it (best effort)
-    try {
-      const pr = prisma as any;
-      const expiresAt = new Date(Date.now() + ttlMs);
+  const resetUrl = `${String(baseUrl).replace(/\/+$/, '')}/auth/reset?token=${encodeURIComponent(rawToken)}`;
 
-      // Optional: delete/expire older tokens for same email (best effort)
-      await pr?.passwordResetToken?.deleteMany?.({
-        where: { email },
-      }).catch(() => null);
-
-      await pr?.passwordResetToken?.create?.({
-        data: {
-          token,
-          email,
-          expiresAt,
-          usedAt: null,
-          requestedByIp: ip,
-          requestedByUa: ua,
-        },
-      });
-    } catch (e) {
-      // If you don’t have the model, fallback can’t work. Still do not leak.
-      console.warn(
-        '[auth/forgot] passwordResetToken model not available. Set AUTH_RESET_TOKEN_SECRET to use JWT tokens instead.',
-      );
-      return genericOk();
-    }
-  }
-
-  const resetUrl = `${String(baseUrl).replace(/\/+$/, '')}/auth/reset?token=${encodeURIComponent(token)}`;
-
-  // Email config
-  const supportEmail = process.env.SUPPORT_EMAIL || 'support@ambulant.plus';
+  const supportEmail = process.env.SUPPORT_EMAIL || 'support@cloventechnology.com';
   const privacyUrl = `${String(baseUrl).replace(/\/+$/, '')}/privacy`;
 
-  const legalFooterLines = [
-    process.env.LEGAL_FOOTER_LINE_1 || '',
-    process.env.LEGAL_FOOTER_LINE_2 || '',
-  ].filter(Boolean);
+  const legalFooterLines = [process.env.LEGAL_FOOTER_LINE_1 || '', process.env.LEGAL_FOOTER_LINE_2 || ''].filter(Boolean);
 
   const subject = 'Reset your Ambulant+ password';
 
-  const text = buildResetEmailText({
-    resetUrl,
-    expiryHours,
-    supportEmail,
-    privacyUrl,
-    legalFooterLines,
-  });
-
+  const text = buildResetEmailText({ resetUrl, expiryHours, supportEmail, privacyUrl, legalFooterLines });
   const html = buildResetEmailHtml({
     resetUrl,
     expiryHours,
@@ -417,21 +304,13 @@ export async function POST(req: Request) {
     legalFooterLines,
   });
 
-  // Send email (best effort)
   try {
-    await sendEmailViaWebhook({
-      to: email,
-      subject,
-      html,
-      text,
-    });
+    await sendEmailViaWebhook({ to: email, subject, html, text });
   } catch (e) {
-    // Don’t leak; don’t fail user-facing response.
-    console.error('[auth/forgot] send failed:', e);
+    // Never leak; still return generic OK
+    console.error('[auth/forgot] send failed');
     return genericOk();
   }
 
-  // Generic success response (always same messaging)
-  // Include no fields that reveal user existence.
   return genericOk();
 }

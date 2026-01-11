@@ -123,6 +123,8 @@ export default function PatientEngagementAnalyticsPage() {
   const [gender, setGender] = useState<Gender | 'all'>('all');
   const [ageBand, setAgeBand] = useState<AgeBand | 'all'>('all');
 
+  const [refreshNonce, setRefreshNonce] = useState(0);
+
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -130,42 +132,43 @@ export default function PatientEngagementAnalyticsPage() {
   const [asAt, setAsAt] = useState<string | null>(null);
 
   useEffect(() => {
-    let aborted = false;
+    const controller = new AbortController();
+
     void (async () => {
       setLoading(true);
       setError(null);
       try {
         const params = new URLSearchParams({ range });
-        const endpoint =
-          (API_BASE || '') +
-          '/api/admin/analytics/patient-engagement?' +
-          params.toString();
+
+        // If APIGW is configured, call it directly.
+        // Otherwise call the local admin-dashboard API route.
+        const endpoint = API_BASE
+          ? `${API_BASE}/api/admin/analytics/patient-engagement?${params.toString()}`
+          : `/api/analytics/patient-engagement?${params.toString()}`;
 
         const res = await fetch(endpoint, {
           cache: 'no-store',
+          signal: controller.signal,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = (await res.json()) as PatientEngagementApiResponse;
         if (!json.ok) throw new Error('API returned ok = false');
 
-        if (aborted) return;
         setPayload(json.data);
         setAsAt(json.asAt);
       } catch (e: any) {
-        if (aborted) return;
+        if (e?.name === 'AbortError') return;
         console.error('patient engagement analytics fetch failed', e);
         setError(e?.message || 'Failed to load patient engagement analytics.');
         setPayload(null);
         setAsAt(null);
       } finally {
-        if (!aborted) setLoading(false);
+        setLoading(false);
       }
     })();
 
-    return () => {
-      aborted = true;
-    };
-  }, [range]);
+    return () => controller.abort();
+  }, [range, refreshNonce]);
 
   const summary: PatientEngagementSummary | null = payload?.summary ?? null;
   const plans: PlanEngagementSnapshot[] = payload?.planSnapshots ?? [];
@@ -238,9 +241,7 @@ export default function PatientEngagementAnalyticsPage() {
   const topSegmentsBySteps = useMemo(() => {
     if (!filteredStepsAgg.length) return [];
     return [...filteredStepsAgg]
-      .sort(
-        (a, b) => (b.avgDailySteps || 0) - (a.avgDailySteps || 0),
-      )
+      .sort((a, b) => (b.avgDailySteps || 0) - (a.avgDailySteps || 0))
       .slice(0, 5);
   }, [filteredStepsAgg]);
 
@@ -329,9 +330,7 @@ export default function PatientEngagementAnalyticsPage() {
               <select
                 className="rounded border px-2 py-1"
                 value={plan}
-                onChange={(e) =>
-                  setPlan(e.target.value as PlanTier | 'all')
-                }
+                onChange={(e) => setPlan(e.target.value as PlanTier | 'all')}
               >
                 {Object.entries(PLAN_LABEL).map(([key, label]) => (
                   <option key={key} value={key}>
@@ -346,9 +345,7 @@ export default function PatientEngagementAnalyticsPage() {
               <select
                 className="rounded border px-2 py-1"
                 value={gender}
-                onChange={(e) =>
-                  setGender(e.target.value as Gender | 'all')
-                }
+                onChange={(e) => setGender(e.target.value as Gender | 'all')}
               >
                 {Object.entries(GENDER_LABEL).map(([key, label]) => (
                   <option key={key} value={key}>
@@ -363,9 +360,7 @@ export default function PatientEngagementAnalyticsPage() {
               <select
                 className="rounded border px-2 py-1"
                 value={ageBand}
-                onChange={(e) =>
-                  setAgeBand(e.target.value as AgeBand | 'all')
-                }
+                onChange={(e) => setAgeBand(e.target.value as AgeBand | 'all')}
               >
                 {Object.entries(AGE_LABEL).map(([key, label]) => (
                   <option key={key} value={key}>
@@ -390,7 +385,7 @@ export default function PatientEngagementAnalyticsPage() {
             </button>
             <button
               type="button"
-              onClick={() => setRange((prev) => prev)}
+              onClick={() => setRefreshNonce((x) => x + 1)}
               className="rounded border bg-white px-3 py-1 text-gray-700 hover:bg-gray-50"
             >
               Refresh data
@@ -415,10 +410,7 @@ export default function PatientEngagementAnalyticsPage() {
         <MetricCard
           label="Avg sessions / active (30d)"
           value={fmtNumber(summary?.avgSessionsPerActive30d, 1)}
-          sub={`${fmtNumber(
-            summary?.avgMinutesPerActive30d,
-            1,
-          )} min / active`}
+          sub={`${fmtNumber(summary?.avgMinutesPerActive30d, 1)} min / active`}
         />
         <MetricCard
           label="Avg revenue / active (30d)"
@@ -618,16 +610,9 @@ export default function PatientEngagementAnalyticsPage() {
                         {GENDER_LABEL[s.key.gender]} •{' '}
                         {PLAN_LABEL[s.key.plan]}
                       </span>{' '}
-                      – {fmtNumber(
-                        s.metrics.sessionsPerActive30d,
-                        1,
-                      )}{' '}
-                      sessions / active,{' '}
-                      {fmtNumber(
-                        s.metrics.minutesPerActive30d,
-                        1,
-                      )}{' '}
-                      min / active
+                      – {fmtNumber(s.metrics.sessionsPerActive30d, 1)} sessions /
+                      active, {fmtNumber(s.metrics.minutesPerActive30d, 1)} min /
+                      active
                     </li>
                   ))}
                 </ul>
@@ -689,9 +674,7 @@ export default function PatientEngagementAnalyticsPage() {
               <thead className="bg-gray-50 text-[10px] uppercase tracking-wide text-gray-500">
                 <tr>
                   <th className="border-b px-2 py-1 text-left">Plan</th>
-                  <th className="border-b px-2 py-1 text-right">
-                    Active (30d)
-                  </th>
+                  <th className="border-b px-2 py-1 text-right">Active (30d)</th>
                   <th className="border-b px-2 py-1 text-right">
                     Sessions / active
                   </th>
@@ -790,9 +773,7 @@ export default function PatientEngagementAnalyticsPage() {
                 <tr>
                   <th className="border-b px-2 py-1 text-left">Bucket</th>
                   <th className="border-b px-2 py-1 text-right">Patients</th>
-                  <th className="border-b px-2 py-1 text-right">
-                    Avg score
-                  </th>
+                  <th className="border-b px-2 py-1 text-right">Avg score</th>
                 </tr>
               </thead>
               <tbody>
@@ -901,9 +882,7 @@ export default function PatientEngagementAnalyticsPage() {
         <div className="rounded-2xl border bg-white p-4 shadow-sm text-xs">
           <div className="mb-2 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">
-                IoMT usage
-              </h2>
+              <h2 className="text-sm font-semibold text-gray-900">IoMT usage</h2>
               <p className="mt-1 text-[11px] text-gray-500">
                 Which connected devices patients rely on most – NexRing, Health
                 Monitor, Digital Stethoscope, etc.

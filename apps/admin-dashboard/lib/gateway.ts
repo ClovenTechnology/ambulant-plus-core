@@ -1,3 +1,4 @@
+// apps/admin-dashboard/lib/gateway.ts
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN || '';
 
 async function http<T>(path: string, init?: RequestInit): Promise<T> {

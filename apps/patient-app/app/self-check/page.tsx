@@ -17,7 +17,7 @@ import { useNow } from '@/src/hooks/selfcheck/useNow';
 import { useSelfCheckState } from '@/src/hooks/selfcheck/useSelfCheckState';
 
 import useBodyMapHints from '@/src/hooks/selfcheck/useBodyMapHints';
-import type { BodyHint } from '@/components/selfcheck/BodyMap2D';
+import type { BodyHint } from '@/components/selfcheck/bodymap/BodyMap2D';
 
 export default function SelfCheckPage() {
   const now = useNow(1000);

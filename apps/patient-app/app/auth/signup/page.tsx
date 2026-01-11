@@ -1,9 +1,10 @@
+// file: apps/patient-app/app/auth/signup/page.tsx
 'use client';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useMemo, useState } from 'react';
-import { Sparkles, UserPlus, Mail, Lock, User, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Sparkles, UserPlus, Mail, Lock, User, ArrowRight, ShieldCheck, Crown } from 'lucide-react';
 
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
@@ -28,6 +29,10 @@ export default function PatientSignupPage() {
     if (!nextParam) return fallback;
     if (nextParam.startsWith('/') && !nextParam.startsWith('//')) return nextParam;
     return fallback;
+  }, [nextParam]);
+
+  const premiumHref = useMemo(() => {
+    return nextParam ? `/auth/signup/premium?next=${encodeURIComponent(nextParam)}` : '/auth/signup/premium';
   }, [nextParam]);
 
   const [fullName, setFullName] = useState('');
@@ -84,9 +89,7 @@ export default function PatientSignupPage() {
 
       const serverRedirect = data?.redirectTo;
       const safeServerRedirect =
-        typeof serverRedirect === 'string' &&
-        serverRedirect.startsWith('/') &&
-        !serverRedirect.startsWith('//')
+        typeof serverRedirect === 'string' && serverRedirect.startsWith('/') && !serverRedirect.startsWith('//')
           ? serverRedirect
           : null;
 
@@ -169,15 +172,22 @@ export default function PatientSignupPage() {
                   <div>
                     <div className="text-xs font-black text-slate-500">1 Minute Man - Quick Patient Sign up</div>
                     <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">Ambulant+</div>
-                    <div className="mt-1 text-sm text-slate-600">
-                      ...secure health wallet in your pocket— contactless
-                    </div>
+                    <div className="mt-1 text-sm text-slate-600">... secure health wallet in your pocket - contactless</div>
                   </div>
 
                   <div className="h-12 w-12 rounded-2xl border border-slate-200 bg-white flex items-center justify-center">
                     <UserPlus className="h-5 w-5 text-emerald-700" />
                   </div>
                 </div>
+
+                {/* ✅ Premium link patch */}
+                <Link
+                  href={premiumHref}
+                  className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-black text-slate-800 backdrop-blur hover:bg-white"
+                >
+                  <Crown className="mr-2 h-4 w-4 text-indigo-700" />
+                  Upgrade: Premium signup + IoMT bundle offers
+                </Link>
 
                 {err ? (
                   <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
@@ -259,9 +269,7 @@ export default function PatientSignupPage() {
                         required
                       />
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500">
-                      Use a strong password you don’t reuse elsewhere.
-                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you don’t reuse elsewhere.</div>
                   </label>
 
                   <button
@@ -288,8 +296,7 @@ export default function PatientSignupPage() {
                   </div>
 
                   <div className="pt-2 text-[11px] text-slate-500">
-                    After sign up you’ll be redirected to your Main Dashboard. You can update your profile later.{' '}
-                    <span className="font-semibold text-slate-700">{redirectTo}</span>
+                    After sign up you’ll be redirected to your Main Dashboard. You can update your profile later.
                   </div>
                 </form>
               </div>

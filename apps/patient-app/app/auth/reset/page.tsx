@@ -2,7 +2,7 @@
 'use client';
 
 import Link from 'next/link';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ShieldCheck,
@@ -13,22 +13,18 @@ import {
   ArrowLeft,
   CheckCircle2,
   XCircle,
+  Sparkles,
 } from 'lucide-react';
 
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
 }
 
-type ResetResp = {
-  ok?: boolean;
-  message?: string;
-  error?: string;
-};
+type ResetResp = { ok?: boolean; message?: string; error?: string };
 
 function safeToken(sp: ReturnType<typeof useSearchParams>) {
-  const t = sp?.get('token') || '';
-  // Keep it permissive (tokens can be long, url-safe, base64, jwt, etc.)
-  return t.trim();
+  // Never log this. Never render this.
+  return (sp?.get('token') || '').trim();
 }
 
 function passwordIssues(pw: string): string[] {
@@ -41,11 +37,44 @@ function passwordIssues(pw: string): string[] {
   return issues;
 }
 
+function scorePassword(pw: string) {
+  // Simple, dependency-free score (0..4)
+  const len = pw.length;
+  const hasUpper = /[A-Z]/.test(pw);
+  const hasLower = /[a-z]/.test(pw);
+  const hasNum = /[0-9]/.test(pw);
+  const hasSym = /[^A-Za-z0-9]/.test(pw);
+
+  let score = 0;
+  if (len >= 8) score++;
+  if (len >= 12) score++;
+  if (hasUpper && hasLower) score++;
+  if ((hasNum && hasSym) || (hasNum && hasUpper) || (hasSym && hasUpper)) score++;
+
+  // Clamp 0..4
+  score = Math.max(0, Math.min(4, score));
+
+  const label =
+    score <= 1 ? 'Weak' : score === 2 ? 'Fair' : score === 3 ? 'Strong' : 'Very strong';
+
+  const hint =
+    score <= 1
+      ? 'Add length and variety (upper/lower/number/symbol).'
+      : score === 2
+        ? 'Good start — strengthen a bit more.'
+        : score === 3
+          ? 'Nice — this is a strong password.'
+          : 'Excellent — hard to guess.';
+
+  return { score, label, hint };
+}
+
 export default function ResetPasswordPage() {
   const sp = useSearchParams();
   const router = useRouter();
 
   const token = useMemo(() => safeToken(sp), [sp]);
+  const tokenMissing = !token;
 
   const [pw, setPw] = useState('');
   const [pw2, setPw2] = useState('');
@@ -54,20 +83,23 @@ export default function ResetPasswordPage() {
   const [phase, setPhase] = useState<'ready' | 'submitting' | 'success'>('ready');
   const [err, setErr] = useState<string | null>(null);
 
-  const tokenMissing = !token;
+  const submitBtnRef = useRef<HTMLButtonElement | null>(null);
 
   const issues = useMemo(() => passwordIssues(pw), [pw]);
   const pwMatches = pw.length > 0 && pw2.length > 0 && pw === pw2;
+  const strength = useMemo(() => scorePassword(pw), [pw]);
 
-  // Optional: if token is missing, clear form errors
+  // Keep UI tidy if token missing
   useEffect(() => {
-    if (tokenMissing) setErr(null);
+    if (tokenMissing) {
+      setErr(null);
+      setPhase('ready');
+    }
   }, [tokenMissing]);
 
   function validate(): string | null {
     if (!token) return 'Reset token is missing. Please use the link from your email.';
     if (!pw) return 'Please enter a new password.';
-    if (pw.length < 8) return 'Password must be at least 8 characters.';
     if (issues.length > 0) return 'Please strengthen your password to meet the requirements.';
     if (!pw2) return 'Please confirm your new password.';
     if (pw !== pw2) return 'Passwords do not match.';
@@ -81,6 +113,7 @@ export default function ResetPasswordPage() {
     const v = validate();
     if (v) {
       setErr(v);
+      submitBtnRef.current?.focus();
       return;
     }
 
@@ -104,16 +137,26 @@ export default function ResetPasswordPage() {
         );
       }
 
-      // Best practice: do NOT auto-login here (unless explicitly desired).
-      // Also do NOT auto-redirect; keep user in control.
       setPhase('success');
       setPw('');
       setPw2('');
     } catch (e: any) {
+      // No token leakage: we never log token; we only show a generic message.
       setErr(e?.message || 'Password reset failed.');
       setPhase('ready');
+      submitBtnRef.current?.focus();
     }
   }
+
+  const meterWidth = `${(strength.score / 4) * 100}%`;
+  const meterClass =
+    strength.score <= 1
+      ? 'bg-rose-500'
+      : strength.score === 2
+        ? 'bg-amber-500'
+        : strength.score === 3
+          ? 'bg-emerald-500'
+          : 'bg-emerald-600';
 
   return (
     <main className="min-h-screen bg-[radial-gradient(900px_circle_at_18%_-10%,rgba(16,185,129,0.16),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(99,102,241,0.14),transparent_55%),linear-gradient(to_bottom,rgba(255,255,255,0.86),rgba(248,250,252,1))]">
@@ -160,6 +203,24 @@ export default function ResetPasswordPage() {
 
             {phase !== 'success' ? (
               <form onSubmit={onSubmit} className="mt-5 space-y-4">
+                {/* Strength meter */}
+                <div className="rounded-2xl border border-slate-200 bg-white px-3 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs font-extrabold text-slate-800 inline-flex items-center gap-2">
+                      <Sparkles className="h-4 w-4 text-slate-500" />
+                      Strength: <span className="text-slate-950">{strength.label}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500">{strength.hint}</div>
+                  </div>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={cx('h-2 rounded-full transition-all', meterClass)}
+                      style={{ width: pw.length ? meterWidth : '0%' }}
+                      aria-hidden="true"
+                    />
+                  </div>
+                </div>
+
                 <label className="block">
                   <div className="text-xs font-black text-slate-700">New password</div>
                   <div className="mt-1 relative">
@@ -214,7 +275,9 @@ export default function ResetPasswordPage() {
                               : 'border-slate-200 bg-white text-slate-500',
                           )}
                         >
-                          <span className={cx('h-1.5 w-1.5 rounded-full', r.ok ? 'bg-emerald-500' : 'bg-slate-300')} />
+                          <span
+                            className={cx('h-1.5 w-1.5 rounded-full', r.ok ? 'bg-emerald-500' : 'bg-slate-300')}
+                          />
                           {r.label}
                         </span>
                       ))}
@@ -259,6 +322,7 @@ export default function ResetPasswordPage() {
                 </label>
 
                 <button
+                  ref={submitBtnRef}
                   disabled={phase === 'submitting' || tokenMissing}
                   type="submit"
                   aria-busy={phase === 'submitting'}

@@ -1,5 +1,6 @@
 // apps/admin-dashboard/app/admin/clinicians/onboarding/page.tsx
 import React from 'react';
+import Link from 'next/link';
 import { headers } from 'next/headers';
 import { verifyAdminToken } from '@/src/lib/auth';
 import OnboardingDispatchBoard from './OnboardingDispatchBoard';
@@ -76,8 +77,7 @@ async function fetchOnboardingBoard(): Promise<BoardResponse> {
         ok: false,
         rows: [],
         error:
-          js.error ||
-          `HTTP ${res.status} loading onboarding board (${url})`,
+          js.error || `HTTP ${res.status} loading onboarding board (${url})`,
       };
     }
     return { ok: true, rows: js.rows || [] };
@@ -116,7 +116,7 @@ export default async function AdminClinicianOnboardingPage() {
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-6">
-      <header className="flex items-center justify-between gap-3">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">
             Clinicians — Onboarding &amp; Dispatch
@@ -126,15 +126,26 @@ export default async function AdminClinicianOnboardingPage() {
             Ambulant+ starter kit dispatch.
           </p>
         </div>
-        <div className="text-xs text-gray-500">
-          Signed in as admin
-          <div>
-            <span className="font-mono text-[11px]">
-              Gateway:{' '}
-              {process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-                process.env.NEXT_PUBLIC_PATIENT_BASE ??
-                'http://localhost:3010'}
-            </span>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            href="/admin/calendar"
+            className="rounded border bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+            title="Open calendar view (training schedule)"
+          >
+            Calendar
+          </Link>
+
+          <div className="text-right text-xs text-gray-500">
+            Signed in as admin
+            <div>
+              <span className="font-mono text-[11px]">
+                Gateway:{' '}
+                {process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
+                  process.env.NEXT_PUBLIC_PATIENT_BASE ??
+                  'http://localhost:3010'}
+              </span>
+            </div>
           </div>
         </div>
       </header>

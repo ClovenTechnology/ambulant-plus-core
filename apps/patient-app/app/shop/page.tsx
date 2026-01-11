@@ -3,6 +3,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { usePlan } from '@/components/context/PlanContext';
 
 type ProductVariant = {
   id: string;
@@ -152,12 +153,6 @@ function pickPrimaryImage(p: Product, chosenVariant?: ProductVariant | null) {
   if (p.imageUrl) return p.imageUrl;
 
   // demo placeholder images (save these files to make storefront look premium)
-  // Suggested paths:
-  // apps/patient-app/public/shop/fallback/tech.png
-  // apps/patient-app/public/shop/fallback/clinic.png
-  // apps/patient-app/public/shop/fallback/clothing.png
-  // apps/patient-app/public/shop/fallback/duecare.png
-  // apps/patient-app/public/shop/fallback/other.png
   const cat = normTag(productCategory(p));
   if (cat.includes('duecare')) return '/shop/fallback/duecare.png';
   if (cat.includes('clinic')) return '/shop/fallback/clinic.png';
@@ -264,6 +259,17 @@ const FALLBACK_PRODUCTS: Product[] = [
 export default function ShopStorefrontPage() {
   const [uid] = useState(() => getUid());
 
+  // ✅ plan detection (no shop logic changes)
+  const planCtx = usePlan() as any;
+  const currentPlanKey = String(planCtx?.effectivePlan || planCtx?.plan || 'free').toLowerCase().trim();
+  const isFreePlan = currentPlanKey === 'free';
+
+  const planLabel = useMemo(() => {
+    if (!currentPlanKey) return 'Free';
+    // typical keys: free | premium | family
+    return titleize(currentPlanKey);
+  }, [currentPlanKey]);
+
   // data
   const [items, setItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -283,6 +289,18 @@ export default function ShopStorefrontPage() {
   // variant selections per product
   const [variantChoice, setVariantChoice] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Teaser destinations (keep plan tiers as the canonical upgrade flow)
+  const backParam = useMemo(() => encodeURIComponent('/shop'), []);
+  const upgradeHref = useMemo(() => `/plan/upgrade?plan=premium&cycle=monthly&back=${backParam}`, [backParam]);
+  const manageHref = useMemo(() => `/plan/upgrade?back=${backParam}`, [backParam]);
+  const giveawaysHref = '/raffles';
+
+  const premiumCta = useMemo(() => {
+    return isFreePlan
+      ? { label: 'Upgrade', href: upgradeHref }
+      : { label: 'Manage plan', href: manageHref };
+  }, [isFreePlan, upgradeHref, manageHref]);
 
   useEffect(() => {
     // currency preference
@@ -427,10 +445,7 @@ export default function ShopStorefrontPage() {
     }
     // stable sort inside each group
     for (const [k, list] of map.entries()) {
-      map.set(
-        k,
-        [...list].sort((a, b) => String(a.name).localeCompare(String(b.name))),
-      );
+      map.set(k, [...list].sort((a, b) => String(a.name).localeCompare(String(b.name))));
     }
     // order groups by category list (excluding All)
     const orderedCats = categories.filter((c) => c !== 'All');
@@ -564,6 +579,99 @@ export default function ShopStorefrontPage() {
           </Link>
         </div>
       </header>
+
+      {/* Teasers (no shop logic changes; just navigation) */}
+      <section className="grid gap-3 sm:grid-cols-2">
+        {/* Premium / Plan tiers teaser */}
+        <div className="rounded-2xl border bg-white overflow-hidden shadow-sm">
+          <div className="p-5 border-b bg-gradient-to-br from-sky-50 to-white">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="text-sm font-semibold">Premium access</div>
+                <div className="text-xs text-gray-600">
+                  Your plan is <span className="font-semibold text-gray-900">{planLabel}</span>. Plans handle upgrades,
+                  billing, and entitlements — the Store stays focused on products.
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="shrink-0 text-[11px] px-2 py-1 rounded-full border bg-white text-gray-700">
+                  {isFreePlan ? 'Free plan' : 'Plan active'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 flex items-center justify-between gap-3">
+            <div className="text-[11px] text-gray-600 leading-relaxed">
+              {isFreePlan
+                ? 'Upgrade to unlock deeper access (live clinician status, enhanced insights, and more).'
+                : 'You can review features, switch cycle, or manage your plan anytime.'}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Link
+                href={premiumCta.href}
+                className="inline-flex items-center justify-center rounded-full px-3 py-2 text-xs font-medium bg-blue-600 text-white hover:bg-blue-700"
+              >
+                {premiumCta.label}
+              </Link>
+              <Link
+                href={manageHref}
+                className="inline-flex items-center justify-center rounded-full px-3 py-2 text-xs border hover:bg-gray-50"
+              >
+                Compare
+              </Link>
+            </div>
+          </div>
+        </div>
+
+        {/* Giveaways teaser */}
+        <div className="rounded-2xl border bg-white overflow-hidden shadow-sm">
+          <div className="p-5 border-b bg-gradient-to-br from-emerald-50 to-white">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="text-sm font-semibold">Giveaways</div>
+                <div className="text-xs text-gray-600">
+                  Enter promotions and track your entries. Winner announcements will show here later.
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {isFreePlan ? (
+                  <span className="shrink-0 text-[11px] px-2 py-1 rounded-full border border-sky-200 bg-sky-50 text-sky-800 font-semibold">
+                    Premium feature
+                  </span>
+                ) : null}
+                <span className="shrink-0 text-[11px] px-2 py-1 rounded-full border bg-white text-gray-700">Free</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="p-5 flex items-center justify-between gap-3">
+            <div className="text-[11px] text-gray-600 leading-relaxed">
+              {isFreePlan
+                ? 'Premium members may see exclusive bonus drops when available.'
+                : 'Your entries will show under “My entries” on that page.'}
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Link
+                href={giveawaysHref}
+                className="inline-flex items-center justify-center rounded-full px-3 py-2 text-xs font-medium bg-emerald-600 text-white hover:bg-emerald-700"
+              >
+                Explore
+              </Link>
+              <Link
+                href="/1stop"
+                className="inline-flex items-center justify-center rounded-full px-3 py-2 text-xs border hover:bg-gray-50"
+              >
+                My orders
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
 
       {/* Controls */}
       <section className="rounded-xl border bg-white p-3 space-y-3">
@@ -760,7 +868,11 @@ export default function ShopStorefrontPage() {
                                 const vZar = pickSaleOrBase(v.unitAmountZar, v.saleUnitAmountZar ?? null);
                                 const vLocal = priceLocal(vZar);
                                 const suffix =
-                                  typeof v.stockQty === 'number' ? (v.stockQty <= 0 ? ' • sold out' : ` • ${v.stockQty} left`) : '';
+                                  typeof v.stockQty === 'number'
+                                    ? v.stockQty <= 0
+                                      ? ' • sold out'
+                                      : ` • ${v.stockQty} left`
+                                    : '';
 
                                 const localLabel =
                                   cur === 'ZAR' ? money(vZar, 'ZAR') : `${money(vLocal, cur)} (${money(vZar, 'ZAR')})`;

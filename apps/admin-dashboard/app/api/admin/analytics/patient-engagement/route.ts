@@ -18,8 +18,6 @@ type AgeBand =
   | '65+'
   | 'unknown';
 
-type RegionLevel = 'country' | 'province' | 'city';
-
 interface PatientEngagementSummary {
   totalPatients: number;
   totalVerifiedPatients: number;
@@ -332,220 +330,40 @@ function buildFunnel(summary: PatientEngagementSummary): ActivationFunnelStage[]
 }
 
 function buildCohorts(): RetentionCohortRow[] {
-  // Example: last 6 cohorts
   return [
-    {
-      cohortKey: '2025-06',
-      cohortLabel: 'Jun 2025 signups',
-      cohortSize: 2100,
-      d7Retained: 0.78,
-      d30Retained: 0.69,
-      d60Retained: 0.63,
-      d90Retained: 0.58,
-    },
-    {
-      cohortKey: '2025-07',
-      cohortLabel: 'Jul 2025 signups',
-      cohortSize: 1950,
-      d7Retained: 0.76,
-      d30Retained: 0.68,
-      d60Retained: 0.61,
-      d90Retained: 0.55,
-    },
-    {
-      cohortKey: '2025-08',
-      cohortLabel: 'Aug 2025 signups',
-      cohortSize: 2300,
-      d7Retained: 0.79,
-      d30Retained: 0.7,
-      d60Retained: 0.64,
-      d90Retained: 0.59,
-    },
-    {
-      cohortKey: '2025-09',
-      cohortLabel: 'Sep 2025 signups',
-      cohortSize: 1880,
-      d7Retained: 0.75,
-      d30Retained: 0.67,
-      d60Retained: 0.6,
-      d90Retained: 0.54,
-    },
-    {
-      cohortKey: '2025-10',
-      cohortLabel: 'Oct 2025 signups',
-      cohortSize: 2400,
-      d7Retained: 0.8,
-      d30Retained: 0.72,
-      d60Retained: 0.66,
-      d90Retained: 0.6,
-    },
-    {
-      cohortKey: '2025-11',
-      cohortLabel: 'Nov 2025 signups',
-      cohortSize: 2160,
-      d7Retained: 0.77,
-      d30Retained: 0.7,
-      d60Retained: 0.63,
-      d90Retained: 0.57,
-    },
+    { cohortKey: '2025-06', cohortLabel: 'Jun 2025 signups', cohortSize: 2100, d7Retained: 0.78, d30Retained: 0.69, d60Retained: 0.63, d90Retained: 0.58 },
+    { cohortKey: '2025-07', cohortLabel: 'Jul 2025 signups', cohortSize: 1950, d7Retained: 0.76, d30Retained: 0.68, d60Retained: 0.61, d90Retained: 0.55 },
+    { cohortKey: '2025-08', cohortLabel: 'Aug 2025 signups', cohortSize: 2300, d7Retained: 0.79, d30Retained: 0.7, d60Retained: 0.64, d90Retained: 0.59 },
+    { cohortKey: '2025-09', cohortLabel: 'Sep 2025 signups', cohortSize: 1880, d7Retained: 0.75, d30Retained: 0.67, d60Retained: 0.6, d90Retained: 0.54 },
+    { cohortKey: '2025-10', cohortLabel: 'Oct 2025 signups', cohortSize: 2400, d7Retained: 0.8, d30Retained: 0.72, d60Retained: 0.66, d90Retained: 0.6 },
+    { cohortKey: '2025-11', cohortLabel: 'Nov 2025 signups', cohortSize: 2160, d7Retained: 0.77, d30Retained: 0.7, d60Retained: 0.63, d90Retained: 0.57 },
   ];
 }
 
 function buildFeatureUsage(summary: PatientEngagementSummary): FeatureUsageItem[] {
   const active = summary.activePatients30d;
   return [
-    {
-      key: 'consult_video',
-      label: 'Video consults',
-      dailyActiveUsers: Math.round(active * 0.22),
-      weeklyActiveUsers: Math.round(active * 0.47),
-      monthlyActiveUsers: Math.round(active * 0.68),
-      avgSessionsPerUser30d: 2.1,
-      avgMinutesPerUser30d: 18.4,
-      penetrationActive30d: 0.68,
-    },
-    {
-      key: 'consult_chat',
-      label: 'Chat consults',
-      dailyActiveUsers: Math.round(active * 0.18),
-      weeklyActiveUsers: Math.round(active * 0.39),
-      monthlyActiveUsers: Math.round(active * 0.6),
-      avgSessionsPerUser30d: 1.9,
-      avgMinutesPerUser30d: 11.3,
-      penetrationActive30d: 0.6,
-    },
-    {
-      key: 'self_checks',
-      label: 'Self-checks & symptom flows',
-      dailyActiveUsers: Math.round(active * 0.14),
-      weeklyActiveUsers: Math.round(active * 0.32),
-      monthlyActiveUsers: Math.round(active * 0.54),
-      avgSessionsPerUser30d: 2.7,
-      avgMinutesPerUser30d: 9.1,
-      penetrationActive30d: 0.54,
-    },
-    {
-      key: 'medication_schedule',
-      label: 'Medication schedule & reminders',
-      dailyActiveUsers: Math.round(active * 0.16),
-      weeklyActiveUsers: Math.round(active * 0.36),
-      monthlyActiveUsers: Math.round(active * 0.55),
-      avgSessionsPerUser30d: 4.2,
-      avgMinutesPerUser30d: 12.5,
-      penetrationActive30d: 0.55,
-    },
-    {
-      key: 'vitals_dashboard',
-      label: 'NexRing / vitals dashboard',
-      dailyActiveUsers: Math.round(active * 0.21),
-      weeklyActiveUsers: Math.round(active * 0.44),
-      monthlyActiveUsers: Math.round(active * 0.63),
-      avgSessionsPerUser30d: 5.1,
-      avgMinutesPerUser30d: 16.8,
-      penetrationActive30d: 0.63,
-    },
-    {
-      key: 'erx_refill',
-      label: 'eRx refills via CarePort',
-      dailyActiveUsers: Math.round(active * 0.09),
-      weeklyActiveUsers: Math.round(active * 0.24),
-      monthlyActiveUsers: Math.round(active * 0.41),
-      avgSessionsPerUser30d: 1.6,
-      avgMinutesPerUser30d: 8.4,
-      penetrationActive30d: 0.41,
-    },
-    {
-      key: 'lab_results',
-      label: 'Lab results (MedReach)',
-      dailyActiveUsers: Math.round(active * 0.07),
-      weeklyActiveUsers: Math.round(active * 0.19),
-      monthlyActiveUsers: Math.round(active * 0.34),
-      avgSessionsPerUser30d: 1.2,
-      avgMinutesPerUser30d: 7.6,
-      penetrationActive30d: 0.34,
-    },
-    {
-      key: 'careplan_tasks',
-      label: 'Care plan tasks',
-      dailyActiveUsers: Math.round(active * 0.12),
-      weeklyActiveUsers: Math.round(active * 0.29),
-      monthlyActiveUsers: Math.round(active * 0.49),
-      avgSessionsPerUser30d: 2.3,
-      avgMinutesPerUser30d: 10.2,
-      penetrationActive30d: 0.49,
-    },
-    {
-      key: 'shop',
-      label: 'Ambulant+ shop',
-      dailyActiveUsers: Math.round(active * 0.05),
-      weeklyActiveUsers: Math.round(active * 0.15),
-      monthlyActiveUsers: Math.round(active * 0.28),
-      avgSessionsPerUser30d: 1.3,
-      avgMinutesPerUser30d: 6.3,
-      penetrationActive30d: 0.28,
-    },
-    {
-      key: 'rewards',
-      label: 'Rewards & challenges',
-      dailyActiveUsers: Math.round(active * 0.08),
-      weeklyActiveUsers: Math.round(active * 0.21),
-      monthlyActiveUsers: Math.round(active * 0.4),
-      avgSessionsPerUser30d: 2.0,
-      avgMinutesPerUser30d: 8.9,
-      penetrationActive30d: 0.4,
-    },
-    {
-      key: 'other',
-      label: 'Other flows',
-      dailyActiveUsers: Math.round(active * 0.03),
-      weeklyActiveUsers: Math.round(active * 0.09),
-      monthlyActiveUsers: Math.round(active * 0.16),
-      avgSessionsPerUser30d: 1.1,
-      avgMinutesPerUser30d: 4.2,
-      penetrationActive30d: 0.16,
-    },
+    { key: 'consult_video', label: 'Video consults', dailyActiveUsers: Math.round(active * 0.22), weeklyActiveUsers: Math.round(active * 0.47), monthlyActiveUsers: Math.round(active * 0.68), avgSessionsPerUser30d: 2.1, avgMinutesPerUser30d: 18.4, penetrationActive30d: 0.68 },
+    { key: 'consult_chat', label: 'Chat consults', dailyActiveUsers: Math.round(active * 0.18), weeklyActiveUsers: Math.round(active * 0.39), monthlyActiveUsers: Math.round(active * 0.6), avgSessionsPerUser30d: 1.9, avgMinutesPerUser30d: 11.3, penetrationActive30d: 0.6 },
+    { key: 'self_checks', label: 'Self-checks & symptom flows', dailyActiveUsers: Math.round(active * 0.14), weeklyActiveUsers: Math.round(active * 0.32), monthlyActiveUsers: Math.round(active * 0.54), avgSessionsPerUser30d: 2.7, avgMinutesPerUser30d: 9.1, penetrationActive30d: 0.54 },
+    { key: 'medication_schedule', label: 'Medication schedule & reminders', dailyActiveUsers: Math.round(active * 0.16), weeklyActiveUsers: Math.round(active * 0.36), monthlyActiveUsers: Math.round(active * 0.55), avgSessionsPerUser30d: 4.2, avgMinutesPerUser30d: 12.5, penetrationActive30d: 0.55 },
+    { key: 'vitals_dashboard', label: 'NexRing / vitals dashboard', dailyActiveUsers: Math.round(active * 0.21), weeklyActiveUsers: Math.round(active * 0.44), monthlyActiveUsers: Math.round(active * 0.63), avgSessionsPerUser30d: 5.1, avgMinutesPerUser30d: 16.8, penetrationActive30d: 0.63 },
+    { key: 'erx_refill', label: 'eRx refills via CarePort', dailyActiveUsers: Math.round(active * 0.09), weeklyActiveUsers: Math.round(active * 0.24), monthlyActiveUsers: Math.round(active * 0.41), avgSessionsPerUser30d: 1.6, avgMinutesPerUser30d: 8.4, penetrationActive30d: 0.41 },
+    { key: 'lab_results', label: 'Lab results (MedReach)', dailyActiveUsers: Math.round(active * 0.07), weeklyActiveUsers: Math.round(active * 0.19), monthlyActiveUsers: Math.round(active * 0.34), avgSessionsPerUser30d: 1.2, avgMinutesPerUser30d: 7.6, penetrationActive30d: 0.34 },
+    { key: 'careplan_tasks', label: 'Care plan tasks', dailyActiveUsers: Math.round(active * 0.12), weeklyActiveUsers: Math.round(active * 0.29), monthlyActiveUsers: Math.round(active * 0.49), avgSessionsPerUser30d: 2.3, avgMinutesPerUser30d: 10.2, penetrationActive30d: 0.49 },
+    { key: 'shop', label: 'Ambulant+ shop', dailyActiveUsers: Math.round(active * 0.05), weeklyActiveUsers: Math.round(active * 0.15), monthlyActiveUsers: Math.round(active * 0.28), avgSessionsPerUser30d: 1.3, avgMinutesPerUser30d: 6.3, penetrationActive30d: 0.28 },
+    { key: 'rewards', label: 'Rewards & challenges', dailyActiveUsers: Math.round(active * 0.08), weeklyActiveUsers: Math.round(active * 0.21), monthlyActiveUsers: Math.round(active * 0.4), avgSessionsPerUser30d: 2.0, avgMinutesPerUser30d: 8.9, penetrationActive30d: 0.4 },
+    { key: 'other', label: 'Other flows', dailyActiveUsers: Math.round(active * 0.03), weeklyActiveUsers: Math.round(active * 0.09), monthlyActiveUsers: Math.round(active * 0.16), avgSessionsPerUser30d: 1.1, avgMinutesPerUser30d: 4.2, penetrationActive30d: 0.16 },
   ];
 }
 
 function buildDevices(summary: PatientEngagementSummary): DeviceUsageItem[] {
   const active = summary.activePatients30d;
   return [
-    {
-      deviceSlug: 'nexring',
-      label: 'NexRing smart ring',
-      modality: 'ring',
-      activeUsers30d: Math.round(active * 0.36),
-      measurements30d: 36_000,
-      avgMeasurementsPerUser30d: 28.5,
-      penetrationActive30d: 0.36,
-    },
-    {
-      deviceSlug: 'hc-03',
-      label: 'HC-03 Health Monitor',
-      modality: 'health-monitor',
-      activeUsers30d: Math.round(active * 0.24),
-      measurements30d: 19_800,
-      avgMeasurementsPerUser30d: 23.7,
-      penetrationActive30d: 0.24,
-    },
-    {
-      deviceSlug: 'hc-21',
-      label: 'HC-21 Digital Stethoscope',
-      modality: 'stethoscope',
-      activeUsers30d: Math.round(active * 0.11),
-      measurements30d: 6_900,
-      avgMeasurementsPerUser30d: 17.2,
-      penetrationActive30d: 0.11,
-    },
-    {
-      deviceSlug: 'hc-41',
-      label: 'HC-41 HD Otoscope',
-      modality: 'otoscope',
-      activeUsers30d: Math.round(active * 0.07),
-      measurements30d: 3_400,
-      avgMeasurementsPerUser30d: 14.5,
-      penetrationActive30d: 0.07,
-    },
+    { deviceSlug: 'nexring', label: 'NexRing smart ring', modality: 'ring', activeUsers30d: Math.round(active * 0.36), measurements30d: 36000, avgMeasurementsPerUser30d: 28.5, penetrationActive30d: 0.36 },
+    { deviceSlug: 'hc-03', label: 'HC-03 Health Monitor', modality: 'health-monitor', activeUsers30d: Math.round(active * 0.24), measurements30d: 19800, avgMeasurementsPerUser30d: 23.7, penetrationActive30d: 0.24 },
+    { deviceSlug: 'hc-21', label: 'HC-21 Digital Stethoscope', modality: 'stethoscope', activeUsers30d: Math.round(active * 0.11), measurements30d: 6900, avgMeasurementsPerUser30d: 17.2, penetrationActive30d: 0.11 },
+    { deviceSlug: 'hc-41', label: 'HC-41 HD Otoscope', modality: 'otoscope', activeUsers30d: Math.round(active * 0.07), measurements30d: 3400, avgMeasurementsPerUser30d: 14.5, penetrationActive30d: 0.07 },
   ];
 }
 
@@ -559,30 +377,10 @@ function buildAdherence(summary: PatientEngagementSummary): MedicationAdherenceS
 
   return {
     buckets: [
-      {
-        bucketKey: 'high',
-        label: 'High adherence (80–100%)',
-        patients: high,
-        avgScore: 0.9,
-      },
-      {
-        bucketKey: 'medium',
-        label: 'Medium adherence (50–79%)',
-        patients: medium,
-        avgScore: 0.66,
-      },
-      {
-        bucketKey: 'low',
-        label: 'Low adherence (&lt; 50%)',
-        patients: low,
-        avgScore: 0.36,
-      },
-      {
-        bucketKey: 'unknown',
-        label: 'Unknown / insufficient data',
-        patients: unknown,
-        avgScore: 0.4,
-      },
+      { bucketKey: 'high', label: 'High adherence (80–100%)', patients: high, avgScore: 0.9 },
+      { bucketKey: 'medium', label: 'Medium adherence (50–79%)', patients: medium, avgScore: 0.66 },
+      { bucketKey: 'low', label: 'Low adherence (< 50%)', patients: low, avgScore: 0.36 },
+      { bucketKey: 'unknown', label: 'Unknown / insufficient data', patients: unknown, avgScore: 0.4 },
     ],
     avgScoreOverall: summary.avgMedicationAdherenceScore,
     avgScorePremium: 0.85,

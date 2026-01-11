@@ -34,6 +34,15 @@ type NavGroup = {
 
 const COLLAPSE_KEY = 'clinician.sidebar-collapsed';
 
+// Exclude these routes from showing the sidebar shell UI
+const SIDEBAR_EXCLUDED_PREFIXES = [
+  '/auth/login',
+  '/auth/signup',
+  '/auth/forgot',
+  '/auth/reset',
+  '/auth/logout',
+];
+
 function classNames(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ');
 }
@@ -41,6 +50,11 @@ function classNames(...parts: Array<string | false | null | undefined>) {
 export function ClinicianShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+
+  const hideShellChrome = useMemo(() => {
+    const p = pathname || '';
+    return SIDEBAR_EXCLUDED_PREFIXES.some((prefix) => p === prefix || p.startsWith(prefix + '/'));
+  }, [pathname]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -64,58 +78,20 @@ export function ClinicianShell({ children }: { children: ReactNode }) {
         key: 'workspace',
         label: 'Workspace',
         items: [
-          {
-            href: '/',
-            label: 'Landing',
-            icon: LayoutDashboard,
-          },
-          {
-            href: '/today',
-            label: 'Today',
-            icon: CalendarDays,
-          },
-          {
-            href: '/appointments',
-            label: 'Appointments',
-            icon: HeartPulse,
-          },
-          {
-            href: '/encounters',
-            label: 'Encounters',
-            icon: Stethoscope,
-          },
-          {
-            href: '/practice',
-            label: 'My Practice',
-            icon: Users,
-          },
-          {
-            href: '/claims',
-            label: 'Claims',
-            icon: FileText,
-          },
-          {
-            href: '/payout',
-            label: 'Payouts & Plan',
-            icon: WalletCards,
-          },
-          {
-            href: '/shop',
-            label: 'Shop',
-            icon: Store,
-          },
+          { href: '/', label: 'Landing', icon: LayoutDashboard },
+          { href: '/today', label: 'Today', icon: CalendarDays },
+          { href: '/appointments', label: 'Appointments', icon: HeartPulse },
+          { href: '/encounters', label: 'Encounters', icon: Stethoscope },
+          { href: '/practice', label: 'My Practice', icon: Users },
+          { href: '/claims', label: 'Claims', icon: FileText },
+          { href: '/payout', label: 'Payouts & Plan', icon: WalletCards },
+          { href: '/shop', label: 'Shop', icon: Store },
         ],
       },
       {
         key: 'settings',
         label: 'Settings',
-        items: [
-          {
-            href: '/settings/profile',
-            label: 'Profile & Practice',
-            icon: Settings,
-          },
-        ],
+        items: [{ href: '/settings/profile', label: 'Profile & Practice', icon: Settings }],
       },
     ],
     [],
@@ -123,8 +99,13 @@ export function ClinicianShell({ children }: { children: ReactNode }) {
 
   const isActive = (href: string) => {
     if (href === '/') return pathname === '/';
-    return pathname === href || pathname.startsWith(href + '/');
+    return pathname === href || (pathname || '').startsWith(href + '/');
   };
+
+  // ✅ Auth routes: render page content without sidebar/top chrome
+  if (hideShellChrome) {
+    return <div className="min-h-screen bg-slate-50 text-slate-900">{children}</div>;
+  }
 
   return (
     <div className="min-h-screen flex bg-slate-50 text-slate-900">
@@ -143,12 +124,8 @@ export function ClinicianShell({ children }: { children: ReactNode }) {
             </div>
             {!collapsed && (
               <div className="flex flex-col leading-tight">
-                <span className="text-xs font-semibold text-slate-900">
-                  Ambulant+
-                </span>
-                <span className="text-[10px] text-slate-500">
-                  Clinician Console
-                </span>
+                <span className="text-xs font-semibold text-slate-900">Ambulant+</span>
+                <span className="text-[10px] text-slate-500">Clinician Console</span>
               </div>
             )}
           </div>
@@ -158,11 +135,7 @@ export function ClinicianShell({ children }: { children: ReactNode }) {
             className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 text-slate-500 hover:bg-slate-100"
             aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
           >
-            {collapsed ? (
-              <ChevronRight className="h-3 w-3" />
-            ) : (
-              <ChevronLeft className="h-3 w-3" />
-            )}
+            {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
           </button>
         </div>
 
@@ -186,15 +159,11 @@ export function ClinicianShell({ children }: { children: ReactNode }) {
                           href={item.href}
                           className={classNames(
                             'flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition-colors',
-                            active
-                              ? 'bg-slate-900 text-white'
-                              : 'text-slate-700 hover:bg-slate-100',
+                            active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-100',
                           )}
                         >
                           <Icon className="h-4 w-4 shrink-0" />
-                          {!collapsed && (
-                            <span className="truncate">{item.label}</span>
-                          )}
+                          {!collapsed && <span className="truncate">{item.label}</span>}
                         </Link>
                       </li>
                     );
@@ -219,7 +188,6 @@ export function ClinicianShell({ children }: { children: ReactNode }) {
       <div className="flex min-h-screen flex-1 flex-col">
         {/* Optional top bar (kept minimal) */}
         <header className="h-10 border-b border-slate-200 bg-white/60 backdrop-blur-sm flex items-center justify-end px-4 text-[11px] text-slate-500">
-          {/* You can wire real clinician info here later */}
           <span>Signed in as clinician</span>
         </header>
         <main className="flex-1">{children}</main>

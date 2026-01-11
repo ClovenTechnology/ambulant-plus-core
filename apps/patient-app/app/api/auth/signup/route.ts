@@ -1,6 +1,7 @@
 // apps/patient-app/app/api/auth/signup/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { randomUUID } from 'crypto';
+import crypto from 'node:crypto';
+import { PrismaClient, PresenceActorType } from '@prisma/client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -13,129 +14,156 @@ type JsonPayload = {
   gender?: string;
   phone?: string;
   address?: string;
-  emergencyContact?: { name?: string; phone?: string };
-  bloodType?: string;
   allergies?: string[];
-  chronicConditions?: string[];
 };
 
-// Helper: respond JSON
 function json(data: any, status = 200) {
-  return NextResponse.json(data, { status });
+  return NextResponse.json(data, {
+    status,
+    headers: { 'cache-control': 'no-store, max-age=0' },
+  });
 }
 
-// Try to read JSON OR form-data (multipart)
 async function parseRequest(req: NextRequest): Promise<{ payload: JsonPayload; avatar?: File | null }> {
   const contentType = req.headers.get('content-type') || '';
   if (contentType.includes('multipart/form-data')) {
-    // Next.js Request supports formData() on the server
     const fd = await req.formData();
     const payloadRaw = fd.get('payload') as FormDataEntryValue | null;
+
     let payload: JsonPayload = {};
     if (payloadRaw && typeof payloadRaw === 'string') {
-      try { payload = JSON.parse(payloadRaw); } catch { payload = {}; }
-    } else if (payloadRaw && typeof payloadRaw === 'object' && (payloadRaw as any).toString) {
-      // unlikely, but guard
-      try { payload = JSON.parse(String(payloadRaw)); } catch {}
+      try {
+        payload = JSON.parse(payloadRaw);
+      } catch {
+        payload = {};
+      }
     }
 
     const avatar = fd.get('avatar') as File | null;
     return { payload, avatar };
-  } else {
-    // assume JSON
-    try {
-      const body = await req.json();
-      return { payload: body as JsonPayload, avatar: null };
-    } catch {
-      return { payload: {}, avatar: null };
-    }
+  }
+
+  try {
+    const body = await req.json();
+    return { payload: body as JsonPayload, avatar: null };
+  } catch {
+    return { payload: {}, avatar: null };
   }
 }
 
-async function createAuth0User(email: string, password: string, name?: string) {
-  const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
-  const AUTH0_CLIENT_ID = process.env.AUTH0_CLIENT_ID;
-  const AUTH0_CLIENT_SECRET = process.env.AUTH0_CLIENT_SECRET;
-  // Minimal checks
-  if (!AUTH0_DOMAIN || !AUTH0_CLIENT_ID || !AUTH0_CLIENT_SECRET) {
-    throw new Error('Auth0 config missing');
-  }
-
-  // 1) get management token
-  const tokenRes = await fetch(`https://${AUTH0_DOMAIN}/oauth/token`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      grant_type: 'client_credentials',
-      client_id: AUTH0_CLIENT_ID,
-      client_secret: AUTH0_CLIENT_SECRET,
-      audience: `https://${AUTH0_DOMAIN}/api/v2/`,
-    }),
-  });
-  if (!tokenRes.ok) {
-    const ttxt = await tokenRes.text().catch(() => '');
-    throw new Error(`Auth0 token error: ${tokenRes.status} ${ttxt}`);
-  }
-  const tokenJson = await tokenRes.json();
-  const mgmtToken = tokenJson.access_token;
-
-  // 2) create user
-  // NOTE: adjust connection name to your tenant (often "Username-Password-Authentication")
-  const createRes = await fetch(`https://${AUTH0_DOMAIN}/api/v2/users`, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${mgmtToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify({
-      email,
-      name,
-      connection: process.env.AUTH0_DB_CONNECTION || 'Username-Password-Authentication',
-      password,
-      email_verified: false, // recommend sending a verification email separately
-      user_metadata: { createdBy: 'ambulant-signup' },
-    }),
-  });
-
-  if (!createRes.ok) {
-    const txt = await createRes.text().catch(() => '');
-    throw new Error(`Auth0 create user failed: ${createRes.status} ${txt}`);
-  }
-  const created = await createRes.json();
-  return created; // returns the Auth0 user object
+function normalizeEmail(v: string) {
+  return String(v || '').trim().toLowerCase();
 }
+
+function looksLikeEmail(v: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+function isStrongPassword(pw: string) {
+  return (
+    typeof pw === 'string' &&
+    pw.length >= 8 &&
+    /[A-Z]/.test(pw) &&
+    /[a-z]/.test(pw) &&
+    /[0-9]/.test(pw) &&
+    /[^A-Za-z0-9]/.test(pw)
+  );
+}
+
+function base64urlToBuffer(s: string) {
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  const b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(b64, 'base64');
+}
+function bufferToBase64url(buf: Buffer) {
+  return buf
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+async function hashPasswordScrypt(password: string) {
+  const salt = crypto.randomBytes(16);
+  const N = 16384;
+  const r = 8;
+  const p = 1;
+  const keyLen = 64;
+
+  const hash = await new Promise<Buffer>((resolve, reject) => {
+    crypto.scrypt(password, salt, keyLen, { N, r, p }, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey as Buffer);
+    });
+  });
+
+  return `scrypt$${N}$${r}$${p}$${bufferToBase64url(salt)}$${bufferToBase64url(hash)}`;
+}
+
+// Prisma singleton
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+const prisma = globalForPrisma.prisma ?? new PrismaClient();
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 export async function POST(req: NextRequest) {
   try {
-    const { payload, avatar } = await parseRequest(req);
-    // Required: email + password (password optional if you plan SSO-only)
-    const email = payload.email?.trim();
-    const password = payload.password || '';
-    const name = payload.name || '';
+    const { payload } = await parseRequest(req);
 
-    if (!email) return json({ error: 'Missing email' }, 400);
-    if (!password || password.length < 6) {
-      // if your flow allows passwordless, adapt this check
-      return json({ error: 'Password must be provided and >= 6 chars' }, 400);
+    const email = normalizeEmail(payload.email || '');
+    const password = String(payload.password || '');
+    const name = String(payload.name || '').trim() || null;
+
+    if (!email || !looksLikeEmail(email)) return json({ ok: false, error: 'Valid email is required.' }, 400);
+    if (!isStrongPassword(password)) {
+      return json(
+        {
+          ok: false,
+          error: 'Password must be 8+ chars and include uppercase, lowercase, a number, and a symbol.',
+        },
+        400,
+      );
     }
 
-    // Try Auth0 if configured
-    try {
-      if (process.env.AUTH0_DOMAIN && process.env.AUTH0_CLIENT_ID && process.env.AUTH0_CLIENT_SECRET) {
-        const created = await createAuth0User(email, password, name);
-        // Optionally: store avatar somewhere (S3) and user profile in your DB
-        return json({ ok: true, userId: created.user_id || created.sub || created._id });
-      }
-    } catch (err: any) {
-      // if Auth0 fails, log and continue to fallback stub (but if you want to fail hard, return error)
-      console.error('Auth0 signup failed:', err?.message || err);
-      // fall through to stub fallback
-    }
+    const existing = await prisma.authCredential.findUnique({ where: { email } }).catch(() => null);
+    if (existing) return json({ ok: false, error: 'An account with this email already exists.' }, 409);
 
-    // Fallback dev stub: create a lightweight local user id
-    const userId = `local:${randomUUID()}`;
-    // Optionally persist to your datastore here
-    // // TODO: write to DB or call your gateway
-    return json({ ok: true, userId });
+    const passwordHash = await hashPasswordScrypt(password);
+    const orgId = process.env.DEFAULT_ORG_ID || 'org-default';
+
+    // Create AuthCredential + PatientProfile (single source of truth)
+    const created = await prisma.$transaction(async (tx) => {
+      const cred = await tx.authCredential.create({
+        data: {
+          email,
+          passwordHash,
+          actorType: PresenceActorType.PATIENT,
+          disabled: false,
+          orgId,
+        },
+      });
+
+      await tx.patientProfile
+        .create({
+          data: {
+            userId: cred.id,
+            name: name || undefined,
+            contactEmail: email,
+            phone: payload.phone || undefined,
+            gender: payload.gender || undefined,
+            addressLine1: payload.address || undefined,
+            allergies: Array.isArray(payload.allergies) ? payload.allergies.filter(Boolean).join(', ') : undefined,
+          },
+        })
+        .catch(() => null);
+
+      // Optional: wallet account, etc (leave for later)
+
+      return cred;
+    });
+
+    return json({ ok: true, userId: created.id });
   } catch (err: any) {
-    console.error('signup route error', err);
-    return json({ error: err?.message || 'signup failed' }, 500);
+    console.error('[auth/signup] error', err);
+    return json({ ok: false, error: err?.message || 'signup failed' }, 500);
   }
 }

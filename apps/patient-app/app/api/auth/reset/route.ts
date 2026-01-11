@@ -5,18 +5,18 @@ import crypto from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-type ResetBody = {
-  token?: string;
-  password?: string;
-};
+type ResetBody = { token?: string; password?: string };
 
 function json(status: number, body: any) {
-  return NextResponse.json(body, { status });
+  return NextResponse.json(body, {
+    status,
+    headers: { 'cache-control': 'no-store, max-age=0' },
+  });
 }
 
 function isStrongPassword(pw: string) {
-  // Keep aligned with UI: >=8 + upper + lower + number + symbol
   return (
     typeof pw === 'string' &&
     pw.length >= 8 &&
@@ -27,12 +27,15 @@ function isStrongPassword(pw: string) {
   );
 }
 
+function sha256Hex(s: string) {
+  return crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+}
+
 function base64urlToBuffer(s: string) {
   const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
   const b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
   return Buffer.from(b64, 'base64');
 }
-
 function bufferToBase64url(buf: Buffer) {
   return buf
     .toString('base64')
@@ -41,44 +44,10 @@ function bufferToBase64url(buf: Buffer) {
     .replace(/=+$/g, '');
 }
 
-/**
- * Minimal HS256 JWT verify (no external deps).
- * Expected payload includes: { email: string, exp: number }
- */
-function verifyJwtHs256(token: string, secret: string): { ok: true; payload: any } | { ok: false } {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return { ok: false };
-
-    const [h, p, sig] = parts;
-    const data = `${h}.${p}`;
-    const expected = crypto.createHmac('sha256', secret).update(data).digest();
-    const got = base64urlToBuffer(sig);
-
-    // constant-time compare
-    if (got.length !== expected.length || !crypto.timingSafeEqual(got, expected)) return { ok: false };
-
-    const payloadJson = base64urlToBuffer(p).toString('utf8');
-    const payload = JSON.parse(payloadJson);
-
-    const now = Math.floor(Date.now() / 1000);
-    if (payload?.exp && typeof payload.exp === 'number' && now > payload.exp) return { ok: false };
-
-    return { ok: true, payload };
-  } catch {
-    return { ok: false };
-  }
-}
-
-// Prisma singleton (safe in dev)
-const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-const prisma = globalForPrisma.prisma ?? new PrismaClient();
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
-
 async function hashPasswordScrypt(password: string) {
   // Format: scrypt$N$r$p$salt$hash
   const salt = crypto.randomBytes(16);
-  const N = 16384; // cost
+  const N = 16384;
   const r = 8;
   const p = 1;
   const keyLen = 64;
@@ -92,6 +61,11 @@ async function hashPasswordScrypt(password: string) {
 
   return `scrypt$${N}$${r}$${p}$${bufferToBase64url(salt)}$${bufferToBase64url(hash)}`;
 }
+
+// Prisma singleton
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+const prisma = globalForPrisma.prisma ?? new PrismaClient();
+if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
 
 export async function POST(req: Request) {
   const h = headers();
@@ -117,126 +91,60 @@ export async function POST(req: Request) {
     });
   }
 
-  /**
-   * Mode A (Recommended): proxy to your real auth service
-   * Set:
-   *  - AUTH_RESET_WEBHOOK_URL="https://your-auth-service/reset"
-   *  - AUTH_RESET_WEBHOOK_SECRET="shared-secret"
-   */
-  const webhookUrl = process.env.AUTH_RESET_WEBHOOK_URL;
-  const webhookSecret = process.env.AUTH_RESET_WEBHOOK_SECRET;
+  const tokenHash = sha256Hex(token);
 
-  if (webhookUrl) {
-    try {
-      const res = await fetch(webhookUrl, {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(webhookSecret ? { 'x-ambulant-reset-secret': webhookSecret } : {}),
-        },
-        body: JSON.stringify({ token, password, ip, ua }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.ok === false) {
-        return json(400, {
-          ok: false,
-          error: data?.error || data?.message || 'Reset failed. Link may be expired or already used.',
-        });
-      }
-
-      return json(200, { ok: true, message: 'Password reset successful.' });
-    } catch (e) {
-      console.error('Reset proxy failed', e);
-      return json(502, { ok: false, error: 'Reset service unavailable. Please try again shortly.' });
-    }
-  }
-
-  /**
-   * Mode B (Local fallback):
-   * - If token looks like JWT (3 parts), verify using AUTH_RESET_TOKEN_SECRET and get email from payload.
-   * - Else attempt to look up token in Prisma model "passwordResetToken" (if you have it).
-   *
-   * IMPORTANT:
-   * Your login flow must use the SAME hashing scheme as whatever sets the user password.
-   * If your current login uses bcrypt/argon2/etc, wire this route to that same code path.
-   */
   try {
-    let email: string | null = null;
+    const now = new Date();
 
-    // JWT path
-    if (token.split('.').length === 3 && process.env.AUTH_RESET_TOKEN_SECRET) {
-      const v = verifyJwtHs256(token, process.env.AUTH_RESET_TOKEN_SECRET);
-      if (v.ok && typeof v.payload?.email === 'string') {
-        email = v.payload.email.trim().toLowerCase();
-      } else {
-        return json(400, { ok: false, error: 'Reset link is invalid or expired.' });
-      }
-    } else {
-      // Opaque token path (requires you to have a token table)
-      // Expected fields (example):
-      // passwordResetToken: { token, email, expiresAt, usedAt, usedByIp, usedByUa }
-      const pr = prisma as any;
+    // Look up token row by hash
+    const row = await prisma.passwordResetToken.findUnique({ where: { tokenHash } }).catch(() => null);
+    if (!row) return json(400, { ok: false, error: 'Reset link is invalid or expired.' });
 
-      const row =
-        (await pr?.passwordResetToken?.findUnique?.({ where: { token } }).catch(() => null)) ||
-        (await pr?.passwordResetToken?.findFirst?.({ where: { token } }).catch(() => null));
-
-      if (!row) return json(400, { ok: false, error: 'Reset link is invalid or expired.' });
-
-      const exp = row?.expiresAt ? new Date(row.expiresAt).getTime() : null;
-      const usedAt = row?.usedAt ? new Date(row.usedAt).getTime() : null;
-
-      if (usedAt) return json(400, { ok: false, error: 'This reset link has already been used.' });
-      if (exp && Date.now() > exp) return json(400, { ok: false, error: 'Reset link is expired.' });
-
-      if (typeof row?.email === 'string') email = row.email.trim().toLowerCase();
-      if (!email) return json(500, { ok: false, error: 'Reset token record is missing email.' });
+    if (row.usedAt) return json(400, { ok: false, error: 'This reset link has already been used.' });
+    if (row.expiresAt && now.getTime() > new Date(row.expiresAt).getTime()) {
+      return json(400, { ok: false, error: 'Reset link is invalid or expired.' });
     }
 
-    // Update user password (requires a user table/model)
-    const pr = prisma as any;
+    const email = String(row.email || '').trim().toLowerCase();
+    if (!email) return json(400, { ok: false, error: 'Reset link is invalid or expired.' });
 
-    const user =
-      (await pr?.user?.findUnique?.({ where: { email } }).catch(() => null)) ||
-      (await pr?.user?.findFirst?.({ where: { email } }).catch(() => null));
-
-    if (!user) {
-      // For reset, it’s okay to be generic.
+    const cred = await prisma.authCredential.findUnique({ where: { email } }).catch(() => null);
+    if (!cred || cred.disabled) {
       return json(400, { ok: false, error: 'Reset failed. Link may be expired or invalid.' });
     }
 
-    const passwordHash = await hashPasswordScrypt(password);
+    const newHash = await hashPasswordScrypt(password);
 
-    // Try update by id (most reliable)
-    await pr?.user?.update?.({
-      where: { id: user.id },
-      data: {
-        passwordHash,
-        passwordUpdatedAt: new Date(),
-      },
-    });
-
-    // Mark token used for opaque-token mode (best effort)
-    if (token.split('.').length !== 3) {
-      await pr?.passwordResetToken?.update?.({
-        where: { token },
+    // Transaction: update password + mark token used
+    await prisma.$transaction([
+      prisma.authCredential.update({
+        where: { id: cred.id },
         data: {
-          usedAt: new Date(),
-          usedByIp: ip,
-          usedByUa: ua,
+          passwordHash: newHash,
+          lastLoginAt: null, // optional; leave as-is if you prefer
+          // updatedAt handled by Prisma
         },
-      }).catch(() => null);
-    }
+      }),
+      prisma.passwordResetToken.update({
+        where: { tokenHash },
+        data: {
+          usedAt: now,
+          // schema doesn't have usedByIp/usedByUa — keep it clean & consistent.
+          // ip/ua captured on request in forgot route.
+        },
+      }),
+    ]);
+
+    // Optional: record an audit event if you want (not required)
+    // await prisma.auditLog.create({ ... })
+
+    // Never log token / email to console here.
+    void ip;
+    void ua;
 
     return json(200, { ok: true, message: 'Password reset successful.' });
   } catch (e) {
-    console.error('Local reset failed', e);
-
-    return json(501, {
-      ok: false,
-      error:
-        'Reset is not fully wired yet. Configure AUTH_RESET_WEBHOOK_URL (recommended) or ensure Prisma models/fields exist (user.passwordHash, user.passwordUpdatedAt, and optionally passwordResetToken.*).',
-    });
+    console.error('[auth/reset] failed');
+    return json(500, { ok: false, error: 'Reset failed. Please try again shortly.' });
   }
 }

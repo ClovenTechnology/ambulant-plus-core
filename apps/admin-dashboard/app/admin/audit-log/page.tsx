@@ -4,6 +4,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
+import {
+  deriveScopeFromAuditAction,
+  DANGER_SCOPES,
+} from '../../../lib/authz/scopeCatalog';
+
 type RangeKey = '24h' | '7d' | '30d' | '90d';
 
 type AuditActorType =
@@ -93,6 +98,23 @@ function MetricCard(props: { label: string; value: string; sub?: string }) {
         <div className="mt-1 text-[11px] text-gray-400">{props.sub}</div>
       )}
     </div>
+  );
+}
+
+function ScopeBadge({ scope }: { scope: string | null }) {
+  if (!scope) return <span className="text-[10px] text-gray-400">—</span>;
+  const danger = DANGER_SCOPES.has(scope);
+  return (
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 font-mono text-[10px] ${
+        danger
+          ? 'bg-amber-50 border-amber-200 text-amber-900'
+          : 'bg-gray-50 border-gray-200 text-gray-700'
+      }`}
+      title={danger ? 'Privileged scope' : 'Standard scope'}
+    >
+      {scope}
+    </span>
   );
 }
 
@@ -249,11 +271,7 @@ export default function AdminAuditLogPage() {
         />
         <MetricCard
           label="Unique entities"
-          value={
-            summary
-              ? summary.uniqueEntities.toLocaleString()
-              : '—'
-          }
+          value={summary ? summary.uniqueEntities.toLocaleString() : '—'}
           sub="Distinct entityType / entityId pairs"
         />
         <MetricCard
@@ -371,9 +389,7 @@ export default function AdminAuditLogPage() {
       {/* TABLE */}
       <section className="rounded-2xl border bg-white p-4 shadow-sm text-xs">
         <div className="flex items-center justify-between mb-2">
-          <h2 className="text-sm font-semibold text-gray-900">
-            Audit events
-          </h2>
+          <h2 className="text-sm font-semibold text-gray-900">Audit events</h2>
           <span className="text-[11px] text-gray-500">
             Sorted by newest first • up to {rows.length.toLocaleString()} rows
             loaded in this view
@@ -387,6 +403,7 @@ export default function AdminAuditLogPage() {
                 <th className="border-b px-2 py-1 text-left">Actor</th>
                 <th className="border-b px-2 py-1 text-left">App</th>
                 <th className="border-b px-2 py-1 text-left">Action</th>
+                <th className="border-b px-2 py-1 text-left">Scope</th>
                 <th className="border-b px-2 py-1 text-left">Entity</th>
                 <th className="border-b px-2 py-1 text-left">Description</th>
                 <th className="border-b px-2 py-1 text-left">IP / Location</th>
@@ -396,80 +413,98 @@ export default function AdminAuditLogPage() {
               {rows.length === 0 && !loading && (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-3 py-4 text-center text-xs text-gray-500"
                   >
                     No audit events match this filter set.
                   </td>
                 </tr>
               )}
-              {rows.map((r) => (
-                <tr key={r.id} className="border-t text-[11px] hover:bg-gray-50">
-                  <td className="px-2 py-1 align-top whitespace-nowrap">
-                    {fmtDateTime(r.createdAt)}
-                  </td>
-                  <td className="px-2 py-1 align-top">
-                    <div className="text-gray-900">
-                      {labelActorType(r.actorType)}
-                    </div>
-                    <div className="font-mono text-[10px] text-gray-500">
-                      {r.actorUserId || '—'}
-                    </div>
-                    {r.actorRefId && (
-                      <div className="font-mono text-[10px] text-gray-400">
-                        ref: {r.actorRefId}
+
+              {rows.map((r) => {
+                const derivedScope = deriveScopeFromAuditAction(r.action);
+
+                return (
+                  <tr
+                    key={r.id}
+                    className="border-t text-[11px] hover:bg-gray-50"
+                  >
+                    <td className="px-2 py-1 align-top whitespace-nowrap">
+                      {fmtDateTime(r.createdAt)}
+                    </td>
+
+                    <td className="px-2 py-1 align-top">
+                      <div className="text-gray-900">
+                        {labelActorType(r.actorType)}
                       </div>
-                    )}
-                  </td>
-                  <td className="px-2 py-1 align-top">
-                    <div className="text-gray-900">{r.app}</div>
-                    {r.sessionId && (
-                      <div className="font-mono text-[10px] text-gray-400">
-                        sess: {r.sessionId}
+                      <div className="font-mono text-[10px] text-gray-500">
+                        {r.actorUserId || '—'}
                       </div>
-                    )}
-                  </td>
-                  <td className="px-2 py-1 align-top">
-                    <div className="font-mono text-[10px] text-gray-900">
-                      {r.action}
-                    </div>
-                  </td>
-                  <td className="px-2 py-1 align-top">
-                    {r.entityType ? (
-                      <>
-                        <div className="text-gray-900">{r.entityType}</div>
-                        {r.entityId && (
-                          <div className="font-mono text-[10px] text-gray-500">
-                            {r.entityId}
-                          </div>
-                        )}
-                      </>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-1 align-top max-w-xs">
-                    {r.description ? (
-                      <span className="text-gray-800">{r.description}</span>
-                    ) : (
-                      <span className="text-gray-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-2 py-1 align-top">
-                    <div className="text-gray-800">
-                      {r.ip || <span className="text-gray-400">—</span>}
-                    </div>
-                    {(r.ipCity || r.ipCountry) && (
-                      <div className="text-[10px] text-gray-500">
-                        {r.ipCity
-                          ? `${r.ipCity}${r.ipCountry ? ', ' : ''}`
-                          : ''}
-                        {r.ipCountry || ''}
+                      {r.actorRefId && (
+                        <div className="font-mono text-[10px] text-gray-400">
+                          ref: {r.actorRefId}
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="px-2 py-1 align-top">
+                      <div className="text-gray-900">{r.app}</div>
+                      {r.sessionId && (
+                        <div className="font-mono text-[10px] text-gray-400">
+                          sess: {r.sessionId}
+                        </div>
+                      )}
+                    </td>
+
+                    <td className="px-2 py-1 align-top">
+                      <div className="font-mono text-[10px] text-gray-900">
+                        {r.action}
                       </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                    </td>
+
+                    <td className="px-2 py-1 align-top">
+                      <ScopeBadge scope={derivedScope} />
+                    </td>
+
+                    <td className="px-2 py-1 align-top">
+                      {r.entityType ? (
+                        <>
+                          <div className="text-gray-900">{r.entityType}</div>
+                          {r.entityId && (
+                            <div className="font-mono text-[10px] text-gray-500">
+                              {r.entityId}
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+
+                    <td className="px-2 py-1 align-top max-w-xs">
+                      {r.description ? (
+                        <span className="text-gray-800">{r.description}</span>
+                      ) : (
+                        <span className="text-gray-400">—</span>
+                      )}
+                    </td>
+
+                    <td className="px-2 py-1 align-top">
+                      <div className="text-gray-800">
+                        {r.ip || <span className="text-gray-400">—</span>}
+                      </div>
+                      {(r.ipCity || r.ipCountry) && (
+                        <div className="text-[10px] text-gray-500">
+                          {r.ipCity
+                            ? `${r.ipCity}${r.ipCountry ? ', ' : ''}`
+                            : ''}
+                          {r.ipCountry || ''}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

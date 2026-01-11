@@ -37,6 +37,11 @@ import {
   FlaskConical,
   ClipboardCheck,
   LogOut,
+
+  // ✅ NEW icons for requested sidebar links
+  FileText,
+  Dumbbell,
+  Baby,
 } from 'lucide-react';
 
 type Item = {
@@ -61,6 +66,14 @@ const NAV: Item[] = [
   { href: '/televisit', label: 'Televisit', icon: Video },
   { href: '/profile', label: 'My Profile', icon: UserCircle },
   { href: '/shop', label: 'Shop', icon: Store },
+];
+
+const MY_CARE: Item[] = [
+  { href: '/myCare', label: 'myCare', icon: ClipboardList },
+  { href: '/medical-records', label: 'Health Records', icon: FileText }, // ✅ Medical Records
+  { href: '/gentlemens-center', label: "Men's Health", icon: Dumbbell }, // ✅ Male Health
+  { href: '/paediatric-center', label: 'Paediatrics', icon: Baby }, // ✅ Paediatric Management
+  { href: '/self-check', label: 'Self-care', icon: Activity },
 ];
 
 const ANALYTICS: Item[] = [
@@ -147,18 +160,14 @@ export default function Sidebar() {
   }, [pathname]);
 
   const allItems = useMemo(() => {
-    const extras: Item[] = [
-      { href: '/myCare', label: 'myCare', icon: ClipboardList },
-      { href: '/self-check', label: 'Self-care', icon: Activity },
-    ];
     return [
       ...NAV,
-      ...extras,
+      ...MY_CARE,
       ...WOMEN,
       ...RESOURCES,
       ...ANALYTICS,
       { href: '/settings', label: 'Settings', icon: Settings },
-      { href: '/app/auth/logout', label: 'Log out', icon: LogOut },
+      { href: '/auth/logout', label: 'Log out', icon: LogOut },
     ];
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -289,12 +298,7 @@ export default function Sidebar() {
         {collapsed ? (
           <ul className="mt-1 space-y-1">
             {items.map((it) => (
-              <NavRow
-                key={it.href}
-                item={it}
-                collapsed={collapsed}
-                active={isMatch(pathname, it.href)}
-              />
+              <NavRow key={it.href} item={it} collapsed={collapsed} active={isMatch(pathname, it.href)} />
             ))}
           </ul>
         ) : null}
@@ -398,21 +402,14 @@ export default function Sidebar() {
             <NavRow key={it.href} item={it} collapsed={collapsed} active={isMatch(pathname, it.href)} />
           ))}
 
-          {/* explicit single links */}
+          {/* My Care */}
           <div className={cx('mt-3 mb-2 px-3', collapsed && 'hidden')}>
             <div className="text-[11px] font-black tracking-wide text-slate-400 uppercase">My Care</div>
           </div>
 
-          <NavRow
-            item={{ href: '/myCare', label: 'myCare', icon: ClipboardList }}
-            collapsed={collapsed}
-            active={isMatch(pathname, '/myCare')}
-          />
-          <NavRow
-            item={{ href: '/self-check', label: 'Self-care', icon: Activity }}
-            collapsed={collapsed}
-            active={isMatch(pathname, '/self-check')}
-          />
+          {MY_CARE.map((it) => (
+            <NavRow key={it.href} item={it} collapsed={collapsed} active={isMatch(pathname, it.href)} />
+          ))}
 
           {/* groups */}
           <Group

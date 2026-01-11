@@ -1,28 +1,57 @@
 // apps/patient-app/mock/practices/index.ts
 
 export * from './types';
-export * from './practices-by-country';
 
-export { default as PRACTICES_ZA } from './ZA';
-export { default as PRACTICES_NG } from './NG';
-export { default as PRACTICES_KE } from './KE';
-export { default as PRACTICES_GH } from './GH';
-export { default as PRACTICES_BW } from './BW';
-export { default as PRACTICES_ZW } from './ZW';
-export { default as PRACTICES_CD } from './CD';
-export { default as PRACTICES_BR } from './BR';
-export { default as PRACTICES_AR } from './AR';
-export { default as PRACTICES_NZ } from './NZ';
-export { default as PRACTICES_GB } from './GB';
-export { default as PRACTICES_US } from './US';
-export { default as PRACTICES_CA } from './CA';
-export { default as PRACTICES_AE } from './AE';
-export { default as PRACTICES_SA } from './SA';
-export { default as PRACTICES_AU } from './AU';
-export { default as PRACTICES_CU } from './CU';
-export { default as PRACTICES_SG } from './SG';
-export { default as PRACTICES_JM } from './JM';
-export { default as PRACTICES_DM } from './DM';
+// Import all country practice lists
+import PRACTICES_ZA from './ZA';
+import PRACTICES_NG from './NG';
+import PRACTICES_KE from './KE';
+import PRACTICES_GH from './GH';
+import PRACTICES_BW from './BW';
+import PRACTICES_ZW from './ZW';
+import PRACTICES_CD from './CD';
+import PRACTICES_BR from './BR';
+import PRACTICES_AR from './AR';
+import PRACTICES_NZ from './NZ';
+import PRACTICES_GB from './GB';
+import PRACTICES_US from './US';
+import PRACTICES_CA from './CA';
+import PRACTICES_AE from './AE';
+import PRACTICES_SA from './SA';
+import PRACTICES_AU from './AU';
+import PRACTICES_CU from './CU';
+import PRACTICES_SG from './SG';
+import PRACTICES_JM from './JM';
+import PRACTICES_DM from './DM';
 
-// ✅ Back-compat: existing code imports { PRACTICES } from '@/mock/practices'
-export { default as PRACTICES } from './ZA';
+// Map all countries
+export const PRACTICES_BY_COUNTRY: Record<string, any> = {
+  ZA: PRACTICES_ZA,
+  NG: PRACTICES_NG,
+  KE: PRACTICES_KE,
+  GH: PRACTICES_GH,
+  BW: PRACTICES_BW,
+  ZW: PRACTICES_ZW,
+  CD: PRACTICES_CD,
+  BR: PRACTICES_BR,
+  AR: PRACTICES_AR,
+  NZ: PRACTICES_NZ,
+  GB: PRACTICES_GB,
+  US: PRACTICES_US,
+  CA: PRACTICES_CA,
+  AE: PRACTICES_AE,
+  SA: PRACTICES_SA,
+  AU: PRACTICES_AU,
+  CU: PRACTICES_CU,
+  SG: PRACTICES_SG,
+  JM: PRACTICES_JM,
+  DM: PRACTICES_DM,
+};
+
+// Helper to get practices dynamically
+export function getMockPracticesForCountry(countryCode: string) {
+  return PRACTICES_BY_COUNTRY[countryCode.toUpperCase()];
+}
+
+// ✅ Back-compat: old code
+export const PRACTICES = PRACTICES_BY_COUNTRY.ZA;

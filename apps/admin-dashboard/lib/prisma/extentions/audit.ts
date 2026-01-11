@@ -1,4 +1,4 @@
-// prisma/extensions/audit.ts
+// lib/prisma/extensions/audit.ts
 import { Prisma } from '@prisma/client';
 
 export const auditExtension = Prisma.defineExtension({

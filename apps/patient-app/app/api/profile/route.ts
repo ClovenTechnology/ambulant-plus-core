@@ -101,8 +101,8 @@ export async function GET(req: NextRequest) {
     {
       userId: userId || 'patient-demo-001',
       patientId: 'Am25-02-001',
-      name: 'Demo Patient',
-      email: 'demo.patient@example.com',
+      name: 'Lerato Teeke',
+      email: 'lerato@ambulant.com',
       age: 34,
       gender: 'Female',
       dob: '1991-03-14',
@@ -118,8 +118,8 @@ export async function GET(req: NextRequest) {
         profile: {
           id: 'Am25-02-001',
           userId: userId || 'patient-demo-001',
-          name: 'Demo Patient',
-          email: 'demo.patient@example.com',
+          name: 'Lerato Teeke',
+          email: 'lerato@ambulant.com',
           gender: 'Female',
           dob: '1991-03-14',
           address: 'Morningside, Sandton 2150',

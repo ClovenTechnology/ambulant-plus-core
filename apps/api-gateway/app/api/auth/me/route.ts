@@ -3,6 +3,14 @@ import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 
+async function getAllKnownScopes(): Promise<string[]> {
+  // safest because prisma.role exists in your code already
+  const roles = await prisma.role.findMany({
+    select: { scopes: { select: { scope: true } } },
+  });
+  return Array.from(new Set(roles.flatMap(r => r.scopes.map(s => s.scope)).filter(Boolean)));
+}
+
 async function resolveEffectiveRolesAndScopes(userId?: string, email?: string) {
   if (!userId && !email) return { roles: [], scopes: [] as string[] };
 
@@ -35,13 +43,29 @@ async function resolveEffectiveRolesAndScopes(userId?: string, email?: string) {
 
   const fromDesignation = (profile.designation?.roles ?? []).map(r => r.role);
   const directRoles = (profile.roles ?? []).map(r => r.role);
-  const allRoleNames = Array.from(new Set([...fromDesignation, ...directRoles].map(r => r.name)));
-  const allScopes = Array.from(
+
+  const allRoleNames = Array.from(new Set([...fromDesignation, ...directRoles].map(r => r.name).filter(Boolean)));
+
+  let allScopes = Array.from(
     new Set(
       [...fromDesignation, ...directRoles]
         .flatMap(r => r.scopes.map(s => s.scope))
+        .filter(Boolean)
     )
   );
+
+  // ✅ Super-admin expansion: if role includes "superadmin" OR scopes include admin:all / *
+  const isSuper =
+    allRoleNames.includes('superadmin') ||
+    allScopes.includes('admin:all') ||
+    allScopes.includes('*');
+
+  if (isSuper) {
+    allScopes = await getAllKnownScopes();
+    // optional: keep sentinel scopes too (useful for client checks)
+    allScopes = Array.from(new Set([...allScopes, 'admin:all', 'superadmin']));
+    if (!allRoleNames.includes('superadmin')) allRoleNames.push('superadmin');
+  }
 
   return {
     roles: allRoleNames,
@@ -58,7 +82,6 @@ async function resolveEffectiveRolesAndScopes(userId?: string, email?: string) {
 }
 
 export async function GET() {
-  // Expect cookie adm.profile = encodeURIComponent(JSON.stringify({userId?, email?, name?}))
   const raw = cookies().get('adm.profile')?.value;
   if (!raw) return NextResponse.json({ authenticated: false }, { status: 200 });
 

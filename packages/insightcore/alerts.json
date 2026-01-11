@@ -169,6 +169,14 @@
       "score": 0.72,
       "ts": "2025-12-13T12:25:22.181Z",
       "note": "Persistent tachycardia over threshold"
+    },
+    {
+      "id": "0bbabb26-b5d2-42eb-94dc-31587f3ad108",
+      "patient": "Thandi Mokoena",
+      "type": "Heart risk",
+      "score": 0.72,
+      "ts": "2025-12-23T16:25:25.629Z",
+      "note": "Persistent tachycardia over threshold"
     }
   ]
 }

@@ -1,4 +1,4 @@
-//apps/admin-dashboard/components/AdminSidebar.tsx
+// apps/admin-dashboard/components/AdminSidebar.tsx
 'use client';
 
 import Link from 'next/link';
@@ -29,6 +29,7 @@ import {
   ChevronRight,
   LogOut,
   UserRoundCog,
+  ArrowLeftRight,
 } from 'lucide-react';
 
 type Item = { href: string; label: string; icon: LucideIcon; requires?: string | string[] };
@@ -43,18 +44,34 @@ type Group = {
 
 const COLLAPSE_KEY = 'admin.sidebar-collapsed';
 
+// TEMP: show everything in the sidebar regardless of scopes.
+// Flip this to false once your Gateway returns superadmin scopes reliably.
+const FORCE_SHOW_ALL = true;
+
+// Scopes that should unlock EVERYTHING in the UI (you still must enforce on the API too)
+const SUPER_SCOPES = ['superadmin', 'admin:all', '*'] as const;
+
 // ---- tiny scope helper (client) ----
 function hasAny(scopes: string[], need?: string | string[]) {
+  const set = new Set(scopes);
+
+  // Super-admin override
+  for (const s of SUPER_SCOPES) {
+    if (set.has(s)) return true;
+  }
+
   if (!need) return true; // public
   const req = Array.isArray(need) ? need : [need];
-  const set = new Set(scopes);
   return req.some((r) => set.has(r));
 }
 
 export default function AdminSidebar() {
   const pathname = usePathname();
-  const [collapsed, setCollapsed] = useState(false);
 
+  // ✅ Hide sidebar on auth routes without changing app/layout.tsx
+  if (pathname?.startsWith('/auth')) return null;
+
+  const [collapsed, setCollapsed] = useState(false);
   const [scopes, setScopes] = useState<string[] | null>(null); // null=loading, []=no scopes
 
   // groups open/close state
@@ -79,7 +96,7 @@ export default function AdminSidebar() {
     } catch {}
   }, [collapsed]);
 
-  // Fetch session scopes from Gateway
+  // Fetch session scopes from Gateway (kept, even if we force-show UI for now)
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -101,8 +118,7 @@ export default function AdminSidebar() {
     };
   }, []);
 
-  const isActive = (href: string) =>
-    pathname === href || pathname?.startsWith(href + '/');
+  const isActive = (href: string) => pathname === href || pathname?.startsWith(href + '/');
 
   // Top level shortcuts
   const TOP: Item[] = useMemo(
@@ -122,6 +138,10 @@ export default function AdminSidebar() {
       { href: '/analytics', label: 'Analytics', icon: BarChart3, requires: ['reports', 'finance'] },
       { href: '/reports', label: 'Reports', icon: FileText, requires: 'reports' },
       { href: '/insurance', label: 'Insurance', icon: Shield, requires: 'finance' },
+
+      // ✅ NEW: Forex (FX)
+      { href: '/finance/fx', label: 'Forex', icon: ArrowLeftRight, requires: 'finance' },
+
       { href: '/promotions', label: 'Promotions', icon: Sparkles /* public within admin */ },
       { href: '/consult', label: 'Consult', icon: HeartPulse, requires: 'medical' },
     ],
@@ -174,8 +194,8 @@ export default function AdminSidebar() {
         defaultOpen: true,
         requires: ['hr', 'manageRoles'],
         items: [
-          { href: '/admin/clinicians', label: 'Admin Clinicians', icon: Stethoscope, requires: ['hr','manageRoles'] },
-          { href: '/admin/patients', label: 'Admin Patients', icon: Users, requires: ['hr','manageRoles'] },
+          { href: '/admin/clinicians', label: 'Admin Clinicians', icon: Stethoscope, requires: ['hr', 'manageRoles'] },
+          { href: '/admin/patients', label: 'Admin Patients', icon: Users, requires: ['hr', 'manageRoles'] },
           { href: '/admin/shop', label: 'Admin Shop', icon: Store, requires: ['manageRoles'] },
         ],
       },
@@ -188,15 +208,15 @@ export default function AdminSidebar() {
         items: [
           { href: '/settings/general', label: 'General', icon: Settings, requires: ['manageRoles'] },
           { href: '/settings/roles', label: 'Roles', icon: UserRoundCog, requires: ['manageRoles'] },
-          { href: '/settings/plans', label: 'Plans', icon: Settings, requires: ['manageRoles','finance'] },
-          { href: '/settings/consult', label: 'Consult', icon: HeartPulse, requires: ['medical','manageRoles'] },
+          { href: '/settings/plans', label: 'Plans', icon: Settings, requires: ['manageRoles', 'finance'] },
+          { href: '/settings/consult', label: 'Consult', icon: HeartPulse, requires: ['medical', 'manageRoles'] },
           { href: '/settings/insurance', label: 'Insurance', icon: Shield, requires: ['finance'] },
           { href: '/settings/payouts', label: 'Payouts', icon: Package, requires: ['finance'] },
           { href: '/settings/insightcore', label: 'InsightCore', icon: BarChart3, requires: ['tech'] },
           { href: '/settings/shop', label: 'Shop', icon: Store, requires: ['manageRoles'] },
           // People (Departments / Role Requests)
-          { href: '/settings/people/departments', label: 'Departments', icon: Settings, requires: ['hr','manageRoles'] },
-          { href: '/settings/people/role-requests', label: 'Role Requests', icon: UserRoundCog, requires: ['hr','manageRoles'] },
+          { href: '/settings/people/departments', label: 'Departments', icon: Settings, requires: ['hr', 'manageRoles'] },
+          { href: '/settings/people/role-requests', label: 'Role Requests', icon: UserRoundCog, requires: ['hr', 'manageRoles'] },
           { href: '/settings/profile', label: 'My Profile', icon: UserRoundCog }, // always visible to the user
         ],
       },
@@ -205,14 +225,15 @@ export default function AdminSidebar() {
   );
 
   function ItemRow(it: Item) {
-    // If scopes still loading, render a skeleton placeholder for gated items
     const gated = !!it.requires;
-    const allowed = scopes ? hasAny(scopes, it.requires) : !gated;
 
+    // ✅ Force-show mode: render everything
+    const allowed = FORCE_SHOW_ALL ? true : scopes ? hasAny(scopes, it.requires) : !gated;
     if (!allowed) return null;
 
     const active = isActive(it.href);
     const Icon = it.icon;
+
     return (
       <li key={it.href}>
         <Link
@@ -221,9 +242,7 @@ export default function AdminSidebar() {
           aria-current={active ? 'page' : undefined}
           className={[
             'flex items-center gap-2 rounded px-3 py-2 text-sm transition-colors',
-            active
-              ? 'bg-black/5 font-medium text-black'
-              : 'text-black/70 hover:bg-black/5 hover:text-black',
+            active ? 'bg-black/5 font-medium text-black' : 'text-black/70 hover:bg-black/5 hover:text-black',
           ].join(' ')}
         >
           <Icon className="h-4 w-4 text-black/50" />
@@ -234,12 +253,12 @@ export default function AdminSidebar() {
   }
 
   function GroupBlock(g: Group) {
-    // Hide whole group if user lacks access to the group and all its items
-    const groupAllowed = scopes ? hasAny(scopes, g.requires) : false;
-    const anyItemAllowed =
-      scopes ? g.items.some((it) => hasAny(scopes!, it.requires)) : false;
-
-    if (!groupAllowed && !anyItemAllowed) return null;
+    if (!FORCE_SHOW_ALL) {
+      // Hide whole group if user lacks access to the group and all its items
+      const groupAllowed = scopes ? hasAny(scopes, g.requires) : false;
+      const anyItemAllowed = scopes ? g.items.some((it) => hasAny(scopes!, it.requires)) : false;
+      if (!groupAllowed && !anyItemAllowed) return null;
+    }
 
     const expanded = !!open[g.key];
 
@@ -256,9 +275,7 @@ export default function AdminSidebar() {
             <g.icon className="h-4 w-4 text-black/50" />
             {!collapsed && <span className="font-medium">{g.label}</span>}
           </span>
-          {!collapsed && (
-            <span className="text-xs text-black/40">{expanded ? '▾' : '▸'}</span>
-          )}
+          {!collapsed && <span className="text-xs text-black/40">{expanded ? '▾' : '▸'}</span>}
         </button>
 
         {!collapsed && expanded && (
@@ -279,11 +296,7 @@ export default function AdminSidebar() {
       ].join(' ')}
     >
       <div className="flex items-center justify-between px-3 py-2 border-b">
-        {!collapsed && (
-          <span className="text-xs font-semibold uppercase tracking-wide text-black/45">
-            Admin
-          </span>
-        )}
+        {!collapsed && <span className="text-xs font-semibold uppercase tracking-wide text-black/45">Admin</span>}
 
         <button
           type="button"

@@ -124,6 +124,21 @@ type DayLog = {
   symptoms?: SymptomChoice[];
 };
 
+type LadyServerState = {
+  profile: LadyProfile | null;
+  docs: LadyDoc[];
+  notes: { id: string; text: string; createdISO: string }[];
+  screening: Record<string, { lastDoneISO?: string | null }>;
+  dayLogs: Record<string, DayLog>;
+  updatedAtISO?: string | null;
+};
+
+type ApiEnvelope<T> = {
+  ok: boolean;
+  data?: T;
+  error?: { message?: string; code?: string };
+};
+
 /* =========================================================
    Storage keys (keeps backward compat with the “old” file)
 ========================================================= */
@@ -146,6 +161,24 @@ const LS = {
 
   // legacy (read-only migration fallback)
   legacyDaylogs: 'fertilityDayLogs',
+};
+
+/* =========================================================
+   API endpoints (adjust here if your gateway routes differ)
+========================================================= */
+
+const LADY_API = {
+  // Load everything in one call (recommended)
+  state: '/api/lady-center/state', // GET -> LadyServerState, PUT -> LadyServerState
+
+  // Optional granular endpoints (we try these first when saving)
+  profile: '/api/lady-center/profile', // PUT { profile }
+  dayLogsUpsert: '/api/lady-center/daylogs', // POST { log }
+  notes: '/api/lady-center/notes', // POST { note } | DELETE { id }
+  documents: '/api/lady-center/documents', // POST { doc } | DELETE { id }
+  screening: '/api/lady-center/screening', // POST { key, lastDoneISO }
+  reminders: '/api/reminders', // POST reminder requests
+  reportPdf: '/api/reports/lady-center', // GET (pdf blob) OR POST (generate)
 };
 
 /* =========================================================
@@ -267,6 +300,76 @@ function demoDocs(): LadyDoc[] {
     { id: uid('doc'), title: 'Prescription summary', fileName: 'rx_summary.pdf', tag: 'Rx', createdISO: addDaysISO(t, -7) },
     { id: uid('doc'), title: 'Clinician note', fileName: 'gynae_note.pdf', tag: 'Notes', createdISO: addDaysISO(t, -3) },
   ];
+}
+
+/* =========================================================
+   API helpers (safe envelopes + graceful fallbacks)
+========================================================= */
+
+function unwrapEnvelope<T>(x: any): T {
+  if (x && typeof x === 'object' && 'ok' in x) {
+    const env = x as ApiEnvelope<T>;
+    if (env.ok) return (env.data ?? (null as any)) as T;
+    throw new Error(env.error?.message || 'Request failed');
+  }
+  return x as T;
+}
+
+async function fetchJson<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const timeoutMs = init?.timeoutMs ?? 15000;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: init?.signal ?? ctrl.signal,
+      headers: {
+        ...(init?.headers ?? {}),
+        Accept: 'application/json',
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      },
+    });
+
+    const text = await res.text();
+    const data = text ? safeJsonParse<any>(text) : null;
+
+    if (!res.ok) {
+      const msg = data?.error?.message || data?.message || res.statusText || `HTTP ${res.status}`;
+      throw new Error(msg);
+    }
+
+    return unwrapEnvelope<T>(data ?? ({} as any));
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function fetchBlob(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<Blob> {
+  const timeoutMs = init?.timeoutMs ?? 25000;
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      ...init,
+      signal: init?.signal ?? ctrl.signal,
+      headers: { ...(init?.headers ?? {}), Accept: 'application/pdf' },
+    });
+    if (!res.ok) throw new Error(res.statusText || `HTTP ${res.status}`);
+    return await res.blob();
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function apiTry<T>(fn: () => Promise<T>): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
+  try {
+    const data = await fn();
+    return { ok: true, data };
+  } catch (e: any) {
+    return { ok: false, error: e?.message || 'Request failed' };
+  }
 }
 
 /* =========================================================
@@ -494,6 +597,13 @@ export default function LadyCenterPage() {
   // pregnancy banner dismiss
   const [dismissedAt, setDismissedAt] = useState<number | null>(null);
 
+  // server sync status
+  const [syncState, setSyncState] = useState<'idle' | 'syncing' | 'ok' | 'error'>('idle');
+  const [syncHint, setSyncHint] = useState<string>('');
+  const serverHydratedRef = useRef(false);
+  const lastRemoteUpdatedAtRef = useRef<string | null>(null);
+  const lastPushAtRef = useRef<number>(0);
+
   const sensitiveHidden = discreet && Date.now() > revealUntil;
 
   const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), []);
@@ -559,6 +669,69 @@ export default function LadyCenterPage() {
     } catch {}
   }, [mounted]);
 
+  // ---- Remote hydrate (best-effort; never breaks demo)
+  useEffect(() => {
+    if (!mounted) return;
+
+    const ac = new AbortController();
+
+    const hydrate = async () => {
+      setSyncState('syncing');
+      setSyncHint('Loading from server…');
+
+      const r = await apiTry(async () => {
+        const st = await fetchJson<LadyServerState>(LADY_API.state, { method: 'GET', signal: ac.signal, timeoutMs: 12000 });
+        return st;
+      });
+
+      if (!r.ok) {
+        setSyncState('error');
+        setSyncHint('Offline mode');
+        return;
+      }
+
+      const remote = r.data;
+
+      // Avoid noisy overrides if server returns nothing during early setup
+      const remoteSeemsEmpty =
+        !remote ||
+        (!remote.profile &&
+          (!remote.docs || remote.docs.length === 0) &&
+          (!remote.notes || remote.notes.length === 0) &&
+          (!remote.dayLogs || Object.keys(remote.dayLogs).length === 0) &&
+          (!remote.screening || Object.keys(remote.screening).length === 0));
+
+      if (!remoteSeemsEmpty) {
+        setProfile(remote.profile ?? null);
+        setDocs(Array.isArray(remote.docs) ? remote.docs : []);
+        setNotes(Array.isArray(remote.notes) ? remote.notes : []);
+        setScreening(remote.screening ?? {});
+        setDayLogs(remote.dayLogs ?? {});
+
+        // mirror into localStorage for offline resilience
+        try {
+          localStorage.setItem(LS.profile, JSON.stringify(remote.profile ?? null));
+          localStorage.setItem(LS.docs, JSON.stringify(remote.docs ?? []));
+          localStorage.setItem(LS.notes, JSON.stringify(remote.notes ?? []));
+          localStorage.setItem(LS.screening, JSON.stringify(remote.screening ?? {}));
+          localStorage.setItem(LS.daylogs, JSON.stringify(remote.dayLogs ?? {}));
+          localStorage.setItem(LS.legacyDaylogs, JSON.stringify(remote.dayLogs ?? {}));
+        } catch {}
+      }
+
+      serverHydratedRef.current = true;
+      lastRemoteUpdatedAtRef.current = remote.updatedAtISO ?? null;
+
+      setSyncState('ok');
+      setSyncHint('Synced');
+    };
+
+    hydrate();
+
+    return () => ac.abort();
+  }, [mounted]);
+
+  // ---- local persistence
   useEffect(() => {
     if (!mounted) return;
     try {
@@ -570,6 +743,7 @@ export default function LadyCenterPage() {
     if (!mounted) return;
     try {
       if (profile) localStorage.setItem(LS.profile, JSON.stringify(profile));
+      else localStorage.removeItem(LS.profile);
     } catch {}
   }, [profile, mounted]);
 
@@ -610,6 +784,28 @@ export default function LadyCenterPage() {
       localStorage.setItem(LS.series, JSON.stringify(visibleSeries));
     } catch {}
   }, [windowDays, visibleSeries, mounted]);
+
+  // ---- Server push: profile changes (debounced)
+  useEffect(() => {
+    if (!mounted) return;
+    if (!serverHydratedRef.current) return;
+
+    const t = setTimeout(async () => {
+      const now = Date.now();
+      if (now - lastPushAtRef.current < 500) return;
+
+      lastPushAtRef.current = now;
+      await apiTry(async () => {
+        await fetchJson(LADY_API.profile, {
+          method: 'PUT',
+          body: JSON.stringify({ profile }),
+          timeoutMs: 12000,
+        });
+      });
+    }, 550);
+
+    return () => clearTimeout(t);
+  }, [profile, mounted]);
 
   // ---- Prediction from prefs (real logic hook-in)
   const prediction = useMemo(() => {
@@ -828,9 +1024,36 @@ export default function LadyCenterPage() {
     return dayLogs[selectedDay] ?? { date: selectedDay };
   }, [selectedDay, dayLogs]);
 
+  const persistDayLog = useCallback(async (log: DayLog) => {
+    if (!serverHydratedRef.current) return;
+
+    // Try granular endpoint first
+    const r = await apiTry(async () => {
+      await fetchJson(LADY_API.dayLogsUpsert, { method: 'POST', body: JSON.stringify({ log }), timeoutMs: 12000 });
+    });
+
+    if (r.ok) return;
+
+    // Fallback: push full state
+    await apiTry(async () => {
+      const state: LadyServerState = {
+        profile,
+        docs,
+        notes,
+        screening,
+        dayLogs: { ...dayLogs, [log.date]: log },
+        updatedAtISO: nowISO(),
+      };
+      await fetchJson(LADY_API.state, { method: 'PUT', body: JSON.stringify(state), timeoutMs: 15000 });
+    });
+  }, [dayLogs, docs, notes, profile, screening]);
+
   function saveLog(log: DayLog) {
     setDayLogs((prev) => ({ ...prev, [log.date]: log }));
     track('lady_daylog_save', { date: log.date });
+
+    // Fire-and-forget server persist (best effort)
+    void persistDayLog(log);
   }
 
   // symptom heatmap (last 28)
@@ -852,12 +1075,27 @@ export default function LadyCenterPage() {
     track('lady_symptom_toggle', { name, active: !has, date: quickDate });
   };
 
-  // ---- PDF generator
+  // ---- PDF generator (server-first, fallback local)
   const loadPdfOnce = useCallback(async () => {
     if (!mounted) return;
     setPdfLoading(true);
     try {
-      const { blob } = await generateHealthReport('current-user', { fertility: true, ladyCenter: true } as any);
+      let blob: Blob | null = null;
+
+      // 1) Try server PDF endpoint (recommended for production)
+      const serverPdf = await apiTry(async () => {
+        const b = await fetchBlob(LADY_API.reportPdf, { method: 'GET', timeoutMs: 25000 });
+        return b;
+      });
+
+      if (serverPdf.ok) blob = serverPdf.data;
+
+      // 2) fallback: local generator
+      if (!blob) {
+        const r = await generateHealthReport('current-user', { fertility: true, ladyCenter: true } as any);
+        blob = r.blob;
+      }
+
       if (pdfObjectUrlRef.current) {
         try {
           URL.revokeObjectURL(pdfObjectUrlRef.current);
@@ -868,7 +1106,7 @@ export default function LadyCenterPage() {
       setPdfUrl(url);
     } catch (err) {
       console.error('Failed to generate Lady Center PDF', err);
-      showBanner('error', 'Could not generate report (demo).');
+      showBanner('error', 'Could not generate report.');
     } finally {
       setPdfLoading(false);
     }
@@ -995,6 +1233,63 @@ export default function LadyCenterPage() {
     });
   }, [screening]);
 
+  const scheduleScreeningReminders = useCallback(async () => {
+    // This is intentionally generic so it can plug into your existing reminders service.
+    // If your reminders API differs, adjust payload here only.
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    const payload = {
+      kind: 'lady_screening',
+      timezone: tz,
+      items: screeningItems.map((x) => ({
+        key: x.key,
+        title: x.title,
+        cadence: x.cadence,
+        nextDueISO: x.nextDueISO ?? null,
+        lastDoneISO: x.lastDoneISO ?? null,
+      })),
+    };
+
+    const r = await apiTry(async () => {
+      await fetchJson(LADY_API.reminders, { method: 'POST', body: JSON.stringify(payload), timeoutMs: 15000 });
+    });
+
+    if (r.ok) {
+      showBanner('success', 'Reminders scheduled.');
+      track('lady_screening_reminders_scheduled');
+      return;
+    }
+
+    showBanner('info', 'Could not schedule reminders (offline).');
+  }, [screeningItems]);
+
+  const markScreeningDone = useCallback(async (key: string) => {
+    const iso = nowISO();
+    setScreening((s) => ({ ...s, [key]: { lastDoneISO: iso } }));
+    showBanner('success', 'Marked as done.');
+    track('lady_screening_done', { key });
+
+    if (!serverHydratedRef.current) return;
+
+    const r = await apiTry(async () => {
+      await fetchJson(LADY_API.screening, { method: 'POST', body: JSON.stringify({ key, lastDoneISO: iso }), timeoutMs: 12000 });
+    });
+
+    if (r.ok) return;
+
+    // fallback push full state
+    await apiTry(async () => {
+      const state: LadyServerState = {
+        profile,
+        docs,
+        notes,
+        screening: { ...screening, [key]: { lastDoneISO: iso } },
+        dayLogs,
+        updatedAtISO: nowISO(),
+      };
+      await fetchJson(LADY_API.state, { method: 'PUT', body: JSON.stringify(state), timeoutMs: 15000 });
+    });
+  }, [dayLogs, docs, notes, profile, screening]);
+
   // ---- “Today summary”
   const todaySummary = useMemo(() => {
     const mode = profile?.mode ?? 'cycle';
@@ -1054,6 +1349,13 @@ export default function LadyCenterPage() {
     };
   }, [profile, prediction]);
 
+  const pregModePill = useMemo(() => {
+    if (syncState === 'syncing') return <Pill tone="blue">Syncing…</Pill>;
+    if (syncState === 'ok') return <Pill tone="emerald">Synced</Pill>;
+    if (syncState === 'error') return <Pill tone="amber">Offline</Pill>;
+    return <Pill tone="slate">Local</Pill>;
+  }, [syncState]);
+
   return (
     <div className="min-h-screen">
       {/* Background */}
@@ -1070,7 +1372,11 @@ export default function LadyCenterPage() {
             <div className="flex items-center gap-2">
               <div className="h-10 w-10 rounded-2xl bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700 shadow-sm" />
               <div>
-                <h1 className="text-xl font-semibold text-slate-900">Lady Center</h1>
+                <div className="flex items-center gap-2">
+                  <h1 className="text-xl font-semibold text-slate-900">Lady Center</h1>
+                  {pregModePill}
+                  <span className="text-xs text-slate-500">{syncHint}</span>
+                </div>
                 <p className="mt-0.5 text-sm text-slate-600">
                   {profile ? `${modeLabel(profile.mode)} • Private, supportive, actionable` : 'Your cycle, hormones, and screenings—tracked privately.'}
                 </p>
@@ -1534,7 +1840,7 @@ export default function LadyCenterPage() {
                   <div className="flex items-center gap-2">
                     <ChevronDown className={cn('h-4 w-4 transition', showReport ? 'rotate-0' : '-rotate-90')} />
                     <span className="text-sm font-semibold text-slate-900">Report preview</span>
-                    <span className="text-xs text-slate-500">PDF (local generator)</span>
+                    <span className="text-xs text-slate-500">PDF</span>
                   </div>
 
                   <div className="flex items-center gap-2">
@@ -1605,12 +1911,8 @@ export default function LadyCenterPage() {
             <ScreeningChecklist
               items={screeningItems as any}
               formatNiceDate={formatNiceDate}
-              onReminders={() => showBanner('info', 'Wire this into Reminders + Calendar later.')}
-              onMarkDone={(key) => {
-                const iso = nowISO();
-                setScreening((s) => ({ ...s, [key]: { lastDoneISO: iso } }));
-                showBanner('success', 'Marked as done.');
-              }}
+              onReminders={scheduleScreeningReminders}
+              onMarkDone={(key) => void markScreeningDone(key)}
               onBook={() => showBanner('info', 'Route to booking flow + clinician suggestions next.')}
             />
 
@@ -1656,8 +1958,31 @@ export default function LadyCenterPage() {
                   createdISO: nowISO(),
                 };
                 setDocs((d) => [doc, ...d]);
-                showBanner('success', 'Document added (demo).');
+                showBanner('success', 'Document added.');
                 track('lady_doc_add', { fileName });
+
+                // Best-effort persist
+                void (async () => {
+                  if (!serverHydratedRef.current) return;
+
+                  const r = await apiTry(async () => {
+                    await fetchJson(LADY_API.documents, { method: 'POST', body: JSON.stringify({ doc }), timeoutMs: 12000 });
+                  });
+
+                  if (r.ok) return;
+
+                  await apiTry(async () => {
+                    const state: LadyServerState = {
+                      profile,
+                      docs: [doc, ...docs],
+                      notes,
+                      screening,
+                      dayLogs,
+                      updatedAtISO: nowISO(),
+                    };
+                    await fetchJson(LADY_API.state, { method: 'PUT', body: JSON.stringify(state), timeoutMs: 15000 });
+                  });
+                })();
               }}
               onView={() => showBanner('info', 'Open viewer + share/export controls next.')}
               onSummarize={() => showBanner('info', 'Route to clinician summary + AI extraction next.')}
@@ -1665,6 +1990,29 @@ export default function LadyCenterPage() {
                 setDocs((xs) => xs.filter((x) => x.id !== docId));
                 showBanner('success', 'Removed.');
                 track('lady_doc_remove', { id: docId });
+
+                // Best-effort persist
+                void (async () => {
+                  if (!serverHydratedRef.current) return;
+
+                  const r = await apiTry(async () => {
+                    await fetchJson(LADY_API.documents, { method: 'DELETE', body: JSON.stringify({ id: docId }), timeoutMs: 12000 });
+                  });
+
+                  if (r.ok) return;
+
+                  await apiTry(async () => {
+                    const state: LadyServerState = {
+                      profile,
+                      docs: docs.filter((x) => x.id !== docId),
+                      notes,
+                      screening,
+                      dayLogs,
+                      updatedAtISO: nowISO(),
+                    };
+                    await fetchJson(LADY_API.state, { method: 'PUT', body: JSON.stringify(state), timeoutMs: 15000 });
+                  });
+                })();
               }}
             />
 
@@ -1748,6 +2096,11 @@ export default function LadyCenterPage() {
                   showBanner('info', 'Tracking reset.');
                   setOpenSettings(false);
                   track('lady_reset_tracking');
+
+                  // best-effort server reset (push empty profile only)
+                  void apiTry(async () => {
+                    await fetchJson(LADY_API.profile, { method: 'PUT', body: JSON.stringify({ profile: null }), timeoutMs: 12000 });
+                  });
                 }}
               >
                 Reset tracking
@@ -1951,10 +2304,34 @@ export default function LadyCenterPage() {
         >
           <NoteComposer
             onSaved={(text) => {
-              setNotes((n) => [{ id: uid('note'), text, createdISO: nowISO() }, ...n]);
+              const note = { id: uid('note'), text, createdISO: nowISO() };
+              setNotes((n) => [note, ...n]);
               showBanner('success', 'Note added.');
               setOpenAddNote(false);
               track('lady_note_add');
+
+              // best-effort persist
+              void (async () => {
+                if (!serverHydratedRef.current) return;
+
+                const r = await apiTry(async () => {
+                  await fetchJson(LADY_API.notes, { method: 'POST', body: JSON.stringify({ note }), timeoutMs: 12000 });
+                });
+
+                if (r.ok) return;
+
+                await apiTry(async () => {
+                  const state: LadyServerState = {
+                    profile,
+                    docs,
+                    notes: [note, ...notes],
+                    screening,
+                    dayLogs,
+                    updatedAtISO: nowISO(),
+                  };
+                  await fetchJson(LADY_API.state, { method: 'PUT', body: JSON.stringify(state), timeoutMs: 15000 });
+                });
+              })();
             }}
           />
         </Modal>
@@ -1971,9 +2348,15 @@ export default function LadyCenterPage() {
               pathKey={openCarePath.key}
               discreet={discreet}
               onDone={(summary) => {
-                setNotes((n) => [{ id: uid('note'), text: summary, createdISO: nowISO() }, ...n]);
+                const note = { id: uid('note'), text: summary, createdISO: nowISO() };
+                setNotes((n) => [note, ...n]);
                 showBanner('success', 'Saved to notes.');
                 setOpenCarePath(null);
+
+                // best-effort persist
+                void apiTry(async () => {
+                  await fetchJson(LADY_API.notes, { method: 'POST', body: JSON.stringify({ note }), timeoutMs: 12000 });
+                });
               }}
             />
           ) : null}
