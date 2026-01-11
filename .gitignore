@@ -8,3 +8,14 @@ out/
 .DS_Store
 pnpm-lock.yaml
 .vercel/
+# ML / AI models
+models/*.bin
+models/**/*.bin
+
+# Clinical datasets
+packages/clinical-codes/sources/*.RRF
+packages/clinical-codes/sources/**/*.RRF
+
+# Safety: never commit large binaries
+*.bin
+*.RRF
