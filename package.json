@@ -2,35 +2,49 @@
   "name": "ambulant-plus-scaffold",
   "version": "13.0.0-bi",
   "private": true,
+
   "packageManager": "pnpm@10.13.1",
+
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
+
   "engines": {
-    "node": ">=18.12",
+    "node": ">=20.11.0",
     "pnpm": ">=10.13.1"
   },
+
   "scripts": {
     "prebuild": "node scripts/check-env.mjs",
-    "dev:clinician": "pnpm -C apps/clinician-app dev -- -p 3001",
-    "dev:admin": "pnpm -C apps/admin-app dev -- -p 3002",
-    "dev:patient": "pnpm -C apps/patient-app dev -- -p 3000",
-    "dev:mvp": "pnpm -C apps/patient-mvp dev -- -p 3013",
+
+    "dev:clinician": "pnpm --filter clinician-app dev",
+    "dev:admin": "pnpm --filter admin-dashboard dev",
+    "dev:patient": "pnpm --filter patient-app dev",
+
+    "build": "pnpm -r --filter ./apps/... build",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+
     "bridge:ring": "tsx bridges/ring-bridge.ts",
+
     "storybook": "storybook dev -p 6006 -s ./public",
     "build-storybook": "storybook build",
     "test-storybook": "test-storybook"
   },
+
   "dependencies": {
     "@livekit/components-react": "^2.9.14",
     "@livekit/components-styles": "^1.1.6",
     "@prisma/client": "^6.17.1",
     "@react-pdf/renderer": "^4.3.1",
+
     "@react-three/drei": "10.7.6",
     "@react-three/fiber": "8.18.0",
     "@react-three/xr": "2.1.0",
+
     "@tanstack/react-query": "^5.90.2",
+
     "chart.js": "^4.5.0",
     "date-fns": "^4.1.0",
     "date-holidays": "^3.26.1",
@@ -38,44 +52,54 @@
     "downsample-lttb": "^0.0.1",
     "downshift": "^9.0.10",
     "framer-motion": "^12.23.12",
+
     "html2canvas": "^1.4.1",
     "jose": "^6.1.0",
     "jspdf": "^3.0.3",
     "jspdf-autotable": "^5.0.2",
+
     "livekit-server-sdk": "^2.13.2",
     "lucide-react": "^0.544.0",
     "mqtt": "^5.14.0",
+
     "next": "14.1.0",
-    "qrcode": "^1.5.4",
     "react": "18.2.0",
-    "react-chartjs-2": "^5.3.0",
     "react-dom": "18.2.0",
+
+    "react-chartjs-2": "^5.3.0",
     "recharts": "^3.2.0",
-    "smart-ring-js-sdk": "file:vendor/smart-ring-js-sdk",
     "swr": "^2.3.6",
+
     "three": "0.160.0",
     "zod": "^4.0.17"
   },
+
   "devDependencies": {
     "@faker-js/faker": "^9.9.0",
     "@playwright/test": "^1.55.0",
-    "@types/node": "^20.19.13",
-    "@types/react": "^19.2.2",
-    "@types/react-dom": "^19.2.1",
+
+    "@types/node": "18.x",
+    "@types/react": "18.x",
+    "@types/react-dom": "18.x",
+
     "autoprefixer": "^10.4.21",
     "postcss": "^8.5.6",
     "prisma": "^6.17.1",
     "tailwindcss": "^3.4.17",
+
     "tsx": "^4.20.4",
     "typescript": "^5.9.2"
   },
+
   "pnpm": {
     "overrides": {
       "react": "18.2.0",
       "react-dom": "18.2.0",
+
       "@react-three/fiber": "8.18.0",
       "@react-three/drei": "10.7.6",
       "@react-three/xr": "2.1.0",
+
       "three": "0.160.0",
       "livekit-client": "2.15.6"
     }

@@ -1,9 +1,6 @@
 // apps/api-gateway/app/api/analytics/practice/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  type PlanTier,
-  getViewerPlanTier,
-} from '@/lib/planTier';
+import { type PlanTier, getViewerPlanTier } from '@/lib/planTier';
 
 type RangeKey = '30d' | '90d' | '12m';
 
@@ -72,8 +69,6 @@ export type TeamAnalyticsPayload = {
   members: TeamMemberRow[];
 };
 
-/* ---------- Demo builder (replace with real aggregations later) ---------- */
-
 function buildDemoTeamAnalytics(
   planTier: PlanTier,
   practiceName: string,
@@ -96,38 +91,10 @@ function buildDemoTeamAnalytics(
       avgOverrunRatePct: 23,
     },
     roleBreakdown: [
-      {
-        role: 'clinician',
-        label: 'Clinicians',
-        headcount: 5,
-        active: 4,
-        sessions: 310,
-        sharePct: 74,
-      },
-      {
-        role: 'nurse',
-        label: 'Nurses',
-        headcount: 3,
-        active: 3,
-        sessions: 60,
-        sharePct: 14,
-      },
-      {
-        role: 'admin_medical',
-        label: 'Medical admin',
-        headcount: 2,
-        active: 2,
-        sessions: 30,
-        sharePct: 7,
-      },
-      {
-        role: 'admin_non_medical',
-        label: 'Non-medical admin',
-        headcount: 2,
-        active: 2,
-        sessions: 20,
-        sharePct: 5,
-      },
+      { role: 'clinician', label: 'Clinicians', headcount: 5, active: 4, sessions: 310, sharePct: 74 },
+      { role: 'nurse', label: 'Nurses', headcount: 3, active: 3, sessions: 60, sharePct: 14 },
+      { role: 'admin_medical', label: 'Medical admin', headcount: 2, active: 2, sessions: 30, sharePct: 7 },
+      { role: 'admin_non_medical', label: 'Non-medical admin', headcount: 2, active: 2, sessions: 20, sharePct: 5 },
     ],
     punctualityBucketsClinician: [
       { label: 'On time (≤ grace)', sessions: 280, sharePct: 67 },
@@ -202,36 +169,19 @@ function buildDemoTeamAnalytics(
   };
 }
 
-/* ---------- GET /api/analytics/practice ---------- */
-
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const rangeParam = (url.searchParams.get('range') as RangeKey | null) ?? '90d';
-  const range: RangeKey = ['30d', '90d', '12m'].includes(rangeParam)
-    ? rangeParam
-    : '90d';
+  const range: RangeKey = ['30d', '90d', '12m'].includes(rangeParam) ? rangeParam : '90d';
 
   try {
     const viewer = await getViewerPlanTier(req);
-    const payload = buildDemoTeamAnalytics(
-      viewer.planTier,
-      viewer.practiceName,
-      viewer.practiceId,
-    );
+    const payload = buildDemoTeamAnalytics(viewer.planTier, viewer.practiceName, viewer.practiceId);
 
-    // TODO: replace buildDemoTeamAnalytics with real aggregations
-    // using viewer.clinicianId, viewer.practiceId and `range`.
-
-    return NextResponse.json(
-      {
-        ...payload,
-        _range: range,
-      },
-      { status: 200 },
-    );
+    return NextResponse.json({ ...payload, _range: range }, { status: 200 });
   } catch (e: any) {
     console.error('[analytics/practice] GET error', e);
-    // Fallback: still go through the same helper so mapping stays consistent
+
     const fallbackViewer = await getViewerPlanTier(req).catch(() => ({
       planTier: 'host' as PlanTier,
       practiceName: 'Demo Virtual Practice',
@@ -239,17 +189,18 @@ export async function GET(req: NextRequest) {
       clinicianId: 'clin-demo-host',
       planId: 'team' as const,
     }));
+
     const payload = buildDemoTeamAnalytics(
       fallbackViewer.planTier,
       fallbackViewer.practiceName,
       fallbackViewer.practiceId,
     );
+
     return NextResponse.json(
       {
         ...payload,
         _range: '90d' as RangeKey,
-        _warning:
-          'Using demo practice analytics payload (real aggregation not wired yet).',
+        _warning: 'Using demo practice analytics payload (real aggregation not wired yet).',
       },
       { status: 200 },
     );
