@@ -102,7 +102,7 @@ export default function ClinicianSidebar() {
               { href: '/patients', label: 'Patients', icon: Users },
 
               // ✅ requested additions
-              { href: '/practices', label: 'Teams & Practices', icon: Building2 },
+              { href: '/practice', label: 'Teams & Practices', icon: Building2 },
               { href: '/workspaces', label: 'Specialist Workspaces', icon: LayoutGrid },
               { href: '/analytics/me', label: 'Analytics', icon: BarChart3 },
             ],

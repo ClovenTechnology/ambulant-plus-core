@@ -5,10 +5,7 @@ import React from 'react';
 import clsx from 'clsx';
 
 import { keyFor } from './bodyMapConfig';
-import type {
-  Marker,
-  BodyAreaKey,
-} from './types';
+import type { Marker, BodyAreaKey, BodySide } from './types';
 import { BODY_AREA_LABEL } from './types';
 
 function toneClass(tone: Marker['tone'], active: boolean) {
@@ -23,26 +20,69 @@ function toneClass(tone: Marker['tone'], active: boolean) {
   return clsx(base, active && 'ring-4 ring-black/10');
 }
 
+function PinGlyph({ x, y }: { x: number; y: number }) {
+  // simple, consistent “pin” silhouette (SVG path)
+  return (
+    <g transform={`translate(${x}, ${y})`} aria-hidden="true">
+      <path
+        d="M6 0c2.1 0 3.8 1.7 3.8 3.8 0 2.6-2.4 4.5-3.2 5.6L6 11 5.4 9.4C4.6 8.3 2.2 6.4 2.2 3.8 2.2 1.7 3.9 0 6 0Z"
+        fill="white"
+        opacity="0.95"
+      />
+      <circle cx="6" cy="3.8" r="1.1" fill="rgba(2,6,23,0.55)" />
+    </g>
+  );
+}
+
 export default function BodyMapMarkers({
   markers,
   selected,
   currentView,
   onToggle,
+
+  // ✅ optional polish callbacks
+  onRequestView,
+  hoveredKey,
+  pinnedKey,
+  onHoverKey,
+  onLeaveKey,
+  onPinKey,
 }: {
   markers: Marker[];
   selected: BodyAreaKey[];
-  currentView: 'front' | 'back';
+  currentView: BodySide;
   onToggle: (k: BodyAreaKey) => void;
+
+  onRequestView?: (v: BodySide) => void;
+  hoveredKey?: BodyAreaKey | null;
+  pinnedKey?: BodyAreaKey | null;
+  onHoverKey?: (k: BodyAreaKey) => void;
+  onLeaveKey?: (k: BodyAreaKey) => void;
+  onPinKey?: (k: BodyAreaKey) => void;
 }) {
   return (
     <>
       {markers.map((m) => {
         const k = keyFor(m.view, m.area);
         const active = selected.includes(k);
+        const hovered = hoveredKey === k;
+        const pinned = pinnedKey === k;
+
+        const dimmed = m.view !== currentView;
+
+        const activate = () => {
+          // ✅ auto-flip when clicking a hidden marker
+          if (dimmed && onRequestView) onRequestView(m.view);
+
+          // keep selection behavior
+          onToggle(k);
+
+          // clicking also pins/unpins preview (luxury feel)
+          if (onPinKey) onPinKey(k);
+        };
 
         return (
-          <g key={k} opacity={m.view === currentView ? 1 : 0.4}>
-            {/* Connector line */}
+          <g key={k} opacity={dimmed ? 0.4 : 1}>
             <polyline
               points={`${m.x},${m.y} ${m.lx},${m.ly}`}
               stroke="rgba(0,0,0,0.25)"
@@ -50,28 +90,34 @@ export default function BodyMapMarkers({
               fill="none"
             />
 
-            {/* Marker */}
             <g
               role="checkbox"
               tabIndex={0}
               aria-checked={active}
               aria-label={`${BODY_AREA_LABEL[m.area]} (${m.view})`}
-              onClick={() => onToggle(k)}
+              onClick={activate}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  onToggle(k);
+                  activate();
                 }
               }}
+              onMouseEnter={() => onHoverKey?.(k)}
+              onMouseLeave={() => onLeaveKey?.(k)}
               className="cursor-pointer focus:outline-none"
             >
               <circle
                 cx={m.x}
                 cy={m.y}
                 r={16}
-                className={toneClass(m.tone, active)}
+                className={clsx(
+                  toneClass(m.tone, active),
+                  // ✅ subtle hover glow pulse
+                  (hovered || pinned) && !dimmed && 'bm-pulse'
+                )}
               />
 
+              {/* number */}
               <text
                 x={m.x}
                 y={m.y + 5}
@@ -83,6 +129,9 @@ export default function BodyMapMarkers({
               >
                 {m.n}
               </text>
+
+              {/* ✅ pin icon indicator */}
+              {pinned ? <PinGlyph x={m.x + 9} y={m.y - 22} /> : null}
             </g>
           </g>
         );

@@ -32,7 +32,7 @@ type InsightAlert = {
 };
 
 export default function HomePage({ meds, cases }: { meds: any[]; cases: any[] }) {
-  const patientName = 'Ndileka'; // TODO: replace with authenticated user's name
+  const patientName = 'Lilo'; // TODO: replace with authenticated user's name
 
   const [mockVitals] = useState<Vitals & { bpSeries: BpPoint[] }>({
     hr: 72,
@@ -48,7 +48,7 @@ export default function HomePage({ meds, cases }: { meds: any[]; cases: any[] })
   });
 
   const nextAppointment = {
-    when: 'Oct 20, 2025 • 09:30',
+    when: 'Mar 20, 2026 • 09:30',
     with: 'Dr. Mbatha',
     status: 'Upcoming',
   };

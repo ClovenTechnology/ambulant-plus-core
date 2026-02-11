@@ -129,18 +129,17 @@ export default function PatientSignupPage() {
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600">
               Track & stream live vitals (integrated IoMTs) during virtual consultations, manage medications (smart
               scheduler/reminder with eRx sync), book visits (electronic appointment booking), and keep your medical
-              history organized — with privacy-first EHR and care workflows for yourself and loved ones (spouse/children/
-              aged relatives). Best part: zero monthly platform fees.
+              history organized, with privacy-first EHR and care workflows for yourself and loved ones (spouse/children/aged relatives). Best part? Zero monthly platform fees.
             </p>
 
             <div className="mt-6 grid max-w-xl gap-3 sm:grid-cols-2">
               <div className="rounded-3xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
                 <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
                   <ShieldCheck className="h-4 w-4 text-emerald-700" />
-                  Bank-grade records security
+                  Bank-grade data security
                 </div>
                 <div className="mt-1 text-[12px] text-slate-600">
-                  Designed to support secure, reliable clinical reconciliation and continuity of care.
+                  With blockchain-backed built-in EHR, Ambulant+ is designed to support secure, reliable clinical reconciliation and uninterupted continuity of care. Major medical aids accepted.
                 </div>
               </div>
 
@@ -150,7 +149,7 @@ export default function PatientSignupPage() {
                   Quick 1-min sign up · No fees
                 </div>
                 <div className="mt-1 text-[12px] text-slate-600">
-                  Create your account in under a minute. Complete profile details later at your pace.
+                  Create your account in under a minute and access a clinician/clinic instantly. Complete profile details later at your pace. You can access care, use your IoMTs and without mandatory subscription. 
                 </div>
               </div>
             </div>
@@ -167,7 +166,7 @@ export default function PatientSignupPage() {
           {/* Right: form */}
           <section className="order-1 lg:order-2">
             <div className="mx-auto w-full max-w-md">
-              <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-black/[0.06] backdrop-blur">
+              <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-blaack/[0.06] backdrop-blur">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs font-black text-slate-500">1 Minute Man - Quick Patient Sign up</div>

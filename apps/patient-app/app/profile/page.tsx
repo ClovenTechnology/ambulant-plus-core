@@ -182,7 +182,7 @@ export default function Profile() {
 
         <div className="flex-1">
           <h1 className="text-2xl font-semibold">
-            {profile?.name || form.name || "Ndileka Mandela"}
+            {profile?.name || form.name || "Lerato Toto"}
           </h1>
           <div className="text-sm text-gray-500">
             {profile?.age ? `${profile.age} yrs` : ""}{" "}
@@ -238,7 +238,7 @@ export default function Profile() {
             <div>
               <div className="text-sm text-gray-500">Health Passport</div>
               <div className="font-semibold text-lg mt-1">
-                {profile?.name || "Ndileka Mandela"}
+                {profile?.name || "Lerao Toto"}
               </div>
               <div className="text-sm text-gray-600 mt-1">
                 Blood: {profile?.bloodType || "O+"} • Allergies:{" "}

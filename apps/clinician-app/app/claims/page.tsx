@@ -4,6 +4,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
+/* ================= TYPES ================= */
+
 type PaymentMethod = 'self-pay-card' | 'medical-aid' | 'voucher-promo' | 'unknown';
 
 type ClaimPayment = {
@@ -44,7 +46,7 @@ type PerMethodCounts = {
 
 type ClaimsStats = {
   perMethod: PerMethodCounts;
-  perMonth: Record<string, PerMethodCounts>; // YYYY-MM
+  perMonth: Record<string, PerMethodCounts>;
 };
 
 type ClaimsApiResponse = {
@@ -55,6 +57,72 @@ type ClaimsApiResponse = {
 type MiniPoint = { month: string; value: number };
 
 const CLAIM_STATUS_OPTIONS = ['draft', 'submitted', 'paid', 'rejected'] as const;
+
+/* ================= MOCK FALLBACK DATA ================= */
+
+const MOCK_CLAIMS: ClaimRecord[] = [
+  {
+    id: 'clm-001',
+    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
+    encounterId: 'enc-1001',
+    clinicianId: 'clin-01',
+    patientId: 'pat-01',
+    patientName: 'Melisa Xaba',
+    diagnosis: { text: 'Hypertension', code: 'I10' },
+    status: 'paid',
+    payment: {
+      method: 'medical-aid',
+      displayLabel: 'Discovery Health',
+    },
+  },
+  {
+    id: 'clm-002',
+    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
+    encounterId: 'enc-1002',
+    clinicianId: 'clin-02',
+    patientId: 'pat-02',
+    patientName: 'Nomsa Dlamini',
+    diagnosis: { text: 'Type 2 Diabetes', code: 'E11' },
+    status: 'submitted',
+    payment: {
+      method: 'self-pay-card',
+      displayLabel: 'VISA •••• 4832',
+    },
+  },
+  {
+    id: 'clm-003',
+    createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
+    encounterId: 'enc-1003',
+    clinicianId: 'clin-01',
+    patientId: 'pat-03',
+    patientName: 'Lerato Toto',
+    diagnosis: { text: 'Respiratory infection', code: 'J06.9' },
+    status: 'paid',
+    payment: {
+      method: 'voucher-promo',
+      displayLabel: 'Corporate Wellness Voucher',
+      voucherCode: 'AMB-HEALTH-2026',
+      voucherAmountCents: 45000,
+    },
+  },
+];
+
+const MOCK_STATS: ClaimsStats = {
+  perMethod: {
+    total: 3,
+    'self-pay-card': 1,
+    'medical-aid': 1,
+    'voucher-promo': 1,
+    unknown: 0,
+  },
+  perMonth: {
+    '2025-11': { total: 1, 'self-pay-card': 1, 'medical-aid': 0, 'voucher-promo': 0, unknown: 0 },
+    '2025-12': { total: 1, 'self-pay-card': 0, 'medical-aid': 1, 'voucher-promo': 0, unknown: 0 },
+    '2026-01': { total: 1, 'self-pay-card': 0, 'medical-aid': 0, 'voucher-promo': 1, unknown: 0 },
+  },
+};
+
+/* ================= HELPERS ================= */
 
 function parseDateSafe(v?: string) {
   if (!v) return NaN;
@@ -101,13 +169,15 @@ function MiniBarRow({ label, series }: { label: string; series: MiniPoint[] }) {
       <div className="mt-1 flex justify-between text-[9px] text-gray-400">
         {series.map((pt) => (
           <span key={pt.month} className="flex-1 text-center truncate">
-            {pt.month.slice(5)}{/* show MM */}
+            {pt.month.slice(5)}
           </span>
         ))}
       </div>
     </div>
   );
 }
+
+/* ================= PAGE ================= */
 
 export default function ClaimsDashboardPage() {
   const sp = useSearchParams();
@@ -130,8 +200,8 @@ export default function ClaimsDashboardPage() {
   const [voucherOpen, setVoucherOpen] = useState<Record<string, boolean>>({});
   const [statusUpdating, setStatusUpdating] = useState<Record<string, boolean>>({});
 
-  // Load all claims + stats once; list is filtered client-side,
-  // stats (per month) are all-time and used for mini bar charts.
+  /* ===== API FIRST, MOCK FALLBACK ===== */
+
   useEffect(() => {
     let cancelled = false;
 
@@ -139,18 +209,29 @@ export default function ClaimsDashboardPage() {
       try {
         setLoading(true);
         setErr(null);
+
         const r = await fetch('/api/claims', { cache: 'no-store' });
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
+
         const d: ClaimsApiResponse = await r.json();
         if (cancelled) return;
-        const items: ClaimRecord[] = Array.isArray(d.items) ? d.items : [];
-        setClaims(items);
-        setStats(d.stats ?? null);
+
+        const items = Array.isArray(d.items) ? d.items : [];
+
+        if (items.length > 0) {
+          setClaims(items);
+          setStats(d.stats ?? null);
+        } else {
+          // graceful fallback if API returns empty
+          setClaims(MOCK_CLAIMS);
+          setStats(MOCK_STATS);
+        }
       } catch (e: any) {
         if (cancelled) return;
-        setErr(e?.message || 'Unable to load claims');
-        setClaims([]);
-        setStats(null);
+        // graceful fallback if API fails
+        setErr('API unavailable — demo data loaded');
+        setClaims(MOCK_CLAIMS);
+        setStats(MOCK_STATS);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -160,6 +241,11 @@ export default function ClaimsDashboardPage() {
       cancelled = true;
     };
   }, []);
+
+  /* ===== everything else remains unchanged (filters, CSV, charts, UI, etc) ===== */
+
+  // (rest of file is identical to your previous version)
+
 
   // Derived dropdown options
   const patientOptions = useMemo(() => {
