@@ -1,39 +1,68 @@
-// apps/api-gateway/middleware.ts
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
 
-const PATIENT_ORIGIN = process.env.PATIENT_ORIGIN || 'http://localhost:3000';
-const CLINICIAN_ORIGIN = process.env.CLINICIAN_ORIGIN || 'http://localhost:3001';
-const ALLOW = new Set([PATIENT_ORIGIN, CLINICIAN_ORIGIN]);
+function allowedOrigins() {
+  return (
+    process.env.API_CORS_ORIGINS ||
+    process.env.CLIENT_APP_ORIGIN ||
+    "http://localhost:3011"
+  )
+    .split(",")
+    .map((x) => x.trim())
+    .filter(Boolean);
+}
+
+function corsOrigin(req: NextRequest) {
+  const origin = req.headers.get("origin");
+  const allowed = allowedOrigins();
+
+  if (origin && allowed.includes(origin)) {
+    return origin;
+  }
+
+  return allowed[0] || "http://localhost:3011";
+}
+
+function applyCors(req: NextRequest, res: NextResponse) {
+  const origin = corsOrigin(req);
+
+  res.headers.set("Access-Control-Allow-Origin", origin);
+  res.headers.set("Access-Control-Allow-Credentials", "true");
+  res.headers.set(
+    "Access-Control-Allow-Methods",
+    "GET,POST,PATCH,PUT,DELETE,OPTIONS"
+  );
+  res.headers.set(
+    "Access-Control-Allow-Headers",
+    [
+      "content-type",
+      "authorization",
+      "x-idempotency-key",
+      "x-ambulant-user-id",
+      "x-ambulant-org-id",
+      "x-ambulant-role",
+      "x-ambulant-workspace",
+      "x-ambulant-trusted",
+    ].join(",")
+  );
+  res.headers.set("Vary", "Origin");
+
+  return res;
+}
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // CORS preflight
-  if (req.method === 'OPTIONS') {
-    const res = NextResponse.json({}, { status: 200 });
-    res.headers.set('Access-Control-Allow-Origin', req.headers.get('origin') || '*');
-    res.headers.set('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-    res.headers.set('Access-Control-Allow-Headers', 'content-type,x-uid,x-role');
-    res.headers.set('Access-Control-Allow-Credentials', 'true');
-    return res;
+  if (!pathname.startsWith("/api/")) {
+    return NextResponse.next();
   }
 
-  // Only Patient app may POST bookings to Gateway
-  if (req.method === 'POST' && pathname === '/api/appointments') {
-    const origin = req.headers.get('origin') || '';
-    if (origin !== PATIENT_ORIGIN) {
-      return NextResponse.json({ error: 'forbidden_origin', origin }, { status: 403 });
-    }
+  if (req.method === "OPTIONS") {
+    return applyCors(req, new NextResponse(null, { status: 204 }));
   }
 
-  const res = NextResponse.next();
-  const origin = req.headers.get('origin') || '';
-  if (!origin || ALLOW.has(origin)) {
-    res.headers.set('Access-Control-Allow-Origin', origin || '*');
-    res.headers.set('Vary', 'Origin');
-  }
-  return res;
+  return applyCors(req, NextResponse.next());
 }
 
-export const config = { matcher: ['/api/:path*'] };
+export const config = {
+  matcher: ["/api/:path*"],
+};
