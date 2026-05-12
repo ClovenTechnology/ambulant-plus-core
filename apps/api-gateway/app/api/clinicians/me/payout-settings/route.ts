@@ -20,12 +20,12 @@ function normalizePlanId(raw: unknown): PlanTierId {
   if (typeof raw === 'string' && ALLOWED_PLAN_IDS.includes(raw as PlanTierId)) {
     return raw as PlanTierId;
   }
+
   return 'solo';
 }
 
 function normalizeBillingCycle(raw: unknown): BillingCycle {
-  if (raw === 'annual') return 'annual';
-  return 'monthly';
+  return raw === 'annual' ? 'annual' : 'monthly';
 }
 
 function normalizeDispatch(raw: unknown): SmartIdDispatchOption {
@@ -36,7 +36,7 @@ function normalizeDispatch(raw: unknown): SmartIdDispatchOption {
  * Default max admin slots per plan.
  * Keep this logically in sync with UI PLAN_TIERS.
  *
- * Free plan: 0 slots (even though UI shows maxAdminSlots=1).
+ * Free/solo plan: 0 active admin staff slots.
  */
 function defaultMaxAdminSlotsForPlan(plan: PlanTierId): number {
   switch (plan) {
@@ -53,49 +53,78 @@ function defaultMaxAdminSlotsForPlan(plan: PlanTierId): number {
   }
 }
 
-async function getCurrentClinician(req: NextRequest) {
-  const who = readIdentity(req.headers);
-  if (who.role !== 'clinician' || !who.uid) return null;
+function parseMeta(raw: unknown): Record<string, any> {
+  if (!raw) return {};
 
-  // Gateway uses userId = who.uid
-  const clinician = await prisma.clinicianProfile.findUnique({
-    where: { userId: who.uid },
-    include: { metadata: true },
-  });
-  return { clinician, who };
-}
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, any>;
+  }
 
-function loadProfileJson(clinician: any): any {
-  if (clinician?.metadata?.rawProfileJson) {
+  if (typeof raw === 'string') {
     try {
-      return JSON.parse(clinician.metadata.rawProfileJson);
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
     } catch {
       return {};
     }
   }
+
   return {};
+}
+
+async function getCurrentClinician(req: NextRequest) {
+  const who = readIdentity(req.headers);
+
+  if (who.role !== 'clinician' || !who.uid) return null;
+
+  const clinician = await prisma.clinicianProfile.findUnique({
+    where: { userId: who.uid },
+  });
+
+  return { clinician, who };
+}
+
+function loadProfileJson(clinician: any): Record<string, any> {
+  const meta = parseMeta(clinician?.meta);
+  const rawProfileJson = meta.rawProfileJson ?? meta.rawProfile;
+
+  if (!rawProfileJson) return meta;
+
+  if (typeof rawProfileJson === 'object' && !Array.isArray(rawProfileJson)) {
+    return rawProfileJson as Record<string, any>;
+  }
+
+  try {
+    const parsed = JSON.parse(String(rawProfileJson));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function normalizeStaffArray(raw: any): any[] {
   if (!Array.isArray(raw)) return [];
+
   return raw.filter((s) => s && typeof s === 'object');
 }
 
 function countActiveFromStaff(staff: any[]): number {
   return staff.filter((s) => {
-    const status = (s?.status || '').toString().toLowerCase();
+    const status = String(s?.status || '').toLowerCase();
     return status !== 'disabled';
   }).length;
 }
 
-function buildUpdatedMetaData(clinician: any, profileJson: any) {
+function buildUpdatedMeta(clinician: any, profileJson: Record<string, any>) {
+  const currentMeta = parseMeta(clinician?.meta);
+
   return {
+    ...currentMeta,
     rawProfileJson: JSON.stringify(profileJson),
-    hpcsaS3Key: clinician.metadata?.hpcsaS3Key ?? null,
-    hpcsaFileMeta: clinician.metadata?.hpcsaFileMeta ?? null,
-    hpcsaNextRenewalDate: clinician.metadata?.hpcsaNextRenewalDate ?? null,
-    insurerName: clinician.metadata?.insurerName ?? null,
-    insuranceType: clinician.metadata?.insuranceType ?? null,
   };
 }
 
@@ -116,12 +145,14 @@ function buildUpdatedMetaData(clinician: any, profileJson: any) {
 export async function GET(req: NextRequest) {
   try {
     const ctx = await getCurrentClinician(req);
+
     if (!ctx || !ctx.clinician) {
       return json({ ok: false, error: 'unauthorized_or_not_found' }, 401);
     }
+
     const clinician = ctx.clinician;
 
-    let profileJson = loadProfileJson(clinician);
+    const profileJson = loadProfileJson(clinician);
     const payout = profileJson.payoutSettings || {};
     const adminStaffRaw = normalizeStaffArray(profileJson.adminStaff || []);
 
@@ -129,12 +160,12 @@ export async function GET(req: NextRequest) {
     const billingCycle = normalizeBillingCycle(payout.billingCycle);
     const smartIdDispatch = normalizeDispatch(payout.smartIdDispatch);
 
-    // active slots: prefer dynamic count from staff list
     const activeFromStaff = countActiveFromStaff(adminStaffRaw);
     const storedActive =
       typeof payout.activeAdminStaffSlots === 'number'
         ? payout.activeAdminStaffSlots
         : 0;
+
     const activeAdminStaffSlots = activeFromStaff > 0 ? activeFromStaff : storedActive;
 
     const maxAdminStaffSlots =
@@ -142,21 +173,21 @@ export async function GET(req: NextRequest) {
         ? payout.maxAdminStaffSlotsOverride
         : defaultMaxAdminSlotsForPlan(plan);
 
-    // keep payoutSettings in sync
-    profileJson.payoutSettings = {
-      ...payout,
-      planTierId: plan,
-      billingCycle,
-      smartIdDispatch,
-      activeAdminStaffSlots,
+    const nextProfileJson = {
+      ...profileJson,
+      payoutSettings: {
+        ...payout,
+        planTierId: plan,
+        billingCycle,
+        smartIdDispatch,
+        activeAdminStaffSlots,
+      },
     };
-
-    const updatedMeta = buildUpdatedMetaData(clinician, profileJson);
 
     await prisma.clinicianProfile.update({
       where: { id: clinician.id },
       data: {
-        metadata: clinician.metadata ? { update: updatedMeta } : { create: updatedMeta },
+        meta: buildUpdatedMeta(clinician, nextProfileJson),
       },
     });
 
@@ -171,8 +202,12 @@ export async function GET(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('GET /api/clinicians/me/payout-settings error', err);
+
     return json(
-      { ok: false, error: err?.message || 'failed_to_load_payout_settings' },
+      {
+        ok: false,
+        error: err?.message || 'failed_to_load_payout_settings',
+      },
       500,
     );
   }
@@ -189,26 +224,30 @@ export async function GET(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const ctx = await getCurrentClinician(req);
+
     if (!ctx || !ctx.clinician) {
       return json({ ok: false, error: 'unauthorized_or_not_found' }, 401);
     }
-    const clinician = ctx.clinician;
 
+    const clinician = ctx.clinician;
     const body = await req.json().catch(() => ({} as any));
 
-    const planTierId = normalizePlanId(body.planTierId);
-    const billingCycle = normalizeBillingCycle(body.billingCycle);
-    const smartIdDispatch = normalizeDispatch(body.smartIdDispatch);
-
-    let profileJson = loadProfileJson(clinician);
+    const profileJson = loadProfileJson(clinician);
     const prevPayout = profileJson.payoutSettings || {};
     const adminStaffRaw = normalizeStaffArray(profileJson.adminStaff || []);
+
+    const planTierId = normalizePlanId(body.planTierId ?? prevPayout.planTierId);
+    const billingCycle = normalizeBillingCycle(body.billingCycle ?? prevPayout.billingCycle);
+    const smartIdDispatch = normalizeDispatch(
+      body.smartIdDispatch ?? prevPayout.smartIdDispatch,
+    );
 
     const activeFromStaff = countActiveFromStaff(adminStaffRaw);
     const storedActive =
       typeof prevPayout.activeAdminStaffSlots === 'number'
         ? prevPayout.activeAdminStaffSlots
         : 0;
+
     const activeAdminStaffSlots = activeFromStaff > 0 ? activeFromStaff : storedActive;
 
     const maxAdminStaffSlots =
@@ -216,22 +255,22 @@ export async function PUT(req: NextRequest) {
         ? prevPayout.maxAdminStaffSlotsOverride
         : defaultMaxAdminSlotsForPlan(planTierId);
 
-    profileJson.payoutSettings = {
-      ...prevPayout,
-      planTierId,
-      billingCycle,
-      smartIdDispatch,
-      activeAdminStaffSlots,
+    const nextProfileJson = {
+      ...profileJson,
+      payoutSettings: {
+        ...prevPayout,
+        planTierId,
+        billingCycle,
+        smartIdDispatch,
+        activeAdminStaffSlots,
+      },
     };
-
-    const updatedMeta = buildUpdatedMetaData(clinician, profileJson);
 
     const updated = await prisma.clinicianProfile.update({
       where: { id: clinician.id },
       data: {
-        metadata: clinician.metadata ? { update: updatedMeta } : { create: updatedMeta },
+        meta: buildUpdatedMeta(clinician, nextProfileJson),
       },
-      include: { metadata: true },
     });
 
     const outJson = loadProfileJson(updated);
@@ -247,7 +286,9 @@ export async function PUT(req: NextRequest) {
         : defaultMaxAdminSlotsForPlan(curPlan);
 
     const outActive =
-      typeof payout.activeAdminStaffSlots === 'number' ? payout.activeAdminStaffSlots : 0;
+      typeof payout.activeAdminStaffSlots === 'number'
+        ? payout.activeAdminStaffSlots
+        : 0;
 
     return json({
       ok: true,
@@ -260,8 +301,12 @@ export async function PUT(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('PUT /api/clinicians/me/payout-settings error', err);
+
     return json(
-      { ok: false, error: err?.message || 'failed_to_update_payout_settings' },
+      {
+        ok: false,
+        error: err?.message || 'failed_to_update_payout_settings',
+      },
       500,
     );
   }

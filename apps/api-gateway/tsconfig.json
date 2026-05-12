@@ -20,6 +20,63 @@
       "@/src/*": ["src/*"]
     }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "next-env.d.ts",
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "src/**/*.d.ts",
+    ".next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    ".next",
+
+    "src/app",
+    "src/app/**",
+    "src/routes",
+    "src/routes/**",
+
+    "src/devices/wearable/_template.ts",
+    "src/devices/wearable/_template/**",
+
+    "src/devices/wearable/duecare/band",
+    "src/devices/wearable/duecare/band/**",
+    "src/devices/wearable/duecare/earbuds",
+    "src/devices/wearable/duecare/earbuds/**",
+    "src/devices/wearable/duecare/pillow",
+    "src/devices/wearable/duecare/pillow/**",
+    "src/devices/wearable/duecare/watch",
+    "src/devices/wearable/duecare/watch/**",
+    "src/devices/wearable/duecare/glasses",
+    "src/devices/wearable/duecare/glasses/**",
+
+    "src/devices/wearable/samsung",
+    "src/devices/wearable/samsung/**",
+    "src/devices/wearable/garmin",
+    "src/devices/wearable/garmin/**",
+    "src/devices/wearable/fitbit",
+    "src/devices/wearable/fitbit/**",
+    "src/devices/wearable/oura",
+    "src/devices/wearable/oura/**",
+    "src/devices/wearable/apple",
+    "src/devices/wearable/apple/**",
+
+    "src/devices/iomt/duecare/cgm.ts",
+    "src/devices/iomt/duecare/smart-scale.ts",
+    "src/devices/iomt/duecare/scale.ts",
+    "src/devices/iomt/duecare/glucose-monitor.ts",
+
+    "jest.config.ts",
+    "jest.config.js",
+    "**/*.test.ts",
+    "**/*.test.tsx",
+    "**/*.spec.ts",
+    "**/*.spec.tsx",
+    "__tests__",
+    "src/__tests__",
+    "app/**/__tests__",
+    "tests",
+    "test",
+    "coverage"
+  ]
 }

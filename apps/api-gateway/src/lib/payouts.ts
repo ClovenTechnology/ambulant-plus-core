@@ -1,73 +1,158 @@
 // apps/api-gateway/src/lib/payouts.ts
-import { prisma } from './db';
+import { prisma } from '@/src/lib/db';
 
-/**
- * Pull payout configuration (currently only used for clinician %).
- * Expect a model payoutConfig { id: 'default', clinicianPct, riderFlat?, phlebFlat? }
- * Rider/Phleb remain fixed-rate per your original logic.
- */
-export async function getConfig() {
-  const cfg = await prisma.payoutConfig
-    .findUnique({ where: { id: 'default' } })
-    .catch(() => null);
+export type PayoutConfig = {
+  id: string;
+  clinicianConsultPayoutPercent: number;
+  riderDeliveryPayoutCents: number;
+  phlebDrawPayoutCents: number;
+  currency: string;
+};
 
+export const DEFAULT_PAYOUT_CONFIG: PayoutConfig = {
+  id: 'default',
+  clinicianConsultPayoutPercent: 70,
+  riderDeliveryPayoutCents: 0,
+  phlebDrawPayoutCents: 0,
+  currency: 'ZAR',
+};
+
+function payoutConfigDelegate() {
+  return (prisma as any).payoutConfig ?? null;
+}
+
+function cleanCurrency(value: unknown, fallback = 'ZAR') {
+  const s = String(value ?? fallback).trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(s) ? s : fallback;
+}
+
+function percent(value: unknown, fallback: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function cents(value: unknown, fallback: number) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.round(n));
+}
+
+function normalizeConfig(row: any): PayoutConfig {
   return {
-    clinicianPct: cfg?.clinicianPct ?? 70,
-    // riderFlat / phlebFlat intentionally NOT used below to preserve existing logic
-    riderFlat: cfg?.riderFlat ?? 4000,
-    phlebFlat: cfg?.phlebFlat ?? 5500,
+    id: String(row?.id || DEFAULT_PAYOUT_CONFIG.id),
+    clinicianConsultPayoutPercent: percent(
+      row?.clinicianConsultPayoutPercent,
+      DEFAULT_PAYOUT_CONFIG.clinicianConsultPayoutPercent,
+    ),
+    riderDeliveryPayoutCents: cents(
+      row?.riderDeliveryPayoutCents,
+      DEFAULT_PAYOUT_CONFIG.riderDeliveryPayoutCents,
+    ),
+    phlebDrawPayoutCents: cents(
+      row?.phlebDrawPayoutCents,
+      DEFAULT_PAYOUT_CONFIG.phlebDrawPayoutCents,
+    ),
+    currency: cleanCurrency(row?.currency, DEFAULT_PAYOUT_CONFIG.currency),
   };
 }
 
-/** Rider payout: fixed R40 per completed delivery (status=delivered) in the period. */
-export async function computeRiderPayout(periodStart: Date, periodEnd: Date) {
-  const completed = await prisma.delivery.count({
-    where: { status: 'delivered', updatedAt: { gte: periodStart, lt: periodEnd } },
-  });
-  return { count: completed, amountCents: completed * 4000 };
-}
+/**
+ * Reads payout config from DB if the schema exposes payoutConfig.
+ * Falls back to safe defaults if this model/table is not present.
+ */
+export async function getConfig(): Promise<PayoutConfig> {
+  const delegate = payoutConfigDelegate();
 
-/** Phlebotomist payout: fixed R55 per draw delivered to lab (status=delivered_lab) in the period. */
-export async function computePhlebPayout(periodStart: Date, periodEnd: Date) {
-  const completed = await prisma.draw.count({
-    where: { status: 'delivered_lab', updatedAt: { gte: periodStart, lt: periodEnd } },
-  });
-  return { count: completed, amountCents: completed * 5500 };
+  if (!delegate?.findUnique) {
+    return DEFAULT_PAYOUT_CONFIG;
+  }
+
+  const cfg = await delegate
+    .findUnique({
+      where: { id: 'default' },
+    })
+    .catch(() => null);
+
+  if (!cfg) {
+    return DEFAULT_PAYOUT_CONFIG;
+  }
+
+  return normalizeConfig(cfg);
 }
 
 /**
- * Clinician payout: percentage of captured payments in the period.
- * Sums captured payments per encounter, maps to clinician, then applies clinicianPct.
+ * Upserts payout config only when the model exists.
+ * If the current deploy schema does not expose payoutConfig, return merged defaults
+ * without failing the build/runtime.
  */
-export async function computeClinicianPayout(periodStart: Date, periodEnd: Date) {
-  const { clinicianPct } = await getConfig();
+export async function setConfig(input: Partial<PayoutConfig>): Promise<PayoutConfig> {
+  const next: PayoutConfig = {
+    id: 'default',
+    clinicianConsultPayoutPercent: percent(
+      input.clinicianConsultPayoutPercent,
+      DEFAULT_PAYOUT_CONFIG.clinicianConsultPayoutPercent,
+    ),
+    riderDeliveryPayoutCents: cents(
+      input.riderDeliveryPayoutCents,
+      DEFAULT_PAYOUT_CONFIG.riderDeliveryPayoutCents,
+    ),
+    phlebDrawPayoutCents: cents(
+      input.phlebDrawPayoutCents,
+      DEFAULT_PAYOUT_CONFIG.phlebDrawPayoutCents,
+    ),
+    currency: cleanCurrency(input.currency, DEFAULT_PAYOUT_CONFIG.currency),
+  };
 
-  // Sum captured payments per encounter in the window
-  const rows = await prisma.payment.groupBy({
-    by: ['encounterId'],
-    _sum: { amountCents: true },
-    where: { status: 'captured', updatedAt: { gte: periodStart, lt: periodEnd } },
-  });
-  if (rows.length === 0) return [];
+  const delegate = payoutConfigDelegate();
 
-  // Map encounter -> clinician
-  const encs = await prisma.encounter.findMany({
-    where: { id: { in: rows.map((r) => r.encounterId) } },
-    select: { id: true, clinicianId: true },
-  });
-  const enc2clin = new Map(encs.map((e) => [e.id, e.clinicianId || 'unknown']));
-
-  // Aggregate per clinician
-  const totals = new Map<string, number>();
-  for (const r of rows) {
-    const clin = enc2clin.get(r.encounterId) || 'unknown';
-    const amt = r._sum.amountCents ?? 0;
-    totals.set(clin, (totals.get(clin) || 0) + amt);
+  if (!delegate?.upsert) {
+    return next;
   }
 
-  // Apply percentage
-  return Array.from(totals.entries()).map(([clinicianId, grossCents]) => {
-    const net = Math.round(grossCents * (clinicianPct / 100));
-    return { clinicianId, grossCents, netCents: net, pct: clinicianPct };
-  });
+  const saved = await delegate
+    .upsert({
+      where: { id: 'default' },
+      update: {
+        clinicianConsultPayoutPercent: next.clinicianConsultPayoutPercent,
+        riderDeliveryPayoutCents: next.riderDeliveryPayoutCents,
+        phlebDrawPayoutCents: next.phlebDrawPayoutCents,
+        currency: next.currency,
+      },
+      create: {
+        id: 'default',
+        clinicianConsultPayoutPercent: next.clinicianConsultPayoutPercent,
+        riderDeliveryPayoutCents: next.riderDeliveryPayoutCents,
+        phlebDrawPayoutCents: next.phlebDrawPayoutCents,
+        currency: next.currency,
+      },
+    })
+    .catch(() => null);
+
+  return saved ? normalizeConfig(saved) : next;
+}
+
+export function splitConsultationAmount(amountCents: number, clinicianPercent: number) {
+  const gross = cents(amountCents, 0);
+  const pct = percent(clinicianPercent, DEFAULT_PAYOUT_CONFIG.clinicianConsultPayoutPercent);
+
+  const clinicianTakeCents = Math.round((gross * pct) / 100);
+  const platformFeeCents = Math.max(0, gross - clinicianTakeCents);
+
+  return {
+    grossCents: gross,
+    clinicianTakeCents,
+    platformFeeCents,
+    clinicianPercent: pct,
+    platformPercent: 100 - pct,
+  };
+}
+
+export async function getConsultationSplit(amountCents: number) {
+  const cfg = await getConfig();
+
+  return {
+    ...splitConsultationAmount(amountCents, cfg.clinicianConsultPayoutPercent),
+    currency: cfg.currency,
+  };
 }

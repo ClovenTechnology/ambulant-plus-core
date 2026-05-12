@@ -1,9 +1,9 @@
-// apps/api-gateway/app/api/codes/icd10/route.ts
+﻿// apps/api-gateway/app/api/codes/icd10/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import {
   searchICD10,
   loadICD10FromGzip,
-} from '@ambulant/clinical-codes/src/icd10';
+} from '@ambulant/clinical-codes/icd10';
 import { join } from 'node:path';
 
 let loaded = false;

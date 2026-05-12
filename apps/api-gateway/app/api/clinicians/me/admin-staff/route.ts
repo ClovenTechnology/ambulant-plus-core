@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type PlanTierId = 'solo' | 'starter' | 'team' | 'group';
+
 type AdminStaffMember = {
   id: string;
   name: string;
@@ -34,6 +35,7 @@ function normalizePlanId(raw: unknown): PlanTierId {
   if (typeof raw === 'string' && ALLOWED_PLAN_IDS.includes(raw as PlanTierId)) {
     return raw as PlanTierId;
   }
+
   return 'solo';
 }
 
@@ -52,46 +54,94 @@ function defaultMaxAdminSlotsForPlan(plan: PlanTierId): number {
   }
 }
 
-async function getCurrentClinician(req: NextRequest) {
-  const who = readIdentity(req.headers);
-  if (who.role !== 'clinician' || !who.uid) return null;
+function parseMeta(raw: unknown): Record<string, any> {
+  if (!raw) return {};
 
-  const clinician = await prisma.clinicianProfile.findUnique({
-    where: { userId: who.uid },
-    include: { metadata: true },
-  });
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, any>;
+  }
 
-  return clinician;
-}
-
-function loadProfileJson(clinician: any): any {
-  if (clinician?.metadata?.rawProfileJson) {
+  if (typeof raw === 'string') {
     try {
-      return JSON.parse(clinician.metadata.rawProfileJson);
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
     } catch {
       return {};
     }
   }
+
   return {};
+}
+
+function loadProfileJson(clinician: any): any {
+  const meta = parseMeta(clinician?.meta);
+
+  const rawProfileJson = meta.rawProfileJson ?? meta.rawProfile;
+
+  if (!rawProfileJson) return meta;
+
+  if (typeof rawProfileJson === 'object' && !Array.isArray(rawProfileJson)) {
+    return rawProfileJson;
+  }
+
+  try {
+    const parsed = JSON.parse(String(rawProfileJson));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function buildUpdatedMeta(clinician: any, profileJson: any) {
+  const currentMeta = parseMeta(clinician?.meta);
+
+  return {
+    ...currentMeta,
+    rawProfileJson: JSON.stringify(profileJson),
+  };
+}
+
+async function getCurrentClinician(req: NextRequest) {
+  const who = readIdentity(req.headers);
+
+  if (who.role !== 'clinician' || !who.uid) return null;
+
+  return prisma.clinicianProfile.findUnique({
+    where: { userId: who.uid },
+  });
 }
 
 function normalizeStaffArray(raw: any): AdminStaffMember[] {
   if (!Array.isArray(raw)) return [];
+
   return raw
     .map((s) => {
-      const id = String(s.id || '');
+      const id = String(s.id || '').trim();
       const name = String(s.name || '').trim();
       const email = String(s.email || '').trim();
+
       if (!id || !name || !email) return null;
 
-      const type: 'medical' | 'non-medical' = s.type === 'medical' ? 'medical' : 'non-medical';
-      const role = s.role ? String(s.role).trim() : null;
-      const phone = s.phone ? String(s.phone).trim() : null;
-      const statusRaw = (s.status || '').toString().toLowerCase();
-      const status: AdminStaffMember['status'] =
-        statusRaw === 'disabled' ? 'disabled' : statusRaw === 'invited' ? 'invited' : 'active';
+      const statusRaw = String(s.status || 'active').toLowerCase();
 
-      return { id, name, email, type, role, phone, status };
+      return {
+        id,
+        name,
+        email,
+        phone: s.phone ? String(s.phone).trim() : null,
+        type: s.type === 'medical' ? 'medical' : 'non-medical',
+        role: s.role ? String(s.role).trim() : null,
+        status:
+          statusRaw === 'disabled'
+            ? 'disabled'
+            : statusRaw === 'invited'
+              ? 'invited'
+              : 'active',
+      };
     })
     .filter(Boolean) as AdminStaffMember[];
 }
@@ -100,26 +150,16 @@ function countActive(staff: AdminStaffMember[]): number {
   return staff.filter((s) => s.status !== 'disabled').length;
 }
 
-function buildUpdatedMetaData(clinician: any, profileJson: any) {
-  return {
-    rawProfileJson: JSON.stringify(profileJson),
-    hpcsaS3Key: clinician.metadata?.hpcsaS3Key ?? null,
-    hpcsaFileMeta: clinician.metadata?.hpcsaFileMeta ?? null,
-    hpcsaNextRenewalDate: clinician.metadata?.hpcsaNextRenewalDate ?? null,
-    insurerName: clinician.metadata?.insurerName ?? null,
-    insuranceType: clinician.metadata?.insuranceType ?? null,
-  };
-}
-
 // GET /api/clinicians/me/admin-staff
 export async function GET(req: NextRequest) {
   try {
     const clinician = await getCurrentClinician(req);
+
     if (!clinician) {
       return json({ ok: false, error: 'unauthorized_or_not_found' }, 401);
     }
 
-    let profileJson = loadProfileJson(clinician);
+    const profileJson = loadProfileJson(clinician);
     const payout = profileJson.payoutSettings || {};
     const plan = normalizePlanId(payout.planTierId);
 
@@ -131,19 +171,16 @@ export async function GET(req: NextRequest) {
         ? payout.maxAdminStaffSlotsOverride
         : defaultMaxAdminSlotsForPlan(plan);
 
-    // sync active count back into payoutSettings
     profileJson.payoutSettings = {
       ...payout,
       planTierId: plan,
       activeAdminStaffSlots: activeSlots,
     };
 
-    const updatedMetaData = buildUpdatedMetaData(clinician, profileJson);
-
     await prisma.clinicianProfile.update({
       where: { id: clinician.id },
       data: {
-        metadata: clinician.metadata ? { update: updatedMetaData } : { create: updatedMetaData },
+        meta: buildUpdatedMeta(clinician, profileJson),
       },
     });
 
@@ -157,6 +194,7 @@ export async function GET(req: NextRequest) {
     return json(resp);
   } catch (err: any) {
     console.error('GET /api/clinicians/me/admin-staff error', err);
+
     return json(
       { ok: false, error: err?.message || 'failed_to_load_admin_staff' },
       500,
@@ -168,22 +206,25 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const clinician = await getCurrentClinician(req);
+
     if (!clinician) {
       return json({ ok: false, error: 'unauthorized_or_not_found' }, 401);
     }
 
     const body = await req.json().catch(() => ({} as any));
+
     const name = String(body.name || '').trim();
     const email = String(body.email || '').trim();
     const phone = body.phone ? String(body.phone).trim() : null;
     const role = body.role ? String(body.role).trim() : null;
-    const type: 'medical' | 'non-medical' = body.type === 'medical' ? 'medical' : 'non-medical';
+    const type: 'medical' | 'non-medical' =
+      body.type === 'medical' ? 'medical' : 'non-medical';
 
     if (!name || !email) {
       return json({ ok: false, error: 'name_and_email_required' }, 400);
     }
 
-    let profileJson = loadProfileJson(clinician);
+    const profileJson = loadProfileJson(clinician);
     const payout = profileJson.payoutSettings || {};
     const plan = normalizePlanId(payout.planTierId);
 
@@ -219,12 +260,10 @@ export async function POST(req: NextRequest) {
       activeAdminStaffSlots: activeSlots,
     };
 
-    const updatedMetaData = buildUpdatedMetaData(clinician, profileJson);
-
     await prisma.clinicianProfile.update({
       where: { id: clinician.id },
       data: {
-        metadata: clinician.metadata ? { update: updatedMetaData } : { create: updatedMetaData },
+        meta: buildUpdatedMeta(clinician, profileJson),
       },
     });
 
@@ -236,8 +275,9 @@ export async function POST(req: NextRequest) {
     });
   } catch (err: any) {
     console.error('POST /api/clinicians/me/admin-staff error', err);
+
     return json(
-      { ok: false, error: err?.message || 'failed_to_create_admin_staff' },
+      { ok: false, error: err?.message || 'failed_to_add_admin_staff' },
       500,
     );
   }

@@ -1,7 +1,7 @@
-//apps/api-gateway/app/api/admin/clinicians/onboarding/notify-dispatch/route.ts
+// apps/api-gateway/app/api/admin/clinicians/onboarding/notify-dispatch/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { sendEmail, sendSms } from '@/src/lib/mailer';
+import { sendEmail } from '@/src/lib/mailer';
 import { verifyAdminRequest } from '../../../../utils/auth';
 
 import {
@@ -25,6 +25,38 @@ function normalizeKind(v: any): EmailDispatchItem['kind'] {
   if (s.includes('merch') || s.includes('hoodie') || s.includes('shirt')) return 'merch';
   if (s.includes('paper') || s.includes('doc')) return 'paperwork';
   return 'other';
+}
+
+async function sendSms(to: string, body: string) {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const from = process.env.TWILIO_FROM;
+
+  if (!accountSid || !authToken || !from) {
+    throw new Error('twilio_sms_not_configured');
+  }
+
+  const endpoint = `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`;
+  const params = new URLSearchParams();
+  params.set('To', to);
+  params.set('From', from);
+  params.set('Body', body);
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${accountSid}:${authToken}`).toString('base64')}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: params.toString(),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`twilio_sms_failed_${res.status}${text ? `_${text.slice(0, 160)}` : ''}`);
+  }
+
+  return res.json().catch(() => ({ ok: true }));
 }
 
 /**
@@ -128,11 +160,12 @@ export async function POST(req: NextRequest) {
         smsSent.error = 'no_phone_on_profile';
       } else {
         const bits: string[] = [];
-        bits.push(`Ambulant+: Your starter kit is on the way.`);
+        bits.push('Ambulant+: Your starter kit is on the way.');
         bits.push(`Dispatch ID: ${dispatch.id}`);
         if (dispatch.courier) bits.push(`Courier: ${dispatch.courier}`);
         if (dispatch.trackingCode) bits.push(`Tracking: ${dispatch.trackingCode}`);
         if (dispatch.trackingUrl) bits.push(`Track: ${dispatch.trackingUrl}`);
+
         try {
           await sendSms(clinicianPhone, bits.join(' | '));
           smsSent.ok = true;

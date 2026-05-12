@@ -5,32 +5,73 @@ import { prisma } from '@/src/lib/db';
 
 export const dynamic = 'force-dynamic';
 
+type CarePortRole = 'admin' | 'rider' | 'patient' | 'clinician' | 'anonymous';
+
+function roleOf(who: ReturnType<typeof readIdentity>): CarePortRole {
+  return String((who as any)?.role || 'anonymous') as CarePortRole;
+}
+
+function uidOf(who: ReturnType<typeof readIdentity>): string {
+  return String((who as any)?.uid || '');
+}
+
+function sseWriter(controller: ReadableStreamDefaultController<Uint8Array>) {
+  return {
+    write(chunk: Uint8Array) {
+      controller.enqueue(chunk);
+    },
+  };
+}
+
 export async function GET(req: NextRequest) {
   const orderId = req.nextUrl.searchParams.get('orderId') || '';
-  if (!orderId) return new Response('orderId required', { status: 400 });
 
-  // Authorize viewer against the delivery record
+  if (!orderId) {
+    return new Response('orderId required', { status: 400 });
+  }
+
   const who = readIdentity(req.headers);
-  const delivery = await prisma.delivery.findFirst({ where: { orderId } });
-  if (!delivery) return new Response('not found', { status: 404 });
+  const role = roleOf(who);
+  const uid = uidOf(who);
+
+  const delivery = await prisma.delivery.findFirst({
+    where: { orderId },
+  });
+
+  if (!delivery) {
+    return new Response('not found', { status: 404 });
+  }
 
   const allowed =
-    who.role === 'admin' ||
-    (who.role === 'patient' && who.uid === delivery.patientId) ||
-    (who.role === 'clinician' && who.uid === delivery.clinicianId) ||
-    (who.role === 'rider' && who.uid === delivery.riderId);
+    role === 'admin' ||
+    (role === 'patient' && uid === delivery.patientId) ||
+    (role === 'clinician' && uid === delivery.clinicianId) ||
+    (role === 'rider' && uid === delivery.riderId);
 
-  if (!allowed) return new Response('forbidden', { status: 403 });
+  if (!allowed) {
+    return new Response('forbidden', { status: 403 });
+  }
+
+  const encoder = new TextEncoder();
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const writer = controller as unknown as ReadableStreamDefaultWriter<Uint8Array>;
-      const remove = addClient(orderId, { id: crypto.randomUUID(), res: writer });
-      const enc = new TextEncoder();
-      writer.write(enc.encode(': connected\n\n'));
-      (req.signal as any).addEventListener('abort', () => {
+      const writer = sseWriter(controller);
+      const remove = addClient(orderId, {
+        id: crypto.randomUUID(),
+        res: writer,
+      });
+
+      writer.write(encoder.encode(': connected\n\n'));
+
+      req.signal.addEventListener('abort', () => {
         remove();
-        controller.close();
+
+        try {
+          controller.close();
+        } catch {
+          // Stream may already be closed.
+        }
       });
     },
   });

@@ -1,77 +1,193 @@
-// Single import surface for device inventory.
-// Add new devices by exporting them here; managers discover via these arrays.
+// apps/api-gateway/src/devices/registry.ts
+// Production device registry.
+// Supported device scope only:
+// 1. Health Monitor
+// 2. Digital Stethoscope
+// 3. HD Otoscope
+// 4. NexRing
 
-import type { WearableDevice, IoMTDevice } from './types';
+export type DeviceTransport = 'ble' | 'mqtt' | 'http' | 'manual';
 
-// ==== Wearables (Apple) ====
-import AppleSeries9 from './wearable/apple/smart-watch/series-9';
-import AppleSeries10 from './wearable/apple/smart-watch/series-10';
-import AppleSeries11 from './wearable/apple/smart-watch/series-11';
-import AppleUltra from './wearable/apple/smart-watch/ultra';
-import AppleUltra2 from './wearable/apple/smart-watch/ultra-2';
-import AppleUltra3 from './wearable/apple/smart-watch/ultra-3';
-import AppleSE3 from './wearable/apple/smart-watch/se-3';
+export type DeviceModality =
+  | 'monitor'
+  | 'stethoscope'
+  | 'otoscope'
+  | 'ring';
 
-// Samsung
-import GalaxyWatch8 from './wearable/samsung/smart-watch/galaxy-watch-8';
-import GalaxyWatch8Classic from './wearable/samsung/smart-watch/galaxy-watch-8-classic';
-import GalaxyFit3 from './wearable/samsung/band/galaxy-fit-3';
+export type SupportedDeviceInfo = {
+  slug: string;
+  key: string;
+  label: string;
+  vendor: string;
+  model: string;
+  modality: DeviceModality;
+  transport: DeviceTransport;
+  aliases: string[];
+};
 
-// Google
-import PixelWatch3 from './wearable/google/smart-watch/pixel-watch-3';
-import PixelWatch4 from './wearable/google/smart-watch/pixel-watch-4';
+export type DeviceMapper = {
+  key: string;
+  device: SupportedDeviceInfo;
+  normalizePayload: (payload: any) => any;
+  map: (payload: any) => any;
+  parse: (payload: any) => any;
+};
 
-// Fitbit
-import FitbitCharge6 from './wearable/fitbit/band/charge-6';
-import FitbitLuxe from './wearable/fitbit/band/luxe';
-import FitbitInspire3 from './wearable/fitbit/band/inspire-3';
+function normalizePayload(device: SupportedDeviceInfo, payload: any) {
+  const now = new Date().toISOString();
 
-// Garmin (subset you listed; add others as needed the same way)
-import GarminVenuSq2 from './wearable/garmin/smart-watch/venu-sq-2';
-import GarminVenu3 from './wearable/garmin/smart-watch/venu-3';
-import GarminVenu3s from './wearable/garmin/smart-watch/venu-3s';
-import GarminForerunner55 from './wearable/garmin/smart-watch/forerunner-55';
-import GarminForerunner255 from './wearable/garmin/smart-watch/forerunner-255';
-import GarminForerunner265 from './wearable/garmin/smart-watch/forerunner-265';
-import GarminFenix6 from './wearable/garmin/smart-watch/fenix-6';
-import GarminFenix7 from './wearable/garmin/smart-watch/fenix-7';
-import GarminFenix7x from './wearable/garmin/smart-watch/fenix-7x';
-import GarminFenix7Pro from './wearable/garmin/smart-watch/fenix-7-pro';
-import GarminFenix8 from './wearable/garmin/smart-watch/fenix-8';
-import GarminFenixE from './wearable/garmin/smart-watch/fenix-e';
-import GarminFenix8Pro from './wearable/garmin/smart-watch/fenix-8-pro';
-import GarminInstinct2 from './wearable/garmin/smart-watch/instinct-2';
-import GarminInstinct2s from './wearable/garmin/smart-watch/instinct-2s';
+  return {
+    deviceKey: device.key,
+    deviceSlug: device.slug,
+    deviceLabel: device.label,
+    vendor: device.vendor,
+    model: device.model,
+    modality: device.modality,
+    transport: device.transport,
+    receivedAt: now,
+    payload: payload ?? {},
+  };
+}
 
-// Oura
-import OuraGen3 from './wearable/oura/smart-ring/gen-3';
-import OuraGen4 from './wearable/oura/smart-ring/gen-4';
-import OuraGen5 from './wearable/oura/smart-ring/gen-5';
+function makeMapper(device: SupportedDeviceInfo): DeviceMapper {
+  const mapper = {
+    key: device.key,
+    device,
+    normalizePayload: (payload: any) => normalizePayload(device, payload),
+    map: (payload: any) => normalizePayload(device, payload),
+    parse: (payload: any) => normalizePayload(device, payload),
+  };
 
-// DueCare wearables
-import DueCareSleepEarbuds from './wearable/duecare/earbuds/sleep-earbuds';
-import DueCareSmartPillow from './wearable/duecare/pillow/smart-pillow';
-import DueCareNexBand from './wearable/duecare/band/nexband';
-import DueCareNexRing from './wearable/duecare/smart-ring/nexring';
-import DueCareNexRingEcg from './wearable/duecare/smart-ring/nexring-ecg';
+  return mapper;
+}
 
-// ==== IoMT (DueCare) ====
-import DueCareHealthMonitor from './iomt/duecare/health-monitor';
-import DueCareStethoscope from './iomt/duecare/stethoscope';
-import DueCareOtoscope from './iomt/duecare/otoscope';
-import DueCareSmartScale from './iomt/duecare/smart-scale';
-import DueCareCGM from './iomt/duecare/cgm';
-
-export const wearableInventory: WearableDevice[] = [
-  new AppleSeries9(), new AppleSeries10(), new AppleSeries11(), new AppleUltra(), new AppleUltra2(), new AppleUltra3(), new AppleSE3(),
-  new GalaxyWatch8(), new GalaxyWatch8Classic(), new GalaxyFit3(),
-  new PixelWatch3(), new PixelWatch4(),
-  new FitbitCharge6(), new FitbitLuxe(), new FitbitInspire3(),
-  new GarminVenuSq2(), new GarminVenu3(), new GarminVenu3s(), new GarminForerunner55(), new GarminForerunner255(), new GarminForerunner265(), new GarminFenix6(), new GarminFenix7(), new GarminFenix7x(), new GarminFenix7Pro(), new GarminFenix8(), new GarminFenixE(), new GarminFenix8Pro(), new GarminInstinct2(), new GarminInstinct2s(),
-  new OuraGen3(), new OuraGen4(), new OuraGen5(),
-  new DueCareSleepEarbuds(), new DueCareSmartPillow(), new DueCareNexBand(), new DueCareNexRing(), new DueCareNexRingEcg(),
+export const supportedDevices: SupportedDeviceInfo[] = [
+  {
+    slug: 'duecare.health-monitor',
+    key: 'health-monitor',
+    label: 'Health Monitor',
+    vendor: 'DueCare',
+    model: 'DueMonitor',
+    modality: 'monitor',
+    transport: 'ble',
+    aliases: [
+      'health-monitor',
+      'health_monitor',
+      'duecare.health-monitor',
+      'duecare.vitals-360',
+      'DueMonitor',
+      'HM_DEVICE_ID',
+    ],
+  },
+  {
+    slug: 'duecare.stethoscope',
+    key: 'digital-stethoscope',
+    label: 'Digital Stethoscope',
+    vendor: 'DueCare',
+    model: 'DueScope',
+    modality: 'stethoscope',
+    transport: 'ble',
+    aliases: [
+      'digital-stethoscope',
+      'digital_stethoscope',
+      'stethoscope',
+      'duecare.stethoscope',
+      'DueScope',
+      'STETH_DEVICE_ID',
+    ],
+  },
+  {
+    slug: 'duecare.otoscope',
+    key: 'hd-otoscope',
+    label: 'HD Otoscope',
+    vendor: 'DueCare',
+    model: 'DueOto',
+    modality: 'otoscope',
+    transport: 'ble',
+    aliases: [
+      'hd-otoscope',
+      'hd_otoscope',
+      'otoscope',
+      'duecare.otoscope',
+      'DueOto',
+      'OTO_DEVICE_ID',
+    ],
+  },
+  {
+    slug: 'duecare.nexring',
+    key: 'nexring',
+    label: 'NexRing',
+    vendor: 'DueCare',
+    model: 'NexRing',
+    modality: 'ring',
+    transport: 'ble',
+    aliases: [
+      'nexring',
+      'nex-ring',
+      'duecare.nexring',
+      'DueRing',
+      'NexRing',
+      'RING_DEVICE_ID',
+    ],
+  },
 ];
 
-export const iomtInventory: IoMTDevice[] = [
-  new DueCareHealthMonitor(), new DueCareStethoscope(), new DueCareOtoscope(), new DueCareSmartScale(), new DueCareCGM(),
-];
+export const wearableInventory = supportedDevices.filter((device) => device.modality === 'ring');
+export const iomtInventory = supportedDevices.filter((device) => device.modality !== 'ring');
+
+const mappers = supportedDevices.map(makeMapper);
+
+function normalizeKey(value: unknown) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+export function getMapperByKey(key: string | null | undefined): DeviceMapper | null {
+  const wanted = normalizeKey(key);
+  if (!wanted) return null;
+
+  return (
+    mappers.find((mapper) => {
+      const device = mapper.device;
+      return (
+        normalizeKey(device.key) === wanted ||
+        normalizeKey(device.slug) === wanted ||
+        normalizeKey(device.model) === wanted ||
+        device.aliases.some((alias) => normalizeKey(alias) === wanted)
+      );
+    }) ?? null
+  );
+}
+
+export function getMapperFromLegacyVendor(vendor: string | null | undefined, model?: string | null): DeviceMapper | null {
+  const vendorKey = normalizeKey(vendor);
+  const modelKey = normalizeKey(model);
+
+  if (modelKey) {
+    const byModel = getMapperByKey(modelKey);
+    if (byModel) return byModel;
+  }
+
+  if (!vendorKey) return null;
+
+  if (vendorKey.includes('health') || vendorKey.includes('monitor') || vendorKey.includes('vitals')) {
+    return getMapperByKey('health-monitor');
+  }
+
+  if (vendorKey.includes('steth')) {
+    return getMapperByKey('digital-stethoscope');
+  }
+
+  if (vendorKey.includes('oto')) {
+    return getMapperByKey('hd-otoscope');
+  }
+
+  if (vendorKey.includes('ring') || vendorKey.includes('nex')) {
+    return getMapperByKey('nexring');
+  }
+
+  return null;
+}
+
+export function listSupportedDevices() {
+  return supportedDevices;
+}

@@ -371,11 +371,11 @@ export async function GET(req: NextRequest) {
 
       let matchesProvince = true;
       if (provinceFilter && provinceFilter !== 'All') {
-        // For now, we match province filter against patient.city or postalCode.
-        matchesProvince =
-          (p?.city && p.city === provinceFilter) ||
-          (p?.postalCode && p.postalCode === provinceFilter);
-      }
+  // For now, we match province filter against patient.city or postalCode.
+  matchesProvince =
+    Boolean(p?.city && p.city === provinceFilter) ||
+    Boolean(p?.postalCode && p.postalCode === provinceFilter);
+}
 
       return matchesAge && matchesGender && matchesProvince;
     });

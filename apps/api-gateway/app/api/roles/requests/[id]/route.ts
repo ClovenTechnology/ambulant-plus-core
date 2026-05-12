@@ -20,10 +20,17 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
       include: { roles: true },
     });
 
-    if (body.status === 'approved' && current.userId && current.roles.length) {
+    if (body.status === 'approved') {
+      if (!current.userId) {
+        throw new Error('role_request_missing_userId');
+      }
+
       // Grant roles to user
       await tx.userRole.createMany({
-        data: current.roles.map(r => ({ userId: current.userId!, roleId: r.roleId })),
+        data: current.roles.map((r) => ({
+          adminUserId: current.userId!,
+          roleId: r.roleId,
+        })),
         skipDuplicates: true,
       });
     }

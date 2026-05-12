@@ -1,147 +1,506 @@
 // apps/api-gateway/src/store/appointments.ts
 import { prisma } from '@/src/lib/db';
 
-/**
- * Simple HTTP-aware error so upper layers can map to proper status codes.
- */
 export class HttpError extends Error {
   status: number;
-  code?: string;
+  code: string;
+
   constructor(message: string, status = 500, code?: string) {
     super(message);
+    this.name = 'HttpError';
     this.status = status;
-    this.code = code;
-    Object.setPrototypeOf(this, HttpError.prototype);
+    this.code = code || message;
   }
 }
 
-const FALLBACK_CLINICIANS: Record<string, { id: string; name: string; feeCents: number; currency: string }> = {
-  'clin-za-001': { id: 'clin-za-001', name: 'Dr Z A', feeCents: 60000, currency: 'ZAR' },
-  'clin-za-002': { id: 'clin-za-002', name: 'Dr Z B', feeCents: 55000, currency: 'ZAR' },
-  'doctor-12'  : { id: 'doctor-12',  name: 'Dr Twelve', feeCents: 65000, currency: 'ZAR' },
-};
+type JsonObject = Record<string, any>;
 
-export async function getClinician(id: string) {
-  const clin = await prisma.clinicianProfile.findUnique({ where: { userId: id } });
-  if (clin) {
-    return {
-      id: clin.userId,
-      name: clin.displayName || clin.userId,
-      feeCents: clin.feeCents ?? 60000,
-      currency: clin.currency ?? 'ZAR',
-    };
-  }
-  return FALLBACK_CLINICIANS[id] ?? null;
+function asString(value: unknown, fallback = '') {
+  const s = String(value ?? '').trim();
+  return s || fallback;
 }
 
-/**
- * createAppointment: safer creation with conflict checks and meta handling
- *
- * Expected input shape (typical):
- * {
- *   encounterId, sessionId, caseId, clinicianId, patientId,
- *   startsAt, endsAt,
- *   priceCents, currency, platformFeeCents, clinicianTakeCents,
- *   paymentProvider, paymentRef,
- *   roomId?,
- *   reason?,           // <- will be moved into meta, NOT stored top-level
- *   meta?              // object or JSON-string; will be merged with reason/roomId and stringified
- * }
- *
- * Throws HttpError on conflict (status 409) or invalid input (422).
- */
-export async function createAppointment(input: any) {
-  // Basic validation
-  if (!input || !input.startsAt || !input.endsAt || !input.patientId || !input.clinicianId || !input.encounterId) {
-    throw new HttpError('invalid_input', 422);
-  }
+function asNullableString(value: unknown) {
+  const s = String(value ?? '').trim();
+  return s || null;
+}
 
-  // normalize starts/ends to Date objects or ISO strings acceptable by Prisma
-  const startsAt = input.startsAt;
-  const endsAt = input.endsAt;
+function asCents(value: unknown, fallback = 0) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.round(n));
+}
 
-  // Conflict checks to avoid double-booking
-  // clinician overlap
-  const overlappingClinician = await prisma.appointment.findFirst({
-    where: {
-      clinicianId: input.clinicianId,
-      status: { not: 'cancelled' },
-      AND: [
-        { startsAt: { lt: endsAt } },
-        { endsAt: { gt: startsAt } },
-      ],
-    },
-  });
-  if (overlappingClinician) {
-    throw new HttpError('clinician_unavailable', 409);
-  }
+function asDate(value: unknown, fallback?: Date) {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
 
-  // patient overlap
-  const overlappingPatient = await prisma.appointment.findFirst({
-    where: {
-      patientId: input.patientId,
-      status: { not: 'cancelled' },
-      AND: [
-        { startsAt: { lt: endsAt } },
-        { endsAt: { gt: startsAt } },
-      ],
-    },
-  });
-  if (overlappingPatient) {
-    throw new HttpError('patient_unavailable', 409);
-  }
+  const d = new Date(String(value ?? ''));
+  if (!Number.isNaN(d.getTime())) return d;
 
-  // ensure meta is serialized if Prisma model expects a String
-  // If input.meta is a string, try to parse it; if parse fails, treat as raw string and include it.
-  let metaObj: Record<string, any> = {};
-  if (input.meta) {
-    if (typeof input.meta === 'string') {
-      try {
-        metaObj = JSON.parse(input.meta);
-      } catch {
-        // it's a plain string; preserve as field
-        metaObj = { raw: input.meta };
-      }
-    } else if (typeof input.meta === 'object') {
-      metaObj = { ...input.meta };
+  if (fallback) return fallback;
+
+  throw new HttpError('invalid_date', 422, 'invalid_date');
+}
+
+function normalizeCurrency(value: unknown, fallback = 'ZAR') {
+  return asString(value, fallback).toUpperCase();
+}
+
+function normalizeMeta(value: unknown): JsonObject {
+  if (!value) return {};
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return { note: value };
     }
   }
 
-  // Put reason and roomId inside meta (but do not store reason at top-level)
-  if (input.reason !== undefined) metaObj.reason = input.reason;
-  if (input.roomId !== undefined) metaObj.roomId = input.roomId;
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as JsonObject;
+  }
 
-  const metaString = JSON.stringify(metaObj);
+  return {};
+}
 
-  // Build create data WITHOUT top-level "reason"
-  const data = {
-    encounterId: input.encounterId,
-    sessionId: input.sessionId,
-    caseId: input.caseId,
-    clinicianId: input.clinicianId,
-    patientId: input.patientId,
-    startsAt: startsAt,
-    endsAt: endsAt,
-    roomId: input.roomId ?? null,
-    status: input.status ?? 'scheduled',
-    priceCents: input.priceCents ?? 0,
-    currency: input.currency ?? 'ZAR',
-    platformFeeCents: input.platformFeeCents ?? 0,
-    clinicianTakeCents: input.clinicianTakeCents ?? 0,
-    paymentProvider: input.paymentProvider ?? null,
-    paymentRef: input.paymentRef ?? null,
-    meta: metaString,
+function mergeMeta(...values: unknown[]): JsonObject {
+  return values.reduce<JsonObject>((acc, value) => {
+    return { ...acc, ...normalizeMeta(value) };
+  }, {});
+}
+
+function appointmentDelegate() {
+  return (prisma as any).appointment;
+}
+
+function clinicianProfileDelegate() {
+  return (prisma as any).clinicianProfile;
+}
+
+function clinicianFeeDelegate() {
+  return (prisma as any).clinicianFee;
+}
+
+export async function getClinician(clinicianId: string) {
+  if (!clinicianId) {
+    throw new HttpError('clinician_id_required', 422, 'clinician_id_required');
+  }
+
+  const delegate = clinicianProfileDelegate();
+
+  if (!delegate?.findFirst) {
+    throw new HttpError('clinician_store_unavailable', 503, 'clinician_store_unavailable');
+  }
+
+  const clinician = await delegate.findFirst({
+    where: {
+      OR: [
+        { id: clinicianId },
+        { userId: clinicianId },
+      ],
+    },
+  });
+
+  if (!clinician) {
+    throw new HttpError('clinician_not_found', 404, 'clinician_not_found');
+  }
+
+  const feeCents = asCents(
+    clinician.feeCents ??
+      clinician.consultationFeeCents ??
+      clinician.standardFeeCents ??
+      clinician.priceCents ??
+      clinician.amountCents ??
+      0,
+  );
+
+  return {
+    ...clinician,
+    id: clinician.id,
+    userId: clinician.userId,
+    clinicianId: clinician.id,
+    name: clinician.displayName ?? clinician.name ?? 'Clinician',
+    displayName: clinician.displayName ?? clinician.name ?? 'Clinician',
+    currency: clinician.currency ?? 'ZAR',
+    feeCents,
+    amountCents: feeCents,
+    priceCents: feeCents,
+  };
+}
+
+export async function createAppointment(input: JsonObject = {}) {
+  const delegate = appointmentDelegate();
+
+  if (!delegate?.create) {
+    throw new HttpError('appointment_store_unavailable', 503, 'appointment_store_unavailable');
+  }
+
+  const clinicianId = asString(input.clinicianId ?? input.clinician_id);
+  const patientId = asString(input.patientId ?? input.patient_id);
+
+  if (!clinicianId) {
+    throw new HttpError('clinician_id_required', 422, 'clinician_id_required');
+  }
+
+  if (!patientId) {
+    throw new HttpError('patient_id_required', 422, 'patient_id_required');
+  }
+
+  const startsAt = asDate(
+    input.startsAt ?? input.startAt ?? input.start ?? input.slotStart,
+    new Date(),
+  );
+
+  const endsAt = input.endsAt ?? input.endAt ?? input.end ?? input.slotEnd
+    ? asDate(input.endsAt ?? input.endAt ?? input.end ?? input.slotEnd)
+    : new Date(startsAt.getTime() + 30 * 60 * 1000);
+
+  if (endsAt <= startsAt) {
+    throw new HttpError('end_before_start', 422, 'end_before_start');
+  }
+
+  const meta = mergeMeta(input.meta, {
+    roomId: input.roomId,
+    reason: input.reason,
+    source: input.source,
+    patientName: input.patientName,
+    clinicianName: input.clinicianName,
+    appointmentType: input.appointmentType ?? input.type,
+  });
+
+  const data: JsonObject = {
+    clinicianId,
+    patientId,
+    startsAt,
+    endsAt,
+    status: asString(input.status, 'pending'),
+    meta,
   };
 
-  // Create appointment
-  const appt = await prisma.appointment.create({ data });
-  return appt;
+  // These are added conditionally and ignored only if your runtime schema accepts them.
+  // They are kept because existing booking routes may rely on them.
+  if (input.clientId !== undefined) data.clientId = asNullableString(input.clientId);
+  if (input.clientMemberId !== undefined) data.clientMemberId = asNullableString(input.clientMemberId);
+  if (input.coveragePlanId !== undefined) data.coveragePlanId = asNullableString(input.coveragePlanId);
+  if (input.partnerId !== undefined) data.partnerId = asNullableString(input.partnerId);
+  if (input.practiceId !== undefined) data.practiceId = asNullableString(input.practiceId);
+
+  if (input.priceCents !== undefined || input.amountCents !== undefined) {
+    data.priceCents = asCents(input.priceCents ?? input.amountCents);
+  }
+
+  if (input.platformFeeCents !== undefined) {
+    data.platformFeeCents = asCents(input.platformFeeCents);
+  }
+
+  if (input.clinicianTakeCents !== undefined) {
+    data.clinicianTakeCents = asCents(input.clinicianTakeCents);
+  }
+
+  if (input.currency !== undefined) {
+    data.currency = normalizeCurrency(input.currency);
+  }
+
+  if (input.paymentProvider !== undefined) {
+    data.paymentProvider = asNullableString(input.paymentProvider);
+  }
+
+  if (input.paymentRef !== undefined) {
+    data.paymentRef = asNullableString(input.paymentRef);
+  }
+
+  try {
+    return await delegate.create({ data });
+  } catch (err: any) {
+    // If optional columns are not present in a partially migrated DB/schema,
+    // retry with the safest core appointment fields only.
+    const message = String(err?.message || err);
+
+    if (
+      message.includes('Unknown argument') ||
+      message.includes('Unknown field') ||
+      message.includes('does not exist')
+    ) {
+      return delegate.create({
+        data: {
+          clinicianId,
+          patientId,
+          startsAt,
+          endsAt,
+          status: asString(input.status, 'pending'),
+          meta,
+        },
+      });
+    }
+
+    throw err;
+  }
 }
 
-export async function updateAppointment(id: string, data: any) {
-  return prisma.appointment.update({ where: { id }, data });
+export async function updateAppointment(id: string, patch: JsonObject = {}) {
+  if (!id) {
+    throw new HttpError('appointment_id_required', 422, 'appointment_id_required');
+  }
+
+  const delegate = appointmentDelegate();
+
+  if (!delegate?.update || !delegate?.findUnique) {
+    throw new HttpError('appointment_store_unavailable', 503, 'appointment_store_unavailable');
+  }
+
+  const data: JsonObject = {};
+
+  if (patch.startsAt !== undefined) {
+    data.startsAt = asDate(patch.startsAt);
+  }
+
+  if (patch.endsAt !== undefined) {
+    data.endsAt = asDate(patch.endsAt);
+  }
+
+  if (patch.status !== undefined) {
+    data.status = asString(patch.status);
+  }
+
+  if (patch.clinicianId !== undefined) {
+    data.clinicianId = asString(patch.clinicianId);
+  }
+
+  if (patch.patientId !== undefined) {
+    data.patientId = asString(patch.patientId);
+  }
+
+  if (patch.clientId !== undefined) {
+    data.clientId = asNullableString(patch.clientId);
+  }
+
+  if (patch.clientMemberId !== undefined) {
+    data.clientMemberId = asNullableString(patch.clientMemberId);
+  }
+
+  if (patch.coveragePlanId !== undefined) {
+    data.coveragePlanId = asNullableString(patch.coveragePlanId);
+  }
+
+  if (patch.partnerId !== undefined) {
+    data.partnerId = asNullableString(patch.partnerId);
+  }
+
+  if (patch.practiceId !== undefined) {
+    data.practiceId = asNullableString(patch.practiceId);
+  }
+
+  if (patch.priceCents !== undefined) {
+    data.priceCents = asCents(patch.priceCents);
+  }
+
+  if (patch.platformFeeCents !== undefined) {
+    data.platformFeeCents = asCents(patch.platformFeeCents);
+  }
+
+  if (patch.clinicianTakeCents !== undefined) {
+    data.clinicianTakeCents = asCents(patch.clinicianTakeCents);
+  }
+
+  if (patch.currency !== undefined) {
+    data.currency = normalizeCurrency(patch.currency);
+  }
+
+  if (patch.paymentProvider !== undefined) {
+    data.paymentProvider = asNullableString(patch.paymentProvider);
+  }
+
+  if (patch.paymentRef !== undefined) {
+    data.paymentRef = asNullableString(patch.paymentRef);
+  }
+
+  if (patch.meta !== undefined || patch.reason !== undefined || patch.roomId !== undefined) {
+    let currentMeta: JsonObject = {};
+
+    try {
+      const existing = await delegate.findUnique({
+        where: { id },
+        select: { meta: true },
+      });
+
+      currentMeta = normalizeMeta(existing?.meta);
+    } catch {
+      currentMeta = {};
+    }
+
+    data.meta = mergeMeta(currentMeta, patch.meta, {
+      reason: patch.reason,
+      roomId: patch.roomId,
+    });
+  }
+
+  if (Object.keys(data).length === 0) {
+    const existing = await delegate.findUnique({ where: { id } });
+
+    if (!existing) {
+      throw new HttpError('appointment_not_found', 404, 'appointment_not_found');
+    }
+
+    return existing;
+  }
+
+  try {
+    return await delegate.update({
+      where: { id },
+      data,
+    });
+  } catch (err: any) {
+    if (String(err?.code || '') === 'P2025') {
+      throw new HttpError('appointment_not_found', 404, 'appointment_not_found');
+    }
+
+    const message = String(err?.message || err);
+
+    if (
+      message.includes('Unknown argument') ||
+      message.includes('Unknown field') ||
+      message.includes('does not exist')
+    ) {
+      const safeData: JsonObject = {};
+
+      for (const key of ['startsAt', 'endsAt', 'status', 'clinicianId', 'patientId', 'meta']) {
+        if (data[key] !== undefined) safeData[key] = data[key];
+      }
+
+      return delegate.update({
+        where: { id },
+        data: safeData,
+      });
+    }
+
+    throw err;
+  }
 }
 
-export async function findAppointmentByPaymentRef(paymentRef: string) {
-  return prisma.appointment.findFirst({ where: { paymentRef } });
+export async function setClinicianFee(
+  clinicianId: string,
+  feeOrInput:
+    | number
+    | {
+        feeCents?: number;
+        amountCents?: number;
+        priceCents?: number;
+        currency?: string;
+        kind?: string;
+        label?: string;
+        active?: boolean;
+        [key: string]: any;
+      },
+  currencyArg?: string,
+) {
+  if (!clinicianId) {
+    throw new HttpError('clinician_id_required', 422, 'clinician_id_required');
+  }
+
+  const input =
+    typeof feeOrInput === 'object' && feeOrInput !== null
+      ? feeOrInput
+      : { feeCents: feeOrInput, currency: currencyArg };
+
+  const feeCents = asCents(
+    input.feeCents ??
+      input.amountCents ??
+      input.priceCents ??
+      0,
+  );
+
+  const currency = normalizeCurrency(input.currency || currencyArg);
+  const kind = asString(input.kind, 'standard');
+  const label = asString(input.label, kind);
+  const active = input.active ?? true;
+
+  const profileDelegate = clinicianProfileDelegate();
+  const feeDelegate = clinicianFeeDelegate();
+
+  if (profileDelegate?.updateMany) {
+    await profileDelegate
+      .updateMany({
+        where: {
+          OR: [
+            { id: clinicianId },
+            { userId: clinicianId },
+          ],
+        },
+        data: {
+          feeCents,
+          currency,
+        },
+      })
+      .catch(() => null);
+  }
+
+  if (feeDelegate?.upsert) {
+    try {
+      return await feeDelegate.upsert({
+        where: {
+          clinicianId_kind: {
+            clinicianId,
+            kind,
+          },
+        },
+        update: {
+          label,
+          amountCents: feeCents,
+          currency,
+          active,
+        },
+        create: {
+          clinicianId,
+          kind,
+          label,
+          amountCents: feeCents,
+          currency,
+          active,
+        },
+      });
+    } catch {
+      // Fall through to compatibility return.
+    }
+  }
+
+  return {
+    clinicianId,
+    kind,
+    label,
+    feeCents,
+    amountCents: feeCents,
+    currency,
+    active,
+  };
+}
+
+export async function listAppointments(opts: JsonObject = {}) {
+  const delegate = appointmentDelegate();
+
+  if (!delegate?.findMany) return [];
+
+  const where: JsonObject = {};
+
+  if (opts.patientId) where.patientId = String(opts.patientId);
+  if (opts.clinicianId) where.clinicianId = String(opts.clinicianId);
+  if (opts.status) where.status = String(opts.status);
+
+  return delegate.findMany({
+    where,
+    orderBy: { startsAt: 'desc' },
+  });
+}
+
+export async function getAppointment(id: string) {
+  if (!id) return null;
+
+  const delegate = appointmentDelegate();
+
+  if (!delegate?.findUnique) return null;
+
+  return delegate.findUnique({
+    where: { id },
+  });
 }

@@ -11,6 +11,26 @@ if (!global.__INSIGHT_MODEL_CACHE__) global.__INSIGHT_MODEL_CACHE__ = {};
 type Client = { id: string; session: string; controller: ReadableStreamDefaultController<Uint8Array> };
 const getClients = (): Client[] => global.__INSIGHT_CLIENTS__ || [];
 
+function normalisePayload(raw: unknown): any {
+  if (raw == null) return null;
+
+  if (typeof raw === 'string') {
+    if (!raw.trim()) return null;
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  if (typeof raw === 'object') {
+    return raw;
+  }
+
+  return null;
+}
+
 function sse(data: any, event?: string) {
   const head = event ? `event: ${event}\n` : '';
   return new TextEncoder().encode(`${head}data: ${JSON.stringify(data)}\n\n`);
@@ -56,11 +76,15 @@ async function getLatestModelFor(modality: Modality, orgId?: string | null) {
   let weights: Record<string, number> = {};
 
   if (ev?.payload) {
-    try {
-      const p = JSON.parse(ev.payload);
-      if (p?.modelVersion) modelVersion = String(p.modelVersion);
-      if (p?.weights && typeof p.weights === 'object') weights = p.weights;
-    } catch {}
+    const p = normalisePayload(ev.payload);
+
+    if (p && typeof p === 'object' && !Array.isArray(p)) {
+      if ((p as any).modelVersion) modelVersion = String((p as any).modelVersion);
+
+      if ((p as any).weights && typeof (p as any).weights === 'object') {
+        weights = (p as any).weights;
+      }
+    }
   }
 
   cache[key] = { fetchedAt: now, modelVersion, weights };

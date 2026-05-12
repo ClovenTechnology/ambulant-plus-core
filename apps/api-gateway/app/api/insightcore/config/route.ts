@@ -59,13 +59,24 @@ const DEFAULT_CONFIG: InsightThresholdConfig = {
   },
 };
 
-function safeJsonParse(s?: string | null) {
-  if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
+function safeJsonParse(value: unknown) {
+  if (value == null) return null;
+
+  if (typeof value === 'string') {
+    if (!value.trim()) return null;
+
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
   }
+
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+
+  return null;
 }
 
 function getOrgId(req: Request): string {

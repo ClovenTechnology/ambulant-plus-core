@@ -1,0 +1,25 @@
+{
+  "name": "@ambulant/client-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./src/index": "./src/index.ts",
+    "./src/preflight": "./src/preflight.ts",
+    "./src/authorizations": "./src/authorizations.ts",
+    "./src/billing": "./src/billing.ts",
+    "./src/booking": "./src/booking.ts",
+    "./src/claims": "./src/claims.ts",
+    "./src/careport": "./src/careport.ts",
+    "./src/medreach": "./src/medreach.ts",
+    "./src/http": "./src/http.ts",
+    "./src/schema-ready-guards": "./src/schema-ready-guards.ts",
+    "./src/idempotency": "./src/idempotency.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.17.1"
+  }
+}

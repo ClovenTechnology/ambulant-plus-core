@@ -58,7 +58,7 @@ type FeesExtendedGetResponse = {
   clinicianServices: ServiceFee[];
   adminStaff: {
     staff: AdminStaffNormalized[];
-    services: ServiceFee[]; // all admin-owned services
+    services: ServiceFee[];
   };
 };
 
@@ -100,6 +100,7 @@ function sanitizeCurrency(raw: unknown): string {
 
 function normalizeBillingUnit(raw: unknown): BillingUnit {
   const v = String(raw || '').toLowerCase();
+
   switch (v) {
     case 'per_followup':
       return 'per_followup';
@@ -115,36 +116,63 @@ function normalizeBillingUnit(raw: unknown): BillingUnit {
   }
 }
 
-async function getCurrentClinician(req: NextRequest) {
-  const who = readIdentity(req.headers);
-  if (who.role !== 'clinician' || !who.uid) return null;
+function parseMeta(raw: unknown): Record<string, any> {
+  if (!raw) return {};
 
-  const clinician = await prisma.clinicianProfile.findUnique({
-    where: { userId: who.uid },
-    include: { metadata: true },
-  });
-  return clinician;
-}
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, any>;
+  }
 
-function loadProfileJson(clinician: any): any {
-  if (clinician?.metadata?.rawProfileJson) {
+  if (typeof raw === 'string') {
     try {
-      return JSON.parse(clinician.metadata.rawProfileJson);
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
     } catch {
       return {};
     }
   }
+
   return {};
 }
 
-function buildUpdatedMetaData(clinician: any, profileJson: any) {
+async function getCurrentClinician(req: NextRequest) {
+  const who = readIdentity(req.headers);
+
+  if (who.role !== 'clinician' || !who.uid) return null;
+
+  return prisma.clinicianProfile.findUnique({
+    where: { userId: who.uid },
+  });
+}
+
+function loadProfileJson(clinician: any): any {
+  const meta = parseMeta(clinician?.meta);
+  const rawProfileJson = meta.rawProfileJson ?? meta.rawProfile;
+
+  if (!rawProfileJson) return meta;
+
+  if (typeof rawProfileJson === 'object' && !Array.isArray(rawProfileJson)) {
+    return rawProfileJson;
+  }
+
+  try {
+    const parsed = JSON.parse(String(rawProfileJson));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function buildUpdatedMeta(clinician: any, profileJson: any) {
+  const currentMeta = parseMeta(clinician?.meta);
+
   return {
+    ...currentMeta,
     rawProfileJson: JSON.stringify(profileJson),
-    hpcsaS3Key: clinician.metadata?.hpcsaS3Key ?? null,
-    hpcsaFileMeta: clinician.metadata?.hpcsaFileMeta ?? null,
-    hpcsaNextRenewalDate: clinician.metadata?.hpcsaNextRenewalDate ?? null,
-    insurerName: clinician.metadata?.insurerName ?? null,
-    insuranceType: clinician.metadata?.insuranceType ?? null,
   };
 }
 
@@ -166,12 +194,14 @@ function normalizeServiceFees(
       s?.ownerType === 'admin_staff' ? 'admin_staff' : 'clinician';
 
     let ownerAdminStaffId: string | undefined;
+
     if (ownerType === 'admin_staff') {
       const sid = String(s?.ownerAdminStaffId || '').trim();
+
       if (!sid || !staffIds.has(sid)) {
-        // skip invalid / non-medical / unknown staff services
         continue;
       }
+
       ownerAdminStaffId = sid;
     }
 
@@ -179,9 +209,7 @@ function normalizeServiceFees(
     if (!label) continue;
 
     const code = s?.code ? String(s.code).trim() : undefined;
-    const description = s?.description
-      ? String(s.description).trim()
-      : undefined;
+    const description = s?.description ? String(s.description).trim() : undefined;
 
     const amountCentsNum = Number(s?.amountCents ?? 0);
     if (!Number.isFinite(amountCentsNum) || amountCentsNum < 0) continue;
@@ -207,9 +235,7 @@ function normalizeServiceFees(
   return fees;
 }
 
-function normalizeAdminStaff(
-  raw: any,
-): AdminStaffNormalized[] {
+function normalizeAdminStaff(raw: any): AdminStaffNormalized[] {
   const arr: any[] = Array.isArray(raw) ? raw : [];
 
   return arr
@@ -217,6 +243,7 @@ function normalizeAdminStaff(
       const id = String(s?.id || '').trim();
       const name = String(s?.name || '').trim();
       const email = String(s?.email || '').trim();
+
       if (!id || !name || !email) return null;
 
       const type: 'medical' | 'non-medical' =
@@ -230,8 +257,8 @@ function normalizeAdminStaff(
         statusRaw === 'disabled'
           ? 'disabled'
           : statusRaw === 'invited'
-          ? 'invited'
-          : 'active';
+            ? 'invited'
+            : 'active';
 
       const compRaw = s?.compensation || {};
       const modeRaw = String(compRaw?.mode || 'none') as AdminStaffCompMode;
@@ -242,21 +269,14 @@ function normalizeAdminStaff(
 
       let amountCents: number | null = null;
       let percent: number | null = null;
+
       if (mode === 'flat_monthly') {
         const v = Number(compRaw?.amountCents ?? 0);
-        amountCents =
-          Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
+        amountCents = Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
       } else if (mode === 'percent_revenue') {
         const p = Number(compRaw?.percent ?? 0);
-        percent =
-          Number.isFinite(p) && p >= 0 && p <= 100 ? p : 0;
+        percent = Number.isFinite(p) && p >= 0 && p <= 100 ? p : 0;
       }
-
-      const compensation: AdminStaffCompensation = {
-        mode,
-        amountCents,
-        percent,
-      };
 
       return {
         id,
@@ -266,7 +286,11 @@ function normalizeAdminStaff(
         role: role ?? null,
         type,
         status,
-        compensation,
+        compensation: {
+          mode,
+          amountCents,
+          percent,
+        },
         canHaveServices: type === 'medical',
       } satisfies AdminStaffNormalized;
     })
@@ -278,11 +302,13 @@ function applyAdminStaffCompUpdates(
   updates: FeesExtendedPutBody['adminStaffComp'],
 ): AdminStaffNormalized[] {
   if (!Array.isArray(updates) || updates.length === 0) return staff;
+
   const byId = new Map<string, AdminStaffNormalized>();
   staff.forEach((s) => byId.set(s.id, s));
 
   for (const u of updates) {
     if (!u || !u.adminStaffId) continue;
+
     const cur = byId.get(u.adminStaffId);
     if (!cur) continue;
 
@@ -297,12 +323,10 @@ function applyAdminStaffCompUpdates(
 
     if (mode === 'flat_monthly') {
       const v = Number(u.amountCents ?? 0);
-      amountCents =
-        Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
+      amountCents = Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
     } else if (mode === 'percent_revenue') {
       const p = Number(u.percent ?? 0);
-      percent =
-        Number.isFinite(p) && p >= 0 && p <= 100 ? p : 0;
+      percent = Number.isFinite(p) && p >= 0 && p <= 100 ? p : 0;
     }
 
     cur.compensation = { mode, amountCents, percent };
@@ -312,20 +336,12 @@ function applyAdminStaffCompUpdates(
   return Array.from(byId.values());
 }
 
-/**
- * GET /api/clinicians/me/fees/extended
- *
- * Returns base consult/follow-up fees, clinician services, and
- * admin staff list with comp + their services.
- */
 export async function GET(req: NextRequest) {
   try {
     const clinician = await getCurrentClinician(req);
+
     if (!clinician) {
-      return json(
-        { ok: false, error: 'unauthorized_or_not_found' },
-        401,
-      );
+      return json({ ok: false, error: 'unauthorized_or_not_found' }, 401);
     }
 
     const profileJson = loadProfileJson(clinician);
@@ -334,28 +350,17 @@ export async function GET(req: NextRequest) {
     const rawAdminStaff = profileJson.adminStaff || [];
     const rawServiceFees = profileJson.serviceFees || [];
 
-    const baseCurrency = sanitizeCurrency(
-      rawFees.currency || 'ZAR',
-    );
+    const baseCurrency = sanitizeCurrency(rawFees.currency || clinician.currency || 'ZAR');
 
     const staff = normalizeAdminStaff(rawAdminStaff);
-    const allFees = normalizeServiceFees(
-      rawServiceFees,
-      staff,
-      baseCurrency,
-    );
+    const allFees = normalizeServiceFees(rawServiceFees, staff, baseCurrency);
 
-    const clinicianServices = allFees.filter(
-      (f) => f.ownerType === 'clinician',
-    );
-    const adminServices = allFees.filter(
-      (f) => f.ownerType === 'admin_staff',
-    );
+    const clinicianServices = allFees.filter((f) => f.ownerType === 'clinician');
+    const adminServices = allFees.filter((f) => f.ownerType === 'admin_staff');
 
-    const consultationCents =
-      Number.isFinite(Number(clinician.feeCents))
-        ? Number(clinician.feeCents)
-        : 0;
+    const consultationCents = Number.isFinite(Number(clinician.feeCents))
+      ? Number(clinician.feeCents)
+      : 0;
 
     const followupCentsRaw = Number(rawFees.followupCents ?? 0);
     const followupCents =
@@ -379,10 +384,8 @@ export async function GET(req: NextRequest) {
 
     return json(payload);
   } catch (err: any) {
-    console.error(
-      'GET /api/clinicians/me/fees/extended error',
-      err,
-    );
+    console.error('GET /api/clinicians/me/fees/extended error', err);
+
     return json(
       {
         ok: false,
@@ -393,98 +396,64 @@ export async function GET(req: NextRequest) {
   }
 }
 
-/**
- * PUT /api/clinicians/me/fees/extended
- *
- * Body:
- *  - baseFees: { consultationCents?, followupCents?, currency? }
- *  - services: Service definitions (clinician + admin_staff)
- *  - adminStaffComp: base comp per admin staff (flat or %)
- */
 export async function PUT(req: NextRequest) {
   try {
     const clinician = await getCurrentClinician(req);
+
     if (!clinician) {
-      return json(
-        { ok: false, error: 'unauthorized_or_not_found' },
-        401,
-      );
+      return json({ ok: false, error: 'unauthorized_or_not_found' }, 401);
     }
 
-    const body: FeesExtendedPutBody = await req
-      .json()
-      .catch(() => ({} as any));
+    const body: FeesExtendedPutBody = await req.json().catch(() => ({} as any));
 
-    let profileJson = loadProfileJson(clinician);
+    const profileJson = loadProfileJson(clinician);
 
     const rawFees = profileJson.fees || {};
     const rawAdminStaff = profileJson.adminStaff || [];
     const rawServiceFees = profileJson.serviceFees || [];
 
-    let baseCurrency = sanitizeCurrency(
-      body.baseFees?.currency || rawFees.currency || 'ZAR',
+    const baseCurrency = sanitizeCurrency(
+      body.baseFees?.currency || rawFees.currency || clinician.currency || 'ZAR',
     );
 
-    // 1) Normalize staff (existing)
     let staff = normalizeAdminStaff(rawAdminStaff);
+    staff = applyAdminStaffCompUpdates(staff, body.adminStaffComp);
 
-    // 2) Apply adminStaffComp updates
-    staff = applyAdminStaffCompUpdates(
-      staff,
-      body.adminStaffComp,
-    );
-
-    // 3) Base fees
     let consultationCents =
-      Number.isFinite(Number(clinician.feeCents)) &&
-      Number(clinician.feeCents) >= 0
+      Number.isFinite(Number(clinician.feeCents)) && Number(clinician.feeCents) >= 0
         ? Number(clinician.feeCents)
         : 0;
 
-    if (
-      body.baseFees &&
-      body.baseFees.consultationCents != null
-    ) {
+    if (body.baseFees?.consultationCents != null) {
       const v = Number(body.baseFees.consultationCents);
-      consultationCents =
-        Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
+      consultationCents = Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
     }
 
     let followupCents =
-      Number.isFinite(Number(rawFees.followupCents)) &&
-      Number(rawFees.followupCents) >= 0
+      Number.isFinite(Number(rawFees.followupCents)) && Number(rawFees.followupCents) >= 0
         ? Math.round(Number(rawFees.followupCents))
         : 0;
 
-    if (body.baseFees && body.baseFees.followupCents != null) {
+    if (body.baseFees?.followupCents != null) {
       const v = Number(body.baseFees.followupCents);
-      followupCents =
-        Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
+      followupCents = Number.isFinite(v) && v >= 0 ? Math.round(v) : 0;
     }
 
-    // 4) Services – replace full list with normalized input
     const allFees = normalizeServiceFees(
       body.services ?? rawServiceFees,
       staff,
       baseCurrency,
     );
 
-    const clinicianServices = allFees.filter(
-      (f) => f.ownerType === 'clinician',
-    );
-    const adminServices = allFees.filter(
-      (f) => f.ownerType === 'admin_staff',
-    );
+    const clinicianServices = allFees.filter((f) => f.ownerType === 'clinician');
+    const adminServices = allFees.filter((f) => f.ownerType === 'admin_staff');
 
-    // 5) Persist back to metadata
     profileJson.fees = {
       consultationCents,
       followupCents,
       currency: baseCurrency,
     };
 
-    // Only medical admin staff are allowed service fees —
-    // normalizeServiceFees already enforced this based on canHaveServices.
     profileJson.adminStaff = staff.map((s) => ({
       id: s.id,
       name: s.name,
@@ -498,44 +467,30 @@ export async function PUT(req: NextRequest) {
 
     profileJson.serviceFees = [...clinicianServices, ...adminServices];
 
-    const updatedMeta = buildUpdatedMetaData(
-      clinician,
-      profileJson,
-    );
+    const updatedMeta = buildUpdatedMeta(clinician, profileJson);
 
     const updated = await prisma.clinicianProfile.update({
       where: { id: clinician.id },
       data: {
         feeCents: consultationCents,
-        metadata: clinician.metadata
-          ? { update: updatedMeta }
-          : { create: updatedMeta },
+        meta: updatedMeta,
       },
-      include: { metadata: true },
     });
 
-    // Rebuild response from updated record
     const updatedJson = loadProfileJson(updated);
     const updatedFees = updatedJson.fees || {};
-    const updatedAdminStaff = normalizeAdminStaff(
-      updatedJson.adminStaff || [],
-    );
+    const updatedAdminStaff = normalizeAdminStaff(updatedJson.adminStaff || []);
     const updatedServiceFees = normalizeServiceFees(
       updatedJson.serviceFees || [],
       updatedAdminStaff,
-      sanitizeCurrency(
-        updatedFees.currency || baseCurrency || 'ZAR',
-      ),
+      sanitizeCurrency(updatedFees.currency || baseCurrency || 'ZAR'),
     );
 
-    const updatedCurrency = sanitizeCurrency(
-      updatedFees.currency || baseCurrency || 'ZAR',
-    );
+    const updatedCurrency = sanitizeCurrency(updatedFees.currency || baseCurrency || 'ZAR');
 
-    const updatedClinicianServices =
-      updatedServiceFees.filter(
-        (f) => f.ownerType === 'clinician',
-      );
+    const updatedClinicianServices = updatedServiceFees.filter(
+      (f) => f.ownerType === 'clinician',
+    );
     const updatedAdminServices = updatedServiceFees.filter(
       (f) => f.ownerType === 'admin_staff',
     );
@@ -545,13 +500,10 @@ export async function PUT(req: NextRequest) {
       currency: updatedCurrency,
       baseFees: {
         consultationCents:
-          Number(updated.feeCents) >= 0
-            ? Number(updated.feeCents)
-            : 0,
+          Number(updated.feeCents) >= 0 ? Number(updated.feeCents) : 0,
         followupCents:
-          Number.isFinite(
-            Number(updatedFees.followupCents),
-          ) && Number(updatedFees.followupCents) >= 0
+          Number.isFinite(Number(updatedFees.followupCents)) &&
+          Number(updatedFees.followupCents) >= 0
             ? Math.round(Number(updatedFees.followupCents))
             : 0,
       },
@@ -564,16 +516,12 @@ export async function PUT(req: NextRequest) {
 
     return json(resp);
   } catch (err: any) {
-    console.error(
-      'PUT /api/clinicians/me/fees/extended error',
-      err,
-    );
+    console.error('PUT /api/clinicians/me/fees/extended error', err);
+
     return json(
       {
         ok: false,
-        error:
-          err?.message ||
-          'failed_to_update_fees_extended',
+        error: err?.message || 'failed_to_update_fees_extended',
       },
       500,
     );

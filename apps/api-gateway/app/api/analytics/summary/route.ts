@@ -24,20 +24,29 @@ export async function GET() {
     );
 
     const refundsCents = await (async () => {
-      // prefer a Refund table if you have one, otherwise infer from payments
-      try {
-        const r = await prisma.refund.aggregate({
-          _sum: { amountCents: true },
-          where: { createdAt: { gte: monthAgo, lte: now } },
-        });
-        return r._sum.amountCents ?? 0;
-      } catch {
-        const r = await prisma.payment.aggregate({
-          _sum: { amountCents: true },
-          where: { status: 'refunded', updatedAt: { gte: monthAgo, lte: now } },
-        });
-        return r._sum.amountCents ?? 0;
+      // Prefer a Refund table if the generated Prisma client exposes one.
+      // If not, infer refunds from refunded payments.
+      const refundDelegate = (prisma as any).refund;
+
+      if (refundDelegate?.aggregate) {
+        try {
+          const r = await refundDelegate.aggregate({
+            _sum: { amountCents: true },
+            where: { createdAt: { gte: monthAgo, lte: now } },
+          });
+
+          return r?._sum?.amountCents ?? 0;
+        } catch {
+          // Fall through to payment-based inference below.
+        }
       }
+
+      const r = await prisma.payment.aggregate({
+        _sum: { amountCents: true },
+        where: { status: 'refunded', updatedAt: { gte: monthAgo, lte: now } },
+      });
+
+      return r._sum.amountCents ?? 0;
     })();
 
     const payoutsDueCents = await sumOrZero(
@@ -58,14 +67,30 @@ export async function GET() {
     const clinicians = await countOrZero(prisma.clinicianProfile.count());
 
     const devicesOnline = await (async () => {
-      try {
-        // If you track heartbeats in deviceHeartbeat(ts), use this:
-        return await prisma.deviceHeartbeat.count({ where: { ts: { gte: fiveMinAgo } } });
-      } catch {
-        // Fallback: if you store lastSeen on device
-        try { return await prisma.device.count({ where: { lastSeenAt: { gte: fiveMinAgo } } }); }
-        catch { return 0; }
+      const deviceHeartbeatDelegate = (prisma as any).deviceHeartbeat;
+      const deviceDelegate = (prisma as any).device;
+
+      if (deviceHeartbeatDelegate?.count) {
+        try {
+          return await deviceHeartbeatDelegate.count({
+            where: { ts: { gte: fiveMinAgo } },
+          });
+        } catch {
+          // Fall through to device lastSeen fallback below.
+        }
       }
+
+      if (deviceDelegate?.count) {
+        try {
+          return await deviceDelegate.count({
+            where: { lastSeenAt: { gte: fiveMinAgo } },
+          });
+        } catch {
+          return 0;
+        }
+      }
+
+      return 0;
     })();
 
     // Split revenue buckets if you track them (best-effort, safe if missing)

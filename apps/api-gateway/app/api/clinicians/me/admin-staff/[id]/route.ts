@@ -7,6 +7,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type PlanTierId = 'solo' | 'starter' | 'team' | 'group';
+
 type AdminStaffMember = {
   id: string;
   name: string;
@@ -27,6 +28,7 @@ function normalizePlanId(raw: unknown): PlanTierId {
   if (typeof raw === 'string' && ALLOWED_PLAN_IDS.includes(raw as PlanTierId)) {
     return raw as PlanTierId;
   }
+
   return 'solo';
 }
 
@@ -45,30 +47,61 @@ function defaultMaxAdminSlotsForPlan(plan: PlanTierId): number {
   }
 }
 
-async function getCurrentClinician(req: NextRequest) {
-  const who = readIdentity(req.headers);
-  if (who.role !== 'clinician' || !who.uid) return null;
+function parseMeta(raw: unknown): Record<string, any> {
+  if (!raw) return {};
 
-  const clinician = await prisma.clinicianProfile.findUnique({
-    where: { userId: who.uid },
-    include: { metadata: true },
-  });
-  return clinician;
-}
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, any>;
+  }
 
-function loadProfileJson(clinician: any): any {
-  if (clinician?.metadata?.rawProfileJson) {
+  if (typeof raw === 'string') {
     try {
-      return JSON.parse(clinician.metadata.rawProfileJson);
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
     } catch {
       return {};
     }
   }
+
   return {};
+}
+
+async function getCurrentClinician(req: NextRequest) {
+  const who = readIdentity(req.headers);
+
+  if (who.role !== 'clinician' || !who.uid) return null;
+
+  return prisma.clinicianProfile.findUnique({
+    where: { userId: who.uid },
+  });
+}
+
+function loadProfileJson(clinician: any): any {
+  const meta = parseMeta(clinician?.meta);
+
+  const rawProfileJson = meta.rawProfileJson ?? meta.rawProfile;
+
+  if (!rawProfileJson) return meta;
+
+  if (typeof rawProfileJson === 'object' && !Array.isArray(rawProfileJson)) {
+    return rawProfileJson;
+  }
+
+  try {
+    const parsed = JSON.parse(String(rawProfileJson));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed
+      : {};
+  } catch {
+    return {};
+  }
 }
 
 function normalizeStaffArray(raw: any): AdminStaffMember[] {
   if (!Array.isArray(raw)) return [];
+
   return raw.map((s) => ({
     id: String(s.id || ''),
     name: String(s.name || '').trim(),
@@ -89,32 +122,35 @@ function countActive(staff: AdminStaffMember[]): number {
   return staff.filter((s) => s.status !== 'disabled').length;
 }
 
-function buildUpdatedMetaData(clinician: any, profileJson: any) {
+function buildUpdatedMeta(clinician: any, profileJson: any) {
+  const currentMeta = parseMeta(clinician?.meta);
+
   return {
+    ...currentMeta,
     rawProfileJson: JSON.stringify(profileJson),
-    hpcsaS3Key: clinician.metadata?.hpcsaS3Key ?? null,
-    hpcsaFileMeta: clinician.metadata?.hpcsaFileMeta ?? null,
-    hpcsaNextRenewalDate: clinician.metadata?.hpcsaNextRenewalDate ?? null,
-    insurerName: clinician.metadata?.insurerName ?? null,
-    insuranceType: clinician.metadata?.insuranceType ?? null,
   };
 }
 
 // DELETE /api/clinicians/me/admin-staff/[id]
-export async function DELETE(_req: NextRequest, ctx: { params: { id: string } }) {
+export async function DELETE(
+  req: NextRequest,
+  ctx: { params: { id: string } },
+) {
   try {
-    const clinician = await getCurrentClinician(_req);
+    const clinician = await getCurrentClinician(req);
+
     if (!clinician) {
       return json({ ok: false, error: 'unauthorized_or_not_found' }, 401);
     }
 
     const staffId = ctx.params.id;
-    let profileJson = loadProfileJson(clinician);
+    const profileJson = loadProfileJson(clinician);
     const payout = profileJson.payoutSettings || {};
     const plan = normalizePlanId(payout.planTierId);
 
     const staff = normalizeStaffArray(profileJson.adminStaff || []);
     const idx = staff.findIndex((s) => s.id === staffId);
+
     if (idx === -1) {
       return json({ ok: false, error: 'admin_staff_not_found' }, 404);
     }
@@ -129,12 +165,10 @@ export async function DELETE(_req: NextRequest, ctx: { params: { id: string } })
       activeAdminStaffSlots: activeSlots,
     };
 
-    const updatedMetaData = buildUpdatedMetaData(clinician, profileJson);
-
     await prisma.clinicianProfile.update({
       where: { id: clinician.id },
       data: {
-        metadata: clinician.metadata ? { update: updatedMetaData } : { create: updatedMetaData },
+        meta: buildUpdatedMeta(clinician, profileJson),
       },
     });
 
@@ -150,6 +184,7 @@ export async function DELETE(_req: NextRequest, ctx: { params: { id: string } })
     });
   } catch (err: any) {
     console.error('DELETE /api/clinicians/me/admin-staff/[id] error', err);
+
     return json(
       { ok: false, error: err?.message || 'failed_to_disable_admin_staff' },
       500,

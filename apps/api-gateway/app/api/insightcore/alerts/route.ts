@@ -69,13 +69,24 @@ type AlertPayload = {
   factors?: RiskFactors;
 };
 
-function safeJsonParse(s?: string | null) {
-  if (!s) return null;
-  try {
-    return JSON.parse(s);
-  } catch {
-    return null;
+function safeJsonParse(value: unknown) {
+  if (value == null) return null;
+
+  if (typeof value === 'string') {
+    if (!value.trim()) return null;
+
+    try {
+      return JSON.parse(value);
+    } catch {
+      return null;
+    }
   }
+
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value;
+  }
+
+  return null;
 }
 
 async function loadConfig(orgId: string): Promise<InsightThresholdConfig> {

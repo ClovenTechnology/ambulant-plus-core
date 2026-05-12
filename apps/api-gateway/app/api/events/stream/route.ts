@@ -11,8 +11,23 @@ type Opts = {
   kinds?: string[];
 };
 
+function normalisePayload(raw: unknown) {
+  if (raw == null) return null;
+
+  if (typeof raw === 'string') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
+
+  return raw;
+}
+
 export async function GET(req: NextRequest) {
   const u = new URL(req.url);
+
   const q: Opts = {
     clinicianId: u.searchParams.get('clinicianId') || undefined,
     patientId: u.searchParams.get('patientId') || undefined,
@@ -23,15 +38,16 @@ export async function GET(req: NextRequest) {
   const headers = new Headers({
     'content-type': 'text/event-stream',
     'cache-control': 'no-cache, no-transform',
-    'connection': 'keep-alive',
+    connection: 'keep-alive',
     'access-control-allow-origin': '*',
   });
 
-  let lastTs = BigInt(Date.now() - 60_000); // start from last 60s
+  let lastTs = BigInt(Date.now() - 60_000);
   let closed = false;
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
+    start(controller) {
       const encoder = new TextEncoder();
 
       function send(type: string, data: unknown) {
@@ -39,14 +55,18 @@ export async function GET(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       }
 
-      // heartbeat
-      const hb = setInterval(() => {
-        if (!closed) controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
-      }, 15000);
+      heartbeat = setInterval(() => {
+        if (!closed) {
+          controller.enqueue(encoder.encode(`: ping ${Date.now()}\n\n`));
+        }
+      }, 15_000);
 
       async function pump() {
         while (!closed) {
-          const where: any = { ts: { gt: lastTs } };
+          const where: Record<string, any> = {
+            ts: { gt: lastTs },
+          };
+
           if (q.orgId) where.orgId = q.orgId;
           if (q.clinicianId) where.targetClinicianId = q.clinicianId;
           if (q.patientId) where.targetPatientId = q.patientId;
@@ -60,27 +80,44 @@ export async function GET(req: NextRequest) {
 
           for (const r of rows) {
             lastTs = r.ts;
-            const payload = (() => {
-              try { return r.payload ? JSON.parse(r.payload) : null; } catch { return r.payload; }
-            })();
-            send(r.kind, { id: r.id, ts: r.ts.toString(), kind: r.kind, payload });
+
+            send(r.kind, {
+              id: r.id,
+              ts: r.ts.toString(),
+              kind: r.kind,
+              payload: normalisePayload(r.payload),
+            });
           }
 
-          // backoff a bit
-          await new Promise((r) => setTimeout(r, 2000));
+          await new Promise((resolve) => setTimeout(resolve, 2_000));
         }
       }
 
-      pump().catch(() => {});
-
-      // cleanup
-      // @ts-ignore - controller has no 'closed' event in types; rely on cancel
-      stream.cancel = () => {
-        closed = true;
-        clearInterval(hb);
-      };
+      pump().catch((err) => {
+        if (!closed) {
+          send('error', {
+            error: 'event_stream_failed',
+            detail: err?.message || String(err),
+          });
+        }
+      });
     },
-    cancel() { closed = true; },
+
+    cancel() {
+      closed = true;
+
+      if (heartbeat) {
+        clearInterval(heartbeat);
+      }
+    },
+  });
+
+  req.signal.addEventListener('abort', () => {
+    closed = true;
+
+    if (heartbeat) {
+      clearInterval(heartbeat);
+    }
   });
 
   return new Response(stream, { headers });

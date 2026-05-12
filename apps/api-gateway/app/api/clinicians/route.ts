@@ -65,6 +65,18 @@ function zarMinor(v: any): number {
   return Number.isFinite(n) ? Math.max(0, Math.round(n)) : 0;
 }
 
+type ClinicianFeeKindValue = 'STANDARD' | 'FOLLOWUP' | 'PROCEDURE';
+
+function normalizeClinicianFeeKind(value: unknown): ClinicianFeeKindValue | null {
+  const kind = String(value || '').trim().toUpperCase();
+
+  if (kind === 'STANDARD' || kind === 'FOLLOWUP' || kind === 'PROCEDURE') {
+    return kind;
+  }
+
+  return null;
+}
+
 type SortKey = 'name' | 'created' | 'updated' | 'fee' | 'specialty' | 'email' | 'status' | 'training';
 type SortDir = 'asc' | 'desc';
 
@@ -466,8 +478,8 @@ export async function PATCH(req: NextRequest) {
         const effectiveCurrency = safeCurrency(body.currency ?? clinician.currency ?? 'ZAR');
 
         for (const row of feesV2) {
-          const kind = String(row?.kind || '').toUpperCase();
-          if (!['STANDARD', 'FOLLOWUP', 'PROCEDURE'].includes(kind)) continue;
+          const kind = normalizeClinicianFeeKind(row?.kind);
+          if (!kind) continue;
 
           const currency = safeCurrency(row?.currency ?? effectiveCurrency);
           const amountMinor =

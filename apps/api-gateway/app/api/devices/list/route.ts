@@ -13,5 +13,5 @@ await upsertCatalog([
   { slug: 'duecare.nexring', label: 'DueCare NexRing', vendor: 'DueCare', modality:'ring', transport:'ble' },
   { slug: 'duecare.nexring-ecg', label: 'DueCare NexRing ECG', vendor: 'DueCare', modality:'ring_ecg', transport:'ble' },
   { slug: 'duecare.vitals-360', label: 'Vitals 360', vendor: 'DueCare', modality:'monitor', transport:'ble' },
-]);
+])}
 

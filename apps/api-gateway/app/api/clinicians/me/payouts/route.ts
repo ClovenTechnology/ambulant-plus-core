@@ -1,8 +1,10 @@
+// apps/api-gateway/app/api/clinicians/me/payouts/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { promises as fs } from 'fs';
 import path from 'path';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
+import { buildMetaForSave, readProfileJson } from '@/src/lib/meta-json';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -54,17 +56,13 @@ async function readPayoutSettings(): Promise<{
 }> {
   try {
     const raw = await fs.readFile(payoutsPath, 'utf-8');
-    const clean =
-      raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
+    const clean = raw.charCodeAt(0) === 0xfeff ? raw.slice(1) : raw;
     const json = JSON.parse(clean);
 
-    const pct = Number(
-      json.clinicianConsultPayoutPercent ?? 70,
-    );
+    const pct = Number(json.clinicianConsultPayoutPercent ?? 70);
     const safePct = Math.max(0, Math.min(100, pct));
 
-    const taxRules: ClinicianTaxRules | null =
-      json.clinicianTax || null;
+    const taxRules: ClinicianTaxRules | null = json.clinicianTax || null;
 
     return {
       clinicianPercent: safePct,
@@ -97,71 +95,52 @@ function endOfDay(d: Date) {
 function startOfWeek(d: Date) {
   const x = startOfDay(d);
   const day = x.getDay(); // Sun=0
-  const diff = (day + 6) % 7; // make Monday=0
-  x.setDate(x.getDate() - diff);
+  const dff = (day + 6) % 7; // make Monday=0
+  x.setDate(x.getDate() - dff);
   return x;
 }
 
-/* ---------- Clinician + metadata helpers ---------- */
+/* ---------- Clinician helpers ---------- */
 
 async function getCurrentClinician(req: NextRequest) {
   const who = readIdentity(req.headers);
-  if (who.role !== 'clinician' || !who.uid) return null;
+  const uid = String((who as any)?.uid || '');
 
-  const clinician = await prisma.clinicianProfile.findUnique(
-    {
-      where: { userId: who.uid },
-      include: { metadata: true } as any, // metadata model exists in your repo
-    } as any,
-  );
+  if (who.role !== 'clinician' || !uid) return null;
+
+  const clinician = await prisma.clinicianProfile.findUnique({
+    where: { userId: uid },
+  });
+
   if (!clinician) return null;
-  return { clinician, who };
-}
 
-function loadProfileJson(clinician: any): any {
-  if (clinician?.metadata?.rawProfileJson) {
-    try {
-      return JSON.parse(clinician.metadata.rawProfileJson);
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function buildUpdatedMetaData(
-  clinician: any,
-  profileJson: any,
-) {
-  // keep all existing metadata fields stable
   return {
-    rawProfileJson: JSON.stringify(profileJson),
-    hpcsaS3Key: clinician.metadata?.hpcsaS3Key ?? null,
-    hpcsaFileMeta: clinician.metadata?.hpcsaFileMeta ?? null,
-    hpcsaNextRenewalDate:
-      clinician.metadata?.hpcsaNextRenewalDate ?? null,
-    insurerName: clinician.metadata?.insurerName ?? null,
-    insuranceType: clinician.metadata?.insuranceType ?? null,
+    clinician,
+    who: {
+      ...who,
+      uid,
+    },
   };
 }
 
 /* ---------- Staff compensation extraction ---------- */
 
-function extractStaffCompFromProfile(clinician: any): {
+function extractStaffCompFromProfile(clinician: unknown): {
   percentRevenueTotalPercent: number;
   flatMonthlyNominalCents: number;
 } {
-  const j = loadProfileJson(clinician);
-  const staffArr: any[] = Array.isArray(j.adminStaff)
-    ? j.adminStaff
-    : [];
+  const j = readProfileJson(clinician);
+  const staffArr: unknown[] = Array.isArray(j.adminStaff) ? j.adminStaff : [];
 
   let percentTotal = 0;
   let flatMonthlyCents = 0;
 
-  for (const s of staffArr) {
-    const comp = s?.compensation || {};
-    const mode = String(comp.mode || 'none');
+  for (const item of staffArr) {
+    if (!item || typeof item !== 'object') continue;
+
+    const s = item as Record<string, unknown>;
+    const comp = (s.compensation ?? {}) as Record<string, unknown>;
+    const mode = String(comp.mode ?? 'none');
 
     if (mode === 'percent_revenue') {
       const p = Number(comp.percent ?? 0);
@@ -176,7 +155,7 @@ function extractStaffCompFromProfile(clinician: any): {
     }
   }
 
-  // clamp to something sane so accountant can’t accidentally do 300%
+  // Clamp to something sane so accountant cannot accidentally do 300%.
   percentTotal = Math.max(0, Math.min(80, percentTotal));
 
   return {
@@ -197,68 +176,58 @@ function pickTaxRate(
 
   let rate = Number(rules.defaultRatePercent ?? 0);
 
-  // 1) income bracket
-  const brackets = Array.isArray(rules.brackets)
-    ? rules.brackets
-    : [];
+  const brackets = Array.isArray(rules.brackets) ? rules.brackets : [];
   if (brackets.length && grossCents > 0) {
     const found = brackets.find((b) => {
-      const min =
-        typeof b.minGrossCents === 'number'
-          ? b.minGrossCents
-          : 0;
+      const min = typeof b.minGrossCents === 'number' ? b.minGrossCents : 0;
       const max =
         typeof b.maxGrossCents === 'number'
           ? b.maxGrossCents
           : Number.POSITIVE_INFINITY;
+
       return grossCents >= min && grossCents <= max;
     });
+
     if (found) {
       rate = Number(found.ratePercent);
     }
   }
 
-  // 2) clinician class override
-  const classOverrides = Array.isArray(
-    rules.classOverrides,
-  )
+  const classOverrides = Array.isArray(rules.classOverrides)
     ? rules.classOverrides
     : [];
+
   if (clinicianClassId) {
-    const c = classOverrides.find(
-      (x) => x.classId === clinicianClassId,
-    );
+    const c = classOverrides.find((x) => x.classId === clinicianClassId);
     if (c) {
       rate = Number(c.ratePercent);
     }
   }
 
-  // 3) labour sector override
-  const labourOverrides = Array.isArray(
-    rules.labourSectorOverrides,
-  )
+  const labourOverrides = Array.isArray(rules.labourSectorOverrides)
     ? rules.labourSectorOverrides
     : [];
+
   if (labourCode) {
-    const l = labourOverrides.find(
-      (x) => x.labourCode === labourCode,
-    );
+    const l = labourOverrides.find((x) => x.labourCode === labourCode);
     if (l) {
       rate = Number(l.ratePercent);
     }
   }
 
-  // clamp
-  rate = Math.max(0, Math.min(55, rate));
-  return rate;
+  return Math.max(0, Math.min(55, rate));
 }
 
 /* ---------- Payment funding source helpers ---------- */
 
-function parsePaymentMeta(raw: string | null): any {
-  if (!raw) return null;
+function parsePaymentMeta(raw: unknown): Record<string, unknown> | null {
+  if (typeof raw !== 'string' || !raw) return null;
+
   try {
-    return JSON.parse(raw);
+    const out = JSON.parse(raw);
+    return out && typeof out === 'object'
+      ? (out as Record<string, unknown>)
+      : null;
   } catch {
     return null;
   }
@@ -266,7 +235,7 @@ function parsePaymentMeta(raw: string | null): any {
 
 function deriveFundingSource(
   paymentProvider: string | null,
-  paymentMeta: string | null,
+  paymentMeta: unknown,
 ): FundingSource {
   const meta = parsePaymentMeta(paymentMeta);
 
@@ -274,20 +243,21 @@ function deriveFundingSource(
     meta?.method ||
     meta?.payment_method ||
     meta?.fundingSource;
-  const method = methodRaw
-    ? String(methodRaw).toLowerCase()
-    : null;
+
+  const method = methodRaw ? String(methodRaw).toLowerCase() : null;
 
   if (method === 'medical_aid' || method === 'medical-aid') {
     return 'medical_aid';
   }
+
   if (method === 'voucher' || method === 'promo') {
     return 'voucher';
   }
+
   if (method === 'card') return 'card';
 
-  // Fallback: assume card if we see a known card gateway
   const prov = (paymentProvider || '').toLowerCase();
+
   if (
     prov === 'paystack' ||
     prov === 'stripe' ||
@@ -306,18 +276,16 @@ function derivePayoutStatus(
   const ps = (paymentStatus || '').toLowerCase();
 
   if (fundingSource === 'medical_aid') {
-    // scheme remittance often lags → treat all non-failed as awaiting
     if (ps === 'failed') return 'unpaid';
     return 'awaiting_scheme';
   }
 
   if (fundingSource === 'voucher') {
-    // vouchers are pre-funded; you may still settle them in batches.
     return 'voucher_pool';
   }
 
-  // card / unknown → treat captured as “paid”
   if (ps === 'captured') return 'paid';
+
   return 'unpaid';
 }
 
@@ -326,13 +294,16 @@ function derivePayoutStatus(
 export async function GET(req: NextRequest) {
   try {
     const ctx = await getCurrentClinician(req);
+
     if (!ctx?.clinician) {
       return NextResponse.json(
         { error: 'unauthorized' },
         { status: 401 },
       );
     }
+
     const { clinician, who } = ctx;
+    const clinicianUserId = String(who.uid);
 
     const url = new URL(req.url);
     const fromStr = url.searchParams.get('from');
@@ -345,13 +316,14 @@ export async function GET(req: NextRequest) {
     const from = fromStr
       ? startOfDay(new Date(fromStr))
       : startOfDay(defaultFrom);
+
     const to = toStr
       ? endOfDay(new Date(toStr))
       : endOfDay(today);
 
     const where: any = {
-      clinicianId: who.uid,
-      status: { in: ['completed', 'confirmed'] }, // tweak if you only want completed
+      clinicianId: clinicianUserId,
+      status: { in: ['completed', 'confirmed'] },
       startsAt: { gte: from, lte: to },
     };
 
@@ -375,7 +347,11 @@ export async function GET(req: NextRequest) {
     });
 
     const encounterIds = Array.from(
-      new Set(appts.map((a) => a.encounterId)),
+      new Set(
+        appts
+          .map((a) => a.encounterId)
+          .filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
     );
 
     const payments = encounterIds.length
@@ -389,7 +365,7 @@ export async function GET(req: NextRequest) {
             caseId: true,
             amountCents: true,
             currency: true,
-            status: true, // initiated | captured | refunded | failed
+            status: true,
             meta: true,
             createdAt: true,
           },
@@ -398,19 +374,38 @@ export async function GET(req: NextRequest) {
 
     const paymentsByEncounter = new Map<
       string,
-      any[]
+      Array<{
+        id: string;
+        encounterId: string;
+        caseId: string | null;
+        amountCents: number;
+        currency: string;
+        status: string;
+        meta: unknown;
+        createdAt: Date;
+      }>
     >();
+
     for (const p of payments) {
-      const list =
-        paymentsByEncounter.get(p.encounterId) || [];
-      list.push(p);
+      if (!p.encounterId) continue;
+
+      const list = paymentsByEncounter.get(p.encounterId) || [];
+      list.push({
+        id: p.id,
+        encounterId: p.encounterId,
+        caseId: p.caseId,
+        amountCents: p.amountCents,
+        currency: p.currency,
+        status: String(p.status),
+        meta: p.meta,
+        createdAt: p.createdAt,
+      });
       paymentsByEncounter.set(p.encounterId, list);
     }
-    // sort payments per encounter newest first
+
     for (const [k, list] of paymentsByEncounter) {
       list.sort(
-        (a, b) =>
-          b.createdAt.getTime() - a.createdAt.getTime(),
+        (a, b) => b.createdAt.getTime() - a.createdAt.getTime(),
       );
       paymentsByEncounter.set(k, list);
     }
@@ -429,34 +424,31 @@ export async function GET(req: NextRequest) {
       grossCents += basePrice;
       currency = a.currency || currency;
 
-      // Use stored split if present, else fall back to global %
       const netBase =
         a.clinicianTakeCents > 0
           ? a.clinicianTakeCents
-          : Math.round(
-              (basePrice * clinicianPercent) / 100,
-            );
+          : Math.round((basePrice * clinicianPercent) / 100);
+
       const platformShare =
         a.platformFeeCents > 0
           ? a.platformFeeCents
           : Math.max(0, basePrice - netBase);
 
-      const payList =
-        paymentsByEncounter.get(a.encounterId) || [];
+      const payList = a.encounterId
+        ? paymentsByEncounter.get(a.encounterId) || []
+        : [];
+
       const pay = payList[0] || null;
 
       const fundingSource = deriveFundingSource(
         a.paymentProvider,
         pay?.meta ?? null,
       );
+
       const payoutStatus = derivePayoutStatus(
         fundingSource,
         pay?.status ?? null,
       );
-
-      // TODO: later, decompose base vs follow-up vs service fees
-      // by reading Appointment.meta + clinician serviceFees if you want
-      // per-line analytics. For now, we treat priceCents as “consult + services”.
 
       return {
         id: a.id,
@@ -479,54 +471,60 @@ export async function GET(req: NextRequest) {
       (sum, r) => sum + r.netBaseToClinicianCents,
       0,
     );
+
     const platformShareCents = rows.reduce(
       (sum, r) => sum + r.platformShareCents,
       0,
     );
 
-    /* ---------- Weekly & avg monthly (pre staff/tax) ---------- */
+    /* ---------- Weekly & avg monthly ---------- */
 
     const weekStart = startOfWeek(today);
+
     const weekAppts = appts.filter(
       (a) => a.startsAt >= weekStart && a.startsAt <= today,
     );
+
     const weekGross = weekAppts.reduce(
       (sum, a) => sum + a.priceCents,
       0,
     );
+
     const weekNet = Math.round(
       (weekGross * clinicianPercent) / 100,
     );
 
     const sixMonthsAgo = new Date(today);
     sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
-    const recentAppts =
-      await prisma.appointment.findMany({
-        where: {
-          clinicianId: who.uid,
-          status: { in: ['completed', 'confirmed'] },
-          startsAt: { gte: sixMonthsAgo, lte: today },
-        },
-        select: { priceCents: true, startsAt: true },
-      });
+
+    const recentAppts = await prisma.appointment.findMany({
+      where: {
+        clinicianId: clinicianUserId,
+        status: { in: ['completed', 'confirmed'] },
+        startsAt: { gte: sixMonthsAgo, lte: today },
+      },
+      select: {
+        priceCents: true,
+        startsAt: true,
+      },
+    });
+
     const byMonth: Record<string, number> = {};
+
     recentAppts.forEach((a) => {
       const d = a.startsAt;
-      const k = `${d.getFullYear()}-${String(
-        d.getMonth() + 1,
-      ).padStart(2, '0')}`;
+      const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
       if (!byMonth[k]) byMonth[k] = 0;
       byMonth[k] += a.priceCents;
     });
+
     const monthKeys = Object.keys(byMonth);
+
     const avgMonthlyNetCents =
       monthKeys.length === 0
         ? 0
         : Math.round(
-            (monthKeys.reduce(
-              (sum, k) => sum + byMonth[k],
-              0,
-            ) /
+            (monthKeys.reduce((sum, k) => sum + byMonth[k], 0) /
               monthKeys.length) *
               (clinicianPercent / 100),
           );
@@ -538,57 +536,59 @@ export async function GET(req: NextRequest) {
       flatMonthlyNominalCents,
     } = extractStaffCompFromProfile(clinician);
 
-    const daysMs =
-      endOfDay(to).getTime() - startOfDay(from).getTime();
+    const daysMs = endOfDay(to).getTime() - startOfDay(from).getTime();
+
     const daysInRange =
       daysMs <= 0
         ? 0
         : Math.round(daysMs / (1000 * 60 * 60 * 24)) + 1;
 
     let flatMonthlyProratedCents = 0;
+
     if (flatMonthlyNominalCents > 0 && daysInRange > 0) {
       const ref = to;
       const year = ref.getFullYear();
       const month = ref.getMonth();
-      const daysInMonth = new Date(
-        year,
-        month + 1,
-        0,
-      ).getDate();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+
       const ratio = Math.min(
         1,
         Math.max(0, daysInRange / daysInMonth),
       );
+
       flatMonthlyProratedCents = Math.round(
         flatMonthlyNominalCents * ratio,
       );
     }
 
     const staffPercentCompCents = Math.round(
-      netToClinicianCentsBeforeStaff *
-        (staffPercentTotal / 100),
+      netToClinicianCentsBeforeStaff * (staffPercentTotal / 100),
     );
+
     const totalStaffCompCents =
       staffPercentCompCents + flatMonthlyProratedCents;
 
     const netToClinicianAfterStaffCents = Math.max(
       0,
-      netToClinicianCentsBeforeStaff -
-        totalStaffCompCents,
+      netToClinicianCentsBeforeStaff - totalStaffCompCents,
     );
 
     /* ---------- Tax ---------- */
 
-    const profileJson = loadProfileJson(clinician);
-    const payoutSettings = profileJson.payoutSettings || {};
+    const profileJson = readProfileJson(clinician);
+
+    const payoutSettings =
+      (profileJson.payoutSettings ?? {}) as Record<string, unknown>;
+
     const clinicianClassId = payoutSettings.clinicianClassId
       ? String(payoutSettings.clinicianClassId)
       : null;
+
     const labourCode = profileJson.labourCode
       ? String(profileJson.labourCode)
       : profileJson.labourSector
-      ? String(profileJson.labourSector)
-      : null;
+        ? String(profileJson.labourSector)
+        : null;
 
     const taxRatePercent = pickTaxRate(
       taxRules,
@@ -596,17 +596,17 @@ export async function GET(req: NextRequest) {
       clinicianClassId,
       labourCode,
     );
+
     const estimatedTaxCents = Math.round(
-      netToClinicianAfterStaffCents *
-        (taxRatePercent / 100),
-    );
-    const netAfterStaffAndTaxCents = Math.max(
-      0,
-      netToClinicianAfterStaffCents -
-        estimatedTaxCents,
+      netToClinicianAfterStaffCents * (taxRatePercent / 100),
     );
 
-    /* ---------- Payout history via Payout table ---------- */
+    const netAfterStaffAndTaxCents = Math.max(
+      0,
+      netToClinicianAfterStaffCents - estimatedTaxCents,
+    );
+
+    /* ---------- Payout history ---------- */
 
     const lastPayout = await prisma.payout.findFirst({
       where: {
@@ -644,10 +644,8 @@ export async function GET(req: NextRequest) {
       },
       earnings: {
         grossCents,
-        netToClinicianCents:
-          netToClinicianCentsBeforeStaff,
+        netToClinicianCents: netToClinicianCentsBeforeStaff,
         platformShareCents,
-
         staffComp: {
           percentRevenueTotalPercent: staffPercentTotal,
           percentRevenueCents: staffPercentCompCents,
@@ -661,7 +659,6 @@ export async function GET(req: NextRequest) {
           estimatedTaxCents,
           netAfterStaffAndTaxCents,
         },
-
         thisWeekNetCents: weekNet,
         avgMonthlyNetCents,
       },
@@ -678,7 +675,6 @@ export async function GET(req: NextRequest) {
         clinicianClassId,
         labourCode,
       },
-      // Keep demographics shape for future; currently empty until we wire patient city/province.
       demographics: {
         byGender: {},
         byCity: [],
@@ -688,6 +684,7 @@ export async function GET(req: NextRequest) {
     });
   } catch (e: any) {
     console.error('clinician payouts GET error', e);
+
     return NextResponse.json(
       { ok: false, error: e?.message || 'failed' },
       { status: 500 },
@@ -700,60 +697,55 @@ export async function GET(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const ctx = await getCurrentClinician(req);
+
     if (!ctx?.clinician) {
       return NextResponse.json(
         { error: 'unauthorized' },
         { status: 401 },
       );
     }
+
     const { clinician } = ctx;
 
     const body = await req
       .json()
-      .catch(() => ({} as any));
-    const scheduleRaw = String(
-      body.schedule || '',
-    ).toLowerCase();
-    if (
-      !['fortnightly', 'monthly'].includes(
-        scheduleRaw,
-      )
-    ) {
+      .catch(() => ({} as Record<string, unknown>));
+
+    const scheduleRaw = String(body.schedule || '').toLowerCase();
+
+    if (!['fortnightly', 'monthly'].includes(scheduleRaw)) {
       return NextResponse.json(
         { error: 'invalid_schedule' },
         { status: 400 },
       );
     }
+
     const schedule =
       scheduleRaw === 'fortnightly'
         ? 'fortnightly'
         : 'monthly';
 
-    const profileJson = loadProfileJson(clinician);
-    const payoutSettings = profileJson.payoutSettings || {};
+    const profileJson = readProfileJson(clinician);
+
+    const payoutSettings =
+      (profileJson.payoutSettings ?? {}) as Record<string, unknown>;
 
     profileJson.payoutSettings = {
       ...payoutSettings,
       schedule,
     };
 
-    const updatedMeta = buildUpdatedMetaData(
-      clinician,
-      profileJson,
-    );
+    const nextMeta = buildMetaForSave(clinician, profileJson);
 
     await prisma.clinicianProfile.update({
       where: { id: clinician.id },
-      data: {
-        metadata: clinician.metadata
-          ? { update: updatedMeta }
-          : { create: updatedMeta },
-      },
+      data: { meta: nextMeta },
     });
 
     return NextResponse.json({ ok: true, schedule });
   } catch (e: any) {
     console.error('clinician payouts PUT error', e);
+
     return NextResponse.json(
       { ok: false, error: e?.message || 'failed' },
       { status: 500 },

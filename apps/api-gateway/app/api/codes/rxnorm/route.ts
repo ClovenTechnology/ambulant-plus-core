@@ -1,7 +1,7 @@
-// apps/api-gateway/app/api/codes/rxnorm/route.ts
+﻿// apps/api-gateway/app/api/codes/rxnorm/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 // If you have a tsconfig path alias, prefer: import { searchRxNorm, ensureRxNormLoaded } from 'clinical-codes/src/rxnorm';
-import { searchRxNorm, ensureRxNormLoaded } from '../../../../../packages/clinical-codes/src/rxnorm';
+import { searchRxNorm, ensureRxNormLoaded } from '@ambulant/clinical-codes/rxnorm';
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);

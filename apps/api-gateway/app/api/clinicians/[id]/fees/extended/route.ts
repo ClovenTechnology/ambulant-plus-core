@@ -1,7 +1,7 @@
-// apps/api-gateway/app/api/admin/clinicians/[id]/fees/extended/route.ts
+// apps/api-gateway/app/api/clinicians/[id]/fees/extended/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
-import { verifyAdminRequest } from '../../../utils/auth';
+import { verifyAdminRequest } from '../../../../utils/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -47,19 +47,43 @@ type AdminClinicianFeesVM = {
   }[];
 };
 
-// ---- helpers ----
-
 function json(data: any, status = 200) {
   return NextResponse.json(data, { status });
 }
 
-function parseProfileJson(raw: string | null | undefined): any {
+function safeParseJson(raw: unknown): any {
   if (!raw) return {};
+  if (typeof raw === 'object' && !Array.isArray(raw)) return raw;
+
   try {
-    return JSON.parse(raw);
+    const parsed = JSON.parse(String(raw));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
   } catch {
     return {};
   }
+}
+
+function getProfileJson(clinician: any): any {
+  const meta = safeParseJson(clinician?.meta);
+
+  if (meta?.rawProfileJson) {
+    return safeParseJson(meta.rawProfileJson);
+  }
+
+  if (meta?.rawProfile) {
+    return safeParseJson(meta.rawProfile);
+  }
+
+  return meta;
+}
+
+function buildUpdatedMeta(clinician: any, profileJson: any) {
+  const currentMeta = safeParseJson(clinician?.meta);
+
+  return {
+    ...currentMeta,
+    rawProfileJson: JSON.stringify(profileJson),
+  };
 }
 
 function normaliseCurrency(raw: any): string {
@@ -70,8 +94,10 @@ function normaliseCurrency(raw: any): string {
 
 function normaliseService(raw: any, defaultCurrency: string): Service | null {
   if (!raw || typeof raw !== 'object') return null;
+
   const id = String(raw.id || '').trim();
   const name = String(raw.name || '').trim();
+
   if (!id || !name) return null;
 
   const kindRaw = String(raw.kind || 'extra') as ServiceKind;
@@ -95,9 +121,6 @@ function normaliseService(raw: any, defaultCurrency: string): Service | null {
       ? Math.max(0, Math.round(Number(raw.maxMinutes)))
       : null;
 
-  const active = Boolean(raw.active ?? true);
-  const includesMedicalStaff = raw.includesMedicalStaff ? true : false;
-
   return {
     id,
     kind,
@@ -107,13 +130,14 @@ function normaliseService(raw: any, defaultCurrency: string): Service | null {
     currency,
     minMinutes,
     maxMinutes,
-    active,
-    includesMedicalStaff,
+    active: Boolean(raw.active ?? true),
+    includesMedicalStaff: raw.includesMedicalStaff ? true : false,
   };
 }
 
 function normaliseStaffComp(raw: any): StaffCompConfig | null {
   if (!raw || typeof raw !== 'object') return null;
+
   const staffId = String(raw.staffId || '').trim();
   if (!staffId) return null;
 
@@ -141,40 +165,28 @@ function normaliseStaffComp(raw: any): StaffCompConfig | null {
   };
 }
 
-function buildUpdatedMetaData(clinician: any, profileJson: any) {
-  return {
-    rawProfileJson: JSON.stringify(profileJson),
-    hpcsaS3Key: clinician.metadata?.hpcsaS3Key ?? null,
-    hpcsaFileMeta: clinician.metadata?.hpcsaFileMeta ?? null,
-    hpcsaNextRenewalDate: clinician.metadata?.hpcsaNextRenewalDate ?? null,
-    insurerName: clinician.metadata?.insurerName ?? null,
-    insuranceType: clinician.metadata?.insuranceType ?? null,
-  };
-}
-
-// ---- GET: view extended fees & staff comp ----
-
 export async function GET(
   req: NextRequest,
   ctx: { params: { id: string } },
 ) {
   try {
     const isAdmin = await verifyAdminRequest(req);
+
     if (!isAdmin) {
       return json({ ok: false, error: 'admin_required' }, 403);
     }
 
     const clinicianId = ctx.params.id;
+
     const clinician = await prisma.clinicianProfile.findUnique({
       where: { id: clinicianId },
-      include: { metadata: true },
     });
 
     if (!clinician) {
       return json({ ok: false, error: 'not_found' }, 404);
     }
 
-    const profileJson = parseProfileJson(clinician.metadata?.rawProfileJson);
+    const profileJson = getProfileJson(clinician);
 
     const serviceFees = profileJson.serviceFees || {};
     const currency = normaliseCurrency(
@@ -184,6 +196,7 @@ export async function GET(
     const rawServices: any[] = Array.isArray(serviceFees.services)
       ? serviceFees.services
       : [];
+
     const services: Service[] = rawServices
       .map((s) => normaliseService(s, currency))
       .filter(Boolean) as Service[];
@@ -201,7 +214,9 @@ export async function GET(
       const row = rawComp.find(
         (c) => String(c.staffId || '') === String(staffId),
       );
+
       if (!row) return null;
+
       return normaliseStaffComp(row);
     };
 
@@ -219,7 +234,6 @@ export async function GET(
           s.type === 'medical' ? 'medical' : 'non-medical';
 
         const role = s.role ? String(s.role).trim() : null;
-
         const comp = findComp(staffId);
 
         return {
@@ -248,9 +262,10 @@ export async function GET(
     return json(out);
   } catch (err: any) {
     console.error(
-      'GET /api/admin/clinicians/[id]/fees/extended error',
+      'GET /api/clinicians/[id]/fees/extended error',
       err,
     );
+
     return json(
       { ok: false, error: err?.message || 'failed_to_load_fees' },
       500,
@@ -258,22 +273,21 @@ export async function GET(
   }
 }
 
-// ---- PUT: update serviceFees + adminStaffComp (for future UI) ----
-
 export async function PUT(
   req: NextRequest,
   ctx: { params: { id: string } },
 ) {
   try {
     const isAdmin = await verifyAdminRequest(req);
+
     if (!isAdmin) {
       return json({ ok: false, error: 'admin_required' }, 403);
     }
 
     const clinicianId = ctx.params.id;
+
     const clinician = await prisma.clinicianProfile.findUnique({
       where: { id: clinicianId },
-      include: { metadata: true },
     });
 
     if (!clinician) {
@@ -281,12 +295,12 @@ export async function PUT(
     }
 
     const body = await req.json().catch(() => ({} as any));
-
     const baseCurrency = normaliseCurrency(body.currency || 'ZAR');
 
     const rawServices: any[] = Array.isArray(body.services)
       ? body.services
       : [];
+
     const services: Service[] = rawServices
       .map((s) => normaliseService(s, baseCurrency))
       .filter(Boolean) as Service[];
@@ -294,11 +308,12 @@ export async function PUT(
     const rawStaffComp: any[] = Array.isArray(body.staff)
       ? body.staff
       : [];
+
     const staffComp: StaffCompConfig[] = rawStaffComp
       .map((s) => normaliseStaffComp(s))
       .filter(Boolean) as StaffCompConfig[];
 
-    const profileJson = parseProfileJson(clinician.metadata?.rawProfileJson);
+    const profileJson = getProfileJson(clinician);
 
     profileJson.serviceFees = {
       currency: baseCurrency,
@@ -310,24 +325,22 @@ export async function PUT(
       staff: staffComp,
     };
 
-    const updatedMeta = buildUpdatedMetaData(clinician, profileJson);
+    const updatedMeta = buildUpdatedMeta(clinician, profileJson);
 
     await prisma.clinicianProfile.update({
       where: { id: clinician.id },
       data: {
-        metadata: clinician.metadata
-          ? { update: updatedMeta }
-          : { create: updatedMeta },
+        meta: updatedMeta,
       },
-      include: { metadata: true },
     });
 
     return json({ ok: true });
   } catch (err: any) {
     console.error(
-      'PUT /api/admin/clinicians/[id]/fees/extended error',
+      'PUT /api/clinicians/[id]/fees/extended error',
       err,
     );
+
     return json(
       { ok: false, error: err?.message || 'failed_to_update_fees' },
       500,

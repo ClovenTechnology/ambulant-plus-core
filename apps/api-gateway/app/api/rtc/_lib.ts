@@ -1,19 +1,23 @@
 // apps/api-gateway/app/api/rtc/_lib.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
 import { createHash } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import { jwtVerify } from 'jose';
 
 // -----------------------------
-// Prisma (local, safe singleton)
+// Prisma safe singleton
 // -----------------------------
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+
 export const prisma =
   globalForPrisma.prisma ||
   new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
   });
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}
 
 // -----------------------------
 // CORS
@@ -25,9 +29,11 @@ const ORIGINS = (process.env.RTC_CORS_ORIGINS || '')
 
 export function cors(req: NextRequest) {
   const origin = req.headers.get('origin') || '';
-  const allowOrigin = ORIGINS.length === 0 ? '*' : ORIGINS.includes(origin) ? origin : '';
+  const allowOrigin =
+    ORIGINS.length === 0 ? '*' : ORIGINS.includes(origin) ? origin : '';
 
   const h = new Headers();
+
   if (allowOrigin) h.set('access-control-allow-origin', allowOrigin);
   if (ORIGINS.length > 0) h.set('vary', 'Origin');
 
@@ -46,6 +52,7 @@ export function cors(req: NextRequest) {
   );
   h.set('access-control-max-age', '600');
   h.set('cache-control', 'no-store');
+
   return h;
 }
 
@@ -58,6 +65,7 @@ export function envFirst(names: string[]) {
     const v = process.env[n];
     if (v && v.trim()) return v.trim();
   }
+
   return '';
 }
 
@@ -70,20 +78,29 @@ export function pickClaim(payload: any, keys: string[]) {
     const v = payload?.[k];
     if (typeof v === 'string' && v.trim()) return v.trim();
   }
+
   return '';
 }
 
-export function mustRole(role: string) {
+export type RtcRole = 'patient' | 'clinician' | 'staff' | 'observer' | 'admin';
+
+export function mustRole(role: string): RtcRole | '' {
   const r = role.trim();
-  if (!['patient', 'clinician', 'staff', 'observer', 'admin'].includes(r)) return '';
-  return r as 'patient' | 'clinician' | 'staff' | 'observer' | 'admin';
+
+  if (!['patient', 'clinician', 'staff', 'observer', 'admin'].includes(r)) {
+    return '';
+  }
+
+  return r as RtcRole;
 }
 
 function toHttpUrl(url: string) {
   const u = (url || '').trim();
+
   if (!u) return '';
-  if (u.startsWith('wss://')) return 'https://' + u.slice('wss://'.length);
-  if (u.startsWith('ws://')) return 'http://' + u.slice('ws://'.length);
+  if (u.startsWith('wss://')) return `https://${u.slice('wss://'.length)}`;
+  if (u.startsWith('ws://')) return `http://${u.slice('ws://'.length)}`;
+
   return u;
 }
 
@@ -91,7 +108,7 @@ export type VerifiedJoin = {
   joinJwt: string;
   tokenHash: string;
   uid: string;
-  role: 'patient' | 'clinician' | 'staff' | 'observer' | 'admin';
+  role: RtcRole;
   roomId: string;
   visitId: string;
   orgId: string;
@@ -99,7 +116,7 @@ export type VerifiedJoin = {
     id: string;
     visitId: string;
     uid: string;
-    role: 'patient' | 'clinician' | 'staff' | 'observer' | 'admin';
+    role: RtcRole;
     orgId: string | null;
     expiresAt: Date;
     revokedAt: Date | null;
@@ -108,15 +125,26 @@ export type VerifiedJoin = {
 
 export async function verifyJoinTicket(req: NextRequest): Promise<VerifiedJoin> {
   const joinJwt = (req.headers.get('x-join-token') || '').trim();
-  if (!joinJwt) throw new Error('missing_join_token');
 
-  const joinSecret = envFirst(['TELEVISIT_JOIN_JWT_SECRET', 'RTC_JOIN_JWT_SECRET', 'JOIN_TICKET_JWT_SECRET']);
-  if (!joinSecret) throw new Error('server_misconfig_missing_join_secret');
+  if (!joinJwt) {
+    throw new Error('missing_join_token');
+  }
+
+  const joinSecret = envFirst([
+    'TELEVISIT_JOIN_JWT_SECRET',
+    'RTC_JOIN_JWT_SECRET',
+    'JOIN_TICKET_JWT_SECRET',
+  ]);
+
+  if (!joinSecret) {
+    throw new Error('server_misconfig_missing_join_secret');
+  }
 
   const issuer = envFirst(['TELEVISIT_JOIN_JWT_ISSUER', 'JOIN_TICKET_JWT_ISSUER']);
   const audience = envFirst(['TELEVISIT_JOIN_JWT_AUDIENCE', 'JOIN_TICKET_JWT_AUDIENCE']);
 
   const secretKey = new TextEncoder().encode(joinSecret);
+
   const { payload } = await jwtVerify(joinJwt, secretKey, {
     algorithms: ['HS256'],
     clockTolerance: 10,
@@ -130,7 +158,9 @@ export async function verifyJoinTicket(req: NextRequest): Promise<VerifiedJoin> 
   const orgId = pickClaim(payload, ['orgId', 'org', 'tenant']) || 'org-default';
   const role = mustRole(pickClaim(payload, ['role', 'televisitRole', 'rRole'])) || 'patient';
 
-  if (!uid || !roomId || !visitId) throw new Error('invalid_join_token_missing_claims');
+  if (!uid || !roomId || !visitId) {
+    throw new Error('invalid_join_token_missing_claims');
+  }
 
   const tokenHash = sha256Hex(joinJwt);
   const now = new Date();
@@ -150,7 +180,9 @@ export async function verifyJoinTicket(req: NextRequest): Promise<VerifiedJoin> 
 
   if (!ticket) throw new Error('ticket_not_found');
   if (ticket.revokedAt) throw new Error('ticket_revoked');
-  if (new Date(ticket.expiresAt).getTime() <= now.getTime()) throw new Error('ticket_expired');
+  if (new Date(ticket.expiresAt).getTime() <= now.getTime()) {
+    throw new Error('ticket_expired');
+  }
 
   if (ticket.visitId !== visitId || ticket.uid !== uid || ticket.role !== role) {
     throw new Error('ticket_mismatch');
@@ -172,7 +204,7 @@ export async function verifyJoinTicket(req: NextRequest): Promise<VerifiedJoin> 
       id: ticket.id,
       visitId: ticket.visitId,
       uid: ticket.uid,
-      role: ticket.role,
+      role: ticket.role as RtcRole,
       orgId: ticket.orgId,
       expiresAt: ticket.expiresAt,
       revokedAt: ticket.revokedAt,
@@ -181,27 +213,32 @@ export async function verifyJoinTicket(req: NextRequest): Promise<VerifiedJoin> 
 }
 
 export function requireRole(role: string, allowed: string[]) {
-  if (!allowed.includes(role)) throw new Error('forbidden_role');
+  if (!allowed.includes(role)) {
+    throw new Error('forbidden_role');
+  }
 }
 
 export async function roomServiceClient() {
   const livekitKey = envFirst(['LIVEKIT_API_KEY', 'LK_API_KEY']);
   const livekitSecret = envFirst(['LIVEKIT_API_SECRET', 'LK_API_SECRET']);
-  const livekitUrlRaw = envFirst(['LIVEKIT_API_URL', 'LIVEKIT_WS_URL', 'LIVEKIT_URL', 'LK_URL', 'LK_WS_URL']);
+  const livekitUrlRaw = envFirst([
+    'LIVEKIT_API_URL',
+    'LIVEKIT_WS_URL',
+    'LIVEKIT_URL',
+    'LK_URL',
+    'LK_WS_URL',
+  ]);
 
-  if (!livekitKey || !livekitSecret || !livekitUrlRaw) throw new Error('server_misconfig_missing_livekit_creds');
+  if (!livekitKey || !livekitSecret || !livekitUrlRaw) {
+    throw new Error('server_misconfig_missing_livekit_creds');
+  }
 
   const livekitUrl = toHttpUrl(livekitUrlRaw);
-
   const { RoomServiceClient } = await import('livekit-server-sdk');
+
   return new RoomServiceClient(livekitUrl, livekitKey, livekitSecret);
 }
 
-/**
- * Best-effort audit log.
- * If you later add a Prisma model named TelevisitRtcActionLog (or televisitRtcActionLog),
- * this will start persisting automatically.
- */
 export async function auditBestEffort(entry: Record<string, any>) {
   try {
     const model =
@@ -212,9 +249,22 @@ export async function auditBestEffort(entry: Record<string, any>) {
 
     if (model?.create) {
       await model.create({ data: entry });
-      return;
     }
   } catch {
-    // ignore
+    // Best-effort only.
   }
+}
+
+export function rtcErrorStatus(message: string) {
+  if (
+    message.includes('missing_join_token') ||
+    message.includes('invalid_join') ||
+    message.includes('ticket_')
+  ) {
+    return 401;
+  }
+
+  if (message.includes('forbidden')) return 403;
+
+  return 400;
 }

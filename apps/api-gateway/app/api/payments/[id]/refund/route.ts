@@ -1,47 +1,109 @@
 // apps/api-gateway/app/api/payments/[id]/refund/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
-import { getProvider } from '@/src/payments';
-import { emitEvent } from '@/src/lib/events';
-import { readIdentity } from '@/src/lib/identity';
 
 export const dynamic = 'force-dynamic';
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const who = readIdentity(req.headers);
-  if (who.role !== 'admin') return NextResponse.json({ error: 'forbidden' }, { status: 403 });
+function asJsonObject(value: unknown): Record<string, any> {
+  if (!value) return {};
 
-  const pay = await prisma.payment.findUnique({ where: { id: params.id } });
-  if (!pay) return NextResponse.json({ error: 'not found' }, { status: 404 });
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, any>;
+  }
 
-  const provider = getProvider();
-  const ref = pay.meta?.providerRef as string | undefined;
-  await provider.refund(ref || `mock_${pay.id}`, pay.amountCents);
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch {
+      return {};
+    }
+  }
 
-  const updated = await prisma.payment.update({
-    where: { id: pay.id },
-    data: { status: 'refunded', updatedAt: new Date() },
-  });
+  return {};
+}
 
-  // AUDIT
-  await prisma.auditEvent.create({
-    data: {
-      kind: 'payment_refunded',
-      actorId: who.uid,
-      actorRole: who.role,
-      subjectId: updated.id,
-      meta: { encounterId: pay.encounterId, amountCents: pay.amountCents, providerRef: ref || `mock_${pay.id}` },
-    },
-  });
+async function refundViaProvider(ref: string, amountCents: number) {
+  try {
+    const mod: any = await import('@/src/payments/provider');
 
-  await emitEvent({
-    kind: 'payment_refunded',
-    encounterId: pay.encounterId,
-    patientId: 'pt-za-001',
-    clinicianId: 'clin-za-001',
-    payload: { paymentId: pay.id, amount: pay.amountCents },
-    targets: { admin: true, patientId: 'pt-za-001' },
-  });
+    const provider =
+      typeof mod.getProvider === 'function'
+        ? mod.getProvider()
+        : typeof mod.default === 'function'
+          ? mod.default()
+          : mod.provider ?? null;
 
-  return NextResponse.json(updated, { headers: { 'access-control-allow-origin': '*' } });
+    if (provider && typeof provider.refund === 'function') {
+      await provider.refund(ref, amountCents);
+      return { ok: true, providerRefunded: true };
+    }
+
+    return {
+      ok: true,
+      providerRefunded: false,
+      reason: 'refund_provider_not_available',
+    };
+  } catch (err: any) {
+    return {
+      ok: true,
+      providerRefunded: false,
+      reason: err?.message || 'refund_provider_import_failed',
+    };
+  }
+}
+
+export async function POST(
+  _req: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  try {
+    const pay = await prisma.payment.findUnique({
+      where: { id: params.id },
+    });
+
+    if (!pay) {
+      return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
+
+    const meta = asJsonObject(pay.meta);
+
+    const ref =
+      typeof meta.providerRef === 'string' && meta.providerRef.trim()
+        ? meta.providerRef.trim()
+        : `mock_${pay.id}`;
+
+    const refundResult = await refundViaProvider(ref, pay.amountCents);
+
+    const updated = await prisma.payment.update({
+      where: { id: pay.id },
+      data: {
+        status: 'refunded',
+        meta: {
+          ...meta,
+          refundedAt: new Date().toISOString(),
+          refundProviderRef: ref,
+          refundProviderResult: refundResult,
+        },
+      },
+    });
+
+    return NextResponse.json({
+      ok: true,
+      payment: updated,
+      refundProviderResult: refundResult,
+    });
+  } catch (err: any) {
+    console.error('payment refund error', err);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err?.message || 'refund_failed',
+      },
+      { status: 500 },
+    );
+  }
 }

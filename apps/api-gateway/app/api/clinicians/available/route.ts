@@ -1,34 +1,173 @@
 // apps/api-gateway/app/api/clinicians/available/route.ts
 import { NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/db';
 
-// however you load clinicians:
+export const dynamic = 'force-dynamic';
+
 type Clin = {
   id: string;
-  status: 'online_available'|'in_consult'|'wrap_up'|'on_break';
-  login_at: number;
-  returned_to_available_at?: number;
-  sessions_assigned_today: number;
-  last_assigned_at?: number;
-  rank_at_login?: number;
+  userId?: string | null;
+  displayName?: string | null;
+  name?: string | null;
+  specialty?: string | null;
+  status?: string | null;
+  onboardingStatus?: string | null;
+  trainingStatus?: string | null;
+  isAvailable?: boolean | null;
+  discoverable?: boolean | null;
+  visible?: boolean | null;
+  lastSeenAt?: Date | string | null;
+  updatedAt?: Date | string | null;
+  meta?: any;
 };
 
-function score(c: Clin, now: number) {
-  const minutes_since_last = c.last_assigned_at ? (now - c.last_assigned_at)/60000 : 9999;
-  const idle_minutes = c.returned_to_available_at
-    ? (now - c.returned_to_available_at)/60000
-    : (now - c.login_at)/60000;
-  const login_bias = c.rank_at_login ?? 0;
-  return 3*c.sessions_assigned_today + (-0.02*minutes_since_last) + (-0.01*idle_minutes) + 0.5*login_bias;
+function parseMeta(raw: unknown): Record<string, any> {
+  if (!raw) return {};
+
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return raw as Record<string, any>;
+  }
+
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function boolFromMeta(meta: Record<string, any>, keys: string[], fallback = false) {
+  for (const key of keys) {
+    if (typeof meta[key] === 'boolean') return meta[key];
+    if (typeof meta[key] === 'string') {
+      const value = meta[key].trim().toLowerCase();
+      if (value === 'true') return true;
+      if (value === 'false') return false;
+    }
+  }
+
+  return fallback;
+}
+
+function isTrainingComplete(clinician: Clin, meta: Record<string, any>) {
+  const direct =
+    String(clinician.trainingStatus ?? '').toLowerCase() === 'completed' ||
+    String(clinician.onboardingStatus ?? '').toLowerCase() === 'training_completed' ||
+    String(clinician.status ?? '').toLowerCase() === 'active';
+
+  const fromMeta =
+    boolFromMeta(meta, ['trainingCompleted', 'training_complete', 'isTrainingComplete'], false) ||
+    String(meta.trainingStatus ?? '').toLowerCase() === 'completed' ||
+    String(meta.onboardingStatus ?? '').toLowerCase() === 'training_completed';
+
+  return direct || fromMeta;
+}
+
+function isDiscoverable(clinician: Clin, meta: Record<string, any>) {
+  if (clinician.discoverable === false || clinician.visible === false) return false;
+
+  if (
+    meta.discoverable === false ||
+    meta.visible === false ||
+    meta.isDiscoverable === false ||
+    meta.patientVisible === false
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
+function isRecentlyAvailable(clinician: Clin, meta: Record<string, any>, now: number) {
+  if (clinician.isAvailable === true) return true;
+
+  if (
+    boolFromMeta(meta, ['isAvailable', 'available', 'online'], false) ||
+    String(meta.availabilityStatus ?? '').toLowerCase() === 'available'
+  ) {
+    return true;
+  }
+
+  const rawLastSeen = clinician.lastSeenAt ?? meta.lastSeenAt ?? meta.last_seen_at ?? clinician.updatedAt;
+  const lastSeenMs = rawLastSeen ? new Date(rawLastSeen).getTime() : 0;
+
+  if (!Number.isFinite(lastSeenMs) || lastSeenMs <= 0) return false;
+
+  // Consider clinician recently reachable if seen within the last 15 minutes.
+  return now - lastSeenMs <= 15 * 60 * 1000;
+}
+
+async function loadClinicians(): Promise<Clin[]> {
+  const delegate = (prisma as any).clinicianProfile;
+
+  if (!delegate?.findMany) return [];
+
+  const rows = await delegate.findMany({
+    take: 200,
+    orderBy: {
+      updatedAt: 'desc',
+    },
+  });
+
+  return Array.isArray(rows) ? rows : [];
 }
 
 export async function GET() {
-  const clinicians: Clin[] = await loadFromYourStore(); // implement
-  const now = Date.now();
+  try {
+    const clinicians = await loadClinicians();
+    const now = Date.now();
 
-  const visible = clinicians
-    .filter(c => c.status === 'online_available')
-    .map(c => ({ ...c, score: score(c, now) }))
-    .sort((a, b) => a.score - b.score);
+    const visible = clinicians
+      .filter((clinician) => {
+        const meta = parseMeta(clinician.meta);
 
-  return NextResponse.json(visible);
+        return (
+          isDiscoverable(clinician, meta) &&
+          isTrainingComplete(clinician, meta) &&
+          isRecentlyAvailable(clinician, meta, now)
+        );
+      })
+      .map((clinician) => {
+        const meta = parseMeta(clinician.meta);
+
+        return {
+          id: clinician.id,
+          userId: clinician.userId ?? null,
+          displayName:
+            clinician.displayName ??
+            clinician.name ??
+            meta.displayName ??
+            meta.name ??
+            'Clinician',
+          specialty: clinician.specialty ?? meta.specialty ?? null,
+          status: clinician.status ?? null,
+          available: true,
+          lastSeenAt: clinician.lastSeenAt ?? meta.lastSeenAt ?? null,
+        };
+      });
+
+    return NextResponse.json({
+      ok: true,
+      clinicians: visible,
+      count: visible.length,
+    });
+  } catch (err: any) {
+    console.error('GET /api/clinicians/available error', err);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err?.message || 'failed_to_load_available_clinicians',
+        clinicians: [],
+        count: 0,
+      },
+      { status: 500 },
+    );
+  }
 }

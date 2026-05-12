@@ -1,51 +1,140 @@
-// Updated device types. Otoscope supports photo + video capture.
-
+// apps/api-gateway/src/devices/types.ts
 
 export type DeviceCategory =
-| 'wearable'
-| 'iomt'
-| 'stethoscope'
-| 'otoscope'
-| 'scale'
-| 'cgm';
+  | 'health-monitor'
+  | 'stethoscope'
+  | 'otoscope'
+  | 'ring'
+  | 'vitals'
+  | 'audio'
+  | 'imaging'
+  | 'wearable'
+  | 'iomt';
 
+export type Transport =
+  | 'ble'
+  | 'usb'
+  | 'camera'
+  | 'cloud'
+  | 'mqtt'
+  | 'manual';
 
-export type Transport = 'ble' | 'usb' | 'camera' | 'cloud';
-
-
-export type ServiceUUID = string; // 128-bit or 16-bit (e.g., 0x180D)
+export type ServiceUUID = string;
 export type CharUUID = string;
 
-
 export type BleChar = {
-uuid: CharUUID;
-notify?: boolean;
-write?: boolean;
-read?: boolean;
-cadenceHz?: number; // expected notification cadence if notify=true
-description?: string;
+  uuid: CharUUID;
+  notify?: boolean;
+  write?: boolean;
+  read?: boolean;
+  cadenceHz?: number;
+  description?: string;
 };
-
 
 export type BleService = {
-uuid: ServiceUUID;
-chars: Record<string, BleChar>; // key = symbolic name, e.g. "ecg_wave", "hr_measurement"
+  uuid: ServiceUUID;
+  chars: Record<string, BleChar>;
 };
-
 
 export type UsbInterface = {
-vendorId: number;
-productId: number;
-description?: string;
+  vendorId: number;
+  productId: number;
+  description?: string;
 };
-
 
 export type DeviceServiceMap = {
-transport: Transport;
-ble?: {
-filters: { services?: ServiceUUID[]; namePrefix?: string }[];
-services: Record<string, BleService>; // symbolic service names
+  transport: Transport;
+  ble?: {
+    filters: Array<{
+      services?: ServiceUUID[];
+      namePrefix?: string;
+    }>;
+    services: Record<string, BleService>;
+  };
+  usb?: UsbInterface[];
+  camera?: {
+    uvcLabelHint?: string;
+  };
 };
-usb?: UsbInterface[]; // otoscope etc.
-camera?: { uvcLabelHint?: string };
+
+export type MetricSample = {
+  metric: string;
+  value: number | string | boolean | null;
+  unit?: string | null;
+  timestamp?: string | Date;
+  deviceId?: string;
+  patientId?: string;
+  payload?: any;
+  raw?: any;
+  [key: string]: any;
 };
+
+export type IoMTInfo = {
+  id: string;
+  vendor: string;
+  displayName: string;
+  category: DeviceCategory | string;
+  family?: string;
+  model?: string;
+  transport?: Transport;
+  version?: string;
+  description?: string;
+  capabilities?: string[];
+  serviceMap?: DeviceServiceMap;
+  [key: string]: any;
+};
+
+export type IoMTData = MetricSample & {
+  type?: string;
+};
+
+export type IoMTDevice = {
+  info: IoMTInfo;
+
+  connect?: () => Promise<void> | void;
+  disconnect?: () => Promise<void> | void;
+  start?: () => Promise<void> | void;
+  stop?: () => Promise<void> | void;
+
+  onData?: (cb: (event: IoMTData) => void) => void;
+  offData?: () => void;
+
+  read?: () =>
+    | Promise<IoMTData | IoMTData[] | null>
+    | IoMTData
+    | IoMTData[]
+    | null;
+};
+
+export type IoMTManager = {
+  list: () => IoMTInfo[];
+  get?: (id: string) => IoMTDevice | undefined;
+  find?: (id: string) => IoMTDevice | undefined;
+  connect?: (id: string) => Promise<IoMTDevice | null> | IoMTDevice | null;
+  disconnect?: (id: string) => Promise<void> | void;
+  onData?: (id: string, cb: (event: IoMTData) => void) => void;
+};
+
+export type WearableInfo = IoMTInfo;
+export type WearableData = IoMTData;
+export type WearableDevice = IoMTDevice;
+
+export type WearableManager = {
+  list: () => WearableInfo[];
+  get?: (id: string) => WearableDevice | undefined;
+  find?: (id: string) => WearableDevice | undefined;
+  connect?: (id: string) => Promise<WearableDevice | null> | WearableDevice | null;
+  disconnect?: (id: string) => Promise<void> | void;
+  onData?: (id: string, cb: (event: WearableData) => void) => void;
+};
+
+export type DeviceReading = IoMTData;
+
+export type DeviceMapperInput = {
+  deviceId?: string;
+  patientId?: string;
+  payload?: any;
+  [key: string]: any;
+};
+
+export type DeviceMapperOutput = IoMTData | IoMTData[] | null;

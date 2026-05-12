@@ -4,39 +4,81 @@ import { prisma } from '@/src/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-function cors(json: any, status = 200) {
-  return NextResponse.json(json, { status, headers: { 'access-control-allow-origin': '*' } });
+function caseDelegate() {
+  return (prisma as any).case ?? (prisma as any).clinicalCase ?? null;
 }
 
-// GET /api/cases?patientId=...
+function cleanStr(value: unknown, fallback = '') {
+  const s = String(value ?? '').trim();
+  return s || fallback;
+}
+
 export async function GET(req: NextRequest) {
-  const p = req.nextUrl.searchParams.get('patientId') || undefined;
-  const where: any = p ? { patientId: p } : {};
-  const rows = await prisma.case.findMany({
+  const delegate = caseDelegate();
+
+  if (!delegate?.findMany) {
+    return NextResponse.json({ cases: [] });
+  }
+
+  const q = req.nextUrl.searchParams;
+
+  const where: Record<string, any> = {};
+
+  const patientId = q.get('patientId') || q.get('patient_id');
+  const clinicianId = q.get('clinicianId') || q.get('clinician_id');
+  const status = q.get('status');
+
+  if (patientId) where.patientId = patientId;
+  if (clinicianId) where.clinicianId = clinicianId;
+  if (status && status !== 'all') where.status = status;
+
+  const rows = await delegate.findMany({
     where,
     orderBy: { updatedAt: 'desc' },
-    include: {
-      encounters: { select: { id: true, createdAt: true, updatedAt: true, status: true }, orderBy: { createdAt: 'desc' } },
-    },
+    take: 100,
   });
-  const data = rows.map(c => ({
-    id: c.id,
-    title: c.title,
-    status: c.status,
-    encounterCount: c.encounters.length,
-    lastEncounterAt: c.encounters[0]?.updatedAt ?? c.updatedAt,
-    updatedAt: c.updatedAt,
-  }));
-  return cors({ items: data });
+
+  return NextResponse.json({ cases: rows });
 }
 
-// POST /api/cases
 export async function POST(req: NextRequest) {
-  const b = await req.json().catch(()=> ({}));
-  const patientId = String(b.patientId || '');
-  const title = String(b.title || 'Case');
-  if (!patientId) return cors({ error: 'patientId_required' }, 400);
+  const delegate = caseDelegate();
 
-  const row = await prisma.case.create({ data: { patientId, title, status: 'open' } });
-  return cors(row, 201);
+  if (!delegate?.create) {
+    return NextResponse.json(
+      { error: 'case_store_unavailable' },
+      { status: 503 },
+    );
+  }
+
+  const body = await req.json().catch(() => ({}));
+
+  const patientId = cleanStr(body.patientId ?? body.patient_id);
+  const clinicianId = cleanStr(body.clinicianId ?? body.clinician_id);
+
+  if (!patientId) {
+    return NextResponse.json({ error: 'patientId_required' }, { status: 400 });
+  }
+
+  const data: Record<string, any> = {
+    patientId,
+    status: cleanStr(body.status, 'open'),
+  };
+
+  if (clinicianId) data.clinicianId = clinicianId;
+  if (body.title !== undefined) data.title = cleanStr(body.title, 'Clinical case');
+  if (body.summary !== undefined) data.summary = cleanStr(body.summary);
+  if (body.priority !== undefined) data.priority = cleanStr(body.priority);
+  if (body.notes !== undefined) data.notes = cleanStr(body.notes);
+
+  try {
+    const created = await delegate.create({ data });
+
+    return NextResponse.json(created, { status: 201 });
+  } catch (err: any) {
+    return NextResponse.json(
+      { error: err?.message || 'create_failed' },
+      { status: 500 },
+    );
+  }
 }
