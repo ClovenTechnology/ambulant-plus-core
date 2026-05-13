@@ -1,43 +1,92 @@
 // apps/admin-dashboard/app/auth/signin/page.tsx
+import { Suspense } from 'react';
+import Link from 'next/link';
 import AdminSignIn from '../../../components/AdminSignIn';
 
-export const metadata = { title: 'Admin Sign In' };
+export const metadata = {
+  title: 'Sign in | Ambulant+ Admin',
+};
+
+export const dynamic = 'force-dynamic';
+
+function SignInFallback() {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+      <div className="h-5 w-32 animate-pulse rounded bg-slate-100" />
+      <div className="mt-4 h-10 w-full animate-pulse rounded-lg bg-slate-100" />
+      <div className="mt-3 h-10 w-full animate-pulse rounded-lg bg-slate-100" />
+    </div>
+  );
+}
 
 export default function SignInPage() {
   return (
-    <main className="min-h-[calc(100vh-64px)] bg-gradient-to-b from-gray-50 to-white">
-      <section className="mx-auto max-w-5xl px-6 py-10">
-        <header className="mb-8">
-          <h1 className="text-2xl font-semibold tracking-tight">Welcome back</h1>
-          <p className="text-sm text-gray-600">
-            Sign in to manage operations, clinicians, analytics, and more.
-          </p>
-        </header>
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,#eff6ff,transparent_34%),linear-gradient(to_bottom,#f8fafc,#ffffff)]">
+      <section className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-10">
+        <div className="grid w-full items-center gap-10 lg:grid-cols-[1fr_430px]">
+          <div className="max-w-2xl">
+            <div className="mb-6 inline-flex rounded-full border border-blue-100 bg-white/80 px-3 py-1 text-xs font-medium text-blue-700 shadow-sm">
+              Ambulant+ Admin Console
+            </div>
 
-        <div className="grid items-start gap-8 lg:grid-cols-[1fr_420px]">
-          <div className="rounded-2xl border bg-white p-6">
-            <h2 className="text-base font-semibold">Access levels at a glance</h2>
-            <ul className="mt-3 grid gap-2 text-sm text-gray-700">
-              <li>• <b>Super Admin</b>: Full platform control</li>
-              <li>• <b>Admin</b>: Operational administration</li>
-              <li>• <b>Medical</b>: Clinical data & care ops</li>
-              <li>• <b>Tech & IT</b>: Devices, SDK, InsightCore</li>
-              <li>• <b>Finance</b>: Payouts, orders & analytics</li>
-              <li>• <b>HR</b>: People administration</li>
-              <li>• <b>Compliance</b>: Read-only oversight</li>
-              <li>• <b>Reports & Research</b>: Data insights</li>
-              <li>• <b>R&D</b>: Experiments & innovation</li>
-            </ul>
+            <h1 className="text-4xl font-semibold tracking-tight text-slate-950 sm:text-5xl">
+              Secure operational access for your care network.
+            </h1>
 
-            <div className="mt-4 rounded-xl border bg-gray-50 p-4 text-xs text-gray-600">
-              Your access is enforced by middleware at request time and by server actions on writes.
+            <p className="mt-5 max-w-xl text-base leading-7 text-slate-600">
+              Sign in to manage clinicians, onboarding, training, payouts,
+              CarePort, MedReach, devices, analytics, and platform settings.
+            </p>
+
+            <div className="mt-8 grid gap-3 text-sm text-slate-600 sm:grid-cols-3">
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+                <div className="font-semibold text-slate-900">Role-based</div>
+                <div className="mt-1 text-xs leading-5">
+                  Access is scoped by your admin permissions.
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+                <div className="font-semibold text-slate-900">Auditable</div>
+                <div className="mt-1 text-xs leading-5">
+                  Sensitive actions should be traceable.
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+                <div className="font-semibold text-slate-900">Production</div>
+                <div className="mt-1 text-xs leading-5">
+                  Connected to the API Gateway.
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="lg:sticky lg:top-8">
-            <AdminSignIn />
-            <div className="mt-3 text-center">
-              <a href="/" className="text-sm text-blue-600 hover:underline">Back to dashboard</a>
+          <div className="w-full">
+            <div className="rounded-3xl border border-slate-200 bg-white/90 p-6 shadow-xl shadow-slate-200/70 backdrop-blur">
+              <div className="mb-5">
+                <h2 className="text-xl font-semibold text-slate-950">
+                  Sign in
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Use your authorised admin credentials.
+                </p>
+              </div>
+
+              <Suspense fallback={<SignInFallback />}>
+                <AdminSignIn />
+              </Suspense>
+
+              <div className="mt-5 rounded-2xl border border-slate-100 bg-slate-50 p-3 text-xs leading-5 text-slate-500">
+                Access is monitored. Only authorised Ambulant+ administrators
+                should continue.
+              </div>
+            </div>
+
+            <div className="mt-4 text-center">
+              <Link href="/" className="text-sm text-blue-700 hover:underline">
+                Back to dashboard
+              </Link>
             </div>
           </div>
         </div>
