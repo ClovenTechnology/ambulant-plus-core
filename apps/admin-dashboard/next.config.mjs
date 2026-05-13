@@ -4,7 +4,6 @@ import { withFxProxy } from '../../next.fx-proxy.mjs';
 const nextConfig = {
   experimental: {
     externalDir: true,
-    tsconfigPaths: true,
   },
   transpilePackages: ['@ambulant/ui-shell'],
 };

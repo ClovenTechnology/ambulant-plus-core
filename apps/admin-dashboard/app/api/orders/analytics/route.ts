@@ -1,6 +1,9 @@
 // apps/admin-dashboard/app/api/orders/analytics/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 type OrderRow = {
   id: string;
   kind: 'pharmacy' | 'lab';
@@ -35,6 +38,16 @@ function hoursBetween(a?: string, b?: string): number | null {
 
 function toDayKey(d: Date) { return d.toISOString().slice(0, 10); }
 
+function topCounts(xs: OrderRow[], labeler: (r: OrderRow) => string) {
+  const map = new Map<string, number>();
+  xs.forEach(r => {
+    const key = (labeler(r) || '—').trim();
+    if (!key) return;
+    map.set(key, (map.get(key) || 0) + 1);
+  });
+  return Array.from(map.entries()).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([label,value])=>({label, value}));
+}
+
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
@@ -47,7 +60,13 @@ export async function GET(req: NextRequest) {
     const lbSLA = Math.max(1, parseInt(url.searchParams.get('lbSLA') || '48', 10));  // default 48h
 
     // Pull raw orders (merged)
-    const res = await fetch(`${url.origin}/api/orders/index?scope=all`, { cache: 'no-store' });
+    const source = new URL('/api/orders/index', url.origin);
+    source.searchParams.set('scope', 'all');
+
+    const res = await fetch(source.toString(), {
+      cache: 'no-store',
+      headers: { accept: 'application/json' },
+    });
     if (!res.ok) throw new Error(`Source /api/orders/index returned ${res.status}`);
     const raw = await res.json().catch(() => []);
     const rows: OrderRow[] = Array.isArray(raw) ? raw : [];
@@ -92,15 +111,6 @@ export async function GET(req: NextRequest) {
     const trend = trendLabels.map(k => byDay.get(k) || 0);
 
     // Top entities
-    function topCounts(xs: OrderRow[], labeler: (r: OrderRow) => string) {
-      const map = new Map<string, number>();
-      xs.forEach(r => {
-        const key = (labeler(r) || '—').trim();
-        if (!key) return;
-        map.set(key, (map.get(key) || 0) + 1);
-      });
-      return Array.from(map.entries()).sort((a,b)=>b[1]-a[1]).slice(0,10).map(([label,value])=>({label, value}));
-    }
     const topPharmacies = topCounts(list.filter(r=>r.kind==='pharmacy'), r => (r.title || 'Pharmacy').split(' ')[0]);
     const topLabs       = topCounts(list.filter(r=>r.kind==='lab'),       r => r.site || (r.title || 'Lab').split(' ')[0]);
 
