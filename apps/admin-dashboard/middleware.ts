@@ -4,13 +4,23 @@ import { resolveEffectiveScopes, type SessionUser } from './src/lib/acl';
 
 // --- Route protections (prefix -> required scopes) ---
 const RULES: Array<{ prefix: string; required: string[] }> = [
-  { prefix: '/settings/roles',  required: ['manageRoles'] },
-  { prefix: '/settings/people', required: ['hr'] },       // departments, designations, role-requests
-  { prefix: '/finance',         required: ['finance'] },
-  { prefix: '/tech',            required: ['tech'] },
-  { prefix: '/compliance',      required: ['compliance'] },
-  { prefix: '/reports',         required: ['reports'] },
-  { prefix: '/rnd',             required: ['rnd'] },
+  // ✅ protect admin areas (includes Smart ID printing pages)
+  {
+    prefix: '/admin',
+    required: ['manageRoles', 'hr', 'finance', 'tech', 'compliance', 'reports', 'rnd'],
+  },
+  {
+    prefix: '/clinicians',
+    required: ['manageRoles', 'hr', 'finance', 'tech', 'compliance', 'reports', 'rnd'],
+  },
+
+  { prefix: '/settings/roles', required: ['manageRoles'] },
+  { prefix: '/settings/people', required: ['hr'] }, // departments, designations, role-requests
+  { prefix: '/finance', required: ['finance'] },
+  { prefix: '/tech', required: ['tech'] },
+  { prefix: '/compliance', required: ['compliance'] },
+  { prefix: '/reports', required: ['reports'] },
+  { prefix: '/rnd', required: ['rnd'] },
 ];
 
 // Public paths (no auth required)
@@ -34,8 +44,8 @@ type MeResponse = {
     name?: string | null;
     departmentId?: string | null;
     designationId?: string | null;
-    roles?: string[];   // direct + designation-derived (as implemented by gateway)
-    scopes?: string[];  // effective scopes (preferred)
+    roles?: string[];
+    scopes?: string[];
   };
 };
 
@@ -50,7 +60,6 @@ async function fetchMe(req: NextRequest): Promise<MeResponse | null> {
       },
       cache: 'no-store',
     });
-    // Gateway returns 200 with authenticated:false if no session
     if (!res.ok) return null;
     const text = await res.text();
     return text ? (JSON.parse(text) as MeResponse) : null;
@@ -88,35 +97,28 @@ function redirectHome(req: NextRequest) {
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Public / auth paths → pass
   if (isPublicPath(pathname)) return NextResponse.next();
 
-  // If no rule targets this path, allow
   const rule = RULES.find((r) => pathname.startsWith(r.prefix));
   if (!rule) return NextResponse.next();
 
-  // 1) Preferred: use Gateway’s /api/auth/me
   const me = await fetchMe(req);
   if (!me || !me.authenticated || !me.user) {
     return redirectToSignin(req);
   }
 
-  // 2) If gateway provided effective scopes, trust them
   let effectiveScopes: string[] | null =
     Array.isArray(me.user.scopes) ? me.user.scopes : null;
 
-  // 3) Fallback: compute from local cookie if gateway didn’t include scopes
   if (!effectiveScopes) {
     const cookieUser = getSessionUserFromCookie(req);
     if (!cookieUser) return redirectToSignin(req);
     effectiveScopes = resolveEffectiveScopes(cookieUser);
   }
 
-  // 4) Enforce access — any one required scope unlocks the section
   const ok = rule.required.some((s) => effectiveScopes!.includes(s));
   if (ok) return NextResponse.next();
 
-  // 5) Not authorized → send home (or serve a 403)
   return redirectHome(req);
 }
 

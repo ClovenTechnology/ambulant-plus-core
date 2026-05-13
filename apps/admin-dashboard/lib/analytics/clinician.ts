@@ -512,12 +512,12 @@ export function buildMockClinicianAnalytics(
   }));
 
   const outliers: ClinicianOutlierFlag[] = [];
-  const byConsults = [...panelTable].sort((a, b) => b.consults - a.consults);
-  const byRefund = [...panelTable].sort((a, b) => b.refundRate - a.refundRate);
-  const byNoShow = [...panelTable].sort(
+  const byConsults = panelTable.slice().sort((a, b) => b.consults - a.consults);
+  const byRefund = panelTable.slice().sort((a, b) => b.refundRate - a.refundRate);
+  const byNoShow = panelTable.slice().sort(
     (a, b) => b.clinicianNoShowRate - a.clinicianNoShowRate,
   );
-  const byResp = [...panelTable].sort(
+  const byResp = panelTable.slice().sort(
     (a, b) => b.medianTimeToFirstResponseMinutes - a.medianTimeToFirstResponseMinutes,
   );
 
@@ -821,7 +821,7 @@ export async function buildRealClinicianAnalytics(
   let ratingSum = 0;
   let ratingCount = 0;
 
-  for (const agg of clinicianAgg.values()) {
+  for (const agg of Array.from(clinicianAgg.values())) {
     const prof = clinicianById.get(agg.clinicianId);
     const distinctPatients = agg.patientIds.size;
     const activePanel90d = distinctPatients; // for now, same window
@@ -1021,12 +1021,12 @@ export async function buildRealClinicianAnalytics(
 
   // Outliers based on real-ish metrics
   const outliers: ClinicianOutlierFlag[] = [];
-  const byConsults = [...panelTable].sort((a, b) => b.consults - a.consults);
-  const byRefund = [...panelTable].sort((a, b) => b.refundRate - a.refundRate);
-  const byNoShow = [...panelTable].sort(
+  const byConsults = panelTable.slice().sort((a, b) => b.consults - a.consults);
+  const byRefund = panelTable.slice().sort((a, b) => b.refundRate - a.refundRate);
+  const byNoShow = panelTable.slice().sort(
     (a, b) => b.clinicianNoShowRate - a.clinicianNoShowRate,
   );
-  const byResp = [...panelTable].sort(
+  const byResp = panelTable.slice().sort(
     (a, b) => b.medianTimeToFirstResponseMinutes - a.medianTimeToFirstResponseMinutes,
   );
 

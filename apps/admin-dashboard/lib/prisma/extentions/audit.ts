@@ -1,5 +1,7 @@
-// lib/prisma/extensions/audit.ts
+// apps/admin-dashboard/lib/prisma/extentions/audit.ts
 import { Prisma } from '@prisma/client';
+
+type LogAuditInput = Record<string, any>;
 
 export const auditExtension = Prisma.defineExtension({
   name: 'audit',

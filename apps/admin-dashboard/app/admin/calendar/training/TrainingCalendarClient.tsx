@@ -205,10 +205,13 @@ export default function TrainingCalendarClient({
       arr.push(ev);
       map.set(k, arr);
     }
-    for (const [k, arr] of map.entries()) {
-      arr.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+    Array.from(map.entries()).forEach(([k, arr]) => {
+      arr.sort(
+        (a, b) =>
+          new Date(a.startAt).getTime() - new Date(b.startAt).getTime(),
+      );
       map.set(k, arr);
-    }
+    });
     return map;
   }, [events]);
 

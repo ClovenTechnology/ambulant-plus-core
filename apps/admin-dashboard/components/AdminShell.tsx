@@ -7,7 +7,7 @@ import InboxBell from '@/components/InboxBell';
 import AdminSidebar from '@/components/AdminSidebar';
 
 export default function AdminShell({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '';
   const isAuth = pathname === '/auth/signin' || pathname === '/auth/signup' || pathname.startsWith('/auth/');
 
   if (isAuth) {

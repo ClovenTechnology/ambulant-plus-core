@@ -6,7 +6,7 @@ import CliniciansSectionClient from './CliniciansSectionClient';
 
 export const dynamic = 'force-dynamic';
 
-export type Clinician = {
+type Clinician = {
   id: string;
   userId?: string | null;
   displayName?: string | null;

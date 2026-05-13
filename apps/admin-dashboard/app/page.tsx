@@ -49,6 +49,7 @@ function Badge({ children }: { children: React.ReactNode }) {
 export default async function AdminHome() {
   const session = await getSessionFromGateway(); // calls APIGW /api/auth/me with cookies
   const user = session?.user ?? null;
+  const tenant = (session as { tenant?: unknown } | null | undefined)?.tenant;
   const scopes: string[] = user?.scopes ?? [];
   const can = (need: string | string[]) => hasAnyScope(scopes, need as any);
 
@@ -86,8 +87,8 @@ export default async function AdminHome() {
                 Widgets: {visible.length} / {totalWidgets} enabled
               </Badge>
               {user?.email && <Badge>{user.email}</Badge>}
-              {session?.tenant && (
-                <Badge>Tenant: {String(session.tenant)}</Badge>
+              {Boolean(tenant) && (
+                <Badge>Tenant: {String(tenant)}</Badge>
               )}
             </div>
           </div>
@@ -246,3 +247,4 @@ export default async function AdminHome() {
     </main>
   );
 }
+

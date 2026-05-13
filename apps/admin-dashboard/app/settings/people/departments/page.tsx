@@ -21,21 +21,40 @@ export default function DepartmentsSettingsPage() {
 
   const allRoleNames = useMemo<RoleName[]>(() => {
     const set = new Set<RoleName>();
+
     (structure?.departments ?? []).forEach((d) =>
-      (d.designations ?? []).forEach((z) => (z.roleNames ?? []).forEach((r) => set.add(r)))
+      (d.designations ?? []).forEach((z) =>
+        (z.roleNames ?? []).forEach((r) => set.add(r))
+      )
     );
+
     // Add expected defaults so UX isn't empty on day 1
-    ['SuperAdmin','Admin','Medical','TechIT','Finance','HR','Compliance','ReportsResearch','RnD'].forEach((r) => set.add(r as RoleName));
-    return [...set];
+    [
+      'SuperAdmin',
+      'Admin',
+      'Medical',
+      'TechIT',
+      'Finance',
+      'HR',
+      'Compliance',
+      'ReportsResearch',
+      'RnD',
+    ].forEach((r) => set.add(r as RoleName));
+
+    return Array.from(set);
   }, [structure]);
 
   const refresh = async () => {
     setLoading(true);
     setErr(null);
+
     try {
       const j = await OrgApi.structure();
       setStructure(j as OrgStructure);
-      if (!selectedDeptId && j?.departments?.[0]) setSelectedDeptId(j.departments[0].id);
+
+      if (!selectedDeptId && j?.departments?.[0]) {
+        setSelectedDeptId(j.departments[0].id);
+      }
     } catch (e: any) {
       setErr(e?.message || 'failed');
     } finally {
@@ -43,7 +62,10 @@ export default function DepartmentsSettingsPage() {
     }
   };
 
-  useEffect(() => { refresh(); /* eslint-disable-next-line */ }, []);
+  useEffect(() => {
+    refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const selectedDept = useMemo(
     () => structure?.departments.find((d) => d.id === selectedDeptId) || null,
@@ -53,41 +75,62 @@ export default function DepartmentsSettingsPage() {
   async function addDepartment() {
     const name = newDeptName.trim();
     if (!name) return;
+
     await OrgApi.createDepartment({ name, active: true });
     setNewDeptName('');
     await refresh();
   }
+
   async function toggleDeptActive(dep: Department) {
     await OrgApi.updateDepartment(dep.id, { active: !dep.active });
     await refresh();
   }
+
   async function deleteDept(dep: Department) {
     if (!confirm(`Delete department "${dep.name}" (and its designations)?`)) return;
+
     await OrgApi.deleteDepartment(dep.id);
-    if (selectedDeptId === dep.id) setSelectedDeptId('');
+
+    if (selectedDeptId === dep.id) {
+      setSelectedDeptId('');
+    }
+
     await refresh();
   }
+
   async function addDesignation() {
     if (!selectedDept) return;
+
     const name = newDesigName.trim();
     if (!name) return;
+
     await OrgApi.createDesignation({ departmentId: selectedDept.id, name });
+
     if (newDesigRoles.length) {
-      // refresh & then set roles on the created designation
+      // Refresh & then set roles on the created designation
       const list = await OrgApi.listDesignations();
-      const created = (list.items || list || []).find((d: any) => d.departmentId === selectedDept.id && d.name === name);
-      if (created) await OrgApi.setDesignationRoles(created.id, undefined, newDesigRoles);
+      const created = (list.items || list || []).find(
+        (d: any) => d.departmentId === selectedDept.id && d.name === name
+      );
+
+      if (created) {
+        await OrgApi.setDesignationRoles(created.id, undefined, newDesigRoles);
+      }
     }
+
     setNewDesigName('');
     setNewDesigRoles([]);
     await refresh();
   }
+
   async function updateDesigRoles(des: Designation, roles: RoleName[]) {
     await OrgApi.setDesignationRoles(des.id, undefined, roles);
     await refresh();
   }
+
   async function deleteDesignation(des: Designation) {
     if (!confirm(`Delete designation "${des.name}"?`)) return;
+
     await OrgApi.deleteDesignation(des.id);
     await refresh();
   }
@@ -95,11 +138,18 @@ export default function DepartmentsSettingsPage() {
   return (
     <main className="p-6 max-w-6xl mx-auto space-y-6">
       <h1 className="text-2xl font-bold">Departments & Designations</h1>
+
       <p className="text-sm text-gray-600">
-        Organize your org structure and map designations to default roles. Users selecting a designation at sign-up will automatically receive these roles (admins can override later).
+        Organize your org structure and map designations to default roles. Users selecting a
+        designation at sign-up will automatically receive these roles (admins can override later).
       </p>
 
-      {err && <div className="p-3 border bg-rose-50 text-rose-700 rounded text-sm">{err}</div>}
+      {err && (
+        <div className="p-3 border bg-rose-50 text-rose-700 rounded text-sm">
+          {err}
+        </div>
+      )}
+
       {loading && <div className="text-sm text-gray-600">Loading…</div>}
 
       {structure && (
@@ -109,6 +159,7 @@ export default function DepartmentsSettingsPage() {
             <div className="p-3 border-b flex items-center justify-between">
               <h2 className="font-semibold">Departments</h2>
             </div>
+
             <div className="p-3 space-y-2">
               <div className="flex gap-2">
                 <input
@@ -117,26 +168,53 @@ export default function DepartmentsSettingsPage() {
                   placeholder="New department"
                   className="border rounded p-2 text-sm flex-1"
                 />
-                <button onClick={addDepartment} className="px-3 py-2 rounded bg-black text-white text-sm">Add</button>
+
+                <button
+                  onClick={addDepartment}
+                  className="px-3 py-2 rounded bg-black text-white text-sm"
+                >
+                  Add
+                </button>
               </div>
 
               <ul className="space-y-1">
                 {structure.departments.map((dep) => (
                   <li key={dep.id}>
                     <button
-                      className={`w-full text-left px-3 py-2 rounded text-sm flex items-center justify-between ${selectedDeptId === dep.id ? 'bg-black/5' : 'hover:bg-black/5'}`}
+                      className={`w-full text-left px-3 py-2 rounded text-sm flex items-center justify-between ${
+                        selectedDeptId === dep.id ? 'bg-black/5' : 'hover:bg-black/5'
+                      }`}
                       onClick={() => setSelectedDeptId(dep.id)}
                     >
                       <span className="truncate">{dep.name}</span>
+
                       <span className="flex items-center gap-2">
-                        <span className={`text-xs px-2 py-0.5 rounded-full border ${dep.active ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-gray-200 bg-gray-50 text-gray-600'}`}>
+                        <span
+                          className={`text-xs px-2 py-0.5 rounded-full border ${
+                            dep.active
+                              ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                              : 'border-gray-200 bg-gray-50 text-gray-600'
+                          }`}
+                        >
                           {dep.active ? 'Active' : 'Inactive'}
                         </span>
                       </span>
                     </button>
+
                     <div className="flex gap-2 px-3 pb-2">
-                      <button onClick={() => toggleDeptActive(dep)} className="text-xs underline">Toggle active</button>
-                      <button onClick={() => deleteDept(dep)} className="text-xs text-rose-600 underline">Delete</button>
+                      <button
+                        onClick={() => toggleDeptActive(dep)}
+                        className="text-xs underline"
+                      >
+                        Toggle active
+                      </button>
+
+                      <button
+                        onClick={() => deleteDept(dep)}
+                        className="text-xs text-rose-600 underline"
+                      >
+                        Delete
+                      </button>
                     </div>
                   </li>
                 ))}
@@ -147,11 +225,15 @@ export default function DepartmentsSettingsPage() {
           {/* Right: Designations */}
           <section className="md:col-span-2 border rounded bg-white">
             <div className="p-3 border-b flex items-center justify-between">
-              <h2 className="font-semibold">Designations {selectedDept ? `— ${selectedDept.name}` : ''}</h2>
+              <h2 className="font-semibold">
+                Designations {selectedDept ? `— ${selectedDept.name}` : ''}
+              </h2>
             </div>
 
             {!selectedDept && (
-              <div className="p-3 text-sm text-gray-600">Select a department to manage its designations.</div>
+              <div className="p-3 text-sm text-gray-600">
+                Select a department to manage its designations.
+              </div>
             )}
 
             {selectedDept && (
@@ -165,6 +247,7 @@ export default function DepartmentsSettingsPage() {
                       placeholder="Designation (e.g., Software Engineer)"
                       className="border rounded p-2 text-sm md:col-span-1"
                     />
+
                     <div className="md:col-span-2">
                       <RoleSelector
                         label="Default Roles"
@@ -174,8 +257,14 @@ export default function DepartmentsSettingsPage() {
                       />
                     </div>
                   </div>
+
                   <div>
-                    <button onClick={addDesignation} className="px-3 py-2 rounded bg-black text-white text-sm">Add designation</button>
+                    <button
+                      onClick={addDesignation}
+                      className="px-3 py-2 rounded bg-black text-white text-sm"
+                    >
+                      Add designation
+                    </button>
                   </div>
                 </div>
 
@@ -184,14 +273,24 @@ export default function DepartmentsSettingsPage() {
                   {selectedDept.designations.length === 0 && (
                     <li className="text-sm text-gray-600">No designations yet.</li>
                   )}
+
                   {selectedDept.designations.map((des) => (
                     <li key={des.id} className="border rounded p-3 bg-white">
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <div className="font-medium">{des.name}</div>
-                          <div className="text-xs text-gray-500">ID: <span className="font-mono">{des.id}</span></div>
+
+                          <div className="text-xs text-gray-500">
+                            ID: <span className="font-mono">{des.id}</span>
+                          </div>
                         </div>
-                        <button onClick={() => deleteDesignation(des)} className="text-xs text-rose-600 underline">Delete</button>
+
+                        <button
+                          onClick={() => deleteDesignation(des)}
+                          className="text-xs text-rose-600 underline"
+                        >
+                          Delete
+                        </button>
                       </div>
 
                       <div className="mt-2">
@@ -226,22 +325,33 @@ function RoleSelector({
   options: RoleName[];
 }) {
   const toggle = (r: RoleName) => {
-    const set = new Set(value);
-    set.has(r) ? set.delete(r) : set.add(r);
-    onChange([...set]);
+    const set = new Set<RoleName>(value);
+
+    if (set.has(r)) {
+      set.delete(r);
+    } else {
+      set.add(r);
+    }
+
+    onChange(Array.from(set));
   };
+
   return (
     <div>
       <div className="text-xs text-gray-600 mb-1">{label}</div>
+
       <div className="flex flex-wrap gap-2">
         {options.map((r) => {
           const on = value.includes(r);
+
           return (
             <button
               key={r}
               type="button"
               onClick={() => toggle(r)}
-              className={`px-2 py-1 rounded-full border text-xs ${on ? 'bg-black text-white border-black' : 'bg-white hover:bg-black/5'}`}
+              className={`px-2 py-1 rounded-full border text-xs ${
+                on ? 'bg-black text-white border-black' : 'bg-white hover:bg-black/5'
+              }`}
             >
               {r}
             </button>

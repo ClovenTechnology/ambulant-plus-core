@@ -47,9 +47,16 @@ async function readFormOrJson(req: NextRequest) {
     const body = await req.json().catch(() => ({} as any));
     return body ?? {};
   }
+
   const fd = await req.formData().catch(() => null);
   const out: Record<string, any> = {};
-  if (fd) for (const [k, v] of fd.entries()) out[k] = v;
+
+  if (fd) {
+    Array.from(fd.entries()).forEach(([k, v]) => {
+      out[k] = v;
+    });
+  }
+
   return out;
 }
 

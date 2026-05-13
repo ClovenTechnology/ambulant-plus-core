@@ -8,6 +8,7 @@ import { cookies } from 'next/headers';
 
 export type GatewaySession = {
   authenticated: boolean;
+  tenant?: unknown;
   user?: {
     id: string | null;
     email: string | null;
@@ -38,12 +39,10 @@ export async function getSessionFromGateway(): Promise<GatewaySession> {
 
   try {
     const res = await fetch(`${APIGW}/api/auth/me`, {
-      // ensure we don’t cache session
+      // ensure we do not cache session
       cache: 'no-store',
       // forward cookies to Gateway so it can read adm.profile etc.
       headers: cookieHeader ? { cookie: cookieHeader } : undefined,
-      // (credentials isn’t required for cross-origin here as we manually forward cookies)
-      next: { revalidate: 0 },
     });
 
     if (!res.ok) {

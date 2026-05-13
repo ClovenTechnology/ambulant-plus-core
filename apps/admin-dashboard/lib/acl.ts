@@ -9,16 +9,20 @@ export type SessionUser = {
   // optional, if your auth service doesn't return these you can enrich server-side
   departmentId?: string | null;
   designationId?: string | null;
-  roles?: RoleName[];            // direct roles on user (approved)
-  pendingRoles?: RoleName[];     // optional: requested roles awaiting approval
+  roles?: RoleName[]; // direct roles on user (approved)
+  pendingRoles?: RoleName[]; // optional: requested roles awaiting approval
 };
 
 export function expandScopesFromRoles(roleNames: RoleName[]): Scope[] {
   const set = new Set<Scope>();
+
   for (const r of roleNames) {
-    for (const s of (ROLE_PRESETS[r] ?? [])) set.add(s);
+    for (const s of ROLE_PRESETS[r] ?? []) {
+      set.add(s);
+    }
   }
-  return [...set];
+
+  return Array.from(set);
 }
 
 /**
@@ -28,12 +32,14 @@ export function expandScopesFromRoles(roleNames: RoleName[]): Scope[] {
 export function resolveEffectiveRoles(u: SessionUser): RoleName[] {
   const fromDesignation: RoleName[] = (() => {
     if (!u.designationId) return [];
+
     const des = orgdb.getDesignation(u.designationId);
     return des?.roleNames ?? [];
   })();
 
   const direct = u.roles ?? [];
-  return [...new Set<RoleName>([...fromDesignation, ...direct])];
+
+  return Array.from(new Set<RoleName>(fromDesignation.concat(direct)));
 }
 
 export function resolveEffectiveScopes(u: SessionUser): Scope[] {
@@ -45,5 +51,6 @@ export function resolveEffectiveScopes(u: SessionUser): Scope[] {
 export function hasAnyScope(scopes: Scope[], required: Scope | Scope[]): boolean {
   const req = Array.isArray(required) ? required : [required];
   const set = new Set(scopes);
-  return req.some(s => set.has(s));
+
+  return req.some((s) => set.has(s));
 }

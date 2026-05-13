@@ -378,12 +378,12 @@ function humanTs(d: Date) {
 }
 
 function downloadCsv(filename: string, rows: Record<string, any>[]) {
-  const keys = Array.from(
-    rows.reduce((s, r) => {
-      Object.keys(r || {}).forEach((k) => s.add(k));
-      return s;
-    }, new Set<string>()),
-  );
+  const keySet = rows.reduce<Set<string>>((s, r) => {
+    Object.keys(r || {}).forEach((k) => s.add(k));
+    return s;
+  }, new Set<string>());
+
+  const keys = Array.from(keySet);
 
   const esc = (v: any) => {
     const s = v == null ? '' : String(v);

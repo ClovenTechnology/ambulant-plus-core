@@ -392,8 +392,10 @@ function EntityTable({ rows }: { rows: EntityRow[] }) {
 /* ---------- Canvas revenue chart ---------- */
 
 function drawRevenueChart(canvas: HTMLCanvasElement, points: RevenuePoint[]) {
-  const ctx = canvas.getContext('2d');
-  if (!ctx || !points.length) return;
+  const maybeCtx = canvas.getContext('2d');
+  if (!maybeCtx || !points.length) return;
+
+  const ctx = maybeCtx;
 
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = canvas.clientWidth || 600;

@@ -93,7 +93,7 @@ function statusTone(status?: string | null): Tone {
   if (s === 'archived') return 'gray';
   return 'slate';
 }
-function statusLabel(status?: string | null, fallback: string) {
+function statusLabel(status: string | null | undefined, fallback = 'Unknown') {
   const s = String(status ?? '').trim();
   return s ? s : fallback;
 }

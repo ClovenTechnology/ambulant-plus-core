@@ -361,11 +361,11 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     .catch(() => []);
 
   const lastSeenByUserId = new Map<string, Date>();
-  for (const r of sessRowsRange) {
+  sessRowsRange.forEach((r) => {
     if (r?.userId && r?._max?.lastSeenAt) {
       lastSeenByUserId.set(r.userId, new Date(r._max.lastSeenAt));
     }
-  }
+  });
 
   const activeUserIds30 = sessRows30.map((r) => r.userId).filter(Boolean);
   const activeUserIds90 = sessRows90.map((r) => r.userId).filter(Boolean);
@@ -417,15 +417,15 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
   let totalConsultMinutes30 = 0;
 
   const apptPatients30 = new Set<string>();
-  for (const a of appointments30 as any[]) {
+  (appointments30 as any[]).forEach((a) => {
     const pid = String(a?.patientId ?? '');
     if (pid) apptPatients30.add(pid);
 
-    if (!apptIsCompleted(a?.status)) continue;
+    if (!apptIsCompleted(a?.status)) return;
 
     const s = a?.startsAt ? new Date(a.startsAt).getTime() : NaN;
     const e = a?.endsAt ? new Date(a.endsAt).getTime() : NaN;
-    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) continue;
+    if (!Number.isFinite(s) || !Number.isFinite(e) || e <= s) return;
 
     const min = Math.min(24 * 60, (e - s) / 60000);
     totalConsultMinutes30 += min;
@@ -434,17 +434,22 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
       minutesByPatientId.set(pid, (minutesByPatientId.get(pid) ?? 0) + min);
       consultCountByPatientId.set(pid, (consultCountByPatientId.get(pid) ?? 0) + 1);
     }
-  }
+  });
 
   const apptPatients90 = new Set<string>();
-  for (const a of appointments90 as any[]) {
+  (appointments90 as any[]).forEach((a) => {
     const pid = String(a?.patientId ?? '');
     if (pid) apptPatients90.add(pid);
-  }
+  });
 
   // Active patients include consult-only patients too
-  for (const pid of apptPatients30) activePatientIds30.add(pid);
-  for (const pid of apptPatients90) activePatientIds90.add(pid);
+  Array.from(apptPatients30).forEach((pid) => {
+    activePatientIds30.add(pid);
+  });
+
+  Array.from(apptPatients90).forEach((pid) => {
+    activePatientIds90.add(pid);
+  });
 
   const activePatients30d = activePatientIds30.size;
   const activePatients90d = activePatientIds90.size;
@@ -454,12 +459,12 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
   const sessionCounts30: number[] = [];
   const sessionsCountByUserId30 = new Map<string, number>();
 
-  for (const r of sessRows30) {
+  sessRows30.forEach((r) => {
     const c = Number(r?._count?._all ?? 0) || 0;
     totalSessions30 += c;
     sessionCounts30.push(c);
     if (r?.userId) sessionsCountByUserId30.set(r.userId, c);
-  }
+  });
 
   const avgSessionsPerActive30d = safeDiv(totalSessions30, Math.max(1, activePatients30d));
   const medianSessionsPerActive30d = median(sessionCounts30);
@@ -482,8 +487,8 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
   const paymentCountByPatientId = new Map<string, number>();
   let totalCapturedRevenueCents30 = 0;
 
-  for (const p of payments30 as any[]) {
-    if (!statusIsCaptured(p?.status)) continue;
+  (payments30 as any[]).forEach((p) => {
+    if (!statusIsCaptured(p?.status)) return;
     const cents = Number(p?.amountCents ?? 0) || 0;
     const pid = String(p?.encounter?.patientId ?? '');
     totalCapturedRevenueCents30 += cents;
@@ -491,7 +496,7 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
       revenueCentsByPatientId.set(pid, (revenueCentsByPatientId.get(pid) ?? 0) + cents);
       paymentCountByPatientId.set(pid, (paymentCountByPatientId.get(pid) ?? 0) + 1);
     }
-  }
+  });
 
   const totalCapturedAllTimeCents = await prisma.payment
     .aggregate({ _sum: { amountCents: true } })
@@ -534,10 +539,10 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     })
     .catch(() => []);
 
-  for (const a of appts7d as any[]) {
+  (appts7d as any[]).forEach((a) => {
     const pid = String(a?.patientId ?? '');
     if (pid) activePatientIds7d.add(pid);
-  }
+  });
 
   const dau7dAvg = Math.round((activePatientIds7d.size || 0) / 7);
   const wau4wAvg = Math.round((activePatients30d || 0) / 4);
@@ -563,18 +568,18 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     let eligible = 0;
     let retained = 0;
 
-    for (const c of cohort as any[]) {
+    (cohort as any[]).forEach((c) => {
       const uid = String(c?.userId ?? '');
       const createdAt = c?.createdAt ? new Date(c.createdAt) : null;
-      if (!uid || !createdAt) continue;
+      if (!uid || !createdAt) return;
 
       const target = addDays(createdAt, days).getTime();
-      if (target > end.getTime()) continue;
+      if (target > end.getTime()) return;
 
       eligible++;
       const lastSeen = lastSeenByUserId.get(uid);
       if (lastSeen && lastSeen.getTime() >= target) retained++;
-    }
+    });
 
     return eligible ? clamp01(retained / eligible) : null;
   }
@@ -600,9 +605,9 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     if (!rows.length) return null;
 
     const perPatient = new Map<string, { taken: number; missed: number }>();
-    for (const r of rows as any[]) {
+    (rows as any[]).forEach((r) => {
       const pid = String(r?.patientId ?? '');
-      if (!pid) continue;
+      if (!pid) return;
 
       const status = String(r?.status ?? '');
       const c = Number(r?._count?._all ?? 0) || 0;
@@ -613,14 +618,14 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
       else if (status === ReminderStatus.Missed || status.toLowerCase() === 'missed') agg.missed += c;
 
       perPatient.set(pid, agg);
-    }
+    });
 
     const scores: Array<{ pid: string; score: number }> = [];
-    for (const [pid, a] of perPatient.entries()) {
+    Array.from(perPatient.entries()).forEach(([pid, a]) => {
       const denom = a.taken + a.missed;
-      if (denom <= 0) continue;
+      if (denom <= 0) return;
       scores.push({ pid, score: a.taken / denom });
-    }
+    });
 
     const avgOverall =
       scores.length ? scores.reduce((s, x) => s + x.score, 0) / scores.length : null;
@@ -670,17 +675,17 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
       });
 
       const highRisk = new Set<string>();
-      for (const r of ev as any[]) {
+      (ev as any[]).forEach((r) => {
         const pid = String(r?.targetPatientId ?? r?.patientId ?? '');
         if (pid) highRisk.add(pid);
-      }
+      });
 
       if (highRisk.size) {
         let low = 0;
-        for (const pid of highRisk) {
+        Array.from(highRisk).forEach((pid) => {
           const s = scores.find((x) => x.pid === pid)?.score;
           if (s != null && s < 0.5) low++;
-        }
+        });
         highRiskLowAdherentShare = clamp01(low / highRisk.size);
       }
     } catch {
@@ -699,9 +704,11 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
   // Plan snapshots (no plan mapping yet → Unknown bucket)
   const churnedPatients90d = (() => {
     let churned = 0;
-    for (const pid of activePatientIds90) {
+
+    Array.from(activePatientIds90).forEach((pid) => {
       if (!activePatientIds30.has(pid)) churned++;
-    }
+    });
+
     return churned;
   })();
 
@@ -723,23 +730,27 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
 
   // Funnel stages (best-effort)
   const distinctPaidPatients30 = new Set<string>();
-  for (const [pid, c] of paymentCountByPatientId.entries()) {
+  Array.from(paymentCountByPatientId.entries()).forEach(([pid, c]) => {
     if (c > 0) distinctPaidPatients30.add(pid);
-  }
+  });
 
   const repeatConsultPatients30 = (() => {
     let n = 0;
-    for (const [, c] of consultCountByPatientId.entries()) {
+
+    Array.from(consultCountByPatientId.entries()).forEach(([, c]) => {
       if (c >= 2) n++;
-    }
+    });
+
     return n;
   })();
 
   const repeatOrderPatients30 = (() => {
     let n = 0;
-    for (const [, c] of paymentCountByPatientId.entries()) {
+
+    Array.from(paymentCountByPatientId.entries()).forEach(([, c]) => {
       if (c >= 2) n++;
-    }
+    });
+
     return n;
   })();
 
@@ -789,18 +800,18 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     let eligible = 0;
     let retained = 0;
 
-    for (const p of patients) {
+    patients.forEach((p) => {
       const uid = String(p?.userId ?? '');
       const createdAt = p?.createdAt ? new Date(p.createdAt) : null;
-      if (!uid || !createdAt) continue;
+      if (!uid || !createdAt) return;
 
       const target = addDays(createdAt, days).getTime();
-      if (target > end.getTime()) continue;
+      if (target > end.getTime()) return;
 
       eligible++;
       const lastSeen = lastSeenByUserId.get(uid);
       if (lastSeen && lastSeen.getTime() >= target) retained++;
-    }
+    });
 
     return eligible ? clamp01(retained / eligible) : null;
   }
@@ -859,26 +870,26 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     ];
 
     const out: FeatureUsageItem[] = [];
-    for (const f of defs) {
+    defs.forEach((f) => {
       const dau = new Set<string>();
       const wau = new Set<string>();
       const mau = new Set<string>();
       let totalMatches30 = 0;
 
-      for (const l of logs as any[]) {
+      (logs as any[]).forEach((l) => {
         const uid = String(l?.actorUserId ?? '');
-        if (!uid) continue;
+        if (!uid) return;
         const action = String(l?.action ?? '');
-        if (!f.re.test(action)) continue;
+        if (!f.re.test(action)) return;
 
         const t = l?.createdAt ? new Date(l.createdAt).getTime() : NaN;
-        if (!Number.isFinite(t)) continue;
+        if (!Number.isFinite(t)) return;
 
         if (t >= since30d) totalMatches30 += 1;
         if (t >= since1d) dau.add(uid);
         if (t >= since7d) wau.add(uid);
         if (t >= since30d) mau.add(uid);
-      }
+      });
 
       const monthlyActiveUsers = mau.size;
       out.push({
@@ -891,7 +902,7 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
         avgMinutesPerUser30d: 0,
         penetrationActive30d: clamp01(monthlyActiveUsers / Math.max(1, activePatients30d)) ?? 0,
       });
-    }
+    });
 
     // “Other”
     const knownRe = new RegExp(defs.map((d) => d.re.source).join('|'), 'i');
@@ -900,20 +911,20 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     const otherMau = new Set<string>();
     let otherMatches30 = 0;
 
-    for (const l of logs as any[]) {
+    (logs as any[]).forEach((l) => {
       const uid = String(l?.actorUserId ?? '');
-      if (!uid) continue;
+      if (!uid) return;
       const action = String(l?.action ?? '');
       const t = l?.createdAt ? new Date(l.createdAt).getTime() : NaN;
-      if (!Number.isFinite(t)) continue;
+      if (!Number.isFinite(t)) return;
 
-      if (knownRe.test(action)) continue;
+      if (knownRe.test(action)) return;
 
       if (t >= since30d) otherMatches30 += 1;
       if (t >= since1d) otherDau.add(uid);
       if (t >= since7d) otherWau.add(uid);
       if (t >= since30d) otherMau.add(uid);
-    }
+    });
 
     out.push({
       key: 'other',
@@ -936,7 +947,7 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
         by: ['deviceId'],
         where: { t: { gte: start30, lt: end } },
         _count: { _all: true },
-        orderBy: { _count: { _all: 'desc' } },
+        orderBy: { _count: { deviceId: 'desc' } },
         take: 20,
       })
       .catch(() => []);
@@ -950,19 +961,20 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
         by: ['deviceId', 'patientId'],
         where: { t: { gte: start30, lt: end }, deviceId: { in: deviceIds } },
         _count: { _all: true },
+        orderBy: [{ deviceId: 'asc' }, { patientId: 'asc' }],
         take: 200_000,
       })
       .catch(() => []);
 
     const usersByDevice = new Map<string, Set<string>>();
-    for (const p of pairs as any[]) {
+    (pairs as any[]).forEach((p) => {
       const did = String(p?.deviceId ?? '');
       const pid = String(p?.patientId ?? '');
-      if (!did || !pid) continue;
+      if (!did || !pid) return;
       const s = usersByDevice.get(did) || new Set<string>();
       s.add(pid);
       usersByDevice.set(did, s);
-    }
+    });
 
     const devRows = await prisma.device
       .findMany({
@@ -972,7 +984,7 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
       .catch(() => []);
 
     const metaByDeviceId = new Map<string, { label: string; modality: string }>();
-    for (const d of devRows as any[]) {
+    (devRows as any[]).forEach((d) => {
       const did = String(d?.deviceId ?? '');
       const label =
         String(d?.category ?? '').trim() ||
@@ -982,7 +994,7 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
       const modality = String(d?.category ?? '').trim() || 'unknown';
 
       metaByDeviceId.set(did, { label, modality: slugify(modality) || 'unknown' });
-    }
+    });
 
     return (top as any[]).map((r) => {
       const did = String(r?.deviceId ?? '');
@@ -1026,6 +1038,7 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
       },
       _sum: { valueNum: true },
       _count: { _all: true },
+      orderBy: [{ patientId: 'asc' }, { vType: 'asc' }],
       take: 200_000,
     })
     .catch(() => []);
@@ -1034,9 +1047,9 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
   const calsByPatient = new Map<string, number>();
   const sleepByPatient = new Map<string, number>();
 
-  for (const r of vitAgg as any[]) {
+  (vitAgg as any[]).forEach((r) => {
     const pid = String(r?.patientId ?? '');
-    if (!pid) continue;
+    if (!pid) return;
     const t = String(r?.vType ?? '').toLowerCase();
     const sum = Number(r?._sum?.valueNum ?? 0) || 0;
 
@@ -1046,14 +1059,26 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     } else {
       calsByPatient.set(pid, (calsByPatient.get(pid) ?? 0) + sum);
     }
-  }
+  });
 
   // Build segment patient set: active30 + anyone with lifestyle data
   const segPatientIds = new Set<string>();
-  for (const pid of activePatientIds30) segPatientIds.add(pid);
-  for (const pid of stepsByPatient.keys()) segPatientIds.add(pid);
-  for (const pid of calsByPatient.keys()) segPatientIds.add(pid);
-  for (const pid of sleepByPatient.keys()) segPatientIds.add(pid);
+
+  Array.from(activePatientIds30).forEach((pid) => {
+    segPatientIds.add(pid);
+  });
+
+  Array.from(stepsByPatient.keys()).forEach((pid) => {
+    segPatientIds.add(pid);
+  });
+
+  Array.from(calsByPatient.keys()).forEach((pid) => {
+    segPatientIds.add(pid);
+  });
+
+  Array.from(sleepByPatient.keys()).forEach((pid) => {
+    segPatientIds.add(pid);
+  });
 
   const idList = Array.from(segPatientIds).slice(0, 80_000);
   const profiles = idList.length
@@ -1091,9 +1116,9 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
 
   const segMap = new Map<string, { key: SegmentKey; agg: SegAgg }>();
 
-  for (const p of profiles as any[]) {
+  (profiles as any[]).forEach((p) => {
     const pid = String(p?.id ?? '');
-    if (!pid) continue;
+    if (!pid) return;
 
     const plan: PlanTier = 'unknown';
     const gender = normGender(p?.gender);
@@ -1151,12 +1176,12 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
     }
 
     segMap.set(kStr, entry);
-  }
+  });
 
   const segments: SegmentRow[] = [];
   const stepsAndCalories: StepsAndCaloriesAggregate[] = [];
 
-  for (const { key, agg } of segMap.values()) {
+  Array.from(segMap.values()).forEach(({ key, agg }) => {
     const sessionsPerActive = safeDiv(agg.sessions, Math.max(1, agg.activePatients)) ?? 0;
     const minutesPerActive = safeDiv(agg.minutes, Math.max(1, agg.activePatients)) ?? 0;
     const consultsPerActive = safeDiv(agg.consults, Math.max(1, agg.activePatients)) ?? 0;
@@ -1192,7 +1217,7 @@ async function buildPatientEngagement(rangeKey: RangeKey): Promise<PatientEngage
       avgDailyCalories,
       sampleSize: agg.lifestyleSample,
     });
-  }
+  });
 
   // Summary: “plan totals” not yet modeled → everything is free/unknown for now
   const totalPremiumPatients = 0;

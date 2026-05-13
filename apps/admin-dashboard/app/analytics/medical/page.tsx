@@ -473,8 +473,10 @@ function MetricCard({
 
 /* Simple multi-series line chart for syndromes, using canvas like the overview page */
 function drawSyndromeChart(canvas: HTMLCanvasElement, points: SyndromePoint[]) {
-  const ctx = canvas.getContext('2d');
-  if (!ctx || !points.length) return;
+  const maybeCtx = canvas.getContext('2d');
+  if (!maybeCtx || !points.length) return;
+
+  const ctx = maybeCtx;
 
   const dpr = window.devicePixelRatio || 1;
   const cssWidth = canvas.clientWidth || 600;

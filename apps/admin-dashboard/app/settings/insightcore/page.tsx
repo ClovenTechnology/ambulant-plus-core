@@ -129,21 +129,12 @@ export default function InsightCoreSettings() {
         const merged: InsightCoreConfig = {
           ...DEFAULT_CFG,
           ...json,
-          heartRate: { ...DEFAULT_CFG.heartRate, ...json.heartRate },
-          spo2: { ...DEFAULT_CFG.spo2, ...json.spo2 },
-          temperature: {
-            ...DEFAULT_CFG.temperature,
-            ...json.temperature,
-          },
-          bp: { ...DEFAULT_CFG.bp, ...json.bp },
-          glucoseInstability: {
-            ...DEFAULT_CFG.glucoseInstability,
-            ...json.glucoseInstability,
-          },
-          riskScoring: {
-            ...DEFAULT_CFG.riskScoring,
-            ...json.riskScoring,
-          },
+          heartRate: { ...DEFAULT_CFG.heartRate, ...(json.heartRate ?? {}) } as HeartRateCfg,
+          spo2: { ...DEFAULT_CFG.spo2, ...(json.spo2 ?? {}) } as SpO2Cfg,
+          temperature: { ...DEFAULT_CFG.temperature, ...(json.temperature ?? {}) } as TemperatureCfg,
+          bp: { ...DEFAULT_CFG.bp, ...(json.bp ?? {}) } as BpCfg,
+          glucoseInstability: { ...DEFAULT_CFG.glucoseInstability, ...(json.glucoseInstability ?? {}) } as GlucoseInstabilityCfg,
+          riskScoring: { ...DEFAULT_CFG.riskScoring, ...(json.riskScoring ?? {}) } as RiskScoringCfg,
         };
 
         setCfg(merged);
