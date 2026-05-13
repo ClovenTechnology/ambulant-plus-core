@@ -1,173 +1,94 @@
-type MedicalAnalyticsPayload = {
-  kpis: {
-    /** Total cases in the selected window after filters */
-    totalCases: number;
-    /** New cases (e.g. last 24h inside the window or last bucket) */
-    newCases: number;
-    /** Confirmed positive tests / total tests (%) for this cohort */
-    testPositivityPct: number;
-    /** Count of active outbreak signals for the current filter scope */
-    suspectedOutbreaks: number;
-    /** % of cases where age ∈ [0,17] */
-    paedsSharePct: number;
-    /** % of active patients with >= moderate risk InsightCore alerts in last 7d */
-    highRiskPatientsPct7d: number;
-    /** Avg time (hours) from symptom onset to first consult */
-    avgTimeToFirstConsultHours: number;
-  };
+// apps/admin-dashboard/app/api/analytics/medical/route.ts
+import { NextRequest, NextResponse } from 'next/server';
 
-  /** High-level syndrome buckets for stacked views / legend */
-  topSyndromes: {
-    key: 'respiratory' | 'gi' | 'feverRash' | 'neuro' | 'other';
-    label: string;
-    cases: number;
-    sharePct: number;
-  }[];
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-  /** Time series; bucket granularity inferred from range (e.g. daily) */
-  timeSeries: {
-    bucket: string; // ISO date (YYYY-MM-DD) or month label
-    totalCases: number;
-    respiratory: number;
-    gi: number;
-    feverRash: number;
-    neuro: number;
-    other: number;
-  }[];
+function apiGatewayBase() {
+  return (
+    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    'http://localhost:3010'
+  ).replace(/\/+$/, '');
+}
 
-  /** Top ICD-10 codes contributing to this cohort */
-  topIcd10: {
-    code: string;
-    description: string;
-    cases: number;
-    patients: number;
-    sharePct: number;
-    ageBandBreakdown: {
-      band: string; // "0–17" etc
-      cases: number;
-    }[];
-  }[];
+function copyForwardHeaders(req: NextRequest) {
+  const headers = new Headers();
 
-  /** Geospatial incidence summary for the chosen geoLevel */
-  geoIncidence: {
-    geoLevel: 'country' | 'province' | 'city' | 'postalCode';
-    name: string;
-    code: string;
-    totalCases: number;
-    incidencePer100k: number;
-    /** % change vs previous comparable window (e.g. prior 7d) */
-    growthRatePct: number;
-    /** Flag for statistical clustering / anomaly */
-    suspectedCluster: boolean;
-    /** Dominant high-level syndrome in this bucket */
-    dominantSyndrome?: 'respiratory' | 'gi' | 'feverRash' | 'neuro' | 'other';
-  }[];
+  const passthrough = [
+    'authorization',
+    'cookie',
+    'x-admin-key',
+    'x-uid',
+    'x-role',
+    'x-org',
+    'x-org-id',
+    'content-type',
+  ];
 
-  /** Movement of patients between locations (for spread mapping) */
-  movement: {
-    fromName: string;
-    fromCode: string;
-    toName: string;
-    toCode: string;
-    patients: number;
-    suspectedCases: number;
-  }[];
+  for (const key of passthrough) {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
+  }
 
-  /** Demography matrix: age-band x gender segments */
-  demography: {
-    ageBand: string; // "0–17", "18–39" etc.
-    gender: 'Male' | 'Female' | 'Other';
-    patients: number;
-    cases: number;
-    incidencePer100k: number;
-    sharePct: number;
-    topIcd10: {
-      code: string;
-      description: string;
-      cases: number;
-    }[];
-  }[];
+  return headers;
+}
 
-  /** Medication usage broken down into slices */
-  meds: {
-    overall: {
-      atcCode?: string | null;
-      name: string;
-      prescriptions: number;
-      patients: number;
-      sharePct: number;
-      demographicSkew?: string;
-    }[];
-    paeds: {
-      atcCode?: string | null;
-      name: string;
-      prescriptions: number;
-      patients: number;
-      sharePct: number;
-      demographicSkew?: string;
-    }[];
-    adults: {
-      atcCode?: string | null;
-      name: string;
-      prescriptions: number;
-      patients: number;
-      sharePct: number;
-      demographicSkew?: string;
-    }[];
-    seniors: {
-      atcCode?: string | null;
-      name: string;
-      prescriptions: number;
-      patients: number;
-      sharePct: number;
-      demographicSkew?: string;
-    }[];
-  };
+async function proxy(req: NextRequest, method: 'GET' | 'POST') {
+  try {
+    const incomingUrl = new URL(req.url);
+    const target = new URL('/api/analytics/medical', apiGatewayBase());
 
-  /** Lab utilisation and positivity */
-  labs: {
-    loincCode?: string | null;
-    name: string;
-    orders: number;
-    positives: number;
-    positivityPct: number;
-    topIcd10: {
-      code: string;
-      description: string;
-      cases: number;
-    }[];
-  }[];
+    incomingUrl.searchParams.forEach((value, key) => {
+      target.searchParams.set(key, value);
+    });
 
-  /** Outbreak / cluster detection signals */
-  outbreakSignals: {
-    id: string;
-    syndrome: 'respiratory' | 'gi' | 'feverRash' | 'neuro' | 'other';
-    label: string;
-    geoLevel: 'country' | 'province' | 'city' | 'postalCode';
-    locationName: string;
-    /** 0–1 anomaly score (higher = more unusual) */
-    signalScore: number;
-    /** Current rate vs baseline (e.g. 2.4 → 2.4x baseline) */
-    baselineMultiplier: number;
-    /** Optional reproduction estimate, if you compute it */
-    rEstimate?: number | null;
-    status: 'watch' | 'investigate' | 'incident';
-    window: { from: string; to: string }; // ISO timestamps
-  }[];
+    const init: RequestInit = {
+      method,
+      headers: copyForwardHeaders(req),
+      cache: 'no-store',
+    };
 
-  /** Paediatric-specific snapshot */
-  paediatrics: {
-    totalCases: number;
-    sharePct: number;
-    hospitalisationRatePer1000: number;
-    topDiagnoses: {
-      code: string;
-      description: string;
-      cases: number;
-    }[];
-    topAgeBands: {
-      band: string; // e.g. "0–4", "5–11"
-      cases: number;
-    }[];
-  };
-};
+    if (method !== 'GET') {
+      init.body = await req.text();
+    }
+
+    const upstream = await fetch(target.toString(), init);
+
+    const contentType = upstream.headers.get('content-type') || '';
+
+    if (contentType.includes('application/json')) {
+      const data = await upstream.json().catch(() => null);
+      return NextResponse.json(data, { status: upstream.status });
+    }
+
+    const text = await upstream.text().catch(() => '');
+    return new NextResponse(text, {
+      status: upstream.status,
+      headers: {
+        'content-type': contentType || 'text/plain',
+      },
+    });
+  } catch (err: any) {
+    console.error('admin-dashboard analytics medical proxy error', err);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err?.message || 'analytics_medical_proxy_failed',
+      },
+      { status: 500 },
+    );
+  }
+}
+
+export async function GET(req: NextRequest) {
+  return proxy(req, 'GET');
+}
+
+export async function POST(req: NextRequest) {
+  return proxy(req, 'POST');
+}
