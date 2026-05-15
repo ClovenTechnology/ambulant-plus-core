@@ -256,6 +256,37 @@ importers:
         specifier: ^5.0.0
         version: 5.9.3
 
+  apps/client-app:
+    dependencies:
+      next:
+        specifier: 14.1.0
+        version: 14.1.0(@babel/core@7.28.4)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
+      qrcode:
+        specifier: ^1.5.4
+        version: 1.5.4
+      react:
+        specifier: 18.2.0
+        version: 18.2.0
+      react-dom:
+        specifier: 18.2.0
+        version: 18.2.0(react@18.2.0)
+    devDependencies:
+      '@types/node':
+        specifier: 18.x
+        version: 18.19.130
+      '@types/qrcode':
+        specifier: ^1.5.6
+        version: 1.5.6
+      '@types/react':
+        specifier: 18.x
+        version: 18.3.28
+      '@types/react-dom':
+        specifier: 18.x
+        version: 18.3.7(@types/react@18.3.28)
+      typescript:
+        specifier: ^5.9.2
+        version: 5.9.3
+
   apps/clinician-app:
     dependencies:
       '@ambulant/rtc':
@@ -2308,6 +2339,9 @@ packages:
 
   '@types/prop-types@15.7.15':
     resolution: {integrity: sha512-F6bEyamV9jKGAFBEmlQnesRPGOQqS2+Uwi0Em15xenOxHaf2hv6L8YCVn3rPdPJOiJfPiCnLIRyvwVaqMY3MIw==}
+
+  '@types/qrcode@1.5.6':
+    resolution: {integrity: sha512-te7NQcV2BOvdj2b1hCAHzAoMNuj65kNBMz0KBaxM6c3VGBOhU0dURQKOtH8CFNI/dsKkwlv32p26qYQTWoB5bw==}
 
   '@types/raf@3.4.3':
     resolution: {integrity: sha512-c4YAvMedbPZ5tEyxzQdMoOhhJ4RD3rngZIdwC2/qDN3d7JpEhB6fiBRKVY1lg5B7Wk+uPBjn5f39j1/2MY1oOw==}
@@ -7609,6 +7643,10 @@ snapshots:
 
   '@types/prop-types@15.7.15': {}
 
+  '@types/qrcode@1.5.6':
+    dependencies:
+      '@types/node': 20.19.22
+
   '@types/raf@3.4.3':
     optional: true
 
@@ -9527,7 +9565,7 @@ snapshots:
       '@next/env': 14.1.0
       '@swc/helpers': 0.5.2
       busboy: 1.6.0
-      caniuse-lite: 1.0.30001751
+      caniuse-lite: 1.0.30001755
       graceful-fs: 4.2.11
       postcss: 8.4.31
       react: 18.2.0
