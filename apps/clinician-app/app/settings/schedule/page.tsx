@@ -475,11 +475,7 @@ export default function SchedulePage() {
       <CalendarPreview
         clinicianId="clinician-local-001"
         initialView={patientView ? 'month' : 'week'}
-        mode={patientView ? 'month' : 'week'}
-        onSelectSlot={(startIso, endIso) => handleSlotClick(startIso, endIso)}
-        slotMin={slotMin}
-        slotMax={slotMax}
-        defaultDuration={consult?.defaultMinutes ?? 30}
+        useBatchForWeek={!patientView}
       />
     </main>
   );

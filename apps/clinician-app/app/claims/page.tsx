@@ -1,7 +1,7 @@
 // apps/clinician-app/app/claims/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 /* ================= TYPES ================= */
@@ -57,70 +57,6 @@ type ClaimsApiResponse = {
 type MiniPoint = { month: string; value: number };
 
 const CLAIM_STATUS_OPTIONS = ['draft', 'submitted', 'paid', 'rejected'] as const;
-
-/* ================= MOCK FALLBACK DATA ================= */
-
-const MOCK_CLAIMS: ClaimRecord[] = [
-  {
-    id: 'clm-001',
-    createdAt: new Date(Date.now() - 86400000 * 2).toISOString(),
-    encounterId: 'enc-1001',
-    clinicianId: 'clin-01',
-    patientId: 'pat-01',
-    patientName: 'Melisa Xaba',
-    diagnosis: { text: 'Hypertension', code: 'I10' },
-    status: 'paid',
-    payment: {
-      method: 'medical-aid',
-      displayLabel: 'Discovery Health',
-    },
-  },
-  {
-    id: 'clm-002',
-    createdAt: new Date(Date.now() - 86400000 * 5).toISOString(),
-    encounterId: 'enc-1002',
-    clinicianId: 'clin-02',
-    patientId: 'pat-02',
-    patientName: 'Nomsa Dlamini',
-    diagnosis: { text: 'Type 2 Diabetes', code: 'E11' },
-    status: 'submitted',
-    payment: {
-      method: 'self-pay-card',
-      displayLabel: 'VISA •••• 4832',
-    },
-  },
-  {
-    id: 'clm-003',
-    createdAt: new Date(Date.now() - 86400000 * 10).toISOString(),
-    encounterId: 'enc-1003',
-    clinicianId: 'clin-01',
-    patientId: 'pat-03',
-    patientName: 'Lerato Toto',
-    diagnosis: { text: 'Respiratory infection', code: 'J06.9' },
-    status: 'paid',
-    payment: {
-      method: 'voucher-promo',
-      displayLabel: 'Corporate Wellness Voucher',
-      voucherCode: 'AMB-HEALTH-2026',
-      voucherAmountCents: 45000,
-    },
-  },
-];
-
-const MOCK_STATS: ClaimsStats = {
-  perMethod: {
-    total: 3,
-    'self-pay-card': 1,
-    'medical-aid': 1,
-    'voucher-promo': 1,
-    unknown: 0,
-  },
-  perMonth: {
-    '2025-11': { total: 1, 'self-pay-card': 1, 'medical-aid': 0, 'voucher-promo': 0, unknown: 0 },
-    '2025-12': { total: 1, 'self-pay-card': 0, 'medical-aid': 1, 'voucher-promo': 0, unknown: 0 },
-    '2026-01': { total: 1, 'self-pay-card': 0, 'medical-aid': 0, 'voucher-promo': 1, unknown: 0 },
-  },
-};
 
 /* ================= HELPERS ================= */
 
@@ -179,9 +115,9 @@ function MiniBarRow({ label, series }: { label: string; series: MiniPoint[] }) {
 
 /* ================= PAGE ================= */
 
-export default function ClaimsDashboardPage() {
+function ClaimsDashboardPageContent() {
   const sp = useSearchParams();
-  const highlightEncounterId = sp.get('encounterId') || '';
+  const highlightEncounterId = sp?.get('encounterId') || '';
 
   const [claims, setClaims] = useState<ClaimRecord[]>([]);
   const [stats, setStats] = useState<ClaimsStats | null>(null);
@@ -200,42 +136,49 @@ export default function ClaimsDashboardPage() {
   const [voucherOpen, setVoucherOpen] = useState<Record<string, boolean>>({});
   const [statusUpdating, setStatusUpdating] = useState<Record<string, boolean>>({});
 
-  /* ===== API FIRST, MOCK FALLBACK ===== */
+  /* ===== API FIRST — NO MOCK FALLBACK ===== */
 
   useEffect(() => {
     let cancelled = false;
 
-    (async () => {
+    async function loadClaims() {
       try {
         setLoading(true);
         setErr(null);
 
         const r = await fetch('/api/claims', { cache: 'no-store' });
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
 
-        const d: ClaimsApiResponse = await r.json();
+        const d = (await r.json().catch(() => null)) as ClaimsApiResponse | {
+          error?: string;
+        } | null;
+
+        if (!r.ok) {
+          throw new Error(
+            d && 'error' in d && d.error ? d.error : `HTTP ${r.status}`,
+          );
+        }
+
         if (cancelled) return;
 
-        const items = Array.isArray(d.items) ? d.items : [];
+        const items =
+          d && 'items' in d && Array.isArray(d.items) ? d.items : [];
 
-        if (items.length > 0) {
-          setClaims(items);
-          setStats(d.stats ?? null);
-        } else {
-          // graceful fallback if API returns empty
-          setClaims(MOCK_CLAIMS);
-          setStats(MOCK_STATS);
-        }
+        setClaims(items);
+        setStats(d && 'stats' in d ? d.stats ?? null : null);
       } catch (e: any) {
         if (cancelled) return;
-        // graceful fallback if API fails
-        setErr('API unavailable — demo data loaded');
-        setClaims(MOCK_CLAIMS);
-        setStats(MOCK_STATS);
+
+        setErr(e?.message || 'Failed to load claims.');
+        setClaims([]);
+        setStats(null);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
-    })();
+    }
+
+    loadClaims();
 
     return () => {
       cancelled = true;
@@ -858,5 +801,13 @@ export default function ClaimsDashboardPage() {
         )}
       </section>
     </main>
+  );
+}
+
+export default function ClaimsDashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClaimsDashboardPageContent />
+    </Suspense>
   );
 }

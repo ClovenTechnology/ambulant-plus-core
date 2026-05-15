@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { Sparkles, ShieldCheck, Lock, Mail, ArrowRight, Loader2, Eye, EyeOff, Stethoscope } from 'lucide-react';
 
 type LoginResponse = {
@@ -26,7 +26,7 @@ function safeInternalPath(p: string | null | undefined, fallback: string) {
   return fallback;
 }
 
-export default function ClinicianLoginPage() {
+function ClinicianLoginPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -283,5 +283,13 @@ export default function ClinicianLoginPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function ClinicianLoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClinicianLoginPageContent />
+    </Suspense>
   );
 }

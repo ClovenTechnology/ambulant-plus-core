@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { TextBlock } from '@/components/shared/TextBlock';
@@ -105,13 +105,18 @@ async function patchJSON<T = any>(url: string, body: any): Promise<T> {
   return data as T;
 }
 
-export default function XRayWorkspacePage() {
+function XRayWorkspacePageContent() {
   const sp = useSearchParams();
-  const patientId = sp.get('patientId') || 'patient-demo-001';
-  const encounterId = sp.get('encounterId') || 'enc-demo-001';
-  const roomId = sp.get('roomId') || sp.get('room') || undefined;
+  const qs = useMemo(
+    () => new URLSearchParams(sp?.toString() ?? ''),
+    [sp]
+  );
 
-  const createdBy = sp.get('clinicianId') || 'clin_demo_001';
+  const patientId = qs.get('patientId') || 'patient-demo-001';
+  const encounterId = qs.get('encounterId') || 'enc-demo-001';
+  const roomId = qs.get('roomId') || qs.get('room') || undefined;
+
+  const createdBy = qs.get('clinicianId') || 'clin_demo_001';
 
   const STORAGE_KEY = useMemo(
     () => `ambulant-xray-ws-v2::${patientId}::${encounterId}`,
@@ -1080,5 +1085,13 @@ export default function XRayWorkspacePage() {
         </div>
       </Card>
     </div>
+  );
+}
+
+export default function XRayWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <XRayWorkspacePageContent />
+    </Suspense>
   );
 }

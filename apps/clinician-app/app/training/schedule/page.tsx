@@ -1,7 +1,7 @@
-//apps/clinician-app/app/training/schedule/page.tsx
+// apps/clinician-app/app/training/schedule/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   CalendarDays,
@@ -75,8 +75,12 @@ type TrainingContext = {
 
 function money(cents: number, currency: string) {
   const n = (cents || 0) / 100;
+
   try {
-    return new Intl.NumberFormat('en-ZA', { style: 'currency', currency }).format(n);
+    return new Intl.NumberFormat('en-ZA', {
+      style: 'currency',
+      currency,
+    }).format(n);
   } catch {
     return `${currency} ${n.toFixed(2)}`;
   }
@@ -84,6 +88,7 @@ function money(cents: number, currency: string) {
 
 function fmt(dtIso: string) {
   const d = new Date(dtIso);
+
   return new Intl.DateTimeFormat('en-ZA', {
     weekday: 'short',
     year: 'numeric',
@@ -96,7 +101,11 @@ function fmt(dtIso: string) {
 
 function fmtTime(dtIso: string) {
   const d = new Date(dtIso);
-  return new Intl.DateTimeFormat('en-ZA', { hour: '2-digit', minute: '2-digit' }).format(d);
+
+  return new Intl.DateTimeFormat('en-ZA', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(d);
 }
 
 function makeICS({
@@ -116,6 +125,7 @@ function makeICS({
   const toUtc = (iso: string) => {
     const d = new Date(iso);
     const pad = (x: number) => String(x).padStart(2, '0');
+
     return (
       d.getUTCFullYear() +
       pad(d.getUTCMonth() + 1) +
@@ -128,7 +138,10 @@ function makeICS({
     );
   };
 
-  const uid = `ambulant-training-${Math.random().toString(36).slice(2)}@ambulant.plus`;
+  const uid = `ambulant-training-${Math.random()
+    .toString(36)
+    .slice(2)}@ambulant.plus`;
+
   const lines = [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
@@ -164,20 +177,24 @@ function StepPill({
   const tone = done
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
     : active
-    ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
-    : 'border-gray-200 bg-white text-gray-600';
+      ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
+      : 'border-gray-200 bg-white text-gray-600';
 
   return (
-    <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${tone}`}>
+    <div
+      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${tone}`}
+    >
       <span className="opacity-80">{icon}</span>
       <span className="font-medium">{label}</span>
     </div>
   );
 }
 
-export default function TrainingSchedulePage() {
+function TrainingSchedulePageContent() {
   const router = useRouter();
   const sp = useSearchParams();
+
+  const qs = useMemo(() => new URLSearchParams(sp?.toString() ?? ''), [sp]);
 
   const [clinicianId, setClinicianId] = useState<string>('');
   const [ctx, setCtx] = useState<TrainingContext | null>(null);
@@ -189,47 +206,86 @@ export default function TrainingSchedulePage() {
   const [step, setStep] = useState<'pick' | 'pay' | 'done'>('pick');
 
   useEffect(() => {
-    const qId = sp.get('clinicianId') || '';
+    const qId = qs.get('clinicianId') || '';
+
     if (qId) {
       setClinicianId(qId);
       return;
     }
+
     // fallback: if clinician already logged in on this device
     try {
-      const p = JSON.parse(localStorage.getItem('ambulant.profile') || '{}');
-      if (p?.id) setClinicianId(String(p.id));
+      const raw = localStorage.getItem('ambulant.profile');
+
+      if (!raw) return;
+
+      const p = JSON.parse(raw);
+
+      if (p?.id) {
+        setClinicianId(String(p.id));
+      }
     } catch {
-      // ignore
+      // ignore malformed local profile
     }
-  }, [sp]);
+  }, [qs]);
 
   async function load() {
     if (!clinicianId) return;
+
     setErr(null);
+
     try {
       const [cRes, sRes] = await Promise.all([
-        fetch(`/api/training/context?clinicianId=${encodeURIComponent(clinicianId)}`, { cache: 'no-store' }),
-        fetch(`/api/training/slots?clinicianId=${encodeURIComponent(clinicianId)}`, { cache: 'no-store' }),
+        fetch(
+          `/api/training/context?clinicianId=${encodeURIComponent(
+            clinicianId
+          )}`,
+          { cache: 'no-store' }
+        ),
+        fetch(
+          `/api/training/slots?clinicianId=${encodeURIComponent(
+            clinicianId
+          )}`,
+          { cache: 'no-store' }
+        ),
       ]);
 
       const c = (await cRes.json().catch(() => null)) as TrainingContext | null;
-      const s = (await sRes.json().catch(() => null)) as { ok: boolean; slots: TrainingSlot[]; error?: string } | null;
+      const s = (await sRes.json().catch(() => null)) as {
+        ok: boolean;
+        slots: TrainingSlot[];
+        error?: string;
+      } | null;
 
-      if (!cRes.ok || !c?.ok) throw new Error(c?.error || `Failed to load training context`);
-      if (!sRes.ok || !s?.ok) throw new Error(s?.error || `Failed to load training slots`);
+      if (!cRes.ok || !c?.ok) {
+        throw new Error(c?.error || 'Failed to load training context');
+      }
+
+      if (!sRes.ok || !s?.ok) {
+        throw new Error(s?.error || 'Failed to load training slots');
+      }
 
       setCtx(c);
       setSlots(s.slots || []);
 
       // If already scheduled & paid, show done.
-      if (c.training?.status === 'scheduled' && c.training?.paid) setStep('done');
-      else if (c.training?.status === 'scheduled' && !c.training?.paid) setStep('pay');
-      else setStep('pick');
+      if (c.training?.status === 'scheduled' && c.training?.paid) {
+        setStep('done');
+      } else if (c.training?.status === 'scheduled' && !c.training?.paid) {
+        setStep('pay');
+      } else {
+        setStep('pick');
+      }
 
       // preselect if already booked
       if (c.training?.startAt) {
-        const pre = (s.slots || []).find((x) => x.startAt === c.training?.startAt);
-        if (pre) setSlotId(pre.id);
+        const pre = (s.slots || []).find(
+          (x) => x.startAt === c.training?.startAt
+        );
+
+        if (pre) {
+          setSlotId(pre.id);
+        }
       }
     } catch (e: any) {
       setErr(e?.message || 'Failed to load');
@@ -241,8 +297,17 @@ export default function TrainingSchedulePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clinicianId]);
 
-  const selectedSlot = useMemo(() => slots.find((x) => x.id === slotId) || null, [slots, slotId]);
-  const pricing = ctx?.pricing || { currency: 'ZAR', trainingFeeCents: 0, paymentProvider: 'unknown' as const };
+  const selectedSlot = useMemo(
+    () => slots.find((x) => x.id === slotId) || null,
+    [slots, slotId]
+  );
+
+  const pricing = ctx?.pricing || {
+    currency: 'ZAR',
+    trainingFeeCents: 0,
+    paymentProvider: 'paystack' as const,
+  };
+
   const feeLabel = money(pricing.trainingFeeCents, pricing.currency);
 
   const alreadyScheduled = ctx?.training?.status === 'scheduled';
@@ -252,14 +317,19 @@ export default function TrainingSchedulePage() {
 
   async function proceedToPay() {
     setErr(null);
+
     if (!canProceedPick) return;
+
     setStep('pay');
   }
 
   async function confirmAndPay() {
     setErr(null);
+
     if (!selectedSlot) return;
+
     setBusy(true);
+
     try {
       const res = await fetch('/api/training/book', {
         method: 'POST',
@@ -271,12 +341,27 @@ export default function TrainingSchedulePage() {
           endAt: selectedSlot.endAt,
           mode,
           payment: {
-            provider: pricing.paymentProvider, // server will fallback to mock if unset
+            provider:
+              pricing.paymentProvider === 'unknown'
+                ? 'paystack'
+                : pricing.paymentProvider,
           },
         }),
       });
+
       const js = await res.json().catch(() => null);
-      if (!res.ok || !js?.ok) throw new Error(js?.error || 'Booking failed');
+
+      if (!res.ok || !js?.ok) {
+        throw new Error(js?.error || 'Booking failed');
+      }
+
+      if (js.authorizationUrl || js.paymentUrl || js.checkoutUrl) {
+        window.location.href = String(
+          js.authorizationUrl || js.paymentUrl || js.checkoutUrl
+        );
+        return;
+      }
+
       await load();
       setStep('done');
     } catch (e: any) {
@@ -289,6 +374,7 @@ export default function TrainingSchedulePage() {
   const trainingIcsHref = useMemo(() => {
     const t = ctx?.training;
     const c = ctx?.clinician;
+
     if (!t?.startAt || !t?.endAt) return null;
 
     const title = 'Ambulant+ — Mandatory Clinician Training';
@@ -300,10 +386,23 @@ export default function TrainingSchedulePage() {
       'Note: You will not be visible to patients until training is completed and certified by Admin.',
     ].join('\n');
 
-    const location = t.mode === 'in_person' ? 'Ambulant+ Training Centre (details will be sent)' : (t.joinUrl || 'Virtual');
-    const ics = makeICS({ title, startIso: t.startAt, endIso: t.endAt, description, location });
+    const location =
+      t.mode === 'in_person'
+        ? 'Ambulant+ Training Centre (details will be sent)'
+        : t.joinUrl || 'Virtual';
 
-    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
+    const ics = makeICS({
+      title,
+      startIso: t.startAt,
+      endIso: t.endAt,
+      description,
+      location,
+    });
+
+    const blob = new Blob([ics], {
+      type: 'text/calendar;charset=utf-8',
+    });
+
     return URL.createObjectURL(blob);
   }, [ctx]);
 
@@ -328,15 +427,32 @@ export default function TrainingSchedulePage() {
         <header className="rounded-2xl border bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
             <div className="space-y-1">
-              <h1 className="text-2xl font-bold text-slate-900">Mandatory Clinician Training</h1>
+              <h1 className="text-2xl font-bold text-slate-900">
+                Mandatory Clinician Training
+              </h1>
               <p className="text-sm text-slate-600">
-                Book your onboarding session, complete payment, then we prepare your starter kit dispatch.
+                Book your onboarding session, complete payment, then we prepare
+                your starter kit dispatch.
               </p>
+
               {ctx?.clinician?.name || ctx?.clinician?.email ? (
                 <div className="mt-2 text-xs text-slate-600">
-                  Signed up as <span className="font-medium text-slate-800">{ctx?.clinician?.name || '—'}</span>
-                  {ctx?.clinician?.email ? <span className="text-slate-500"> • {ctx.clinician.email}</span> : null}
-                  {ctx?.clinician?.specialty ? <span className="text-slate-500"> • {ctx.clinician.specialty}</span> : null}
+                  Signed up as{' '}
+                  <span className="font-medium text-slate-800">
+                    {ctx?.clinician?.name || '—'}
+                  </span>
+                  {ctx?.clinician?.email ? (
+                    <span className="text-slate-500">
+                      {' '}
+                      • {ctx.clinician.email}
+                    </span>
+                  ) : null}
+                  {ctx?.clinician?.specialty ? (
+                    <span className="text-slate-500">
+                      {' '}
+                      • {ctx.clinician.specialty}
+                    </span>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -378,7 +494,7 @@ export default function TrainingSchedulePage() {
             <InfoCard
               icon={<CheckCircle2 className="h-5 w-5" />}
               title="Fast onboarding"
-              text="Once certified, your profile becomes active, insurance can be auto-attached (if enabled), and you can set fees + availability."
+              text="Once certified, your profile becomes active, insurance can be auto-attached if enabled, and you can set fees and availability."
             />
           </div>
         </header>
@@ -386,7 +502,8 @@ export default function TrainingSchedulePage() {
         {/* Errors / Loading */}
         {!clinicianId ? (
           <div className="rounded-xl border bg-white p-4 text-sm text-rose-700">
-            Missing <code className="font-mono">clinicianId</code>. Use the training link from your email/SMS or sign in first.
+            Missing <code className="font-mono">clinicianId</code>. Use the
+            training link from your email/SMS or sign in first.
           </div>
         ) : null}
 
@@ -412,18 +529,29 @@ export default function TrainingSchedulePage() {
                   <CheckCircle2 className="h-4 w-4" />
                   Training scheduled
                 </div>
-                <h2 className="mt-2 text-lg font-semibold text-slate-900">Your booking</h2>
+
+                <h2 className="mt-2 text-lg font-semibold text-slate-900">
+                  Your booking
+                </h2>
+
                 <div className="mt-1 text-sm text-slate-700">
                   {ctx.training?.startAt ? (
                     <>
-                      {fmt(ctx.training.startAt)} → {ctx.training?.endAt ? fmtTime(ctx.training.endAt) : '—'}
+                      {fmt(ctx.training.startAt)} →{' '}
+                      {ctx.training?.endAt ? fmtTime(ctx.training.endAt) : '—'}
                     </>
                   ) : (
                     '—'
                   )}
                 </div>
+
                 <div className="mt-1 text-xs text-slate-600">
-                  Mode: <span className="font-medium">{ctx.training?.mode === 'in_person' ? 'In person' : 'Virtual'}</span>
+                  Mode:{' '}
+                  <span className="font-medium">
+                    {ctx.training?.mode === 'in_person'
+                      ? 'In person'
+                      : 'Virtual'}
+                  </span>
                   {ctx.training?.paid ? (
                     <span className="ml-2 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">
                       Paid
@@ -478,25 +606,44 @@ export default function TrainingSchedulePage() {
               </div>
             </div>
 
-            {/* Dispatch status (if exists) */}
+            {/* Dispatch status */}
             <div className="rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
               <div className="font-semibold">Starter kit dispatch</div>
+
               {ctx.dispatch?.status ? (
                 <div className="mt-1 text-xs text-slate-600 space-y-1">
-                  <div>Status: <span className="font-medium capitalize">{ctx.dispatch.status}</span></div>
-                  {ctx.dispatch.courierName ? <div>Courier: {ctx.dispatch.courierName}</div> : null}
-                  {ctx.dispatch.trackingCode ? <div>Tracking: {ctx.dispatch.trackingCode}</div> : null}
+                  <div>
+                    Status:{' '}
+                    <span className="font-medium capitalize">
+                      {ctx.dispatch.status}
+                    </span>
+                  </div>
+                  {ctx.dispatch.courierName ? (
+                    <div>Courier: {ctx.dispatch.courierName}</div>
+                  ) : null}
+                  {ctx.dispatch.trackingCode ? (
+                    <div>Tracking: {ctx.dispatch.trackingCode}</div>
+                  ) : null}
                   {ctx.dispatch.trackingUrl ? (
-                    <a className="inline-flex items-center gap-1 text-indigo-700 hover:underline" href={ctx.dispatch.trackingUrl} target="_blank" rel="noreferrer">
+                    <a
+                      className="inline-flex items-center gap-1 text-indigo-700 hover:underline"
+                      href={ctx.dispatch.trackingUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
                       Track shipment <ExternalLink className="h-4 w-4" />
                     </a>
                   ) : (
-                    <div className="text-[11px] text-slate-500">Tracking will appear after Admin assigns courier + tracking.</div>
+                    <div className="text-[11px] text-slate-500">
+                      Tracking will appear after Admin assigns courier and
+                      tracking.
+                    </div>
                   )}
                 </div>
               ) : (
                 <div className="mt-1 text-xs text-slate-600">
-                  Dispatch will be created after payment, then Admin assigns courier + tracking.
+                  Dispatch will be created after payment, then Admin assigns
+                  courier and tracking.
                 </div>
               )}
             </div>
@@ -507,7 +654,10 @@ export default function TrainingSchedulePage() {
         {ctx && step === 'pick' && !alreadyScheduled ? (
           <section className="grid gap-6 md:grid-cols-5">
             <div className="md:col-span-3 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">Choose training mode</h2>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Choose training mode
+              </h2>
+
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <ModeCard
                   active={mode === 'virtual'}
@@ -526,9 +676,12 @@ export default function TrainingSchedulePage() {
               </div>
 
               <div className="pt-2">
-                <h3 className="text-sm font-semibold text-slate-900">Pick a slot</h3>
+                <h3 className="text-sm font-semibold text-slate-900">
+                  Pick a slot
+                </h3>
                 <p className="mt-1 text-xs text-slate-600">
-                  Select one slot. If you need a special time, contact support after booking and we’ll adjust.
+                  Select one slot. If you need a special time, contact support
+                  after booking and we’ll adjust.
                 </p>
 
                 <div className="mt-3 space-y-2">
@@ -539,23 +692,33 @@ export default function TrainingSchedulePage() {
                   ) : (
                     slots.map((s) => {
                       const active = s.id === slotId;
+
                       return (
                         <button
                           key={s.id}
                           type="button"
                           onClick={() => setSlotId(s.id)}
                           className={`w-full rounded-xl border p-4 text-left transition ${
-                            active ? 'border-indigo-300 bg-indigo-50' : 'hover:bg-slate-50'
+                            active
+                              ? 'border-indigo-300 bg-indigo-50'
+                              : 'hover:bg-slate-50'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <div className="text-sm font-semibold text-slate-900">{fmt(s.startAt)}</div>
+                              <div className="text-sm font-semibold text-slate-900">
+                                {fmt(s.startAt)}
+                              </div>
                               <div className="mt-1 text-xs text-slate-600">
                                 {fmtTime(s.startAt)} → {fmtTime(s.endAt)}
-                                {s.seatsLeft != null ? <span className="ml-2">• Seats left: {s.seatsLeft}</span> : null}
+                                {s.seatsLeft != null ? (
+                                  <span className="ml-2">
+                                    • Seats left: {s.seatsLeft}
+                                  </span>
+                                ) : null}
                               </div>
                             </div>
+
                             {active ? (
                               <span className="inline-flex items-center rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-medium text-white">
                                 Selected
@@ -589,13 +752,19 @@ export default function TrainingSchedulePage() {
             </div>
 
             <div className="md:col-span-2 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">What you’ll receive</h2>
+              <h2 className="text-lg font-semibold text-slate-900">
+                What you’ll receive
+              </h2>
               <p className="text-sm text-slate-600">
-                After payment, your starter kit dispatch is created. Admin will assign courier + tracking and you’ll be notified automatically.
+                After payment, your starter kit dispatch is created. Admin will
+                assign courier and tracking, and you’ll be notified
+                automatically.
               </p>
 
               <div className="rounded-xl border bg-slate-50 p-4">
-                <div className="text-xs font-semibold text-slate-700">Starter kit contents</div>
+                <div className="text-xs font-semibold text-slate-700">
+                  Starter kit contents
+                </div>
                 <ul className="mt-2 space-y-1 text-sm text-slate-700 list-disc pl-5">
                   {starterKit.map((x) => (
                     <li key={x}>{x}</li>
@@ -605,9 +774,16 @@ export default function TrainingSchedulePage() {
 
               <div className="rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
                 <div className="font-semibold">Training fee</div>
-                <div className="mt-1 text-2xl font-bold text-slate-900">{feeLabel}</div>
+                <div className="mt-1 text-2xl font-bold text-slate-900">
+                  {feeLabel}
+                </div>
                 <div className="mt-1 text-xs text-slate-600">
-                  Provider: <span className="font-medium">{pricing.paymentProvider}</span>
+                  Provider:{' '}
+                  <span className="font-medium">
+                    {pricing.paymentProvider === 'unknown'
+                      ? 'paystack'
+                      : pricing.paymentProvider}
+                  </span>
                 </div>
               </div>
             </div>
@@ -620,28 +796,40 @@ export default function TrainingSchedulePage() {
             <div className="md:col-span-3 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
               <h2 className="text-lg font-semibold text-slate-900">Payment</h2>
               <p className="text-sm text-slate-600">
-                Pay to confirm your training booking. Immediately after payment we create your dispatch as <span className="font-medium">pending</span>,
-                then Admin adds courier + tracking.
+                Pay securely with Paystack to confirm your training booking.
+                Immediately after successful payment, we create your dispatch as{' '}
+                <span className="font-medium">pending</span>, then Admin adds
+                courier and tracking.
               </p>
 
               <div className="rounded-xl border bg-slate-50 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <div className="text-xs font-semibold text-slate-700">Training booking</div>
+                    <div className="text-xs font-semibold text-slate-700">
+                      Training booking
+                    </div>
                     <div className="mt-1 text-sm text-slate-900">
                       {selectedSlot ? (
                         <>
-                          {fmt(selectedSlot.startAt)} → {fmtTime(selectedSlot.endAt)} •{' '}
-                          <span className="font-medium">{mode === 'in_person' ? 'In person' : 'Virtual'}</span>
+                          {fmt(selectedSlot.startAt)} →{' '}
+                          {fmtTime(selectedSlot.endAt)} •{' '}
+                          <span className="font-medium">
+                            {mode === 'in_person' ? 'In person' : 'Virtual'}
+                          </span>
                         </>
                       ) : (
-                        <span className="text-slate-600">No slot selected (go back and choose one).</span>
+                        <span className="text-slate-600">
+                          No slot selected. Go back and choose one.
+                        </span>
                       )}
                     </div>
                   </div>
+
                   <div className="text-right">
                     <div className="text-xs text-slate-600">Amount</div>
-                    <div className="text-xl font-bold text-slate-900">{feeLabel}</div>
+                    <div className="text-xl font-bold text-slate-900">
+                      {feeLabel}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -653,9 +841,14 @@ export default function TrainingSchedulePage() {
                   onClick={confirmAndPay}
                   className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                  Pay & confirm booking
+                  {busy ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <CreditCard className="h-4 w-4" />
+                  )}
+                  Pay with Paystack
                 </button>
+
                 <button
                   type="button"
                   disabled={busy}
@@ -665,22 +858,21 @@ export default function TrainingSchedulePage() {
                   Back
                 </button>
               </div>
-
-              <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900">
-                <div className="font-semibold">Note</div>
-                This build is payment-provider ready. If you haven’t configured Stripe/Paystack/Ozow yet, the server will safely fall back to a “mock paid”
-                mode for dev/testing.
-              </div>
             </div>
 
             <div className="md:col-span-2 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">Next steps</h2>
+              <h2 className="text-lg font-semibold text-slate-900">
+                Next steps
+              </h2>
               <ol className="space-y-2 text-sm text-slate-700 list-decimal pl-5">
                 <li>Payment confirms your slot.</li>
-                <li>Dispatch is created (pending).</li>
-                <li>Admin assigns courier + tracking on the onboarding board.</li>
+                <li>Dispatch is created as pending.</li>
+                <li>Admin assigns courier and tracking on the onboarding board.</li>
                 <li>You get email/SMS with tracking and starter kit contents.</li>
-                <li>After training completion + admin certification, you become visible to patients.</li>
+                <li>
+                  After training completion and admin certification, you become
+                  visible to patients.
+                </li>
               </ol>
             </div>
           </section>
@@ -695,11 +887,21 @@ export default function TrainingSchedulePage() {
                   <CheckCircle2 className="h-4 w-4" />
                   Confirmed
                 </div>
-                <h2 className="text-xl font-semibold text-slate-900">Training booked successfully</h2>
+
+                <h2 className="text-xl font-semibold text-slate-900">
+                  Training booked successfully
+                </h2>
+
                 <div className="text-sm text-slate-700">
-                  {fmt(ctx.training.startAt)} → {ctx.training?.endAt ? fmtTime(ctx.training.endAt) : '—'} •{' '}
-                  <span className="font-medium">{ctx.training.mode === 'in_person' ? 'In person' : 'Virtual'}</span>
+                  {fmt(ctx.training.startAt)} →{' '}
+                  {ctx.training?.endAt ? fmtTime(ctx.training.endAt) : '—'} •{' '}
+                  <span className="font-medium">
+                    {ctx.training.mode === 'in_person'
+                      ? 'In person'
+                      : 'Virtual'}
+                  </span>
                 </div>
+
                 {ctx.training.joinUrl ? (
                   <a
                     className="inline-flex items-center gap-2 text-sm text-indigo-700 hover:underline"
@@ -722,6 +924,7 @@ export default function TrainingSchedulePage() {
                     Add to calendar
                   </a>
                 ) : null}
+
                 <button
                   type="button"
                   onClick={() => router.push('/auth/login')}
@@ -734,9 +937,12 @@ export default function TrainingSchedulePage() {
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="rounded-xl border bg-slate-50 p-4">
-                <div className="text-sm font-semibold text-slate-900">Starter kit (preparing)</div>
+                <div className="text-sm font-semibold text-slate-900">
+                  Starter kit preparing
+                </div>
                 <div className="mt-1 text-xs text-slate-600">
-                  Tracking will be sent once Admin assigns courier + tracking number.
+                  Tracking will be sent once Admin assigns courier and tracking
+                  number.
                 </div>
                 <ul className="mt-3 space-y-1 text-sm text-slate-700 list-disc pl-5">
                   {starterKit.map((x) => (
@@ -746,13 +952,18 @@ export default function TrainingSchedulePage() {
               </div>
 
               <div className="rounded-xl border bg-slate-50 p-4 space-y-2">
-                <div className="text-sm font-semibold text-slate-900">Certification gate</div>
+                <div className="text-sm font-semibold text-slate-900">
+                  Certification gate
+                </div>
                 <div className="text-sm text-slate-700">
-                  After training, Admin will certify your profile (individually or by batch). Only then you become visible to patients.
+                  After training, Admin will certify your profile individually
+                  or by batch. Only then you become visible to patients.
                 </div>
                 <div className="text-xs text-slate-600">
                   Current stage:{' '}
-                  <span className="font-medium">{ctx.onboarding?.stage || ctx.clinician?.status || '—'}</span>
+                  <span className="font-medium">
+                    {ctx.onboarding?.stage || ctx.clinician?.status || '—'}
+                  </span>
                 </div>
               </div>
             </div>
@@ -763,7 +974,15 @@ export default function TrainingSchedulePage() {
   );
 }
 
-function InfoCard({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
+function InfoCard({
+  icon,
+  title,
+  text,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  text: string;
+}) {
   return (
     <div className="rounded-xl border bg-slate-50 p-4">
       <div className="flex items-center gap-2 text-slate-900">
@@ -804,5 +1023,13 @@ function ModeCard({
         </div>
       </div>
     </button>
+  );
+}
+
+export default function TrainingSchedulePage() {
+  return (
+    <Suspense fallback={null}>
+      <TrainingSchedulePageContent />
+    </Suspense>
   );
 }

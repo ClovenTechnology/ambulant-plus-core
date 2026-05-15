@@ -1,7 +1,7 @@
 // apps/clinician-app/app/orders/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -15,9 +15,9 @@ type OrderRow = {
   scriptId?: string;
 };
 
-export default function OrdersPage() {
+function OrdersPageContent() {
   const sp = useSearchParams();
-  const enc = useMemo(() => sp.get('encounterId') || undefined, [sp]);
+  const enc = useMemo(() => sp?.get('encounterId') || undefined, [sp]);
 
   const [rows, setRows] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -94,5 +94,13 @@ export default function OrdersPage() {
 
       {err && <div className="text-sm text-rose-600">{err}</div>}
     </main>
+  );
+}
+
+export default function OrdersPage() {
+  return (
+    <Suspense fallback={null}>
+      <OrdersPageContent />
+    </Suspense>
   );
 }

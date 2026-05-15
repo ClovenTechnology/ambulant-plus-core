@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 const MEDICAL_AIDS_STORE = path.join(process.cwd(), '../../medical-aids.json');
 const CLAIMS_STORE = path.join(process.cwd(), 'data-claims.json');
 
-// Optional: shared clinicians JSON (if you mirror profiles there)
+// Optional: shared clinicians JSON if you mirror profiles there
 const CLINICIANS_STORE = path.join(process.cwd(), '../../clinicians.json');
 
 type AutoSubmitBody = {
@@ -26,7 +26,7 @@ type AutoSubmitBody = {
   followupId?: string;
   followupSlot?: { start: string; end: string };
 
-  // optional: allow caller to send a friendly label if they know it
+  // Optional: allow caller to send a friendly label if they know it
   paymentDisplayLabel?: string;
 };
 
@@ -89,7 +89,7 @@ type ClaimRecord = {
   };
   payment: {
     method: PaymentMethod;
-    /** Human friendly label like "Medical aid — Discovery Classic (Telemed: partial, 20% co-pay)" */
+    /** Human-friendly label like "Medical aid — Discovery Classic (Telemed: partial, 20% co-pay)" */
     displayLabel?: string | null;
     membership?: any | null;
     payments: any[];
@@ -117,7 +117,7 @@ type ClaimRecord = {
     telemedCopayType?: 'fixed' | 'percent' | null;
     telemedCopayValue?: number | null;
 
-    /** Voucher contribution (if voucher-promo was used) */
+    /** Voucher contribution if voucher-promo was used */
     voucherAmountCents?: number | null;
 
     rawMembership?: any | null;
@@ -128,11 +128,11 @@ type ClaimRecord = {
   followupId?: string | null;
   followupSlot?: { start: string; end: string } | null;
 
-  // provider + session orders + IoMT context
+  // Provider + session orders + IoMT context
   provider?: ProviderBlock;
   erxOrders?: any[];
   labOrders?: any[];
-  iomtUsed?: string[]; // e.g. ["Health Monitor", "Digital Stethoscope"]
+  iomtUsed?: string[];
 };
 
 async function readClaims(): Promise<ClaimRecord[]> {
@@ -173,8 +173,15 @@ function lower(v: any) {
   return v == null ? '' : String(v).toLowerCase();
 }
 
+function asStringOrNull(v: unknown): string | null {
+  if (typeof v !== 'string') return null;
+  const trimmed = v.trim();
+  return trimmed ? trimmed : null;
+}
+
 export async function POST(req: NextRequest) {
   let body: AutoSubmitBody;
+
   try {
     body = (await req.json()) as AutoSubmitBody;
   } catch {
@@ -182,24 +189,28 @@ export async function POST(req: NextRequest) {
   }
 
   const { encounterId } = body;
+
   if (!encounterId) {
     return NextResponse.json({ error: 'encounterId is required' }, { status: 400 });
   }
 
-  // Look up encounter + payments from the in-memory demo store
+  // Look up encounter + payments from the runtime store.
   const encounter = store.encounters.get(encounterId);
-  const payments = Array.from(store.payments.values()).filter(
-    (p: any) => p.caseId === encounter?.caseId,
-  );
+  const encounterAny = encounter as any;
+
+  const payments: any[] = Array.from(store.payments.values() as Iterable<any>).filter(
+  (p: any) => p.caseId === encounter?.caseId,
+);
 
   const patientIdFromEncounter = body.patientId ?? encounter?.patientId;
   const clinicianIdFromEncounter = body.clinicianId ?? encounter?.clinicianId ?? null;
 
-  // Attachments + legacy DB-backed memberships + session orders from "demo DB"
+  // Attachments + legacy DB-backed memberships + session orders from local DB compatibility layer.
   let attachments: any[] = [];
   let dbMembershipFallback: any | null = null;
   let erxOrders: any[] = [];
   let labOrders: any[] = [];
+
   try {
     const db: any = await readDb();
     const memberships = Array.isArray(db?.memberships) ? db.memberships : [];
@@ -225,6 +236,7 @@ export async function POST(req: NextRequest) {
         o.encounterId === encounterId ||
         o.caseId === encounter?.caseId,
     );
+
     labOrders = labAll.filter(
       (o: any) =>
         o.encounterId === encounterId ||
@@ -237,8 +249,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Prefer shared medical-aids.json for membership + COM/telemed details
+  // Prefer shared medical-aids.json for membership + COM/telemed details.
   let membership: MedicalAidMembership | any | null = null;
+
   try {
     const list = await readMedicalAids();
     const filtered = list.filter(
@@ -246,12 +259,15 @@ export async function POST(req: NextRequest) {
         String(m.patientId) ===
         String(patientIdFromEncounter ?? 'pt-za-001'),
     );
+
     filtered.sort((a, b) => {
       const aTs = Date.parse(a.updatedAt || a.createdAt || '');
       const bTs = Date.parse(b.updatedAt || b.createdAt || '');
-      return (isNaN(bTs) ? 0 : bTs) - (isNaN(aTs) ? 0 : aTs);
+      return (Number.isNaN(bTs) ? 0 : bTs) - (Number.isNaN(aTs) ? 0 : aTs);
     });
+
     const preferred = filtered.find((m) => m.active) ?? filtered[0];
+
     if (preferred) {
       membership = preferred;
     }
@@ -263,7 +279,7 @@ export async function POST(req: NextRequest) {
     membership = dbMembershipFallback;
   }
 
-  // Infer payment method
+  // Infer payment method.
   let paymentMethod: PaymentMethod = 'unknown';
 
   if (membership && (membership.scheme || membership.planName || membership.payerName || membership.plan)) {
@@ -271,6 +287,7 @@ export async function POST(req: NextRequest) {
   } else if (payments.length > 0) {
     const hasMedicalAid = payments.some((p: any) => {
       const method = lower(p.method || p.channel || p.source || p.meta?.paymentMethod);
+
       return (
         method.includes('medical-aid') ||
         method.includes('medical aid') ||
@@ -281,6 +298,7 @@ export async function POST(req: NextRequest) {
 
     const hasVoucher = payments.some((p: any) => {
       const method = lower(p.method || p.channel || p.source || p.meta?.paymentMethod);
+
       return (
         method.includes('voucher') ||
         method.includes('promo') ||
@@ -291,6 +309,7 @@ export async function POST(req: NextRequest) {
 
     const hasCard = payments.some((p: any) => {
       const method = lower(p.method || p.channel || p.source || p.meta?.paymentMethod);
+
       return (
         method.includes('card') ||
         method.includes('credit') ||
@@ -316,7 +335,7 @@ export async function POST(req: NextRequest) {
     paymentMethod = 'self-pay-card';
   }
 
-  // Extract telemed cover information from membership if present
+  // Extract telemed cover information from membership if present.
   const telemedCover = (membership?.telemedCover ??
     membership?.telemedicineCover ??
     membership?.virtualConsultsCover) as TelemedCover | undefined;
@@ -324,13 +343,15 @@ export async function POST(req: NextRequest) {
   const telemedCopayType =
     (membership?.telemedCopayType as 'fixed' | 'percent' | undefined) ??
     undefined;
+
   const telemedCopayValue =
     typeof membership?.telemedCopayValue === 'number'
       ? membership.telemedCopayValue
       : undefined;
 
-  // Build a human-readable display label for this payment
+  // Build a human-readable display label for this payment.
   let paymentDisplayLabel: string | undefined = body.paymentDisplayLabel ?? undefined;
+
   if (!paymentDisplayLabel) {
     if (paymentMethod === 'medical-aid') {
       const payer =
@@ -339,28 +360,32 @@ export async function POST(req: NextRequest) {
         membership?.plan ||
         membership?.planName ||
         'Medical aid';
+
       const memberNo =
         membership?.membershipNumber || membership?.memberNumber || '–';
+
       const dep = membership?.dependentCode ? `-${membership.dependentCode}` : '';
+
       const telemedPart =
         telemedCover && telemedCover !== 'none'
           ? telemedCover === 'full'
             ? 'Telemed: full cover'
             : telemedCopayType && telemedCopayValue != null
-            ? `Telemed: partial, ${
-                telemedCopayType === 'percent'
-                  ? `${telemedCopayValue}% co-pay`
-                  : `R${telemedCopayValue} co-pay`
-              }`
-            : 'Telemed: partial cover'
+              ? `Telemed: partial, ${
+                  telemedCopayType === 'percent'
+                    ? `${telemedCopayValue}% co-pay`
+                    : `R${telemedCopayValue} co-pay`
+                }`
+              : 'Telemed: partial cover'
           : 'Telemed: not covered / unknown';
+
       paymentDisplayLabel = `${payer} — member ${memberNo}${dep} (${telemedPart})`;
     } else if (paymentMethod === 'self-pay-card') {
       paymentDisplayLabel = 'Self-pay — card (credit/debit)';
     } else if (paymentMethod === 'voucher-promo') {
       paymentDisplayLabel = 'Voucher / promo (pre-paid)';
     } else {
-      paymentDisplayLabel = 'Payment method: unknown (demo)';
+      paymentDisplayLabel = 'Payment method: unknown';
     }
   }
 
@@ -370,40 +395,63 @@ export async function POST(req: NextRequest) {
   const diagnosisText = body.diagnosisText ?? undefined;
   const diagnosisCode = body.diagnosisCode ?? undefined;
 
-  // Try to infer IoMT usage (demo): if encounter meta lists any known devices
+  // Infer IoMT usage if encounter metadata lists supported devices.
   const knownIomtDevices = [
     'Health Monitor',
     'Digital Stethoscope',
     'Digital Otoscope',
     'NexRing',
   ];
+
   const iomtUsed: string[] = [];
+
   const encDevices: any[] =
-    (encounter?.devices as any[]) ??
-    (encounter?.meta?.devices as any[]) ??
-    [];
+    Array.isArray(encounterAny?.devices)
+      ? encounterAny.devices
+      : Array.isArray(encounterAny?.meta?.devices)
+        ? encounterAny.meta.devices
+        : [];
+
   for (const d of encDevices) {
     const label = String(d?.label ?? d?.name ?? '').trim();
-    if (!label) continue;
+
+    if (!label) {
+      continue;
+    }
+
     if (knownIomtDevices.includes(label) && !iomtUsed.includes(label)) {
       iomtUsed.push(label);
     }
   }
 
-  const summaryParts: string[] = [];
-  if (encounter?.reason)
-    summaryParts.push(`Reason for visit: ${encounter.reason}`);
-  if (diagnosisText) summaryParts.push(`Diagnosis: ${diagnosisText}`);
-  if (diagnosisCode) summaryParts.push(`ICD-10: ${diagnosisCode}`);
-  if (encounter?.summary)
-    summaryParts.push(`Session summary: ${encounter.summary}`);
+  const encounterReason = asStringOrNull(encounterAny?.reason);
+  const encounterSummary = asStringOrNull(encounterAny?.summary);
 
-  // eRx + lab summary lines
+  const summaryParts: string[] = [];
+
+  if (encounterReason) {
+    summaryParts.push(`Reason for visit: ${encounterReason}`);
+  }
+
+  if (diagnosisText) {
+    summaryParts.push(`Diagnosis: ${diagnosisText}`);
+  }
+
+  if (diagnosisCode) {
+    summaryParts.push(`ICD-10: ${diagnosisCode}`);
+  }
+
+  if (encounterSummary) {
+    summaryParts.push(`Session summary: ${encounterSummary}`);
+  }
+
+  // eRx + lab summary lines.
   if (erxOrders.length > 0) {
     summaryParts.push(
       `Electronic prescriptions: ${erxOrders.length} order(s) captured during this encounter.`,
     );
   }
+
   if (labOrders.length > 0) {
     summaryParts.push(
       `Laboratory orders: ${labOrders.length} panel(s) / test order(s) requested.`,
@@ -415,14 +463,15 @@ export async function POST(req: NextRequest) {
       telemedCover === 'full'
         ? 'Policy indicates full cover for virtual consultations (telemedicine).'
         : telemedCover === 'partial'
-        ? telemedCopayType && telemedCopayValue != null
-          ? `Policy indicates partial cover for telemedicine with ${
-              telemedCopayType === 'percent'
-                ? `${telemedCopayValue}%`
-                : `R${telemedCopayValue.toFixed(2)}`
-            } co-payment.`
-          : 'Policy indicates partial cover for telemedicine (co-payment / deductible may apply).'
-        : 'Telemedicine cover is not indicated or unknown.';
+          ? telemedCopayType && telemedCopayValue != null
+            ? `Policy indicates partial cover for telemedicine with ${
+                telemedCopayType === 'percent'
+                  ? `${telemedCopayValue}%`
+                  : `R${telemedCopayValue.toFixed(2)}`
+              } co-payment.`
+            : 'Policy indicates partial cover for telemedicine; co-payment or deductible may apply.'
+          : 'Telemedicine cover is not indicated or unknown.';
+
     summaryParts.push(telemedLine);
   }
 
@@ -436,15 +485,19 @@ export async function POST(req: NextRequest) {
 
   const comSummary =
     summaryParts.join('\n') ||
-    'Clinical motivation / COM not available in demo store.';
+    'Clinical motivation / COM not available from the current encounter record.';
 
-  // Naive co-payment / deductible extraction for demo
+  // Co-payment / deductible extraction.
   let copayment: number | null = null;
   let deductible: number | null = null;
+
   for (const p of payments) {
     const kind = lower(p.kind || p.type || p.meta?.kind);
     const amt = Number(p.amount ?? p.value ?? p.amountCents);
-    if (Number.isNaN(amt)) continue;
+
+    if (Number.isNaN(amt)) {
+      continue;
+    }
 
     if (kind.includes('copay') || kind.includes('co-pay')) {
       copayment = (copayment ?? 0) + amt;
@@ -453,7 +506,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Extract voucher usage (if any) from payments
+  // Extract voucher usage if any.
   let voucherCode: string | null = null;
   let voucherAmountCents: number | null = null;
 
@@ -461,6 +514,7 @@ export async function POST(req: NextRequest) {
     const voucherPayment = payments.find((p: any) => {
       const method = lower(p.method || p.channel || p.source || p.meta?.paymentMethod);
       const kind = lower(p.kind || p.type || p.meta?.kind);
+
       return (
         method.includes('voucher') ||
         method.includes('promo') ||
@@ -490,12 +544,14 @@ export async function POST(req: NextRequest) {
         voucherAmountCents = rawAmt;
       } else if (typeof rawAmt === 'string') {
         const parsed = Number(rawAmt);
-        if (!Number.isNaN(parsed)) voucherAmountCents = parsed;
+        if (!Number.isNaN(parsed)) {
+          voucherAmountCents = parsed;
+        }
       }
     }
   }
 
-  // If COM was uploaded as a separate attachment from the medical-aids profile, link it
+  // If COM was uploaded as a separate attachment from the medical-aids profile, link it.
   if (membership && membership.comFilePath) {
     attachments.push({
       kind: 'com',
@@ -505,10 +561,12 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Provider block (facility + clinician)
+  // Provider block: facility + clinician.
   let provider: ProviderBlock | undefined;
+
   try {
     const clinicians = await readClinicians();
+
     const c =
       clinicians.find(
         (x: any) =>
@@ -551,6 +609,7 @@ export async function POST(req: NextRequest) {
       '[claims/auto-submit] failed to read clinicians.json; provider block will be basic',
       err,
     );
+
     provider = {
       facility: {
         name: 'Ambulant+ Center',
@@ -595,8 +654,7 @@ export async function POST(req: NextRequest) {
     com: {
       summary: comSummary,
       meta: {
-        generatedFrom:
-          'encounter + diagnosis + telemed cover + session orders (demo)',
+        generatedFrom: 'encounter + diagnosis + telemed cover + session orders',
       },
     },
     preauth: {

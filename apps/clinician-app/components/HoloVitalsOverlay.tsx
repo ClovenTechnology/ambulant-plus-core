@@ -1,6 +1,5 @@
 'use client';
 
-import clsx from 'clsx';
 import { useEffect, useState } from 'react';
 import useVitalsSSE from '@/components/useVitalsSSE';
 import {
@@ -70,13 +69,7 @@ export default function HoloVitalsOverlay({ roomId, visible }: Props) {
 
   return (
     <div
-      className={clsx(
-        'pointer-events-none',
-        'fixed inset-x-0 top-0 z-20',
-        'mx-auto mt-2 w-[min(92vw,640px)]',
-        'rounded-2xl p-3',
-        'glass neon holo-grid backdrop-blur-md ring-1 ring-white/15'
-      )}
+      className="pointer-events-none fixed inset-x-0 top-0 z-20 mx-auto mt-2 w-[min(92vw,640px)] rounded-2xl p-3 glass neon holo-grid backdrop-blur-md ring-1 ring-white/15"
       aria-hidden
     >
       <div className="flex items-center justify-between">

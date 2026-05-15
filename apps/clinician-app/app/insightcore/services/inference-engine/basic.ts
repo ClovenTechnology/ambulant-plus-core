@@ -1,8 +1,18 @@
-// services/inference-engine/basic.ts
-import { InferenceEngine } from './index';
-import { InferenceOutput } from '@/lib/insightcore/contracts';
-import { eventBus } from '@/services/event-bus';
-import { v4 as uuid } from 'uuid';
+// apps/clinician-app/app/insightcore/services/inference-engine/basic.ts
+import type { InferenceOutput } from '@/lib/insightcore/contracts';
+import { eventBus } from '../event-bus';
+
+type InferenceEngine = {
+  run(patientId: string, vitals: Record<string, any>): Promise<InferenceOutput[]>;
+};
+
+function uuid(prefix = 'inference') {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 
 export const BasicInferenceEngine: InferenceEngine = {
   async run(patientId: string, vitals: Record<string, any>) {
@@ -29,7 +39,7 @@ export const BasicInferenceEngine: InferenceEngine = {
     }
 
     for (const inf of outputs) {
-      await eventBus.publish({
+      eventBus.emit('INFERENCE_READY', {
         id: uuid(),
         type: 'INFERENCE_READY',
         entityId: patientId,

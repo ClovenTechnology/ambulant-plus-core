@@ -1,26 +1,23 @@
-/*
+﻿/*
 File: apps/clinician-app/app/workspaces/optometry/page.tsx
-Purpose: World-class Optometry workspace scaffold (POST-ready later; premium local-first UX today).
+Purpose: World-class Optometry workspace scaffold (local-first UX, context-aware)
 
 Upgrades in this version:
-- Premium dashboard header with stats + context (like dental/physio/ent)
-- Eye “map” panel with zone selection (MVP-lite) + tags
-- LocalStorage persistence (feels real before GET)
-- Selected finding panel (inline edit, local-only until PATCH exists)
-- Evidence viewer HUD + click-to-pin overlay + pin POST hook (annotations) (local list until GET)
-- Undo-hide for findings/media/evidence (since DELETE endpoints don’t exist yet)
-- Search + filters + quick templates
-- Safer typing (no `any`), cleaner helpers
+- Reads patientId / encounterId / clinicianId from query params
+- Stops relying on fake prop defaults
+- Guards create/bookmark/pin actions when consultation context is missing
+- Keeps premium local-first UX intact for now
 
 Notes:
 - Still NOT integrated with SFU.
-- Still does NOT call POST endpoints yet (because this file defines its own types). When you’re ready, we’ll swap
-  the local types for your shared `Finding/Evidence/Location` + `postFinding/postEvidence/postAnnotation` like ENT.
+- Still local-first for findings/evidence/pins.
+- Next pass can swap local models for shared workspace types + POST /findings /evidence /annotations.
 */
 
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 type Specialty = 'dental' | 'physio' | 'ent' | 'optometry';
 
@@ -29,7 +26,7 @@ type Eye = 'OD' | 'OS';
 type ChartLocation = {
   kind: 'eye';
   eye: Eye;
-  zoneId?: string; // MVP-lite zones
+  zoneId?: string;
 };
 
 type EvidenceRef =
@@ -68,12 +65,11 @@ type Finding = {
   createdBy: string;
 };
 
-// Local-only pins (until server annotations GET exists)
 type LocalPin = {
   id: string;
-  evidenceKey: string; // findingId + index (since evidence has no id)
-  x: number; // 0..1
-  y: number; // 0..1
+  evidenceKey: string;
+  x: number;
+  y: number;
   label: string;
   createdAt: string;
   status: 'pending' | 'saved' | 'failed';
@@ -101,13 +97,6 @@ const ZONES = [
 ] as const;
 
 type ZoneId = (typeof ZONES)[number]['id'];
-
-type OptometryWorkspaceProps = {
-  patientId?: string;
-  encounterId?: string;
-  clinicianId?: string;
-};
-
 type Banner = { kind: 'info' | 'success' | 'error'; text: string } | null;
 
 function nowISO() {
@@ -124,7 +113,6 @@ function clamp01(n: number) {
 }
 
 function makeThumbUrl(url: string) {
-  // In real impl, server generates thumbs. For local object URLs, just reuse.
   return url;
 }
 
@@ -145,6 +133,14 @@ function severityTone(s?: Finding['severity']) {
   if (s === 'moderate') return 'border-amber-200 bg-amber-50 text-amber-900';
   if (s === 'mild') return 'border-emerald-200 bg-emerald-50 text-emerald-900';
   return 'border-gray-200 bg-white text-gray-700';
+}
+
+function firstNonEmpty(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = String(v ?? '').trim();
+    if (t) return t;
+  }
+  return '';
 }
 
 function StatCard(props: { label: string; value: React.ReactNode; sub?: string }) {
@@ -182,18 +178,40 @@ function PillBtn(props: { label: string; active?: boolean; onClick?: () => void;
   );
 }
 
-export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
-  const patientId = props.patientId ?? 'pat_demo_001';
-  const encounterId = props.encounterId ?? 'enc_demo_001';
-  const clinicianId = props.clinicianId ?? 'clin_demo_001';
+function OptometryWorkspacePageContent() {
+  const searchParams = useSearchParams() ?? new URLSearchParams();
 
-  const storageKey = useMemo(() => `optometry-ws-v2:${patientId}:${encounterId}`, [patientId, encounterId]);
+  const patientId = firstNonEmpty(
+    searchParams.get('patientId'),
+    searchParams.get('subjectPatientId'),
+    searchParams.get('patient_id')
+  );
+  const encounterId = firstNonEmpty(
+    searchParams.get('encounterId'),
+    searchParams.get('caseId'),
+    searchParams.get('encounter_id')
+  );
+  const clinicianId = firstNonEmpty(
+    searchParams.get('clinicianId'),
+    searchParams.get('providerId'),
+    searchParams.get('uid'),
+    searchParams.get('clinician_id')
+  );
+
+  const contextReady = Boolean(patientId && encounterId && clinicianId);
+  const contextBanner = !contextReady
+    ? 'Missing consultation context. Open this workspace from the consultation flow so patient, encounter and clinician IDs are present.'
+    : null;
+
+  const storageKey = useMemo(
+    () => `optometry-ws-v2:${patientId || 'missing-patient'}:${encounterId || 'missing-encounter'}`,
+    [patientId, encounterId]
+  );
   const didLoadRef = useRef(false);
 
   const [eye, setEye] = useState<Eye>('OD');
   const [zone, setZone] = useState<ZoneId>('unknown');
 
-  // Exam template fields (MVP)
   const [vaOD, setVaOD] = useState<string>('');
   const [vaOS, setVaOS] = useState<string>('');
   const [symptoms, setSymptoms] = useState({
@@ -206,47 +224,37 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
   });
   const [symptomNote, setSymptomNote] = useState('');
 
-  // Media library (local-only)
   type MediaItem = {
     id: string;
     kind: 'image' | 'video';
     name: string;
-    url: string; // object URL
+    url: string;
     createdAt: string;
   };
 
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [selectedMediaId, setSelectedMediaId] = useState<string | null>(null);
-
   const selectedMedia = useMemo(() => media.find((m) => m.id === selectedMediaId) ?? null, [media, selectedMediaId]);
 
-  // Findings (local-only)
   const [findings, setFindings] = useState<Finding[]>([]);
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null);
 
-  // pins (local list; in future becomes server-truth)
   const [pins, setPins] = useState<LocalPin[]>([]);
 
-  // UI state
   const [banner, setBanner] = useState<Banner>(null);
-  const [busy, setBusy] = useState(false);
 
-  // Hide (soft delete) until DELETE exists
   const [hiddenFindingIds, setHiddenFindingIds] = useState<Set<string>>(() => new Set());
   const [hiddenMediaIds, setHiddenMediaIds] = useState<Set<string>>(() => new Set());
 
-  // Undo-hide
   const undoTimerRef = useRef<number | null>(null);
   const [undoState, setUndoState] = useState<{ visible: boolean; text: string; restore?: () => void }>({
     visible: false,
     text: '',
   });
 
-  // search + filters
   const [search, setSearch] = useState('');
   const [showOnlyWithEvidence, setShowOnlyWithEvidence] = useState(false);
 
-  // ---------- Load / persist ----------
   useEffect(() => {
     if (didLoadRef.current) return;
     didLoadRef.current = true;
@@ -277,9 +285,7 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
 
       if (typeof parsed.search === 'string') setSearch(parsed.search);
       if (typeof parsed.showOnlyWithEvidence === 'boolean') setShowOnlyWithEvidence(parsed.showOnlyWithEvidence);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [storageKey]);
 
   useEffect(() => {
@@ -304,9 +310,7 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
           showOnlyWithEvidence,
         })
       );
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [
     storageKey,
     eye,
@@ -326,19 +330,15 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
     showOnlyWithEvidence,
   ]);
 
-  // cleanup object URLs on unmount (best effort)
   useEffect(() => {
     return () => {
       try {
         for (const m of media) {
           if (m.url.startsWith('blob:')) URL.revokeObjectURL(m.url);
         }
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [media]);
 
   const visibleMedia = useMemo(() => media.filter((m) => !hiddenMediaIds.has(m.id)), [media, hiddenMediaIds]);
   const visibleFindings = useMemo(() => findings.filter((f) => !hiddenFindingIds.has(f.id)), [findings, hiddenFindingIds]);
@@ -466,6 +466,11 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
   });
 
   const createFinding = (type: FindingTypeKey, severity?: Finding['severity'], note?: string, evidence?: EvidenceRef[]) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     const zoneTag = zone !== 'unknown' ? `zone:${zone}` : undefined;
     const f: Finding = {
       id: uid('fd'),
@@ -493,8 +498,12 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
     setFindings((prev) => prev.map((f) => (f.id === selectedFinding.id ? { ...f, ...patch, updatedAt: nowISO() } : f)));
   };
 
-  // Attach existing media to a finding (bookmark flow)
   const bookmarkSelectedMedia = (type: FindingTypeKey, severity?: Finding['severity'], note?: string) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     let ev: EvidenceRef;
     const t = Date.now();
 
@@ -554,14 +563,17 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
     }
   };
 
-  const addPinToSelectedEvidence = async (x: number, y: number) => {
+  const addPinToSelectedEvidence = useCallback(async (x: number, y: number) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     if (!selectedEvidence) {
       setBanner({ kind: 'info', text: 'Select an evidence item first.' });
       return;
     }
 
-    // NOTE: This is local-only in this scaffold. When you wire server annotations, replace this
-    // with postAnnotation(...) and store evidenceId instead of evidenceKey.
     const key = `${selectedEvidence.findingId}:${selectedEvidence.idx}`;
     const label = zone !== 'unknown' ? `Concern (${eye}:${zone})` : `Concern (${eye})`;
 
@@ -577,14 +589,13 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
 
     setPins((prev) => [local, ...prev]);
     setBanner({ kind: 'success', text: 'Pin saved (local). Wire POST /annotations next.' });
-  };
+  }, [contextReady, contextBanner, selectedEvidence, zone, eye]);
 
   const headerEyeLabel = eye === 'OD' ? 'Right eye (OD)' : 'Left eye (OS)';
   const vaLabel = eye === 'OD' ? (vaOD || '—') : (vaOS || '—');
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* PREMIUM HEADER */}
       <header className="sticky top-0 z-10 border-b bg-white/90 backdrop-blur">
         <div className="mx-auto max-w-7xl px-4 py-3">
           <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
@@ -595,7 +606,8 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                 <span className="text-xs text-gray-500">Phase 1 · Local-first “world-class” UX</span>
               </div>
               <div className="mt-1 text-xs text-gray-500">
-                Patient: <span className="font-mono">{patientId}</span> · Encounter: <span className="font-mono">{encounterId}</span>
+                Patient: <span className="font-mono">{patientId || '—'}</span> · Encounter:{' '}
+                <span className="font-mono">{encounterId || '—'}</span>
               </div>
             </div>
 
@@ -610,7 +622,12 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
-        {/* Banner */}
+        {contextBanner ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {contextBanner}
+          </div>
+        ) : null}
+
         {banner ? (
           <div
             className={
@@ -626,7 +643,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
           </div>
         ) : null}
 
-        {/* Undo bar */}
         {undoState.visible ? (
           <div className="mb-4 rounded-lg border bg-white px-3 py-2 text-sm flex items-center justify-between gap-3">
             <div className="text-gray-700">{undoState.text}</div>
@@ -646,7 +662,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
         ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-[1.12fr_1.72fr_1.16fr] gap-4">
-          {/* LEFT: Eye chart + findings list */}
           <section className="rounded-xl border bg-white shadow-sm overflow-hidden">
             <div className="border-b px-4 py-3">
               <div className="flex items-start justify-between gap-3">
@@ -670,7 +685,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                 counts={eyeCounts}
               />
 
-              {/* Zone selection */}
               <div className="rounded-xl border bg-gradient-to-b from-slate-50 to-white p-3">
                 <div className="flex items-center justify-between">
                   <div>
@@ -704,7 +718,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                 </div>
               </div>
 
-              {/* Findings list */}
               <div className="rounded-lg border bg-gray-50 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-semibold text-gray-700">Findings</div>
@@ -718,7 +731,7 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                   className="mt-2 w-full rounded border bg-white px-2.5 py-2 text-sm"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search title, note, tags…"
+                  placeholder="Search title, note, tagsâ€¦"
                 />
 
                 <div className="mt-3">
@@ -794,7 +807,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
             </div>
           </section>
 
-          {/* CENTER: Media viewer + evidence timeline */}
           <section className="rounded-xl border bg-white shadow-sm overflow-hidden">
             <div className="border-b px-4 py-3 flex items-center justify-between gap-3">
               <div>
@@ -850,7 +862,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                 </div>
               </div>
 
-              {/* Library */}
               <div>
                 <div className="text-xs font-semibold text-gray-700">Library</div>
                 <div className="mt-2 flex gap-2 overflow-auto pb-1">
@@ -884,7 +895,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                 </div>
               </div>
 
-              {/* Evidence timeline */}
               <div className="rounded-lg border bg-gray-50 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-semibold text-gray-700">Evidence for {eye}</div>
@@ -900,7 +910,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                 />
               </div>
 
-              {/* Evidence viewer (for evidence, not uploads) */}
               <div className="rounded-xl border bg-gradient-to-b from-slate-50 to-white overflow-hidden">
                 <div className="border-b px-3 py-2 flex items-center justify-between gap-3">
                   <div className="text-xs text-gray-600">
@@ -925,7 +934,6 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                       {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img src={selectedEvidence.ev.url} alt="Evidence" className="absolute inset-0 h-full w-full object-contain" />
 
-                      {/* pins */}
                       <div className="absolute inset-0">
                         {pinsForSelectedEvidence.map((p) => (
                           <div
@@ -939,13 +947,12 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                             title={p.label}
                           >
                             <div className="w-6 h-6 rounded-full grid place-items-center text-[11px] font-semibold shadow bg-blue-600 text-white">
-                              •
+                              â€¢
                             </div>
                           </div>
                         ))}
                       </div>
 
-                      {/* click to pin */}
                       <button
                         type="button"
                         className="absolute inset-0"
@@ -981,11 +988,10 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
             </div>
           </section>
 
-          {/* RIGHT: Exam + attach + composer + inline edit + plan */}
           <section className="rounded-xl border bg-white shadow-sm overflow-hidden">
             <div className="border-b px-4 py-3">
               <div className="text-sm font-semibold text-gray-900">Exam & Findings</div>
-              <div className="text-xs text-gray-500">VA + symptoms + attach selected media → finding</div>
+              <div className="text-xs text-gray-500">VA + symptoms + attach selected media â†’ finding</div>
             </div>
 
             <div className="p-4 space-y-4">
@@ -998,13 +1004,13 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                 toggleSymptom={toggleSymptom}
                 symptomNote={symptomNote}
                 setSymptomNote={setSymptomNote}
+                disabled={!contextReady}
               />
 
-              <BookmarkButton eye={eye} hasMedia={!!selectedMedia} onBookmark={bookmarkSelectedMedia} zone={zone} />
+              <BookmarkButton eye={eye} hasMedia={!!selectedMedia} onBookmark={bookmarkSelectedMedia} zone={zone} disabled={!contextReady} />
 
-              <QuickFindingComposer onCreate={createFinding} />
+              <QuickFindingComposer onCreate={createFinding} disabled={!contextReady} />
 
-              {/* Inline edit */}
               <div className="rounded-xl border bg-white">
                 <div className="border-b px-3 py-2 flex items-center justify-between">
                   <div>
@@ -1086,7 +1092,7 @@ export default function OptometryWorkspacePage(props: OptometryWorkspaceProps) {
                 <ul className="mt-2 text-[11px] text-gray-600 list-disc pl-4 space-y-1">
                   <li>Swap local types for shared workspace types and call POST /findings, /evidence, /annotations.</li>
                   <li>Add GET endpoints for server-truth (stop using local-only state).</li>
-                  <li>Replace zone list with segmented eye GLB + true hotspots (like physio/dental).</li>
+                  <li>Replace zone list with segmented eye GLB + true hotspots.</li>
                 </ul>
               </div>
             </div>
@@ -1140,11 +1146,12 @@ function ExamPanel(props: {
   setVaOD: (v: string) => void;
   setVaOS: (v: string) => void;
   symptoms: Record<string, boolean>;
-  toggleSymptom: (k: keyof any) => void;
+  toggleSymptom: (k: 'redness' | 'pain' | 'discharge' | 'photophobia' | 'blurredVision' | 'itching') => void;
   symptomNote: string;
   setSymptomNote: (v: string) => void;
+  disabled?: boolean;
 }) {
-  const { vaOD, vaOS, setVaOD, setVaOS, symptoms, toggleSymptom, symptomNote, setSymptomNote } = props;
+  const { vaOD, vaOS, setVaOD, setVaOS, symptoms, toggleSymptom, symptomNote, setSymptomNote, disabled } = props;
 
   return (
     <div className="rounded-xl border p-3 bg-white">
@@ -1153,11 +1160,11 @@ function ExamPanel(props: {
       <div className="mt-2 grid grid-cols-2 gap-2">
         <label className="text-xs text-gray-600">
           Visual Acuity (OD)
-          <input className="mt-1 w-full rounded border px-2 py-2 text-sm" placeholder="e.g., 20/40" value={vaOD} onChange={(e) => setVaOD(e.target.value)} />
+          <input className="mt-1 w-full rounded border px-2 py-2 text-sm" placeholder="e.g., 20/40" value={vaOD} onChange={(e) => setVaOD(e.target.value)} disabled={disabled} />
         </label>
         <label className="text-xs text-gray-600">
           Visual Acuity (OS)
-          <input className="mt-1 w-full rounded border px-2 py-2 text-sm" placeholder="e.g., 20/20" value={vaOS} onChange={(e) => setVaOS(e.target.value)} />
+          <input className="mt-1 w-full rounded border px-2 py-2 text-sm" placeholder="e.g., 20/20" value={vaOS} onChange={(e) => setVaOS(e.target.value)} disabled={disabled} />
         </label>
       </div>
 
@@ -1175,7 +1182,7 @@ function ExamPanel(props: {
             ] as const
           ).map(([k, label]) => (
             <label key={k} className="flex items-center gap-2 text-sm text-gray-700">
-              <input type="checkbox" checked={!!(symptoms as any)[k]} onChange={() => toggleSymptom(k)} />
+              <input type="checkbox" checked={!!symptoms[k]} onChange={() => toggleSymptom(k)} disabled={disabled} />
               {label}
             </label>
           ))}
@@ -1184,7 +1191,7 @@ function ExamPanel(props: {
 
       <label className="mt-3 block text-xs text-gray-600">
         Notes
-        <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={symptomNote} onChange={(e) => setSymptomNote(e.target.value)} placeholder="Optional symptom details…" />
+        <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={symptomNote} onChange={(e) => setSymptomNote(e.target.value)} placeholder="Optional symptom detailsâ€¦" disabled={disabled} />
       </label>
 
       <div className="mt-2 text-[11px] text-gray-500">Later: persist these fields on the encounter (structured observations).</div>
@@ -1194,8 +1201,10 @@ function ExamPanel(props: {
 
 function QuickFindingComposer({
   onCreate,
+  disabled,
 }: {
   onCreate: (type: FindingTypeKey, severity?: 'mild' | 'moderate' | 'severe', note?: string) => void;
+  disabled?: boolean;
 }) {
   const [type, setType] = useState<FindingTypeKey>('redness');
   const [severity, setSeverity] = useState<'mild' | 'moderate' | 'severe' | ''>('mild');
@@ -1214,7 +1223,7 @@ function QuickFindingComposer({
 
       <div className="mt-3 flex flex-wrap gap-2">
         {templates.map((t) => (
-          <button key={t.label} type="button" className="rounded-full border bg-gray-50 hover:bg-gray-100 px-3 py-1.5 text-xs text-gray-800" onClick={t.apply}>
+          <button key={t.label} type="button" className="rounded-full border bg-gray-50 hover:bg-gray-100 px-3 py-1.5 text-xs text-gray-800 disabled:opacity-50" onClick={t.apply} disabled={disabled}>
             {t.label}
           </button>
         ))}
@@ -1223,7 +1232,7 @@ function QuickFindingComposer({
       <div className="mt-3 grid grid-cols-1 gap-2">
         <label className="text-xs text-gray-600">
           Type
-          <select className="mt-1 w-full rounded border px-2 py-2 text-sm" value={type} onChange={(e) => setType(e.target.value as FindingTypeKey)}>
+          <select className="mt-1 w-full rounded border px-2 py-2 text-sm" value={type} onChange={(e) => setType(e.target.value as FindingTypeKey)} disabled={disabled}>
             {FINDING_TYPES.map((t) => (
               <option key={t.key} value={t.key}>
                 {t.label}
@@ -1234,7 +1243,7 @@ function QuickFindingComposer({
 
         <label className="text-xs text-gray-600">
           Severity
-          <select className="mt-1 w-full rounded border px-2 py-2 text-sm" value={severity} onChange={(e) => setSeverity(e.target.value as '' | 'mild' | 'moderate' | 'severe')}>
+          <select className="mt-1 w-full rounded border px-2 py-2 text-sm" value={severity} onChange={(e) => setSeverity(e.target.value as '' | 'mild' | 'moderate' | 'severe')} disabled={disabled}>
             <option value="">—</option>
             <option value="mild">mild</option>
             <option value="moderate">moderate</option>
@@ -1244,16 +1253,17 @@ function QuickFindingComposer({
 
         <label className="text-xs text-gray-600">
           Note
-          <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional details…" />
+          <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional detailsâ€¦" disabled={disabled} />
         </label>
 
         <button
           type="button"
-          className="mt-1 rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-2 text-sm font-medium text-blue-900"
+          className="mt-1 rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-2 text-sm font-medium text-blue-900 disabled:opacity-50"
           onClick={() => {
             onCreate(type, (severity || undefined) as 'mild' | 'moderate' | 'severe' | undefined, note);
             setNote('');
           }}
+          disabled={disabled}
         >
           Create finding
         </button>
@@ -1267,11 +1277,13 @@ function BookmarkButton({
   hasMedia,
   onBookmark,
   zone,
+  disabled,
 }: {
   eye: Eye;
   hasMedia: boolean;
   onBookmark: (type: FindingTypeKey, severity?: 'mild' | 'moderate' | 'severe', note?: string) => void;
   zone: string;
+  disabled?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<FindingTypeKey>('redness');
@@ -1280,7 +1292,7 @@ function BookmarkButton({
 
   return (
     <div className="rounded-xl border p-3 bg-white">
-      <div className="text-xs font-semibold text-gray-700">Attach selected media → Finding</div>
+      <div className="text-xs font-semibold text-gray-700">Attach selected media â†’ Finding</div>
       <div className="mt-1 text-sm text-gray-700">
         Eye: <span className="font-mono font-semibold">{eye}</span>
         {zone && zone !== 'unknown' ? <span className="text-gray-500"> · zone:{zone}</span> : null}
@@ -1291,8 +1303,9 @@ function BookmarkButton({
 
       <button
         type="button"
-        className="mt-2 rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800"
+        className="mt-2 rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800 disabled:opacity-50"
         onClick={() => setOpen(true)}
+        disabled={disabled}
       >
         Bookmark / Attach
       </button>
@@ -1338,7 +1351,7 @@ function BookmarkButton({
 
               <label className="text-xs text-gray-600 block">
                 Note
-                <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional details…" />
+                <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional detailsâ€¦" />
               </label>
 
               <div className="flex items-center justify-end gap-2">
@@ -1359,7 +1372,7 @@ function BookmarkButton({
               </div>
 
               <div className="rounded-lg border bg-amber-50 border-amber-200 px-3 py-2 text-[11px] text-amber-900">
-                When you wire POST endpoints, this modal becomes the “real” attach flow (finding + evidence + optional pin).
+                When you wire POST endpoints, this modal becomes the real attach flow.
               </div>
             </div>
           </div>
@@ -1426,5 +1439,13 @@ function EvidenceTimeline(props: {
         );
       })}
     </div>
+  );
+}
+
+export default function OptometryWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <OptometryWorkspacePageContent />
+    </Suspense>
   );
 }

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
-import { Room, RoomEvent, DataPacket_Kind, ConnectionQuality } from 'livekit-client';
+import { Room, RoomEvent, ConnectionQuality } from 'livekit-client';
 
 import { connectRoom, getOrCreateUid, mintRtcToken } from '@ambulant/rtc';
 
@@ -159,7 +159,7 @@ function readJoinJwtFromSession(visitId: string, roomId: string) {
 function SafeDeviceSettings() {
   return <div className="text-sm text-gray-600">Safe device settings (fallback)</div>;
 }
-const DeviceSettings = dynamic(
+const DeviceSettings = dynamic<any>(
   async () => {
     try {
       const m = await import('@ambulant/rtc');
@@ -172,19 +172,19 @@ const DeviceSettings = dynamic(
 );
 
 // Lazy-loaded heavy panels
-const SessionConclusions = dynamic(() => import('@/components/SessionConclusions'), {
+const SessionConclusions = dynamic<any>(() => import('@/components/SessionConclusions'), {
   ssr: false,
 });
 
-const IntegratedIoMTs = dynamic(() => import('@/components/IntegratedIoMTs'), {
+const IntegratedIoMTs = dynamic<any>(() => import('@/components/IntegratedIoMTs'), {
   ssr: false,
 });
 
-const SmartWearablesPanel = dynamic(() => import('@/components/SmartWearablesPanel'), {
+const SmartWearablesPanel = dynamic<any>(() => import('@/components/SmartWearablesPanel'), {
   ssr: false,
 });
 
-const ClinicianVitalsPanel = dynamic(() => import('../../../components/ClinicianVitalsPanel'), {
+const ClinicianVitalsPanel = dynamic<any>(() => import('../../../components/ClinicianVitalsPanel'), {
   ssr: false,
   loading: () => <Skeleton height="h-40" />,
 });
@@ -193,27 +193,27 @@ const ClinicianVitalsPanel = dynamic(() => import('../../../components/Clinician
    Specialist Workspaces (SFU)
    Mounted inside the SFU page
 ------------------------------ */
-const DentalWorkspaceSFU = dynamic(() => import('../../workspaces/dental/sfu/page'), {
+const DentalWorkspaceSFU = dynamic<any>(() => import('../../workspaces/dental/sfu/page'), {
   ssr: false,
   loading: () => <Skeleton height="h-40" />,
 });
 
-const PhysioWorkspaceSFU = dynamic(() => import('../../workspaces/physio/sfu/page'), {
+const PhysioWorkspaceSFU = dynamic<any>(() => import('../../workspaces/physio/sfu/page'), {
   ssr: false,
   loading: () => <Skeleton height="h-40" />,
 });
 
-const XrayWorkspaceSFU = dynamic(() => import('../../workspaces/x-ray/sfu/page'), {
+const XrayWorkspaceSFU = dynamic<any>(() => import('../../workspaces/x-ray/sfu/page'), {
   ssr: false,
   loading: () => <Skeleton height="h-40" />,
 });
 
-const EntWorkspaceSFU = dynamic(() => import('../../workspaces/ent/sfu/page'), {
+const EntWorkspaceSFU = dynamic<any>(() => import('../../workspaces/ent/sfu/page'), {
   ssr: false,
   loading: () => <Skeleton height="h-40" />,
 });
 
-const OptometryWorkspaceSFU = dynamic(() => import('../../workspaces/optometry/sfu/page'), {
+const OptometryWorkspaceSFU = dynamic<any>(() => import('../../workspaces/optometry/sfu/page'), {
   ssr: false,
   loading: () => <Skeleton height="h-40" />,
 });
@@ -253,12 +253,12 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     encounterId,
     refreshAllergies,
     setPatientAllergies,
-  } = usePatientContext(roomId, searchParams);
+  } = usePatientContext(roomId, searchParams as any);
 
   // Other URL params
-  const clinicianIdParam = searchParams.get('clinicianId') || 'clinician-local-001';
-  const clinicNameParam = searchParams.get('clinicName') || undefined;
-  const clinicAddressParam = searchParams.get('clinicAddress') || undefined;
+  const clinicianIdParam = searchParams?.get('clinicianId') || 'clinician-local-001';
+  const clinicNameParam = searchParams?.get('clinicName') || undefined;
+  const clinicAddressParam = searchParams?.get('clinicAddress') || undefined;
 
   // Fake appt meta (patient-aware; profile can override labels)
   const appt = useMemo(
@@ -267,8 +267,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       when: new Date().toISOString(),
       patientId,
       patientName,
-      clinicianName: searchParams.get('clinicianName') || 'Demo Clinician',
-      reason: searchParams.get('reason') || 'Acute bronchitis (demo)',
+      clinicianName: searchParams?.get('clinicianName') || 'Demo Clinician',
+      reason: searchParams?.get('reason') || 'Acute bronchitis (demo)',
       status: 'In progress',
       roomId,
     }),
@@ -377,8 +377,11 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   // UI prefs
   const { state: ui, set: setUi } = useUiPrefs();
-  const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, rightTab, pip, rightPanelsOpen } =
+  const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, pip } =
     ui;
+
+  const [rightTab, setRightTab] = useState<RightTab>('soap');
+  const [rightPanelsOpen, setRightPanelsOpen] = useState(true);
 
   // NEW: narrow video / wider notes toggle
   const [videoNarrow, setVideoNarrow] = useState(false);
@@ -664,8 +667,10 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     try {
       await room.localParticipant.publishData(
         new TextEncoder().encode(JSON.stringify({ type, value, from: 'clinician' })),
-        DataPacket_Kind.RELIABLE,
-        type === 'typing' ? 'chat' : 'control'
+        {
+          reliable: true,
+          topic: type === 'typing' ? 'chat' : 'control',
+        }
       );
     } catch (e) {
       console.warn('[control] publish error', e);
@@ -674,8 +679,9 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   const wireRoomEvents = (r: Room) => {
     r.on(RoomEvent.ConnectionStateChanged, () => setState(r.state as any))
-      .on(RoomEvent.ConnectionQualityChanged, (_p, q) => setQuality(q))
-      .on(RoomEvent.DataReceived, (payload, _p, _kind, topic) => {
+      .on(RoomEvent.ConnectionQualityChanged, (q: any) => setQuality(q as ConnectionQuality))
+      .on(RoomEvent.DataReceived, (...args: any[]) => {
+        const [payload, _p, _kind, topic] = args;
         try {
           const text = new TextDecoder().decode(payload);
           const data = JSON.parse(text);
@@ -765,12 +771,12 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     setState('connecting');
 
     try {
-      const uid = getOrCreateUid('ambulant_uid');
+      const uid = getOrCreateUid('clinician');
       const visitId =
-        searchParams.get('visitId') || searchParams.get('visit') || searchParams.get('v') || roomId;
+        searchParams?.get('visitId') || searchParams?.get('visit') || searchParams?.get('v') || roomId;
 
       // allow query token, else sessionStorage
-      const direct = searchParams.get('joinToken') || searchParams.get('jt') || '';
+      const direct = searchParams?.get('joinToken') || searchParams?.get('jt') || '';
       const joinToken = (direct || readJoinJwtFromSession(visitId, roomId)).trim();
 
       if (!joinToken) {
@@ -779,20 +785,16 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         return;
       }
 
-      const rtc = await mintRtcToken({
+      const token = await mintRtcToken({
         roomId,
         visitId,
         uid,
         role: 'clinician',
         joinToken,
         identity: uid,
-        name: uid,
       });
 
-      const livekitUrl = (rtc as any)?.wsUrl || wsUrl;
-      const token = rtc.token;
-
-      const r = await connectRoom(livekitUrl, token, { autoSubscribe: true });
+      const r = await connectRoom(wsUrl, token, { autoSubscribe: true });
       wireRoomEvents(r);
       setRoom(r);
       setState('connected');
@@ -868,8 +870,10 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     try {
       await room.localParticipant.publishData(
         new TextEncoder().encode(JSON.stringify({ from: 'clinician', text })),
-        DataPacket_Kind.RELIABLE,
-        'chat'
+        {
+          reliable: true,
+          topic: 'chat',
+        }
       );
       setChat((c) => [...c, { from: 'me', text }]);
       setMsg('');
@@ -1546,7 +1550,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                     <IntegratedIoMTs roomId={roomId} patientId={profile.id} dense={dense} defaultOpen />
                   </Card>
 
-                  <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen patientId={profile.id} />
+                  <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen />
                 </>
               )}
             </div>
@@ -1664,7 +1668,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                 <div className="flex items-center justify-between p-1">
                   <Tabs<RightTab>
                     active={rightTab}
-                    onChange={(key) => setUi('rightTab', key)}
+                    onChange={(key) => setRightTab(key)}
                     items={[
                       { key: 'soap', label: 'Sub' },
                       { key: 'erx', label: 'eRx' },
@@ -1675,7 +1679,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                   />
                   <button
                     className="ml-2 px-2 py-1 text-xs border rounded"
-                    onClick={() => setUi('rightPanelsOpen', !rightPanelsOpen)}
+                    onClick={() => setRightPanelsOpen((v) => !v)}
                     aria-pressed={rightPanelsOpen}
                     aria-label={rightPanelsOpen ? 'Collapse right panels' : 'Expand right panels'}
                     title={rightPanelsOpen ? 'Collapse' : 'Expand'}
@@ -1980,7 +1984,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                       onChangeSoap={(next) => setSoap(next)}
                       onChangePatientEducation={setPatientEducation}
                       onToast={pushToast}
-                      onShowSoapTab={() => setUi('rightTab', 'soap')}
+                      onShowSoapTab={() => setRightTab('soap')}
                     />
                   )}
 

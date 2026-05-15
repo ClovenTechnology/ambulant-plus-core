@@ -1,49 +1,73 @@
 // apps/clinician-app/app/api/me/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 
-// If you already have session helpers / Auth0 integration elsewhere,
-// you can swap the "current user" resolution logic below to match that.
-export async function GET() {
-  try {
-    // TODO: replace this with your real session / auth lookup.
-    // For now this just picks the first clinician as a dev default.
-    const clinician = await prisma.clinicianProfile.findFirst({
-      orderBy: { createdAt: 'asc' },
-    });
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-    if (!clinician) {
-      return NextResponse.json(
+function json(data: any, status = 200) {
+  return NextResponse.json(data, { status });
+}
+
+function normaliseEmail(value: string | null) {
+  return String(value || '').trim().toLowerCase();
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const email =
+      normaliseEmail(req.headers.get('x-clinician-email')) ||
+      normaliseEmail(req.headers.get('x-user-email'));
+
+    const clinicianId =
+      req.headers.get('x-clinician-id') ||
+      req.headers.get('x-user-id') ||
+      '';
+
+    if (!email && !clinicianId) {
+      return json(
         {
-          ok: true,
-          // dev fallback – keeps dashboard working even if no record yet
-          clinicianId: 'clin-demo',
-          name: 'Nomsa Demo',
+          ok: false,
+          error:
+            'Unauthenticated clinician request. Missing clinician identity.',
         },
-        { status: 200 },
+        401
       );
     }
 
-    return NextResponse.json(
-      {
-        ok: true,
-        clinicianId: clinician.id,
-        name: clinician.displayName ?? 'Clinician',
-        clinician,
-      },
-      { status: 200 },
-    );
+    const clinician = await prisma.clinicianProfile.findFirst({
+      where: clinicianId
+        ? { id: clinicianId }
+        : {
+            OR: [{ userId: email }, { email }],
+          } as any,
+    });
+
+    if (!clinician) {
+      return json(
+        {
+          ok: false,
+          error: 'Clinician profile not found.',
+        },
+        404
+      );
+    }
+
+    return json({
+      ok: true,
+      clinicianId: clinician.id,
+      name: clinician.displayName ?? 'Clinician',
+      clinician,
+    });
   } catch (err: any) {
     console.error('/api/me error', err);
-    // Safe fallback so UI still renders
-    return NextResponse.json(
+
+    return json(
       {
         ok: false,
-        clinicianId: 'clin-demo',
-        name: 'Nomsa Demo',
-        error: String(err),
+        error: err?.message || 'Unable to resolve clinician profile.',
       },
-      { status: 200 },
+      500
     );
   }
 }

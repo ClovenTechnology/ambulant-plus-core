@@ -11,7 +11,7 @@ Notes:
 
 'use client';
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 import { useStdWorkspace } from '@/src/components/workspaces/std/useStdWorkspace';
@@ -29,12 +29,13 @@ function qp(v: string | null) {
   return t ? t : undefined;
 }
 
-export default function STDWorkspacePage() {
+function STDWorkspacePageContent() {
   const sp = useSearchParams();
+  const qs = React.useMemo(() => new URLSearchParams(sp?.toString() ?? ''), [sp]);
 
-  const patientId = qp(sp.get('patientId'));
-  const encounterId = qp(sp.get('encounterId'));
-  const clinicianId = qp(sp.get('clinicianId'));
+  const patientId = qp(qs.get('patientId'));
+  const encounterId = qp(qs.get('encounterId'));
+  const clinicianId = qp(qs.get('clinicianId'));
 
   const vm = useStdWorkspace({ patientId, encounterId, clinicianId });
   const { state, actions } = vm;
@@ -182,5 +183,13 @@ export default function STDWorkspacePage() {
         onSave={actions.handleBookmark}
       />
     </div>
+  );
+}
+
+export default function STDWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <STDWorkspacePageContent />
+    </Suspense>
   );
 }

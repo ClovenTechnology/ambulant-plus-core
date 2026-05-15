@@ -95,107 +95,6 @@ type TeamMemberAnalyticsPayload = {
   timeSeries: MemberSessionPoint[];
 };
 
-/* ----------- Local mock for fallback ----------- */
-
-const MOCK_MEMBER_ANALYTICS: TeamMemberAnalyticsPayload = {
-  viewerPlanTier: 'host',
-  practiceName: 'Demo Virtual Practice',
-  memberId: 'cln-001',
-  name: 'Dr N. Naidoo',
-  roleLabel: 'Clinician',
-  isClinician: true,
-  classLabel: 'Class A — Doctors',
-  planTier: 'host',
-  status: 'active',
-  kpis: {
-    totalTelevisits: 120,
-    totalInPerson: 20,
-    totalPatients: 140,
-    newPatients: 35,
-    repeatRatePct: 75,
-    clinicianOnTimeJoinRatePct: 84,
-    patientOnTimeJoinRatePct: 79,
-    avgClinicianJoinDelayMin: 3.8,
-    overrunRatePct: 27,
-    avgOverrunMin: 5.9,
-    cancellations: 4,
-    noShows: 3,
-  },
-  lifecycleSummary: {
-    starterKitShippedAt: new Date().toISOString(),
-    firstShiftAt: new Date().toISOString(),
-    firstConsultAt: new Date().toISOString(),
-    totalCompletedSessions: 140,
-    totalConsultationMinutes: 3200,
-    totalEarningsCents: 910000,
-    avgMonthlyEarningsCents: 455000,
-    totalPayThisMonthCents: 230000,
-    avgWorkDaysPerMonth: 14.5,
-    avgWorkHoursPerMonth: 58,
-    avgWorkHoursPerDay: 4.0,
-    totalWorkDaysInRange: 26,
-    totalWorkDaysThisMonth: 9,
-    avgPatientsPerMonth: 45,
-    totalPatientsThisMonth: 20,
-  },
-  badgeCounters: {
-    topRated: true,
-    avgRating: 4.8,
-    ratingsCount: 95,
-    suspendedCount: 0,
-    disciplinaryCount: 0,
-    inactiveCount: 0,
-  },
-  punctualityBucketsClinician: [
-    { label: 'On time (≤ grace)', sessions: 90, sharePct: 70 },
-    { label: '0–5 min late', sessions: 24, sharePct: 19 },
-    { label: '5–10 min late', sessions: 10, sharePct: 8 },
-    { label: '>10 min late', sessions: 4, sharePct: 3 },
-  ],
-  punctualityBucketsPatient: [
-    { label: 'On time (≤ grace)', sessions: 92, sharePct: 72 },
-    { label: '0–5 min late', sessions: 20, sharePct: 16 },
-    { label: '5–10 min late', sessions: 9, sharePct: 7 },
-    { label: '>10 min late', sessions: 6, sharePct: 5 },
-  ],
-  overrunBuckets: [
-    { label: 'On time / early', sessions: 70, sharePct: 50 },
-    { label: '0–25% over', sessions: 40, sharePct: 29 },
-    { label: '25–50% over', sessions: 20, sharePct: 14 },
-    { label: '>50% over', sessions: 10, sharePct: 7 },
-  ],
-  timeSeries: [
-    {
-      bucket: 'Jan',
-      sessions: 20,
-      clinicianOnTimeJoinRatePct: 80,
-      overrunRatePct: 30,
-      revenueCents: 120000,
-    },
-    {
-      bucket: 'Feb',
-      sessions: 24,
-      clinicianOnTimeJoinRatePct: 82,
-      overrunRatePct: 28,
-      revenueCents: 150000,
-    },
-    {
-      bucket: 'Mar',
-      sessions: 28,
-      clinicianOnTimeJoinRatePct: 83,
-      overrunRatePct: 26,
-      revenueCents: 160000,
-    },
-    {
-      bucket: 'Apr',
-      sessions: 30,
-      clinicianOnTimeJoinRatePct: 85,
-      overrunRatePct: 25,
-      revenueCents: 180000,
-    },
-  ],
-};
-
 /* ----------- Small UI bits ----------- */
 
 function StatCard({
@@ -362,16 +261,18 @@ export default function TeamMemberAnalyticsPage() {
 
   useEffect(() => {
     if (!memberId) return;
+
+    const resolvedMemberId = memberId;
     let cancelled = false;
 
     async function load() {
       setLoading(true);
       setErr(null);
+
       try {
-        // Gateway-aligned endpoint
         const res = await fetch(
           `/api/analytics/practice/members/${encodeURIComponent(
-            memberId,
+            resolvedMemberId,
           )}?range=${encodeURIComponent(range)}`,
           {
             cache: 'no-store',
@@ -380,25 +281,39 @@ export default function TeamMemberAnalyticsPage() {
             },
           },
         );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
         const js = (await res.json().catch(() => null)) as
           | TeamMemberAnalyticsPayload
+          | { error?: string }
           | null;
+
+        if (!res.ok) {
+          throw new Error(
+            js && 'error' in js && js.error ? js.error : `HTTP ${res.status}`,
+          );
+        }
+
+        if (!js || !('memberId' in js)) {
+          throw new Error('Invalid analytics response from server.');
+        }
+
         if (cancelled) return;
-        setData(js || MOCK_MEMBER_ANALYTICS);
+
+        setData(js);
       } catch (e: any) {
         console.error('[team member analytics] failed', e);
+
         if (cancelled) return;
-        setErr(
-          e?.message || 'Failed to load member analytics; using demo snapshot.',
-        );
-        setData(MOCK_MEMBER_ANALYTICS);
+
+        setErr(e?.message || 'Failed to load member analytics.');
+        setData(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
 
     load();
+
     return () => {
       cancelled = true;
     };

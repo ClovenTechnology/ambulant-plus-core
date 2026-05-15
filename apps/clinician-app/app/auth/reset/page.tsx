@@ -3,7 +3,7 @@
 
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { useMemo, useState } from 'react';
+import { Suspense, useMemo, useState } from 'react';
 import { Lock, Loader2, ArrowRight, Sparkles, Eye, EyeOff } from 'lucide-react';
 
 type ResetResponse = { ok?: boolean; message?: string };
@@ -12,7 +12,7 @@ function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
 }
 
-export default function ClinicianResetPage() {
+function ClinicianResetPageContent() {
   const sp = useSearchParams();
   const router = useRouter();
 
@@ -174,5 +174,13 @@ export default function ClinicianResetPage() {
         </div>
       </div>
     </main>
+  );
+}
+
+export default function ClinicianResetPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClinicianResetPageContent />
+    </Suspense>
   );
 }

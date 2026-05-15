@@ -14,6 +14,8 @@ import { errMsg, locationForContext, nowISO, safeJsonParse, tmpId } from './util
 
 type Banner = { kind: 'info' | 'success' | 'error'; text: string } | null;
 
+const STD_SPECIALTY = 'std' as Finding['specialty'];
+
 export type STDWorkspaceProps = {
   patientId?: string;
   encounterId?: string;
@@ -585,7 +587,7 @@ export function useStdWorkspace(props: STDWorkspaceProps) {
         id: optimisticId,
         patientId,
         encounterId,
-        specialty: 'std',
+        specialty: STD_SPECIALTY,
         status: 'draft',
         title,
         note: note?.trim() ? note.trim() : undefined,
@@ -604,7 +606,7 @@ export function useStdWorkspace(props: STDWorkspaceProps) {
         const created = await postFinding({
           patientId,
           encounterId,
-          specialty: 'std',
+          specialty: STD_SPECIALTY,
           title,
           status: 'draft',
           severity,
@@ -652,7 +654,7 @@ export function useStdWorkspace(props: STDWorkspaceProps) {
         const createdFinding = await postFinding({
           patientId,
           encounterId,
-          specialty: 'std',
+          specialty: STD_SPECIALTY,
           title,
           status: 'draft',
           severity: payload.severity,
@@ -668,7 +670,7 @@ export function useStdWorkspace(props: STDWorkspaceProps) {
         const snapshot = await postEvidence({
           patientId,
           encounterId,
-          specialty: 'std',
+          specialty: STD_SPECIALTY,
           findingId: createdFinding.id,
           location,
           source: { type: 'live_capture', device: 'camera', roomId: undefined, trackId: undefined },
@@ -686,7 +688,7 @@ export function useStdWorkspace(props: STDWorkspaceProps) {
         const clip = await postEvidence({
           patientId,
           encounterId,
-          specialty: 'std',
+          specialty: STD_SPECIALTY,
           findingId: createdFinding.id,
           location,
           source: {
@@ -736,14 +738,13 @@ export function useStdWorkspace(props: STDWorkspaceProps) {
       await postAnnotation({
         patientId,
         encounterId,
-        specialty: 'std',
+        specialty: STD_SPECIALTY,
         evidenceId: (selectedEvidence as any).id,
         findingId: (selectedEvidence as any).findingId ?? null,
         location: (selectedEvidence as any).location,
         type: 'pin',
         payload: { x: 0.54, y: 0.42, label: 'Key observation' },
         createdBy: clinicianId,
-        meta: { clientRequestId: tmpId('ann') },
       });
 
       setBanner({ kind: 'success', text: 'Annotation created (demo pin).' });

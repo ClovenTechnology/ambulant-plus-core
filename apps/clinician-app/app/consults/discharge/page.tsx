@@ -1,71 +1,107 @@
-"use client";
+// apps/clinician-app/app/consults/discharge/page.tsx
+'use client';
 
-import React, { useEffect, useState, useCallback } from "react";
-import ReferralPanelEnhanced from "@/components/SessionConclusions";
+import React, { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import ReferralPanelEnhanced from '@/components/SessionConclusions';
 
 type FormState = {
-  noteType: "none" | "sick" | "fitness";
+  noteType: 'none' | 'sick' | 'fitness';
   diagnosis: string;
   plan: string;
   notes: string;
   referral?: string;
 };
 
-export default function Discharge({
-  encounterId,
-  clinicianId,
-}: {
-  encounterId?: string;
-  clinicianId: string;
-}) {
+function DischargeContent() {
+  const searchParams = useSearchParams();
+
+  const encounterId =
+    searchParams?.get('encounterId') ||
+    searchParams?.get('encounter') ||
+    searchParams?.get('id') ||
+    undefined;
+
+  const clinicianId =
+    searchParams?.get('clinicianId') ||
+    searchParams?.get('clinician') ||
+    'clinician-local-001';
+
   const [form, setForm] = useState<FormState>({
-    noteType: "none",
-    diagnosis: "",
-    plan: "",
-    notes: "",
-    referral: "",
+    noteType: 'none',
+    diagnosis: '',
+    plan: '',
+    notes: '',
+    referral: '',
   });
 
-  // autopopulate from SessionConclusions in localStorage
+  // Autopopulate from SessionConclusions in localStorage
   useEffect(() => {
     if (!encounterId) return;
+
     try {
       const raw = localStorage.getItem(`sfu-session-conclusions:${encounterId}`);
       if (!raw) return;
-      const draft = JSON.parse(raw) as { dxQuery?: string; plan?: string; notes?: string };
+
+      const draft = JSON.parse(raw) as {
+        dxQuery?: string;
+        plan?: string;
+        notes?: string;
+      };
+
       setForm((f) => ({
         ...f,
-        diagnosis: draft.dxQuery || "",
-        plan: draft.plan || "",
-        notes: draft.notes || "",
+        diagnosis: draft.dxQuery || '',
+        plan: draft.plan || '',
+        notes: draft.notes || '',
       }));
-    } catch (err) {
-      // optional: console.error(err);
+    } catch {
+      // Keep page usable if the local draft is malformed.
     }
   }, [encounterId]);
 
-  // callback for ReferralPanelEnhanced to update referral in this form
-  const handleReferralChange = useCallback((referralText: string) => {
-    setForm((f) => ({ ...f, referral: referralText }));
-  }, []);
 
   // Create printable HTML and open print dialog
   function generatePrintableDoc(title: string, contentHtml: string) {
-    const printWindow = window.open("", "_blank", "noopener,noreferrer");
+    const printWindow = window.open('', '_blank', 'noopener,noreferrer');
+
     if (!printWindow) {
-      alert("Unable to open print window. Please check popup blocker.");
+      alert('Unable to open print window. Please check popup blocker.');
       return;
     }
 
     const style = `
       <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial; padding: 24px; color: #111; }
-        h1 { font-size: 20px; margin-bottom: 8px; }
-        .meta { margin-bottom: 12px; font-size: 13px; color: #333; }
-        .section { margin-top: 12px; }
-        .label { font-weight: 600; margin-bottom: 4px; }
-        pre { white-space: pre-wrap; font-family: inherit; }
-        .footer { margin-top: 28px; font-size: 12px; color: #666; }
+        body {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+          padding: 24px;
+          color: #111;
+        }
+        h1 {
+          font-size: 20px;
+          margin-bottom: 8px;
+        }
+        .meta {
+          margin-bottom: 12px;
+          font-size: 13px;
+          color: #333;
+        }
+        .section {
+          margin-top: 12px;
+        }
+        .label {
+          font-weight: 600;
+          margin-bottom: 4px;
+        }
+        pre {
+          white-space: pre-wrap;
+          font-family: inherit;
+        }
+        .footer {
+          margin-top: 28px;
+          font-size: 12px;
+          color: #666;
+        }
       </style>
     `;
 
@@ -80,8 +116,8 @@ export default function Discharge({
         <body>
           <h1>${title}</h1>
           <div class="meta">
-            <div>Clinician ID: ${clinicianId || "—"}</div>
-            <div>Encounter ID: ${encounterId || "—"}</div>
+            <div>Clinician ID: ${clinicianId || '—'}</div>
+            <div>Encounter ID: ${encounterId || '—'}</div>
             <div>Generated: ${new Date().toLocaleString()}</div>
           </div>
 
@@ -93,51 +129,44 @@ export default function Discharge({
     `);
     printWindow.document.close();
 
-    // Give the window a tiny moment to render then call print
+    // Give the window a tiny moment to render, then call print.
     setTimeout(() => {
       printWindow.focus();
       printWindow.print();
-      // don't auto-close — leave it so user can save/cancel. If you want it to close automatically after print:
-      // printWindow.close();
     }, 250);
   }
 
-  // Build HTML for the document and call the printer
   function submit() {
-    // if not producing a certificate or note, just save (or ask)
-    if (form.noteType === "none") {
-      // still allow generating a visit summary PDF even if noteType is "none"
-      // change behavior if you want to enforce noteType
-    }
-
     const docTitle =
-      form.noteType === "sick" ? "Sick Note" : form.noteType === "fitness" ? "Fitness Certificate" : "Clinical Note";
+      form.noteType === 'sick'
+        ? 'Sick Note'
+        : form.noteType === 'fitness'
+          ? 'Fitness Certificate'
+          : 'Clinical Note';
 
     const contentHtml = `
       <div class="section">
         <div class="label">Diagnosis</div>
-        <pre>${form.diagnosis || "—"}</pre>
+        <pre>${form.diagnosis || '—'}</pre>
       </div>
 
       <div class="section">
         <div class="label">Plan</div>
-        <pre>${form.plan || "—"}</pre>
+        <pre>${form.plan || '—'}</pre>
       </div>
 
       <div class="section">
         <div class="label">Notes</div>
-        <pre>${form.notes || "—"}</pre>
+        <pre>${form.notes || '—'}</pre>
       </div>
 
       <div class="section">
         <div class="label">Referral</div>
-        <pre>${form.referral || "—"}</pre>
+        <pre>${form.referral || '—'}</pre>
       </div>
     `;
 
     generatePrintableDoc(docTitle, contentHtml);
-    // If you also want to persist to server: call your API here
-    // e.g. await fetch('/api/encounters/save-note', { method: 'POST', body: JSON.stringify(...) })
   }
 
   return (
@@ -147,9 +176,15 @@ export default function Discharge({
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <label className="space-y-1">
           <div className="text-sm font-medium">Document Type</div>
+
           <select
             value={form.noteType}
-            onChange={(e) => setForm((f) => ({ ...f, noteType: e.target.value as FormState["noteType"] }))}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                noteType: e.target.value as FormState['noteType'],
+              }))
+            }
             className="border rounded p-2"
           >
             <option value="none">Clinical Note (no certificate)</option>
@@ -160,9 +195,15 @@ export default function Discharge({
 
         <label className="space-y-1">
           <div className="text-sm font-medium">Diagnosis</div>
+
           <input
             value={form.diagnosis}
-            onChange={(e) => setForm((f) => ({ ...f, diagnosis: e.target.value }))}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                diagnosis: e.target.value,
+              }))
+            }
             className="border rounded p-2 w-full"
             placeholder="Diagnosis / Impression"
           />
@@ -170,9 +211,15 @@ export default function Discharge({
 
         <label className="space-y-1 md:col-span-2">
           <div className="text-sm font-medium">Plan</div>
+
           <textarea
             value={form.plan}
-            onChange={(e) => setForm((f) => ({ ...f, plan: e.target.value }))}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                plan: e.target.value,
+              }))
+            }
             className="border rounded p-2 w-full"
             placeholder="Plan / Treatment / Follow-up"
             rows={3}
@@ -181,18 +228,40 @@ export default function Discharge({
 
         <label className="space-y-1 md:col-span-2">
           <div className="text-sm font-medium">Notes</div>
+
           <textarea
             value={form.notes}
-            onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                notes: e.target.value,
+              }))
+            }
             className="border rounded p-2 w-full"
             placeholder="Clinical notes, observations..."
             rows={4}
           />
         </label>
 
-        {/* The referral panel — pass a callback so it can set referral text in this parent */}
+        <label className="space-y-1 md:col-span-2">
+          <div className="text-sm font-medium">Referral</div>
+
+          <textarea
+            value={form.referral || ''}
+            onChange={(e) =>
+              setForm((f) => ({
+                ...f,
+                referral: e.target.value,
+              }))
+            }
+            className="border rounded p-2 w-full"
+            placeholder="Referral details, receiving clinician/service, reason for referral..."
+            rows={3}
+          />
+        </label>
+
         <div className="md:col-span-2">
-          <ReferralPanelEnhanced clinicianId={clinicianId} onChangeReferral={handleReferralChange} />
+          <ReferralPanelEnhanced clinicianId={clinicianId} />
         </div>
       </div>
 
@@ -200,22 +269,36 @@ export default function Discharge({
         <button
           onClick={submit}
           className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+          type="button"
         >
           Generate PDF / Print
         </button>
 
         <button
           onClick={() => {
-            // Quick local save (optional)
             if (!encounterId) return;
-            localStorage.setItem(`sfu-discharge:${encounterId}`, JSON.stringify(form));
-            alert("Saved locally.");
+
+            localStorage.setItem(
+              `sfu-discharge:${encounterId}`,
+              JSON.stringify(form),
+            );
+
+            alert('Saved locally.');
           }}
           className="px-4 py-2 border rounded"
+          type="button"
         >
           Save Draft
         </button>
       </div>
     </main>
+  );
+}
+
+export default function Discharge() {
+  return (
+    <Suspense fallback={null}>
+      <DischargeContent />
+    </Suspense>
   );
 }

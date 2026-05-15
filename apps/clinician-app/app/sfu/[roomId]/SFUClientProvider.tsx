@@ -68,7 +68,6 @@ function getUid(storageKey = 'ambulant_uid') {
 function envStr(...keys: Array<string | undefined>) {
   for (const k of keys) {
     if (!k) continue;
-    // @ts-expect-error - Next inject
     const v = process?.env?.[k];
     if (typeof v === 'string' && v.trim()) return v.trim();
   }

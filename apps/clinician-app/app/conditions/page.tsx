@@ -1,7 +1,5 @@
 'use client';
 import React, { useEffect, useState } from 'react';
-import { FiPlus } from 'react-icons/fi';
-import { format } from 'date-fns';
 
 type ConditionStatus =
   | 'Active'
@@ -28,24 +26,7 @@ type Condition = {
   ehrTxId?: string | null;
 };
 
-/* ----------------- Helpers & mocks ----------------- */
-function makeMockConditions(): Condition[] {
-  return [
-    {
-      id: 'C-1',
-      name: 'Hypertension',
-      diagnosedAt: '2020-01-01',
-      status: 'Active',
-      notes: 'Controlled with ACE inhibitor',
-      facility: 'Ambulant+ Clinic',
-      clinician: 'Dr. Naidoo',
-      onAmbulant: true,
-      recordedBy: 'Dr. Naidoo',
-      source: 'clinician',
-    },
-  ];
-}
-
+/* ----------------- Helpers ----------------- */
 function validateFile(f: File | null, maxMB = 12) {
   if (!f) return null;
   const allowed = ['application/pdf', 'image/png', 'image/jpeg'];
@@ -54,9 +35,20 @@ function validateFile(f: File | null, maxMB = 12) {
   return null;
 }
 
+function formatDate(value?: string) {
+  if (!value) return 'Unknown date';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Unknown date';
+
+  return date.toISOString().slice(0, 10);
+}
+
 /* ----------------- Page ----------------- */
 export default function ClinicianConditionsPage() {
   const [items, setItems] = useState<Condition[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewName, setPreviewName] = useState<string | null>(null);
@@ -66,17 +58,32 @@ export default function ClinicianConditionsPage() {
   const [onAmbulantFlag, setOnAmbulantFlag] = useState(false);
 
   useEffect(() => {
-    // load conditions
+    // load conditions — production only, no fallback data
     let cancelled = false;
     async function load() {
       try {
+        setLoading(true);
+        setErr(null);
+
         const res = await fetch('/api/clinician/conditions', { cache: 'no-store' });
-        const data = await res.json();
-        if (!cancelled) {
-          setItems(Array.isArray(data) && data.length ? data : makeMockConditions());
+        const data = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          throw new Error(data?.error || `HTTP ${res.status}`);
         }
-      } catch {
-        if (!cancelled) setItems(makeMockConditions());
+
+        if (!cancelled) {
+          setItems(Array.isArray(data) ? data : []);
+        }
+      } catch (e: any) {
+        if (!cancelled) {
+          setErr(e?.message || 'Failed to load conditions.');
+          setItems([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setLoading(false);
+        }
       }
     }
     load();
@@ -93,10 +100,10 @@ export default function ClinicianConditionsPage() {
             )
           );
         } else {
-          setClinicians(['Dr. Naidoo', 'Dr. Adeola']);
+          setClinicians([]);
         }
       } catch {
-        setClinicians(['Dr. Naidoo', 'Dr. Adeola']);
+        setClinicians([]);
       }
     })();
 
@@ -206,7 +213,7 @@ export default function ClinicianConditionsPage() {
       facility: facility || undefined,
       clinician: clinician || undefined,
       onAmbulant,
-      recordedBy: currentClinician || 'Clinician (local)',
+      recordedBy: currentClinician || undefined,
       source: 'clinician',
     };
     setItems((prev) => [optimistic, ...prev]);
@@ -229,7 +236,8 @@ export default function ClinicianConditionsPage() {
       setItems((prev) => prev.map((it) => (it.id === tempId ? serverRecord ?? it : it)));
       alert('Condition recorded');
     } else {
-      alert('Save failed to server — record saved locally (optimistic).');
+      setItems((prev) => prev.filter((it) => it.id !== tempId));
+      alert('Save failed. Please try again.');
     }
 
     setSelectedFile(null);
@@ -245,9 +253,26 @@ export default function ClinicianConditionsPage() {
           onClick={() => setAddOpen(true)}
           className="px-3 py-1 bg-blue-600 text-white rounded flex items-center gap-2"
         >
-          <FiPlus /> New Condition
+          <span aria-hidden="true" className="text-base leading-none">+</span>
+          New Condition
         </button>
       </div>
+
+      {err && (
+        <div className="rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
+          {err}
+        </div>
+      )}
+
+      {loading && (
+        <div className="text-sm text-zinc-500">Loading conditions…</div>
+      )}
+
+      {!loading && items.length === 0 && (
+        <div className="rounded border bg-white p-4 text-sm text-zinc-500">
+          No conditions recorded yet.
+        </div>
+      )}
 
       <ul className="space-y-2">
         {items.map((c) => (
@@ -273,9 +298,7 @@ export default function ClinicianConditionsPage() {
                   )}
                 </div>
                 <div className="text-xs text-zinc-400">
-                  {c.diagnosedAt
-                    ? `${format(new Date(c.diagnosedAt), 'yyyy-MM-dd')}`
-                    : 'Unknown date'}
+                  {formatDate(c.diagnosedAt)}
                   {c.facility ? ` • ${c.facility}` : ''}
                   {c.clinician ? ` • ${c.clinician}` : ''}
                 </div>

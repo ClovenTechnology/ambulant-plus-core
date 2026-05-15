@@ -4,7 +4,10 @@
 import { useEffect, useState } from 'react';
 import { eventBus } from '@/app/insightcore/services/event-bus';
 import Sparkline from '@/components/Sparkline';
-import clsx from 'clsx';
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
 
 type LivePatient = {
   id: string;
@@ -48,7 +51,7 @@ export default function LiveWardView() {
       {Object.values(patients).map((p) => (
         <div
           key={p.id}
-          className={clsx(
+          className={cn(
             'border rounded p-3 space-y-2 bg-white',
             p.risk === 'critical' && 'border-red-600',
             p.risk === 'high' && 'border-amber-500',

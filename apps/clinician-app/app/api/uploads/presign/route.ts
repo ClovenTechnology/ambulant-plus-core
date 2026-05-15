@@ -39,13 +39,15 @@ export async function POST(req: NextRequest) {
 
     // optional: create DB row with PENDING_UPLOAD
     try {
-      if ((prisma as any).clinicianFile) {
-        await prisma.clinicianFile.create({
+      const db = prisma as any;
+
+      if (db.clinicianFile?.create) {
+        await db.clinicianFile.create({
           data: {
             clinicianId: clinicianId ?? null,
             purpose,
             s3Key: key,
-            fileName: fileName,
+            fileName,
             mimeType: contentType,
             size: 0,
             scanStatus: 'PENDING_UPLOAD',

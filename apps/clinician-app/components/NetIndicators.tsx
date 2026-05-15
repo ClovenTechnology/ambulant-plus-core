@@ -34,6 +34,22 @@ export function StatePill({
 /**
  * 0–5 bar connection quality indicator compatible with LiveKit's ConnectionQuality.
  */
+function qualityToBars(quality?: ConnectionQuality) {
+  if (quality == null) return 0;
+
+  const normalized = String(quality).toLowerCase();
+
+  if (normalized === 'excellent') return 5;
+  if (normalized === 'good') return 4;
+  if (normalized === 'poor') return 2;
+  if (normalized === 'lost' || normalized === 'unknown') return 0;
+
+  return 0;
+}
+
+/**
+ * 0–5 bar connection quality indicator compatible with LiveKit's ConnectionQuality.
+ */
 export function QualityBars({
   quality,
   className,
@@ -43,13 +59,7 @@ export function QualityBars({
   className?: string;
   title?: string;
 }) {
-  const n =
-    quality === 5 /* Excellent */ ? 5
-    : quality === 4 /* Good */      ? 4
-    : quality === 2 /* Poor */      ? 2
-    : quality === 0 /* Unknown */   ? 0
-    : quality === 1 /* Lost */      ? 0
-    : quality ? 3 : 0;
+  const n = qualityToBars(quality);
 
   return (
     <div className={`flex items-end gap-0.5 ${className || ''}`} title={`${title}: ${quality ?? 'n/a'}`} aria-label={title}>

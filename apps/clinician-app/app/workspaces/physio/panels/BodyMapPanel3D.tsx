@@ -138,7 +138,6 @@ function OptionalGLB(props: {
   // (Procedural mannequin will still render.)
   let gltf: any = null;
   try {
-    // @ts-expect-error - path is optional in runtime
     gltf = useGLTF('/models/physio/body.glb');
   } catch {
     gltf = null;

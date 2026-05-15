@@ -1,12 +1,38 @@
 // apps/clinician-app/app/shop/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { DEMO_PRODUCTS, withImageFallback, type Product, type ProductVariant } from '@/mock/shopDemoCatalog';
 
 type Category = 'all' | 'clothing' | 'desk' | 'tech' | 'clinic';
+
+type ProductVariant = {
+  id: string;
+  label: string;
+  sku?: string | null;
+  imageUrl?: string | null;
+  unitAmountZar?: number | null;
+  saleUnitAmountZar?: number | null;
+  inStock?: boolean | null;
+  stockQty?: number | null;
+};
+
+type Product = {
+  id: string;
+  name: string;
+  description?: string | null;
+  type?: string | null;
+  tags?: string[] | null;
+  imageUrl?: string | null;
+  images?: string[] | null;
+  unitAmountZar?: number | null;
+  saleAmountZar?: number | null;
+  inStock?: boolean | null;
+  stockQty?: number | null;
+  maxQtyPerOrder?: number | null;
+  variants?: ProductVariant[] | null;
+};
 
 const CATEGORY_PILLS: { id: Category; label: string }[] = [
   { id: 'all', label: 'All' },
@@ -31,7 +57,7 @@ function formatZar(n: number) {
   return `R ${Math.round(n).toString()}`;
 }
 
-function pickSaleOrBase(base?: number, sale?: number) {
+function pickSaleOrBase(base?: number | null, sale?: number | null) {
   const s = Number(sale);
   if (Number.isFinite(s) && s > 0) return s;
   const b = Number(base);
@@ -45,16 +71,15 @@ function pillMatchCategory(p: Product, cat: Category) {
   return tags.includes(cat);
 }
 
-export default function ShopPage() {
+function ShopPageContent() {
   const sp = useSearchParams();
-  const status = sp.get('status'); // success | cancelled
+  const status = sp?.get('status'); // success | cancelled
 
   const [buyerUid] = useState(() => getUid());
 
   const [products, setProducts] = useState<Product[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [usingFallback, setUsingFallback] = useState(false);
 
   // Filters
   const [category, setCategory] = useState<Category>('all');
@@ -67,13 +92,17 @@ export default function ShopPage() {
   const [imageIdx, setImageIdx] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    (async () => {
+    const ac = new AbortController();
+
+    async function loadProducts() {
       try {
         setError(null);
-        setUsingFallback(false);
 
-        // 🔧 IMPORTANT: remove "type=merch" so the demo can show all groupings
-        const res = await fetch('/api/shop/products?active=1', { cache: 'no-store' });
+        const res = await fetch('/api/shop/products?active=1', {
+          cache: 'no-store',
+          signal: ac.signal,
+        });
+
         const js = await res.json().catch(() => ({}));
 
         if (!res.ok || js?.ok === false) {
@@ -81,21 +110,18 @@ export default function ShopPage() {
         }
 
         const items = Array.isArray(js?.items) ? (js.items as Product[]) : [];
-        if (!items.length) {
-          // empty catalog is a legitimate “fallback moment” for demo
-          setUsingFallback(true);
-          setProducts(withImageFallback(DEMO_PRODUCTS));
-          setError('Live catalog returned no items. Showing demo catalog.');
-          return;
-        }
-
         setProducts(items);
       } catch (err: any) {
-        setUsingFallback(true);
-        setProducts(withImageFallback(DEMO_PRODUCTS));
-        setError(err?.message || 'Live catalog unavailable. Showing demo catalog.');
+        if (err?.name === 'AbortError') return;
+
+        setProducts([]);
+        setError(err?.message || 'Live catalog unavailable.');
       }
-    })();
+    }
+
+    loadProducts();
+
+    return () => ac.abort();
   }, []);
 
   // Ensure default variant + default image index
@@ -139,7 +165,7 @@ export default function ShopPage() {
       const chosenVariantId = variantChoice[p.id];
       const chosenVariant = p.variants?.find((v) => v.id === chosenVariantId);
 
-      const imgs = (p.images && p.images.length ? p.images : p.imageUrl ? [p.imageUrl] : []) as string[];
+      const imgs = (p.images && p.images.length ? p.images : p.imageUrl ? [p.imageUrl] : []).filter(Boolean) as string[];
       const idx = Math.max(0, Math.min((imageIdx[p.id] ?? 0) | 0, Math.max(0, imgs.length - 1)));
       const displayImage = chosenVariant?.imageUrl || imgs[idx] || imgs[0] || p.imageUrl;
 
@@ -236,7 +262,7 @@ export default function ShopPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-lg font-semibold">Ambulant+ Shop</h1>
-          <p className="text-xs text-gray-500">Merchandise, tech and clinic infrastructure for demos and deployments.</p>
+          <p className="text-xs text-gray-500">Merchandise, tech and clinic infrastructure for deployments.</p>
 
           <div className="mt-2 flex gap-2">
             <Link href="/shop/orders" className="text-xs underline text-blue-700">
@@ -258,12 +284,6 @@ export default function ShopPage() {
           />
         </div>
       </header>
-
-      {usingFallback && (
-        <div className="text-xs rounded-md border border-amber-200 bg-amber-50 text-amber-900 px-3 py-2">
-          Demo mode: live catalog unavailable — showing demo catalog (wired fallback).
-        </div>
-      )}
 
       {status === 'success' && (
         <div className="text-sm rounded-md border border-green-200 bg-green-50 text-green-800 px-3 py-2">
@@ -439,5 +459,13 @@ export default function ShopPage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function ShopPage() {
+  return (
+    <Suspense fallback={null}>
+      <ShopPageContent />
+    </Suspense>
   );
 }

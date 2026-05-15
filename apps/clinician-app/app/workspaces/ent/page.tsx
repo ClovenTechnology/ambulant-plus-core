@@ -18,7 +18,8 @@ Notes:
 
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import {
   TogglePills,
@@ -43,11 +44,6 @@ const FINDING_TYPES = [
 type FindingTypeKey = (typeof FINDING_TYPES)[number]['key'];
 type EarSide = 'L' | 'R';
 
-type ENTWorkspaceProps = {
-  patientId?: string;
-  encounterId?: string;
-  clinicianId?: string;
-};
 
 type Banner = { kind: 'info' | 'success' | 'error'; text: string } | null;
 
@@ -141,10 +137,23 @@ function severityTone(s?: Finding['severity']) {
   return 'border-gray-200 bg-white text-gray-700';
 }
 
-export default function ENTWorkspacePage(props: ENTWorkspaceProps) {
-  const patientId = props.patientId ?? 'pat_demo_001';
-  const encounterId = props.encounterId ?? 'enc_demo_001';
-  const clinicianId = props.clinicianId ?? 'clin_demo_001';
+function ENTWorkspacePageContent() {
+  const searchParams = useSearchParams();
+
+  const patientId =
+    searchParams?.get('patientId') ||
+    searchParams?.get('patient') ||
+    'pat_demo_001';
+
+  const encounterId =
+    searchParams?.get('encounterId') ||
+    searchParams?.get('encounter') ||
+    'enc_demo_001';
+
+  const clinicianId =
+    searchParams?.get('clinicianId') ||
+    searchParams?.get('clinician') ||
+    'clin_demo_001';
 
   const storageKey = useMemo(() => `ent-ws-v2:${patientId}:${encounterId}`, [patientId, encounterId]);
   const didLoadRef = useRef(false);
@@ -871,96 +880,141 @@ export default function ENTWorkspacePage(props: ENTWorkspaceProps) {
                 <div className="relative h-64 bg-gray-100">
                   {selectedEvidence ? (
                     selectedEvidence.kind === 'image' ? (
-                      <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={selectedEvidence.url}
-                          alt="Selected evidence"
-                          className="absolute inset-0 h-full w-full object-contain"
-                        />
+                      selectedEvidence.url ? (
+                        <>
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img
+                            src={selectedEvidence.url}
+                            alt="Selected evidence"
+                            className="absolute inset-0 h-full w-full object-contain"
+                          />
 
-                        {/* pin overlay */}
-                        <div className="absolute inset-0">
-                          {pinsForSelectedEvidence.map((p) => (
-                            <div
-                              key={p.id}
-                              className="absolute"
-                              style={{
-                                left: `${Math.round(p.x * 1000) / 10}%`,
-                                top: `${Math.round(p.y * 1000) / 10}%`,
-                                transform: 'translate(-50%, -50%)',
-                              }}
-                              title={p.label}
-                            >
+                          {/* pin overlay */}
+                          <div className="absolute inset-0">
+                            {pinsForSelectedEvidence.map((p) => (
                               <div
-                                className={
-                                  'w-6 h-6 rounded-full grid place-items-center text-[11px] font-semibold shadow ' +
-                                  (p.status === 'saved'
-                                    ? 'bg-blue-600 text-white'
-                                    : p.status === 'pending'
-                                    ? 'bg-amber-500 text-white'
-                                    : 'bg-rose-600 text-white')
-                                }
+                                key={p.id}
+                                className="absolute"
+                                style={{
+                                  left: `${Math.round(p.x * 1000) / 10}%`,
+                                  top: `${Math.round(p.y * 1000) / 10}%`,
+                                  transform: 'translate(-50%, -50%)',
+                                }}
+                                title={p.label}
                               >
-                                •
+                                <div
+                                  className={
+                                    'w-6 h-6 rounded-full grid place-items-center text-[11px] font-semibold shadow ' +
+                                    (p.status === 'saved'
+                                      ? 'bg-blue-600 text-white'
+                                      : p.status === 'pending'
+                                        ? 'bg-amber-500 text-white'
+                                        : 'bg-rose-600 text-white')
+                                  }
+                                >
+                                  •
+                                </div>
                               </div>
-                            </div>
-                          ))}
-                        </div>
-
-                        {/* click-to-pin */}
-                        <button
-                          type="button"
-                          className="absolute inset-0"
-                          onClick={(e) => {
-                            const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                            const x = (e.clientX - rect.left) / rect.width;
-                            const y = (e.clientY - rect.top) / rect.height;
-                            // clamp a bit
-                            const cx = Math.max(0, Math.min(1, x));
-                            const cy = Math.max(0, Math.min(1, y));
-                            void addPinToSelectedEvidence(cx, cy);
-                          }}
-                          title="Click to add a pin (saves via POST /annotations)"
-                          style={{ background: 'transparent' }}
-                        />
-
-                        {/* bottom HUD */}
-                        <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 rounded-lg border bg-white/85 backdrop-blur px-3 py-2 text-xs">
-                          <div className="truncate text-gray-700">
-                            Selected: <span className="font-semibold">{selectedEvidence.kind}</span>
-                            {selectedEvidence.status ? (
-                              <>
-                                {' '}
-                                · <span className="text-gray-500">status:</span>{' '}
-                                <span className="font-semibold">{selectedEvidence.status}</span>
-                              </>
-                            ) : null}
+                            ))}
                           </div>
-                          <div className="flex items-center gap-2">
-                            <span className="rounded-full border bg-white px-2 py-0.5 text-gray-700">
-                              Pins: <span className="font-mono font-semibold">{pinsForSelectedEvidence.length}</span>
-                            </span>
+
+                          {/* click-to-pin */}
+                          <button
+                            type="button"
+                            className="absolute inset-0"
+                            onClick={(e) => {
+                              const rect = (
+                                e.currentTarget as HTMLButtonElement
+                              ).getBoundingClientRect();
+                              const x = (e.clientX - rect.left) / rect.width;
+                              const y = (e.clientY - rect.top) / rect.height;
+                              const cx = Math.max(0, Math.min(1, x));
+                              const cy = Math.max(0, Math.min(1, y));
+
+                              void addPinToSelectedEvidence(cx, cy);
+                            }}
+                            title="Click to add a pin (saves via POST /annotations)"
+                            style={{ background: 'transparent' }}
+                          />
+
+                          {/* bottom HUD */}
+                          <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 rounded-lg border bg-white/85 backdrop-blur px-3 py-2 text-xs">
+                            <div className="truncate text-gray-700">
+                              Selected:{' '}
+                              <span className="font-semibold">{selectedEvidence.kind}</span>
+                              {selectedEvidence.status ? (
+                                <>
+                                  {' '}
+                                  · <span className="text-gray-500">status:</span>{' '}
+                                  <span className="font-semibold">{selectedEvidence.status}</span>
+                                </>
+                              ) : null}
+                            </div>
+
+                            <div className="flex items-center gap-2">
+                              <span className="rounded-full border bg-white px-2 py-0.5 text-gray-700">
+                                Pins:{' '}
+                                <span className="font-mono font-semibold">
+                                  {pinsForSelectedEvidence.length}
+                                </span>
+                              </span>
+
+                              <button
+                                type="button"
+                                className="rounded-full border bg-white hover:bg-gray-50 px-2.5 py-1"
+                                onClick={() => hideEvidenceWithUndo(selectedEvidence.id)}
+                                title="Hide from UI (until DELETE exists)"
+                              >
+                                Hide
+                              </button>
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="h-full w-full grid place-items-center text-gray-700">
+                          <div className="text-center px-6">
+                            <div className="text-sm font-medium">Image pending</div>
+
+                            <div className="text-xs text-gray-500 mt-1">
+                              Status: {selectedEvidence.status ?? '—'}
+                              {selectedEvidence.jobId ? ` · job: ${selectedEvidence.jobId}` : ''}
+                            </div>
+
+                            <div className="mt-2 text-xs text-gray-500">
+                              The image will appear when the final media URL is available.
+                            </div>
+
                             <button
                               type="button"
-                              className="rounded-full border bg-white hover:bg-gray-50 px-2.5 py-1"
+                              className="mt-3 rounded-full border bg-white hover:bg-gray-50 px-3 py-1.5 text-xs"
                               onClick={() => hideEvidenceWithUndo(selectedEvidence.id)}
-                              title="Hide from UI (until DELETE exists)"
                             >
-                              Hide
+                              Hide image
                             </button>
                           </div>
                         </div>
-                      </>
+                      )
+                    ) : selectedEvidence.url ? (
+                      <div className="h-full w-full bg-black grid place-items-center">
+                        <video
+                          controls
+                          src={selectedEvidence.url}
+                          className="max-h-full max-w-full"
+                        />
+                      </div>
                     ) : (
                       <div className="h-full w-full grid place-items-center text-gray-700">
                         <div className="text-center px-6">
                           <div className="text-sm font-medium">Clip selected</div>
+
                           <div className="text-xs text-gray-500 mt-1">
                             Status: {selectedEvidence.status ?? '—'}
                             {selectedEvidence.jobId ? ` · job: ${selectedEvidence.jobId}` : ''}
                           </div>
-                          <div className="mt-2 text-xs text-gray-500">(Playback wires in when real clip URLs are returned.)</div>
+
+                          <div className="mt-2 text-xs text-gray-500">
+                            Playback wires in when the final clip URL is available.
+                          </div>
 
                           <button
                             type="button"
@@ -1302,5 +1356,13 @@ function SymptomsChecklist() {
         Next: persist as structured encounter fields (and auto-suggest findings + plan).
       </div>
     </div>
+  );
+}
+
+export default function ENTWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <ENTWorkspacePageContent />
+    </Suspense>
   );
 }

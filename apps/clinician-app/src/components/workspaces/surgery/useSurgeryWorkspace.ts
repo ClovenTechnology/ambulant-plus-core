@@ -26,6 +26,8 @@ import {
 
 type Banner = { kind: 'info' | 'success' | 'error'; text: string } | null;
 
+const SURGERY_SPECIALTY = 'surgery' as Finding['specialty'];
+
 export type SurgeryWorkspaceProps = {
   patientId?: string;
   encounterId?: string;
@@ -291,7 +293,7 @@ export function useSurgeryWorkspace(props: SurgeryWorkspaceProps) {
         id: optimisticId,
         patientId,
         encounterId,
-        specialty: 'surgery',
+        specialty: SURGERY_SPECIALTY,
         status: 'draft',
         title,
         note,
@@ -310,7 +312,7 @@ export function useSurgeryWorkspace(props: SurgeryWorkspaceProps) {
         const created = await postFinding({
           patientId,
           encounterId,
-          specialty: 'surgery',
+          specialty: SURGERY_SPECIALTY,
           title,
           status: 'draft',
           severity: opts?.severity,

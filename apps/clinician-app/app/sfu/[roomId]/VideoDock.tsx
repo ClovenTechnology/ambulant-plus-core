@@ -306,22 +306,18 @@ export default function VideoDock({
           className={`absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-white/85 backdrop-blur rounded-full px-2 py-2 shadow ${hoverOpacity} transition-opacity duration-200`}
         >
           <IconBtn
+            title={micOn ? 'Mute mic' : 'Unmute mic'}
+            active={micOn}
             onClick={onToggleMic}
-            aria-label={micOn ? 'Mute mic' : 'Unmute mic'}
-            aria-pressed={micOn}
-            role="switch"
-            aria-checked={micOn}
           >
-            <Icon name="mic" toggledName="mic-off" toggled={!micOn} />
+            <Icon name={micOn ? "mic" : "mic-off"} />
           </IconBtn>
           <IconBtn
+            title={camOn ? 'Stop camera' : 'Start camera'}
+            active={camOn}
             onClick={onToggleCam}
-            aria-label={camOn ? 'Stop camera' : 'Start camera'}
-            aria-pressed={camOn}
-            role="switch"
-            aria-checked={camOn}
           >
-            <Icon name="video" toggledName="video-off" toggled={!camOn} />
+            <Icon name={camOn ? "video" : "video-off"} />
           </IconBtn>
           <IconBtn
             title={showVitals ? 'Hide vitals' : 'Show vitals'}

@@ -63,7 +63,7 @@ export type PlanTier = {
   highlight?: boolean;
 };
 
-export const PLAN_TIERS: PlanTier[] = [
+const PLAN_TIERS: PlanTier[] = [
   {
     id: 'solo',
     label: 'Solo (Free)',

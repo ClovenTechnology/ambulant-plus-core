@@ -417,6 +417,26 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
     });
   }, [LAB_TESTS]);
 
+  const makeLabItemFromTest = useCallback(
+    (t: {
+      code: string;
+      title?: string;
+      details?: string;
+      fastingRecommended?: boolean;
+      specimen?: string;
+    }): LabItem => ({
+      id: makeId('lab'),
+      testCode: t.code,
+      title: t.title || '',
+      details: t.details || '',
+      priority: 'Routine',
+      fasting: !!t.fastingRecommended,
+      specimen: t.specimen || 'Blood',
+      notes: '',
+    }),
+    []
+  );
+
   const confirmPick = useCallback(() => {
     const selectedCodes = Object.keys(pickerSelection).filter(k => pickerSelection[k]);
     if (selectedCodes.length === 0) {
@@ -434,11 +454,18 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
         });
       }
       const extras = tests.slice(1);
+
       if (extras.length > 0) {
-        setLabItems(prev => [...prev, ...extras.map(t => ({ id: makeId('lab'), testCode: t.code, title: t.title, details: t.details, priority: 'Routine', fasting: !!t.fastingRecommended, specimen: t.specimen, notes: '' }))]);
+        setLabItems((prev) => [
+          ...prev,
+          ...extras.map((t) => makeLabItemFromTest(t)),
+        ]);
       }
     } else {
-      setLabItems(prev => [...prev, ...tests.map(t => ({ id: makeId('lab'), testCode: t.code, title: t.title, details: t.details, priority: 'Routine', fasting: !!t.fastingRecommended, specimen: t.specimen, notes: '' }))]);
+      setLabItems((prev) => [
+        ...prev,
+        ...tests.map((t) => makeLabItemFromTest(t)),
+      ]);
     }
 
     setConfirmPanelShown(true);
@@ -450,7 +477,15 @@ export default function OrderForm({ onSaved = (v: any) => {} }: { onSaved?: (v: 
       setPickerSelection({});
       setPickerFilter('');
     }
-  }, [pickerSelection, LAB_TESTS, pickerTargetRowId, updateLabItem, addAnotherAfterConfirm, closePicker]);
+  }, [
+    pickerSelection,
+    LAB_TESTS,
+    pickerTargetRowId,
+    updateLabItem,
+    makeLabItemFromTest,
+    addAnotherAfterConfirm,
+    closePicker,
+  ]);
 
   /* specimen badge */
   function SpecimenBadge({ text }: { text?: string }) {

@@ -1,7 +1,7 @@
 // apps/clinician-app/app/orders/new/page.tsx
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useCombobox } from 'downshift';
 import { useAutocomplete, rxnormSearch } from '@/src/hooks/useAutocomplete';
@@ -37,10 +37,10 @@ function SigPill({ text, onClick }: { text: string; onClick: () => void }) {
   );
 }
 
-export default function NewOrderPage() {
+function NewOrderPageContent() {
   const sp = useSearchParams();
   const router = useRouter();
-  const urlEncounter = useMemo(() => sp.get('encounterId') || sp.get('encId') || '', [sp]);
+  const urlEncounter = useMemo(() => sp?.get('encounterId') || sp?.get('encId') || '', [sp]);
 
   // allow user to edit or type an encounterId (fallback to url param)
   const [encounterId, setEncounterId] = useState<string>(urlEncounter || '');
@@ -371,5 +371,13 @@ export default function NewOrderPage() {
         <button onClick={() => history.back()} className="px-3 py-1.5 rounded border bg-white">Cancel</button>
       </div>
     </main>
+  );
+}
+
+export default function NewOrderPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewOrderPageContent />
+    </Suspense>
   );
 }

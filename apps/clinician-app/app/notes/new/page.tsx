@@ -27,14 +27,21 @@ export default function NewNotePage() {
         id: 'note-' + Date.now(),
         ...form,
         timestamp: new Date().toISOString(),
-        clinicianId
+        clinicianId,
       };
 
-      // Simulate API save
-      // await fetch('/api/notes', { method: 'POST', body: JSON.stringify(newNote) });
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(newNote),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       alert('Note saved successfully!');
-      router.push('/notes'); // redirect back to notes list
+      router.push('/notes');
     } catch (err) {
       console.error(err);
       alert('Failed to save note.');

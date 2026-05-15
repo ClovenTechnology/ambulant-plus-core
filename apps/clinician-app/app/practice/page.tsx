@@ -259,7 +259,7 @@ function normalizePractice(raw: any): PracticeOverview {
             : 'active';
 
     return {
-      id: String(m.id ?? m.memberId ?? m.userId ?? `m-${idx}` ?? safeId('m')),
+      id: String(m.id ?? m.memberId ?? m.userId ?? `m-${idx}`),
       fullName: m.fullName ?? m.name ?? m.displayName ?? null,
       email: m.email ?? m.contactEmail ?? null,
       role,

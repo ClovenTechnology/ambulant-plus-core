@@ -58,7 +58,7 @@ function tryWebSpeech(room: Room, interim: boolean) {
   sr.interimResults = interim;
   sr.lang = (process.env.NEXT_PUBLIC_DEEPGRAM_LANGUAGE || "en").toString();
 
-  sr.onresult = (e: SpeechRecognitionEvent) => {
+  sr.onresult = (e: any) => {
     for (let i = e.resultIndex; i < e.results.length; i++) {
       const res = e.results[i];
       const text = res[0]?.transcript?.trim();

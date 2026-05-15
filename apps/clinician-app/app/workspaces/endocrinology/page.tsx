@@ -10,7 +10,8 @@ Notes:
 
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { Suspense, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import {
   TogglePills,
@@ -47,11 +48,6 @@ const FINDING_TYPES = [
 
 type FindingTypeKey = (typeof FINDING_TYPES)[number]['key'];
 
-type EndocrinologyWorkspaceProps = {
-  patientId?: string;
-  encounterId?: string;
-  clinicianId?: string;
-};
 
 function nowISO() {
   return new Date().toISOString();
@@ -72,10 +68,23 @@ function panelHint(panel: EndoPanel) {
   return 'Trends + goals';
 }
 
-export default function EndocrinologyWorkspacePage(props: EndocrinologyWorkspaceProps) {
-  const patientId = props.patientId ?? 'pat_demo_001';
-  const encounterId = props.encounterId ?? 'enc_demo_001';
-  const clinicianId = props.clinicianId ?? 'clin_demo_001';
+function EndocrinologyWorkspacePageContent() {
+  const searchParams = useSearchParams();
+
+  const patientId =
+    searchParams?.get('patientId') ||
+    searchParams?.get('patient') ||
+    'pat_demo_001';
+
+  const encounterId =
+    searchParams?.get('encounterId') ||
+    searchParams?.get('encounter') ||
+    'enc_demo_001';
+
+  const clinicianId =
+    searchParams?.get('clinicianId') ||
+    searchParams?.get('clinician') ||
+    'clin_demo_001';
 
   const [panel, setPanel] = useState<EndoPanel>('GLUCOSE');
 
@@ -453,8 +462,35 @@ export default function EndocrinologyWorkspacePage(props: EndocrinologyWorkspace
               <div className="rounded-lg border bg-gray-100 h-64 overflow-hidden">
                 {selectedEvidence ? (
                   selectedEvidence.kind === 'image' ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={selectedEvidence.url} alt="Selected evidence" className="h-full w-full object-contain" />
+                    selectedEvidence.url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={selectedEvidence.url}
+                        alt="Selected evidence"
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <div className="h-full w-full grid place-items-center text-gray-700">
+                        <div className="text-center">
+                          <div className="text-sm font-medium">Image pending</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Status: {selectedEvidence.status}
+                            {selectedEvidence.jobId ? ` · job: ${selectedEvidence.jobId}` : ''}
+                          </div>
+                          <div className="mt-2 text-xs text-gray-500">
+                            The image will appear when the final media URL is available.
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  ) : selectedEvidence.url ? (
+                    <div className="h-full w-full bg-black grid place-items-center">
+                      <video
+                        controls
+                        src={selectedEvidence.url}
+                        className="max-h-full max-w-full"
+                      />
+                    </div>
                   ) : (
                     <div className="h-full w-full grid place-items-center text-gray-700">
                       <div className="text-center">
@@ -463,15 +499,19 @@ export default function EndocrinologyWorkspacePage(props: EndocrinologyWorkspace
                           Status: {selectedEvidence.status}
                           {selectedEvidence.jobId ? ` · job: ${selectedEvidence.jobId}` : ''}
                         </div>
-                        <div className="mt-2 text-xs text-gray-500">(Playback wired when real clip URLs are returned.)</div>
+                        <div className="mt-2 text-xs text-gray-500">
+                          Playback appears when the final clip URL is available.
+                        </div>
                       </div>
                     </div>
                   )
                 ) : (
                   <div className="h-full grid place-items-center text-gray-600">
                     <div className="text-center">
-                      <div className="text-sm font-medium">Live View (placeholder)</div>
-                      <div className="text-xs text-gray-500 mt-1">Select evidence below to preview</div>
+                      <div className="text-sm font-medium">Live View</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Select evidence below to preview.
+                      </div>
                     </div>
                   </div>
                 )}
@@ -916,5 +956,13 @@ function QuickFindingComposer(props: {
         </button>
       </div>
     </div>
+  );
+}
+
+export default function EndocrinologyWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <EndocrinologyWorkspacePageContent />
+    </Suspense>
   );
 }

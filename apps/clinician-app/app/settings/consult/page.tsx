@@ -477,9 +477,7 @@ export default function ConsultSettingsPage() {
         )}
 
         {!previewLoading && !previewError && previewData && (
-          // If SchedulePreview supports a `slots` prop it will use the data we fetched
-          // otherwise it should still render based on clinician/admin settings inside.
-          <SchedulePreview days={42} patientView={patientView} slots={previewData} />
+          <SchedulePreview days={42} />
         )}
 
         {!previewLoading && !previewError && !previewData && (

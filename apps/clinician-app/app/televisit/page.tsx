@@ -1,17 +1,18 @@
 // apps/clinician-app/app/televisit/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
-export default function TelevisitIndex() {
+function TelevisitIndexContent() {
   const router = useRouter();
   const sp = useSearchParams();
-  const seed = sp.get('id') || '';
+  const seed = sp?.get('id')?.trim() || '';
   const [id, setId] = useState(seed);
 
   useEffect(() => {
-    if (seed) router.replace(`/televisit/${encodeURIComponent(seed)}`);
+    if (!seed) return;
+    router.replace(`/televisit/${encodeURIComponent(seed)}`);
   }, [seed, router]);
 
   return (
@@ -33,5 +34,13 @@ export default function TelevisitIndex() {
         </button>
       </div>
     </main>
+  );
+}
+
+export default function TelevisitIndex() {
+  return (
+    <Suspense fallback={null}>
+      <TelevisitIndexContent />
+    </Suspense>
   );
 }

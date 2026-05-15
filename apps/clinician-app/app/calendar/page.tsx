@@ -1,26 +1,58 @@
 // apps/clinician-app/app/calendar/page.tsx
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
-import FullCalendar, {
+import React, { Suspense, useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
+import FullCalendar from '@fullcalendar/react';
+import type {
   DateSelectArg,
   EventApi,
   EventClickArg,
   EventDropArg,
   EventInput,
   DatesSetArg,
-} from '@fullcalendar/react';
+} from '@fullcalendar/core';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
 import listPlugin from '@fullcalendar/list';
-import { toast } from 'react-hot-toast';
 import { AppointmentModal } from '@/components/ClinicianCalendar/AppointmentModal';
 import { useLiveAppointments } from '@/components/ClinicianCalendar/useLiveAppointments';
 import { createOptimisticAppointment, rollbackOptimisticAppointment, applyServerPatch } from '@/components/ClinicianCalendar/lib/appointments';
 import dayjs from 'dayjs';
 
-type ClinicianCalendarProps = { clinicianId: string };
+type ToastRenderer = (t: { id: string }) => React.ReactNode;
+
+const toast = Object.assign(
+  (message: React.ReactNode | ToastRenderer, _options?: { duration?: number }) => {
+    const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+
+    if (typeof message === 'function') {
+      console.info('[toast]', message({ id }));
+    } else {
+      console.info('[toast]', message);
+    }
+
+    return id;
+  },
+  {
+    success(message: React.ReactNode) {
+      console.info('[toast:success]', message);
+    },
+    error(message: React.ReactNode) {
+      console.error('[toast:error]', message);
+    },
+    custom(message: ToastRenderer, _options?: { duration?: number }) {
+      const id = `toast-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+      console.info('[toast:custom]', message({ id }));
+      return id;
+    },
+    dismiss(id?: string) {
+      console.info('[toast:dismiss]', id ?? 'all');
+    },
+  },
+);
+
 
 async function fetchAppointments(clinicianId: string) {
   const res = await fetch(`/api/_proxy/appointments?clinicianId=${encodeURIComponent(clinicianId)}`, { cache: 'no-store' });
@@ -79,7 +111,14 @@ type UndoAction =
   | { id: string; type: 'move'; fromStart: string; fromEnd: string; toStart: string; toEnd: string }
   | { id: string; type: 'create'; createdAt?: string };
 
-export default function CalendarPage({ clinicianId }: ClinicianCalendarProps) {
+function CalendarPageContent() {
+  const searchParams = useSearchParams();
+
+  const clinicianId =
+    searchParams?.get('clinicianId') ||
+    searchParams?.get('clinician') ||
+    searchParams?.get('id') ||
+    'clinician-local-001';
   const calendarRef = useRef<FullCalendar | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [appointments, setAppointments] = useState<EventInput[]>([]);
@@ -279,13 +318,16 @@ export default function CalendarPage({ clinicianId }: ClinicianCalendarProps) {
       if (slotsCache[key]) cached[key] = slotsCache[key];
     }
 
-    setSelectedEvent({
+        setSelectedEvent({
       id: 'tmp-' + Date.now(),
       start,
       end,
       title: 'New Appointment',
-      extendedProps: { availableSlots: cached, defaultDuration: preferredDuration },
-    } as EventApi);
+      extendedProps: {
+        availableSlots: cached,
+        defaultDuration: preferredDuration,
+      },
+    } as unknown as EventApi);
     setModalOpen(true);
   };
 
@@ -787,4 +829,12 @@ function getEventClassName(status: string) {
     case 'blocked': return 'bg-amber-600 text-white';
     default: return 'bg-emerald-50 border-emerald-200 text-emerald-700';
   }
+}
+
+export default function CalendarPage() {
+  return (
+    <Suspense fallback={null}>
+      <CalendarPageContent />
+    </Suspense>
+  );
 }

@@ -2,7 +2,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { CollapseBtn } from '@/components/ui/CollapseBtn';
 import { Collapse } from '@/components/ui/Collapse';
 
@@ -16,14 +15,23 @@ type Note = {
 };
 
 export default function NotesPage() {
-  const router = useRouter();
   const clinicianId = 'clin-demo';
 
   const [notes, setNotes] = useState<Note[]>([]);
   const [loading, setLoading] = useState(true);
   const [newNoteOpen, setNewNoteOpen] = useState(true);
 
-  const [form, setForm] = useState({ patientName: '', title: '', content: '', priority: 'Low' });
+  const [form, setForm] = useState<{
+    patientName: string;
+    title: string;
+    content: string;
+    priority: 'Low' | 'Medium' | 'High';
+  }>({
+    patientName: '',
+    title: '',
+    content: '',
+    priority: 'Low',
+  });
 
   /* ---------- Load notes ---------- */
   useEffect(() => {
@@ -43,15 +51,37 @@ export default function NotesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const note: Note = { 
+
+    const note: Note = {
       id: 'note-' + Date.now(),
       ...form,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     };
-    // Simulate API save
-    setNotes(prev => [note, ...prev]);
-    setForm({ patientName: '', title: '', content: '', priority: 'Low' });
-    alert('Note saved!');
+
+    try {
+      const res = await fetch('/api/notes', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...note,
+          clinicianId,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      const saved = await res.json().catch(() => null);
+      const savedNote = (saved?.note ?? saved?.item ?? saved ?? note) as Note;
+
+      setNotes((prev) => [savedNote, ...prev]);
+      setForm({ patientName: '', title: '', content: '', priority: 'Low' });
+      alert('Note saved!');
+    } catch (err: any) {
+      console.error('save note failed', err);
+      alert(err?.message || 'Failed to save note.');
+    }
   };
 
   return (

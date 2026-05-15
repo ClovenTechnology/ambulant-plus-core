@@ -94,7 +94,7 @@ async function createAuth0User(email: string, name?: string, password?: string) 
     const data = await createRes.json().catch(() => null);
     return { ok: true as const, user: data };
   } catch (err: any) {
-    return { ok: false as const, error: String(err) as const };
+    return { ok: false as const, error: String(err) };
   }
 }
 

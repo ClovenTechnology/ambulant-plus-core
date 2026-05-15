@@ -84,6 +84,65 @@ export async function connectRoomWithToken(
 }
 
 /**
+ * Backward-compatible helper for older app pages that still expect getOrCreateUid().
+ * Stores a stable browser-side uid per role.
+ */
+export function getOrCreateUid(role: RTCWho["role"] = "clinician") {
+  const fallback = `${role}-${Math.random().toString(36).slice(2, 10)}`;
+
+  if (typeof window === "undefined") {
+    return fallback;
+  }
+
+  const key = `ambulant_rtc_uid_${role}`;
+
+  try {
+    const existing = window.localStorage.getItem(key);
+    if (existing) return existing;
+
+    const uid =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? `${role}-${crypto.randomUUID()}`
+        : fallback;
+
+    window.localStorage.setItem(key, uid);
+    return uid;
+  } catch {
+    return fallback;
+  }
+}
+
+/**
+ * Backward-compatible token helper for older SFU pages.
+ * Internally delegates to fetchRtcToken().
+ */
+export async function mintRtcToken(input: {
+  roomId: string;
+  visitId?: string;
+  identity?: string;
+  role?: RTCWho["role"];
+  uid?: string;
+  joinToken?: string;
+  endpoint?: string;
+}) {
+  const uid = input.uid ?? input.identity ?? getOrCreateUid(input.role ?? "clinician");
+
+  const result = await fetchRtcToken({
+    roomId: input.roomId,
+    visitId: input.visitId,
+    identity: input.identity ?? uid,
+    who: {
+      role: input.role ?? "clinician",
+      uid,
+    },
+    joinToken: input.joinToken,
+    endpoint: input.endpoint,
+  });
+
+  return result.token;
+}
+
+/**
  * Re-exports for app pages
  * Make sure these files exist:
  *   packages/rtc/src/components/DeviceSettings.tsx

@@ -1,16 +1,30 @@
 //apps/clinician-app/app/workspaces/surgery/page.tsx
 'use client';
 
-import React from 'react';
+import React, { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { SURGERY_DOMAINS } from '@/src/components/workspaces/surgery/constants';
 import { useSurgeryWorkspace } from '@/src/components/workspaces/surgery/useSurgeryWorkspace';
 
-export default function SurgeryWorkspacePage(props: {
-  patientId?: string;
-  encounterId?: string;
-  clinicianId?: string;
-}) {
-  const vm = useSurgeryWorkspace(props);
+function SurgeryWorkspacePageContent() {
+  const searchParams = useSearchParams();
+
+  const patientId =
+    searchParams?.get('patientId') ||
+    searchParams?.get('patient') ||
+    'pat_demo_001';
+
+  const encounterId =
+    searchParams?.get('encounterId') ||
+    searchParams?.get('encounter') ||
+    'enc_demo_001';
+
+  const clinicianId =
+    searchParams?.get('clinicianId') ||
+    searchParams?.get('clinician') ||
+    'clin_demo_001';
+
+  const vm = useSurgeryWorkspace({ patientId, encounterId, clinicianId });
   const { state, actions } = vm;
 
   const sensitiveClass = state.privacyMode ? 'blur-sm select-none' : '';
@@ -453,5 +467,13 @@ export default function SurgeryWorkspacePage(props: {
         </section>
       </main>
     </div>
+  );
+}
+
+export default function SurgeryWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <SurgeryWorkspacePageContent />
+    </Suspense>
   );
 }

@@ -294,9 +294,9 @@ export default function DentalWorkspacePage() {
   const sp = useSearchParams();
 
   // Allow query overrides, but keep strong defaults for demo/dev
-  const patientId = sp.get('patientId') ?? 'pat_demo_001';
-  const encounterId = sp.get('encounterId') ?? 'enc_demo_001';
-  const clinicianId = sp.get('clinicianId') ?? 'clin_demo_001';
+  const patientId = sp?.get('patientId') ?? 'pat_demo_001';
+  const encounterId = sp?.get('encounterId') ?? 'enc_demo_001';
+  const clinicianId = sp?.get('clinicianId') ?? 'clin_demo_001';
   const roomId = params?.roomId ? String(params.roomId) : null;
 
   const [toothSystem, setToothSystem] = useState<ToothSystem>('universal');
@@ -1538,7 +1538,7 @@ function Teeth3DScene({
       if (!hostRef.current) return;
 
       const THREE = await import('three');
-      const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls');
+      const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
 
       if (disposed) return;
 
@@ -1959,10 +1959,10 @@ function Scan3DViewer({
       if (!url) return;
 
       const THREE = await import('three');
-      const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls');
-      const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader');
-      const { OBJLoader } = await import('three/examples/jsm/loaders/OBJLoader');
-      const { STLLoader } = await import('three/examples/jsm/loaders/STLLoader');
+      const { OrbitControls } = await import('three/examples/jsm/controls/OrbitControls.js');
+      const { GLTFLoader } = await import('three/examples/jsm/loaders/GLTFLoader.js');
+      const { OBJLoader } = await import('three/examples/jsm/loaders/OBJLoader.js');
+      const { STLLoader } = await import('three/examples/jsm/loaders/STLLoader.js');
 
       if (disposed) return;
 

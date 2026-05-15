@@ -1,13 +1,14 @@
-// apps/clinician-app/app/dental-workspace/_components/AddMediaPanel.tsx
+// apps/clinician-app/app/workspaces/dental/_components/AddMediaPanel.tsx
 'use client';
 
 import React, { useState } from 'react';
-import type { EvidenceKind } from '../_lib/types';
+
+type DentalEvidenceKind = 'image' | 'scan_3d' | 'video_clip';
 
 export default function AddMediaPanel(props: {
   busy?: boolean;
   onAddUrl: (opts: {
-    kind: EvidenceKind;
+    kind: DentalEvidenceKind;
     url: string;
     contentType?: string;
     modality?: 'xray' | 'photo' | 'other';
@@ -18,20 +19,27 @@ export default function AddMediaPanel(props: {
 }) {
   const { busy, onAddUrl, onUploadXrayFile } = props;
 
-  const [kind, setKind] = useState<EvidenceKind>('image');
+  const [kind, setKind] = useState<DentalEvidenceKind>('image');
   const [url, setUrl] = useState('');
-  const [modality, setModality] = useState<'xray' | 'photo' | 'other'>('photo');
+  const [modality, setModality] = useState<'xray' | 'photo' | 'other'>(
+    'photo'
+  );
 
   const [segmentedTeeth, setSegmentedTeeth] = useState(false);
-  const [segmentationScheme, setSegmentationScheme] = useState<'FDI' | 'universal'>('FDI');
+  const [segmentationScheme, setSegmentationScheme] = useState<
+    'FDI' | 'universal'
+  >('FDI');
 
   return (
     <div className="rounded-lg border bg-white p-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-xs font-semibold text-gray-700">Add imaging / scans</div>
+          <div className="text-xs font-semibold text-gray-700">
+            Add imaging / scans
+          </div>
           <div className="text-[11px] text-gray-500">
-            Upload X-ray (file) or add URL (X-ray / GLB/OBJ/STL scan). Segmented GLB: nodes tooth_11, tooth_12…
+            Upload X-ray file or add URL for X-ray, GLB, OBJ, or STL scan.
+            Segmented GLB examples: tooth_11, tooth_12…
           </div>
         </div>
       </div>
@@ -42,7 +50,7 @@ export default function AddMediaPanel(props: {
           <select
             className="mt-1 w-full rounded border px-2 py-1.5 text-sm"
             value={kind}
-            onChange={(e) => setKind(e.target.value as any)}
+            onChange={(e) => setKind(e.target.value as DentalEvidenceKind)}
             disabled={busy}
           >
             <option value="image">Image (photo / X-ray)</option>
@@ -56,7 +64,9 @@ export default function AddMediaPanel(props: {
           <select
             className="mt-1 w-full rounded border px-2 py-1.5 text-sm"
             value={modality}
-            onChange={(e) => setModality(e.target.value as any)}
+            onChange={(e) =>
+              setModality(e.target.value as 'xray' | 'photo' | 'other')
+            }
             disabled={busy}
           >
             <option value="photo">Photo</option>
@@ -71,7 +81,11 @@ export default function AddMediaPanel(props: {
             className="mt-1 w-full rounded border px-2 py-1.5 text-sm"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder={kind === 'scan_3d' ? 'https://.../scan.glb (or .obj/.stl)' : 'https://.../image.jpg'}
+            placeholder={
+              kind === 'scan_3d'
+                ? 'https://.../scan.glb or .obj/.stl'
+                : 'https://.../image.jpg'
+            }
             disabled={busy}
           />
         </label>
@@ -95,7 +109,11 @@ export default function AddMediaPanel(props: {
               <select
                 className="rounded border px-2 py-1 text-xs bg-white"
                 value={segmentationScheme}
-                onChange={(e) => setSegmentationScheme(e.target.value as any)}
+                onChange={(e) =>
+                  setSegmentationScheme(
+                    e.target.value as 'FDI' | 'universal'
+                  )
+                }
                 disabled={busy}
               >
                 <option value="FDI">FDI (tooth_11…)</option>
@@ -104,7 +122,10 @@ export default function AddMediaPanel(props: {
             </label>
           ) : null}
 
-          <div className="text-[11px] text-gray-500">Click model to snap a true 3D pin (meshId + local hitpoint + normal).</div>
+          <div className="text-[11px] text-gray-500">
+            Click model to snap a true 3D pin with meshId, local hitpoint, and
+            normal.
+          </div>
         </div>
       ) : null}
 
@@ -119,8 +140,10 @@ export default function AddMediaPanel(props: {
               url: url.trim(),
               modality,
               segmentedTeeth: kind === 'scan_3d' ? segmentedTeeth : false,
-              segmentationScheme: kind === 'scan_3d' ? segmentationScheme : undefined,
+              segmentationScheme:
+                kind === 'scan_3d' ? segmentationScheme : undefined,
             });
+
             setUrl('');
           }}
         >
@@ -135,8 +158,11 @@ export default function AddMediaPanel(props: {
             disabled={busy}
             onChange={async (e) => {
               const f = e.target.files?.[0];
+
               if (!f) return;
+
               await onUploadXrayFile(f);
+
               e.currentTarget.value = '';
             }}
           />
@@ -144,8 +170,10 @@ export default function AddMediaPanel(props: {
         </label>
 
         <div className="text-[11px] text-gray-500">
-          3D supported: <span className="font-mono">.glb</span> / <span className="font-mono">.gltf</span> /{' '}
-          <span className="font-mono">.obj</span> / <span className="font-mono">.stl</span>
+          3D supported: <span className="font-mono">.glb</span> /{' '}
+          <span className="font-mono">.gltf</span> /{' '}
+          <span className="font-mono">.obj</span> /{' '}
+          <span className="font-mono">.stl</span>
         </div>
       </div>
     </div>

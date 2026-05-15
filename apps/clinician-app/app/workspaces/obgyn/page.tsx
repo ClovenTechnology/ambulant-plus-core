@@ -1,6 +1,6 @@
 /*
 File: apps/clinician-app/app/workspaces/obgyn/page.tsx
-Purpose: OB/GYN workspace — upgraded world-class UI aligned with Dental/Physio style.
+Purpose: OB/GYN workspace upgraded world-class UI aligned with Dental/Physio style.
 Notes:
 - Uses shared workspaces UI components and POST helpers.
 - Still optimistic local state until GET endpoints exist.
@@ -8,12 +8,14 @@ Notes:
     GET /api/workspaces/obgyn/context?patientId=...&encounterId=...
   (falls back gracefully if not available)
 - Stores structured extras (triage, vitals, ICD10, visitMode) into Finding.meta to avoid losing data pre-DB-form models.
+- No regression adjustment: now reads patient/encounter/clinician from search params first, with safe demo fallbacks only for preview mode.
 */
 
 'use client';
 
-import React, { useEffect, useMemo, useState, useCallback } from 'react';
+import React, { Suspense, useEffect, useMemo, useState, useCallback } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import {
   AlertTriangle,
   Baby,
@@ -77,7 +79,6 @@ const FINDING_TYPES = [
 
 type FindingTypeKey = (typeof FINDING_TYPES)[number]['key'];
 
-/** Minimal ICD-10 suggestions (expand later). */
 const ICD10_SUGGESTIONS: Record<FindingTypeKey, { code: string; label: string }[]> = {
   routine_check: [
     { code: 'Z34.9', label: 'Supervision of normal pregnancy, unspecified' },
@@ -118,16 +119,10 @@ const ICD10_SUGGESTIONS: Record<FindingTypeKey, { code: string; label: string }[
   other: [{ code: 'Z01.89', label: 'Encounter for other specified special examinations' }],
 };
 
-type OBGYNWorkspaceProps = {
-  patientId?: string;
-  encounterId?: string;
-  clinicianId?: string;
-};
-
 type PatientContext = {
   pregnancyStatus?: 'unknown' | 'not_pregnant' | 'pregnant' | 'postpartum';
-  edd?: string; // YYYY-MM-DD
-  lmp?: string; // YYYY-MM-DD
+  edd?: string;
+  lmp?: string;
   gestAgeWeeks?: number;
   trimester?: 1 | 2 | 3 | null;
 
@@ -184,6 +179,14 @@ function errMsg(e: unknown) {
     }
   }
   return 'Request failed';
+}
+
+function firstNonEmpty(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = String(v ?? '').trim();
+    if (t) return t;
+  }
+  return '';
 }
 
 function clampNum(n: number, a: number, b: number) {
@@ -247,12 +250,10 @@ function trimesterFromGA(gaWeeks?: number | null): 1 | 2 | 3 | null {
 
 function eddFromLMP(lmp?: string) {
   if (!lmp) return null;
-  // Naegele (approx): 280 days
   return addDaysISO(lmp, 280);
 }
 
 function riskScoreFromRedFlags(flags: Record<string, boolean>) {
-  // heuristic UX score; not medical advice
   const weights: Record<string, number> = {
     severePain: 3,
     heavyBleeding: 4,
@@ -332,19 +333,53 @@ function recommendedActionFromRisk(args: {
   };
 }
 
-export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
-  const patientId = props.patientId ?? 'pat_demo_001';
-  const encounterId = props.encounterId ?? 'enc_demo_001';
-  const clinicianId = props.clinicianId ?? 'clin_demo_001';
+function OBGYNWorkspacePageContent() {
+  const searchParams = useSearchParams() ?? new URLSearchParams();
+
+  const patientId = firstNonEmpty(
+    searchParams.get('patientId'),
+    searchParams.get('subjectPatientId'),
+    searchParams.get('patient_id')
+  ) || 'pat_demo_001';
+
+  const encounterId = firstNonEmpty(
+    searchParams.get('encounterId'),
+    searchParams.get('caseId'),
+    searchParams.get('encounter_id')
+  ) || 'enc_demo_001';
+
+  const clinicianId = firstNonEmpty(
+    searchParams.get('clinicianId'),
+    searchParams.get('providerId'),
+    searchParams.get('uid'),
+    searchParams.get('clinician_id')
+  ) || 'clin_demo_001';
+
+  const contextReady = Boolean(
+    firstNonEmpty(
+      searchParams.get('patientId'),
+      searchParams.get('subjectPatientId'),
+      searchParams.get('patient_id')
+    ) &&
+      firstNonEmpty(
+        searchParams.get('encounterId'),
+        searchParams.get('caseId'),
+        searchParams.get('encounter_id')
+      ) &&
+      firstNonEmpty(
+        searchParams.get('clinicianId'),
+        searchParams.get('providerId'),
+        searchParams.get('uid'),
+        searchParams.get('clinician_id')
+      )
+  );
 
   const [track, setTrack] = useState<TrackKey>('ob');
   const [visitMode, setVisitMode] = useState<VisitMode>('televisit');
 
-  // Optimistic local state (until GET exists)
   const [findings, setFindings] = useState<Finding[]>([]);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
 
-  // UI state
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
@@ -355,11 +390,12 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     [evidence, selectedEvidenceId]
   );
 
-  // Patient context (future API; graceful fallback)
   const [ctxLoading, setCtxLoading] = useState(false);
   const [ctx, setCtx] = useState<PatientContext | null>(null);
 
   const reloadContext = useCallback(async () => {
+    if (!contextReady) return;
+
     setCtxLoading(true);
     setCtx(null);
     try {
@@ -376,14 +412,14 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     } finally {
       setCtxLoading(false);
     }
-  }, [patientId, encounterId]);
+  }, [contextReady, patientId, encounterId]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
       try {
-        if (cancelled) return;
+        if (cancelled || !contextReady) return;
         await reloadContext();
       } catch {
         // no-op
@@ -394,24 +430,22 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     return () => {
       cancelled = true;
     };
-  }, [reloadContext]);
+  }, [reloadContext, contextReady]);
 
-  // Quick intake + vitals (manual / screening)
   const [chiefConcern, setChiefConcern] = useState<string>('');
-  const [gestAgeWeeks, setGestAgeWeeks] = useState<string>(''); // OB
-  const [lmp, setLmp] = useState<string>(''); // both
-  const [edd, setEdd] = useState<string>(''); // OB (optional)
+  const [gestAgeWeeks, setGestAgeWeeks] = useState<string>('');
+  const [lmp, setLmp] = useState<string>('');
+  const [edd, setEdd] = useState<string>('');
 
-  const [bpSys, setBpSys] = useState<string>(''); // both
-  const [bpDia, setBpDia] = useState<string>(''); // both
-  const [tempC, setTempC] = useState<string>(''); // both
-  const [hr, setHr] = useState<string>(''); // both
-  const [spo2, setSpo2] = useState<string>(''); // both
-  const [glucose, setGlucose] = useState<string>(''); // OB/GDM context
+  const [bpSys, setBpSys] = useState<string>('');
+  const [bpDia, setBpDia] = useState<string>('');
+  const [tempC, setTempC] = useState<string>('');
+  const [hr, setHr] = useState<string>('');
+  const [spo2, setSpo2] = useState<string>('');
+  const [glucose, setGlucose] = useState<string>('');
 
   const [autoCalcOB, setAutoCalcOB] = useState(true);
 
-  // OB/GYN history quick capture
   const [gynHistory, setGynHistory] = useState({
     gravida: '',
     para: '',
@@ -424,13 +458,12 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     notes: '',
   });
 
-  // Track-specific quick capture (kept light; stored into Finding.meta.triage.extras)
   const [obQuick, setObQuick] = useState({
-    fetalMovements: '', // e.g. "normal"
-    contractions: '', // e.g. "none"
-    swelling: '', // e.g. "none"
-    headache: '', // e.g. "none"
-    vision: '', // e.g. "ok"
+    fetalMovements: '',
+    contractions: '',
+    swelling: '',
+    headache: '',
+    vision: '',
   });
 
   const [gynQuick, setGynQuick] = useState({
@@ -444,14 +477,13 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     'unknown'
   );
 
-  // Red flags (screening UX)
   const [redFlags, setRedFlags] = useState({
     severePain: false,
     heavyBleeding: false,
     fever: false,
     fainting: false,
-    reducedMovements: false, // OB
-    severeHeadache: false, // OB/HTN
+    reducedMovements: false,
+    severeHeadache: false,
     visualChanges: false,
     swelling: false,
     leakingFluid: false,
@@ -474,12 +506,11 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
 
     return {
       label: `${sys}/${dia}`,
-      tone: elevated ? 'rose' : mildly ? 'amber' : 'emerald',
+      tone: (elevated ? 'rose' : mildly ? 'amber' : 'emerald') as 'rose' | 'amber' | 'emerald',
       hint: elevated ? 'High (screening)' : mildly ? 'Borderline' : 'OK',
     };
   }, [bpSys, bpDia]);
 
-  // Derived OB indicators
   const derivedEdd = useMemo(() => (track === 'ob' ? edd || (autoCalcOB ? eddFromLMP(lmp) : null) : null), [track, edd, lmp, autoCalcOB]);
   const derivedGA = useMemo(() => {
     const manual = safeNum(gestAgeWeeks);
@@ -492,7 +523,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
 
   const derivedTrimester = useMemo(() => (track === 'ob' ? trimesterFromGA(derivedGA) : null), [track, derivedGA]);
 
-  // Keep pregnancy status loosely synced from context if present
   useEffect(() => {
     if (!ctx) return;
     if (ctx.pregnancyStatus) setPregnancyStatus(ctx.pregnancyStatus);
@@ -508,20 +538,16 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
       if (ctx.latestVitals.spo2 != null && !spo2) setSpo2(String(ctx.latestVitals.spo2));
       if (ctx.latestVitals.glucose_mg_dl != null && !glucose) setGlucose(String(ctx.latestVitals.glucose_mg_dl));
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ctx]);
+  }, [ctx, lmp, edd, gestAgeWeeks, bpSys, bpDia, tempC, hr, spo2, glucose]);
 
-  // If auto-calc is ON and we have LMP, softly fill EDD if empty (OB only).
   useEffect(() => {
     if (track !== 'ob') return;
     if (!autoCalcOB) return;
     if (edd) return;
     const calc = eddFromLMP(lmp);
     if (calc) setEdd(calc);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [track, autoCalcOB, lmp]);
+  }, [track, autoCalcOB, lmp, edd]);
 
-  // Location helper (stored as JSON on server; TS typing depends on your shared union)
   const locationForTrack = (t: TrackKey): Location => {
     const loc = {
       kind: 'obgyn' as const,
@@ -553,7 +579,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
         if (typeof kind === 'string' && kind === 'obgyn' && (tr === 'ob' || tr === 'gyn')) return tr === track;
         return true;
       })
-      .sort((a, b) => (a.capturedAt < b.capturedAt ? 1 : -1));
+      .sort((a, b) => ((a.capturedAt || '') < (b.capturedAt || '') ? 1 : -1));
   }, [evidence, track]);
 
   const trackCounts = useMemo(() => {
@@ -567,7 +593,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
 
   const evidenceCountForFinding = (findingId: string) => evidence.filter((e) => e.findingId === findingId).length;
 
-  // Search + filter (worldclass “find what you need”)
   const [q, setQ] = useState('');
   const filteredFindings = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -645,6 +670,11 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     note?: string,
     icd10?: { code: string; label: string } | null
   ) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: 'Missing consultation context.' });
+      return;
+    }
+
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForTrack(track);
 
@@ -710,6 +740,11 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     icd10Code?: string;
     icd10Label?: string;
   }) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: 'Missing consultation context.' });
+      return;
+    }
+
     const type = payload.findingTypeKey as FindingTypeKey;
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForTrack(track);
@@ -723,7 +758,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     setBusy(true);
 
     try {
-      // 1) Create finding
       const createdFinding = await postFinding({
         patientId,
         encounterId,
@@ -744,7 +778,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
       } as any);
       setFindings((prev) => [createdFinding, ...prev]);
 
-      // 2) Snapshot evidence (ready)
       const snapshot = await postEvidence({
         patientId,
         encounterId,
@@ -766,7 +799,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
         status: 'ready',
       });
 
-      // 3) Clip evidence (processing)
       const t = Date.now();
       const clip = await postEvidence({
         patientId,
@@ -805,6 +837,11 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
   };
 
   const addDemoPinAnnotation = async () => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: 'Missing consultation context.' });
+      return;
+    }
+
     if (!selectedEvidence) {
       setBanner({ kind: 'info', text: 'Select an evidence item first.' });
       return;
@@ -863,7 +900,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     if (bpBadge) lines.push(`- BP: ${bpBadge.label} (${bpBadge.hint})`);
     if (tempC) lines.push(`- Temp: ${tempC} °C`);
     if (hr) lines.push(`- HR: ${hr} bpm`);
-    if (spo2) lines.push(`- SpO₂: ${spo2} %`);
+    if (spo2) lines.push(`- SpOâ‚‚: ${spo2} %`);
     if (glucose) lines.push(`- Glucose: ${glucose} mg/dL`);
 
     const rf = Object.entries(redFlags)
@@ -916,7 +953,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
         const evCount = evidenceCountForFinding(f.id);
         if (evCount) lines.push(`  Evidence attached: ${evCount}`);
       }
-      if (findingsForTrack.length > 10) lines.push(`- …and ${findingsForTrack.length - 10} more`);
+      if (findingsForTrack.length > 10) lines.push(`- â€¦and ${findingsForTrack.length - 10} more`);
     }
 
     lines.push('');
@@ -964,7 +1001,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* TOP BAR */}
       <header className="sticky top-0 z-10 border-b bg-white/90 backdrop-blur">
         <div className="mx-auto max-w-7xl px-4 py-3 flex flex-col gap-2">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
@@ -986,7 +1022,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
               </h1>
 
               <div className="mt-1 text-xs text-gray-500">
-                Structured intake · Triage meta → findings · Evidence + annotations · ICD-10 hints · Copy-ready summary
+                Structured intake · Triage meta â†’ findings · Evidence + annotations · ICD-10 hints · Copy-ready summary
               </div>
             </div>
 
@@ -1006,7 +1042,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
               </span>
 
               {bpBadge ? (
-                <span className={`rounded-full border px-2 py-1 ${tonePillClass(bpBadge.tone)}`} title="Screening hint only">
+                <span className={`rounded-full border px-2 py-1 ${tonePillClass(bpBadge.tone as any)}`} title="Screening hint only">
                   BP: <span className="font-mono font-semibold">{bpBadge.label}</span> · {bpBadge.hint}
                 </span>
               ) : (
@@ -1017,7 +1053,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                 className="rounded-full border bg-white hover:bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-800 inline-flex items-center gap-2"
                 onClick={() => reloadContext()}
                 type="button"
-                disabled={ctxLoading}
+                disabled={ctxLoading || !contextReady}
                 title="Reload patient context"
               >
                 <RefreshCw className={'w-4 h-4 ' + (ctxLoading ? 'animate-spin' : '')} />
@@ -1027,7 +1063,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
               <button
                 className="rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800 disabled:opacity-50 inline-flex items-center gap-2"
                 onClick={() => setBookmarkOpen(true)}
-                disabled={busy}
+                disabled={busy || !contextReady}
                 type="button"
               >
                 <Plus className="w-4 h-4" />
@@ -1036,7 +1072,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
             </div>
           </div>
 
-          {/* MINI STATUS STRIP */}
           <div className="flex flex-wrap items-center gap-2">
             <Pill tone="slate" label={VISIT_MODES.find((m) => m.key === visitMode)?.label ?? visitMode} />
             <Pill tone="slate" label={track === 'ob' ? 'OB track' : 'GYN track'} />
@@ -1060,13 +1095,19 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
               </>
             ) : null}
             <span className="text-[11px] text-gray-500 ml-auto">
-              Context: {ctxLoading ? 'Loading…' : ctx ? 'Connected' : 'Fallback'}
+              Context: {!contextReady ? 'Missing IDs' : ctxLoading ? 'Loadingâ€¦' : ctx ? 'Connected' : 'Fallback'}
             </span>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
+        {!contextReady ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            Missing consultation context. Open this workspace from the consultation flow so patient, encounter and clinician IDs are present.
+          </div>
+        ) : null}
+
         {banner ? (
           <div
             className={
@@ -1083,12 +1124,11 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
         ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-[420px_minmax(0,1fr)_440px] gap-4">
-          {/* LEFT */}
           <section className="rounded-xl border bg-white shadow-sm overflow-hidden">
             <SectionHeader
               icon={<Shield className="w-4 h-4 text-gray-700" />}
               title="Patient context & intake"
-              subtitle="Everything here feeds triageMeta → stored into Finding.meta for continuity."
+              subtitle="Everything here feeds triageMeta â†’ stored into Finding.meta for continuity."
             />
 
             <div className="p-4 space-y-4">
@@ -1099,7 +1139,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                     className="mt-1 w-full rounded border px-2 py-1.5 text-sm"
                     value={visitMode}
                     onChange={(e) => setVisitMode(e.target.value as VisitMode)}
-                    disabled={busy}
+                    disabled={busy || !contextReady}
                   >
                     {VISIT_MODES.map((m) => (
                       <option key={m.key} value={m.key}>
@@ -1115,7 +1155,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                     className="mt-1 w-full rounded border px-2 py-1.5 text-sm"
                     value={pregnancyStatus}
                     onChange={(e) => setPregnancyStatus(e.target.value as any)}
-                    disabled={busy}
+                    disabled={busy || !contextReady}
                   >
                     <option value="unknown">Unknown</option>
                     <option value="not_pregnant">Not pregnant</option>
@@ -1136,7 +1176,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                 counts={trackCounts}
               />
 
-              {/* Chief concern */}
               <div className="rounded-lg border bg-white p-3">
                 <div className="text-xs font-semibold text-gray-700 flex items-center gap-2">
                   <Sparkles className="w-4 h-4" />
@@ -1149,7 +1188,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                     value={chiefConcern}
                     onChange={(e) => setChiefConcern(e.target.value)}
                     placeholder={track === 'ob' ? 'e.g., Routine antenatal visit' : 'e.g., Bleeding / pain'}
-                    disabled={busy}
+                    disabled={busy || !contextReady}
                   />
                 </label>
 
@@ -1163,14 +1202,13 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                 </Callout>
               </div>
 
-              {/* Patient context panel */}
               <div className="rounded-lg border bg-gray-50 p-3">
                 <div className="flex items-center justify-between">
                   <div className="text-xs font-semibold text-gray-700 flex items-center gap-2">
                     <Info className="w-4 h-4" />
                     Patient context (feeds)
                   </div>
-                  <span className="text-[11px] text-gray-500">{ctxLoading ? 'Loading…' : ctx ? 'Connected' : 'Fallback'}</span>
+                  <span className="text-[11px] text-gray-500">{!contextReady ? 'Missing IDs' : ctxLoading ? 'Loadingâ€¦' : ctx ? 'Connected' : 'Fallback'}</span>
                 </div>
 
                 {ctx ? (
@@ -1191,7 +1229,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                             <b>{ctx.ladyCenter.predictedOvulation ?? '—'}</b> · Pregnancy: <b>{ctx.ladyCenter.possiblePregnancy ?? '—'}</b>
                           </>
                         ) : (
-                          <>Not available yet (wire patient → apigw sync).</>
+                          <>Not available yet (wire patient â†’ apigw sync).</>
                         )}
                       </div>
                     </div>
@@ -1210,7 +1248,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                             ) : null}
                           </>
                         ) : (
-                          <>Not available yet (wire patient → apigw sync).</>
+                          <>Not available yet (wire patient â†’ apigw sync).</>
                         )}
                       </div>
                     </div>
@@ -1220,7 +1258,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                         <div className="text-xs font-semibold text-gray-700">Latest vitals (IoMT)</div>
                         <div className="text-xs text-gray-600 mt-1">
                           {ctx.latestVitals.device ? <b>{ctx.latestVitals.device}</b> : 'Device'} · {ctx.latestVitals.capturedAt ? fmtDate(ctx.latestVitals.capturedAt) : '—'} · HR{' '}
-                          <b>{ctx.latestVitals.hr ?? '—'}</b> · SpO₂ <b>{ctx.latestVitals.spo2 ?? '—'}</b> · BP <b>{ctx.latestVitals.sys ?? '—'}</b>/<b>{ctx.latestVitals.dia ?? '—'}</b> · Temp{' '}
+                          <b>{ctx.latestVitals.hr ?? '—'}</b> · SpOâ‚‚ <b>{ctx.latestVitals.spo2 ?? '—'}</b> · BP <b>{ctx.latestVitals.sys ?? '—'}</b>/<b>{ctx.latestVitals.dia ?? '—'}</b> · Temp{' '}
                           <b>{ctx.latestVitals.tempC ?? '—'}</b>
                         </div>
                       </div>
@@ -1228,15 +1266,20 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                   </div>
                 ) : (
                   <div className="mt-2 text-xs text-gray-600">
-                    APIs not wired yet. Ready to consume:
-                    <div className="mt-1 font-mono text-[11px] text-gray-600">
-                      GET /api/workspaces/obgyn/context?patientId=...&encounterId=...
-                    </div>
+                    {!contextReady ? (
+                      <>Context API not attempted because consultation IDs are missing.</>
+                    ) : (
+                      <>
+                        APIs not wired yet. Ready to consume:
+                        <div className="mt-1 font-mono text-[11px] text-gray-600">
+                          GET /api/workspaces/obgyn/context?patientId=...&encounterId=...
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
 
-              {/* Vitals */}
               <div className="rounded-lg border bg-gray-50 p-3">
                 <div className="text-xs font-semibold text-gray-700 flex items-center gap-2">
                   <HeartPulse className="w-4 h-4" />
@@ -1246,43 +1289,43 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                 <div className="mt-2 grid grid-cols-2 gap-2">
                   <label className="text-xs text-gray-600">
                     BP SYS
-                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={bpSys} onChange={(e) => setBpSys(e.target.value)} placeholder="e.g., 120" />
+                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={bpSys} onChange={(e) => setBpSys(e.target.value)} placeholder="e.g., 120" disabled={busy || !contextReady} />
                   </label>
                   <label className="text-xs text-gray-600">
                     BP DIA
-                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={bpDia} onChange={(e) => setBpDia(e.target.value)} placeholder="e.g., 80" />
+                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={bpDia} onChange={(e) => setBpDia(e.target.value)} placeholder="e.g., 80" disabled={busy || !contextReady} />
                   </label>
 
                   <label className="text-xs text-gray-600">
                     Temp (°C)
-                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="decimal" value={tempC} onChange={(e) => setTempC(e.target.value)} placeholder="e.g., 36.8" />
+                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="decimal" value={tempC} onChange={(e) => setTempC(e.target.value)} placeholder="e.g., 36.8" disabled={busy || !contextReady} />
                   </label>
                   <label className="text-xs text-gray-600">
                     HR (bpm)
-                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={hr} onChange={(e) => setHr(e.target.value)} placeholder="e.g., 78" />
+                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={hr} onChange={(e) => setHr(e.target.value)} placeholder="e.g., 78" disabled={busy || !contextReady} />
                   </label>
 
                   <label className="text-xs text-gray-600">
-                    SpO₂ (%)
-                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={spo2} onChange={(e) => setSpo2(e.target.value)} placeholder="e.g., 98" />
+                    SpOâ‚‚ (%)
+                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={spo2} onChange={(e) => setSpo2(e.target.value)} placeholder="e.g., 98" disabled={busy || !contextReady} />
                   </label>
                   <label className="text-xs text-gray-600">
                     Glucose (mg/dL)
-                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={glucose} onChange={(e) => setGlucose(e.target.value)} placeholder="e.g., 95" />
+                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={glucose} onChange={(e) => setGlucose(e.target.value)} placeholder="e.g., 95" disabled={busy || !contextReady} />
                   </label>
                 </div>
 
                 <div className="mt-3 grid grid-cols-1 gap-2">
                   <label className="text-xs text-gray-600">
                     LMP (optional)
-                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" type="date" value={lmp} onChange={(e) => setLmp(e.target.value)} />
+                    <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" type="date" value={lmp} onChange={(e) => setLmp(e.target.value)} disabled={busy || !contextReady} />
                   </label>
 
                   {track === 'ob' ? (
                     <>
                       <div className="flex items-center justify-between">
                         <label className="text-xs text-gray-600 inline-flex items-center gap-2">
-                          <input type="checkbox" checked={autoCalcOB} onChange={() => setAutoCalcOB((s) => !s)} />
+                          <input type="checkbox" checked={autoCalcOB} onChange={() => setAutoCalcOB((s) => !s)} disabled={busy || !contextReady} />
                           Auto-calc GA/EDD (from LMP)
                         </label>
                         <span className="text-[11px] text-gray-500">
@@ -1299,7 +1342,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                             value={gestAgeWeeks}
                             onChange={(e) => setGestAgeWeeks(e.target.value)}
                             placeholder="e.g., 24"
-                            disabled={autoCalcOB}
+                            disabled={autoCalcOB || busy || !contextReady}
                             title={autoCalcOB ? 'Disable auto-calc to type GA manually' : undefined}
                           />
                         </label>
@@ -1311,6 +1354,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                             value={edd}
                             onChange={(e) => setEdd(e.target.value)}
                             placeholder="YYYY-MM-DD"
+                            disabled={busy || !contextReady}
                           />
                         </label>
                       </div>
@@ -1324,17 +1368,16 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                 </div>
               </div>
 
-              {/* Track-specific quick capture */}
               {track === 'ob' ? (
                 <div className="rounded-lg border p-3">
                   <div className="text-xs font-semibold text-gray-700">OB quick capture</div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    <Field label="Fetal movements" value={obQuick.fetalMovements} onChange={(v) => setObQuick((s) => ({ ...s, fetalMovements: v }))} disabled={busy} placeholder="e.g., normal" />
-                    <Field label="Contractions" value={obQuick.contractions} onChange={(v) => setObQuick((s) => ({ ...s, contractions: v }))} disabled={busy} placeholder="e.g., none" />
-                    <Field label="Swelling" value={obQuick.swelling} onChange={(v) => setObQuick((s) => ({ ...s, swelling: v }))} disabled={busy} placeholder="e.g., none" />
-                    <Field label="Headache" value={obQuick.headache} onChange={(v) => setObQuick((s) => ({ ...s, headache: v }))} disabled={busy} placeholder="e.g., none" />
+                    <Field label="Fetal movements" value={obQuick.fetalMovements} onChange={(v) => setObQuick((s) => ({ ...s, fetalMovements: v }))} disabled={busy || !contextReady} placeholder="e.g., normal" />
+                    <Field label="Contractions" value={obQuick.contractions} onChange={(v) => setObQuick((s) => ({ ...s, contractions: v }))} disabled={busy || !contextReady} placeholder="e.g., none" />
+                    <Field label="Swelling" value={obQuick.swelling} onChange={(v) => setObQuick((s) => ({ ...s, swelling: v }))} disabled={busy || !contextReady} placeholder="e.g., none" />
+                    <Field label="Headache" value={obQuick.headache} onChange={(v) => setObQuick((s) => ({ ...s, headache: v }))} disabled={busy || !contextReady} placeholder="e.g., none" />
                     <div className="col-span-2">
-                      <Field label="Vision" value={obQuick.vision} onChange={(v) => setObQuick((s) => ({ ...s, vision: v }))} disabled={busy} placeholder="e.g., ok" />
+                      <Field label="Vision" value={obQuick.vision} onChange={(v) => setObQuick((s) => ({ ...s, vision: v }))} disabled={busy || !contextReady} placeholder="e.g., ok" />
                     </div>
                   </div>
                   <div className="mt-2 text-[11px] text-gray-500">Stored into triageMeta.extras.ob</div>
@@ -1343,20 +1386,19 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                 <div className="rounded-lg border p-3">
                   <div className="text-xs font-semibold text-gray-700">GYN quick capture</div>
                   <div className="mt-2 grid grid-cols-2 gap-2">
-                    <Field label="Symptom onset" value={gynQuick.symptomOnset} onChange={(v) => setGynQuick((s) => ({ ...s, symptomOnset: v }))} disabled={busy} placeholder="e.g., 3 days" />
-                    <Field label="Bleeding pattern" value={gynQuick.bleedingPattern} onChange={(v) => setGynQuick((s) => ({ ...s, bleedingPattern: v }))} disabled={busy} placeholder="e.g., light/spotting" />
+                    <Field label="Symptom onset" value={gynQuick.symptomOnset} onChange={(v) => setGynQuick((s) => ({ ...s, symptomOnset: v }))} disabled={busy || !contextReady} placeholder="e.g., 3 days" />
+                    <Field label="Bleeding pattern" value={gynQuick.bleedingPattern} onChange={(v) => setGynQuick((s) => ({ ...s, bleedingPattern: v }))} disabled={busy || !contextReady} placeholder="e.g., light/spotting" />
                     <div className="col-span-2">
-                      <Field label="Discharge note" value={gynQuick.dischargeNote} onChange={(v) => setGynQuick((s) => ({ ...s, dischargeNote: v }))} disabled={busy} placeholder="free note" />
+                      <Field label="Discharge note" value={gynQuick.dischargeNote} onChange={(v) => setGynQuick((s) => ({ ...s, dischargeNote: v }))} disabled={busy || !contextReady} placeholder="free note" />
                     </div>
                     <div className="col-span-2">
-                      <Field label="Pain note" value={gynQuick.painNote} onChange={(v) => setGynQuick((s) => ({ ...s, painNote: v }))} disabled={busy} placeholder="free note" />
+                      <Field label="Pain note" value={gynQuick.painNote} onChange={(v) => setGynQuick((s) => ({ ...s, painNote: v }))} disabled={busy || !contextReady} placeholder="free note" />
                     </div>
                   </div>
                   <div className="mt-2 text-[11px] text-gray-500">Stored into triageMeta.extras.gyn</div>
                 </div>
               )}
 
-              {/* Red flags */}
               <div className="rounded-lg border p-3">
                 <div className="text-xs font-semibold text-gray-700 flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4 text-amber-600" />
@@ -1380,7 +1422,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                     ] as const
                   ).map(([k, label]) => (
                     <label key={k} className="flex items-center gap-2 text-sm text-gray-700">
-                      <input type="checkbox" checked={redFlags[k]} onChange={() => toggleRedFlag(k)} />
+                      <input type="checkbox" checked={redFlags[k]} onChange={() => toggleRedFlag(k)} disabled={busy || !contextReady} />
                       {label}
                     </label>
                   ))}
@@ -1391,7 +1433,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                 </div>
               </div>
 
-              {/* Findings list (compact) */}
               <div className="rounded-lg border bg-white p-3">
                 <div className="flex items-center justify-between gap-2">
                   <div className="text-xs font-semibold text-gray-700">Findings ({track.toUpperCase()})</div>
@@ -1401,7 +1442,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                       className="pl-8 pr-2 py-1.5 text-xs rounded border bg-white w-44"
                       value={q}
                       onChange={(e) => setQ(e.target.value)}
-                      placeholder="Search findings…"
+                      placeholder="Search findingsâ€¦"
                     />
                   </div>
                 </div>
@@ -1427,7 +1468,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
             </div>
           </section>
 
-          {/* CENTER */}
           <section className="rounded-xl border bg-white shadow-sm overflow-hidden">
             <SectionHeader
               icon={<Stethoscope className="w-4 h-4 text-gray-700" />}
@@ -1438,7 +1478,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                   <button
                     className="rounded-full border bg-white hover:bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-800 disabled:opacity-50 inline-flex items-center gap-2"
                     onClick={addDemoPinAnnotation}
-                    disabled={busy}
+                    disabled={busy || !contextReady}
                     title="Creates a demo pin annotation for the selected evidence"
                     type="button"
                   >
@@ -1453,8 +1493,35 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
               <div className="rounded-lg border bg-gray-100 h-80 overflow-hidden">
                 {selectedEvidence ? (
                   selectedEvidence.kind === 'image' ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={selectedEvidence.url} alt="Selected evidence" className="h-full w-full object-contain" />
+                    selectedEvidence.url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={selectedEvidence.url}
+                        alt="Selected evidence"
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <div className="h-full w-full grid place-items-center text-gray-700">
+                        <div className="text-center px-6">
+                          <div className="text-sm font-medium">Image pending</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Status: {selectedEvidence.status}
+                            {selectedEvidence.jobId ? ` · job: ${selectedEvidence.jobId}` : ''}
+                          </div>
+                          <div className="mt-2 text-xs text-gray-500">
+                            The image will appear when the final media URL is available.
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  ) : selectedEvidence.url ? (
+                    <div className="h-full w-full bg-black grid place-items-center">
+                      <video
+                        controls
+                        src={selectedEvidence.url}
+                        className="max-h-full max-w-full"
+                      />
+                    </div>
                   ) : (
                     <div className="h-full w-full grid place-items-center text-gray-700">
                       <div className="text-center px-6">
@@ -1464,7 +1531,7 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                           {selectedEvidence.jobId ? ` · job: ${selectedEvidence.jobId}` : ''}
                         </div>
                         <div className="mt-2 text-xs text-gray-500">
-                          Playback becomes available when the evidence service returns real clip URLs/jobIds from SFU capture.
+                          Playback appears when the final clip URL is available.
                         </div>
                       </div>
                     </div>
@@ -1472,11 +1539,9 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
                 ) : (
                   <div className="h-full grid place-items-center text-gray-600">
                     <div className="text-center px-6">
-                      <div className="text-sm font-medium">Live View (placeholder)</div>
-                      <div className="text-xs text-gray-500 mt-1">Select evidence below to preview</div>
-                      <div className="mt-3 inline-flex items-center gap-2 text-[11px] text-gray-500">
-                        <Wand2 className="w-4 h-4" />
-                        Tip: Bookmark is the fastest way to attach evidence to a new finding.
+                      <div className="text-sm font-medium">No evidence selected</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Select an item below to preview.
                       </div>
                     </div>
                   </div>
@@ -1521,18 +1586,17 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
             </div>
           </section>
 
-          {/* RIGHT */}
           <section className="rounded-xl border bg-white shadow-sm overflow-hidden">
             <SectionHeader
               icon={<Sparkles className="w-4 h-4 text-gray-700" />}
               title="Assessment, ICD-10, summary"
-              subtitle="Fast capture → payer-ready summary pipeline (encounter-level aggregation next)"
+              subtitle="Fast capture â†’ payer-ready summary pipeline (encounter-level aggregation next)"
             />
 
             <div className="p-4 space-y-4">
-              <QuickGynHistory value={gynHistory} onChange={setGynHistory} disabled={busy} />
+              <QuickGynHistory value={gynHistory} onChange={setGynHistory} disabled={busy || !contextReady} />
 
-              <QuickFindingComposer onCreate={createManualFinding} disabled={busy} track={track} />
+              <QuickFindingComposer onCreate={createManualFinding} disabled={busy || !contextReady} track={track} />
 
               <div className="rounded-lg border bg-gray-50 p-3">
                 <div className="text-xs font-semibold text-gray-700 flex items-center gap-2">
@@ -1574,7 +1638,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
         </div>
       </main>
 
-      {/* Bookmark modal */}
       <BookmarkModal
         open={bookmarkOpen}
         onClose={() => setBookmarkOpen(false)}
@@ -1587,10 +1650,6 @@ export default function OBGYNWorkspacePage(props: OBGYNWorkspaceProps) {
     </div>
   );
 }
-
-/* -----------------------------
-   Small UI helpers (local)
-------------------------------*/
 
 function SectionHeader(props: { icon: React.ReactNode; title: string; subtitle?: string; right?: React.ReactNode }) {
   return (
@@ -1660,10 +1719,6 @@ function MiniKpi(props: { label: string; value: string }) {
     </div>
   );
 }
-
-/* -----------------------------
-   Right column components
-------------------------------*/
 
 function QuickGynHistory(props: {
   value: {
@@ -1888,7 +1943,7 @@ function QuickFindingComposer(props: {
             rows={3}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Key details…"
+            placeholder="Key detailsâ€¦"
             disabled={disabled || saving}
           />
         </label>
@@ -1908,7 +1963,7 @@ function QuickFindingComposer(props: {
           }}
           type="button"
         >
-          {saving ? 'Saving…' : 'Create finding'}
+          {saving ? 'Saving' : 'Create finding'}
         </button>
 
         <div className="flex items-start gap-2 text-[11px] text-gray-500">
@@ -1919,5 +1974,13 @@ function QuickFindingComposer(props: {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OBGYNWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <OBGYNWorkspacePageContent />
+    </Suspense>
   );
 }

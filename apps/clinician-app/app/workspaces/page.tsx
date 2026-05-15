@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Search } from 'lucide-react'
-import { Card, CardContent } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/Card'
 
 // --- Workspace Registry Model ---
 export type WorkspaceDef = {

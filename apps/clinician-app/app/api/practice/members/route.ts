@@ -2,6 +2,11 @@
 import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const revalidate = 0;
+
 const CLIN = (
   process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL ||
   process.env.CLINICIAN_SERVICE_ORIGIN ||

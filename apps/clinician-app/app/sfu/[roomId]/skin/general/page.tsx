@@ -120,13 +120,13 @@ function fmtBP(sys?: number, dia?: number) {
 }
 
 // Lazy-loaded heavy panels
-const SessionConclusions = dynamic(() => import('@/components/SessionConclusions'), { ssr: false });
+const SessionConclusions = dynamic<any>(() => import('@/components/SessionConclusions'), { ssr: false });
 
-const IntegratedIoMTs = dynamic(() => import('@/components/IntegratedIoMTs'), { ssr: false });
+const IntegratedIoMTs = dynamic<any>(() => import('@/components/IntegratedIoMTs'), { ssr: false });
 
-const SmartWearablesPanel = dynamic(() => import('@/components/SmartWearablesPanel'), { ssr: false });
+const SmartWearablesPanel = dynamic<any>(() => import('@/components/SmartWearablesPanel'), { ssr: false });
 
-const ClinicianVitalsPanel = dynamic(() => import('@/components/ClinicianVitalsPanel'), {
+const ClinicianVitalsPanel = dynamic<any>(() => import('@/components/ClinicianVitalsPanel'), {
   ssr: false,
   loading: () => <Skeleton height="h-40" />,
 });
@@ -273,12 +273,12 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     encounterId,
     refreshAllergies,
     setPatientAllergies,
-  } = usePatientContext(roomId, searchParams);
+  } = usePatientContext(roomId, searchParams as any);
 
   // Other URL params
-  const clinicianIdParam = searchParams.get('clinicianId') || 'clinician-local-001';
-  const clinicNameParam = searchParams.get('clinicName') || undefined;
-  const clinicAddressParam = searchParams.get('clinicAddress') || undefined;
+  const clinicianIdParam = searchParams?.get('clinicianId') || 'clinician-local-001';
+  const clinicNameParam = searchParams?.get('clinicName') || undefined;
+  const clinicAddressParam = searchParams?.get('clinicAddress') || undefined;
 
   // Fake appt meta (patient-aware; profile can override labels)
   const appt = useMemo(
@@ -287,8 +287,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       when: new Date().toISOString(),
       patientId,
       patientName,
-      clinicianName: searchParams.get('clinicianName') || 'Demo Clinician',
-      reason: searchParams.get('reason') || 'Acute bronchitis (demo)',
+      clinicianName: searchParams?.get('clinicianName') || 'Demo Clinician',
+      reason: searchParams?.get('reason') || 'Acute bronchitis (demo)',
       status: 'In progress',
       roomId,
     }),
@@ -330,8 +330,10 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   // UI prefs
   const { state: ui, set: setUi } = useUiPrefs();
-  const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, rightTab, pip, rightPanelsOpen } =
-    ui;
+  const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, pip } = ui;
+
+  const [rightTab, setRightTab] = useState<RightTab>('soap');
+  const [rightPanelsOpen, setRightPanelsOpen] = useState(true);
 
   // NEW: narrow video / wider notes toggle
   const [videoNarrow, setVideoNarrow] = useState(false);
@@ -1322,7 +1324,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                     <IntegratedIoMTs roomId={roomId} patientId={profile.id} dense={dense} defaultOpen />
                   </Card>
 
-                  <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen patientId={profile.id} />
+                  <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen />
                 </>
               )}
             </div>
@@ -1459,7 +1461,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                 <div className="flex items-center justify-between p-1">
                   <Tabs<RightTab>
                     active={rightTab}
-                    onChange={(key) => setUi('rightTab', key)}
+                    onChange={(key) => setRightTab(key)}
                     items={[
                       { key: 'soap', label: 'Sub' },
                       { key: 'erx', label: 'eRx' },
@@ -1470,7 +1472,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                   />
                   <button
                     className="ml-2 px-2 py-1 text-xs border rounded"
-                    onClick={() => setUi('rightPanelsOpen', !rightPanelsOpen)}
+                    onClick={() => setRightPanelsOpen((v) => !v)}
                     aria-pressed={rightPanelsOpen}
                     aria-label={rightPanelsOpen ? 'Collapse right panels' : 'Expand right panels'}
                     title={rightPanelsOpen ? 'Collapse' : 'Expand'}
@@ -1774,7 +1776,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                       onChangeSoap={(next) => setSoap(next)}
                       onChangePatientEducation={setPatientEducation}
                       onToast={pushToast}
-                      onShowSoapTab={() => setUi('rightTab', 'soap')}
+                      onShowSoapTab={() => setRightTab('soap')}
                     />
                   )}
 

@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState, useCallback, memo } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { LiveKitRoom, VideoConference, useRoomContext } from '@livekit/components-react';
-import { DataPacket_Kind } from 'livekit-client';
 
 // Local project components
 import DeviceAttachmentsPanel from '@/components/DeviceAttachmentsPanel';
@@ -32,7 +31,7 @@ import type { ICD10Hit, RxNormHit } from '@/src/hooks/useAutocomplete';
 function SafeDeviceSettings() {
   return <div className="text-sm text-gray-600">Safe device settings (fallback)</div>;
 }
-const DeviceSettings = dynamic(async () => {
+const DeviceSettings = dynamic<any>(async () => {
   if (process.env.NEXT_PUBLIC_USE_SAFE_SETTINGS === '1') return { default: SafeDeviceSettings };
   try {
     const m = await import('@ambulant/rtc');
@@ -220,11 +219,28 @@ function ControlPublisher({ state }: { state: { overlay: boolean; captions: bool
     last.current = now;
     (async () => {
       try {
-        await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'overlay',  value: state.overlay })), DataPacket_Kind.RELIABLE, 'control');
-        await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'captions', value: state.captions })), DataPacket_Kind.RELIABLE, 'control');
-        await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'vitals',   value: state.vitals })),   DataPacket_Kind.RELIABLE, 'control');
-        await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'recording',value: state.recording })),DataPacket_Kind.RELIABLE, 'control');
-        await room.localParticipant.publishData(new TextEncoder().encode(JSON.stringify({ type: 'xr',       value: state.xr })),       DataPacket_Kind.RELIABLE, 'control');
+        const enc = new TextEncoder();
+
+        await room.localParticipant.publishData(
+          enc.encode(JSON.stringify({ type: 'overlay', value: state.overlay })),
+          { reliable: true, topic: 'control' },
+        );
+        await room.localParticipant.publishData(
+          enc.encode(JSON.stringify({ type: 'captions', value: state.captions })),
+          { reliable: true, topic: 'control' },
+        );
+        await room.localParticipant.publishData(
+          enc.encode(JSON.stringify({ type: 'vitals', value: state.vitals })),
+          { reliable: true, topic: 'control' },
+        );
+        await room.localParticipant.publishData(
+          enc.encode(JSON.stringify({ type: 'recording', value: state.recording })),
+          { reliable: true, topic: 'control' },
+        );
+        await room.localParticipant.publishData(
+          enc.encode(JSON.stringify({ type: 'xr', value: state.xr })),
+          { reliable: true, topic: 'control' },
+        );
       } catch {}
     })();
   }, [room, state]);
@@ -240,31 +256,19 @@ export default function TelevisitWorkspace({ params }: { params: { id: string } 
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
-  // Loader with 404→mock fallback (dev convenience)
+  // Loader: production API only
   useEffect(() => {
     let alive = true;
     (async () => {
       setLoading(true); setErr(null);
       try {
         const res = await fetch(`/api/appointments/${encodeURIComponent(id)}`, { cache: 'no-store' });
-        if (res.status === 404) {
-          const mock = {
-            id,
-            when: new Date().toISOString(),
-            patientId: 'pt-dev',
-            patientName: 'Demo Patient',
-            clinicianName: 'Demo Clinician',
-            reason: 'Acute bronchitis (demo)',
-            status: 'Scheduled',
-            roomId: 'dev',
-          };
-          if (alive) setAppt(mock);
-        } else if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        } else {
-          const raw = await res.json();
-          if (alive) setAppt(normalizeAppt(raw));
+        if (!res.ok) {
+          throw new Error(res.status === 404 ? 'Appointment not found' : `HTTP ${res.status}`);
         }
+
+        const raw = await res.json();
+        if (alive) setAppt(normalizeAppt(raw));
       } catch (e: any) {
         if (alive) setErr(e?.message || 'Failed to load appointment');
       } finally { if (alive) setLoading(false); }
@@ -560,7 +564,7 @@ export default function TelevisitWorkspace({ params }: { params: { id: string } 
             <div className="flex flex-col space-y-4">
               <Card title="Bedside Monitor (live)" gradient toolbar={<CollapseBtn open={showGraph} onClick={()=>setShowGraph(v=>!v)} />}>
                 <Collapse open={showGraph}>
-                  <ClinicianVitalsPanel room={null as any} defaultCollapsed={false} maxPoints={240} showDockBadge={false} liveVitals={sseVitals} />
+                  <ClinicianVitalsPanel room={null as any} defaultCollapsed={false} maxPoints={240} showDockBadge={false} />
                 </Collapse>
               </Card>
 
@@ -568,12 +572,12 @@ export default function TelevisitWorkspace({ params }: { params: { id: string } 
 
               <div className="sticky top-20 z-10 shadow-sm bg-white rounded">
                 <div className="flex items-center justify-between p-1">
-                  <Tabs
+                  <Tabs<TabKey>
                     active={rightTab}
-                    onChange={setRightTab}
+                    onChange={(key) => setRightTab(key)}
                     items={[
                       { key: 'soap', label: 'SOAP' },
-                      { key: 'erx',  label: 'eRx' },
+                      { key: 'erx', label: 'eRx' },
                       { key: 'devices', label: 'Devices' },
                       { key: 'insight', label: 'Insight' },
                     ]}
@@ -805,7 +809,8 @@ function RoomChat({ appt }: { appt: Appt }) {
     setChat(c => [...c, { from: 'me', text }]);
     try {
       await room.localParticipant.publishData(
-        new TextEncoder().encode(JSON.stringify({ text, from: appt?.clinicianName || 'clinician' })), DataPacket_Kind.RELIABLE, 'chat'
+        new TextEncoder().encode(JSON.stringify({ text, from: appt?.clinicianName || 'clinician' })),
+        { reliable: true, topic: 'chat' },
       );
       const el = boxRef.current; if (el) el.scrollTop = el.scrollHeight;
     } finally { setSending(false); }
@@ -1041,15 +1046,9 @@ function ReferralPanel() {
             online: c.online,
           }))
         );
-      } catch {
-        const mock: Clin[] = [
-          { id: 'clin-za-001', name: 'Dr Ama Ndlovu', specialty: 'GP', location: 'Johannesburg', gender: 'Female', cls: 'Doctor', priceZAR: 500, rating: 4.7, online: true },
-          { id: 'clin-za-002', name: 'Dr Jane Smith', specialty: 'Cardiology', location: 'Cape Town', gender: 'Female', cls: 'Doctor', priceZAR: 850, rating: 4.8, online: true },
-          { id: 'clin-za-003', name: 'Dr Adam Lee', specialty: 'ENT', location: 'Johannesburg', gender: 'Male', cls: 'Doctor', priceZAR: 700, rating: 4.6, online: true },
-          { id: 'clin-za-101', name: 'RN T. Dube', specialty: 'Nurse', location: 'Durban', gender: 'Male', cls: 'Allied Health', priceZAR: 300, rating: 4.5, online: false },
-          { id: 'clin-za-201', name: 'Coach L. Maseko', specialty: 'Therapist', location: 'Pretoria', gender: 'Female', cls: 'Wellness', priceZAR: 400, rating: 4.4, online: true },
-        ];
-        setRawList(mock);
+      } catch (e) {
+        console.error('[ReferralPanel] failed to load clinicians', e);
+        setRawList([]);
       } finally { setLoading(false); }
     })();
   }, []);

@@ -36,7 +36,7 @@ export default function DeviceDock({
   const [loading, setLoading] = useState(false);
 
   // 🔗 Vitals SSE buffer (guard for undefined to avoid runtime errors)
-  const { buffer } = useVitalsSSE(roomId || '', 120) as { buffer?: Array<{ type: string; ts: number; value: number }> };
+  const { buffer } = useVitalsSSE(roomId || '', patientId || '') as { buffer?: Array<{ type: string; ts: number; value: number }> };
   const safeBuf = Array.isArray(buffer) ? buffer : [];
 
   // device fetch

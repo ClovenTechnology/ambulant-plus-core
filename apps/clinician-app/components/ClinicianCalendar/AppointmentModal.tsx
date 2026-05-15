@@ -3,8 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import dayjs from 'dayjs';
-import { toast } from 'react-hot-toast';
-import type { EventApi } from '@fullcalendar/react';
+import type { EventApi } from '@fullcalendar/core';
 import {
   DndContext,
   DragOverlay,
@@ -24,7 +23,67 @@ import {
   verticalListSortingStrategy,
   sortableKeyboardCoordinates,
 } from '@dnd-kit/sortable';
-import { CSS } from '@dnd-kit/utilities';
+
+function dndTransformToString(transform: {
+  x: number;
+  y: number;
+  scaleX?: number;
+  scaleY?: number;
+} | null) {
+  if (!transform) return undefined;
+
+  const { x, y, scaleX = 1, scaleY = 1 } = transform;
+
+  return `translate3d(${Math.round(x)}px, ${Math.round(y)}px, 0) scaleX(${scaleX}) scaleY(${scaleY})`;
+}
+
+
+type ToastKind = 'success' | 'error' | 'info';
+type ToastFn = (msg: string, kind?: ToastKind) => void;
+type ToastApi = ToastFn & {
+  success: (msg: string) => void;
+  error: (msg: string) => void;
+  info: (msg: string) => void;
+  promise: <T>(promise: Promise<T>, messages: { loading: string; success: string; error: string }) => Promise<T>;
+};
+
+let mountedToast: ToastFn | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  mountedToast = require('@/components/ToastMount').toast as ToastFn;
+} catch {}
+
+function notify(msg: string, kind: ToastKind = 'info') {
+  if (mountedToast) {
+    mountedToast(msg, kind);
+    return;
+  }
+
+  if (typeof window !== 'undefined') {
+    // Last-resort fallback so the modal still gives feedback without react-hot-toast.
+    window.setTimeout(() => window.alert(msg), 0);
+  }
+}
+
+const toast: ToastApi = Object.assign(
+  (msg: string, kind: ToastKind = 'info') => notify(msg, kind),
+  {
+    success: (msg: string) => notify(msg, 'success'),
+    error: (msg: string) => notify(msg, 'error'),
+    info: (msg: string) => notify(msg, 'info'),
+    promise: async <T,>(promise: Promise<T>, messages: { loading: string; success: string; error: string }) => {
+      notify(messages.loading, 'info');
+      try {
+        const result = await promise;
+        notify(messages.success, 'success');
+        return result;
+      } catch (err) {
+        notify(messages.error, 'error');
+        throw err;
+      }
+    },
+  }
+);
 
 type Slot = { start: string; end: string; label?: string }; // ISO strings or HH:mm
 type BookedAppt = { id: string; patient?: { name?: string }; startsAt: string; endsAt: string; status?: string };
@@ -113,7 +172,7 @@ function SortableAppt({
   });
 
   const style = {
-    transform: CSS.Transform.toString(transform),
+    transform: dndTransformToString(transform),
     transition,
     touchAction: 'manipulation' as const,
     cursor: isDragging ? 'grabbing' : 'grab',

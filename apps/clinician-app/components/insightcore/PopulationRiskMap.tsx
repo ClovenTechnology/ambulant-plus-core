@@ -3,7 +3,9 @@
 
 import { useEffect, useState } from 'react';
 import { eventBus } from '@/app/insightcore/services/event-bus';
-import clsx from 'clsx';
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
 
 type ZoneRisk = {
   zone: string;
@@ -34,7 +36,7 @@ export default function PopulationRiskMap() {
         {zones.map((z) => (
           <div
             key={z.zone}
-            className={clsx(
+            className={cn(
               'p-3 rounded border text-sm space-y-1',
               z.riskScore > 80 && 'bg-red-50 border-red-400',
               z.riskScore > 60 && z.riskScore <= 80 && 'bg-amber-50 border-amber-400',

@@ -1,8 +1,18 @@
-// services/insight-generator/basic.ts
-import { InsightGenerator } from './index';
-import { Insight, InferenceOutput } from '@/lib/insightcore/contracts';
-import { eventBus } from '@/services/event-bus';
-import { v4 as uuid } from 'uuid';
+// apps/clinician-app/app/insightcore/services/insight-generator/basic.ts
+import type { Insight, InferenceOutput } from '@/lib/insightcore/contracts';
+import { eventBus } from '../event-bus';
+
+type InsightGenerator = {
+  generate(inferences: InferenceOutput[]): Promise<Insight[]>;
+};
+
+function uuid(prefix = 'insight') {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
 
 export const BasicInsightGenerator: InsightGenerator = {
   async generate(inferences: InferenceOutput[]) {
@@ -27,7 +37,7 @@ export const BasicInsightGenerator: InsightGenerator = {
     }
 
     for (const insight of insights) {
-      await eventBus.publish({
+      eventBus.emit('INSIGHT_GENERATED', {
         id: uuid(),
         type: 'INSIGHT_GENERATED',
         entityId: insight.id,

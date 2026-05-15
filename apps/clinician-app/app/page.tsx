@@ -18,9 +18,6 @@ import {
   AlertCircle,
 } from 'lucide-react';
 
-/* ---------- Presentation mode toggle ---------- */
-const USE_MOCK = false;
-
 /* ---------- Dynamic form imports (client-only) ---------- */
 const AppointmentForm = dynamic(
   () => import('@/components/forms/AppointmentForm'),
@@ -54,6 +51,9 @@ type InboxEvent = {
   timestamp: string;
   type?: 'lab' | 'message' | 'alert' | 'reminder';
 };
+
+const DEFAULT_CLINICIAN_ID = 'clinician-local-001';
+const DEFAULT_CLINICIAN_NAME = 'Clinician';
 
 /* ---------- Helpers ---------- */
 function formatTime(iso?: string) {
@@ -252,6 +252,13 @@ function PriorityBadge({ priority }: { priority?: Appointment['priority'] }) {
   return null;
 }
 
+function appointmentPriority(appt: unknown): Appointment['priority'] {
+  const value = (appt as { priority?: unknown } | null | undefined)?.priority;
+  return value === 'High' || value === 'Medium' || value === 'Low'
+    ? value
+    : undefined;
+}
+
 function KPICard({
   icon: Icon,
   label,
@@ -346,86 +353,6 @@ function canJoinTelevisitNow(appt?: Appointment | null): boolean {
   return nowMs >= startMs - EARLY_JOIN_MS && nowMs <= endMs + LATE_JOIN_MS;
 }
 
-/* ---------- Mock data (display-only fallback) ---------- */
-const MOCK_APPOINTMENTS: Appointment[] = (() => {
-  const now = Date.now();
-  const toISO = (ms: number) => new Date(ms).toISOString();
-  return [
-    {
-      id: 'appt-1001',
-      patientName: 'Mandla Dlamini',
-      start: toISO(now - 45 * 60 * 1000),
-      end: toISO(now - 15 * 60 * 1000),
-      reason: 'Wound review',
-      status: 'completed',
-      priority: 'Low',
-      roomName: 'room-1001',
-    } as any,
-    {
-      id: 'appt-1002',
-      patientName: 'Zanele Nkosi',
-      start: toISO(now - 5 * 60 * 1000),
-      end: toISO(now + 25 * 60 * 1000),
-      reason: 'Follow-up: hypertension',
-      status: 'checked-in',
-      priority: 'High',
-      roomName: 'room-1002',
-    } as any,
-    {
-      id: 'appt-1003',
-      patientName: 'Lerato Mokoena',
-      start: toISO(now + 20 * 60 * 1000),
-      end: toISO(now + 50 * 60 * 1000),
-      reason: 'Diabetes review',
-      status: 'booked',
-      priority: 'High',
-      roomName: 'room-1003',
-    } as any,
-    {
-      id: 'appt-1004',
-      patientName: 'Thabo Mahlangu',
-      start: toISO(now + 90 * 60 * 1000),
-      end: toISO(now + 120 * 60 * 1000),
-      reason: 'New patient consult',
-      status: 'booked',
-      priority: 'Low',
-    } as any,
-    {
-      id: 'appt-1005',
-      patientName: 'Nomsa Khumalo',
-      start: toISO(now + 200 * 60 * 1000),
-      end: toISO(now + 230 * 60 * 1000),
-      reason: 'Contraception',
-      status: 'booked',
-      priority: 'Low',
-    } as any,
-  ];
-})();
-
-const MOCK_INBOX: InboxEvent[] = [
-  {
-    id: 'evt-1',
-    title: 'Lab result: HbA1c received',
-    body: 'Patient Lerato Mokoena — HbA1c 8.1%',
-    timestamp: new Date(Date.now() - 1000 * 60 * 30).toISOString(),
-    type: 'lab',
-  },
-  {
-    id: 'evt-2',
-    title: 'New message from Dr Le Rooy',
-    body: 'Patient Referral: Jess DuPlesis',
-    timestamp: new Date(Date.now() - 1000 * 60 * 60).toISOString(),
-    type: 'message',
-  },
-  {
-    id: 'evt-3',
-    title: 'Reminder (Priority Patient): Book Lab Review',
-    body: 'Today 4pm - roomId: 27u-8u2-6',
-    timestamp: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-    type: 'reminder',
-  },
-];
-
 /* ---------- Main Page ---------- */
 export default function ClinicianDashboardPage() {
   const router = useRouter();
@@ -436,8 +363,8 @@ export default function ClinicianDashboardPage() {
     status?: string | null;
   } | null>(null);
 
-  const clinicianId = me?.clinicianId ?? 'clin-demo';
-  const clinicianName = me?.name ?? 'Nomsa';
+  const clinicianId = me?.clinicianId ?? DEFAULT_CLINICIAN_ID;
+  const clinicianName = me?.name ?? DEFAULT_CLINICIAN_NAME;
   const clinicianStatus = me?.status ?? null;
 
   const [refreshKey, setRefreshKey] = useState(0);
@@ -454,14 +381,7 @@ export default function ClinicianDashboardPage() {
   const [queueOpen, setQueueOpen] = useState(false);
   const [thisWeekOpen, setThisWeekOpen] = useState(false);
 
-  // Selected slot from CalendarPreview
-  const [selectedSlot, setSelectedSlot] = useState<{
-    start?: string;
-    end?: string;
-  } | null>(null);
 
-  const [mockAppointments] = useState<Appointment[]>(MOCK_APPOINTMENTS);
-  const [mockInbox] = useState<InboxEvent[]>(MOCK_INBOX);
 
   const [optimisticAppointments, setOptimisticAppointments] = useState<
     Appointment[]
@@ -475,71 +395,56 @@ export default function ClinicianDashboardPage() {
     progressMap: {},
   };
 
-  let liveAppointments = [
+  const liveAppointments = [
     ...optimisticAppointments,
-    ...(Array.isArray(liveAppointmentsHook) && liveAppointmentsHook.length
-      ? liveAppointmentsHook
+    ...(Array.isArray(liveAppointmentsHook)
+      ? (liveAppointmentsHook as Appointment[])
       : []),
   ];
-
-  if ((!liveAppointments || liveAppointments.length === 0) && !USE_MOCK) {
-    console.warn(
-      '[ClinicianDashboard] liveAppointments hook returned no data — falling back to mockAppointments for UX',
-    );
-    liveAppointments = [...optimisticAppointments, ...mockAppointments];
-  } else if (USE_MOCK) {
-    liveAppointments = [...optimisticAppointments, ...mockAppointments];
-  }
 
   const progressMap =
     liveProgressHook && Object.keys(liveProgressHook).length > 0
       ? (liveProgressHook as Record<string, { pct: number; status?: string }>)
       : {};
 
-  const [inbox, setInbox] = useState<InboxEvent[]>(USE_MOCK ? mockInbox : []);
+  const [inbox, setInbox] = useState<InboxEvent[]>([]);
   const [loadingInbox, setLoadingInbox] = useState(false);
 
   // Inbox loading
   useEffect(() => {
     let cancelled = false;
-    if (USE_MOCK) {
-      setInbox(mockInbox);
-      return;
-    }
-    (async () => {
+
+    async function loadInbox() {
       setLoadingInbox(true);
+
       try {
         const r = await fetch('/api/events/inbox?limit=20', {
           cache: 'no-store',
         });
+
         if (!r.ok) {
           throw new Error(`Inbox fetch failed ${r.status}`);
         }
-        const j = await r.json();
+
+        const j = await r.json().catch(() => null);
         if (cancelled) return;
+
         const items: InboxEvent[] = Array.isArray(j) ? j : j?.events || [];
-        if (!items || items.length === 0) {
-          console.warn(
-            '[ClinicianDashboard] inbox API returned empty — using mockInbox fallback',
-          );
-          setInbox(mockInbox);
-        } else {
-          setInbox(items);
-        }
+        setInbox(Array.isArray(items) ? items : []);
       } catch (err) {
-        console.warn(
-          '[ClinicianDashboard] failed to load inbox, falling back to mockInbox',
-          err,
-        );
-        setInbox(mockInbox);
+        console.error('[ClinicianDashboard] failed to load inbox', err);
+        if (!cancelled) setInbox([]);
       } finally {
         if (!cancelled) setLoadingInbox(false);
       }
-    })();
+    }
+
+    loadInbox();
+
     return () => {
       cancelled = true;
     };
-  }, [refreshKey, mockInbox]);
+  }, [refreshKey]);
 
   // Load clinician from /api/me
   useEffect(() => {
@@ -555,13 +460,13 @@ export default function ClinicianDashboardPage() {
           data.id ??
           data.clinician?.id ??
           data.clinician?.clinicianId ??
-          'clin-demo';
+          DEFAULT_CLINICIAN_ID;
         const name =
           data.name ??
           data.displayName ??
           data.clinician?.displayName ??
           data.clinician?.name ??
-          'Nomsa';
+          DEFAULT_CLINICIAN_NAME;
         const status = data.clinician?.status ?? data.status ?? null;
 
         setMe({
@@ -571,19 +476,9 @@ export default function ClinicianDashboardPage() {
         });
         setRefreshKey((k) => k + 1);
       } catch (err) {
-        console.warn(
-          '[ClinicianDashboard] /api/me not available, using demo clinician',
-          err,
-        );
+        console.error('[ClinicianDashboard] failed to load /api/me', err);
         if (!cancelled) {
-          setMe(
-            (prev) =>
-              prev ?? {
-                clinicianId: 'clin-demo',
-                name: 'Nomsa',
-                status: 'active',
-              },
-          );
+          setMe((prev) => prev);
         }
       }
     })();
@@ -618,7 +513,7 @@ export default function ClinicianDashboardPage() {
       );
       return;
     }
-    router.push('/sfu/room-1001');
+    router.push('/televisit');
   };
 
   const handleJoinCall = (appt?: Appointment | null) => {
@@ -655,7 +550,7 @@ export default function ClinicianDashboardPage() {
       .length,
     televisits: liveAppointments.filter((a) => a.status === 'checked-in')
       .length,
-    ordersPending: 3,
+    ordersPending: 0,
     labPending: inbox.filter((i) => i.type === 'lab' || i.type === 'alert')
       .length,
   };
@@ -727,8 +622,7 @@ export default function ClinicianDashboardPage() {
       reason: payload.reason ?? 'Booking',
       status: payload.status ?? 'booked',
       priority: payload.priority ?? 'Low',
-      roomName:
-        payload.roomName ?? `room-temp-${Math.floor(Math.random() * 10000)}`,
+      roomName: payload.roomName,
     };
 
     setOptimisticAppointments((prev) => [opt, ...prev]);
@@ -766,7 +660,7 @@ export default function ClinicianDashboardPage() {
       toast.className =
         'fixed top-4 right-4 bg-red-600 text-white px-4 py-2 rounded-lg shadow-lg z-50';
       toast.textContent = `Failed to create appointment: ${
-        String((err as any)?.message || err) ?? ''
+        String((err as any)?.message || err || '')
       }`;
       document.body.appendChild(toast);
       setTimeout(() => toast.remove(), 6000);
@@ -784,61 +678,12 @@ export default function ClinicianDashboardPage() {
       (payload.id || payload.patientName || payload.start || payload.startsAt);
     if (!apptLike) return;
 
-    if (USE_MOCK) {
-      const newAppt: Appointment = {
-        id: payload.id ?? `appt-demo-${Date.now()}`,
-        patientName:
-          payload.patientName ??
-          payload.patient?.name ??
-          payload.patientId ??
-          'Demo Patient',
-        start:
-          payload.start ??
-          payload.startsAt ??
-          payload.when ??
-          new Date().toISOString(),
-        end:
-          payload.end ??
-          payload.endsAt ??
-          (payload.start || payload.startsAt
-            ? new Date(
-                Date.parse(payload.start || payload.startsAt) +
-                  30 * 60 * 1000,
-              ).toISOString()
-            : undefined),
-        reason: payload.reason ?? 'Demo booking',
-        status: payload.status ?? 'booked',
-        priority: payload.priority ?? 'Low',
-        roomName:
-          payload.roomName ?? `room-demo-${Math.floor(Math.random() * 1000)}`,
-      };
-
-      setInbox((prev) => [
-        {
-          id: `evt-${Date.now()}`,
-          title: `Appointment created: ${newAppt.patientName}`,
-          body: `${newAppt.reason}`,
-          timestamp: new Date().toISOString(),
-          type: 'reminder',
-        },
-        ...prev,
-      ]);
-
-      if (apptIsNow(newAppt)) {
-        setTimeout(() => {
-          router.push(`/televisit/${encodeURIComponent(newAppt.id)}`);
-        }, 300);
-      }
-      return;
-    }
-
-    // Production path: optimistic create via local proxy
     createAppointmentOptimistic(payload);
   };
 
   /* ---------- Derived data for UI ---------- */
   const needsAttention = liveAppointments.filter(
-    (a) => a.priority === 'High' && a.status !== 'completed',
+    (a) => appointmentPriority(a) === 'High' && a.status !== 'completed',
   );
   const labAlerts = inbox.filter(
     (i) => i.type === 'lab' || i.type === 'alert',
@@ -871,7 +716,7 @@ export default function ClinicianDashboardPage() {
     queue[0]?.roomName ??
     nextAppt?.roomName ??
     (queue[0]?.id || nextAppt?.id) ??
-    'room-1001';
+    '';
   const queueLinks = makeLinks(primaryRoomId);
 
   return (
@@ -1026,7 +871,7 @@ export default function ClinicianDashboardPage() {
                           <span className="font-semibold text-gray-900">
                             {appt.patient?.name ?? appt.patientName}
                           </span>
-                          <PriorityBadge priority={appt.priority} />
+                          <PriorityBadge priority={appointmentPriority(appt)} />
                           <StatusBadge status={appt.status} />
                         </div>
                         <div className="text-sm text-gray-600 mt-1">
@@ -1316,14 +1161,14 @@ export default function ClinicianDashboardPage() {
                     <AppointmentForm
                       clinicianId={clinicianId}
                       onSaved={handleSaved}
-                      prefillStartIso={selectedSlot?.start}
-                      prefillEndIso={selectedSlot?.end}
                     />
                   )}
                   {activeTab === 'orders' && (
                     <OrderForm onSaved={handleSaved} />
                   )}
-                  {activeTab === 'notes' && <NoteForm onSaved={handleSaved} />}
+                  {activeTab === 'notes' && (
+                    <NoteForm clinicianId={clinicianId} onSaved={handleSaved} />
+                  )}
                 </div>
               </Collapse>
             </div>
@@ -1373,8 +1218,8 @@ export default function ClinicianDashboardPage() {
                               <span className="font-semibold">
                                 {patientName}
                               </span>
-                              {appt.priority !== 'Low' && (
-                                <PriorityBadge priority={appt.priority} />
+                              {appointmentPriority(appt) && appointmentPriority(appt) !== 'Low' && (
+                                <PriorityBadge priority={appointmentPriority(appt)} />
                               )}
                             </div>
                             <div className="text-sm text-gray-600">
@@ -1540,23 +1385,17 @@ export default function ClinicianDashboardPage() {
                 />
               </div>
               <Collapse open={calendarOpen}>
-                <CalendarPreview
-                  clinicianId={clinicianId}
-                  onSelectSlot={(startIso, endIso) => {
-                    setSelectedSlot({ start: startIso, end: endIso });
-                    setActiveTab('appointments');
-                    setTabsOpen(true);
-                    const el = document.getElementById(
-                      'create-appointment-panel',
-                    );
-                    if (el) {
-                      el.scrollIntoView({
-                        behavior: 'smooth',
-                        block: 'start',
-                      });
-                    }
-                  }}
-                />
+                <CalendarPreview clinicianId={clinicianId} days={14} />
+                <div className="mt-3 flex items-center justify-between rounded border bg-gray-50 px-3 py-2 text-xs text-gray-600">
+                  <span>Open schedule settings to edit availability or create slots.</span>
+                  <button
+                    type="button"
+                    className="rounded border bg-white px-2 py-1 hover:bg-gray-100"
+                    onClick={() => router.push('/settings/consult')}
+                  >
+                    Manage availability
+                  </button>
+                </div>
               </Collapse>
             </div>
 

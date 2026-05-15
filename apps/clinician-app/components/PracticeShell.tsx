@@ -95,6 +95,7 @@ function findActiveLabel(pathname: string) {
 
 export function PracticeShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const currentPathname = pathname ?? '';
   const [collapsed, setCollapsed] = useState(false);
 
   useEffect(() => {
@@ -106,7 +107,7 @@ export function PracticeShell({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const activeLabel = useMemo(() => findActiveLabel(pathname), [pathname]);
+  const activeLabel = useMemo(() => findActiveLabel(currentPathname), [currentPathname]);
 
   const toggle = () => {
     setCollapsed((v) => {
@@ -179,7 +180,7 @@ export function PracticeShell({ children }: { children: ReactNode }) {
 
                   <ul className="space-y-1">
                     {g.items.map((it) => {
-                      const active = isActive(pathname, it);
+                      const active = isActive(currentPathname, it);
                       const Icon = it.icon;
                       return (
                         <li key={it.href}>

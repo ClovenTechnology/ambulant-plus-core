@@ -1,9 +1,18 @@
 'use client';
+
 import React, { useEffect, useState } from 'react';
-import { format } from 'date-fns';
-import { FiPlus, FiClock } from 'react-icons/fi';
 
 const GATEWAY = process.env.NEXT_PUBLIC_APIGW_BASE ?? '';
+
+function formatDate(value?: string | Date | null) {
+  if (!value) return '—';
+
+  const d = value instanceof Date ? value : new Date(value);
+
+  if (Number.isNaN(d.getTime())) return '—';
+
+  return d.toLocaleString();
+}
 
 type Operation = {
   id: string;
@@ -44,9 +53,17 @@ function makeMockOps(): Operation[] {
 
 function validateFile(f: File | null, maxMB = 24) {
   if (!f) return null;
+
   const allowed = ['application/pdf', 'image/png', 'image/jpeg'];
-  if (f.size > maxMB * 1024 * 1024) return `File too large (max ${maxMB}MB)`;
-  if (!allowed.includes(f.type)) return `Unsupported file type: ${f.type}`;
+
+  if (f.size > maxMB * 1024 * 1024) {
+    return `File too large (max ${maxMB}MB)`;
+  }
+
+  if (!allowed.includes(f.type)) {
+    return `Unsupported file type: ${f.type}`;
+  }
+
   return null;
 }
 
@@ -69,10 +86,14 @@ export default function ClinicianOperationsPage() {
 
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
       try {
-        const res = await fetch('/api/clinician/operations', { cache: 'no-store' });
+        const res = await fetch('/api/clinician/operations', {
+          cache: 'no-store',
+        });
         const data = await res.json();
+
         if (!cancelled) {
           setItems(Array.isArray(data) && data.length ? data : makeMockOps());
         }
@@ -86,10 +107,11 @@ export default function ClinicianOperationsPage() {
       try {
         const r = await fetch('/api/clinicians', { cache: 'no-store' });
         const d = await r.json();
+
         if (Array.isArray(d) && d.length) {
           setClinicians(
             d.map((x: any) =>
-              typeof x === 'string' ? x : (x.name ?? x.fullName ?? x.id)
+              typeof x === 'string' ? x : x.name ?? x.fullName ?? x.id
             )
           );
         } else {
@@ -104,9 +126,11 @@ export default function ClinicianOperationsPage() {
     (async () => {
       try {
         const r = await fetch('/api/auth/me', { cache: 'no-store' });
+
         if (r.ok) {
           const me = await r.json();
           const name = me?.name || me?.fullName || me?.username;
+
           if (name) setCurrentClinician(name);
         }
       } catch {}
@@ -119,20 +143,28 @@ export default function ClinicianOperationsPage() {
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0] ?? null;
+
     setSelectedFile(null);
     setPreviewName(null);
+
     if (!f) return;
+
     const err = validateFile(f, 24);
+
     if (err) {
       alert(err);
       return;
     }
+
     setSelectedFile(f);
     setPreviewName(f.name);
   }
 
   async function presignAndUpload(file: File) {
-    if (!GATEWAY) throw new Error('Gateway (NEXT_PUBLIC_APIGW_BASE) is not configured');
+    if (!GATEWAY) {
+      throw new Error('Gateway (NEXT_PUBLIC_APIGW_BASE) is not configured');
+    }
+
     const metaRes = await fetch(`${GATEWAY}/files/presign`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -142,16 +174,24 @@ export default function ClinicianOperationsPage() {
         fileName: file.name,
       }),
     });
-    if (!metaRes.ok) throw new Error('Failed to request presigned URL');
+
+    if (!metaRes.ok) {
+      throw new Error('Failed to request presigned URL');
+    }
+
     const meta = await metaRes.json();
     const { url, fields, fileKey, fileName } = meta;
 
     const fd = new FormData();
+
     Object.entries(fields || {}).forEach(([k, v]) => fd.append(k, String(v)));
     fd.append('file', file);
 
     const s3Res = await fetch(url, { method: 'POST', body: fd });
-    if (!s3Res.ok) throw new Error('Operation report upload failed');
+
+    if (!s3Res.ok) {
+      throw new Error('Operation report upload failed');
+    }
 
     return { fileKey, fileName };
   }
@@ -159,51 +199,67 @@ export default function ClinicianOperationsPage() {
   function uploadWithProgress(fd: FormData, endpoint: string) {
     return new Promise<{ ok: boolean; json?: any }>((resolve) => {
       const xhr = new XMLHttpRequest();
+
       xhr.open('POST', endpoint, true);
+
       xhr.upload.onprogress = (ev) => {
-        if (ev.lengthComputable) setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
+        if (ev.lengthComputable) {
+          setUploadProgress(Math.round((ev.loaded / ev.total) * 100));
+        }
       };
+
       xhr.onload = () => {
         setUploadProgress(null);
+
         try {
           resolve({
             ok: xhr.status >= 200 && xhr.status < 300,
             json: JSON.parse(xhr.responseText || '{}'),
           });
-        } catch (e) {
+        } catch {
           resolve({
             ok: xhr.status >= 200 && xhr.status < 300,
             json: { raw: xhr.responseText },
           });
         }
       };
+
       xhr.onerror = () => {
         setUploadProgress(null);
         resolve({ ok: false });
       };
+
       xhr.send(fd);
     });
   }
 
   async function onAdd(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+
     const f = new FormData(e.currentTarget);
     const title = String(f.get('title') || '').trim();
+
     if (!title) {
       alert('Please enter operation title');
       return;
     }
+
     const date = String(f.get('date') || '');
     const facility = String(f.get('facility') || '');
     const surgeonDropdown = String(f.get('surgeon') || '');
     const surgeonExternal = String(f.get('surgeonExternal') || '').trim();
     const coCliniciansRaw = String(f.get('coClinicians') || '');
     const coClinicians = coCliniciansRaw
-      ? coCliniciansRaw.split(',').map((s) => s.trim()).filter(Boolean)
+      ? coCliniciansRaw
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean)
       : [];
+
     const clinicianCount =
-      Number(f.get('clinicianCount') || (1 + coClinicians.length)) ||
-      (1 + coClinicians.length);
+      Number(f.get('clinicianCount') || 1 + coClinicians.length) ||
+      1 + coClinicians.length;
+
     const notes = String(f.get('notes') || '');
 
     // if checkbox 'useSelf' then set surgeon to currentClinician
@@ -212,6 +268,7 @@ export default function ClinicianOperationsPage() {
     );
 
     let leadSurgeon: string | undefined;
+
     if (useExternalSurgeon && surgeonExternal) {
       leadSurgeon = surgeonExternal;
     } else if (useSelf && currentClinician) {
@@ -225,6 +282,7 @@ export default function ClinicianOperationsPage() {
 
     let fileKey: string | undefined;
     let fileName: string | undefined;
+
     try {
       if (selectedFile) {
         const uploaded = await presignAndUpload(selectedFile);
@@ -239,6 +297,7 @@ export default function ClinicianOperationsPage() {
 
     // optimistic
     const tempId = `OP-${Date.now()}`;
+
     const optimistic: Operation = {
       id: tempId,
       title,
@@ -253,24 +312,36 @@ export default function ClinicianOperationsPage() {
       recordedBy: currentClinician || 'Clinician (local)',
       source: 'clinician',
     };
+
     setItems((prev) => [optimistic, ...prev]);
     setAddOpen(false);
 
     const payload = new FormData();
+
     payload.append('title', title);
+
     if (date) payload.append('date', date);
     if (facility) payload.append('facility', facility);
     if (leadSurgeon) payload.append('surgeon', leadSurgeon);
-    if (coClinicians.length) payload.append('coClinicians', JSON.stringify(coClinicians));
+    if (coClinicians.length) {
+      payload.append('coClinicians', JSON.stringify(coClinicians));
+    }
+
     payload.append('clinicianCount', String(clinicianCount));
+
     if (notes) payload.append('notes', notes);
     if (fileKey) payload.append('fileKey', fileKey);
     if (fileName) payload.append('fileName', fileName);
 
     const res = await uploadWithProgress(payload, '/api/clinician/operations');
+
     if (res.ok && res.json) {
       const serverRecord = res.json.record;
-      setItems((prev) => prev.map((it) => (it.id === tempId ? serverRecord ?? it : it)));
+
+      setItems((prev) =>
+        prev.map((it) => (it.id === tempId ? serverRecord ?? it : it))
+      );
+
       alert('Operation recorded');
     } else {
       alert('Save failed to server — record saved locally (optimistic).');
@@ -290,15 +361,21 @@ export default function ClinicianOperationsPage() {
 
   async function saveSchedule(e: React.FormEvent) {
     e.preventDefault();
+
     if (!scheduleTarget) return;
+
     if (!scheduleDate) {
       alert('Select a follow-up date');
       return;
     }
+
     setScheduleSaving(true);
+
     try {
       const res = await fetch(
-        `/api/clinician/operations/${encodeURIComponent(scheduleTarget.id)}/schedule`,
+        `/api/clinician/operations/${encodeURIComponent(
+          scheduleTarget.id
+        )}/schedule`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -308,13 +385,17 @@ export default function ClinicianOperationsPage() {
           }),
         }
       );
+
       const data = await res.json().catch(() => ({} as any));
+
       if (!res.ok || !data.record) {
         throw new Error(data.error || 'Failed to save schedule');
       }
+
       setItems((prev) =>
         prev.map((o) => (o.id === scheduleTarget.id ? data.record : o))
       );
+
       setScheduleOpen(false);
       setScheduleTarget(null);
       setScheduleDate('');
@@ -335,7 +416,8 @@ export default function ClinicianOperationsPage() {
           onClick={() => setAddOpen(true)}
           className="px-3 py-1 bg-blue-600 text-white rounded flex items-center gap-2"
         >
-          <FiPlus /> Record Operation
+          <span aria-hidden>+</span>
+          Record Operation
         </button>
       </div>
 
@@ -346,40 +428,45 @@ export default function ClinicianOperationsPage() {
               <div>
                 <div className="font-medium flex items-center gap-2">
                   <span>{op.title}</span>
+
                   {op.ehrTxId && (
                     <span className="text-[10px] text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full uppercase tracking-wide">
                       EHR anchored
                     </span>
                   )}
+
                   {op.followupAt && (
                     <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">
-                      <FiClock className="w-3 h-3" />
+                      <span aria-hidden>⏱</span>
                       Follow-up
                     </span>
                   )}
                 </div>
+
                 <div className="text-xs text-zinc-400">
-                  {op.date
-                    ? format(new Date(op.date), 'yyyy-MM-dd')
-                    : 'Unknown date'}
+                  {op.date ? formatDate(op.date) : 'Unknown date'}
                   {op.facility ? ` • ${op.facility}` : ''}
                   {op.surgeon ? ` • Lead: ${op.surgeon}` : ''}
                   {op.clinicianCount ? ` • ${op.clinicianCount} clinician(s)` : ''}
                 </div>
+
                 {op.coClinicians && op.coClinicians.length > 0 && (
                   <div className="text-xs text-zinc-500 mt-1">
                     Co-clinicians: {op.coClinicians.join(', ')}
                   </div>
                 )}
+
                 {op.notes && (
                   <div className="mt-1 text-sm text-zinc-700">{op.notes}</div>
                 )}
+
                 {op.followupAt && (
                   <div className="text-xs text-blue-700 mt-1">
-                    Follow-up scheduled: {op.followupAt.substring(0, 10)}
+                    Follow-up scheduled: {formatDate(op.followupAt)}
                     {op.followupLabel && ` — ${op.followupLabel}`}
                   </div>
                 )}
+
                 {op.fileUrl && (
                   <div className="mt-1 text-xs">
                     <a
@@ -393,6 +480,7 @@ export default function ClinicianOperationsPage() {
                   </div>
                 )}
               </div>
+
               <div className="flex flex-col items-end gap-1 text-xs text-zinc-400">
                 <div>{op.recordedBy}</div>
                 <button
@@ -422,6 +510,7 @@ export default function ClinicianOperationsPage() {
                 Operation title
                 <input name="title" className="border rounded px-2 py-1 w-full" />
               </label>
+
               <label className="text-xs">
                 Date
                 <input
@@ -430,6 +519,7 @@ export default function ClinicianOperationsPage() {
                   className="border rounded px-2 py-1 w-full"
                 />
               </label>
+
               <label className="text-xs">
                 Facility
                 <input
@@ -438,6 +528,7 @@ export default function ClinicianOperationsPage() {
                   className="border rounded px-2 py-1 w-full"
                 />
               </label>
+
               <div className="text-xs space-y-1">
                 <div className="flex gap-2">
                   <button
@@ -451,6 +542,7 @@ export default function ClinicianOperationsPage() {
                   >
                     Lead on Ambulant+
                   </button>
+
                   <button
                     type="button"
                     onClick={() => setUseExternalSurgeon(true)}
@@ -463,6 +555,7 @@ export default function ClinicianOperationsPage() {
                     External lead
                   </button>
                 </div>
+
                 {!useExternalSurgeon && (
                   <label className="block mt-1">
                     Lead surgeon (Ambulant+)
@@ -480,6 +573,7 @@ export default function ClinicianOperationsPage() {
                     </select>
                   </label>
                 )}
+
                 {useExternalSurgeon && (
                   <label className="block mt-1">
                     Lead clinician name (external)
@@ -502,6 +596,7 @@ export default function ClinicianOperationsPage() {
                   className="border rounded px-2 py-1 w-full"
                 />
               </label>
+
               <label className="text-xs">
                 Number of clinicians involved
                 <input
@@ -516,9 +611,10 @@ export default function ClinicianOperationsPage() {
 
             <div className="flex items-center gap-4">
               <label className="flex items-center gap-2 text-xs">
-                <input type="checkbox" name="useSelf" />
-                I was the lead surgeon (Ambulant+)
+                <input type="checkbox" name="useSelf" />I was the lead surgeon
+                (Ambulant+)
               </label>
+
               <span className="text-[11px] text-zinc-500">
                 Or use dropdown / external lead above.
               </span>
@@ -530,7 +626,7 @@ export default function ClinicianOperationsPage() {
                 name="notes"
                 rows={3}
                 className="border rounded px-2 py-1 w-full"
-              ></textarea>
+              />
             </label>
 
             <label className="text-xs">
@@ -542,9 +638,11 @@ export default function ClinicianOperationsPage() {
                 className="mt-1"
               />
             </label>
+
             {previewName && (
               <div className="text-xs text-zinc-500">Selected: {previewName}</div>
             )}
+
             {uploadProgress != null && (
               <div className="w-full bg-gray-100 rounded h-3 mt-1">
                 <div
@@ -569,6 +667,7 @@ export default function ClinicianOperationsPage() {
               >
                 Cancel
               </button>
+
               <button className="px-3 py-1 bg-blue-600 text-white rounded">
                 Save & Upload
               </button>
@@ -585,7 +684,9 @@ export default function ClinicianOperationsPage() {
             className="bg-white rounded p-4 w-full max-w-md space-y-3"
           >
             <h2 className="text-lg font-semibold">Schedule follow-up</h2>
+
             <p className="text-xs text-zinc-500">{scheduleTarget.title}</p>
+
             <label className="text-xs">
               Follow-up date
               <input
@@ -595,6 +696,7 @@ export default function ClinicianOperationsPage() {
                 className="border rounded px-2 py-1 w-full mt-1"
               />
             </label>
+
             <label className="text-xs">
               Notes (e.g. wound review, suture removal)
               <textarea
@@ -603,6 +705,7 @@ export default function ClinicianOperationsPage() {
                 className="border rounded px-2 py-1 w-full mt-1"
               />
             </label>
+
             <div className="flex justify-end gap-2">
               <button
                 type="button"
@@ -616,6 +719,7 @@ export default function ClinicianOperationsPage() {
               >
                 Cancel
               </button>
+
               <button
                 className="px-3 py-1 bg-blue-600 text-white rounded"
                 disabled={scheduleSaving}

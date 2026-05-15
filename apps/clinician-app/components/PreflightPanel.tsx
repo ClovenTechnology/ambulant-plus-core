@@ -110,12 +110,13 @@ export default function PreflightPanel() {
     }, 500);
   }
 
-  async function setOutput(el: HTMLAudioElement | null) {
+  function setOutput(el: HTMLAudioElement | null) {
     if (!el || !out) return;
     // @ts-ignore
     if (typeof el.setSinkId === 'function') {
+      // React ref callbacks must return void, so run the async sink update fire-and-forget.
       // @ts-ignore
-      await el.setSinkId(out).catch(() => {});
+      void el.setSinkId(out).catch(() => {});
     }
   }
 

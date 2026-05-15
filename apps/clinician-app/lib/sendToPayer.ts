@@ -192,7 +192,7 @@ export function buildSendToPayerPayload(input: BuildSendToPayerInput): SendToPay
       quantity: 1,
       unitPriceZar: unit,
       amountZar: amount,
-      icd10: l.icd || diagArray[0]?.code ?? null,
+      icd10: l.icd || (diagArray[0]?.code ?? null),
       modifiers: [],
     });
   });

@@ -1,7 +1,7 @@
 // apps/clinician-app/app/insightcore/page.tsx
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { ResponsiveContainer, LineChart, Line, XAxis, Tooltip, CartesianGrid, YAxis } from 'recharts';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -39,7 +39,7 @@ function fmtShort(d?: string) {
   }
 }
 
-export default function InsightCorePage() {
+function InsightCorePageContent() {
   const router = useRouter();
   const search = useSearchParams();
 
@@ -320,5 +320,13 @@ export default function InsightCorePage() {
         </div>
       </section>
     </main>
+  );
+}
+
+export default function InsightCorePage() {
+  return (
+    <Suspense fallback={null}>
+      <InsightCorePageContent />
+    </Suspense>
   );
 }

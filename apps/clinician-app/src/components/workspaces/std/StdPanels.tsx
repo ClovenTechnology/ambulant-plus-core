@@ -1112,7 +1112,10 @@ export function StdResultsAndCommsPanel(props: {
                         value={ev.acknowledgement.note || ''}
                         onChange={(e) =>
                           actions.updateCommunicationEvent(ev.id, {
-                            acknowledgement: { note: e.target.value || undefined },
+                            acknowledgement: {
+                              ...ev.acknowledgement,
+                              note: e.target.value || undefined,
+                            },
                           })
                         }
                         disabled={busy}

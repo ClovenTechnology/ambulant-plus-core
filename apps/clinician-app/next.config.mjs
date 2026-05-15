@@ -1,18 +1,17 @@
+// apps/clinician-app/next.config.mjs
 import { withFxProxy } from '../../next.fx-proxy.mjs';
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
     externalDir: true,
-    tsconfigPaths: true,
   },
-  transpilePackages: ['@ambulant/ui-shell'],
+  transpilePackages: ['@ambulant/ui-shell', '@ambulant/rtc'],
   async headers() {
     return [
       {
         source: '/api/:path*',
         headers: [
-          // TODO: set this to your clinician-app origin in dev/prod
           {
             key: 'Access-Control-Allow-Origin',
             value:

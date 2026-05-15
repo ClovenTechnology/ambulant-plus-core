@@ -39,8 +39,8 @@ export default function InsightCorePage() {
       ? 'critical'
       : alerts.some(a => a.severity === 'high')
       ? 'high'
-      : alerts.some(a => a.severity === 'moderate')
-      ? 'moderate'
+      : alerts.some(a => a.severity === 'medium')
+      ? 'medium'
       : 'low';
 
   return (

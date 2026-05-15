@@ -1,7 +1,7 @@
 'use client';
 
 import {
-  LineChart, Line, ResponsiveContainer, Tooltip, YAxis, XAxis, Area, AreaChart, defs
+  LineChart, Line, ResponsiveContainer, Tooltip, YAxis, XAxis, Area, AreaChart
 } from 'recharts';
 import * as React from 'react';
 

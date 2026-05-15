@@ -13,7 +13,6 @@ import {
   XAxis,
   Tooltip,
 } from 'recharts';
-import { MOCK_PATIENTS } from '@/mock/patients';
 import { useLiveAppointments } from '@/src/hooks/useLiveAppointments';
 
 type Patient = {
@@ -30,6 +29,25 @@ type Patient = {
   timeline?: { ts: string; type: string; note?: string }[];
 };
 
+type AppointmentLike = {
+  id?: string;
+  patient?: { id?: string; name?: string };
+  patientId?: string;
+  patientName?: string;
+  startsAt?: string;
+  endsAt?: string;
+  when?: string;
+  whenISO?: string;
+  timestamp?: string;
+  createdAt?: string;
+  reason?: string;
+  status?: string;
+  roomId?: string;
+  roomName?: string;
+};
+
+const DEFAULT_CLINICIAN_ID = 'clinician-local-001';
+
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? '';
 
 /* ---------- helpers ---------- */
@@ -44,6 +62,36 @@ function formatLongDateISO(iso?: string | number) {
 }
 function daysAgoLabel(d: Date) {
   return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function appointmentPatientId(appt: unknown): string | null {
+  const a = appt as AppointmentLike | null | undefined;
+  const value = a?.patientId ?? a?.patient?.id;
+  return value ? String(value) : null;
+}
+
+function appointmentStart(appt: unknown): string | null {
+  const a = appt as AppointmentLike | null | undefined;
+  return a?.startsAt ?? a?.when ?? a?.whenISO ?? a?.timestamp ?? a?.createdAt ?? null;
+}
+
+function appointmentRoom(appt: unknown): string | null {
+  const a = appt as AppointmentLike | null | undefined;
+  return a?.roomName ?? a?.roomId ?? null;
+}
+
+function openTelevisitForAppointment(appt: unknown) {
+  const a = appt as AppointmentLike | null | undefined;
+  const room = appointmentRoom(a);
+
+  if (room) {
+    window.open(`/sfu/${encodeURIComponent(room)}`, '_blank', 'noopener,noreferrer');
+    return;
+  }
+
+  if (a?.id) {
+    window.open(`/televisit/${encodeURIComponent(String(a.id))}`, '_blank', 'noopener,noreferrer');
+  }
 }
 
 /** compute last 7 days counts and return readable date strings for tooltips */
@@ -179,11 +227,17 @@ function PatientDrawer({
         <div class="header">
           <div>
             <h1>Ambulant+ — Appointment Preview</h1>
-            <p>Clinician: Demo • Patient: ${local.name} (${local.id})</p>
+            <p>Clinician: — • Patient: ${local.name} (${local.id})</p>
           </div>
           <div><small>${new Date().toLocaleString()}</small></div>
         </div>
-        ${appointmentsForPatient.map(a => `<div class="card"><strong>${a.reason || 'Consult'}</strong><div>${new Date(a.startsAt).toLocaleString()} - ${new Date(a.endsAt).toLocaleTimeString()}</div><div>Status: ${a.status}</div></div>`).join('')}
+        ${appointmentsForPatient.map((a) => {
+          const start = appointmentStart(a);
+          const end = (a as AppointmentLike)?.endsAt;
+          const status = (a as AppointmentLike)?.status ?? '—';
+          const reason = (a as AppointmentLike)?.reason ?? 'Consult';
+          return `<div class="card"><strong>${reason}</strong><div>${start ? new Date(start).toLocaleString() : '—'}${end ? ` - ${new Date(end).toLocaleTimeString()}` : ''}</div><div>Status: ${status}</div></div>`;
+        }).join('')}
         <footer style="margin-top:18px;color:#9ca3af;font-size:12px">Order created from MedReach by Ambulant+</footer>
       </body>
       </html>
@@ -213,8 +267,14 @@ function PatientDrawer({
             <button
               className="px-3 py-1 text-sm rounded bg-emerald-600 text-white hover:bg-emerald-700"
               onClick={() => {
-                // Start Televisit: open SFU fallback
-                window.open('/sfu/room-1001', '_blank');
+                const next = appointmentsForPatient.find((a) => {
+                  const ts = appointmentStart(a);
+                  return ts ? Date.parse(ts) >= Date.now() : false;
+                }) ?? appointmentsForPatient[0];
+
+                if (next) {
+                  openTelevisitForAppointment(next);
+                }
               }}
             >
               Start Televisit
@@ -419,67 +479,9 @@ function CreateAppointmentDrawer({
 
 /* ---------- main page ---------- */
 export default function PatientsPage() {
-  // enrich MOCK_PATIENTS with seeded lastSeen and timeline (past + a few upcoming visits)
-  const seeded = useMemo<Patient[]>(() => {
-    const now = Date.now();
-    // helper to ISO date +/- days
-    const isoOffset = (daysOffset: number, minutesOffset = 0) => new Date(now + daysOffset * 86400000 + minutesOffset * 60000).toISOString();
-
-    return (MOCK_PATIENTS || []).map((p, idx) => {
-      // clone
-      const copy: Patient = { ...p };
-      copy.timeline = copy.timeline ? [...copy.timeline] : [];
-
-      // Add 1-3 past visits for most patients
-      const pastCount = idx % 3 === 0 ? 0 : 1 + (idx % 3); // variety
-      for (let i = 0; i < pastCount; i++) {
-        const daysAgo = 2 + i + (idx % 5);
-        copy.timeline.push({
-          ts: isoOffset(-daysAgo, (i + 1) * 10),
-          type: 'completed',
-          note: 'Past consult (demo)',
-        });
-      }
-
-      // Add upcoming visits for some patients
-      if (idx % 4 === 0) {
-        // schedule an upcoming visit in 1-3 days
-        const daysAhead = 1 + (idx % 3);
-        copy.timeline.push({
-          ts: isoOffset(daysAhead, 15),
-          type: 'appointment',
-          note: 'Upcoming televisit (demo)',
-        });
-      }
-
-      // Occasionally add a cancelled or no-show
-      if (idx % 7 === 0) {
-        copy.timeline.push({ ts: isoOffset(-1 - (idx % 4)), type: 'no-show', note: 'No-show (demo)' });
-      }
-      if (idx % 11 === 0) {
-        copy.timeline.push({ ts: isoOffset(-3 - (idx % 5)), type: 'cancelled', note: 'Cancelled (demo)' });
-      }
-
-      // ensure lastSeen is the latest timeline ts or a random recent date
-      const times = (copy.timeline || []).map(t => Date.parse(t.ts || '')).filter(Boolean);
-      if (times.length) {
-        copy.lastSeen = new Date(Math.max(...times)).toISOString();
-      } else {
-        // fallback lastSeen within last 30 days
-        const randomDays = -(1 + (idx % 28));
-        copy.lastSeen = isoOffset(randomDays);
-      }
-
-      // risk spread
-      if (!copy.risk) {
-        copy.risk = idx % 10 === 0 ? 'high' : idx % 5 === 0 ? 'medium' : 'low';
-      }
-
-      return copy;
-    });
-  }, []);
-
-  const [patients, setPatients] = useState<Patient[]>(seeded);
+  const [patients, setPatients] = useState<Patient[]>([]);
+  const [loadingPatients, setLoadingPatients] = useState(false);
+  const [patientsErr, setPatientsErr] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [genderFilter, setGenderFilter] = useState('');
   const [locationFilter, setLocationFilter] = useState('');
@@ -494,25 +496,84 @@ export default function PatientsPage() {
   const totalPages = Math.max(1, Math.ceil(patients.length / pageSize));
 
   // wire useLiveAppointments with refreshKey to force refetch when refreshKey changes
-  const clinicianId = 'clin-demo';
+  const clinicianId = DEFAULT_CLINICIAN_ID;
   const clinicianHookArg = `${clinicianId}::${refreshKey}`;
   const live = useLiveAppointments?.(clinicianHookArg) ?? { appointments: [], progressMap: {} };
 
-  // Merge live appointments into patient timelines (non-destructive, presentation-friendly)
+  useEffect(() => {
+    const ac = new AbortController();
+
+    async function loadPatients() {
+      setLoadingPatients(true);
+      setPatientsErr(null);
+
+      try {
+        const res = await fetch('/api/patients', {
+          cache: 'no-store',
+          signal: ac.signal,
+        });
+
+        const js = await res.json().catch(() => null);
+
+        if (!res.ok) {
+          throw new Error(
+            js && typeof js === 'object' && 'error' in js && js.error
+              ? String(js.error)
+              : `HTTP ${res.status}`,
+          );
+        }
+
+        const items = Array.isArray(js) ? js : Array.isArray(js?.items) ? js.items : [];
+        setPatients(
+          items
+            .map((p: any) => ({
+              id: String(p.id ?? p.patientId ?? ''),
+              name: String(p.name ?? p.fullName ?? p.displayName ?? 'Unnamed patient'),
+              dob: p.dob ?? p.dateOfBirth ?? undefined,
+              gender: p.gender ?? undefined,
+              email: p.email ?? undefined,
+              phone: p.phone ?? p.mobile ?? undefined,
+              location: p.location ?? p.address?.city ?? undefined,
+              tags: Array.isArray(p.tags) ? p.tags : [],
+              lastSeen: p.lastSeen ?? p.lastVisitAt ?? p.updatedAt ?? undefined,
+              risk:
+                p.risk === 'high' || p.risk === 'medium' || p.risk === 'low'
+                  ? p.risk
+                  : undefined,
+              timeline: Array.isArray(p.timeline) ? p.timeline : [],
+            }))
+            .filter((p: Patient) => p.id),
+        );
+      } catch (e: any) {
+        if (e?.name === 'AbortError') return;
+        console.error('[PatientsPage] failed to load patients', e);
+        setPatients([]);
+        setPatientsErr(e?.message || 'Failed to load patients.');
+      } finally {
+        setLoadingPatients(false);
+      }
+    }
+
+    loadPatients();
+
+    return () => ac.abort();
+  }, [refreshKey]);
+
+  // Merge live appointments into patient timelines (non-destructive)
   useEffect(() => {
     if (!live || !Array.isArray(live.appointments)) return;
     setPatients(prev => {
       const byId = new Map(prev.map(p => [p.id, { ...p }]));
       for (const a of live.appointments) {
-        const pid = a.patientId || a.patient?.id;
+        const pid = appointmentPatientId(a);
         if (!pid) continue;
         const p = byId.get(pid);
-        const ts = a.startsAt || a.when || a.whenISO || a.timestamp || a.createdAt || new Date().toISOString();
+        const ts = appointmentStart(a) || new Date().toISOString();
         if (p) {
           const timeline = p.timeline ? [...p.timeline] : [];
           // avoid duplicating same ts+type
           if (!timeline.some(t => t.ts === ts && t.type === 'appointment')) {
-            timeline.push({ ts, type: 'appointment', note: a.reason || 'Televisit' });
+            timeline.push({ ts, type: 'appointment', note: (a as AppointmentLike).reason || 'Televisit' });
             p.timeline = timeline;
             p.lastSeen = ts;
             byId.set(pid, { ...p });
@@ -527,7 +588,6 @@ export default function PatientsPage() {
   }, [JSON.stringify(live?.appointments || [])]);
 
   // KPI calculations, including past visits
-  const now = useMemo(() => new Date(), []);
   const total = patients.length;
   const upcoming = patients.filter((p) => (p.timeline || []).some(t => (t.type === 'appointment' || t.type === 'scheduled') && new Date(t.ts) > new Date())).length;
   const highRisk = patients.filter(p => p.risk === 'high').length;
@@ -595,6 +655,7 @@ export default function PatientsPage() {
   // create ad-hoc appointment (used by card button & Start Televisit start)
   const createAppointmentFor = async (p: Patient | null) => {
     if (!p) return;
+
     try {
       const payload = {
         clinicianId,
@@ -602,23 +663,54 @@ export default function PatientsPage() {
         patientName: p.name,
         startsAt: new Date().toISOString(),
         endsAt: new Date(Date.now() + 20 * 60000).toISOString(),
-        reason: 'Ad-hoc (created from patients page)',
+        reason: 'Ad-hoc appointment created from patients page',
         status: 'booked',
       };
-      const r = await fetch('/api/appointments', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) });
-      if (!r.ok) throw new Error('backend-failed');
-      const j = await r.json();
-      setPatients(prev => prev.map(x => x.id === p.id ? { ...x, timeline: [...(x.timeline || []), { ts: payload.startsAt, type: 'appointment', note: payload.reason }], lastSeen: payload.startsAt } : x));
+
+      const r = await fetch('/api/appointments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const j = await r.json().catch(() => null);
+
+      if (!r.ok) {
+        throw new Error(j?.error || `HTTP ${r.status}`);
+      }
+
+      const created = j?.item ?? j;
+
+      setPatients(prev =>
+        prev.map(x =>
+          x.id === p.id
+            ? {
+                ...x,
+                timeline: [
+                  ...(x.timeline || []),
+                  {
+                    ts: created?.startsAt || payload.startsAt,
+                    type: 'appointment',
+                    note: created?.reason || payload.reason,
+                  },
+                ],
+                lastSeen: created?.startsAt || payload.startsAt,
+              }
+            : x,
+        ),
+      );
+
       setToast({ msg: 'Appointment created', kind: 'success' });
       refreshKeyBump();
-      window.open('/sfu/room-1001', '_blank');
-      return j;
+
+      if (created) {
+        openTelevisitForAppointment(created);
+      }
+
+      return created;
     } catch (e: any) {
-      // fallback local creation
-      const ts = new Date().toISOString();
-      setPatients(prev => prev.map(x => x.id === p.id ? { ...x, timeline: [...(x.timeline || []), { ts, type: 'appointment', note: 'Ad-hoc (local)' }], lastSeen: ts } : x));
-      setToast({ msg: 'Appointment created (local fallback)', kind: 'success' });
-      refreshKeyBump();
+      console.error('[PatientsPage] appointment creation failed', e);
+      setToast({ msg: e?.message || 'Failed to create appointment', kind: 'error' });
     }
   };
 
@@ -631,8 +723,8 @@ export default function PatientsPage() {
   const rescheduleAppointment = (p: Patient, newWhenISO: string) => {
     // keep snapshot for undo
     prevSnapshotRef.current = JSON.parse(JSON.stringify(patients));
-    setPatients(prev => prev.map(x => x.id === p.id ? { ...x, timeline: [...(x.timeline || []), { ts: newWhenISO, type: 'appointment', note: 'Rescheduled via modal' }], lastSeen: newWhenISO } : x));
-    setToast({ msg: 'Appointment rescheduled (demo)', kind: 'success', undo: () => {
+    setPatients(prev => prev.map(x => x.id === p.id ? { ...x, timeline: [...(x.timeline || []), { ts: newWhenISO, type: 'appointment', note: 'Rescheduled' }], lastSeen: newWhenISO } : x));
+    setToast({ msg: 'Appointment rescheduled', kind: 'success', undo: () => {
       if (prevSnapshotRef.current) setPatients(prevSnapshotRef.current);
       refreshKeyBump();
       setToast({ msg: 'Undo: reschedule reverted', kind: 'success' });
@@ -642,8 +734,8 @@ export default function PatientsPage() {
 
   const cancelAppointment = (p: Patient) => {
     prevSnapshotRef.current = JSON.parse(JSON.stringify(patients));
-    setPatients(prev => prev.map(x => x.id === p.id ? { ...x, timeline: [...(x.timeline || []), { ts: new Date().toISOString(), type: 'cancelled', note: 'Cancelled via modal' }] } : x));
-    setToast({ msg: 'Appointment cancelled (demo)', kind: 'success', undo: () => {
+    setPatients(prev => prev.map(x => x.id === p.id ? { ...x, timeline: [...(x.timeline || []), { ts: new Date().toISOString(), type: 'cancelled', note: 'Cancelled' }] } : x));
+    setToast({ msg: 'Appointment cancelled', kind: 'success', undo: () => {
       if (prevSnapshotRef.current) setPatients(prevSnapshotRef.current);
       refreshKeyBump();
       setToast({ msg: 'Undo: cancel reverted', kind: 'success' });
@@ -653,7 +745,7 @@ export default function PatientsPage() {
 
   // Get appointments for a patient from live.appointments fallback to mock (presentation)
   const appointmentsForPatient = useCallback((pid: string) => {
-    const liveA = (live && Array.isArray(live.appointments)) ? live.appointments.filter(a => a.patientId === pid) : [];
+    const liveA = (live && Array.isArray(live.appointments)) ? live.appointments.filter(a => appointmentPatientId(a) === pid) : [];
     if (liveA && liveA.length) return liveA;
     // fallback to mapping from patient.timeline
     const p = patients.find(x => x.id === pid);
@@ -671,21 +763,34 @@ export default function PatientsPage() {
 
   // Build upcoming appointments list (next 5) across all patients (live first)
   const upcomingAppointments = useMemo(() => {
-    const all: any[] = [];
+    type UpcomingAppointment = {
+      id: string;
+      patientId?: string;
+      patientName: string;
+      startsAt: string;
+      reason: string;
+      status: string;
+      roomId?: string;
+      roomName?: string;
+    };
+
+    const all: UpcomingAppointment[] = [];
 
     // live appointments (if any)
     if (live && Array.isArray(live.appointments)) {
       for (const a of live.appointments) {
-        const ts = Date.parse(a.startsAt || a.when || a.whenISO || a.timestamp || '');
+        const ts = Date.parse(appointmentStart(a) || '');
         if (!isFinite(ts)) continue;
         if (ts > Date.now()) {
           all.push({
             id: a.id || `live-${Math.random().toString(36).slice(2, 8)}`,
-            patientId: a.patientId,
-            patientName: a.patientName || a.patient?.name || (patients.find(p => p.id === a.patientId)?.name ?? 'Unknown'),
-            startsAt: a.startsAt || a.when || a.whenISO,
-            reason: a.reason || 'Televisit',
-            status: a.status || 'booked',
+            patientId: appointmentPatientId(a) ?? undefined,
+            patientName: (a as AppointmentLike).patientName || (a as AppointmentLike).patient?.name || (patients.find(p => p.id === appointmentPatientId(a))?.name ?? 'Unknown'),
+            startsAt: appointmentStart(a) || new Date(ts).toISOString(),
+            reason: (a as AppointmentLike).reason || 'Televisit',
+            status: (a as AppointmentLike).status || 'booked',
+            roomId: (a as AppointmentLike).roomId,
+            roomName: (a as AppointmentLike).roomName,
           });
         }
       }
@@ -767,6 +872,18 @@ export default function PatientsPage() {
         </div>
       </section>
 
+      {patientsErr && (
+        <div className="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {patientsErr}
+        </div>
+      )}
+
+      {loadingPatients && (
+        <div className="rounded border bg-white px-3 py-2 text-sm text-gray-600">
+          Loading patients…
+        </div>
+      )}
+
       {/* Two-column: patient list + upcoming panel */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
         {/* Patient list (scrollable, limited height) */}
@@ -839,7 +956,7 @@ export default function PatientsPage() {
 
                       <button
                         className="px-2 py-1 text-xs rounded border bg-white hover:bg-gray-50"
-                        onClick={(e) => { e.stopPropagation(); alert('Open New Note (demo)'); }}
+                        onClick={(e) => { e.stopPropagation(); setToast({ msg: 'Notes are not wired from this page yet.', kind: 'error' }); }}
                       >
                         New Note
                       </button>
@@ -848,7 +965,7 @@ export default function PatientsPage() {
                       {hasUpcoming && (
                         <button
                           className="px-2 py-1 text-xs rounded border bg-white hover:bg-gray-50"
-                          onClick={(e) => { e.stopPropagation(); window.open('/sfu/room-1001', '_blank'); }}
+                          onClick={(e) => { e.stopPropagation(); createAppointmentFor(p); }}
                         >
                           Join
                         </button>
@@ -880,7 +997,7 @@ export default function PatientsPage() {
                     <div className="mt-2 flex items-center gap-2">
                       <button
                         className="px-2 py-1 text-xs rounded bg-indigo-600 text-white"
-                        onClick={() => window.open('/sfu/room-1001', '_blank')}
+                        onClick={() => openTelevisitForAppointment(a)}
                       >
                         Join
                       </button>
@@ -893,7 +1010,7 @@ export default function PatientsPage() {
                             setSelected(p);
                             setDrawerOpenState(true);
                           } else {
-                            alert('Patient not found (demo)');
+                            setToast({ msg: 'Patient not found', kind: 'error' });
                           }
                         }}
                       >
@@ -924,11 +1041,26 @@ export default function PatientsPage() {
         patients={patients}
         clinicianId={clinicianId}
         onCreated={(a) => {
-          const pid = a?.patientId || a?.patient?.id;
+          const pid = appointmentPatientId(a);
           if (pid) {
-            setPatients(prev => prev.map(p => p.id === pid ? { ...p, timeline: [...(p.timeline || []), { ts: a.startsAt || new Date().toISOString(), type: 'appointment', note: a.reason || '' }], lastSeen: a.startsAt || new Date().toISOString() } : p));
+            const ts = appointmentStart(a) || new Date().toISOString();
+            const reason = (a as AppointmentLike)?.reason || '';
+            setPatients(prev =>
+              prev.map(p =>
+                p.id === pid
+                  ? {
+                      ...p,
+                      timeline: [
+                        ...(p.timeline || []),
+                        { ts, type: 'appointment', note: reason },
+                      ],
+                      lastSeen: ts,
+                    }
+                  : p,
+              ),
+            );
           }
-          setToast({ msg: 'Appointment created (backend)', kind: 'success' });
+          setToast({ msg: 'Appointment created', kind: 'success' });
           refreshKeyBump();
         }}
         refreshKeyBump={refreshKeyBump}

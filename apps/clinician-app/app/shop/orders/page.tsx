@@ -1,7 +1,7 @@
 //apps/clinician-app/app/shop/orders/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -43,9 +43,9 @@ function moneyZar(n: number) {
   }
 }
 
-export default function ClinicianShopOrdersPage() {
+function ClinicianShopOrdersPageContent() {
   const sp = useSearchParams();
-  const statusParam = (sp.get('status') || '').toLowerCase(); // success | cancelled
+  const statusParam = (sp?.get('status') || '').toLowerCase(); // success | cancelled
 
   const [uid] = useState(() => getUid());
   const [status, setStatus] = useState<(typeof STATUS_PILLS)[number]>('ALL');
@@ -235,5 +235,13 @@ export default function ClinicianShopOrdersPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function ClinicianShopOrdersPage() {
+  return (
+    <Suspense fallback={null}>
+      <ClinicianShopOrdersPageContent />
+    </Suspense>
   );
 }

@@ -1,7 +1,8 @@
 // apps/clinician-app/app/workspaces/oncology/page.tsx
 'use client';
 
-import React, { useMemo, useRef, useState } from 'react';
+import React, { Suspense, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 type TabKey =
   | 'overview'
@@ -22,7 +23,7 @@ type EvidenceItem = {
 
 type RegimenCycle = {
   id: string;
-  label: string; // e.g. "Cycle 1"
+  label: string;
   date?: string;
   status: 'planned' | 'given' | 'held' | 'completed';
   notes?: string;
@@ -30,7 +31,7 @@ type RegimenCycle = {
 
 type Regimen = {
   id: string;
-  name: string; // e.g. "FOLFOX"
+  name: string;
   intent: 'curative' | 'palliative' | 'adjuvant' | 'neoadjuvant';
   line: '1L' | '2L' | '3L+' | 'unknown';
   startDate?: string;
@@ -43,6 +44,14 @@ function uid(prefix = 'id') {
 
 function clsx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
+}
+
+function firstNonEmpty(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = String(v ?? '').trim();
+    if (t) return t;
+  }
+  return '';
 }
 
 function SectionCard(props: {
@@ -132,7 +141,7 @@ function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
 function Button(props: React.ButtonHTMLAttributes<HTMLButtonElement> & { tone?: 'primary' | 'ghost' | 'danger' }) {
   const tone = props.tone ?? 'primary';
   const base =
-    'inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition active:scale-[0.99]';
+    'inline-flex h-9 items-center justify-center gap-2 rounded-lg px-3 text-sm font-medium transition active:scale-[0.99] disabled:opacity-50';
   const styles =
     tone === 'primary'
       ? 'bg-slate-900 text-white hover:bg-slate-800'
@@ -156,45 +165,69 @@ const TABS: Array<{ key: TabKey; label: string }> = [
   { key: 'evidence', label: 'Evidence' },
 ];
 
-export default function OncologyWorkspacePage() {
-  // --- Mock encounter context (safe demo defaults)
+function OncologyWorkspacePageContent() {
+  const sp = useSearchParams() ?? new URLSearchParams();
+
+  const patientId = firstNonEmpty(
+    sp.get('patientId'),
+    sp.get('subjectPatientId'),
+    sp.get('patient_id')
+  );
+  const encounterId = firstNonEmpty(
+    sp.get('encounterId'),
+    sp.get('caseId'),
+    sp.get('encounter_id')
+  );
+  const clinicianId = firstNonEmpty(
+    sp.get('clinicianId'),
+    sp.get('providerId'),
+    sp.get('uid'),
+    sp.get('clinician_id')
+  );
+  const mrnFromQuery = firstNonEmpty(sp.get('mrn'));
+  const caseIdFromQuery = firstNonEmpty(sp.get('caseId'));
+  const patientNameFromQuery = firstNonEmpty(sp.get('patientName'));
+  const ageFromQuery = firstNonEmpty(sp.get('age'));
+  const sexFromQuery = firstNonEmpty(sp.get('sex'));
+
+  const contextReady = Boolean(patientId && encounterId && clinicianId);
+  const contextBanner = !contextReady
+    ? 'Missing consultation context. Open this workspace from the consultation flow so patient, encounter and clinician IDs are present.'
+    : null;
+
   const patient = useMemo(
     () => ({
-      name: 'Demo Patient',
-      age: 54,
-      sex: 'F' as const,
-      mrn: 'MRN-ONC-00421',
-      caseId: 'CASE-ONC-2025-0019',
+      name: patientNameFromQuery || 'Demo Patient',
+      age: ageFromQuery ? Number(ageFromQuery) || 54 : 54,
+      sex: (sexFromQuery || 'F') as 'F' | 'M' | 'Other',
+      mrn: mrnFromQuery || 'MRN-ONC-00421',
+      caseId: caseIdFromQuery || encounterId || 'CASE-ONC-2025-0019',
     }),
-    []
+    [patientNameFromQuery, ageFromQuery, sexFromQuery, mrnFromQuery, caseIdFromQuery, encounterId]
   );
 
   const [tab, setTab] = useState<TabKey>('overview');
+  const [banner, setBanner] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
 
-  // --- Core oncology fields
   const [primaryDx, setPrimaryDx] = useState('Breast carcinoma (suspected)');
   const [site, setSite] = useState('Breast');
   const [laterality, setLaterality] = useState<'left' | 'right' | 'bilateral' | 'na'>('left');
   const [histology, setHistology] = useState('Invasive ductal carcinoma');
   const [grade, setGrade] = useState<'1' | '2' | '3' | 'unknown'>('2');
 
-  // TNM + stage
   const [tStage, setTStage] = useState('T2');
   const [nStage, setNStage] = useState('N1');
   const [mStage, setMStage] = useState('M0');
   const [overallStage, setOverallStage] = useState<'I' | 'II' | 'III' | 'IV' | 'unknown'>('II');
 
-  // Biomarkers
   const [er, setEr] = useState<'pos' | 'neg' | 'unknown'>('pos');
   const [pr, setPr] = useState<'pos' | 'neg' | 'unknown'>('pos');
   const [her2, setHer2] = useState<'pos' | 'neg' | 'equivocal' | 'unknown'>('unknown');
   const [ki67, setKi67] = useState('20');
 
-  // Performance status & goals
   const [ecog, setEcog] = useState<0 | 1 | 2 | 3 | 4>(1);
   const [intent, setIntent] = useState<'curative' | 'palliative' | 'adjuvant' | 'neoadjuvant'>('curative');
 
-  // Notes
   const [assessment, setAssessment] = useState(
     'Patient presents for initial oncology consult. Review biopsy, stage with imaging, and confirm receptor status.'
   );
@@ -205,11 +238,10 @@ export default function OncologyWorkspacePage() {
     'Consider multidisciplinary tumor board review once imaging and HER2 result are available.'
   );
 
-  // Regimen + cycles
   const [regimens, setRegimens] = useState<Regimen[]>([
     {
       id: uid('reg'),
-      name: 'AC → T (demo)',
+      name: 'AC â†’ T (demo)',
       intent: 'neoadjuvant',
       line: '1L',
       startDate: '',
@@ -220,7 +252,6 @@ export default function OncologyWorkspacePage() {
     },
   ]);
 
-  // Labs / imaging trackers
   const [baselineLabs, setBaselineLabs] = useState({
     fbc: 'Pending',
     uec: 'Pending',
@@ -234,7 +265,6 @@ export default function OncologyWorkspacePage() {
     mammo: 'Available',
   });
 
-  // Toxicity checklist + follow-up
   const [tox, setTox] = useState({
     nausea: false,
     neuropathy: false,
@@ -248,7 +278,6 @@ export default function OncologyWorkspacePage() {
     'Advise patient to seek urgent care for fever, uncontrolled vomiting, new chest pain, or severe shortness of breath.'
   );
 
-  // Evidence
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [evidence, setEvidence] = useState<EvidenceItem[]>([
     { id: uid('ev'), kind: 'pdf', title: 'Biopsy report (demo)', status: 'ready', createdAt: 'Today', source: 'integrated' },
@@ -308,11 +337,11 @@ export default function OncologyWorkspacePage() {
       source: 'upload',
     }));
     setEvidence((prev) => [...items, ...prev]);
+    setBanner({ kind: 'success', text: `Added ${items.length} evidence item(s) locally.` });
   }
 
   return (
     <div className="min-h-[calc(100vh-56px)] w-full bg-slate-50">
-      {/* Header */}
       <div className="border-b bg-white">
         <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-4 py-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -321,6 +350,11 @@ export default function OncologyWorkspacePage() {
               <div className="mt-1 text-xs text-slate-500">
                 Case <span className="font-medium text-slate-700">{patient.caseId}</span> · MRN{' '}
                 <span className="font-medium text-slate-700">{patient.mrn}</span>
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                Patient ID <span className="font-mono">{patientId || '—'}</span> · Encounter{' '}
+                <span className="font-mono">{encounterId || '—'}</span> · Clinician{' '}
+                <span className="font-mono">{clinicianId || '—'}</span>
               </div>
             </div>
 
@@ -347,11 +381,13 @@ export default function OncologyWorkspacePage() {
                 View Evidence
               </Button>
               <Button
+                disabled={!contextReady}
                 onClick={() => {
-                  // Demo: lightweight “save” affordance without wiring
-                  // Your real app can wire this to API + audit later.
-                  // eslint-disable-next-line no-alert
-                  alert('Saved (demo). Wire this to your API when ready.');
+                  if (!contextReady) {
+                    setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+                    return;
+                  }
+                  setBanner({ kind: 'success', text: 'Workspace saved locally (demo). Wire to API when ready.' });
                 }}
               >
                 Save Workspace
@@ -361,8 +397,28 @@ export default function OncologyWorkspacePage() {
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="mx-auto w-full max-w-7xl px-4 py-4">
+        {contextBanner ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {contextBanner}
+          </div>
+        ) : null}
+
+        {banner ? (
+          <div
+            className={
+              'mb-4 rounded-lg border px-3 py-2 text-sm ' +
+              (banner.kind === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                : banner.kind === 'error'
+                ? 'border-rose-200 bg-rose-50 text-rose-900'
+                : 'border-slate-200 bg-white text-slate-800')
+            }
+          >
+            {banner.text}
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap gap-2">
           {TABS.map((t) => (
             <button
@@ -379,9 +435,7 @@ export default function OncologyWorkspacePage() {
           ))}
         </div>
 
-        {/* Content */}
         <div className="mt-4 grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* Left main */}
           <div className="lg:col-span-8">
             {tab === 'overview' ? (
               <div className="space-y-4">
@@ -825,7 +879,7 @@ export default function OncologyWorkspacePage() {
                         ['rash', 'Rash'],
                       ] as const
                     ).map(([k, label]) => {
-                      const checked = (tox as any)[k] as boolean;
+                      const checked = tox[k];
                       return (
                         <label
                           key={k}
@@ -911,7 +965,6 @@ export default function OncologyWorkspacePage() {
             ) : null}
           </div>
 
-          {/* Right rail */}
           <div className="lg:col-span-4">
             <div className="space-y-4">
               <SectionCard title="Quick Clinician Tools" subtitle="Fast controls for the consult">
@@ -1022,5 +1075,13 @@ export default function OncologyWorkspacePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OncologyWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <OncologyWorkspacePageContent />
+    </Suspense>
   );
 }

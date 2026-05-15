@@ -6,26 +6,45 @@ function Timeline({ kind }: { kind: 'erx' | 'lab' }) {
   const [items, setItems] = useState<Array<{ status: string; at: string }>>([]);
   const [id, setId] = useState<string>(kind === 'erx' ? 'ERX-1001' : 'LAB-2001');
   const [loading, setLoading] = useState(false);
+
   const title =
-    kind === 'erx' ? 'CarePort (Pharmacy) Timeline' : 'MedReach (Phlebotomy) Timeline';
+    kind === 'erx' ? 'CarePort (Pharmacy) Timeline' : 'MedReach Timeline';
 
   useEffect(() => {
     let on = true;
-    (async () => {
+
+    async function loadTimeline() {
       if (!id) return;
+
       setLoading(true);
+
       try {
-        const res = await fetch(`/api/${kind}/timeline?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
+        const res = await fetch(
+          `/api/${kind}/timeline?id=${encodeURIComponent(id)}`,
+          { cache: 'no-store' },
+        );
+
         const data = await res.json();
+
         if (!on) return;
+
         setItems(Array.isArray(data.timeline) ? data.timeline : []);
       } catch {
-        if (on) setItems([]);
+        if (on) {
+          setItems([]);
+        }
       } finally {
-        if (on) setLoading(false);
+        if (on) {
+          setLoading(false);
+        }
       }
-    })();
-    return () => { on = false; };
+    }
+
+    loadTimeline();
+
+    return () => {
+      on = false;
+    };
   }, [id, kind]);
 
   return (
@@ -39,19 +58,30 @@ function Timeline({ kind }: { kind: 'erx' | 'lab' }) {
           onChange={(e) => setId(e.target.value)}
           placeholder={kind === 'erx' ? 'ERX-1001' : 'LAB-2001'}
         />
-        <span className="text-xs text-gray-500">Enter an order ID returned by the POST API.</span>
+        <span className="text-xs text-gray-500">
+          Enter an order ID returned by the POST API.
+        </span>
       </div>
 
       {loading ? (
         <div className="text-sm text-gray-500">Loading…</div>
       ) : !items.length ? (
-        <div className="text-sm text-gray-500">No timeline yet for <span className="font-mono">{id}</span>.</div>
+        <div className="text-sm text-gray-500">
+          No timeline yet for <span className="font-mono">{id}</span>.
+        </div>
       ) : (
         <ul className="space-y-2 text-sm">
           {items.map((it, i) => (
-            <li key={i} className="p-2 border rounded flex justify-between bg-white">
-              <span className="capitalize">{it.status.replaceAll('_', ' ')}</span>
-              <span className="text-gray-500">{new Date(it.at).toLocaleString()}</span>
+            <li
+              key={i}
+              className="p-2 border rounded flex justify-between bg-white"
+            >
+              <span className="capitalize">
+                {it.status.replace(/_/g, ' ')}
+              </span>
+              <span className="text-gray-500">
+                {new Date(it.at).toLocaleString()}
+              </span>
             </li>
           ))}
         </ul>
@@ -61,6 +91,5 @@ function Timeline({ kind }: { kind: 'erx' | 'lab' }) {
 }
 
 export default function Page() {
-  // CarePort timeline focuses on ERX by default
   return <Timeline kind="erx" />;
 }

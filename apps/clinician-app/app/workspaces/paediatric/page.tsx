@@ -10,7 +10,8 @@ Notes:
 
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { Suspense, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import {
   TogglePills,
@@ -52,12 +53,6 @@ const FINDING_TYPES = [
 
 type FindingTypeKey = (typeof FINDING_TYPES)[number]['key'];
 
-type PaediatricWorkspaceProps = {
-  patientId?: string;
-  encounterId?: string;
-  clinicianId?: string;
-};
-
 function nowISO() {
   return new Date().toISOString();
 }
@@ -89,18 +84,44 @@ function sectionHint(s: PedsSection) {
   }
 }
 
-export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps) {
-  const patientId = props.patientId ?? 'pat_demo_001';
-  const encounterId = props.encounterId ?? 'enc_demo_001';
-  const clinicianId = props.clinicianId ?? 'clin_demo_001';
+function firstNonEmpty(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = String(v ?? '').trim();
+    if (t) return t;
+  }
+  return '';
+}
+
+function PaediatricWorkspacePageContent() {
+  const searchParams = useSearchParams() ?? new URLSearchParams();
+
+  const patientId = firstNonEmpty(
+    searchParams.get('patientId'),
+    searchParams.get('subjectPatientId'),
+    searchParams.get('patient_id')
+  );
+  const encounterId = firstNonEmpty(
+    searchParams.get('encounterId'),
+    searchParams.get('caseId'),
+    searchParams.get('encounter_id')
+  );
+  const clinicianId = firstNonEmpty(
+    searchParams.get('clinicianId'),
+    searchParams.get('providerId'),
+    searchParams.get('uid'),
+    searchParams.get('clinician_id')
+  );
+
+  const contextReady = Boolean(patientId && encounterId && clinicianId);
+  const contextBanner = !contextReady
+    ? 'Missing consultation context. Open this workspace from the consultation flow so patient, encounter and clinician IDs are present.'
+    : null;
 
   const [section, setSection] = useState<PedsSection>('triage');
 
-  // Optimistic local state (until GET exists)
   const [findings, setFindings] = useState<Finding[]>([]);
   const [evidence, setEvidence] = useState<Evidence[]>([]);
 
-  // UI state
   const [bookmarkOpen, setBookmarkOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [banner, setBanner] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
@@ -111,7 +132,6 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
     [evidence, selectedEvidenceId]
   );
 
-  // Mini paeds template (MVP-lite) — stored in meta for now
   const [template, setTemplate] = useState({
     ageMonths: '' as string,
     weightKg: '' as string,
@@ -166,18 +186,22 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
     return evidence
       .filter((ev) => (ev.location as any)?.kind === 'peds_section')
       .filter((ev) => (ev.location as any)?.section === section)
-      .sort((a, b) => (a.capturedAt < b.capturedAt ? 1 : -1));
+      .sort((a, b) => ((a.capturedAt || '') < (b.capturedAt || '') ? 1 : -1));
   }, [evidence, section]);
 
   const evidenceCountForFinding = (findingId: string) => evidence.filter((e) => e.findingId === findingId).length;
 
   const createManualFinding = async (type: FindingTypeKey, severity?: Finding['severity'], note?: string) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForSection(section);
 
     const meta = { section, template };
 
-    // optimistic finding
     const optimisticId = tmpId('fd');
     const optimistic: Finding = {
       id: optimisticId,
@@ -224,6 +248,11 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
   };
 
   const handleBookmark = async (payload: { findingTypeKey: string; severity?: Finding['severity']; note?: string }) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     const type = payload.findingTypeKey as FindingTypeKey;
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForSection(section);
@@ -233,7 +262,6 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
     setBusy(true);
 
     try {
-      // 1) Create finding
       const createdFinding = await postFinding({
         patientId,
         encounterId,
@@ -249,7 +277,6 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
       });
       setFindings((prev) => [createdFinding, ...prev]);
 
-      // 2) Snapshot evidence (ready) — e.g., rash photo, throat image, dehydration signs, etc.
       const snapshotLabel = `Paeds Snapshot (${section})`;
       const snapshot = await postEvidence({
         patientId,
@@ -272,7 +299,6 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
         status: 'ready',
       });
 
-      // 3) Clip evidence (processing) — short clip: breathing effort, cough, gait, etc.
       const t = Date.now();
       const clipLabel = `Paeds Clip (${section})`;
 
@@ -313,6 +339,11 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
   };
 
   const addDemoPinAnnotation = async () => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     if (!selectedEvidence) {
       setBanner({ kind: 'info', text: 'Select an evidence item first.' });
       return;
@@ -354,13 +385,19 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
             <h1 className="text-lg font-semibold">Paediatric Workspace</h1>
           </div>
           <div className="text-xs text-gray-600">
-            Patient: <span className="font-mono">{patientId}</span> · Encounter:{' '}
-            <span className="font-mono">{encounterId}</span>
+            Patient: <span className="font-mono">{patientId || '—'}</span> · Encounter:{' '}
+            <span className="font-mono">{encounterId || '—'}</span>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
+        {contextBanner ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {contextBanner}
+          </div>
+        ) : null}
+
         {banner ? (
           <div
             className={
@@ -377,7 +414,6 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
         ) : null}
 
         <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1.6fr_1.1fr] gap-4">
-          {/* LEFT */}
           <section className="rounded-xl border bg-white shadow-sm">
             <div className="border-b px-4 py-3">
               <div className="text-sm font-semibold">Sections</div>
@@ -423,7 +459,6 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
             </div>
           </section>
 
-          {/* CENTER */}
           <section className="rounded-xl border bg-white shadow-sm">
             <div className="border-b px-4 py-3 flex items-center justify-between">
               <div>
@@ -434,7 +469,8 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
               <button
                 className="rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800 disabled:opacity-50"
                 onClick={() => setBookmarkOpen(true)}
-                disabled={busy}
+                disabled={busy || !contextReady}
+                type="button"
               >
                 Bookmark
               </button>
@@ -444,25 +480,56 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
               <div className="rounded-lg border bg-gray-100 h-64 overflow-hidden">
                 {selectedEvidence ? (
                   selectedEvidence.kind === 'image' ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={selectedEvidence.url} alt="Selected evidence" className="h-full w-full object-contain" />
+                    selectedEvidence.url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={selectedEvidence.url}
+                        alt="Selected evidence"
+                        className="h-full w-full object-contain"
+                      />
+                    ) : (
+                      <div className="h-full w-full grid place-items-center text-gray-700">
+                        <div className="text-center px-6">
+                          <div className="text-sm font-medium">Image pending</div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            Status: {selectedEvidence.status}
+                            {selectedEvidence.jobId ? ` · job: ${selectedEvidence.jobId}` : ''}
+                          </div>
+                          <div className="mt-2 text-xs text-gray-500">
+                            The image will appear when the final media URL is available.
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  ) : selectedEvidence.url ? (
+                    <div className="h-full w-full bg-black grid place-items-center">
+                      <video
+                        controls
+                        src={selectedEvidence.url}
+                        className="max-h-full max-w-full"
+                      />
+                    </div>
                   ) : (
                     <div className="h-full w-full grid place-items-center text-gray-700">
-                      <div className="text-center">
+                      <div className="text-center px-6">
                         <div className="text-sm font-medium">Clip selected</div>
                         <div className="text-xs text-gray-500 mt-1">
                           Status: {selectedEvidence.status}
                           {selectedEvidence.jobId ? ` · job: ${selectedEvidence.jobId}` : ''}
                         </div>
-                        <div className="mt-2 text-xs text-gray-500">(Playback wired when real clip URLs are returned.)</div>
+                        <div className="mt-2 text-xs text-gray-500">
+                          Playback appears when the final clip URL is available.
+                        </div>
                       </div>
                     </div>
                   )
                 ) : (
                   <div className="h-full grid place-items-center text-gray-600">
-                    <div className="text-center">
-                      <div className="text-sm font-medium">Live View (placeholder)</div>
-                      <div className="text-xs text-gray-500 mt-1">Select evidence below to preview</div>
+                    <div className="text-center px-6">
+                      <div className="text-sm font-medium">No evidence selected</div>
+                      <div className="text-xs text-gray-500 mt-1">
+                        Select an item below to preview.
+                      </div>
                     </div>
                   </div>
                 )}
@@ -475,8 +542,9 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
                 <button
                   className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
                   onClick={addDemoPinAnnotation}
-                  disabled={busy}
+                  disabled={busy || !contextReady}
                   title="Creates a demo pin annotation for the selected evidence"
+                  type="button"
                 >
                   + Add demo pin
                 </button>
@@ -492,6 +560,7 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
                 <button
                   className="mt-2 text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50"
                   onClick={() => alert('Stub: open compare view')}
+                  type="button"
                 >
                   Open compare
                 </button>
@@ -499,7 +568,6 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
             </div>
           </section>
 
-          {/* RIGHT */}
           <section className="rounded-xl border bg-white shadow-sm">
             <div className="border-b px-4 py-3">
               <div className="text-sm font-semibold">Assessment & Plan</div>
@@ -507,8 +575,8 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
             </div>
 
             <div className="p-4 space-y-4">
-              <PaedsTemplate template={template} setTemplate={setTemplate} disabled={busy} />
-              <QuickFindingComposer onCreate={createManualFinding} disabled={busy} />
+              <PaedsTemplate template={template} setTemplate={setTemplate} disabled={busy || !contextReady} />
+              <QuickFindingComposer onCreate={createManualFinding} disabled={busy || !contextReady} />
 
               <div className="rounded-lg border p-3 bg-gray-50">
                 <div className="text-xs font-semibold text-gray-700">Plan (stub)</div>
@@ -516,6 +584,7 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
                 <button
                   className="mt-2 text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50"
                   onClick={() => alert('Stub: add plan item')}
+                  type="button"
                 >
                   + Add plan item
                 </button>
@@ -537,8 +606,6 @@ export default function PaediatricWorkspacePage(props: PaediatricWorkspaceProps)
     </div>
   );
 }
-
-/* -------------------- right-side components -------------------- */
 
 function PaedsTemplate(props: {
   template: {
@@ -611,7 +678,7 @@ function PaedsTemplate(props: {
         </label>
 
         <label className="text-xs text-gray-600">
-          SpO₂ (%)
+          SpOâ‚‚ (%)
           <input
             className="mt-1 w-full rounded border px-2 py-1.5 text-sm"
             value={template.spo2}
@@ -813,10 +880,19 @@ function QuickFindingComposer(props: {
               setSaving(false);
             }
           }}
+          type="button"
         >
-          {saving ? 'Saving…' : 'Create finding'}
+          {saving ? 'Saving...' : 'Create finding'}
         </button>
       </div>
     </div>
+  );
+}
+
+export default function PaediatricWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <PaediatricWorkspacePageContent />
+    </Suspense>
   );
 }

@@ -4,6 +4,11 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { authorizeAdminFromHeaders } from '@/src/lib/auth';
 
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const revalidate = 0;
+
 const s3 = new S3Client({
   region: process.env.AWS_REGION,
   credentials: {
@@ -23,7 +28,7 @@ export async function GET(req: NextRequest) {
     const key = url.searchParams.get('key');
     if (!key) return NextResponse.json({ ok: false, error: 'key required' }, { status: 400 });
 
-    const cmd = new GetObjectCommand({ Bucket: process.env.S3_BUCKET, Key: key });
+    const cmd = new GetObjectCommand({ Bucket: process.env.S3_EVIDENCE_BUCKET ?? process.env.S3_BUCKET, Key: key });
     const signed = await getSignedUrl(s3, cmd, { expiresIn: 60 * 5 }); // 5 minutes
     return NextResponse.json({ ok: true, url: signed });
   } catch (err: any) {

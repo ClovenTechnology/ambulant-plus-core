@@ -60,7 +60,7 @@ export default function ReferralPanel({
 
   const [mode, setMode] = useState<'internal' | 'external' | null>(null);
 
-  const allTabs: UIClass[] = UI_CLASSES;
+  const allTabs: UIClass[] = Array.from(UI_CLASSES);
 
   const visibleTabs = useMemo(() => {
     const enabledTabs = allTabs.filter((t) => {

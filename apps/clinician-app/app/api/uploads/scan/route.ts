@@ -52,9 +52,16 @@ export async function POST(req: NextRequest) {
     const key = body?.key ?? body?.s3Key;
     if (!key) return NextResponse.json({ ok: false, error: 'key required' }, { status: 400 });
 
+    const db = prisma as any;
+
     // Mark scanStatus = SCANNING in DB if record exists
     try {
-      await prisma.clinicianFile.updateMany({ where: { s3Key: key }, data: { scanStatus: 'SCANNING' as any } });
+      if (db.clinicianFile?.updateMany) {
+        await db.clinicianFile.updateMany({
+          where: { s3Key: key },
+          data: { scanStatus: 'SCANNING' as any },
+        });
+      }
     } catch (e) {
       console.warn('scan: updateMany failed', e);
     }
@@ -82,10 +89,16 @@ export async function POST(req: NextRequest) {
 
       // update DB
       try {
-        await prisma.clinicianFile.updateMany({
-          where: { s3Key: key },
-          data: { scanStatus, scanReport: report, verified: scanStatus === 'CLEAN' },
-        });
+        if (db.clinicianFile?.updateMany) {
+          await db.clinicianFile.updateMany({
+            where: { s3Key: key },
+            data: {
+              scanStatus,
+              scanReport: report,
+              verified: scanStatus === 'CLEAN',
+            },
+          });
+        }
       } catch (e) {
         console.warn('scan: prisma update failed', e);
       }
@@ -97,7 +110,15 @@ export async function POST(req: NextRequest) {
     } catch (scanErr: any) {
       console.error('scan error', scanErr);
       try {
-        await prisma.clinicianFile.updateMany({ where: { s3Key: key }, data: { scanStatus: 'FAILED', scanReport: { error: String(scanErr) } } });
+        if (db.clinicianFile?.updateMany) {
+          await db.clinicianFile.updateMany({
+            where: { s3Key: key },
+            data: {
+              scanStatus: 'FAILED',
+              scanReport: { error: String(scanErr) },
+            },
+          });
+        }
       } catch (e) { /* ignore */ }
       try { fs.unlinkSync(outPath); } catch (e) { /* ignore */ }
       return NextResponse.json({ ok: false, error: 'scan_failed', details: String(scanErr) }, { status: 500 });

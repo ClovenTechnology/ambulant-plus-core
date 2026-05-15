@@ -26,7 +26,7 @@ type SplitPolicy = {
 type ClaimRules = {
   requireEvidenceForClaims: boolean;
   autoBlockProhibitedClaims: boolean;
-  allow“OutOfScope”NonClinical: boolean; // for Class C style roles
+  allowOutOfScopeNonClinical: boolean; // for Class C style roles
   prohibitedClaims: string[];
 };
 
@@ -266,7 +266,7 @@ const DEFAULT_DRAFT: PracticeSettingsDraft = {
   claimRules: {
     requireEvidenceForClaims: true,
     autoBlockProhibitedClaims: true,
-    allow“OutOfScope”NonClinical: false,
+    allowOutOfScopeNonClinical: false,
     prohibitedClaims: [
       'Cures cancer',
       'Guaranteed weight loss',
@@ -617,8 +617,8 @@ export default function PracticeSettingsPage() {
             <Toggle
               label="Allow out-of-scope non-clinical consultants"
               description="When enabled, you can host non-diagnostic coaching roles under strict prohibited-claims rules."
-              checked={draft.claimRules.allow“OutOfScope”NonClinical}
-              onChange={(v) => setDraft((d) => ({ ...d, claimRules: { ...d.claimRules, allow“OutOfScope”NonClinical: v } }))}
+              checked={draft.claimRules.allowOutOfScopeNonClinical}
+              onChange={(v) => setDraft((d) => ({ ...d, claimRules: { ...d.claimRules, allowOutOfScopeNonClinical: v } }))}
             />
           </div>
 

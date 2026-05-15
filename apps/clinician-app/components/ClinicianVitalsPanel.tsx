@@ -138,11 +138,10 @@ export default function ClinicianVitalsPanel({
       const payload = new TextEncoder().encode(
         JSON.stringify({ type: 'vitals', value })
       );
-      await room.localParticipant.publishData(
-        payload,
-        DataPacket_Kind.RELIABLE,
-        'control'
-      );
+      await room.localParticipant.publishData(payload, {
+        reliable: true,
+        topic: 'control',
+      });
       setLive(value);
     } catch (err) {
       // eslint-disable-next-line no-console

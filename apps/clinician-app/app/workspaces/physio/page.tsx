@@ -1,14 +1,15 @@
-/*
+﻿/*
 File: apps/clinician-app/app/workspaces/physio/page.tsx
-Purpose: Phase 1 “world-class” standalone Physio workspace (NOT integrated with SFU yet).
+Purpose: Phase 1 world-class standalone Physio workspace (NOT integrated with SFU yet).
 
-What’s included (refactored, single-file page implementation):
+What's included (refactored, single-file page implementation):
 - Uses new BodyMapPanel (modern 3D, rotatable drag) from ./_components/BodyMapPanel
 - Fixes SpecialTestComposer (no shared state collision between testName and note)
 - Findings list with inline edit + Undo delete (6s)
 - Progress charts with goal target lines + baseline deltas (pain + ROM active)
 - No (meta as any): all meta reads use discriminated unions + guards
-- Still uses local state + localStorage persistence with basic validation
+- Uses local state + localStorage persistence with basic validation
+- Normalized to real consultation context via query params
 
 Note:
 - This page assumes you already saved:
@@ -19,19 +20,14 @@ Note:
 
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 
 import BodyMapPanel from './_components/BodyMapPanel';
 
 import type { BodyView, EvidenceRef, Finding, Goal, PhysioMeta, RegionDef } from './_components/types';
 import { REGIONS } from './_components/types';
 import { isPainMeta, isRomMeta, isSpecialTestMeta, isStrengthMeta, safeNum } from './_components/guards';
-
-type PhysioWorkspaceProps = {
-  patientId?: string;
-  encounterId?: string;
-  clinicianId?: string;
-};
 
 /* --------------------
    small helpers
@@ -43,6 +39,14 @@ function nowISO() {
 function uid(prefix: string) {
   const r = (globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)) + '';
   return `${prefix}_${r}`;
+}
+
+function firstNonEmpty(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = String(v ?? '').trim();
+    if (t) return t;
+  }
+  return '';
 }
 
 function severityFromPain(p?: number | null) {
@@ -189,7 +193,7 @@ function coerceFinding(x: any): Finding | null {
     meta,
     createdAt: typeof x.createdAt === 'string' ? x.createdAt : nowISO(),
     updatedAt: typeof x.updatedAt === 'string' ? x.updatedAt : nowISO(),
-    createdBy: typeof x.createdBy === 'string' ? x.createdBy : 'clin_demo_001',
+    createdBy: typeof x.createdBy === 'string' ? x.createdBy : 'unknown-clinician',
   };
 }
 
@@ -214,7 +218,7 @@ function coerceGoal(x: any): Goal | null {
 }
 
 /* --------------------
-   Mock clip capture (still Phase 1 standalone)
+   Mock clip capture
 -------------------- */
 function mockMovementClip(label: string): EvidenceRef {
   const t = Date.now();
@@ -232,15 +236,35 @@ function mockMovementClip(label: string): EvidenceRef {
   };
 }
 
-/* --------------------
-   Page
--------------------- */
-export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
-  const patientId = props.patientId ?? 'pat_demo_001';
-  const encounterId = props.encounterId ?? 'enc_demo_001';
-  const clinicianId = props.clinicianId ?? 'clin_demo_001';
+function PhysioWorkspacePageContent() {
+  const searchParams = useSearchParams() ?? new URLSearchParams();
 
-  const storageKey = useMemo(() => `physio-ws-v2:${patientId}:${encounterId}`, [patientId, encounterId]);
+  const patientId = firstNonEmpty(
+    searchParams.get('patientId'),
+    searchParams.get('subjectPatientId'),
+    searchParams.get('patient_id')
+  );
+  const encounterId = firstNonEmpty(
+    searchParams.get('encounterId'),
+    searchParams.get('caseId'),
+    searchParams.get('encounter_id')
+  );
+  const clinicianId = firstNonEmpty(
+    searchParams.get('clinicianId'),
+    searchParams.get('providerId'),
+    searchParams.get('uid'),
+    searchParams.get('clinician_id')
+  );
+
+  const contextReady = Boolean(patientId && encounterId && clinicianId);
+  const contextBanner = !contextReady
+    ? 'Missing consultation context. Open this workspace from the consultation flow so patient, encounter and clinician IDs are present.'
+    : null;
+
+  const storageKey = useMemo(
+    () => `physio-ws-v2:${patientId || 'missing-patient'}:${encounterId || 'missing-encounter'}`,
+    [patientId, encounterId]
+  );
 
   const [view, setView] = useState<BodyView>('front');
   const [regionId, setRegionId] = useState<string>('left_shoulder');
@@ -248,8 +272,8 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
   const didLoadRef = useRef(false);
   const [findings, setFindings] = useState<Finding[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
+  const [banner, setBanner] = useState<{ kind: 'info' | 'success' | 'error'; text: string } | null>(null);
 
-  // Undo delete state
   const undoTimerRef = useRef<number | null>(null);
   const [undoState, setUndoState] = useState<{ visible: boolean; finding: Finding | null; text: string }>({
     visible: false,
@@ -257,7 +281,6 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
     text: '',
   });
 
-  // load persisted (validated)
   useEffect(() => {
     if (didLoadRef.current) return;
     didLoadRef.current = true;
@@ -278,18 +301,13 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
       }
       if (isBodyView(parsed?.view)) setView(parsed.view);
       if (typeof parsed?.regionId === 'string') setRegionId(parsed.regionId);
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [storageKey]);
 
-  // persist
   useEffect(() => {
     try {
       localStorage.setItem(storageKey, JSON.stringify({ findings, goals, view, regionId }));
-    } catch {
-      // ignore
-    }
+    } catch {}
   }, [storageKey, findings, goals, view, regionId]);
 
   const region: RegionDef = useMemo(() => pickRegion(regionId), [regionId]);
@@ -344,7 +362,6 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
     return rom[0]?.v;
   }, [findings, regionId]);
 
-  // Progress demo seed + merge real findings (pain + ROM active)
   type ProgressPoint = { encounterId: string; at: string; painScore?: number; romActiveDeg?: number };
   const progress: ProgressPoint[] = useMemo(() => {
     const base: ProgressPoint[] = [
@@ -381,7 +398,7 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
 
     if (lastPain || lastRom) {
       base.push({
-        encounterId,
+        encounterId: encounterId || 'current',
         at: lastPain?.at ?? lastRom!.at,
         painScore: lastPain?.score,
         romActiveDeg: lastRom?.v,
@@ -391,7 +408,6 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
     return base.sort((a, b) => (a.at < b.at ? -1 : 1));
   }, [findings, regionId, encounterId]);
 
-  // Goals status
   const goalsForRegion = useMemo(() => goals.filter((g) => g.regionId === regionId), [goals, regionId]);
 
   const computedGoals = useMemo(() => {
@@ -407,7 +423,6 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
     });
   }, [goalsForRegion, latestPainForRegion, latestRomActiveForRegion]);
 
-  // Common location builder
   const makeLoc = () => ({
     kind: 'physio_body' as const,
     regionId,
@@ -415,10 +430,15 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
     view,
   });
 
-  // Create finding helpers
   const addFinding = (partial: Omit<Finding, 'id' | 'createdAt' | 'updatedAt'>) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return false;
+    }
     const f: Finding = { ...partial, id: uid('fd'), createdAt: nowISO(), updatedAt: nowISO() };
     setFindings((prev) => [f, ...prev]);
+    setBanner(null);
+    return true;
   };
 
   const updateFinding = (id: string, patch: Partial<Finding>) => {
@@ -429,7 +449,6 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
     setFindings((prev) => prev.map((f) => (f.id === id ? { ...f, meta, updatedAt: nowISO() } : f)));
   };
 
-  // Delete with undo (6s)
   const deleteWithUndo = (id: string) => {
     const victim = findings.find((x) => x.id === id);
     if (!victim) return;
@@ -454,6 +473,11 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
   };
 
   const bookmarkMovement = (note?: string) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     const clip = mockMovementClip(`${region.label} (${view})`);
     addFinding({
       patientId,
@@ -486,10 +510,10 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="rounded-full border bg-white px-2 py-1 text-gray-700">
-              Patient: <span className="font-mono">{patientId}</span>
+              Patient: <span className="font-mono">{patientId || '—'}</span>
             </span>
             <span className="rounded-full border bg-white px-2 py-1 text-gray-700">
-              Encounter: <span className="font-mono">{encounterId}</span>
+              Encounter: <span className="font-mono">{encounterId || '—'}</span>
             </span>
             <span className="rounded-full border bg-white px-2 py-1 text-gray-700">
               Region: <span className="font-semibold">{region.label}</span>
@@ -506,8 +530,28 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
+        {contextBanner ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {contextBanner}
+          </div>
+        ) : null}
+
+        {banner ? (
+          <div
+            className={
+              'mb-4 rounded-lg border px-3 py-2 text-sm ' +
+              (banner.kind === 'success'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                : banner.kind === 'error'
+                ? 'border-rose-200 bg-rose-50 text-rose-900'
+                : 'border-gray-200 bg-white text-gray-800')
+            }
+          >
+            {banner.text}
+          </div>
+        ) : null}
+
         <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1.6fr_1.2fr] gap-4">
-          {/* LEFT: Body map (3D) */}
           <BodyMapPanel
             view={view}
             onChangeView={setView}
@@ -519,21 +563,20 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
             evidenceCount={evidenceForRegion.length}
           />
 
-          {/* CENTER: Capture + Evidence */}
           <section className="rounded-xl border bg-white shadow-sm">
             <div className="border-b px-4 py-3 flex items-center justify-between">
               <div>
                 <div className="text-sm font-semibold">Capture</div>
                 <div className="text-xs text-gray-500">Standalone mode (SFU integration later)</div>
               </div>
-              <BookmarkMovementButton onBookmark={bookmarkMovement} />
+              <BookmarkMovementButton onBookmark={bookmarkMovement} disabled={!contextReady} />
             </div>
 
             <div className="p-4 space-y-4">
               <div className="rounded-xl border bg-gray-100 h-64 grid place-items-center text-gray-600 relative overflow-hidden">
                 <div className="text-center px-6">
                   <div className="text-sm font-medium">Patient Video View (placeholder)</div>
-                  <div className="text-xs text-gray-500 mt-1">Later: mount SFU remote track here + record/stop → /evidence live_capture</div>
+                  <div className="text-xs text-gray-500 mt-1">Later: mount SFU remote track here + record/stop â†’ /evidence live_capture</div>
                 </div>
 
                 <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 rounded-lg border bg-white/85 backdrop-blur px-3 py-2 text-xs">
@@ -575,7 +618,6 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
             </div>
           </section>
 
-          {/* RIGHT: Exam + Findings + Progress */}
           <section className="rounded-xl border bg-white shadow-sm">
             <div className="border-b px-4 py-3">
               <div className="text-sm font-semibold">Exam, Findings & Progress</div>
@@ -585,6 +627,7 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
             <div className="p-4 space-y-4">
               <ExamPanel
                 region={region}
+                disabled={!contextReady}
                 onCreatePain={(p) => {
                   addFinding({
                     patientId,
@@ -726,11 +769,6 @@ export default function PhysioWorkspacePage(props: PhysioWorkspaceProps) {
   );
 }
 
-/* =======================================================================================
-   Components: ExamPanel, FindingsPanel, ProgressPanel
-   (kept here so page.tsx is truly paste-ready without relying on old ./panels/* files)
-======================================================================================= */
-
 function Field(props: {
   label: string;
   children: React.ReactNode;
@@ -745,27 +783,26 @@ function Field(props: {
   );
 }
 
-function ToggleChip(props: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+function ToggleChip(props: { active: boolean; onClick: () => void; children: React.ReactNode; disabled?: boolean }) {
   return (
     <button
       type="button"
       className={
-        'px-3 py-1.5 rounded-full border text-xs ' +
+        'px-3 py-1.5 rounded-full border text-xs disabled:opacity-50 ' +
         (props.active ? 'border-blue-300 bg-blue-50 text-blue-800' : 'border-gray-200 bg-white hover:bg-gray-50 text-gray-700')
       }
       onClick={props.onClick}
       aria-pressed={props.active}
+      disabled={props.disabled}
     >
       {props.children}
     </button>
   );
 }
 
-/* --------------------
-   ExamPanel (includes fixed SpecialTestComposer)
--------------------- */
 function ExamPanel(props: {
   region: RegionDef;
+  disabled?: boolean;
   onCreatePain: (p: {
     painScore0to10: number;
     quality?: any;
@@ -798,15 +835,13 @@ function ExamPanel(props: {
   }) => void;
   onCreateSpecialTest: (t: { testName: string; result: 'positive' | 'negative' | 'inconclusive'; note?: string }) => void;
 }) {
-  const { region } = props;
+  const { region, disabled } = props;
 
   const [tab, setTab] = useState<'pain' | 'rom' | 'strength' | 'special'>('pain');
 
-  // Pain
   const [painScore, setPainScore] = useState(5);
   const [painNote, setPainNote] = useState('');
 
-  // ROM
   const [romJoint, setRomJoint] = useState(region.jointHint ?? '');
   const [romMove, setRomMove] = useState(region.defaultMovementHint ?? '');
   const [romA, setRomA] = useState<number | null>(null);
@@ -817,7 +852,6 @@ function ExamPanel(props: {
   const [romComp, setRomComp] = useState(false);
   const [romNote, setRomNote] = useState('');
 
-  // Strength
   const [strGroup, setStrGroup] = useState('');
   const [strTest, setStrTest] = useState('');
   const [mmt, setMmt] = useState<0 | 1 | 2 | 3 | 4 | 5>(4);
@@ -825,7 +859,6 @@ function ExamPanel(props: {
   const [strInhib, setStrInhib] = useState(false);
   const [strNote, setStrNote] = useState('');
 
-  // Special Test (FIX: separate state for name vs note)
   const tests = region.specialTests ?? [];
   const [testPick, setTestPick] = useState(tests[0] ?? '');
   const [customName, setCustomName] = useState('');
@@ -834,7 +867,6 @@ function ExamPanel(props: {
   const [testNote, setTestNote] = useState('');
 
   useEffect(() => {
-    // keep joint/movement hints in sync when region changes (without clobbering user edits too aggressively)
     setRomJoint((v) => (v ? v : region.jointHint ?? ''));
     setRomMove((v) => (v ? v : region.defaultMovementHint ?? ''));
     if (tests.length && !testPick) setTestPick(tests[0]);
@@ -849,10 +881,10 @@ function ExamPanel(props: {
           <div className="text-sm font-semibold text-gray-900">Exam inputs</div>
         </div>
         <div className="flex flex-wrap gap-2">
-          <ToggleChip active={tab === 'pain'} onClick={() => setTab('pain')}>Pain</ToggleChip>
-          <ToggleChip active={tab === 'rom'} onClick={() => setTab('rom')}>ROM</ToggleChip>
-          <ToggleChip active={tab === 'strength'} onClick={() => setTab('strength')}>Strength</ToggleChip>
-          <ToggleChip active={tab === 'special'} onClick={() => setTab('special')}>Special</ToggleChip>
+          <ToggleChip active={tab === 'pain'} onClick={() => setTab('pain')} disabled={disabled}>Pain</ToggleChip>
+          <ToggleChip active={tab === 'rom'} onClick={() => setTab('rom')} disabled={disabled}>ROM</ToggleChip>
+          <ToggleChip active={tab === 'strength'} onClick={() => setTab('strength')} disabled={disabled}>Strength</ToggleChip>
+          <ToggleChip active={tab === 'special'} onClick={() => setTab('special')} disabled={disabled}>Special</ToggleChip>
         </div>
       </div>
 
@@ -867,6 +899,7 @@ function ExamPanel(props: {
                 value={painScore}
                 onChange={(e) => setPainScore(parseInt(e.target.value, 10))}
                 className="w-full"
+                disabled={disabled}
               />
               <div className="mt-1 text-xs text-gray-600">
                 Score: <span className="font-mono font-semibold">{painScore}</span>/10
@@ -880,17 +913,19 @@ function ExamPanel(props: {
                 value={painNote}
                 onChange={(e) => setPainNote(e.target.value)}
                 placeholder="e.g., pain with overhead reach"
+                disabled={disabled}
               />
             </Field>
 
             <div className="flex justify-end">
               <button
                 type="button"
-                className="rounded border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-sm"
+                className="rounded border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-sm disabled:opacity-50"
                 onClick={() => {
                   props.onCreatePain({ painScore0to10: painScore, note: painNote });
                   setPainNote('');
                 }}
+                disabled={disabled}
               >
                 + Add pain finding
               </button>
@@ -902,10 +937,10 @@ function ExamPanel(props: {
           <>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Joint">
-                <input className="w-full rounded border px-2 py-1.5 text-sm" value={romJoint} onChange={(e) => setRomJoint(e.target.value)} />
+                <input className="w-full rounded border px-2 py-1.5 text-sm" value={romJoint} onChange={(e) => setRomJoint(e.target.value)} disabled={disabled} />
               </Field>
               <Field label="Movement">
-                <input className="w-full rounded border px-2 py-1.5 text-sm" value={romMove} onChange={(e) => setRomMove(e.target.value)} />
+                <input className="w-full rounded border px-2 py-1.5 text-sm" value={romMove} onChange={(e) => setRomMove(e.target.value)} disabled={disabled} />
               </Field>
             </div>
 
@@ -916,6 +951,7 @@ function ExamPanel(props: {
                   type="number"
                   value={romA ?? ''}
                   onChange={(e) => setRomA(e.target.value === '' ? null : parseFloat(e.target.value))}
+                  disabled={disabled}
                 />
               </Field>
               <Field label="Passive (deg)">
@@ -924,25 +960,26 @@ function ExamPanel(props: {
                   type="number"
                   value={romP ?? ''}
                   onChange={(e) => setRomP(e.target.value === '' ? null : parseFloat(e.target.value))}
+                  disabled={disabled}
                 />
               </Field>
             </div>
 
             <div className="flex flex-wrap gap-2">
-              <ToggleChip active={romWnl} onClick={() => setRomWnl((v) => !v)}>WNL</ToggleChip>
-              <ToggleChip active={romPainArc} onClick={() => setRomPainArc((v) => !v)}>Painful arc</ToggleChip>
-              <ToggleChip active={romPainEnd} onClick={() => setRomPainEnd((v) => !v)}>Pain end-range</ToggleChip>
-              <ToggleChip active={romComp} onClick={() => setRomComp((v) => !v)}>Comparable sign</ToggleChip>
+              <ToggleChip active={romWnl} onClick={() => setRomWnl((v) => !v)} disabled={disabled}>WNL</ToggleChip>
+              <ToggleChip active={romPainArc} onClick={() => setRomPainArc((v) => !v)} disabled={disabled}>Painful arc</ToggleChip>
+              <ToggleChip active={romPainEnd} onClick={() => setRomPainEnd((v) => !v)} disabled={disabled}>Pain end-range</ToggleChip>
+              <ToggleChip active={romComp} onClick={() => setRomComp((v) => !v)} disabled={disabled}>Comparable sign</ToggleChip>
             </div>
 
             <Field label="Note (optional)">
-              <textarea className="w-full rounded border px-2 py-1.5 text-sm" rows={2} value={romNote} onChange={(e) => setRomNote(e.target.value)} />
+              <textarea className="w-full rounded border px-2 py-1.5 text-sm" rows={2} value={romNote} onChange={(e) => setRomNote(e.target.value)} disabled={disabled} />
             </Field>
 
             <div className="flex justify-end">
               <button
                 type="button"
-                className="rounded border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-sm"
+                className="rounded border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-sm disabled:opacity-50"
                 onClick={() => {
                   props.onCreateRom({
                     joint: romJoint || undefined,
@@ -957,6 +994,7 @@ function ExamPanel(props: {
                   });
                   setRomNote('');
                 }}
+                disabled={disabled}
               >
                 + Add ROM finding
               </button>
@@ -968,33 +1006,33 @@ function ExamPanel(props: {
           <>
             <div className="grid grid-cols-2 gap-2">
               <Field label="Muscle group">
-                <input className="w-full rounded border px-2 py-1.5 text-sm" value={strGroup} onChange={(e) => setStrGroup(e.target.value)} placeholder="e.g., Rotator cuff" />
+                <input className="w-full rounded border px-2 py-1.5 text-sm" value={strGroup} onChange={(e) => setStrGroup(e.target.value)} placeholder="e.g., Rotator cuff" disabled={disabled} />
               </Field>
               <Field label="Test">
-                <input className="w-full rounded border px-2 py-1.5 text-sm" value={strTest} onChange={(e) => setStrTest(e.target.value)} placeholder="e.g., ER at 0°" />
+                <input className="w-full rounded border px-2 py-1.5 text-sm" value={strTest} onChange={(e) => setStrTest(e.target.value)} placeholder="e.g., ER at 0°" disabled={disabled} />
               </Field>
             </div>
 
             <Field label="MMT (0–5)">
-              <input type="range" min={0} max={5} value={mmt} onChange={(e) => setMmt(parseInt(e.target.value, 10) as any)} className="w-full" />
+              <input type="range" min={0} max={5} value={mmt} onChange={(e) => setMmt(parseInt(e.target.value, 10) as any)} className="w-full" disabled={disabled} />
               <div className="mt-1 text-xs text-gray-600">
                 MMT: <span className="font-mono font-semibold">{mmt}</span>/5
               </div>
             </Field>
 
             <div className="flex flex-wrap gap-2">
-              <ToggleChip active={strPainRes} onClick={() => setStrPainRes((v) => !v)}>Pain w/ resistance</ToggleChip>
-              <ToggleChip active={strInhib} onClick={() => setStrInhib((v) => !v)}>Inhibition</ToggleChip>
+              <ToggleChip active={strPainRes} onClick={() => setStrPainRes((v) => !v)} disabled={disabled}>Pain w/ resistance</ToggleChip>
+              <ToggleChip active={strInhib} onClick={() => setStrInhib((v) => !v)} disabled={disabled}>Inhibition</ToggleChip>
             </div>
 
             <Field label="Note (optional)">
-              <textarea className="w-full rounded border px-2 py-1.5 text-sm" rows={2} value={strNote} onChange={(e) => setStrNote(e.target.value)} />
+              <textarea className="w-full rounded border px-2 py-1.5 text-sm" rows={2} value={strNote} onChange={(e) => setStrNote(e.target.value)} disabled={disabled} />
             </Field>
 
             <div className="flex justify-end">
               <button
                 type="button"
-                className="rounded border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-sm"
+                className="rounded border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-sm disabled:opacity-50"
                 onClick={() => {
                   props.onCreateStrength({
                     muscleGroup: strGroup || undefined,
@@ -1006,6 +1044,7 @@ function ExamPanel(props: {
                   });
                   setStrNote('');
                 }}
+                disabled={disabled}
               >
                 + Add strength finding
               </button>
@@ -1018,13 +1057,13 @@ function ExamPanel(props: {
             <div className="rounded-lg border bg-gray-50 p-3">
               <div className="text-xs font-semibold text-gray-700">Pick test</div>
               <div className="mt-2 flex flex-wrap gap-2">
-                <ToggleChip active={!useCustom} onClick={() => setUseCustom(false)}>From list</ToggleChip>
-                <ToggleChip active={useCustom} onClick={() => setUseCustom(true)}>Custom</ToggleChip>
+                <ToggleChip active={!useCustom} onClick={() => setUseCustom(false)} disabled={disabled}>From list</ToggleChip>
+                <ToggleChip active={useCustom} onClick={() => setUseCustom(true)} disabled={disabled}>Custom</ToggleChip>
               </div>
 
               {!useCustom ? (
                 <div className="mt-2">
-                  <select className="w-full rounded border px-2 py-1.5 text-sm" value={testPick} onChange={(e) => setTestPick(e.target.value)}>
+                  <select className="w-full rounded border px-2 py-1.5 text-sm" value={testPick} onChange={(e) => setTestPick(e.target.value)} disabled={disabled}>
                     {tests.length ? null : <option value="">No suggested tests for this region</option>}
                     {tests.map((t) => (
                       <option key={t} value={t}>
@@ -1039,7 +1078,8 @@ function ExamPanel(props: {
                     className="w-full rounded border px-2 py-1.5 text-sm"
                     value={customName}
                     onChange={(e) => setCustomName(e.target.value)}
-                    placeholder="Type custom test name…"
+                    placeholder="Type custom test nameâ€¦"
+                    disabled={disabled}
                   />
                 </div>
               )}
@@ -1047,26 +1087,27 @@ function ExamPanel(props: {
 
             <Field label="Result">
               <div className="flex flex-wrap gap-2">
-                <ToggleChip active={testResult === 'negative'} onClick={() => setTestResult('negative')}>Negative</ToggleChip>
-                <ToggleChip active={testResult === 'positive'} onClick={() => setTestResult('positive')}>Positive</ToggleChip>
-                <ToggleChip active={testResult === 'inconclusive'} onClick={() => setTestResult('inconclusive')}>Inconclusive</ToggleChip>
+                <ToggleChip active={testResult === 'negative'} onClick={() => setTestResult('negative')} disabled={disabled}>Negative</ToggleChip>
+                <ToggleChip active={testResult === 'positive'} onClick={() => setTestResult('positive')} disabled={disabled}>Positive</ToggleChip>
+                <ToggleChip active={testResult === 'inconclusive'} onClick={() => setTestResult('inconclusive')} disabled={disabled}>Inconclusive</ToggleChip>
               </div>
             </Field>
 
             <Field label="Note (optional)">
-              <textarea className="w-full rounded border px-2 py-1.5 text-sm" rows={2} value={testNote} onChange={(e) => setTestNote(e.target.value)} />
+              <textarea className="w-full rounded border px-2 py-1.5 text-sm" rows={2} value={testNote} onChange={(e) => setTestNote(e.target.value)} disabled={disabled} />
             </Field>
 
             <div className="flex justify-end">
               <button
                 type="button"
-                className="rounded border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-sm"
+                className="rounded border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-sm disabled:opacity-50"
                 onClick={() => {
                   const name = (useCustom ? customName : testPick).trim();
                   if (!name) return alert('Pick a test name first.');
                   props.onCreateSpecialTest({ testName: name, result: testResult, note: testNote });
                   setTestNote('');
                 }}
+                disabled={disabled}
               >
                 + Add special test
               </button>
@@ -1078,9 +1119,6 @@ function ExamPanel(props: {
   );
 }
 
-/* --------------------
-   FindingsPanel (inline edit + undo delete)
--------------------- */
 function FindingsPanel(props: {
   regionLabel: string;
   findings: Finding[];
@@ -1238,9 +1276,8 @@ function FindingEditor(props: {
     setTitle(f.title);
     setNote(f.note ?? '');
     setTags((f.tags ?? []).join(', '));
-  }, [f.id]); // switch edits safely
+  }, [f.id]);
 
-  // meta editors
   const [painScore, setPainScore] = useState<number>(isPainMeta(f.meta) && typeof f.meta.painScore0to10 === 'number' ? f.meta.painScore0to10 : 5);
   const [romA, setRomA] = useState<number | null>(isRomMeta(f.meta) && typeof f.meta.activeDeg === 'number' ? f.meta.activeDeg : null);
   const [romP, setRomP] = useState<number | null>(isRomMeta(f.meta) && typeof f.meta.passiveDeg === 'number' ? f.meta.passiveDeg : null);
@@ -1289,7 +1326,7 @@ function FindingEditor(props: {
           <textarea className="w-full rounded border px-2 py-1.5 text-sm bg-white" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
         <Field label="Tags (comma separated)">
-          <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="pain, rom, shoulder…" />
+          <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="pain, rom, shoulderâ€¦" />
         </Field>
       </div>
 
@@ -1341,9 +1378,6 @@ function FindingEditor(props: {
   );
 }
 
-/* --------------------
-   ProgressPanel (goal lines + baseline deltas)
--------------------- */
 function ProgressPanel(props: {
   regionLabel: string;
   regionId: string;
@@ -1399,7 +1433,6 @@ function ProgressPanel(props: {
       </div>
 
       <div className="p-3 space-y-4">
-        {/* Pain chart */}
         <div className="rounded-xl border bg-white">
           <div className="px-3 py-2 border-b flex items-center justify-between">
             <div className="text-sm font-semibold text-gray-900">Pain</div>
@@ -1416,7 +1449,6 @@ function ProgressPanel(props: {
           </div>
         </div>
 
-        {/* ROM chart */}
         <div className="rounded-xl border bg-white">
           <div className="px-3 py-2 border-b flex items-center justify-between">
             <div className="text-sm font-semibold text-gray-900">ROM (Active)</div>
@@ -1425,7 +1457,6 @@ function ProgressPanel(props: {
           <div className="p-3">
             <MiniLineChart
               series={romSeries.map((x) => x.v as number)}
-              // auto scale a bit nicer
               min={romSeries.length ? Math.floor(Math.min(...romSeries.map((x) => x.v as number)) / 10) * 10 - 10 : 0}
               max={romSeries.length ? Math.ceil(Math.max(...romSeries.map((x) => x.v as number)) / 10) * 10 + 10 : 180}
               targetLines={romGoals.map((g) => g.target)}
@@ -1448,8 +1479,8 @@ function ProgressPanel(props: {
 
               <Field label="Direction">
                 <select className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={goalDirection} onChange={(e) => setGoalDirection(e.target.value as any)}>
-                  <option value="lte">≤ target</option>
-                  <option value="gte">≥ target</option>
+                  <option value="lte">â‰¤ target</option>
+                  <option value="gte">â‰¥ target</option>
                 </select>
               </Field>
             </div>
@@ -1459,7 +1490,7 @@ function ProgressPanel(props: {
                 <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" type="number" value={goalTarget} onChange={(e) => setGoalTarget(parseFloat(e.target.value))} />
               </Field>
               <Field label="Title (optional)">
-                <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={goalTitle} onChange={(e) => setGoalTitle(e.target.value)} placeholder="e.g., Pain ≤ 2/10" />
+                <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={goalTitle} onChange={(e) => setGoalTitle(e.target.value)} placeholder="e.g., Pain â‰¤ 2/10" />
               </Field>
             </div>
 
@@ -1517,7 +1548,7 @@ function BaselineDeltaBadge(props: {
       title="Latest vs baseline"
     >
       {props.latest}
-      {props.suffix} · Δ {props.delta > 0 ? '+' : ''}
+      {props.suffix} · Î” {props.delta > 0 ? '+' : ''}
       {props.delta}
       {props.suffix} (from {props.baseline}
       {props.suffix})
@@ -1558,7 +1589,6 @@ function MiniLineChart(props: {
   return (
     <div className="rounded-lg border bg-white overflow-hidden">
       <svg width="100%" viewBox={`0 0 ${w} ${h}`} className="block">
-        {/* soft grid */}
         <g opacity={0.35}>
           {[0.25, 0.5, 0.75].map((t) => {
             const y = pad + t * (h - pad * 2);
@@ -1566,7 +1596,6 @@ function MiniLineChart(props: {
           })}
         </g>
 
-        {/* goal/target lines */}
         {targets.map((t, idx) => (
           <g key={`${t}-${idx}`} opacity={0.9}>
             <line x1={pad} x2={w - pad} y1={yFor(t)} y2={yFor(t)} stroke="currentColor" strokeDasharray="4 4" />
@@ -1576,10 +1605,8 @@ function MiniLineChart(props: {
           </g>
         ))}
 
-        {/* line */}
         {props.series.length ? <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="2" /> : null}
 
-        {/* dots */}
         {props.series.map((v, i) => {
           const n = props.series.length;
           const x = pad + (i * (w - pad * 2)) / Math.max(1, n - 1);
@@ -1607,7 +1634,7 @@ function GoalList(props: {
           <div className="min-w-0">
             <div className="text-sm font-semibold text-gray-900 truncate">{g.title}</div>
             <div className="text-xs text-gray-600">
-              Target: <span className="font-mono">{g.direction === 'lte' ? '≤' : '≥'} {g.target}</span>
+              Target: <span className="font-mono">{g.direction === 'lte' ? 'â‰¤' : 'â‰¥'} {g.target}</span>
               {typeof g._current === 'number' ? (
                 <> · Current: <span className="font-mono font-semibold">{g._current}</span></>
               ) : null}
@@ -1643,20 +1670,17 @@ function GoalList(props: {
   );
 }
 
-/* =======================================================================================
-   Bookmark + Evidence components (kept from your original)
-======================================================================================= */
-
-function BookmarkMovementButton({ onBookmark }: { onBookmark: (note?: string) => void }) {
+function BookmarkMovementButton({ onBookmark, disabled }: { onBookmark: (note?: string) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
 
   return (
     <>
       <button
-        className="rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800"
+        className="rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800 disabled:opacity-50"
         onClick={() => setOpen(true)}
         type="button"
+        disabled={disabled}
       >
         Bookmark Movement
       </button>
@@ -1686,7 +1710,7 @@ function BookmarkMovementButton({ onBookmark }: { onBookmark: (note?: string) =>
                   rows={3}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="Optional… e.g., pain with overhead reach"
+                  placeholder="Optionalâ€¦ e.g., pain with overhead reach"
                 />
               </label>
 
@@ -1759,5 +1783,13 @@ function EvidenceStrip({ evidence }: { evidence: EvidenceRef[] }) {
         </div>
       ))}
     </div>
+  );
+}
+
+export default function PhysioWorkspacePage() {
+  return (
+    <Suspense fallback={null}>
+      <PhysioWorkspacePageContent />
+    </Suspense>
   );
 }
