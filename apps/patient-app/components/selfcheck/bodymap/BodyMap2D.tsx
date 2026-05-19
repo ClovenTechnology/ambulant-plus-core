@@ -2,7 +2,6 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import clsx from 'clsx';
 
 import BodyMapCanvas from './BodyMapCanvas';
 import BodyMapMarkers from './BodyMapMarkers';
@@ -18,13 +17,17 @@ import { BodyAreaKey, BodySide, BodyHint, BODY_AREA_LABEL } from './types';
 export type { BodyAreaKey, BodyHint };
 export { BODY_AREA_LABEL };
 
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
+
 /**
  * Human-readable formatter used by Results + elsewhere
  * Example: "front:lower_back" → "Lower back (FRONT)"
  */
 export function labelBodyAreaKey(k: BodyAreaKey): string {
   const [side, area] = k.split(':') as [BodySide, keyof typeof BODY_AREA_LABEL];
-  const nice = BODY_AREA_LABEL[area] ?? area.replaceAll('_', ' ');
+  const nice = BODY_AREA_LABEL[area] ?? String(area).replace(/_/g, ' ');
   return `${nice} (${side.toUpperCase()})`;
 }
 
@@ -62,7 +65,7 @@ function Nub({
 
   return (
     <div
-      className={clsx(
+      className={cx(
         'absolute top-5',
         side === 'left' ? '-left-[10px]' : '-right-[10px]'
       )}
@@ -372,7 +375,7 @@ export default function BodyMap2D({
                 key={g}
                 type="button"
                 onClick={() => onChangeGender(g)}
-                className={clsx(
+                className={cx(
                   'px-3 py-2 text-sm font-semibold transition-colors',
                   gender === g ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'
                 )}
@@ -388,7 +391,7 @@ export default function BodyMap2D({
                 key={v}
                 type="button"
                 onClick={() => onChangeView(v)}
-                className={clsx(
+                className={cx(
                   'px-3 py-2 text-sm font-semibold transition-colors',
                   view === v ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-50'
                 )}
@@ -421,7 +424,7 @@ export default function BodyMap2D({
             <foreignObject x={bubblePos.x} y={bubblePos.y} width={260} height={196}>
               <div className="pointer-events-auto" onMouseDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
                 <div
-                  className={clsx(
+                  className={cx(
                     'bm-anim bm-enter bm-enterActive relative rounded-2xl border bg-white/85 backdrop-blur-xl px-3 py-2 bm-bubbleShadow'
                   )}
                   style={{
@@ -451,7 +454,7 @@ export default function BodyMap2D({
 
                       <div className="flex items-center gap-2">
                         {activeHint ? (
-                          <span className={clsx('text-[11px] font-extrabold px-2 py-0.5 rounded-lg', tonePill(activeHint.tone))}>
+                          <span className={cx('text-[11px] font-extrabold px-2 py-0.5 rounded-lg', tonePill(activeHint.tone))}>
                             {toneLabel(activeHint.tone)}
                           </span>
                         ) : null}

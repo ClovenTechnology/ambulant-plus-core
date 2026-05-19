@@ -3,8 +3,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import JobStatusPill from '../../../../components/JobStatusPill';
-import { normalizeToJobStatus } from '../../../../lib/medreachStatus';
+import JobStatusPill from '@/components/JobStatusPill';
+import { normalizeToJobStatus } from '@/lib/medreachStatus';
 
 type Job = {
   id: string;
@@ -19,7 +19,14 @@ type Job = {
 export default function PhlebJobMobilePage() {
   const params = useParams();
   const router = useRouter();
-  const id = decodeURIComponent(params.id as string);
+
+  const rawId = Array.isArray(params?.id)
+  ? params.id[0]
+  : typeof params?.id === 'string'
+    ? params.id
+    : '';
+
+  const id = decodeURIComponent(rawId || '');
   const [job, setJob] = useState<Job | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

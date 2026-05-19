@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import useProfileBMI from '@/src/hooks/selfcheck/useProfileBMI';
 import useTriageAnalyzer from '@/src/hooks/selfcheck/useTriageAnalyzer';
@@ -9,7 +9,7 @@ import { computeCardioRisk, hypertensionIndex } from '@/src/analytics/cardio';
 import { computeStressIndex } from '@/src/analytics/stress';
 
 import type { SelfCheckStep } from '@/components/selfcheck/SelfCheckStepper';
-import type { BodyAreaKey, BodySide, BodyAreaBase } from '@/components/selfcheck/BodyMap2D';
+import type { BodyAreaKey, BodySide, BodyArea as BodyAreaBase } from '@/components/selfcheck/BodyMap2D';
 
 export type Vital = {
   label: string;
@@ -31,168 +31,366 @@ export const SELF_CHECK_SYMPTOMS = [
 
 export type SymptomKey = (typeof SELF_CHECK_SYMPTOMS)[number]['key'];
 
+type Gender = 'female' | 'male' | 'other' | 'unknown';
+type SymptomState = Record<SymptomKey, boolean>;
+
+type SafeAnalyzer = {
+  analysisSource?: string;
+  degradedMode?: boolean;
+  remoteError?: string | null;
+  result?: any;
+  risk?: string;
+  riskLevel?: string;
+  confidence?: number;
+  hasAnalyzed?: boolean;
+  lastAnalyzedAt?: string | Date | null;
+  analyze?: (payload?: any) => Promise<any> | any;
+  runAnalyze?: (payload?: any) => Promise<any> | any;
+  reset?: () => void;
+  [key: string]: any;
+};
+
+const DEFAULT_VITALS: Vital[] = [
+  {
+    label: 'Temperature',
+    key: 'temperature',
+    value: '',
+    unit: '°C',
+    min: 36,
+    max: 37.8,
+    trend: [],
+  },
+  {
+    label: 'Heart rate',
+    key: 'heartRate',
+    value: '',
+    unit: 'bpm',
+    min: 50,
+    max: 110,
+    trend: [],
+  },
+  {
+    label: 'Oxygen saturation',
+    key: 'spo2',
+    value: '',
+    unit: '%',
+    min: 94,
+    max: 100,
+    trend: [],
+  },
+  {
+    label: 'Systolic blood pressure',
+    key: 'systolic',
+    value: '',
+    unit: 'mmHg',
+    min: 90,
+    max: 140,
+    trend: [],
+  },
+  {
+    label: 'Diastolic blood pressure',
+    key: 'diastolic',
+    value: '',
+    unit: 'mmHg',
+    min: 60,
+    max: 90,
+    trend: [],
+  },
+  {
+    label: 'Glucose',
+    key: 'glucose',
+    value: '',
+    unit: 'mg/dL',
+    min: 70,
+    max: 180,
+    trend: [],
+  },
+];
+
 function legacyFromKeys(keys: BodyAreaKey[]): BodyAreaBase[] {
-  return keys.map((k) => k.split(':')[1] as BodyAreaBase);
+  return keys.map((k) => String(k).split(':')[1] as BodyAreaBase);
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  if (value === null || value === undefined || value === '') return undefined;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function symptomDefaults(): SymptomState {
+  return SELF_CHECK_SYMPTOMS.reduce((acc, symptom) => {
+    acc[symptom.key] = false;
+    return acc;
+  }, {} as SymptomState);
+}
+
+function riskToColor(risk: unknown) {
+  const value = String(risk ?? '').toLowerCase();
+
+  if (['critical', 'emergency', 'red', 'high'].some((x) => value.includes(x))) {
+    return 'rose';
+  }
+
+  if (['urgent', 'amber', 'moderate', 'medium'].some((x) => value.includes(x))) {
+    return 'amber';
+  }
+
+  if (['low', 'green', 'routine', 'self-care', 'selfcare'].some((x) => value.includes(x))) {
+    return 'emerald';
+  }
+
+  return 'slate';
+}
+
+function buildTrendSummary(vitals: Vital[]) {
+  return vitals
+    .filter((v) => Array.isArray(v.trend) && v.trend.length > 0)
+    .map((v) => {
+      const trend = v.trend || [];
+      const first = trend[0];
+      const last = trend[trend.length - 1];
+      const delta = typeof first === 'number' && typeof last === 'number' ? last - first : 0;
+
+      return {
+        key: v.key,
+        label: v.label,
+        unit: v.unit,
+        first,
+        last,
+        delta,
+        direction: delta > 0 ? 'up' : delta < 0 ? 'down' : 'flat',
+      };
+    });
+}
+
+function buildTimeline(vitals: Vital[], selectedSymptoms: SymptomKey[], areas: BodyAreaKey[]) {
+  return [
+    {
+      id: 'symptoms',
+      label: 'Symptoms selected',
+      value: selectedSymptoms.length,
+      at: new Date().toISOString(),
+    },
+    {
+      id: 'body-areas',
+      label: 'Body areas selected',
+      value: areas.length,
+      at: new Date().toISOString(),
+    },
+    {
+      id: 'vitals',
+      label: 'Vitals entered',
+      value: vitals.filter((v) => numberOrUndefined(v.value) !== undefined).length,
+      at: new Date().toISOString(),
+    },
+  ];
 }
 
 export function useSelfCheckState() {
   const bmi = useProfileBMI();
+  const analyzer = useTriageAnalyzer() as SafeAnalyzer;
 
-  const [step, setStep] = useState<SelfCheckStep>('data');
-
-  const [vitals, setVitals] = useState<Vital[]>(() => [
-    { label: 'Heart Rate', key: 'hr', value: 78, unit: 'bpm', min: 50, max: 100, trend: [72, 74, 76, 78, 77] },
-    { label: 'SpO₂', key: 'spo2', value: 97, unit: '%', min: 90, max: 100, trend: [96, 96, 97, 97, 97] },
-    { label: 'BP', key: 'bp', value: '120/80', unit: 'mmHg', trend: [118, 120, 122, 121, 120] },
-    { label: 'Temp', key: 'temp', value: 36.8, unit: '°C', min: 36, max: 37.5, trend: [36.6, 36.7, 36.8, 36.8, 36.8] },
-  ]);
-
-  const [symptoms, setSymptoms] = useState<Record<string, boolean>>(
-    () => Object.fromEntries(SELF_CHECK_SYMPTOMS.map((s) => [s.key, false]))
-  );
-
-  // Body map
-  const [gender, setGender] = useState<'male' | 'female'>('male');
-  const [view, setView] = useState<BodySide>('front');
+  const [step, setStep] = useState<SelfCheckStep>('symptoms' as SelfCheckStep);
+  const [vitals, setVitals] = useState<Vital[]>(DEFAULT_VITALS);
+  const [symptoms, setSymptoms] = useState<SymptomState>(() => symptomDefaults());
+  const [gender, setGender] = useState<Gender>('unknown');
+  const [view, setView] = useState<BodySide>('front' as BodySide);
   const [areas, setAreas] = useState<BodyAreaKey[]>([]);
-
-  // NEW: results gating
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
-  const [lastAnalyzedAt, setLastAnalyzedAt] = useState<number | null>(null);
-
-  const toggleArea = (k: BodyAreaKey) => {
-    setAreas((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
-  };
+  const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
 
   const selectedSymptoms = useMemo(
-    () => SELF_CHECK_SYMPTOMS.filter((s) => !!symptoms[s.key]).map((s) => s.label),
-    [symptoms]
+    () => SELF_CHECK_SYMPTOMS.filter((s) => symptoms[s.key]).map((s) => s.key),
+    [symptoms],
   );
 
-  const abnormal = useMemo(() => {
-    return vitals
-      .map((v) =>
-        typeof v.value === 'number' && v.min != null && v.max != null && (v.value < v.min || v.value > v.max)
-          ? v.label
-          : null
-      )
-      .filter(Boolean) as string[];
-  }, [vitals]);
+  const toggleArea = useCallback(
+    (area: BodyAreaKey | BodyAreaBase) => {
+      const raw = String(area);
+      const key = (raw.includes(':') ? raw : `${view}:${raw}`) as BodyAreaKey;
 
-  const analyzer = useTriageAnalyzer({
-    vitals,
-    symptoms,
-    bmi,
-    extraMeta: {
-      bodyAreas: areas, // NEW (front/back)
-      bodyAreasLegacy: legacyFromKeys(areas), // OLD (safe)
-      bodyMap: { gender, view },
+      setAreas((prev) => (prev.includes(key) ? prev.filter((x) => x !== key) : [...prev, key]));
     },
-  });
+    [view],
+  );
 
-  const riskColor =
-    analyzer.riskLevel === 'low'
-      ? 'bg-emerald-600 text-white'
-      : analyzer.riskLevel === 'medium'
-      ? 'bg-amber-400 text-slate-900'
-      : 'bg-rose-600 text-white';
+  const abnormal = useMemo(
+    () =>
+      vitals.filter((v) => {
+        const n = numberOrUndefined(v.value);
+        if (n === undefined) return false;
+        if (typeof v.min === 'number' && n < v.min) return true;
+        if (typeof v.max === 'number' && n > v.max) return true;
+        return false;
+      }),
+    [vitals],
+  );
+
+  const vitalValues = useMemo(() => {
+    const get = (key: string) => numberOrUndefined(vitals.find((v) => v.key === key)?.value);
+
+    return {
+      temperature: get('temperature'),
+      heartRate: get('heartRate'),
+      spo2: get('spo2'),
+      systolic: get('systolic'),
+      diastolic: get('diastolic'),
+      glucose: get('glucose'),
+    };
+  }, [vitals]);
 
   const cardioAnalytics = useMemo(() => {
-    const bpEntry = vitals.find((v) => v.key === 'bp');
-    let systolicTrend: number[] = [];
-    let diastolicTrend: number[] = [];
+    try {
+      const computeCardioRiskAny = computeCardioRisk as unknown as (...args: any[]) => any;
+      const hypertensionIndexAny = hypertensionIndex as unknown as (...args: any[]) => any;
 
-    if (bpEntry) {
-      if (Array.isArray(bpEntry.trend) && bpEntry.trend.length > 0 && bpEntry.trend.every((n: any) => Number.isFinite(n))) {
-        systolicTrend = bpEntry.trend.map((n: any) => Number(n));
-      } else if (typeof bpEntry.value === 'string' && bpEntry.value.includes('/')) {
-        const parts = bpEntry.value.split('/').map((p) => Number(p.trim()));
-        if (parts.length >= 2 && parts.every(Number.isFinite)) {
-          systolicTrend = [parts[0]];
-          diastolicTrend = [parts[1]];
-        }
-      }
+      return {
+        risk: computeCardioRiskAny({
+          systolic: vitalValues.systolic,
+          diastolic: vitalValues.diastolic,
+          heartRate: vitalValues.heartRate,
+          spo2: vitalValues.spo2,
+          bmi,
+        }),
+        hypertensionIndex: hypertensionIndexAny(vitalValues.systolic, vitalValues.diastolic),
+      };
+    } catch {
+      return {
+        risk: null,
+        hypertensionIndex: null,
+      };
     }
-
-    const restingHR = (vitals.find((v) => v.key === 'hr')?.value as number) ?? 60;
-    const spo2 = (vitals.find((v) => v.key === 'spo2')?.value as number) ?? 98;
-
-    const cardio = computeCardioRisk(
-      systolicTrend.length ? systolicTrend : [120],
-      diastolicTrend.length ? diastolicTrend : undefined,
-      restingHR,
-      spo2
-    );
-    const hypeIndex = hypertensionIndex(systolicTrend.length ? systolicTrend : [120]);
-    return { cardio, hypeIndex };
-  }, [vitals]);
+  }, [bmi, vitalValues.diastolic, vitalValues.heartRate, vitalValues.spo2, vitalValues.systolic]);
 
   const stressAnalytics = useMemo(() => {
-    const restingHR = (vitals.find((v) => v.key === 'hr')?.value as number) ?? 60;
-    const daytimeStress = symptoms['fatigue'] ? 60 : 30;
-    const hrvVal = (vitals.find((v) => v.key === 'hrv' || v.key === 'hrv_ms')?.value as number) ?? null;
+    try {
+      const computeStressIndexAny = computeStressIndex as unknown as (...args: any[]) => any;
 
-    return hrvVal != null
-      ? computeStressIndex(hrvVal, daytimeStress, 0, { inputType: 'hrv' })
-      : computeStressIndex(restingHR, daytimeStress, 0, { inputType: 'rhr' });
-  }, [vitals, symptoms]);
-
-  const trendSummary = useMemo(() => {
-    const summary: string[] = [];
-    for (const v of vitals) {
-      if (Array.isArray(v.trend) && v.trend.length >= 2) {
-        const last = v.trend[v.trend.length - 1];
-        const prev = v.trend[v.trend.length - 2];
-        if (typeof last === 'number' && typeof prev === 'number') {
-          if (last > prev + Math.max(0.5, prev * 0.02)) summary.push(`${v.label} trending up`);
-          else if (last < prev - Math.max(0.5, prev * 0.02)) summary.push(`${v.label} trending down`);
-          else summary.push(`${v.label} stable`);
-        }
-      }
+      return computeStressIndexAny({
+        heartRate: vitalValues.heartRate,
+        symptoms: selectedSymptoms,
+        abnormalVitals: abnormal,
+      });
+    } catch {
+      return null;
     }
-    return summary;
-  }, [vitals]);
+  }, [abnormal, selectedSymptoms, vitalValues.heartRate]);
 
-  const timeline = useMemo(() => {
-    const items = analyzer.history.items || [];
-    const simple = items
-      .slice(-10)
-      .map((h: any) => ({
-        date: h?.timestamp ? new Date(h.timestamp).toISOString().slice(0, 10) : '—',
-        score: Number(h?.data?.score ?? h?.data?.result?.score ?? 0) || 0,
-      }))
-      .filter((x) => x.score > 0);
-
-    return simple;
-  }, [analyzer.history.items]);
+  const trendSummary = useMemo(() => buildTrendSummary(vitals), [vitals]);
+  const timeline = useMemo(() => buildTimeline(vitals, selectedSymptoms, areas), [areas, selectedSymptoms, vitals]);
 
   const confidence = useMemo(() => {
-    const vitalsFilled = vitals.filter((v) => v.value != null && v.value !== '').length;
-    const symptomCount = selectedSymptoms.length;
-    const bodyCount = areas.length;
+    if (typeof analyzer.confidence === 'number') return analyzer.confidence;
 
-    const points = vitalsFilled * 1.0 + symptomCount * 1.2 + bodyCount * 0.8;
+    const enteredVitals = vitals.filter((v) => numberOrUndefined(v.value) !== undefined).length;
+    const symptomScore = selectedSymptoms.length > 0 ? 35 : 0;
+    const vitalScore = Math.min(40, enteredVitals * 8);
+    const bodyScore = areas.length > 0 ? 15 : 0;
+    const bmiScore = bmi ? 10 : 0;
 
-    if (points >= 8) return { level: 'High' as const, note: 'Good input coverage' };
-    if (points >= 5) return { level: 'Moderate' as const, note: 'Some inputs missing' };
-    return { level: 'Low' as const, note: 'Limited inputs provided' };
-  }, [vitals, selectedSymptoms.length, areas.length]);
+    return Math.min(100, symptomScore + vitalScore + bodyScore + bmiScore);
+  }, [analyzer.confidence, areas.length, bmi, selectedSymptoms.length, vitals]);
 
-  const canOpenResults = hasAnalyzed && !analyzer.busy;
+  const riskColor = useMemo(
+    () => riskToColor(analyzer.riskLevel ?? analyzer.risk ?? analyzer.result?.riskLevel ?? analyzer.result?.risk),
+    [analyzer.risk, analyzer.riskLevel, analyzer.result],
+  );
 
-  async function runAnalyze() {
-    await analyzer.analyze();
+  const profileContext = useMemo(
+    () => ({
+      bmi,
+      gender,
+      bodyAreas: areas,
+      legacyBodyAreas: legacyFromKeys(areas),
+    }),
+    [areas, bmi, gender],
+  );
+
+  const medicationContext = useMemo(
+    () => ({
+      medications: [],
+      allergies: [],
+    }),
+    [],
+  );
+
+  const wearableContext = useMemo(
+    () => ({
+      vitals,
+      abnormal,
+      trends: trendSummary,
+    }),
+    [abnormal, trendSummary, vitals],
+  );
+
+  const canOpenResults = hasAnalyzed || Boolean(analyzer.hasAnalyzed);
+
+  const runAnalyze = useCallback(async () => {
+    const payload = {
+      bmi,
+      step,
+      vitals,
+      symptoms,
+      selectedSymptoms,
+      gender,
+      view,
+      areas,
+      legacyAreas: legacyFromKeys(areas),
+      abnormal,
+      cardioAnalytics,
+      stressAnalytics,
+      trendSummary,
+      timeline,
+      confidence,
+      profileContext,
+      medicationContext,
+      wearableContext,
+    };
+
+    const fn = typeof analyzer.runAnalyze === 'function' ? analyzer.runAnalyze : analyzer.analyze;
+
+    const result = typeof fn === 'function' ? await fn(payload) : null;
+
     setHasAnalyzed(true);
-    setLastAnalyzedAt(Date.now());
-    setStep('results');
-    document.querySelector('#selfcheck-root')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  }
+    setLastAnalyzedAt(new Date().toISOString());
 
-  async function safeCopy(obj: any) {
+    return result;
+  }, [
+    abnormal,
+    analyzer,
+    areas,
+    bmi,
+    cardioAnalytics,
+    confidence,
+    gender,
+    medicationContext,
+    profileContext,
+    selectedSymptoms,
+    step,
+    stressAnalytics,
+    symptoms,
+    timeline,
+    trendSummary,
+    view,
+    vitals,
+    wearableContext,
+  ]);
+
+  const safeCopy = useCallback(async (text?: string) => {
+    const value = String(text ?? '');
+    if (!value) return false;
+
     try {
-      await navigator.clipboard?.writeText(JSON.stringify(obj, null, 2));
-    } catch {}
-  }
+      if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value);
+        return true;
+      }
+    } catch {
+      return false;
+    }
+
+    return false;
+  }, []);
 
   return {
     bmi,
@@ -218,6 +416,9 @@ export function useSelfCheckState() {
     abnormal,
 
     analyzer,
+    analysisSource: analyzer.analysisSource,
+    degradedMode: analyzer.degradedMode,
+    remoteError: analyzer.remoteError,
     riskColor,
 
     cardioAnalytics,
@@ -227,9 +428,13 @@ export function useSelfCheckState() {
 
     confidence,
 
-    hasAnalyzed,
-    lastAnalyzedAt,
+    hasAnalyzed: hasAnalyzed || Boolean(analyzer.hasAnalyzed),
+    lastAnalyzedAt: lastAnalyzedAt ?? analyzer.lastAnalyzedAt ?? null,
     canOpenResults,
+
+    profileContext,
+    medicationContext,
+    wearableContext,
 
     runAnalyze,
     safeCopy,

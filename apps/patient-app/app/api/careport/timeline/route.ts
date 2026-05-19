@@ -1,82 +1,88 @@
 ﻿// apps/patient-app/app/api/careport/timeline/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  forwardAuthHeaders,
+  gatewayNotConfigured,
+  getGatewayBase,
+  readJsonResponse,
+} from '@/app/api/careport/_gw';
 
-const MOCK = [
-  {
-    status: 'REQUESTED',
-    at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-  },
-  {
-    status: 'PHARMACY_MATCHED',
-    at: new Date(Date.now() - 50 * 60 * 1000).toISOString(),
-  },
-  {
-    status: 'RIDER_ASSIGNED',
-    at: new Date(Date.now() - 40 * 60 * 1000).toISOString(),
-  },
-  {
-    status: 'EN_ROUTE',
-    at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
-  },
-  {
-    status: 'DELIVERED',
-    at: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
-  },
-];
-
-const GATEWAY_BASE =
-  process.env.CAREPORT_GATEWAY_BASE ||
-  process.env.CLINICIAN_BASE_URL || // optional convenience
-  '';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const id = url.searchParams.get('id') || 'ERX-1001';
+  const base = getGatewayBase();
 
-  // If no gateway configured, just serve mock.
-  if (!GATEWAY_BASE) {
-    return NextResponse.json({ id, timeline: MOCK, source: 'mock-no-gateway' });
+  if (!base) {
+    return gatewayNotConfigured('careport');
   }
 
-  const upstream = `${GATEWAY_BASE.replace(/\/+$/, '')}/api/careport/timeline?id=${encodeURIComponent(
-    id,
-  )}`;
+  const incoming = new URL(req.url);
+  const id = (incoming.searchParams.get('id') || incoming.searchParams.get('orderId') || '').trim();
+
+  if (!id) {
+    return NextResponse.json(
+      { ok: false, error: 'orderId_required', timeline: [] },
+      { status: 400 },
+    );
+  }
+
+  const upstream = new URL(
+    `/api/careport/orders/${encodeURIComponent(id)}/timeline`,
+    base,
+  );
 
   try {
-    const res = await fetch(upstream, {
+    const res = await fetch(upstream.toString(), {
+      method: 'GET',
+      headers: forwardAuthHeaders(req),
       cache: 'no-store',
-      headers: { accept: 'application/json' },
     });
 
-    if (!res.ok) {
-      console.warn(
-        '[careport/timeline] upstream non-OK, using mock',
-        res.status,
-      );
+    const data = await readJsonResponse(res);
+
+    if (res.status === 404) {
       return NextResponse.json(
-        { id, timeline: MOCK, source: 'mock-upstream-error' },
-        { status: 200 },
+        {
+          ok: false,
+          error: 'careport_timeline_service_not_configured',
+          timeline: [],
+        },
+        { status: 503 },
       );
     }
 
-    const json = await res.json().catch(() => null as any);
-
-    const timeline =
-      (Array.isArray(json?.timeline) && json.timeline) ||
-      (Array.isArray(json?.items) && json.items) ||
-      (Array.isArray(json) && json) ||
-      [];
-
-    if (!timeline.length) {
-      return NextResponse.json({ id, timeline: [], source: 'live-empty' });
+    if (!res.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: data?.error || `careport_gateway_http_${res.status}`,
+          timeline: [],
+        },
+        { status: res.status },
+      );
     }
 
-    return NextResponse.json({ id, timeline, source: 'live' });
-  } catch (err) {
-    console.error('[careport/timeline] upstream error, using mock', err);
+    const timeline = Array.isArray(data?.timeline)
+      ? data.timeline
+      : Array.isArray(data?.items)
+        ? data.items
+        : [];
+
+    return NextResponse.json({
+      ok: true,
+      id,
+      timeline,
+      source: 'api_gateway',
+    });
+  } catch (err: any) {
     return NextResponse.json(
-      { id, timeline: MOCK, source: 'mock-exception' },
-      { status: 200 },
+      {
+        ok: false,
+        error: err?.message || 'careport_timeline_proxy_failed',
+        timeline: [],
+      },
+      { status: 502 },
     );
   }
 }

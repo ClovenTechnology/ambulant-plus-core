@@ -1,3 +1,4 @@
+// packages/client-core/src/lib/idempotency.ts
 import crypto from "node:crypto";
 import prisma, { PrismaTx, dbOrTx } from "./prisma";
 
@@ -16,11 +17,23 @@ export type IdempotencyScope =
   | "wallet.release"
   | "wallet.capture";
 
+const IDEMPOTENCY_ANONYMOUS_ACTOR = "__anonymous__";
+
 export function softJsonHash(value: unknown) {
   return crypto
     .createHash("sha256")
     .update(JSON.stringify(value ?? {}))
     .digest("hex");
+}
+
+function normalizeOrgId(value: unknown): string {
+  const orgId = typeof value === "string" ? value.trim() : "";
+  return orgId || "org-default";
+}
+
+function normalizeActorUserId(value: unknown): string {
+  const actorUserId = typeof value === "string" ? value.trim() : "";
+  return actorUserId || IDEMPOTENCY_ANONYMOUS_ACTOR;
 }
 
 export async function findIdempotentResponse(args: {
@@ -34,14 +47,15 @@ export async function findIdempotentResponse(args: {
   if (!args.key) return null;
 
   const db = dbOrTx(args.tx);
-  const orgId = args.orgId ?? "org-default";
+  const orgId = normalizeOrgId(args.orgId);
+  const actorUserId = normalizeActorUserId(args.actorUserId);
 
   const existing = await db.idempotencyKey.findFirst({
     where: {
       orgId,
       scope: args.scope,
       key: args.key,
-      actorUserId: args.actorUserId ?? null,
+      actorUserId,
     },
   });
 
@@ -66,7 +80,8 @@ export async function saveIdempotentResponse(args: {
   if (!args.key) return null;
 
   const db = dbOrTx(args.tx);
-  const orgId = args.orgId ?? "org-default";
+  const orgId = normalizeOrgId(args.orgId);
+  const actorUserId = normalizeActorUserId(args.actorUserId);
 
   return db.idempotencyKey.upsert({
     where: {
@@ -74,7 +89,7 @@ export async function saveIdempotentResponse(args: {
         orgId,
         scope: args.scope,
         key: args.key,
-        actorUserId: args.actorUserId ?? null,
+        actorUserId,
       },
     },
     update: {
@@ -85,7 +100,7 @@ export async function saveIdempotentResponse(args: {
       orgId,
       scope: args.scope,
       key: args.key,
-      actorUserId: args.actorUserId ?? null,
+      actorUserId,
       requestHash: args.requestHash,
       response: args.response as any,
     },

@@ -1,30 +1,134 @@
+// apps/patient-app/app/api/devices/list/route.ts
 import { NextResponse } from 'next/server';
 
-// Single source-of-truth list (expand freely). You can later read from DB.
-const CATALOG = [
-  // IoMT (DueCare)
-  { id: 'duecare-health-monitor', vendor: 'DueCare', name: 'Health Monitor', model: 'Vitals360', category: 'iomt', modality: 'vitals' },
-  { id: 'duecare-stethoscope', vendor: 'DueCare', name: 'Digital Stethoscope', model: 'HC21', category: 'iomt', modality: 'stethoscope' },
-  { id: 'duecare-otoscope', vendor: 'DueCare', name: 'HD Otoscope', model: 'HD-Pro', category: 'iomt', modality: 'otoscope' },
-  { id: 'duecare-scale', vendor: 'DueCare', name: 'Body Composition Scale', model: 'BF-28', category: 'iomt', modality: 'scale' },
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-  // Wearables
-  { id: 'duecare-nexring', vendor: 'DueCare', name: 'NexRing', model: 'PPG/ECG', category: 'wearable', modality: 'ring' },
-  { id: 'duecare-smart-band', vendor: 'DueCare', name: 'Smart Band', model: 'NexBand', category: 'wearable', modality: 'ring' }, // reuse PPG panel
-] as const;
+type DeviceCatalogItem = {
+  id: string;
+  slug: string;
+  vendor: string;
+  name: string;
+  model: string;
+  category: 'iomt' | 'wearable';
+  kind: 'vitals' | 'stethoscope' | 'otoscope' | 'ring';
+  summary: string;
+  href: string;
+  status: 'supported';
+  capabilities: string[];
+};
+
+const CATALOG: DeviceCatalogItem[] = [
+  {
+    id: 'duecare-health-monitor',
+    slug: 'health-monitor',
+    vendor: 'DueCare',
+    name: 'Health Monitor',
+    model: 'Vitals360',
+    category: 'iomt',
+    kind: 'vitals',
+    summary:
+      'Multi-parameter health monitor for body temperature, blood oxygen, blood pressure, blood glucose, heart rate and ECG workflows.',
+    href: '/myCare/devices/health-monitor',
+    status: 'supported',
+    capabilities: [
+      'Body temperature',
+      'Blood oxygen',
+      'Blood pressure',
+      'Blood glucose',
+      'Heart rate',
+      'ECG',
+    ],
+  },
+  {
+    id: 'duecare-stethoscope',
+    slug: 'digital-stethoscope',
+    vendor: 'DueCare',
+    name: 'Digital Stethoscope',
+    model: 'HC21',
+    category: 'iomt',
+    kind: 'stethoscope',
+    summary:
+      'Digital auscultation workflow for heart and lung sounds, playback, session review and clinician sharing.',
+    href: '/myCare/devices/stethoscope',
+    status: 'supported',
+    capabilities: [
+      'Heart auscultation',
+      'Lung auscultation',
+      'Audio playback',
+      'Session history',
+    ],
+  },
+  {
+    id: 'duecare-otoscope',
+    slug: 'hd-otoscope',
+    vendor: 'DueCare',
+    name: 'HD Otoscope',
+    model: 'HD-Pro',
+    category: 'iomt',
+    kind: 'otoscope',
+    summary:
+      'High-definition otoscope workflow for ear imaging, capture review and care-team sharing.',
+    href: '/myCare/devices/otoscope',
+    status: 'supported',
+    capabilities: [
+      'HD ear imaging',
+      'Image capture',
+      'Review workflow',
+      'Care-team sharing',
+    ],
+  },
+  {
+    id: 'duecare-nexring',
+    slug: 'nexring',
+    vendor: 'DueCare',
+    name: 'NexRing',
+    model: 'PPG/ECG',
+    category: 'wearable',
+    kind: 'ring',
+    summary:
+      'Ring-based wearable insights for pulse, SpO₂, HRV, sleep, recovery and longitudinal wellness signals.',
+    href: '/myCare/devices/nexring',
+    status: 'supported',
+    capabilities: [
+      'Pulse',
+      'SpO₂',
+      'HRV',
+      'Sleep insights',
+      'Recovery trends',
+      'Wearable analytics',
+    ],
+  },
+];
 
 function getPairedIds(): Set<string> {
-  // For demo: read cookie storing paired IDs (comma list)
-  // Replace with real persistence later.
+  /**
+   * Production-safe default:
+   * this endpoint exposes the supported device catalogue.
+   * Pairing state should be attached later from authenticated patient/device persistence.
+   */
   return new Set<string>();
 }
 
 export async function GET() {
   const paired = getPairedIds();
-  const devices = CATALOG.map(d => ({
-    ...d,
-    paired: paired.has(d.id),
-    lastSeenAt: paired.has(d.id) ? new Date().toISOString() : null,
+
+  const devices = CATALOG.map((device) => ({
+    ...device,
+    connected: paired.has(device.id),
+    paired: paired.has(device.id),
+    lastSeenAt: paired.has(device.id) ? new Date().toISOString() : null,
+    lastSeenHuman: paired.has(device.id) ? 'Recently synced' : null,
+    battery: null,
+    recent: [],
   }));
-  return NextResponse.json({ devices });
+
+  return NextResponse.json(
+    { devices },
+    {
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    },
+  );
 }

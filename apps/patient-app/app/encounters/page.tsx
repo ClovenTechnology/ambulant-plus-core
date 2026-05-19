@@ -1,10 +1,22 @@
 ﻿// apps/patient-app/app/encounters/page.tsx
 'use client';
-import React, { useEffect, useRef, useState } from 'react';
+
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
-import { FiVideo, FiMessageCircle, FiDownload, FiShare2, FiPlus } from 'react-icons/fi';
+import { FiChevronDown, FiChevronUp, FiDownload, FiPlus, FiShare2 } from 'react-icons/fi';
+
+import EncountersHero from '@/components/encounters/EncountersHero';
+import CaseStatusBadge from '@/components/encounters/CaseStatusBadge';
+import EncounterModeBadge from '@/components/encounters/EncounterModeBadge';
+import {
+  normalizeEncounterStatus,
+  encounterStatusClasses,
+  initials,
+  colorForId,
+  labelForEncounterStatus,
+} from '@/lib/encounters/display';
 
 type Vitals = {
   hr?: number;
@@ -26,13 +38,12 @@ type Encounter = {
   caseId: string;
   start: string;
   stop?: string;
-  mode?: 'Video' | 'Chat' | 'Audio' | 'InPerson';
+  mode?: 'Video' | 'Chat' | 'Audio' | 'InPerson' | string;
   status?: 'Completed' | 'InProgress' | 'Scheduled' | string;
   clinician?: { id: string; name: string; specialty?: string };
   devices?: string[];
   notes?: string;
   vitals?: Vitals;
-
   rating?: EncounterRating | null;
 };
 
@@ -44,48 +55,6 @@ type Case = {
   latestEncounter?: Encounter | null;
   encounters?: Encounter[];
 };
-
-/* ----------------- Small helpers & visuals ----------------- */
-
-const statusColor = (status: Case['status'] | string) => {
-  switch (status) {
-    case 'Open':
-      return 'bg-green-100 text-green-700';
-    case 'Closed':
-      return 'bg-zinc-100 text-zinc-700';
-    case 'Referred':
-      return 'bg-amber-100 text-amber-800';
-    default:
-      return 'bg-zinc-100 text-zinc-700';
-  }
-};
-
-const modeIcon = (mode?: Encounter['mode']) => {
-  switch (mode) {
-    case 'Video':
-      return <FiVideo className="inline mr-1 text-purple-600" />;
-    case 'Chat':
-      return <FiMessageCircle className="inline mr-1 text-blue-600" />;
-    default:
-      return null;
-  }
-};
-
-function initials(name?: string) {
-  if (!name) return '??';
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
-}
-
-function colorForId(id: string) {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) h = (h << 5) - h + id.charCodeAt(i);
-  const hue = Math.abs(h) % 360;
-  return `hsl(${hue} 60% 75%)`;
-}
-
-/* ---------- Clinical status helpers (for vitals coloring) ---------- */
 
 function statusForHr(hr?: number) {
   if (hr == null) return 'unknown';
@@ -119,11 +88,69 @@ const STATUS_COLOR: Record<string, string> = {
   unknown: '#94a3b8',
 };
 
-/* ---------- Tiny Timeline / Sparkline component (inline, supports clinical coloring) ---------- */
+function pickMetricValue(v?: Vitals, metric: 'auto' | 'hr' | 'spo2' | 'temp' | 'glucose' = 'auto') {
+  if (!v) return null;
+  if (metric === 'hr') return v.hr ?? null;
+  if (metric === 'spo2') return v.spo2 ?? null;
+  if (metric === 'temp') return v.temp_c ?? null;
+  if (metric === 'glucose') return v.glucose_mg_dl ?? null;
+
+  if (v.hr != null) return v.hr;
+  if (v.glucose_mg_dl != null) return v.glucose_mg_dl;
+  if (v.spo2 != null) return v.spo2;
+  if (v.temp_c != null) return v.temp_c;
+  if (v.sys != null) return v.sys;
+  if (v.dia != null) return v.dia;
+  return null;
+}
+
+function metricLabel(metric: 'auto' | 'hr' | 'spo2' | 'temp' | 'glucose', v?: Vitals) {
+  if (metric === 'hr') return 'Heart rate';
+  if (metric === 'spo2') return 'SpO₂';
+  if (metric === 'temp') return 'Temperature';
+  if (metric === 'glucose') return 'Glucose';
+
+  if (v?.hr != null) return 'Heart rate';
+  if (v?.glucose_mg_dl != null) return 'Glucose';
+  if (v?.spo2 != null) return 'SpO₂';
+  if (v?.temp_c != null) return 'Temperature';
+  if (v?.sys != null || v?.dia != null) return 'Blood pressure';
+  return 'Vitals';
+}
+
+function formatMetricValue(metric: 'auto' | 'hr' | 'spo2' | 'temp' | 'glucose', v?: Vitals) {
+  if (!v) return '—';
+  if (metric === 'hr') return v.hr != null ? `${v.hr} bpm` : '—';
+  if (metric === 'spo2') return v.spo2 != null ? `${v.spo2}%` : '—';
+  if (metric === 'temp') return v.temp_c != null ? `${v.temp_c.toFixed(1)} °C` : '—';
+  if (metric === 'glucose') return v.glucose_mg_dl != null ? `${v.glucose_mg_dl} mg/dL` : '—';
+
+  if (v.hr != null) return `${v.hr} bpm`;
+  if (v.glucose_mg_dl != null) return `${v.glucose_mg_dl} mg/dL`;
+  if (v.spo2 != null) return `${v.spo2}%`;
+  if (v.temp_c != null) return `${v.temp_c.toFixed(1)} °C`;
+  if (v.sys != null || v.dia != null) return `${v.sys ?? '—'}/${v.dia ?? '—'} mmHg`;
+  return '—';
+}
+
+function clinicalStatusForMetric(metric: 'auto' | 'hr' | 'spo2' | 'temp' | 'glucose', v?: Vitals) {
+  if (!v) return 'unknown';
+  if (metric === 'hr') return statusForHr(v.hr);
+  if (metric === 'spo2') return statusForSpo2(v.spo2);
+  if (metric === 'temp') return statusForTemp(v.temp_c);
+  if (metric === 'glucose') return statusForGlucose(v.glucose_mg_dl);
+
+  if (v.hr != null) return statusForHr(v.hr);
+  if (v.glucose_mg_dl != null) return statusForGlucose(v.glucose_mg_dl);
+  if (v.spo2 != null) return statusForSpo2(v.spo2);
+  if (v.temp_c != null) return statusForTemp(v.temp_c);
+  return 'unknown';
+}
+
 function TimelineSparkline({
   values,
-  width = 240,
-  height = 36,
+  width = 260,
+  height = 48,
   timestamps,
   vitalsSeries,
   metric,
@@ -142,8 +169,10 @@ function TimelineSparkline({
     const canvas = ref.current;
     const tip = tipRef.current;
     if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
+
     const dpr = Math.min(window.devicePixelRatio || 2, 2);
     canvas.width = width * dpr;
     canvas.height = height * dpr;
@@ -165,44 +194,30 @@ function TimelineSparkline({
     const max = Math.max(...values);
     const range = max === min ? 1 : max - min;
 
-    for (let i = 0; i < values.length - 1; i++) {
+    ctx.strokeStyle = 'rgba(15,23,42,0.06)';
+    ctx.lineWidth = 1;
+    for (let y = 0; y < height; y += Math.max(10, Math.round(height / 3))) {
+      ctx.beginPath();
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(width, y + 0.5);
+      ctx.stroke();
+    }
+
+    for (let i = 0; i < values.length - 1; i += 1) {
       const x1 = (i / (values.length - 1)) * width;
       const x2 = ((i + 1) / (values.length - 1)) * width;
       const y1 = height - ((values[i] - min) / range) * height;
       const y2 = height - ((values[i + 1] - min) / range) * height;
 
       let stroke = '#10b981';
-      const delta = Math.abs(values[i + 1] - values[i]);
-      if (delta > range * 0.25) stroke = '#ef4444';
-      else if (delta > range * 0.12) stroke = '#f59e0b';
-
-      if (vitalsSeries && metric && metric !== 'auto') {
+      if (vitalsSeries) {
         const v = vitalsSeries[i];
-        let s = 'unknown';
-        if (metric === 'hr') s = statusForHr(v?.hr);
-        else if (metric === 'spo2') s = statusForSpo2(v?.spo2);
-        else if (metric === 'temp') s = statusForTemp(v?.temp_c);
-        else if (metric === 'glucose') s = statusForGlucose(v?.glucose_mg_dl);
+        const s = clinicalStatusForMetric(metric ?? 'auto', v);
         stroke = STATUS_COLOR[s] || stroke;
-      } else if (vitalsSeries && metric === 'auto') {
-        const v = vitalsSeries[i];
-        let chosen: 'hr' | 'glucose' | 'spo2' | 'temp' | null = null;
-        if (v?.hr != null) chosen = 'hr';
-        else if (v?.glucose_mg_dl != null) chosen = 'glucose';
-        else if (v?.spo2 != null) chosen = 'spo2';
-        else if (v?.temp_c != null) chosen = 'temp';
-        if (chosen) {
-          let s = 'unknown';
-          if (chosen === 'hr') s = statusForHr(v?.hr);
-          else if (chosen === 'spo2') s = statusForSpo2(v?.spo2);
-          else if (chosen === 'temp') s = statusForTemp(v?.temp_c);
-          else if (chosen === 'glucose') s = statusForGlucose(v?.glucose_mg_dl);
-          stroke = STATUS_COLOR[s] || stroke;
-        }
       }
 
       ctx.strokeStyle = stroke;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 2.5;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
@@ -212,43 +227,36 @@ function TimelineSparkline({
     const handleMove = (ev: MouseEvent) => {
       const rect = canvas.getBoundingClientRect();
       const x = ev.clientX - rect.left;
-      const idx = Math.round((x / width) * (values.length - 1));
+      const idx = Math.round((x / rect.width) * (values.length - 1));
       if (idx < 0 || idx >= values.length) {
         if (tip) tip.style.display = 'none';
         return;
       }
-      const pointVal = values[idx];
+
       const ts = timestamps?.[idx];
       const vit = vitalsSeries?.[idx];
-      if (tip) {
-        tip.style.display = 'block';
-        tip.style.left = `${ev.clientX + 10}px`;
-        tip.style.top = `${ev.clientY + 10}px`;
-        let html = `<div class="text-xs">#${idx + 1}: ${pointVal}</div>`;
-        if (vit) {
-          if (vit.hr != null) html += `<div class="text-xs">HR: ${vit.hr} bpm</div>`;
-          if (vit.spo2 != null) html += `<div class="text-xs">SpO₂: ${vit.spo2}%</div>`;
-          if (vit.temp_c != null) html += `<div class="text-xs">Temp: ${vit.temp_c} °C</div>`;
-          if (vit.glucose_mg_dl != null) html += `<div class="text-xs">Glucose: ${vit.glucose_mg_dl} mg/dL</div>`;
-          if (metric && metric !== 'auto') {
-            let s = 'unknown';
-            if (metric === 'hr') s = statusForHr(vit.hr);
-            else if (metric === 'spo2') s = statusForSpo2(vit.spo2);
-            else if (metric === 'temp') s = statusForTemp(vit.temp_c);
-            else if (metric === 'glucose') s = statusForGlucose(vit.glucose_mg_dl);
-            html += `<div class="text-xs">Status: ${s}</div>`;
-          }
-        }
-        if (ts) html += `<div class="text-xs text-gray-500">${new Date(ts).toLocaleString()}</div>`;
-        tip.innerHTML = html;
+
+      if (!tip) return;
+      tip.style.display = 'block';
+      tip.style.left = `${ev.clientX + 10}px`;
+      tip.style.top = `${ev.clientY + 10}px`;
+
+      let html = `<div class="text-[11px] font-medium">${metricLabel(metric ?? 'auto', vit)}</div>`;
+      html += `<div class="text-[11px]">${formatMetricValue(metric ?? 'auto', vit)}</div>`;
+      if (vit?.sys != null || vit?.dia != null) {
+        html += `<div class="text-[11px]">BP: ${vit?.sys ?? '—'}/${vit?.dia ?? '—'} mmHg</div>`;
       }
+      if (ts) html += `<div class="text-[11px] text-slate-500">${new Date(ts).toLocaleString()}</div>`;
+      tip.innerHTML = html;
     };
+
     const handleLeave = () => {
       if (tip) tip.style.display = 'none';
     };
 
     canvas.addEventListener('mousemove', handleMove);
     canvas.addEventListener('mouseleave', handleLeave);
+
     return () => {
       canvas.removeEventListener('mousemove', handleMove);
       canvas.removeEventListener('mouseleave', handleLeave);
@@ -257,17 +265,15 @@ function TimelineSparkline({
 
   return (
     <div className="relative inline-block">
-      <canvas ref={ref} className="rounded" />
+      <canvas ref={ref} className="rounded-2xl" />
       <div
         ref={tipRef}
-        className="pointer-events-none absolute bg-white border rounded shadow p-1 text-xs"
+        className="pointer-events-none fixed rounded-xl border border-slate-200 bg-white px-2 py-1.5 text-xs shadow-lg"
         style={{ display: 'none', zIndex: 60 }}
       />
     </div>
   );
 }
-
-/* ----------------- Helpers ----------------- */
 
 function groupEncountersIntoCases(encs: Encounter[]): Case[] {
   const map: Record<string, Case> = {};
@@ -296,6 +302,7 @@ function makeMockCases(): Case[] {
         caseId: 'C-1000',
         start: new Date(now - 3600 * 1000).toISOString(),
         mode: 'Video',
+        status: 'InProgress',
         clinician: { id: 'CL-1', name: 'Dr. Sandile Moyo' },
         devices: ['NexRing'],
         vitals: { hr: 82, spo2: 98, temp_c: 37.1, glucose_mg_dl: 98, sys: 120, dia: 82 },
@@ -306,6 +313,7 @@ function makeMockCases(): Case[] {
           caseId: 'C-1000',
           start: new Date(now - 3600 * 1000).toISOString(),
           mode: 'Video',
+          status: 'InProgress',
           clinician: { id: 'CL-1', name: 'Dr. Sandile Moyo' },
           devices: ['NexRing'],
           vitals: { hr: 88, spo2: 94, temp_c: 36.7, glucose_mg_dl: 102, sys: 138, dia: 87 },
@@ -322,6 +330,7 @@ function makeMockCases(): Case[] {
         caseId: 'C-1071',
         start: new Date(now - 96000 * 1000).toISOString(),
         mode: 'Video',
+        status: 'Completed',
         clinician: { id: 'CL-9', name: 'Dr. Florence Moloyi' },
         devices: ['Health Monitor', 'Digital Stethoscope', 'NexRing'],
         vitals: { hr: 101, spo2: 94, temp_c: 39.1 },
@@ -332,6 +341,7 @@ function makeMockCases(): Case[] {
           caseId: 'C-1071',
           start: new Date(now - 96000 * 1000).toISOString(),
           mode: 'Video',
+          status: 'Completed',
           clinician: { id: 'CL-9', name: 'Dr. Florence Moloyi' },
           devices: ['Health Monitor', 'Digital Stethoscope', 'NexRing'],
           vitals: { hr: 101, spo2: 94, temp_c: 37.4, glucose_mg_dl: 105, sys: 132, dia: 88 },
@@ -347,7 +357,8 @@ function makeMockCases(): Case[] {
         id: 'E-4000',
         caseId: 'C-1001',
         start: new Date(now - 7205000 * 1000).toISOString(),
-        mode: 'Video',
+        mode: 'InPerson',
+        status: 'Completed',
         clinician: { id: 'CL-3', name: 'Dr. Jacobs Naidoo' },
         devices: ['Health Monitor'],
         vitals: { sys: 142, dia: 92 },
@@ -357,7 +368,8 @@ function makeMockCases(): Case[] {
           id: 'E-4000',
           caseId: 'C-1001',
           start: new Date(now - 7205000 * 1000).toISOString(),
-          mode: 'Video',
+          mode: 'InPerson',
+          status: 'Completed',
           clinician: { id: 'CL-3', name: 'Dr. Jacobs Naidoo' },
           devices: ['Health Monitor'],
           vitals: { sys: 142, dia: 92 },
@@ -367,36 +379,37 @@ function makeMockCases(): Case[] {
   ];
 }
 
-/* ----------------- Small toast system (local, no deps) ----------------- */
-
 type Toast = { id: string; text: string; tone?: 'info' | 'success' | 'error' };
 
 function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
+
   function push(text: string, tone: Toast['tone'] = 'info', ttl = 5000) {
     const id = String(Date.now()) + Math.random().toString(36).slice(2, 6);
     setToasts((t) => [...t, { id, text, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ttl);
   }
+
   function remove(id: string) {
     setToasts((t) => t.filter((x) => x.id !== id));
   }
+
   const Toasts = () => (
-    <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 1200 }} aria-live="polite">
+    <div className="fixed bottom-4 right-4 z-[1200]" aria-live="polite">
       <div className="flex flex-col gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`px-3 py-2 rounded shadow text-sm ${
+            className={`rounded-2xl px-3 py-2 text-sm shadow-lg ring-1 ${
               t.tone === 'success'
-                ? 'bg-green-50 text-green-800'
+                ? 'bg-emerald-50 text-emerald-800 ring-emerald-200'
                 : t.tone === 'error'
-                ? 'bg-red-50 text-red-800'
-                : 'bg-white text-gray-800'
+                ? 'bg-rose-50 text-rose-800 ring-rose-200'
+                : 'bg-white text-slate-800 ring-slate-200'
             }`}
           >
             {t.text}
-            <button onClick={() => remove(t.id)} className="ml-3 text-xs text-gray-500">
+            <button onClick={() => remove(t.id)} className="ml-3 text-xs text-slate-500">
               ×
             </button>
           </div>
@@ -404,10 +417,9 @@ function useToasts() {
       </div>
     </div>
   );
+
   return { push, Toasts };
 }
-
-/* ----------------- Page Component ----------------- */
 
 export default function EncountersPage() {
   const router = useRouter();
@@ -417,59 +429,91 @@ export default function EncountersPage() {
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<'All' | 'Open' | 'Closed' | 'Referred'>('All');
   const [loading, setLoading] = useState(true);
+  const [metricByCase, setMetricByCase] = useState<Record<string, 'auto' | 'hr' | 'spo2' | 'temp' | 'glucose'>>({});
+  const [startingCareportEncId, setStartingCareportEncId] = useState<string | null>(null);
 
   const caseRefs = useRef<Record<string, HTMLElement | null>>({});
-
-  const [metricByCase, setMetricByCase] = useState<Record<string, 'auto' | 'hr' | 'spo2' | 'temp' | 'glucose'>>({});
-
   const { push, Toasts } = useToasts();
 
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       try {
         if (!cancelled) setLoading(true);
         const res = await fetch('/api/encounters?mode=cases', { cache: 'no-store' });
         const data = await res.json();
         let cases: Case[] = [];
-        if (Array.isArray(data.cases)) {
+
+        if (Array.isArray(data?.cases)) {
           cases = data.cases;
-        } else if (Array.isArray(data.encounters)) {
+        } else if (Array.isArray(data?.encounters)) {
           cases = groupEncountersIntoCases(data.encounters);
         }
+
         if (!cancelled) setItems(cases.length ? cases : makeMockCases());
-      } catch (err) {
+      } catch {
         if (!cancelled) setItems(makeMockCases());
       } finally {
         if (!cancelled) setLoading(false);
       }
     }
+
     load();
     return () => {
       cancelled = true;
     };
   }, []);
 
-  const toggle = (id: string) =>
-    setExpanded((prev) => ({
-      ...prev,
-      [id]: !prev[id],
-    }));
+  async function startCarePort(encId: string) {
+    if (!encId) return;
 
-  const filtered = items.filter((c) => {
-    const okStatus = filterStatus === 'All' || c.status === filterStatus;
-    const okSearch =
-      c.title?.toLowerCase().includes(search.toLowerCase()) ||
-      c.id.toLowerCase().includes(search.toLowerCase());
-    return okStatus && okSearch;
-  });
+    setStartingCareportEncId(encId);
+    try {
+      const r = await fetch('/api/careport/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ encId, fulfillment: 'DELIVERY' }),
+      });
+      const j = await r.json().catch(() => ({} as any));
+      if (!r.ok || !j?.ok) {
+        push(j?.error || `Failed to start CarePort (HTTP ${r.status})`, 'error');
+        return;
+      }
 
-  /* ---------------- export to PDF (header/footer + canvas) ---------------- */
-  const CLINIC_HEADER = {
-    title: 'Ambulant+ Center',
-    address: '0b Meadowbrook Ln, Bryanston 2152',
-  };
-  const CLINIC_FOOTER = 'Ambulant+ Contactless Medicine - Powered by Cloven Technology Impilo';
+      const href = String(j.redirectUrl || '');
+      router.push(href || `/careport/marketplace/${encodeURIComponent(String(j.orderId || ''))}`);
+    } catch (e: any) {
+      push(e?.message || 'Failed to start CarePort', 'error');
+    } finally {
+      setStartingCareportEncId(null);
+    }
+  }
+
+  function toggle(id: string) {
+    setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
+  }
+
+  function routeFollowUp(caseItem: Case) {
+    if (caseItem.status === 'Closed') {
+      push('This case is closed — follow-up not allowed.', 'error');
+      return;
+    }
+
+    const encs = (caseItem.encounters ?? [])
+      .slice()
+      .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+
+    const clinicianId = caseItem.latestEncounter?.clinician?.id ?? encs[0]?.clinician?.id;
+
+    if (!clinicianId) {
+      push('No clinician found for this case — cannot book follow-up.', 'error');
+      return;
+    }
+
+    const href = `/clinicians/${encodeURIComponent(clinicianId)}/calendar?type=followup&caseId=${encodeURIComponent(caseItem.id)}`;
+    router.push(href);
+  }
 
   async function exportCaseAsPdf(caseId: string) {
     try {
@@ -478,12 +522,13 @@ export default function EncountersPage() {
         push('Case element not found for export.', 'error');
         return;
       }
+
       const html2canvas = (await import('html2canvas')).default;
       const clone = el.cloneNode(true) as HTMLElement;
       const wrap = document.createElement('div');
       wrap.style.padding = '20px';
       wrap.style.background = '#ffffff';
-      wrap.style.width = '800px';
+      wrap.style.width = '900px';
       wrap.appendChild(clone);
       document.body.appendChild(wrap);
 
@@ -499,29 +544,25 @@ export default function EncountersPage() {
         const pageHeight = pdf.internal.pageSize.getHeight();
 
         pdf.setFontSize(14);
-        pdf.text(CLINIC_HEADER.title, 40, 30);
+        pdf.text('Ambulant+ Center', 40, 30);
         pdf.setFontSize(10);
-        pdf.text(CLINIC_HEADER.address, 40, 46);
+        pdf.text('0b Meadowbrook Ln, Bryanston 2152', 40, 46);
 
         const margin = 40;
         const imgW = pageWidth - margin * 2;
         const imgH = (canvas.height / canvas.width) * imgW;
-        const y = 60;
-        pdf.addImage(dataUrl, 'JPEG', margin, y, imgW, imgH);
+        pdf.addImage(dataUrl, 'JPEG', margin, 68, imgW, imgH);
 
         pdf.setFontSize(9);
-        pdf.text(CLINIC_FOOTER, 40, pageHeight - 30);
-
+        pdf.text('Ambulant+ Contactless Medicine - Powered by Cloven Technology Impilo', 40, pageHeight - 30);
         pdf.save(`case-${caseId}.pdf`);
         push('Exported PDF successfully', 'success');
-        return;
-      } catch (jspdfErr) {
+      } catch {
         const a = document.createElement('a');
         a.href = dataUrl;
         a.download = `case-${caseId}.jpg`;
         a.click();
         push('Exported as image (jspdf not available)', 'info');
-        return;
       }
     } catch (err) {
       console.error('export error', err);
@@ -529,346 +570,429 @@ export default function EncountersPage() {
     }
   }
 
-  /* ---------------- follow-up routing (case-context only) ---------------- */
+  async function shareCase(caseItem: Case) {
+    const latest = caseItem.latestEncounter;
+    const text = [
+      caseItem.title ?? `Case ${caseItem.id}`,
+      `Status: ${caseItem.status}`,
+      latest?.clinician?.name ? `Clinician: ${latest.clinician.name}` : null,
+      latest?.start ? `Last encounter: ${new Date(latest.start).toLocaleString()}` : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
-  function routeFollowUp(caseItem: Case) {
-    if (caseItem.status === 'Closed') {
-      push('This case is closed — follow-up not allowed.', 'error');
-      return;
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: caseItem.title ?? `Case ${caseItem.id}`,
+          text,
+        });
+        push('Case shared', 'success');
+        return;
+      }
+      await navigator.clipboard.writeText(text);
+      push('Case summary copied to clipboard', 'success');
+    } catch {
+      push('Share cancelled', 'info');
     }
-    const encs = (caseItem.encounters ?? [])
-      .slice()
-      .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
-    const clinicianId = caseItem.latestEncounter?.clinician?.id ?? encs[0]?.clinician?.id;
-
-    if (!clinicianId) {
-      push('No clinician found for this case — cannot book follow-up.', 'error');
-      return;
-    }
-
-    const href =
-      `/clinicians/${encodeURIComponent(clinicianId)}/calendar` +
-      `?type=followup&caseId=${encodeURIComponent(caseItem.id)}`;
-
-    router.push(href);
   }
 
+  const filtered = useMemo(() => {
+    return items.filter((c) => {
+      const q = search.trim().toLowerCase();
+      const okStatus = filterStatus === 'All' || c.status === filterStatus;
+      const okSearch =
+        !q ||
+        c.title?.toLowerCase().includes(q) ||
+        c.id.toLowerCase().includes(q) ||
+        c.latestEncounter?.clinician?.name?.toLowerCase().includes(q);
+      return Boolean(okStatus && okSearch);
+    });
+  }, [items, filterStatus, search]);
+
+  const totalCases = items.length;
+  const openCases = items.filter((c) => c.status === 'Open').length;
+  const referredCases = items.filter((c) => c.status === 'Referred').length;
+  const completedEncounters = items.reduce((sum, c) => {
+    return sum + (c.encounters?.filter((e) => normalizeEncounterStatus(e.status) === 'completed').length ?? 0);
+  }, 0);
+
   return (
-    <main className="space-y-4 p-4">
-      <Toasts />
-      <h1 className="text-2xl font-bold">My Cases</h1>
+    <main className="min-h-screen bg-slate-50/70 p-4 sm:p-6">
+      <div className="mx-auto max-w-7xl space-y-5">
+        <Toasts />
 
-      {/* Info strip about upcoming bookings */}
-      <div className="rounded-lg border border-dashed border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900 flex flex-wrap items-center gap-2">
-        <span>Looking for upcoming bookings?</span>
-        <Link href="/appointments" className="font-medium underline underline-offset-2">
-          Go to Upcoming visits
-        </Link>
-      </div>
-
-      {/* Search + filter */}
-      <div className="flex flex-wrap gap-2 items-center">
-        <input
-          type="search"
-          placeholder="Search cases or case ID..."
-          className="border rounded px-3 py-1 flex-1 min-w-[220px]"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+        <EncountersHero
+          totalCases={totalCases}
+          openCases={openCases}
+          referredCases={referredCases}
+          completedEncounters={completedEncounters}
         />
-        <select
-          className="border rounded px-2 py-1"
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value as any)}
-        >
-          <option value="All">All Status</option>
-          <option value="Open">Open</option>
-          <option value="Closed">Closed</option>
-          <option value="Referred">Referred</option>
-        </select>
-      </div>
 
-      {loading && items.length === 0 && (
-        <div className="rounded-lg border bg-white p-4 text-sm text-zinc-500">
-          Loading your cases…
+        <div className="rounded-[24px] border border-cyan-200/70 bg-cyan-50/80 px-4 py-3 text-sm text-cyan-950 shadow-sm">
+          Looking for upcoming bookings?{' '}
+          <Link href="/appointments" className="font-medium underline underline-offset-2">
+            Go to upcoming visits
+          </Link>
         </div>
-      )}
 
-      {/* Empty state */}
-      {!loading && filtered.length === 0 && (
-        <div className="mt-2 rounded-xl border border-dashed bg-white p-6 text-sm text-gray-700 max-w-xl">
-          <div className="font-semibold text-gray-900">No cases yet</div>
-          <p className="mt-1">
-            After your first consultation, we&apos;ll group your visits into <b>cases</b> so you can track your
-            care over time.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link
-              href="/auto-triage"
-              className="px-3 py-1.5 rounded-full text-xs bg-emerald-600 text-white hover:bg-emerald-700"
+        <section className="rounded-[24px] border border-slate-200/80 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <input
+              type="search"
+              placeholder="Search cases, case IDs, or clinicians..."
+              className="h-11 min-w-[220px] flex-1 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 text-sm outline-none ring-0 placeholder:text-slate-400 focus:border-cyan-300 focus:bg-white"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+
+            <select
+              className="h-11 rounded-2xl border border-slate-200 bg-slate-50/70 px-4 text-sm outline-none focus:border-cyan-300 focus:bg-white"
+              value={filterStatus}
+              onChange={(e) => setFilterStatus(e.target.value as any)}
             >
-              Start a quick triage
-            </Link>
-            <Link href="/clinicians" className="px-3 py-1.5 rounded-full text-xs border bg-white hover:bg-gray-50">
-              Find a clinician
-            </Link>
-            <Link
-              href="/appointments"
-              className="px-3 py-1.5 rounded-full text-xs border bg-white hover:bg-gray-50"
-            >
-              View appointments
-            </Link>
+              <option value="All">All status</option>
+              <option value="Open">Open</option>
+              <option value="Closed">Closed</option>
+              <option value="Referred">Referred</option>
+            </select>
           </div>
-        </div>
-      )}
+        </section>
 
-      <ul className="space-y-3">
-        {filtered.map((c) => {
-          const encs = (c.encounters ?? [])
-            .slice()
-            .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
+        {loading && items.length === 0 ? (
+          <div className="rounded-[24px] border border-slate-200/80 bg-white p-6 text-sm text-slate-500 shadow-sm">
+            Loading your cases…
+          </div>
+        ) : null}
 
-          const series = encs.length ? encs.map((e) => Math.floor(new Date(e.start).getTime() / 60000)) : [0, 0];
-          const humanSeries = encs.map((e) => e.start);
-          const vitalsSeries = encs.map((e) => e.vitals);
+        {!loading && filtered.length === 0 ? (
+          <div className="max-w-2xl rounded-[28px] border border-dashed border-slate-300 bg-white p-8 shadow-sm">
+            <div className="text-lg font-semibold tracking-tight text-slate-950">No cases yet</div>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              After your first consultation, your visits will be grouped into cases so you can track care over time.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <Link href="/auto-triage" className="rounded-full bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700">
+                Start a quick triage
+              </Link>
+              <Link href="/clinicians" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50">
+                Find a clinician
+              </Link>
+              <Link href="/appointments" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm hover:bg-slate-50">
+                View appointments
+              </Link>
+            </div>
+          </div>
+        ) : null}
 
-          const clinician = c.latestEncounter?.clinician ?? encs[0]?.clinician;
-          const metric = metricByCase[c.id] ?? 'auto';
+        <ul className="space-y-4">
+          {filtered.map((c) => {
+            const encs = (c.encounters ?? [])
+              .slice()
+              .sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime());
 
-          const followUpDisabled = c.status === 'Closed';
+            const clinician = c.latestEncounter?.clinician ?? encs[0]?.clinician;
+            const latestEnc = c.latestEncounter ?? encs[0];
+            const latestEncId = latestEnc?.id ?? '';
+            const metric = metricByCase[c.id] ?? 'auto';
 
-          return (
-            <li
-              key={c.id}
-              ref={(el) => (caseRefs.current[c.id] = el)}
-              className="border rounded-lg p-4 shadow hover:shadow-md transition-all bg-white dark:bg-zinc-800"
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3">
-                  {/* clinician avatar */}
-                  <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-semibold"
-                    style={{ background: clinician ? colorForId(clinician.id) : '#eee' }}
-                    title={clinician ? clinician.name : 'No clinician'}
-                  >
-                    <span>{initials(clinician?.name ?? c.title)}</span>
-                  </div>
+            const points = encs
+              .slice()
+              .reverse()
+              .map((e) => pickMetricValue(e.vitals, metric))
+              .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
 
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <div className="font-medium text-lg">{c.title ?? `Case #${c.id}`}</div>
-                      <span className={`text-xs px-2 py-0.5 rounded ${statusColor(c.status)}`}>{c.status}</span>
-                    </div>
-                    <div className="text-sm text-zinc-500 mt-1">
-                      Updated {formatDistanceToNow(new Date(c.updatedAt), { addSuffix: true })}
-                      <span className="ml-1 text-[11px]" title={new Date(c.updatedAt).toLocaleString()}>
-                        (exact)
-                      </span>
-                    </div>
+            const timestamps = encs.slice().reverse().map((e) => e.start);
+            const vitalsSeries = encs.slice().reverse().map((e) => e.vitals);
+            const latestVitals = latestEnc?.vitals;
+            const currentStatus = clinicalStatusForMetric(metric, latestVitals);
+            const followUpDisabled = c.status === 'Closed';
 
-                    {c.latestEncounter && (
-                      <div className="text-[13px] mt-1 text-zinc-600 flex items-center gap-2">
-                        <div className="inline-flex items-center gap-1">
-                          {modeIcon(c.latestEncounter.mode)}{' '}
-                          {formatDistanceToNow(new Date(c.latestEncounter.start), {
-                            addSuffix: true,
-                          })}
+            return (
+              <li
+                key={c.id}
+                ref={(el) => {
+  caseRefs.current[c.id] = el;
+}}
+                className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white shadow-sm transition-shadow hover:shadow-md"
+              >
+                <div className="h-2 bg-gradient-to-r from-cyan-500/20 via-violet-500/20 to-emerald-500/20" />
+
+                <div className="p-5 sm:p-6">
+                  <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start gap-3">
+                        <div
+                          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-sm font-semibold text-slate-900 shadow-inner"
+                          style={{ background: clinician ? colorForId(clinician.id) : '#e5e7eb' }}
+                          title={clinician?.name || 'No clinician'}
+                        >
+                          {initials(clinician?.name ?? c.title)}
                         </div>
-                        {clinician && (
-                          <div className="ml-2 text-sm text-zinc-500">
-                            • {clinician.name}
-                            {clinician.specialty ? ` — ${clinician.specialty}` : ''}
+
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h2 className="truncate text-xl font-semibold tracking-tight text-slate-950">
+                              {c.title ?? `Case #${c.id}`}
+                            </h2>
+                            <CaseStatusBadge status={c.status} />
                           </div>
-                        )}
+
+                          <div className="mt-1 text-sm text-slate-500">
+                            Updated {formatDistanceToNow(new Date(c.updatedAt), { addSuffix: true })}
+                          </div>
+
+                          {latestEnc ? (
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <EncounterModeBadge mode={latestEnc.mode} />
+                              <span
+                                className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-wide ${encounterStatusClasses(
+                                  latestEnc.status,
+                                )}`}
+                              >
+                                {labelForEncounterStatus(latestEnc.status)}
+                              </span>
+                              {clinician?.name ? (
+                                <span className="text-sm text-slate-600">
+                                  with <span className="font-medium text-slate-900">{clinician.name}</span>
+                                  {clinician.specialty ? <span className="text-slate-500"> · {clinician.specialty}</span> : null}
+                                </span>
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
                       </div>
-                    )}
 
-                    {/* devices */}
-                    {encs.length > 0 && (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {Array.from(new Set(encs.flatMap((e) => e.devices ?? []))).map((d) => (
-                          <span key={d} className="text-[12px] px-2 py-0.5 border rounded bg-gray-50">
-                            {d}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* right actions */}
-                <div className="flex flex-col items-end gap-2">
-                  <div className="text-sm text-zinc-500">
-                    {encs.length} encounter{encs.length === 1 ? '' : 's'}
-                  </div>
-                  <div className="flex gap-2">
-                    <button onClick={() => toggle(c.id)} className="text-blue-600 text-sm">
-                      {expanded[c.id] ? 'Hide Details ▲' : 'View Details ▼'}
-                    </button>
-
-                    <button
-                      className={`flex items-center gap-1 text-sm px-2 py-1 border rounded ${
-                        followUpDisabled ? 'opacity-50 cursor-not-allowed' : 'hover:bg-gray-100'
-                      }`}
-                      onClick={() => !followUpDisabled && routeFollowUp(c)}
-                      title={
-                        followUpDisabled
-                          ? 'Case is closed — follow-up not allowed'
-                          : 'Schedule a follow-up (case-context only)'
-                      }
-                      disabled={followUpDisabled}
-                    >
-                      <FiPlus /> Follow-up
-                    </button>
-
-                    <button
-                      className="flex items-center gap-1 text-sm px-2 py-1 border rounded hover:bg-gray-100"
-                      onClick={() => exportCaseAsPdf(c.id)}
-                      title="Export case as PDF"
-                    >
-                      <FiDownload /> Export
-                    </button>
-
-                    <button
-                      className="flex items-center gap-1 text-sm px-2 py-1 border rounded hover:bg-gray-100"
-                      onClick={() => push('Share not implemented yet', 'info')}
-                    >
-                      <FiShare2 /> Share
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              {/* sparkline + small summary */}
-              <div className="mt-3 flex items-center justify-between">
-                <div className="text-xs text-gray-500">Timeline</div>
-                <div className="text-xs text-gray-500">
-                  {encs.length ? `Last: ${new Date(encs[0].start).toLocaleString()}` : ''}
-                </div>
-              </div>
-
-              <div className="mt-2 flex items-center justify-between">
-                <div>
-                  {/* metric selector */}
-                  <div className="flex items-center gap-2 mb-2">
-                    <label className="text-xs text-gray-500">Color by</label>
-                    <select
-                      className="text-xs border rounded px-2 py-1"
-                      value={metric}
-                      onChange={(e) =>
-                        setMetricByCase((prev) => ({
-                          ...prev,
-                          [c.id]: e.target.value as any,
-                        }))
-                      }
-                    >
-                      <option value="auto">Auto</option>
-                      <option value="hr">HR</option>
-                      <option value="spo2">SpO₂</option>
-                      <option value="temp">Temp</option>
-                      <option value="glucose">Glucose</option>
-                    </select>
-                  </div>
-
-                  <TimelineSparkline
-                    values={series}
-                    timestamps={humanSeries}
-                    vitalsSeries={vitalsSeries}
-                    metric={metric}
-                    width={360}
-                    height={48}
-                  />
-                </div>
-
-                <div className="ml-4 text-right text-xs text-zinc-500">
-                  {encs.slice(0, 3).map((e) => (
-                    <div key={e.id} className="mb-1">
-                      <div className="font-medium text-[13px]">
-                        {modeIcon(e.mode)}{' '}
-                        {formatDistanceToNow(new Date(e.start), { addSuffix: true })}
-                      </div>
-                      <div className="text-[12px] text-zinc-400">{e.clinician?.name ?? '—'}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* expanded details */}
-              {expanded[c.id] && (
-                <div className="mt-3 border-t pt-3 space-y-2 text-sm">
-                  {encs.length === 0 ? (
-                    <div className="text-xs text-zinc-500">
-                      No encounters have been recorded for this case yet.
-                    </div>
-                  ) : (
-                    <ul className="space-y-2">
-                      {encs.map((enc) => {
-                        const isCompleted = enc.status === 'Completed' || enc.status === 'Closed';
-                        const needsRating = isCompleted && !enc.rating?.score;
-
-                        return (
-                          <li key={enc.id} className="flex justify-between items-start gap-3">
+                      <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr)_260px]">
+                        <div className="rounded-[22px] border border-slate-200/80 bg-slate-50/70 p-4">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
                             <div>
-                              <div className="font-medium">
-                                {modeIcon(enc.mode)} {new Date(enc.start).toLocaleString()}
+                              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                                Latest signal
                               </div>
-                              <div className="text-xs text-zinc-500">
-                                {enc.clinician
-                                  ? `${enc.clinician.name}${
-                                      enc.clinician.specialty ? ` — ${enc.clinician.specialty}` : ''
-                                    }`
-                                  : 'No clinician'}
-                                {enc.devices && enc.devices.length > 0
-                                  ? ` • ${enc.devices.join(', ')}`
-                                  : ''}
+                              <div className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+                                {formatMetricValue(metric, latestVitals)}
                               </div>
-                              {enc.notes && (
-                                <div className="mt-1 text-[13px] text-zinc-700">{enc.notes}</div>
-                              )}
-                              {enc.vitals && (
-                                <div className="mt-1 text-[13px] text-zinc-700">
-                                  Vitals: {enc.vitals.hr ? `HR ${enc.vitals.hr} bpm • ` : ''}
-                                  {enc.vitals.spo2 ? `SpO₂ ${enc.vitals.spo2}% • ` : ''}
-                                  {enc.vitals.temp_c ? `Temp ${enc.vitals.temp_c}°C • ` : ''}
-                                  {enc.vitals.glucose_mg_dl
-                                    ? `Glucose ${enc.vitals.glucose_mg_dl} mg/dL`
-                                    : ''}
-                                </div>
-                              )}
+                              <div className="mt-1 text-sm text-slate-600">{metricLabel(metric, latestVitals)}</div>
+                            </div>
 
-                              <button
-                                className="mt-2 text-xs text-blue-600 hover:underline"
-                                onClick={() =>
-                                  router.push(`/encounters/${encodeURIComponent(enc.id)}`)
+                            <div className="flex items-center gap-2">
+                              <select
+                                className="h-9 rounded-xl border border-slate-200 bg-white px-3 text-xs outline-none focus:border-cyan-300"
+                                value={metric}
+                                onChange={(e) =>
+                                  setMetricByCase((prev) => ({
+                                    ...prev,
+                                    [c.id]: e.target.value as 'auto' | 'hr' | 'spo2' | 'temp' | 'glucose',
+                                  }))
                                 }
                               >
-                                View visit →
+                                <option value="auto">Auto</option>
+                                <option value="hr">Heart rate</option>
+                                <option value="spo2">SpO₂</option>
+                                <option value="temp">Temperature</option>
+                                <option value="glucose">Glucose</option>
+                              </select>
+
+                              <span
+                                className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize"
+                                style={{
+                                  backgroundColor: `${STATUS_COLOR[currentStatus]}20`,
+                                  color: STATUS_COLOR[currentStatus],
+                                }}
+                              >
+                                {currentStatus}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 min-h-[52px]">
+                            <TimelineSparkline
+                              values={points.length > 1 ? points : [0, 0]}
+                              timestamps={timestamps}
+                              vitalsSeries={vitalsSeries}
+                              metric={metric}
+                            />
+                          </div>
+
+                          {latestVitals ? (
+                            <div className="mt-4 flex flex-wrap gap-2">
+                              {latestVitals.hr != null ? <MiniVital label="HR" value={`${latestVitals.hr} bpm`} /> : null}
+                              {latestVitals.spo2 != null ? <MiniVital label="SpO₂" value={`${latestVitals.spo2}%`} /> : null}
+                              {latestVitals.temp_c != null ? (
+                                <MiniVital label="Temp" value={`${latestVitals.temp_c.toFixed(1)} °C`} />
+                              ) : null}
+                              {latestVitals.glucose_mg_dl != null ? (
+                                <MiniVital label="Glucose" value={`${latestVitals.glucose_mg_dl} mg/dL`} />
+                              ) : null}
+                              {latestVitals.sys != null || latestVitals.dia != null ? (
+                                <MiniVital label="BP" value={`${latestVitals.sys ?? '—'}/${latestVitals.dia ?? '—'} mmHg`} />
+                              ) : null}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="rounded-[22px] border border-slate-200/80 bg-white p-4">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                            Actions
+                          </div>
+
+                          <div className="mt-3 flex flex-col gap-2">
+                            <button
+                              type="button"
+                              onClick={() => latestEncId && startCarePort(latestEncId)}
+                              disabled={!latestEncId || startingCareportEncId === latestEncId}
+                              className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              {startingCareportEncId === latestEncId ? 'Starting…' : 'Start CarePort'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => routeFollowUp(c)}
+                              disabled={followUpDisabled}
+                              className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-900 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                            >
+                              <FiPlus className="h-4 w-4" />
+                              Book follow-up
+                            </button>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <button
+                                type="button"
+                                onClick={() => exportCaseAsPdf(c.id)}
+                                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 transition hover:bg-slate-50"
+                              >
+                                <FiDownload className="h-4 w-4" />
+                                Export
                               </button>
 
-                              {needsRating && (
-                                <button
-                                  className="mt-1 block text-xs text-amber-600 hover:underline"
-                                  onClick={() =>
-                                    router.push(
-                                      `/encounters/${encodeURIComponent(enc.id)}?rate=1`,
-                                    )
-                                  }
-                                >
-                                  Rate this visit
-                                </button>
-                              )}
+                              <button
+                                type="button"
+                                onClick={() => shareCase(c)}
+                                className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 transition hover:bg-slate-50"
+                              >
+                                <FiShare2 className="h-4 w-4" />
+                                Share
+                              </button>
                             </div>
-                            <div className="text-xs text-zinc-400">{enc.status ?? ''}</div>
-                          </li>
-                        );
-                      })}
-                    </ul>
-                  )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-5 border-t border-slate-200/80 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => toggle(c.id)}
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-900/5 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-900/10"
+                    >
+                      {expanded[c.id] ? <FiChevronUp className="h-4 w-4" /> : <FiChevronDown className="h-4 w-4" />}
+                      {expanded[c.id] ? 'Hide encounter timeline' : `Show encounter timeline (${encs.length})`}
+                    </button>
+
+                    {expanded[c.id] ? (
+                      <div className="mt-4 space-y-3">
+                        {encs.map((enc, idx) => {
+                          const encVitals = enc.vitals;
+                          return (
+                            <div
+                              key={enc.id}
+                              className="rounded-[22px] border border-slate-200/80 bg-slate-50/60 p-4"
+                            >
+                              <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                                <div className="min-w-0">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <div className="text-sm font-semibold text-slate-950">
+                                      Encounter {enc.id}
+                                    </div>
+                                    <EncounterModeBadge mode={enc.mode} />
+                                    <span
+                                      className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${encounterStatusClasses(
+                                        enc.status,
+                                      )}`}
+                                    >
+                                      {labelForEncounterStatus(enc.status)}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-1 text-sm text-slate-600">
+                                    {new Date(enc.start).toLocaleString()}
+                                    {enc.clinician?.name ? (
+                                      <>
+                                        {' '}
+                                        · <span className="font-medium text-slate-900">{enc.clinician.name}</span>
+                                      </>
+                                    ) : null}
+                                  </div>
+
+                                  {enc.notes ? (
+                                    <p className="mt-2 max-w-3xl whitespace-pre-line text-sm leading-6 text-slate-600">
+                                      {enc.notes}
+                                    </p>
+                                  ) : null}
+
+                                  {enc.devices?.length ? (
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                      {enc.devices.map((d) => (
+                                        <span
+                                          key={`${enc.id}-${d}`}
+                                          className="rounded-full bg-white px-2.5 py-1 text-[11px] font-medium text-slate-700 ring-1 ring-slate-200"
+                                        >
+                                          {d}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  ) : null}
+                                </div>
+
+                                <div className="shrink-0 text-right">
+                                  <Link
+                                    href={`/encounters/${encodeURIComponent(enc.id)}`}
+                                    className="inline-flex rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+                                  >
+                                    Open details
+                                  </Link>
+                                  <div className="mt-2 text-xs text-slate-500">#{idx + 1} in this case</div>
+                                </div>
+                              </div>
+
+                              {encVitals ? (
+                                <div className="mt-4 flex flex-wrap gap-2">
+                                  {encVitals.hr != null ? <MiniVital label="HR" value={`${encVitals.hr} bpm`} /> : null}
+                                  {encVitals.spo2 != null ? <MiniVital label="SpO₂" value={`${encVitals.spo2}%`} /> : null}
+                                  {encVitals.temp_c != null ? (
+                                    <MiniVital label="Temp" value={`${encVitals.temp_c.toFixed(1)} °C`} />
+                                  ) : null}
+                                  {encVitals.glucose_mg_dl != null ? (
+                                    <MiniVital label="Glucose" value={`${encVitals.glucose_mg_dl} mg/dL`} />
+                                  ) : null}
+                                  {encVitals.sys != null || encVitals.dia != null ? (
+                                    <MiniVital label="BP" value={`${encVitals.sys ?? '—'}/${encVitals.dia ?? '—'} mmHg`} />
+                                  ) : null}
+                                </div>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
-              )}
-            </li>
-          );
-        })}
-      </ul>
+              </li>
+            );
+          })}
+        </ul>
+      </div>
     </main>
+  );
+}
+
+function MiniVital({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-slate-700 ring-1 ring-slate-200">
+      <span className="text-slate-500">{label}:</span> {value}
+    </div>
   );
 }

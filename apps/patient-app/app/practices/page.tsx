@@ -1,7 +1,7 @@
 // apps/patient-app/app/practices/page.tsx
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import useSWR from 'swr';
@@ -9,16 +9,30 @@ import { toast } from '@/components/ToastMount';
 import { usePlan } from '@/components/context/PlanContext';
 import cleanText from '@/lib/cleanText';
 
-import * as PracticesMock from '@/mock/practices';
-
-import { COUNTRY_LABELS } from '@/mock/clinicians-by-country';
-import type { CountryCode } from '@/mock/clinicians-shared';
 
 const MAIN_TABS = ['All', 'Teams', 'Clinics', 'Hospitals'] as const;
 type MainTab = (typeof MAIN_TABS)[number];
 
 const PAGE_SIZE = 10;
 const FAV_KEY = 'practice.favs';
+
+const COUNTRY_LABELS = {
+  ZA: 'South Africa',
+  NG: 'Nigeria',
+  KE: 'Kenya',
+  GH: 'Ghana',
+  BW: 'Botswana',
+  ZW: 'Zimbabwe',
+  CD: 'Democratic Republic of the Congo',
+  GB: 'United Kingdom',
+  US: 'United States',
+  CA: 'Canada',
+  AU: 'Australia',
+  AE: 'United Arab Emirates',
+  SA: 'Saudi Arabia',
+} as const;
+
+type CountryCode = keyof typeof COUNTRY_LABELS;
 
 type PracticeKind = 'team' | 'clinic' | 'hospital' | 'other';
 
@@ -90,58 +104,14 @@ function normalizeCountryParam(v: string | null): CountryCode | null {
   return null;
 }
 
-/**
- * ✅ Matches YOUR mock exports:
- * - PRACTICES_ZA, PRACTICES_NG, PRACTICES_KE, ...
- * - plus back-compat PRACTICES (ZA)
- * Also tolerates other optional shapes if added later.
- */
-function getFallbackPracticesForCountry(country: CountryCode): any[] {
-  // 1) Your actual pattern: PRACTICES_${country}
-  const direct = (PracticesMock as any)[`PRACTICES_${country}`];
-  if (Array.isArray(direct) && direct.length) return direct;
 
-  // 2) Optional helpers if introduced later
-  const maybeFn =
-    (PracticesMock as any).getMockPracticesForCountry ??
-    (PracticesMock as any).default?.getMockPracticesForCountry;
-  if (typeof maybeFn === 'function') {
-    try {
-      const res = maybeFn(country);
-      if (Array.isArray(res) && res.length) return res;
-    } catch {
-      // ignore and fall through
-    }
-  }
-
-  // 3) Optional map export if introduced later
-  const byCountry =
-    (PracticesMock as any).PRACTICES_BY_COUNTRY ??
-    (PracticesMock as any).default?.PRACTICES_BY_COUNTRY ??
-    null;
-  if (byCountry && typeof byCountry === 'object') {
-    const list = (byCountry as any)[country];
-    if (Array.isArray(list) && list.length) return list;
-  }
-
-  // 4) Back-compat: PRACTICES (ZA)
-  const base = (PracticesMock as any).PRACTICES ?? (PracticesMock as any).default?.PRACTICES ?? null;
-  if (Array.isArray(base) && base.length) return base;
-
-  // 5) Last resort: find any exported array with content
-  for (const v of Object.values(PracticesMock as any)) {
-    if (Array.isArray(v) && v.length) return v;
-  }
-
-  return [];
-}
-
-export default function PracticesPage() {
+function PracticesPageContent() {
   const sp = useSearchParams();
+  const queryParam = useCallback((key: string) => sp?.get(key)?.trim() ?? '', [sp]);
   const { isPremium } = usePlan();
 
   const [country, setCountry] = useState<CountryCode>(
-    normalizeCountryParam(sp.get('country')) ?? 'ZA',
+    normalizeCountryParam(queryParam('country')) ?? 'ZA',
   );
 
   const [tab, setTab] = useState<MainTab>('All');
@@ -196,15 +166,15 @@ export default function PracticesPage() {
   }, [filters.q]);
 
   useEffect(() => {
-    const fromUrl = (sp.get('type') || '').toLowerCase().trim();
+    const fromUrl = (queryParam('type') || '').toLowerCase().trim();
     if (fromUrl) {
       if (fromUrl.includes('team')) setTab('Teams');
       else if (fromUrl.includes('clinic')) setTab('Clinics');
       else if (fromUrl.includes('hospital')) setTab('Hospitals');
     }
-    const loc = sp.get('location');
-    const q = sp.get('q');
-    const ctry = normalizeCountryParam(sp.get('country'));
+    const loc = queryParam('location');
+    const q = queryParam('q');
+    const ctry = normalizeCountryParam(queryParam('country'));
     if (ctry) setCountry(ctry);
 
     setFilters((prev) => ({
@@ -230,8 +200,14 @@ export default function PracticesPage() {
   useEffect(() => {
     const normaliseList = (list: any[]): PracticeItem[] =>
       list.map((p) => {
-        const id = String(p.id ?? p.slug ?? p.practiceId ?? `${p.name}-${Math.random()}`);
         const name = cleanText(p.name ?? p.displayName ?? 'Practice');
+        const idSource =
+          p.id ??
+          p.slug ??
+          p.practiceId ??
+          name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+
+        const id = String(idSource || 'practice');
 
         const mainLocation =
           p.primaryLocationName ??
@@ -279,8 +255,8 @@ export default function PracticesPage() {
 
         const acceptedSchemes: string[] = Array.isArray((p as any).acceptedSchemes)
           ? (p as any).acceptedSchemes
-          : Array.isArray((p as any).acceptedSchemes)
-            ? (p as any).acceptedSchemes
+          : Array.isArray((p as any).acceptedMedicalAidSchemes)
+            ? (p as any).acceptedMedicalAidSchemes
             : [];
 
         return {
@@ -313,35 +289,30 @@ export default function PracticesPage() {
         } as PracticeItem;
       });
 
-    const fallback = getFallbackPracticesForCountry(country);
-
     if (data) {
       const list: any[] = Array.isArray(data)
         ? data
         : Array.isArray((data as any)?.practices)
           ? (data as any).practices
-          : [];
+          : Array.isArray((data as any)?.data)
+            ? (data as any).data
+            : [];
 
-      if (list.length > 0) {
-        setAllPractices(normaliseList(list));
-        return;
-      }
-
-      setAllPractices(normaliseList(fallback));
+      setAllPractices(normaliseList(list));
       return;
     }
 
     if (error) {
       console.warn('Failed to load practices', error);
       try {
-        toast('Unable to load practices right now. Showing example practices instead.', 'error');
+        toast('Unable to load practices right now.', 'error');
       } catch {}
-      setAllPractices(normaliseList(fallback));
+      setAllPractices([]);
       return;
     }
 
-    setAllPractices(normaliseList(fallback));
-  }, [data, error, country]);
+    setAllPractices([]);
+  }, [data, error]);
 
   const loading = isValidating && !data && !allPractices.length;
 
@@ -901,5 +872,13 @@ export default function PracticesPage() {
         </nav>
       </div>
     </main>
+  );
+}
+
+export default function PracticesPage() {
+  return (
+    <Suspense fallback={<main className="p-6 text-sm text-slate-600">Loading practices…</main>}>
+      <PracticesPageContent />
+    </Suspense>
   );
 }

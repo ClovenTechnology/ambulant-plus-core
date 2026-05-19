@@ -1,7 +1,7 @@
 // apps/patient-app/app/myCare/devices/stethoscope/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useSearchParams } from 'next/navigation';
 import {
   Activity,
@@ -182,7 +182,7 @@ function newId() {
   try {
     return crypto.randomUUID();
   } catch {
-    return `rec_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+    return `rec_${Date.now().toString(16)}_${performance.now().toString(16).replace('.', '')}`;
   }
 }
 
@@ -312,6 +312,10 @@ function saveSessions(patientId: string, sessions: SessionBundle[]) {
 type UploadResp = { ok?: boolean; item?: any };
 
 async function uploadAuscultation(patientId: string, blob: Blob, meta: Record<string, any>): Promise<UploadResp> {
+  if (!patientId) {
+    throw new Error('Patient identity is required before uploading auscultation.');
+  }
+
   const form = new FormData();
   form.append('file', blob, `steth_${Date.now()}.wav`);
   form.append('meta', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
@@ -432,15 +436,19 @@ function maskId(s?: string) {
   return `${s.slice(0, 2)}•••${s.slice(-2)}`;
 }
 
-export default function StethoscopeConsole() {
+function StethoscopeConsoleContent() {
   const sp = useSearchParams();
+  const queryParam = useCallback(
+    (key: string) => sp?.get(key)?.trim() ?? '',
+    [sp],
+  );
   const SAMPLE_RATE = 8000;
 
   // Keep site state early so UI-only placement helpers can stay minimal & safe
   const [site, setSite] = useState<SiteKey>('chest-apex');
 
   // -------- Placement diagram preferences (pure UI) --------
-  const sexFromUrlRaw = (sp.get('sex') || sp.get('gender') || '').trim().toLowerCase();
+  const sexFromUrlRaw = (queryParam('sex') || queryParam('gender')).toLowerCase();
   const sexFromUrl: BodySex | null =
     sexFromUrlRaw.startsWith('f') ? 'female' : sexFromUrlRaw.startsWith('m') ? 'male' : null;
 
@@ -493,20 +501,20 @@ export default function StethoscopeConsole() {
   // Patient context (non-breaking):
   // - Prefer URL params: ?patientId=&patientName=&mrn=
   // - Fallback to demo id (until you wire real auth/session)
-  const patientIdFromUrl = (sp.get('patientId') || sp.get('pid') || '').trim();
-  const patientNameFromUrl = (sp.get('patientName') || sp.get('name') || '').trim();
-  const mrnFromUrl = (sp.get('mrn') || sp.get('mrnId') || sp.get('patientMrn') || '').trim();
+  const patientIdFromUrl = (queryParam('patientId') || queryParam('pid'));
+  const patientNameFromUrl = (queryParam('patientName') || queryParam('name'));
+  const mrnFromUrl = (queryParam('mrn') || queryParam('mrnId') || queryParam('patientMrn'));
 
   const [patient, setPatient] = useState<PatientCtx>(() => ({
-    patientId: patientIdFromUrl || 'patient-1111',
+    patientId: patientIdFromUrl,
     name: patientNameFromUrl || undefined,
     mrn: mrnFromUrl || undefined,
   }));
 
   // Attach targets (optional)
-  const [visitId, setVisitId] = useState<string>(() => (sp.get('visitId') || '').trim());
-  const [roomId, setRoomId] = useState<string>(() => (sp.get('roomId') || '').trim());
-  const [appointmentId, setAppointmentId] = useState<string>(() => (sp.get('appointmentId') || '').trim());
+  const [visitId, setVisitId] = useState<string>(() => queryParam('visitId'));
+  const [roomId, setRoomId] = useState<string>(() => queryParam('roomId'));
+  const [appointmentId, setAppointmentId] = useState<string>(() => queryParam('appointmentId'));
 
   // Discreet mode (UI privacy)
   const [discreet, setDiscreet] = useState(false);
@@ -675,7 +683,6 @@ export default function StethoscopeConsole() {
     const nm = (patientNameFromUrl || '').trim();
     const mrn = (mrnFromUrl || '').trim();
 
-    if (!pid && patient.patientId !== 'patient-1111') return;
     if (!pid) return;
 
     setPatient((prev) => ({
@@ -2913,5 +2920,13 @@ export default function StethoscopeConsole() {
         </section>
       </div>
     </main>
+  );
+}
+
+export default function StethoscopeConsole() {
+  return (
+    <Suspense fallback={<main className="min-h-screen bg-slate-50 p-6 text-sm text-slate-600">Loading stethoscope console…</main>}>
+      <StethoscopeConsoleContent />
+    </Suspense>
   );
 }

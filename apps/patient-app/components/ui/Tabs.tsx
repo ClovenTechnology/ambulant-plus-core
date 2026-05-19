@@ -1,9 +1,12 @@
 'use client';
 
 import * as React from 'react';
-import clsx from 'clsx';
 
 export type TabItem = { key: string; label: string; disabled?: boolean };
+
+function cx(...classes: Array<string | false | null | undefined>): string {
+  return classes.filter(Boolean).join(' ');
+}
 
 export default function Tabs(props: {
   items: TabItem[];
@@ -25,17 +28,18 @@ export default function Tabs(props: {
   }
 
   return (
-    <div className={clsx('w-full', className)}>
+    <div className={cx('w-full', className)}>
       <div className="inline-flex w-full rounded-2xl border border-slate-200 bg-slate-50 p-1">
         {items.map((it) => {
           const isActive = it.key === active;
+
           return (
             <button
               key={it.key}
               type="button"
               disabled={it.disabled}
               onClick={() => setActive(it.key)}
-              className={clsx(
+              className={cx(
                 'flex-1 rounded-xl px-3 py-2 text-xs font-semibold transition',
                 it.disabled ? 'opacity-40 cursor-not-allowed' : 'hover:brightness-95',
                 isActive

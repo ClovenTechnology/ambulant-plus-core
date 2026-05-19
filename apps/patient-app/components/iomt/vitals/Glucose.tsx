@@ -22,13 +22,25 @@ export type GlucoseRecord = {
   note?: string;
 };
 
+type MeasurementState = 'idle' | 'connecting' | 'measuring' | 'done' | 'error';
+
 type Props = {
   onSave?: (rec: GlucoseRecord) => Promise<void> | void;
   initialHistory?: GlucoseRecord[];
   defaultUnit?: 'mmol_l' | 'mg_dl';
+  measurementState?: MeasurementState;
+  onStart?: () => Promise<void> | void;
+  onStop?: () => Promise<void> | void;
 };
 
-const uid = (p = '') => p + Math.random().toString(36).slice(2, 9);
+const uid = (p = '') => {
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+  return `${p}${token}`;
+};
 const nowISO = () => new Date().toISOString();
 const mmolToMgdl = (mmol: number) => Math.round(mmol * 18);
 const mgdlToMmol = (mgdl: number) => +(mgdl / 18).toFixed(1);
@@ -41,7 +53,14 @@ const DEFAULTS = {
 // Accept plausible glucose ranges
 const within = (v: number, lo: number, hi: number) => v >= lo && v <= hi;
 
-export default function Glucose({ onSave, initialHistory = [], defaultUnit = 'mmol_l' }: Props) {
+export default function Glucose({
+  onSave,
+  initialHistory = [],
+  defaultUnit = 'mmol_l',
+  measurementState,
+  onStart,
+  onStop,
+}: Props) {
   const [history, setHistory] = useState<GlucoseRecord[]>(initialHistory);
 
   // UI state
@@ -95,7 +114,7 @@ export default function Glucose({ onSave, initialHistory = [], defaultUnit = 'mm
 
   // BLE lifecyle refs
   const connRef = useRef<any | null>(null);
-  const unsubRef = useRef<null | (() => void)>(null);
+  const unsubRef = useRef<(() => void) | null>(null);
   const timers = useRef<{ connect?: any; read?: any }>({});
 
   // ingest updates from parent
@@ -306,7 +325,7 @@ export default function Glucose({ onSave, initialHistory = [], defaultUnit = 'mm
   // Simulation (separate control)
   async function doSimulateGlucose(stripCode = 'C19', tType = 'before_breakfast', isFasting = false) {
     setPhase('reading');
-    setMsg('Simulating…');
+    setMsg('Generating reading…');
     await new Promise((r) => setTimeout(r, 600));
     const glucose =
       unit === 'mmol_l'
@@ -336,7 +355,7 @@ export default function Glucose({ onSave, initialHistory = [], defaultUnit = 'mm
     setHistory((h) => [rec, ...h].slice(0, 3000));
     try { await onSave?.(rec); } catch (e) { console.warn('save failed', e); }
     setPhase('done');
-    setMsg(`Simulated ${glucose} ${unit === 'mg_dl' ? 'mg/dL' : 'mmol/L'}`);
+    setMsg(`Generated ${glucose} ${unit === 'mg_dl' ? 'mg/dL' : 'mmol/L'}`);
 
     if (alertTimer.current) clearTimeout(alertTimer.current);
     alertTimer.current = setTimeout(() => evaluateAlerts(), 250);
@@ -448,7 +467,7 @@ export default function Glucose({ onSave, initialHistory = [], defaultUnit = 'mm
     }],
   }), [stats.outF, stats.outNF]);
 
-  const barOptions = { plugins: { legend: { display: false } }, responsive: true, scales: { y: { beginAtZero: true, precision: 0 } } };
+  const barOptions = { plugins: { legend: { display: false } }, responsive: true, scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } };
 
   // Sparkline (last 20) — filtered by range/filter
   const sparkHistory = inRangeRecords.slice(0, 20).reverse();
@@ -704,7 +723,7 @@ export default function Glucose({ onSave, initialHistory = [], defaultUnit = 'mm
                   'px-4 py-2 rounded transition',
                   canApply ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-200 text-gray-500 cursor-not-allowed'
                 )}
-                onClick={armForBlood}
+                onClick={() => void (onStart ? onStart() : armForBlood())}
               >
                 Apply Sample
               </button>
@@ -718,7 +737,7 @@ export default function Glucose({ onSave, initialHistory = [], defaultUnit = 'mm
                 </button>
                 <button
                   className="px-3 py-2 rounded bg-red-600 text-white hover:bg-red-700"
-                  onClick={cancelArming}
+                  onClick={() => void (onStop ? onStop() : cancelArming())}
                 >
                   Cancel
                 </button>

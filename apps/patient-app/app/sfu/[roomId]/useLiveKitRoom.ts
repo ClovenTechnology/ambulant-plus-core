@@ -4,7 +4,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ConnectionQuality,
-  DataPacket_Kind,
   RemoteParticipant,
   Room,
   RoomEvent,
@@ -13,81 +12,124 @@ import { connectRoom, getOrCreateUid, mintRtcToken } from '@ambulant/rtc';
 
 type SearchLike = { get(k: string): string | null };
 
-export type LKConnState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+export type LKConnState =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting';
+
 export type ToastKind = 'info' | 'success' | 'warning' | 'error';
 export type Toast = { id: string; text: string; kind: ToastKind };
 
-function ssSet(k: string, v: string) {
+type JoinTokenClaims = {
+  uid?: string;
+  sub?: string;
+  userId?: string;
+  u?: string;
+  role?: string;
+  televisitRole?: string;
+  roomId?: string;
+  rid?: string;
+  room?: string;
+  r?: string;
+  visitId?: string;
+  vid?: string;
+  visit?: string;
+  v?: string;
+};
+
+function ssSet(key: string, value: string) {
   try {
-    sessionStorage.setItem(k, v);
-  } catch {}
+    sessionStorage.setItem(key, value);
+  } catch {
+    // Ignore storage failures, for example private browsing restrictions.
+  }
 }
-function ssGet(k: string) {
+
+function ssGet(key: string) {
   try {
-    return sessionStorage.getItem(k) || '';
+    return sessionStorage.getItem(key) || '';
   } catch {
     return '';
   }
 }
-function ssRemove(k: string) {
+
+function lsGet(key: string) {
   try {
-    sessionStorage.removeItem(k);
-  } catch {}
-}
-function lsGet(k: string) {
-  try {
-    return localStorage.getItem(k) || '';
+    return localStorage.getItem(key) || '';
   } catch {
     return '';
   }
 }
-function lsRemove(k: string) {
+
+function lsRemove(key: string) {
   try {
-    localStorage.removeItem(k);
-  } catch {}
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore storage failures.
+  }
 }
 
 function joinKeys(visitId: string, roomId: string) {
-  const v = String(visitId || '').trim();
-  const r = String(roomId || '').trim();
+  const visit = String(visitId || '').trim();
+  const room = String(roomId || '').trim();
+
   const keys = [
-    v ? `televisit_join_${v}` : '',
-    r ? `televisit_join_${r}` : '',
-    v ? `ambulant_join_${v}` : '',
-    r ? `ambulant_join_${r}` : '',
-    v ? `ambulant_join_token_${v}` : '',
-    r ? `ambulant_join_token_${r}` : '',
+    visit ? `televisit_join_${visit}` : '',
+    room ? `televisit_join_${room}` : '',
+    visit ? `ambulant_join_${visit}` : '',
+    room ? `ambulant_join_${room}` : '',
+    visit ? `ambulant_join_token_${visit}` : '',
+    room ? `ambulant_join_token_${room}` : '',
     'ambulant_join_token',
   ].filter(Boolean);
+
   return Array.from(new Set(keys));
 }
 
 function storeJoinJwt(visitId: string, roomId: string, jwt: string) {
   if (typeof window === 'undefined') return;
-  const t = String(jwt || '').trim();
-  if (!t) return;
+
+  const token = String(jwt || '').trim();
+  if (!token) return;
+
   const keys = joinKeys(visitId, roomId);
-  for (const k of keys) ssSet(k, t);
-  // scrub localStorage legacy copies
-  for (const k of keys) lsRemove(k);
+
+  for (const key of keys) {
+    ssSet(key, token);
+  }
+
+  // Remove legacy persistent copies. Join tickets should be tab/session-scoped.
+  for (const key of keys) {
+    lsRemove(key);
+  }
 }
 
 function readJoinJwt(visitId: string, roomId: string) {
   if (typeof window === 'undefined') return '';
+
   const keys = joinKeys(visitId, roomId);
 
-  for (const k of keys) {
-    const v = ssGet(k);
-    if (v && v.trim()) return v.trim();
+  for (const key of keys) {
+    const value = ssGet(key);
+    if (value && value.trim()) return value.trim();
   }
 
-  // migrate from legacy localStorage if present
-  for (const k of keys) {
-    const v = lsGet(k);
-    if (v && v.trim()) {
-      const jwt = v.trim();
-      for (const kk of keys) ssSet(kk, jwt);
-      for (const kk of keys) lsRemove(kk);
+  // Migrate from legacy localStorage if present, then scrub persistent copies.
+  for (const key of keys) {
+    const value = lsGet(key);
+
+    if (value && value.trim()) {
+      const jwt = value.trim();
+
+      for (const sessionKey of keys) {
+        ssSet(sessionKey, jwt);
+      }
+
+      for (const localKey of keys) {
+        lsRemove(localKey);
+      }
+
       return jwt;
     }
   }
@@ -96,32 +138,131 @@ function readJoinJwt(visitId: string, roomId: string) {
 }
 
 function getJoinToken(search: SearchLike, visitId: string, roomId: string) {
-  const direct = search.get('joinToken') || search.get('jt') || search.get('join') || '';
+  const direct =
+    search.get('joinToken') ||
+    search.get('jt') ||
+    search.get('join') ||
+    '';
+
   if (direct) {
-    if (typeof window !== 'undefined') {
-      storeJoinJwt(visitId, roomId, direct);
-    }
-    return direct;
+    const token = direct.trim();
+    storeJoinJwt(visitId, roomId, token);
+    return token;
   }
-  if (typeof window === 'undefined') return '';
+
   return readJoinJwt(visitId, roomId);
 }
 
-function firstRemote(r: Room): RemoteParticipant | undefined {
-  const anyRoom = r as any;
-  if (typeof anyRoom.getParticipants === 'function') {
-    const arr = anyRoom.getParticipants();
-    if (Array.isArray(arr) && arr.length) return arr[0] as RemoteParticipant;
+function base64UrlDecode(input: string) {
+  const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
+  const padded = normalized.padEnd(
+    normalized.length + ((4 - (normalized.length % 4)) % 4),
+    '=',
+  );
+
+  if (typeof window !== 'undefined' && typeof window.atob === 'function') {
+    return window.atob(padded);
   }
-  const maps = [anyRoom.remoteParticipants, anyRoom.participants];
-  for (const m of maps) {
-    if (m && typeof m.values === 'function') {
-      const it = m.values();
-      const n = it.next();
-      if (!n.done) return n.value as RemoteParticipant;
+
+  return '';
+}
+
+function decodeJoinTokenClaims(jwt: string): JoinTokenClaims | null {
+  try {
+    const [, payload] = String(jwt || '').split('.');
+    if (!payload) return null;
+
+    const json = base64UrlDecode(payload);
+    if (!json) return null;
+
+    const parsed = JSON.parse(json);
+
+    return parsed && typeof parsed === 'object'
+      ? (parsed as JoinTokenClaims)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function pickClaim(
+  claims: JoinTokenClaims | null,
+  keys: Array<keyof JoinTokenClaims>,
+) {
+  if (!claims) return '';
+
+  for (const key of keys) {
+    const value = claims[key];
+
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
     }
   }
+
+  return '';
+}
+
+function firstRemote(room: Room): RemoteParticipant | undefined {
+  const anyRoom = room as any;
+
+  if (typeof anyRoom.getParticipants === 'function') {
+    const participants = anyRoom.getParticipants();
+
+    if (Array.isArray(participants) && participants.length > 0) {
+      return participants[0] as RemoteParticipant;
+    }
+  }
+
+  const participantMaps = [anyRoom.remoteParticipants, anyRoom.participants];
+
+  for (const participantMap of participantMaps) {
+    if (participantMap && typeof participantMap.values === 'function') {
+      const iterator = participantMap.values();
+      const next = iterator.next();
+
+      if (!next.done) {
+        return next.value as RemoteParticipant;
+      }
+    }
+  }
+
   return undefined;
+}
+
+function normaliseLiveKitState(value: unknown): LKConnState {
+  const state = String(value || '').toLowerCase();
+
+  if (state === 'connected') return 'connected';
+  if (state === 'connecting') return 'connecting';
+  if (state === 'reconnecting') return 'reconnecting';
+
+  return 'disconnected';
+}
+
+function extractLiveKitUrl(rtc: unknown, fallback?: string) {
+  const data = rtc as
+    | {
+        wsUrl?: string;
+        livekitUrl?: string;
+        url?: string;
+        serverUrl?: string;
+      }
+    | null
+    | undefined;
+
+  return String(
+    data?.wsUrl ||
+      data?.livekitUrl ||
+      data?.url ||
+      data?.serverUrl ||
+      fallback ||
+      '',
+  ).trim();
+}
+
+function extractLiveKitToken(rtc: unknown) {
+  const data = rtc as { token?: string } | null | undefined;
+  return String(data?.token || '').trim();
 }
 
 export function useLiveKitRoom(opts: {
@@ -133,9 +274,14 @@ export function useLiveKitRoom(opts: {
 }) {
   const { roomId, wsUrl, search, onConnected, onDisconnected } = opts;
 
-  // Stable identity
-  const uid = useMemo(() => getOrCreateUid('ambulant_uid'), []);
-  const identity = uid;
+  /*
+   * Browser-local fallback identity.
+   * The actual LiveKit identity is replaced with the join-ticket uid when
+   * the patient joins, because the API gateway validates the join ticket as
+   * the source of truth.
+   */
+  const browserUid = useMemo(() => getOrCreateUid('patient'), []);
+  const [identity, setIdentity] = useState(browserUid);
 
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -145,8 +291,12 @@ export function useLiveKitRoom(opts: {
 
   const [room, setRoom] = useState<Room | null>(null);
   const [state, setState] = useState<LKConnState>('disconnected');
-  const [quality, setQuality] = useState<ConnectionQuality | undefined>(undefined);
-  const qualityLabel = quality !== undefined ? ConnectionQuality[quality] : 'Unknown';
+  const [quality, setQuality] = useState<ConnectionQuality | undefined>(
+    undefined,
+  );
+
+  const qualityLabel =
+    quality !== undefined ? ConnectionQuality[quality] : 'Unknown';
 
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
@@ -162,165 +312,286 @@ export function useLiveKitRoom(opts: {
   const [activeSpeaking, setActiveSpeaking] = useState(false);
 
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const pushToast = useCallback((text: string, kind: ToastKind = 'info') => {
-    const id = `${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-    setToasts((t) => [...t, { id, text, kind }]);
-    window.setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), 4500);
-  }, []);
-
   const [recordingToast, setRecordingToast] = useState<string | null>(null);
 
-  const attachToRoom = useCallback((r: Room) => {
-    const rp = firstRemote(r);
-    if (rp) {
-      const rvpub = [...rp.videoTrackPublications.values()].find((p) => p.isSubscribed && p.videoTrack);
-      if (rvpub && remoteVideoRef.current) rvpub.videoTrack?.attach(remoteVideoRef.current);
+  const isRecordingRef = useRef(false);
 
-      const rapub = [...rp.audioTrackPublications.values()].find((p) => p.isSubscribed && p.audioTrack);
-      if (rapub && audioSinkRef.current) rapub.audioTrack?.attach(audioSinkRef.current);
-    }
+  useEffect(() => {
+    isRecordingRef.current = isRecording;
+  }, [isRecording]);
 
-    const localPubV = [...r.localParticipant.videoTrackPublications.values()].find((p) => p.track);
-    if (localPubV && localVideoRef.current) localPubV.videoTrack?.attach(localVideoRef.current);
+  const pushToast = useCallback((text: string, kind: ToastKind = 'info') => {
+    const id =
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}_${performance
+            .now()
+            .toString(36)
+            .replace('.', '')}`;
+
+    setToasts((items) => [...items, { id, text, kind }]);
+
+    window.setTimeout(() => {
+      setToasts((items) => items.filter((item) => item.id !== id));
+    }, 4500);
   }, []);
 
-  const publishControl = useCallback(async (type: string, value: any) => {
-    const r = roomRef.current;
-    if (!r) return;
-    try {
-      await r.localParticipant.publishData(
-        new TextEncoder().encode(JSON.stringify({ type, value, from: 'patient' })),
-        DataPacket_Kind.RELIABLE,
-        'control',
+  const attachToRoom = useCallback((currentRoom: Room) => {
+    const remoteParticipant = firstRemote(currentRoom);
+
+    if (remoteParticipant) {
+      const remoteVideoPublication = [
+        ...remoteParticipant.videoTrackPublications.values(),
+      ].find(
+        (publication) => publication.isSubscribed && publication.videoTrack,
       );
-    } catch (e) {
-      console.warn('[control] publish error', e);
+
+      if (remoteVideoPublication?.videoTrack && remoteVideoRef.current) {
+        remoteVideoPublication.videoTrack.attach(remoteVideoRef.current);
+      }
+
+      const remoteAudioPublication = [
+        ...remoteParticipant.audioTrackPublications.values(),
+      ].find(
+        (publication) => publication.isSubscribed && publication.audioTrack,
+      );
+
+      if (remoteAudioPublication?.audioTrack && audioSinkRef.current) {
+        remoteAudioPublication.audioTrack.attach(audioSinkRef.current);
+      }
+    }
+
+    const localVideoPublication = [
+      ...currentRoom.localParticipant.videoTrackPublications.values(),
+    ].find((publication) => publication.track);
+
+    if (localVideoPublication?.videoTrack && localVideoRef.current) {
+      localVideoPublication.videoTrack.attach(localVideoRef.current);
+    }
+  }, []);
+
+  const publishControl = useCallback(async (type: string, value: unknown) => {
+    const currentRoom = roomRef.current;
+    if (!currentRoom) return;
+
+    try {
+      await currentRoom.localParticipant.publishData(
+        new TextEncoder().encode(
+          JSON.stringify({
+            type,
+            value,
+            from: 'patient',
+            ts: new Date().toISOString(),
+          }),
+        ),
+        {
+          reliable: true,
+          topic: 'control',
+        },
+      );
+    } catch (error) {
+      console.warn('[control] publish error', error);
     }
   }, []);
 
   const sendChat = useCallback(async (text: string) => {
-    const r = roomRef.current;
-    if (!r) return;
-    await r.localParticipant.publishData(
-      new TextEncoder().encode(JSON.stringify({ from: 'patient', text })),
-      DataPacket_Kind.RELIABLE,
-      'chat',
+    const currentRoom = roomRef.current;
+    const cleanText = String(text || '').trim();
+
+    if (!currentRoom || !cleanText) return;
+
+    await currentRoom.localParticipant.publishData(
+      new TextEncoder().encode(
+        JSON.stringify({
+          from: 'patient',
+          text: cleanText,
+          ts: new Date().toISOString(),
+        }),
+      ),
+      {
+        reliable: true,
+        topic: 'chat',
+      },
     );
   }, []);
 
   const wireRoomEvents = useCallback(
-    (r: Room) => {
-      const attachNow = () => attachToRoom(r);
+    (currentRoom: Room) => {
+      const attachNow = () => attachToRoom(currentRoom);
 
-      r.on(RoomEvent.TrackSubscribed, attachNow)
+      currentRoom
+        .on(RoomEvent.TrackSubscribed, attachNow)
         .on(RoomEvent.TrackUnsubscribed, attachNow)
         .on(RoomEvent.LocalTrackPublished, attachNow)
-        .on(RoomEvent.ParticipantConnected, (p) => {
+        .on(RoomEvent.ParticipantConnected, () => {
           attachNow();
-          if ((p as any).isPublisher === false) pushToast('Clinician joined', 'success');
+          pushToast('Clinician joined', 'success');
         })
         .on(RoomEvent.ParticipantDisconnected, () => {
           attachNow();
           pushToast('Clinician left', 'warning');
         })
-        .on(RoomEvent.ConnectionStateChanged, () => setState(r.state as any))
-        .on(RoomEvent.ConnectionQualityChanged, (_p, q) => setQuality(q))
-        .on(RoomEvent.ActiveSpeakersChanged, (speakers) => setActiveSpeaking(!!(speakers && speakers.length)))
-        .on(RoomEvent.DataReceived, (payload, _p, _kind, topic) => {
+        .on(RoomEvent.ConnectionStateChanged, () => {
+          setState(normaliseLiveKitState(currentRoom.state));
+        })
+        .on(RoomEvent.ConnectionQualityChanged, (nextQuality) => {
+          setQuality(nextQuality);
+        })
+        .on(RoomEvent.ActiveSpeakersChanged, (speakers) => {
+          setActiveSpeaking(Boolean(speakers && speakers.length > 0));
+        })
+        .on(RoomEvent.DataReceived, (payload, _participant, _kind, topic) => {
           try {
             const text = new TextDecoder().decode(payload);
             const msg = JSON.parse(text);
 
-            if (topic === 'control') {
-              if (msg?.type === 'vitals') setShowVitals(!!msg.value);
-              if (msg?.type === 'captions') setCaptionsOn(!!msg.value);
-              if (msg?.type === 'overlay') setShowOverlay(!!msg.value);
+            if (topic !== 'control') return;
 
-              if (msg?.type === 'recording') {
-                const next = !!msg.value;
-                if (next && !isRecording) {
-                  setRecordingToast('Clinician started recording. You are being recorded.');
-                  window.setTimeout(() => setRecordingToast(null), 6000);
-                }
-                setIsRecording(next);
+            if (msg?.type === 'vitals') setShowVitals(Boolean(msg.value));
+            if (msg?.type === 'captions') setCaptionsOn(Boolean(msg.value));
+            if (msg?.type === 'overlay') setShowOverlay(Boolean(msg.value));
+
+            if (msg?.type === 'recording') {
+              const nextRecording = Boolean(msg.value);
+
+              if (nextRecording && !isRecordingRef.current) {
+                setRecordingToast(
+                  'Clinician started recording. You are being recorded.',
+                );
+
+                window.setTimeout(() => {
+                  setRecordingToast(null);
+                }, 6000);
               }
 
-              if (msg?.type === 'screenshare' && msg.value === true) pushToast('Screen share started', 'info');
+              isRecordingRef.current = nextRecording;
+              setIsRecording(nextRecording);
+            }
+
+            if (msg?.type === 'screenshare' && msg.value === true) {
+              pushToast('Screen share started', 'info');
             }
           } catch {
-            /* ignore */
+            // Ignore malformed room data packets.
           }
         });
 
       attachNow();
     },
-    [attachToRoom, pushToast, isRecording],
+    [attachToRoom, pushToast],
   );
 
   const join = useCallback(async () => {
     if (state !== 'disconnected') return;
+
     setState('connecting');
 
     try {
-      const visitId = search.get('visitId') || search.get('visit') || search.get('v') || roomId;
+      const visitId =
+        search.get('visitId') ||
+        search.get('visit') ||
+        search.get('v') ||
+        roomId;
+
       const joinToken = getJoinToken(search, visitId, roomId);
 
       if (!joinToken) {
         setState('disconnected');
+
         throw new Error(
           [
             'Missing Televisit join token.',
             'Expected query ?jt=... OR sessionStorage key televisit_join_<visitId>.',
-            'Open via Appointments → Join (it should store the token).',
+            'Open via Appointments → Join so the join ticket is issued and stored.',
           ].join(' '),
         );
       }
 
+      const claims = decodeJoinTokenClaims(joinToken);
+
+      const ticketUid =
+        pickClaim(claims, ['uid', 'sub', 'userId', 'u']) || browserUid;
+
+      const ticketRoomId =
+        pickClaim(claims, ['roomId', 'rid', 'room', 'r']) || roomId;
+
+      const ticketVisitId =
+        pickClaim(claims, ['visitId', 'vid', 'visit', 'v']) || visitId;
+
+      setIdentity(ticketUid);
+
       const rtc = await mintRtcToken({
-        roomId,
-        visitId,
-        uid,
+        endpoint: '/api/rtc/token',
+        roomId: ticketRoomId,
+        visitId: ticketVisitId,
+        uid: ticketUid,
         role: 'patient',
         joinToken,
-        identity,
-        name: identity,
+        identity: ticketUid,
       });
 
-      const livekitUrl = (rtc as any)?.wsUrl || wsUrl;
+      const livekitUrl = extractLiveKitUrl(rtc, wsUrl);
+
       if (!livekitUrl) {
         setState('disconnected');
-        throw new Error('Missing LiveKit wsUrl (set NEXT_PUBLIC_LIVEKIT_URL or return wsUrl from /api/rtc/token)');
+
+        throw new Error(
+          'Missing LiveKit wsUrl. Set NEXT_PUBLIC_LIVEKIT_URL or return wsUrl from /api/rtc/token.',
+        );
       }
 
-      const token = rtc.token;
+      const token = extractLiveKitToken(rtc);
 
-      const r = await connectRoom(livekitUrl, token, { autoSubscribe: true });
-      roomRef.current = r;
-      setRoom(r);
-      wireRoomEvents(r);
+      if (!token) {
+        setState('disconnected');
+        throw new Error('RTC token endpoint returned no LiveKit token.');
+      }
+
+      const nextRoom = await connectRoom(livekitUrl, token, {
+        autoSubscribe: true,
+      });
+
+      roomRef.current = nextRoom;
+      setRoom(nextRoom);
+      wireRoomEvents(nextRoom);
 
       setState('connected');
-      await r.localParticipant.setMicrophoneEnabled(true);
-      await r.localParticipant.setCameraEnabled(true);
+
+      await nextRoom.localParticipant.setMicrophoneEnabled(true);
+      await nextRoom.localParticipant.setCameraEnabled(true);
 
       setMicOn(true);
       setCamOn(true);
-      setQuality(r.localParticipant.connectionQuality);
+      setQuality(nextRoom.localParticipant.connectionQuality);
 
-      attachToRoom(r);
+      attachToRoom(nextRoom);
       pushToast('Connected', 'success');
+
       onConnected?.();
-    } catch (e: any) {
-      console.error('[join] failed', e);
+    } catch (error) {
+      console.error('[join] failed', error);
       setState('disconnected');
-      throw e;
+      throw error;
     }
-  }, [state, search, roomId, wsUrl, uid, identity, wireRoomEvents, attachToRoom, pushToast, onConnected]);
+  }, [
+    attachToRoom,
+    browserUid,
+    onConnected,
+    pushToast,
+    roomId,
+    search,
+    state,
+    wireRoomEvents,
+    wsUrl,
+  ]);
 
   const leave = useCallback(async () => {
     try {
       await roomRef.current?.disconnect();
-    } catch {}
+    } catch {
+      // Ignore disconnect errors during cleanup.
+    }
+
     roomRef.current = null;
 
     setRoom(null);
@@ -332,6 +603,8 @@ export function useLiveKitRoom(opts: {
     setScreenOn(false);
     setRaised(false);
     setBlurOn(false);
+    setActiveSpeaking(false);
+
     onDisconnected?.();
   }, [onDisconnected]);
 
@@ -339,66 +612,88 @@ export function useLiveKitRoom(opts: {
     return () => {
       try {
         roomRef.current?.disconnect();
-      } catch {}
+      } catch {
+        // Ignore cleanup errors.
+      }
+
       roomRef.current = null;
     };
   }, []);
 
   const toggleMic = useCallback(() => {
     const next = !micOn;
+
     setMicOn(next);
-    roomRef.current?.localParticipant.setMicrophoneEnabled(next).catch(() => {});
+    roomRef.current?.localParticipant
+      .setMicrophoneEnabled(next)
+      .catch(() => {});
   }, [micOn]);
 
   const toggleCam = useCallback(() => {
     const next = !camOn;
+
     setCamOn(next);
-    roomRef.current?.localParticipant.setCameraEnabled(next).catch(() => {});
-    const r = roomRef.current;
-    if (r) attachToRoom(r);
-  }, [camOn, attachToRoom]);
+    roomRef.current?.localParticipant
+      .setCameraEnabled(next)
+      .catch(() => {});
+
+    const currentRoom = roomRef.current;
+    if (currentRoom) attachToRoom(currentRoom);
+  }, [attachToRoom, camOn]);
 
   const toggleAndBroadcast = useCallback(
     (key: 'vitals' | 'captions' | 'overlay' | 'recording', val: boolean) => {
       if (key === 'vitals') setShowVitals(val);
       if (key === 'captions') setCaptionsOn(val);
       if (key === 'overlay') setShowOverlay(val);
-      if (key === 'recording') setIsRecording(val);
-      publishControl(key, val);
+
+      if (key === 'recording') {
+        isRecordingRef.current = val;
+        setIsRecording(val);
+      }
+
+      void publishControl(key, val);
     },
     [publishControl],
   );
 
   const toggleScreenShare = useCallback(async () => {
-    const r = roomRef.current;
-    if (!r) return;
+    const currentRoom = roomRef.current;
+    if (!currentRoom) return;
+
     try {
       const next = !screenOn;
-      await r.localParticipant.setScreenShareEnabled(next);
+
+      await currentRoom.localParticipant.setScreenShareEnabled(next);
+
       setScreenOn(next);
-      publishControl('screenshare', next);
+      void publishControl('screenshare', next);
       pushToast(next ? 'Screen sharing on' : 'Screen sharing off', 'info');
     } catch {
       pushToast('Screen share failed', 'error');
     }
-  }, [screenOn, publishControl, pushToast]);
+  }, [publishControl, pushToast, screenOn]);
 
   const toggleRaiseHand = useCallback(() => {
     const next = !raised;
+
     setRaised(next);
-    publishControl('raise_hand', next);
+    void publishControl('raise_hand', next);
     pushToast(next ? 'Hand raised' : 'Hand lowered', 'info');
-  }, [raised, publishControl, pushToast]);
+  }, [publishControl, pushToast, raised]);
 
   const toggleBlur = useCallback(() => {
-    setBlurOn((b) => !b);
-    pushToast(!blurOn ? 'Blur on (stub)' : 'Blur off (stub)', 'info');
+    const next = !blurOn;
+
+    setBlurOn(next);
+    pushToast(next ? 'Blur on' : 'Blur off', 'info');
   }, [blurOn, pushToast]);
 
   useEffect(() => {
-    if (quality === ConnectionQuality.Poor) pushToast('Network unstable', 'warning');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quality]);
+    if (quality === ConnectionQuality.Poor) {
+      pushToast('Network unstable', 'warning');
+    }
+  }, [quality, pushToast]);
 
   return {
     identity,

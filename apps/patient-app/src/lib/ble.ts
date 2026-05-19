@@ -1,4 +1,5 @@
 // apps/patient-app/src/lib/ble.ts
+
 export type BleConnectResult = {
   device: BluetoothDevice;
   server: BluetoothRemoteGATTServer;
@@ -6,86 +7,180 @@ export type BleConnectResult = {
   abortController: AbortController;
 };
 
-export async function webBleConnect(filters: BluetoothRequestDeviceFilter[]): Promise<BleConnectResult> {
-  // ensure developer didn't accidentally pass empty filters
-  if (!Array.isArray(filters) || filters.length === 0) {
-    throw new Error('No BLE filters supplied — ensure device service UUIDs are present.');
+function getBluetooth(): Bluetooth {
+  if (typeof navigator === 'undefined' || !navigator.bluetooth) {
+    throw new Error(
+      'Web Bluetooth is not available in this browser. Use Chrome or Edge over HTTPS or localhost.'
+    );
   }
 
+  return navigator.bluetooth;
+}
+
+function getOptionalServicesFromFilters(
+  filters: BluetoothRequestDeviceFilter[]
+): BluetoothServiceUUID[] {
+  return Array.from(
+    new Set(
+      filters.flatMap((filter) =>
+        Array.isArray(filter.services) ? filter.services : []
+      )
+    )
+  );
+}
+
+function getCharacteristicValue(event: Event): DataView | null {
+  const target = event.target as BluetoothRemoteGATTCharacteristic | null;
+  return target?.value ?? null;
+}
+
+function normalizeBleError(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+
+  if (
+    message.includes('User cancelled') ||
+    message.includes('cancelled') ||
+    message.includes('User canceled') ||
+    message.includes('canceled')
+  ) {
+    return new Error('pairing_cancelled_by_user');
+  }
+
+  if (
+    message.includes('No supported devices') ||
+    message.includes('No device found')
+  ) {
+    return new Error('no_supported_device_found');
+  }
+
+  return err instanceof Error ? err : new Error(message);
+}
+
+export async function webBleConnect(
+  filters: BluetoothRequestDeviceFilter[]
+): Promise<BleConnectResult> {
+  if (!Array.isArray(filters) || filters.length === 0) {
+    throw new Error(
+      'No BLE filters supplied — ensure device service UUIDs are present.'
+    );
+  }
+
+  const bluetooth = getBluetooth();
   const abortController = new AbortController();
 
   try {
     // Do not use acceptAllDevices:true in production. Use filters with service UUIDs/namePrefix.
-    const dev = await navigator.bluetooth.requestDevice({
+    const device = await bluetooth.requestDevice({
       filters,
-      optionalServices: Array.from(new Set(filters.flatMap(f => (f.services || []) as string[]))),
+      optionalServices: getOptionalServicesFromFilters(filters),
     });
 
-    // user may cancel: guard
-    if (!dev) throw new Error('device_selection_cancelled');
+    if (!device) {
+      throw new Error('device_selection_cancelled');
+    }
 
-    const onDisconnected = () => {
-      // no-op but can be expanded
+    if (!device.gatt) {
+      throw new Error('Selected BLE device has no GATT server.');
+    }
+
+    const onDisconnected = (): void => {
+      // Placeholder for future disconnected-state handling.
     };
 
-    dev.addEventListener('gattserverdisconnected', onDisconnected as EventListener);
+    device.addEventListener(
+      'gattserverdisconnected',
+      onDisconnected as EventListener
+    );
 
-    const server = await dev.gatt!.connect();
+    const server = await device.gatt.connect();
 
-    async function cleanup() {
+    let cleanedUp = false;
+
+    async function cleanup(): Promise<void> {
+      if (cleanedUp) return;
+      cleanedUp = true;
+
       try {
-        // remove listeners
-        try { dev.removeEventListener('gattserverdisconnected', onDisconnected as EventListener); } catch {}
-        // stop gatt
-        if (server?.connected) {
-          try { server.disconnect(); } catch {}
+        try {
+          device.removeEventListener(
+            'gattserverdisconnected',
+            onDisconnected as EventListener
+          );
+        } catch {
+          // Ignore listener cleanup failures.
+        }
+
+        if (server.connected) {
+          try {
+            server.disconnect();
+          } catch {
+            // Ignore disconnect failures.
+          }
         }
       } finally {
-        abortController.abort();
+        if (!abortController.signal.aborted) {
+          abortController.abort();
+        }
       }
     }
 
-    // When caller aborts, ensure cleanup
-    abortController.signal.addEventListener('abort', () => {
-      cleanup().catch(()=>{});
-    });
+    abortController.signal.addEventListener(
+      'abort',
+      () => {
+        void cleanup();
+      },
+      { once: true }
+    );
 
-    return { device: dev, server, cleanup, abortController };
+    return {
+      device,
+      server,
+      cleanup,
+      abortController,
+    };
   } catch (err) {
-    // Translate common errors for UX
-    const msg = (err instanceof Error) ? err.message : String(err);
-    if (msg.includes('User cancelled') || msg.includes('cancelled')) {
-      throw new Error('pairing_cancelled_by_user');
-    }
-    if (msg.includes('No supported devices') || msg.includes('No device found')) {
-      throw new Error('no_supported_device_found');
-    }
-    throw err;
+    throw normalizeBleError(err);
   }
 }
 
-// Subscribe to notifications and return an unsubscribe helper
+// Subscribe to notifications and return an unsubscribe helper.
 export async function subscribeNotify(
   server: BluetoothRemoteGATTServer,
   serviceUUID: BluetoothServiceUUID,
   charUUID: BluetoothCharacteristicUUID,
   onValue: (dv: DataView) => void
-) {
-  const svc = await server.getPrimaryService(serviceUUID);
-  const ch = await svc.getCharacteristic(charUUID);
-  await ch.startNotifications();
+): Promise<() => Promise<void>> {
+  const service = await server.getPrimaryService(serviceUUID);
+  const characteristic = await service.getCharacteristic(charUUID);
 
-  const handler = (e: Event) => {
-    const val = (e.target as BluetoothRemoteGATTCharacteristic).value!;
-    onValue(val);
+  await characteristic.startNotifications();
+
+  const handler = (event: Event): void => {
+    const value = getCharacteristicValue(event);
+
+    if (!value) {
+      return;
+    }
+
+    onValue(value);
   };
 
-  ch.addEventListener('characteristicvaluechanged', handler);
+  characteristic.addEventListener('characteristicvaluechanged', handler);
 
-  return async function unsubscribe() {
+  return async function unsubscribe(): Promise<void> {
     try {
-      ch.removeEventListener('characteristicvaluechanged', handler);
-    } catch {}
-    try { await ch.stopNotifications(); } catch {}
+      characteristic.removeEventListener(
+        'characteristicvaluechanged',
+        handler
+      );
+    } catch {
+      // Ignore listener cleanup failures.
+    }
+
+    try {
+      await characteristic.stopNotifications();
+    } catch {
+      // Ignore notification shutdown failures.
+    }
   };
 }

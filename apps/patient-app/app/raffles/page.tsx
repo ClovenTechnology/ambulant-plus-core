@@ -2,7 +2,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 type Giveaway = {
@@ -30,12 +30,19 @@ type EntriesResp = {
 const LS_UID = 'ambulant_uid';
 
 function getUid() {
-  if (typeof window === 'undefined') return 'server-user';
+  if (typeof window === 'undefined') return '';
+
   let v = localStorage.getItem(LS_UID);
   if (!v) {
-    v = (crypto?.randomUUID?.() || Math.random().toString(36).slice(2)) + '-u';
+    const token =
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+    v = `${token}-u`;
     localStorage.setItem(LS_UID, v);
   }
+
   return v;
 }
 
@@ -54,33 +61,14 @@ function daysLeft(iso?: string | null) {
   return Math.ceil((t - now) / (1000 * 60 * 60 * 24));
 }
 
-const FALLBACK_GIVEAWAYS: Giveaway[] = [
-  {
-    id: 'promo-duecare-kit',
-    title: 'Holiday Giveaway',
-    prize: 'DueCare 6-in-1 Health Monitor (Standard Kit)',
-    drawAtISO: null, // set later from backend
-    rulesUrl: '/policy/giveaway-rules.pdf',
-    heroImg: '/shop/fallback/duecare.png',
-    status: 'open',
-  },
-  {
-    id: 'promo-nexring',
-    title: 'New Year Drop',
-    prize: 'NexRing (Wellness Ring)',
-    drawAtISO: null,
-    rulesUrl: '/policy/giveaway-rules.pdf',
-    heroImg: '/shop/fallback/tech.png',
-    status: 'open',
-  },
-];
 
-export default function RafflesLandingPage() {
+function RafflesLandingPageContent() {
   const sp = useSearchParams();
-  const statusParam = (sp.get('status') || '').toLowerCase(); // cancelled / success for future
+  const queryParam = useCallback((key: string) => sp?.get(key)?.trim() ?? '', [sp]);
+  const statusParam = queryParam('status').toLowerCase(); // cancelled / success for future
   const [uid] = useState(() => getUid());
 
-  const [giveaways, setGiveaways] = useState<Giveaway[]>(FALLBACK_GIVEAWAYS);
+  const [giveaways, setGiveaways] = useState<Giveaway[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
@@ -89,26 +77,34 @@ export default function RafflesLandingPage() {
   const [entriesResp, setEntriesResp] = useState<EntriesResp | null>(null);
 
   useEffect(() => {
-    // Optional: if you later add a real endpoint, this will automatically start using it.
-    // GET /api/giveaways?active=1
     let cancelled = false;
+
     (async () => {
       try {
         const res = await fetch('/api/giveaways?active=1', { cache: 'no-store' });
         const js = await res.json().catch(() => ({}));
-        if (!res.ok) return; // keep fallback silently
         const list = Array.isArray(js?.items) ? (js.items as Giveaway[]) : [];
-        if (!cancelled && list.length) setGiveaways(list);
+
+        if (!cancelled) {
+          setGiveaways(res.ok ? list : []);
+        }
       } catch {
-        // keep fallback
+        if (!cancelled) setGiveaways([]);
       }
     })();
+
     return () => {
       cancelled = true;
     };
   }, []);
 
   useEffect(() => {
+    if (!uid) {
+      setEntriesResp(null);
+      setEntriesBusy(false);
+      return;
+    }
+
     const ac = new AbortController();
     (async () => {
       setEntriesBusy(true);
@@ -143,6 +139,11 @@ export default function RafflesLandingPage() {
 
   async function enterGiveaway(g: Giveaway) {
     try {
+      if (!uid) {
+        setErr('Session identity is required before entering a giveaway.');
+        return;
+      }
+
       setBusyId(g.id);
       setErr(null);
 
@@ -224,6 +225,12 @@ export default function RafflesLandingPage() {
           </div>
 
           <div className="p-5 grid gap-4 sm:grid-cols-2">
+            {giveaways.length === 0 ? (
+              <div className="sm:col-span-2 rounded-xl border border-dashed bg-gray-50 p-5 text-sm text-gray-600">
+                No open giveaways are available right now.
+              </div>
+            ) : null}
+
             {giveaways.map((g) => {
               const dLeft = daysLeft(g.drawAtISO);
               const isOpen = (g.status || 'open') === 'open';
@@ -231,11 +238,15 @@ export default function RafflesLandingPage() {
                 <div key={g.id} className="rounded-2xl border bg-white overflow-hidden flex flex-col">
                   <div className="h-40 bg-gray-100 flex items-center justify-center">
                     {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={g.heroImg || '/shop/fallback/other.png'}
-                      alt={g.title}
-                      className="max-h-full max-w-full object-contain"
-                    />
+                    {g.heroImg ? (
+                      <img
+                        src={g.heroImg}
+                        alt={g.title}
+                        className="max-h-full max-w-full object-contain"
+                      />
+                    ) : (
+                      <div className="px-4 text-center text-xs text-gray-500">No giveaway image available</div>
+                    )}
                   </div>
 
                   <div className="p-4 space-y-2 flex-1 flex flex-col">
@@ -333,5 +344,13 @@ export default function RafflesLandingPage() {
         </aside>
       </section>
     </div>
+  );
+}
+
+export default function RafflesLandingPage() {
+  return (
+    <Suspense fallback={<main className="container mx-auto px-4 py-6 text-sm text-gray-600">Loading giveaways…</main>}>
+      <RafflesLandingPageContent />
+    </Suspense>
   );
 }

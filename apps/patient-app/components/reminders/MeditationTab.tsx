@@ -3,11 +3,8 @@ import React, { useRef, useState } from 'react';
 import Section from '@/components/Section';
 import ReminderList, { type ReminderShape } from '@/components/ReminderList';
 import MeterDonut from '@/components/charts/AnimatedMeterDonut';
-import Sparkline from '@/components/charts/Sparkline';
 import { toast } from '../toast';
-import {
-  MOCK_ADHERENCE_TREND,
-  type Stats,
+import {  type Stats,
 } from './shared';
 
 type MeditationTabProps = {
@@ -128,12 +125,6 @@ export default function MeditationTab({
               </div>
             </div>
           </div>
-          <div className="rounded-xl border bg-white p-2">
-            <div className="mb-1 text-xs text-slate-500">
-              Mindfulness trend (placeholder)
-            </div>
-            <Sparkline data={MOCK_ADHERENCE_TREND} height={64} />
-          </div>
           <p className="text-xs text-gray-500">
             You can use meditation reminders for breathing exercises,
             mindfulness, gratitude, or short yoga stretches.
@@ -229,7 +220,7 @@ export default function MeditationTab({
             <select
               value={meditationSchedule}
               onChange={(e) =>
-                setMeditationSchedule(e.target.value as any)
+                setMeditationSchedule(e.target.value as MeditationSchedule)
               }
               className="w-full rounded-md border px-2 py-1 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:border-emerald-500"
             >

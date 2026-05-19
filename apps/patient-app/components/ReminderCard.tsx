@@ -28,6 +28,7 @@ interface Props {
   reminder?: ReminderShape | null;
   autoSyncErx?: boolean;
   onConfirm?: (reminder: ReminderShape) => Promise<void> | void;
+  onTakenEarlier?: (reminder: ReminderShape) => Promise<void> | void;
   onSnooze?: (reminder: ReminderShape, mins?: number) => Promise<void> | void;
   onEdit?: (reminder: ReminderShape) => void;
   onSyncErx?: (reminder: ReminderShape) => Promise<void>;
@@ -44,6 +45,7 @@ export default function ReminderCard({
   reminder = {},
   autoSyncErx = false,
   onConfirm,
+  onTakenEarlier,
   onSnooze,
   onEdit,
   onSyncErx,
@@ -136,6 +138,20 @@ export default function ReminderCard({
     setBusy(false);
   }
 
+  async function handleTakenEarlier() {
+    if (!safe.id) return;
+    setBusy(true);
+    setStatus('Taken');
+    try {
+      await (onTakenEarlier
+        ? onTakenEarlier({ ...safe } as ReminderShape)
+        : onConfirm
+          ? onConfirm({ ...safe } as ReminderShape)
+          : Promise.resolve());
+    } catch {}
+    setBusy(false);
+  }
+
   async function handleSnooze(mins = 10) {
     setBusy(true);
     try {
@@ -176,7 +192,7 @@ export default function ReminderCard({
           <div className="text-xs text-gray-500">
             {safe.dose
               ? `${safe.dose} • ${displayTime}`
-              : displayTime || safe.notes ?? ''}
+              : (displayTime || safe.notes || '')}
           </div>
           {safe.recurrence ? (
             <div className="text-xxs text-gray-400 mt-1">
@@ -216,8 +232,17 @@ export default function ReminderCard({
               onClick={handleConfirm}
               disabled={busy}
               className="px-2 py-1 rounded bg-emerald-600 text-white text-xs"
+              title="Mark as taken now"
             >
               ✅
+            </button>
+            <button
+              onClick={handleTakenEarlier}
+              disabled={busy}
+              className="px-2 py-1 rounded border text-xs"
+              title="Mark as taken earlier"
+            >
+              Earlier
             </button>
             <button
               onClick={() => handleSnooze(10)}

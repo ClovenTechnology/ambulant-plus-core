@@ -175,7 +175,14 @@ export default function PlanModal(props: {
           onRedeemed={(data) => {
             // If it was an upgrade, reflect it immediately for gating UI.
             if (data.effect === 'upgraded') {
-              const next = data.redeemed.plan === 'family' ? ('family' as Plan) : ('premium' as Plan);
+              const redeemedPlan = data.redeemed?.plan;
+              const next: Plan =
+                redeemedPlan === 'family'
+                  ? 'family'
+                  : redeemedPlan === 'premium'
+                    ? 'premium'
+                    : required;
+
               try {
                 setPlan?.(next);
               } catch {}

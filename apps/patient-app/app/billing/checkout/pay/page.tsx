@@ -24,7 +24,7 @@ function formatMoney(currency: string, cents: number) {
   }
 }
 
-export default function CheckoutPayPage() {
+function CheckoutPayPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -193,5 +193,12 @@ export default function CheckoutPayPage() {
         </div>
       </div>
     </main>
+  );
+}
+export default function CheckoutPayPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <CheckoutPayPageContent />
+    </React.Suspense>
   );
 }

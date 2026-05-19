@@ -1,104 +1,97 @@
 // apps/patient-app/app/api/careport/history/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  forwardAuthHeaders,
+  gatewayNotConfigured,
+  getGatewayBase,
+  readJsonResponse,
+} from '@/app/api/careport/_gw';
 
-type HistoryItem = {
-  id: string;
-  encId?: string;
-  orderNo?: string;
-  status: string;
-  createdAt?: string;
-  deliveredAt?: string | null;
-  pharmacyName?: string;
-  riderName?: string;
-  total?: number;
-  paymentMethod?: string;
-};
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-const MOCK_HISTORY: HistoryItem[] = [
-  {
-    id: 'H-1',
-    encId: 'E-2000',
-    orderNo: 'ORD-1001',
-    status: 'Delivered',
-    createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-    deliveredAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    pharmacyName: 'MedCare Sandton',
-    riderName: 'Sipho R.',
-    total: 120.0,
-    paymentMethod: 'Medical Aid',
-  },
-  {
-    id: 'H-2',
-    encId: 'E-2001',
-    orderNo: 'ORD-1002',
-    status: 'Out for delivery',
-    createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    deliveredAt: null,
-    pharmacyName: 'HealthPlus Rosebank',
-    riderName: 'Thandi M.',
-    total: 85.5,
-    paymentMethod: 'Card',
-  },
-];
-
-const GATEWAY_BASE =
-  process.env.CAREPORT_GATEWAY_BASE ||
-  process.env.CLINICIAN_BASE_URL ||
-  '';
+function normalizeOrderToHistoryItem(order: any) {
+  return {
+    id: String(order.id),
+    encId: order.encounterId ?? null,
+    orderNo: order.id,
+    status: order.status,
+    createdAt: order.createdAt ?? null,
+    deliveredAt: order.deliveredAt ?? null,
+    pharmacyName: order.pharmacyName ?? order.chosenPharmacyName ?? null,
+    riderName: order.riderName ?? null,
+    total:
+      typeof order.total === 'number'
+        ? order.total
+        : typeof order.totalCents === 'number'
+          ? order.totalCents / 100
+          : null,
+    paymentMethod: order.paymentMethod ?? null,
+    fulfillment: order.fulfillment ?? null,
+    currency: order.currency ?? 'ZAR',
+  };
+}
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const encId = url.searchParams.get('encId') || undefined;
+  const base = getGatewayBase();
 
-  if (!GATEWAY_BASE) {
-    return NextResponse.json({
-      items: MOCK_HISTORY,
-      source: 'mock-no-gateway',
-    });
+  if (!base) {
+    return gatewayNotConfigured('careport');
   }
 
-  const qs = new URLSearchParams();
-  if (encId) qs.set('encId', encId);
+  const incoming = new URL(req.url);
+  const encId =
+    incoming.searchParams.get('encId') ||
+    incoming.searchParams.get('encounterId') ||
+    '';
 
-  const upstream = `${GATEWAY_BASE.replace(
-    /\/+$/,
-    '',
-  )}/api/careport/history${qs.toString() ? `?${qs.toString()}` : ''}`;
+  const upstream = new URL('/api/careport/orders', base);
+
+  if (encId) upstream.searchParams.set('encounterId', encId);
+  upstream.searchParams.set('limit', incoming.searchParams.get('limit') || '50');
 
   try {
-    const res = await fetch(upstream, {
+    const res = await fetch(upstream.toString(), {
+      method: 'GET',
+      headers: forwardAuthHeaders(req),
       cache: 'no-store',
-      headers: { accept: 'application/json' },
     });
+
+    const data = await readJsonResponse(res);
 
     if (!res.ok) {
-      console.warn(
-        '[careport/history] upstream non-OK, using mock',
-        res.status,
+      return NextResponse.json(
+        {
+          ok: false,
+          error: data?.error || `careport_gateway_http_${res.status}`,
+          items: [],
+        },
+        { status: res.status },
       );
-      return NextResponse.json({
-        items: MOCK_HISTORY,
-        source: 'mock-upstream-error',
-      });
     }
 
-    const json = await res.json().catch(() => null as any);
+    const orders = Array.isArray(data?.orders)
+      ? data.orders
+      : Array.isArray(data?.items)
+        ? data.items
+        : [];
 
-    let items: HistoryItem[] = [];
-    if (Array.isArray(json?.items)) items = json.items;
-    else if (Array.isArray(json?.history)) items = json.history;
-    else if (Array.isArray(json)) items = json;
-
-    if (!items.length) {
-      return NextResponse.json({ items: [], source: 'live-empty' });
-    }
-
-    return NextResponse.json({ items, source: 'live' });
-  } catch (err) {
-    console.error('[careport/history] upstream error, using mock', err);
-    return NextResponse.json({
-      items: MOCK_HISTORY,
-      source: 'mock-exception',
-    });
+    return NextResponse.json(
+      {
+        ok: true,
+        items: orders.map(normalizeOrderToHistoryItem),
+        source: 'api_gateway',
+      },
+      { status: 200 },
+    );
+  } catch (err: any) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err?.message || 'careport_history_proxy_failed',
+        items: [],
+      },
+      { status: 502 },
+    );
   }
 }

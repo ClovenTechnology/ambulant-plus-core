@@ -1,7 +1,7 @@
-// apps/patient-app/app/plan/upgrade/page.tsx
+﻿// apps/patient-app/app/plan/upgrade/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { Plan } from '../../../lib/plans';
@@ -15,7 +15,7 @@ type CheckoutResp = { ok: boolean; checkoutUrl?: string; error?: string };
 type BillingPeriod = 'monthly' | 'annual';
 type FeatureGroupKey = 'Core' | 'Care' | 'Insights' | 'Devices' | 'Family';
 
-const ANNUAL_MONTHS_FREE = 2; // “2 months free”
+const ANNUAL_MONTHS_FREE = 2; // â€œ2 months freeâ€
 
 function annualPriceFromMonthly(monthly: number) {
   const payMonths = Math.max(1, 12 - ANNUAL_MONTHS_FREE);
@@ -101,18 +101,24 @@ function normFeature(s: string) {
   return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
-export default function UpgradePlanPage() {
+function UpgradePlanPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
+
+  const qs = useMemo(
+    () => new URLSearchParams(sp?.toString() ?? ''),
+    [sp],
+  );
+
   const { plan, effectivePlan, setPlan, refreshEntitlements } = usePlan() as any;
 
   const planKeys = useMemo(() => PATIENT_PLANS.map((p) => p.key), []);
   const defaultPick = (planKeys.includes('premium' as Plan) ? ('premium' as Plan) : (planKeys[0] as Plan)) || 'free';
 
-  const rawInitial = (sp.get('plan') as Plan) || defaultPick;
+  const rawInitial = (qs.get('plan') as Plan) || defaultPick;
   const initialPlan = planKeys.includes(rawInitial) ? rawInitial : defaultPick;
 
-  const initialCycle = (sp.get('cycle') || sp.get('billing') || '').toLowerCase().trim();
+  const initialCycle = (qs.get('cycle') || qs.get('billing') || '').toLowerCase().trim();
   const initialBilling: BillingPeriod = initialCycle === 'annual' ? 'annual' : 'monthly';
 
   const [selected, setSelected] = useState<Plan>(initialPlan);
@@ -122,11 +128,11 @@ export default function UpgradePlanPage() {
   const [showCompare, setShowCompare] = useState(false);
   const [redeemOpen, setRedeemOpen] = useState(false);
 
-  const status = sp.get('status'); // success/cancel (mock)
-  const paidPlan = sp.get('paidPlan') as Plan | null;
-  const tx = sp.get('tx') ?? '';
-  const back = sp.get('back') ?? '';
-  const cycleFromReturn = (sp.get('cycle') || '').toLowerCase().trim() === 'annual' ? 'annual' : 'monthly';
+  const status = qs.get('status'); // success/cancel (mock)
+  const paidPlan = qs.get('paidPlan') as Plan | null;
+  const tx = qs.get('tx') ?? '';
+  const back = qs.get('back') ?? '';
+  const cycleFromReturn = (qs.get('cycle') || '').toLowerCase().trim() === 'annual' ? 'annual' : 'monthly';
 
   const currentMeta = useMemo(() => planMeta(plan), [plan]);
   const selectedMeta = useMemo(() => planMeta(selected), [selected]);
@@ -145,7 +151,7 @@ export default function UpgradePlanPage() {
     let cancelled = false;
     (async () => {
       setBusy(true);
-      setMsg('Finishing up… securing your new plan and syncing your access.');
+      setMsg('Finishing upâ€¦ securing your new plan and syncing your access.');
 
       const res = await fetch('/api/plan/confirm', {
         method: 'POST',
@@ -158,7 +164,7 @@ export default function UpgradePlanPage() {
       if (cancelled) return;
 
       if (!res?.ok || !data?.ok) {
-        setMsg('We couldn’t confirm that payment. Nothing changed — please try again.');
+        setMsg('We couldnâ€™t confirm that payment. Nothing changed â€” please try again.');
         setBusy(false);
         return;
       }
@@ -168,7 +174,7 @@ export default function UpgradePlanPage() {
         refreshEntitlements?.();
       } catch {}
 
-      setMsg(`You’re in. ${planMeta(paidPlan).name} is now active. Redirecting…`);
+      setMsg(`Youâ€™re in. ${planMeta(paidPlan).name} is now active. Redirectingâ€¦`);
 
       setTimeout(() => {
         if (back) router.push(back);
@@ -186,7 +192,7 @@ export default function UpgradePlanPage() {
     setMsg(null);
     setBusy(true);
 
-    // ✅ IMPORTANT: backend expects `cycle`. We also send `billing` for backwards tolerance.
+    // âœ… IMPORTANT: backend expects `cycle`. We also send `billing` for backwards tolerance.
     const cycle = billing;
 
     const resp = await fetch('/api/plan/checkout', {
@@ -203,7 +209,7 @@ export default function UpgradePlanPage() {
     const data = (await resp?.json().catch(() => null)) as CheckoutResp | null;
 
     if (!resp?.ok || !data?.ok || !data.checkoutUrl) {
-      setMsg(data?.error || 'Checkout couldn’t start. Please try again.');
+      setMsg(data?.error || 'Checkout couldnâ€™t start. Please try again.');
       setBusy(false);
       return;
     }
@@ -240,11 +246,11 @@ export default function UpgradePlanPage() {
     // After applying, compute remaining credit and surface it in the message.
     const s = pruneExpired(loadEntitlements());
     const prem = s.credits?.premiumDays ?? 0;
-    const fam = s.credits?.familyDays ?? 0;
+    const fam = (s.credits as { premiumDays?: number; familyDays?: number } | undefined)?.familyDays ?? 0;
 
     const creditLine =
       prem > 0 || fam > 0
-        ? ` Remaining credit — Premium: ${prem} days, Family: ${fam} days.`
+        ? ` Remaining credit â€” Premium: ${prem} days, Family: ${fam} days.`
         : '';
 
     // Prefer server message (world-class copy), but still respect local computed rule message.
@@ -263,7 +269,7 @@ export default function UpgradePlanPage() {
   const entitlementSummary = useMemo(() => {
     const s = pruneExpired(loadEntitlements());
     const premiumCredit = s.credits?.premiumDays ?? 0;
-    const familyCredit = s.credits?.familyDays ?? 0;
+    const familyCredit = (s.credits as { premiumDays?: number; familyDays?: number } | undefined)?.familyDays ?? 0;
     const active = s.active && s.active.endsAtISO ? s.active : null;
     return { premiumCredit, familyCredit, active };
   }, [effectivePlan, plan, msg]);
@@ -324,8 +330,16 @@ export default function UpgradePlanPage() {
       <RedeemCodeModal
         open={redeemOpen}
         onClose={() => setRedeemOpen(false)}
-        currentPlan={plan}
-        onRedeemed={(data) => {
+        onRedeemed={(data: {
+          effect: 'upgraded' | 'credit_saved';
+          message: string;
+          redeemed: {
+            plan: 'premium' | 'family';
+            days: number;
+            label: string;
+          };
+          allowShopSpend?: boolean;
+        }) => {
           onRedeemedServer({
             redeemed: data.redeemed,
             effect: data.effect,
@@ -341,7 +355,7 @@ export default function UpgradePlanPage() {
           <div className="max-w-2xl">
             <div className="text-[28px] leading-[1.15] font-semibold tracking-tight">Plans that fit real life</div>
             <div className="mt-2 text-sm leading-6 text-slate-600">
-              Upgrade when you want deeper access — like live clinician status and practice bookings. You’re currently on{' '}
+              Upgrade when you want deeper access â€” like live clinician status and practice bookings. Youâ€™re currently on{' '}
               <span className="font-semibold text-slate-900">{currentMeta.name}</span>
               {effectivePlan !== plan ? (
                 <span className="text-slate-500">
@@ -447,7 +461,7 @@ export default function UpgradePlanPage() {
               {(entitlementSummary.premiumCredit > 0 || entitlementSummary.familyCredit > 0) ? (
                 <div className="mt-1">
                   Credit balance:{' '}
-                  <span className="font-semibold">{entitlementSummary.premiumCredit}</span> Premium days ·{' '}
+                  <span className="font-semibold">{entitlementSummary.premiumCredit}</span> Premium days Â·{' '}
                   <span className="font-semibold">{entitlementSummary.familyCredit}</span> Family days.{' '}
                   <span className="text-slate-500">Family + Premium redemption becomes saved Premium credit.</span>
                 </div>
@@ -550,7 +564,7 @@ export default function UpgradePlanPage() {
                     <div className="text-xs text-slate-500">{active ? 'Selected' : 'Tap to select'}</div>
                   )}
                   <div className={['text-xs font-medium', active ? 'text-sky-700' : 'text-slate-600'].join(' ')}>
-                    {active ? '✓' : ''}
+                    {active ? 'âœ“' : ''}
                   </div>
                 </div>
               </button>
@@ -566,8 +580,8 @@ export default function UpgradePlanPage() {
               <div className="mt-1 text-lg font-semibold tracking-tight text-slate-900">{selectedMeta.name}</div>
               <div className="mt-1 text-sm text-slate-600">
                 {billing === 'annual'
-                  ? `Annual billing gives you ${ANNUAL_MONTHS_FREE} months free — best value for long-term care.`
-                  : 'Monthly billing stays flexible — switch anytime.'}
+                  ? `Annual billing gives you ${ANNUAL_MONTHS_FREE} months free â€” best value for long-term care.`
+                  : 'Monthly billing stays flexible â€” switch anytime.'}
               </div>
             </div>
 
@@ -586,14 +600,14 @@ export default function UpgradePlanPage() {
                 className="rounded-xl px-4 py-2 text-sm text-white bg-slate-900 hover:bg-slate-800 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
               >
                 {busy
-                  ? 'Working…'
+                  ? 'Workingâ€¦'
                   : selected === plan
                     ? 'Already on this plan'
                     : selected === 'free'
                       ? 'Choose Premium or Family'
                       : billing === 'annual'
-                        ? 'Continue — Annual'
-                        : 'Continue — Monthly'}
+                        ? 'Continue â€” Annual'
+                        : 'Continue â€” Monthly'}
               </button>
             </div>
           </div>
@@ -697,7 +711,7 @@ export default function UpgradePlanPage() {
                                       ].join(' ')}
                                       aria-label={hasIt ? 'Included' : 'Not included'}
                                     >
-                                      {hasIt ? '✓' : '—'}
+                                      {hasIt ? 'âœ“' : 'â€”'}
                                     </span>
                                   </td>
                                 );
@@ -713,7 +727,7 @@ export default function UpgradePlanPage() {
             </div>
 
             <div className="mt-4 text-xs text-slate-500">
-              Annual billing changes the price — not the features. Same access, best value.
+              Annual billing changes the price â€” not the features. Same access, best value.
             </div>
           </div>
         ) : null}
@@ -721,3 +735,12 @@ export default function UpgradePlanPage() {
     </div>
   );
 }
+
+export default function UpgradePlanPage() {
+  return (
+    <Suspense fallback={null}>
+      <UpgradePlanPageContent />
+    </Suspense>
+  );
+}
+

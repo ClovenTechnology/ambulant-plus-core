@@ -2,9 +2,35 @@
 import Link from 'next/link';
 import { notFound, redirect } from 'next/navigation';
 import { headers } from 'next/headers';
-import type { Order } from '../../api/orders/route';
 import { formatDateTime } from '../../../src/lib/date';     // ✅ correct relative path
 import { fmt2 } from '../../../src/lib/number';             // ✅ correct relative path
+
+type Order = {
+  id: string;
+  status?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  total?: number;
+  totalZAR?: number;
+  currency?: string;
+  type?: string;
+  note?: string;
+  meds?: Array<{
+    drug?: string;
+    sig?: string;
+    qty?: string | number;
+    refills?: string | number;
+  }>;
+  items?: Array<{
+    id?: string;
+    name?: string;
+    title?: string;
+    quantity?: number;
+    price?: number;
+    priceZAR?: number;
+  }>;
+  [key: string]: unknown;
+};
 
 export const dynamic = 'force-dynamic';
 

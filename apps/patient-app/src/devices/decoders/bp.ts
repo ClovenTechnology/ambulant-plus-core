@@ -1,83 +1,163 @@
 // apps/patient-app/src/devices/decoders/bp.ts
+
 export type BPDecoded = {
   timestamp: string;
   systolic?: number;
   diastolic?: number;
   meanArterial?: number;
   pulse?: number;
-  cuffStatus?: string; // e.g. 'inflating'|'done' etc
+  cuffStatus?: string;
   unit: 'mmHg';
   raw: Uint8Array;
 };
 
+type DecodableBytes = ArrayBuffer | DataView | Uint8Array;
+
+function toUint8Array(bytes: DecodableBytes): Uint8Array {
+  if (bytes instanceof Uint8Array) {
+    return bytes;
+  }
+
+  if (bytes instanceof DataView) {
+    return new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  }
+
+  return new Uint8Array(bytes);
+}
+
+function readSfloat(dv: DataView, offset: number): number {
+  if (offset + 1 >= dv.byteLength) {
+    return Number.NaN;
+  }
+
+  const raw16 = dv.getUint16(offset, true);
+
+  let mantissa = raw16 & 0x0fff;
+  let exponent = raw16 >> 12;
+
+  // IEEE-11073 SFLOAT uses a signed 12-bit mantissa.
+  if (mantissa >= 0x0800) {
+    mantissa = mantissa - 0x1000;
+  }
+
+  // IEEE-11073 SFLOAT uses a signed 4-bit exponent.
+  if (exponent >= 0x0008) {
+    exponent = exponent - 0x0010;
+  }
+
+  return mantissa * Math.pow(10, exponent);
+}
+
+function isPlausibleBp(
+  systolic: number,
+  diastolic?: number,
+  meanArterial?: number
+): boolean {
+  if (!Number.isFinite(systolic) || systolic < 30 || systolic > 300) {
+    return false;
+  }
+
+  if (
+    typeof diastolic === 'number' &&
+    Number.isFinite(diastolic) &&
+    (diastolic < 20 || diastolic > 200)
+  ) {
+    return false;
+  }
+
+  if (
+    typeof meanArterial === 'number' &&
+    Number.isFinite(meanArterial) &&
+    (meanArterial < 20 || meanArterial > 250)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 /**
  * decodeBpPacket
- * - Generic parse for BP notify char: many devices follow Bluetooth SIG Blood Pressure spec
- * - If vendor uses custom layout, replace the VENDOR PARSE HOOK with exact code.
+ *
+ * Parses Bluetooth SIG Blood Pressure Measurement packets where available.
+ * Some devices may expose vendor-specific packets, so the byte fallback remains
+ * deliberately conservative and only accepts physiologically plausible values.
  */
-export function decodeBpPacket(bytes: ArrayBuffer | DataView | Uint8Array): BPDecoded | null {
-  let u8: Uint8Array;
-  if (bytes instanceof Uint8Array) u8 = bytes;
-  else if (bytes instanceof DataView) u8 = new Uint8Array(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  else u8 = new Uint8Array(bytes);
-
+export function decodeBpPacket(bytes: DecodableBytes): BPDecoded | null {
+  const u8 = toUint8Array(bytes);
   const now = new Date().toISOString();
-  const raw = u8;
-  if (u8.length < 3) return null;
+
+  if (u8.length < 3) {
+    return null;
+  }
 
   try {
-    // Standard Bluetooth Blood Pressure Measurement (0x2A35) uses IEEE-11073 float (sfloat)
-    // Many vendors send [flags, systolic(sfloat), diastolic(sfloat), mean(sfloat), [pulseRate optional], ...]
-    // Helper to read sfloat (16-bit IEEE-11073 SFLOAT)
     const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+
     const flags = dv.getUint8(0);
-    const hasPulse = !!(flags & 0x04);
-    // read sfloat at offset 1.. (if buffer long enough)
-    const readSfloat = (off: number) => {
-      if (off + 1 >= dv.byteLength) return NaN;
-      const raw16 = dv.getUint16(off, true);
-      const mantissa = raw16 & 0x0FFF;
-      let exp = raw16 >> 12;
-      if (mantissa >= 0x0800) { // negative mantissa
-        // sign extend 12-bit
-        mantissa = -(0x1000 - mantissa);
+    const hasPulse = Boolean(flags & 0x04);
+
+    let offset = 1;
+
+    const systolic = readSfloat(dv, offset);
+    offset += 2;
+
+    const diastolic = readSfloat(dv, offset);
+    offset += 2;
+
+    const meanArterial = readSfloat(dv, offset);
+    offset += 2;
+
+    let pulse: number | undefined;
+
+    if (hasPulse && offset + 1 < dv.byteLength) {
+      const pulseValue = readSfloat(dv, offset);
+
+      if (Number.isFinite(pulseValue) && pulseValue > 20 && pulseValue < 250) {
+        pulse = Math.round(pulseValue);
       }
-      if (exp >= 0x0008) exp = -(0x0010 - exp); // 4-bit signed
-      return mantissa * Math.pow(10, exp);
-    };
-
-    // try parsing as BLE spec
-    let off = 1;
-    const systolic = readSfloat(off); off += 2;
-    const diastolic = readSfloat(off); off += 2;
-    const mean = readSfloat(off); off += 2;
-    let pulse: number | undefined = undefined;
-    if (hasPulse && off + 1 <= dv.byteLength) { pulse = dv.getUint16(off, true); }
-
-    // plausibility check
-    if (!isNaN(systolic) && systolic > 30 && systolic < 300) {
-      return { timestamp: now, systolic: Math.round(systolic), diastolic: Math.round(diastolic), meanArterial: Math.round(mean), pulse: pulse ? Math.round(pulse) : undefined, unit: 'mmHg', raw };
     }
 
-    // VENDOR PARSE FALLBACK:
-    // Some devices send simple [hdr, sys, dia, pulse] as bytes
+    if (isPlausibleBp(systolic, diastolic, meanArterial)) {
+      return {
+        timestamp: now,
+        systolic: Math.round(systolic),
+        diastolic: Number.isFinite(diastolic) ? Math.round(diastolic) : undefined,
+        meanArterial: Number.isFinite(meanArterial)
+          ? Math.round(meanArterial)
+          : undefined,
+        pulse,
+        unit: 'mmHg',
+        raw: u8,
+      };
+    }
+
+    // Conservative byte fallback for simple vendor packets such as:
+    // [header, systolic, diastolic, pulse]
     if (u8.length >= 4) {
-      const sys = u8[1];
-      const dia = u8[2];
-      const pl = u8[3];
-      if (sys > 30 && sys < 300 && dia > 20 && dia < 200) {
-        return { timestamp: now, systolic: sys, diastolic: dia, pulse: pl, unit: 'mmHg', raw };
+      const systolicByte = u8[1];
+      const diastolicByte = u8[2];
+      const pulseByte = u8[3];
+
+      if (
+        isPlausibleBp(systolicByte, diastolicByte) &&
+        pulseByte > 20 &&
+        pulseByte < 250
+      ) {
+        return {
+          timestamp: now,
+          systolic: systolicByte,
+          diastolic: diastolicByte,
+          pulse: pulseByte,
+          unit: 'mmHg',
+          raw: u8,
+        };
       }
     }
 
     return null;
-  } catch (e) {
-    console.warn('decodeBpPacket error', e);
+  } catch (err) {
+    console.warn('[decodeBpPacket] error', err);
     return null;
   }
 }
-
-
-/*
-Replace with exact decode logic from the SDK Protocol; BP is critical — please replace with vendor parse for production.
-*/

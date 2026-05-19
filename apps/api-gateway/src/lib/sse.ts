@@ -1,96 +1,38 @@
-// apps/api-gateway/src/lib/sse.ts
-
-export type SseWritable = {
-  write: (chunk: Uint8Array) => void | Promise<void>;
+// FILE: apps/api-gateway/src/lib/sse.ts
+type StreamWriter = {
+  write(chunk: Uint8Array): void | Promise<void>;
+  close?(): void | Promise<void>;
 };
 
-type Client = {
-  id: string;
-  res: SseWritable;
-};
+type Client = { id: string; res: StreamWriter };
 
+// channel key can be "order:<id>" | "draw:<id>" | "bundle:<id>" | "specimen:<id>"
 const channels = new Map<string, Set<Client>>();
 
-function channelKey(orderId: string) {
-  return String(orderId || '').trim();
+function keyOf(kind: string, id: string) {
+  return `${kind}:${id}`;
 }
 
-function encodeSse(payload: unknown) {
-  const data = `data: ${JSON.stringify(payload)}\n\n`;
-  return new TextEncoder().encode(data);
+export function addClient(channelKey: string, client: Client) {
+  if (!channels.has(channelKey)) channels.set(channelKey, new Set());
+  channels.get(channelKey)!.add(client);
+  return () => channels.get(channelKey)?.delete(client);
 }
 
-export function addClient(orderId: string, client: Client) {
-  const key = channelKey(orderId);
-
-  if (!key) {
-    return () => undefined;
-  }
-
-  if (!channels.has(key)) {
-    channels.set(key, new Set());
-  }
-
-  const set = channels.get(key)!;
-  set.add(client);
-
-  return () => {
-    const current = channels.get(key);
-
-    if (!current) return;
-
-    current.delete(client);
-
-    if (current.size === 0) {
-      channels.delete(key);
-    }
-  };
-}
-
-export async function push(orderId: string, payload: unknown) {
-  const key = channelKey(orderId);
-  const set = channels.get(key);
-
+export async function push(channelKey: string, payload: any) {
+  const set = channels.get(channelKey);
   if (!set?.size) return;
-
-  const frame = encodeSse(payload);
-  const stale: Client[] = [];
-
-  await Promise.allSettled(
-    Array.from(set).map(async (client) => {
-      try {
-        await client.res.write(frame);
-      } catch {
-        stale.push(client);
-      }
-    }),
-  );
-
-  if (stale.length > 0) {
-    for (const client of stale) {
-      set.delete(client);
-    }
-
-    if (set.size === 0) {
-      channels.delete(key);
-    }
-  }
+  const data = `data: ${JSON.stringify(payload)}\n\n`;
+  const enc = new TextEncoder().encode(data);
+  await Promise.allSettled(Array.from(set).map((c) => c.res.write(enc)));
 }
 
-export function clientCount(orderId?: string) {
-  if (orderId) {
-    return channels.get(channelKey(orderId))?.size ?? 0;
-  }
-
-  let total = 0;
-
-  for (const set of channels.values()) {
-    total += set.size;
-  }
-
-  return total;
-}
-
-export function clearChannel(orderId: string) {
-  channels.delete(channelKey(orderId));
-}
+// Convenience helpers (keep your old mental model)
+export const sseKeys = {
+  order: (id: string) => keyOf("order", id),
+  draw: (id: string) => keyOf("draw", id),
+  lab: (id: string) => keyOf("lab", id),
+  labOrder: (id: string) => keyOf("lab", id),
+  bundle: (id: string) => keyOf("bundle", id),
+  specimen: (id: string) => keyOf("specimen", id),
+};

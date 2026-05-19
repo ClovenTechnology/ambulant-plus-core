@@ -1,6 +1,8 @@
 // apps/patient-app/app/api/profile/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { API } from '@/src/lib/config';
+import { PrismaClient } from '@prisma/client';
+import crypto from 'node:crypto';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -23,125 +25,253 @@ type GatewayPatient = {
   primaryConditionsText?: string | null;
 };
 
-export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const userId = searchParams.get('userId') || '';
+const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
+const prisma = globalForPrisma.prisma ?? new PrismaClient();
 
-  // 1) Try API Gateway (if configured)
-  if (API) {
-    try {
-      const baseUrl = API.replace(/\/+$/, ''); // trim trailing slash
-      const url = new URL('/api/patients/profile', baseUrl);
-      if (userId) {
-        url.searchParams.set('userId', userId);
-      }
+if (process.env.NODE_ENV !== 'production') {
+  globalForPrisma.prisma = prisma;
+}
 
-      // Forward auth-related headers so identity works on gateway
-      const forwardHeaders = new Headers();
-      const original = req.headers;
+function base64urlToBuffer(s: string) {
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  const b64 = (s + pad).replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(b64, 'base64');
+}
 
-      const forwardKeys = ['cookie', 'authorization', 'x-ambulant-identity'];
-      forwardKeys.forEach((key) => {
-        const v = original.get(key);
-        if (v) forwardHeaders.set(key, v);
-      });
+function safeJsonParse(buf: Buffer) {
+  try {
+    return JSON.parse(buf.toString('utf8'));
+  } catch {
+    return null;
+  }
+}
 
-      forwardHeaders.set('content-type', 'application/json');
+function verifyJwtHs256(token: string, secret: string): any | null {
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) return null;
 
-      const r = await fetch(url.toString(), {
-        headers: forwardHeaders,
-        cache: 'no-store',
-      });
+    const [h, p, sig] = parts;
+    const data = `${h}.${p}`;
 
-      if (r.ok) {
-        const data = await r.json().catch(() => ({} as any));
+    const expected = crypto.createHmac('sha256', secret).update(data).digest();
+    const got = base64urlToBuffer(sig);
 
-        // Gateway shape: { ok, profile, conditions, ... }
-        const patient: GatewayPatient = (data?.patient || data?.profile || data || {}) as GatewayPatient;
+    if (got.length !== expected.length) return null;
+    if (!crypto.timingSafeEqual(got, expected)) return null;
 
-        const chronicConditions = Array.isArray(patient.chronicConditions)
-          ? patient.chronicConditions
-          : [];
+    const payload = safeJsonParse(base64urlToBuffer(p));
+    if (!payload) return null;
 
-        const normalized = {
-          userId: patient.userId || userId || null,
-          patientId: patient.patientId || patient.id || null,
-          name: patient.name || (data?.displayName ?? null),
-          email: patient.email ?? null,
-          age: patient.age ?? null, // optional, if you ever compute it server-side
-          gender: patient.gender ?? null,
-          dob: patient.dob ?? null,
-          avatarUrl: patient.avatarUrl || null,
-          address: patient.address || null,
-          mobile: patient.mobile || null,
-          bloodType: patient.bloodType ?? null,
-          allergies: Array.isArray(patient.allergies) ? patient.allergies : [],
-          chronicConditions,
-          primaryConditionsText:
-            patient.primaryConditionsText ??
-            (chronicConditions.length ? chronicConditions.join(', ') : null),
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof payload.exp === 'number' && payload.exp <= now) return null;
 
-          // keep the entire gateway payload for richer UIs (history, etc.)
-          patientRaw: data,
-        };
+    return payload;
+  } catch {
+    return null;
+  }
+}
 
-        return NextResponse.json(normalized, {
-          headers: { 'Cache-Control': 'no-store' },
-        });
-      }
-    } catch (err) {
-      console.error('[patient-app/api/profile] gateway error', err);
-      // fall through to local mock
-    }
+function readSessionPayload(req: NextRequest): any | null {
+  const secret = process.env.AUTH_SESSION_SECRET;
+  if (!secret) return null;
+
+  const token =
+    req.cookies.get('ambulant_session')?.value ||
+    req.cookies.get('__Host-ambulant_session')?.value ||
+    req.cookies.get('ambulant.session')?.value ||
+    req.cookies.get('auth_session')?.value ||
+    req.cookies.get('session')?.value ||
+    req.cookies.get('token')?.value ||
+    '';
+
+  if (!token) return null;
+
+  return verifyJwtHs256(token, secret);
+}
+
+function resolveUserIdFromSession(req: NextRequest): string {
+  const payload = readSessionPayload(req);
+
+  return String(
+    payload?.sub ||
+      payload?.userId ||
+      payload?.uid ||
+      '',
+  ).trim();
+}
+
+function normaliseAllergies(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
   }
 
-  // 2) Local dev stub (kept realistic & stable for PDFs/UI)
-  const mockChronic = ['Hypertension', 'Prediabetes'];
-  return NextResponse.json(
-    {
-      userId: userId || 'patient-demo-001',
-      patientId: 'Am25-02-001',
-      name: 'Lerato Teeke',
-      email: 'lerato@ambulant.com',
-      age: 34,
-      gender: 'Female',
-      dob: '1991-03-14',
-      avatarUrl: '/images/avatar-placeholder.png',
-      address: 'Morningside, Sandton 2150',
-      mobile: '074-551-8583',
-      bloodType: 'O+',
-      allergies: ['Peanuts (mild)'],
-      chronicConditions: mockChronic,
-      primaryConditionsText: mockChronic.join(', '),
-      patientRaw: {
-        ok: true,
-        profile: {
-          id: 'Am25-02-001',
-          userId: userId || 'patient-demo-001',
-          name: 'Lerato Teeke',
-          email: 'lerato@ambulant.com',
-          gender: 'Female',
-          dob: '1991-03-14',
-          address: 'Morningside, Sandton 2150',
-          mobile: '074-551-8583',
-          bloodType: 'O+',
-          allergies: ['Peanuts (mild)'],
-          chronicConditions: mockChronic,
-        },
-        conditions: [],
-        vaccinations: [],
-        operations: [],
-        medications: [],
-        encounters: [],
-        historyCounts: {
-          conditions: 0,
-          vaccinations: 0,
-          operations: 0,
-          medications: 0,
-          encounters: 0,
-        },
+  if (typeof value === 'string') {
+    return value
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+async function readLocalPatientProfile(userId: string) {
+  if (!userId) return null;
+
+  return prisma.patientProfile
+    .findFirst({
+      where: { userId },
+    })
+    .catch(() => null);
+}
+
+function json(data: any, status = 200) {
+  return NextResponse.json(data, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  });
+}
+
+function readUserId(req: NextRequest, url: URL) {
+  return (
+    url.searchParams.get('userId') ||
+    req.headers.get('x-ambulant-user-id') ||
+    req.headers.get('x-user-id') ||
+    req.headers.get('x-uid') ||
+    resolveUserIdFromSession(req) ||
+    ''
+  ).trim();
+}
+
+function forwardHeaders(req: NextRequest) {
+  const h = new Headers();
+
+  [
+    'cookie',
+    'authorization',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-role',
+    'x-email',
+    'x-name',
+    'x-display-name',
+    'x-org-id',
+    'x-correlation-id',
+    'x-request-id',
+  ].forEach((key) => {
+    const value = req.headers.get(key);
+    if (value) h.set(key, value);
+  });
+
+  h.set('accept', 'application/json');
+  return h;
+}
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const userId = readUserId(req, url);
+
+  const localPatient = await readLocalPatientProfile(userId);
+
+  if (localPatient) {
+    const allergies = normaliseAllergies((localPatient as any).allergies);
+
+    return json({
+      ok: true,
+      userId: localPatient.userId || userId || null,
+      patientId: localPatient.id || null,
+      name: localPatient.name || null,
+      email: (localPatient as any).contactEmail ?? null,
+      age: null,
+      gender: (localPatient as any).gender ?? null,
+      dob: null,
+      avatarUrl: (localPatient as any).avatarUrl || null,
+      address: (localPatient as any).addressLine1 || null,
+      mobile: (localPatient as any).phone || null,
+      bloodType: null,
+      allergies,
+      chronicConditions: [],
+      primaryConditionsText: null,
+      patientRaw: localPatient,
+      source: 'local_patient_profile',
+    });
+  }
+
+  if (!API) {
+    return json(
+      {
+        ok: false,
+        error: 'api_gateway_base_not_configured',
+        profile: null,
       },
-    },
-    { headers: { 'Cache-Control': 'no-store' } },
-  );
+      503,
+    );
+  }
+
+  try {
+    const baseUrl = API.replace(/\/+$/, '');
+    const target = new URL('/api/patients/profile', baseUrl);
+
+    if (userId) {
+      target.searchParams.set('userId', userId);
+    }
+
+    const r = await fetch(target.toString(), {
+      headers: forwardHeaders(req),
+      cache: 'no-store',
+    });
+
+    const data = await r.json().catch(() => null);
+
+    if (!r.ok || !data) {
+      return json(
+        {
+          ok: false,
+          error: data?.error || data?.message || `profile_gateway_http_${r.status}`,
+          profile: null,
+        },
+        r.status === 404 ? 404 : 502,
+      );
+    }
+
+    const patient: GatewayPatient = (data?.patient || data?.profile || data || {}) as GatewayPatient;
+    const chronicConditions = Array.isArray(patient.chronicConditions)
+      ? patient.chronicConditions
+      : [];
+
+    return json({
+      ok: true,
+      userId: patient.userId || userId || null,
+      patientId: patient.patientId || patient.id || null,
+      name: patient.name || data?.displayName || null,
+      email: patient.email ?? null,
+      age: patient.age ?? null,
+      gender: patient.gender ?? null,
+      dob: patient.dob ?? null,
+      avatarUrl: patient.avatarUrl || null,
+      address: patient.address || null,
+      mobile: patient.mobile || null,
+      bloodType: patient.bloodType ?? null,
+      allergies: Array.isArray(patient.allergies) ? patient.allergies : [],
+      chronicConditions,
+      primaryConditionsText:
+        patient.primaryConditionsText ??
+        (chronicConditions.length ? chronicConditions.join(', ') : null),
+      patientRaw: data,
+    });
+  } catch (err: any) {
+    return json(
+      {
+        ok: false,
+        error: err?.message || 'profile_gateway_failed',
+        profile: null,
+      },
+      502,
+    );
+  }
 }

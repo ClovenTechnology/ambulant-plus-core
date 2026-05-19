@@ -2,8 +2,6 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import PillReminderCard from './PillReminderCard';
-import type { Pill } from '@/types';
 
 type Reminder = {
   id: string;
@@ -33,16 +31,7 @@ export default function PillRemindersWrapper({
       setReminders(data?.reminders ?? []);
     } catch (err) {
       console.error(err);
-      // fall back to initial pills passed from server
-      setReminders(
-        (initialPills ?? []).map((p) => ({
-          id: p.id ?? `${p.name}-${p.time ?? '0'}`,
-          name: p.name,
-          dose: p.dose,
-          time: p.time,
-          status: (p.status as any) ?? 'Pending',
-        }))
-      );
+      setReminders([]);
     } finally {
       setLoading(false);
     }

@@ -8,17 +8,22 @@ import { TelevisitRole } from '@prisma/client';
 import { ipFromReq, safeUA, sha256Hex, randomToken } from '@/src/lib/televisit/security';
 import { SignJWT } from 'jose';
 
-function mustUid(req: Request) {
-  const uid = (req.headers.get('x-uid') || '').trim();
-  if (!uid) throw new Error('Missing x-uid');
-  return uid;
-}
-
-function mustRole(req: Request) {
-  const r = (req.headers.get('x-role') || 'patient').trim();
-  if (!['patient', 'clinician', 'staff', 'observer', 'admin'].includes(r)) throw new Error('Invalid x-role');
-  return r as TelevisitRole;
-}
+type PersistedAppointmentParticipant = {
+  partyId: string;
+  role:
+    | 'PRIMARY_PATIENT'
+    | 'DEPENDANT_PATIENT'
+    | 'OBSERVER'
+    | 'CARE_ALLY'
+    | 'SECOND_PATIENT_PARTICIPANT'
+    | 'LEAD_CLINICIAN'
+    | 'CO_CLINICIAN'
+    | 'ADVISOR';
+  name?: string | null;
+  access?: {
+    canJoinTelevisit?: boolean;
+  };
+};
 
 function envFirst(names: string[]) {
   for (const n of names) {
@@ -34,18 +39,43 @@ function envInt(name: string, fallback: number) {
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
+function parseParticipants(meta: unknown): PersistedAppointmentParticipant[] {
+  const obj =
+    meta && typeof meta === 'object' && !Array.isArray(meta)
+      ? (meta as Record<string, unknown>)
+      : null;
+  const list = Array.isArray(obj?.participants) ? obj?.participants : [];
+  return list.filter(Boolean) as PersistedAppointmentParticipant[];
+}
+
+function toTelevisitRole(participantRole: PersistedAppointmentParticipant['role']): TelevisitRole {
+  switch (participantRole) {
+    case 'OBSERVER':
+      return 'observer';
+    case 'LEAD_CLINICIAN':
+    case 'CO_CLINICIAN':
+    case 'ADVISOR':
+      return 'clinician';
+    default:
+      return 'patient';
+  }
+}
+
 export async function POST(req: Request) {
   try {
-    const uid = mustUid(req);
-    const role = mustRole(req);
-
     const body = await req.json().catch(() => ({} as any));
+
     const visitId = String(body.visitId || '').trim();
     const roomId = String(body.roomId || '').trim();
+    const appointmentId = String(body.appointmentId || '').trim();
+    const participantId = String(body.participantId || body.personId || '').trim();
     const force = !!body.force;
 
-    if (!visitId && !roomId) {
-      return NextResponse.json({ ok: false, error: 'visitId or roomId required' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+    if ((!visitId && !roomId) || !appointmentId || !participantId) {
+      return NextResponse.json(
+        { ok: false, error: 'visitId/roomId, appointmentId and participantId required' },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
 
     const visit =
@@ -53,8 +83,44 @@ export async function POST(req: Request) {
       (roomId ? await prisma.televisit.findUnique({ where: { roomId } }) : null);
 
     if (!visit) {
-      return NextResponse.json({ ok: false, error: 'Televisit not found' }, { status: 404, headers: { 'Cache-Control': 'no-store' } });
+      return NextResponse.json(
+        { ok: false, error: 'Televisit not found' },
+        { status: 404, headers: { 'Cache-Control': 'no-store' } },
+      );
     }
+
+    const appointment = await prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      select: { id: true, meta: true },
+    });
+
+    if (!appointment) {
+      return NextResponse.json(
+        { ok: false, error: 'Appointment not found' },
+        { status: 404, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    const participant = parseParticipants(appointment.meta).find(
+      (p) => p.partyId === participantId,
+    );
+
+    if (!participant) {
+      return NextResponse.json(
+        { ok: false, error: 'participant_not_authorized' },
+        { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    if (participant.access?.canJoinTelevisit === false) {
+      return NextResponse.json(
+        { ok: false, error: 'participant_join_not_allowed' },
+        { status: 403, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    const role = toTelevisitRole(participant.role);
+    const uid = participant.partyId;
 
     const now = new Date();
     const joinOpen = now >= visit.joinOpensAt && now <= visit.joinClosesAt;
@@ -78,8 +144,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // If an active ticket exists, we can't return it (we never store raw token).
-    // If force=false, block and tell client to keep its token.
     const existing = await prisma.televisitJoinTicket.findFirst({
       where: { visitId: visit.id, uid, role, revokedAt: null, expiresAt: { gt: now } },
       orderBy: { issuedAt: 'desc' },
@@ -97,7 +161,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---- JWT config (must match api-gateway verification) ----
     const joinSecret = envFirst(['TELEVISIT_JOIN_JWT_SECRET', 'RTC_JOIN_JWT_SECRET', 'JOIN_TICKET_JWT_SECRET']);
     if (!joinSecret) {
       return NextResponse.json(
@@ -109,48 +172,48 @@ export async function POST(req: Request) {
     const issuer = envFirst(['TELEVISIT_JOIN_JWT_ISSUER', 'JOIN_TICKET_JWT_ISSUER']);
     const audience = envFirst(['TELEVISIT_JOIN_JWT_AUDIENCE', 'JOIN_TICKET_JWT_AUDIENCE']);
 
-    // TTL: default 2h, but never beyond joinClosesAt
     const ttlSec = envInt('TELEVISIT_JOIN_TOKEN_TTL_SEC', envInt('JOIN_TOKEN_TTL_SEC', 2 * 60 * 60));
     const expMsHard = Math.min(now.getTime() + ttlSec * 1000, new Date(visit.joinClosesAt).getTime());
     const expiresAt = new Date(expMsHard);
 
-    // Allow small skew. (Join window already enforced above.)
     const nbf = Math.floor((now.getTime() - 5_000) / 1000);
     const iat = Math.floor(now.getTime() / 1000);
     const exp = Math.floor(expiresAt.getTime() / 1000);
 
     const orgId = (visit as any)?.orgId ? String((visit as any).orgId) : 'org-default';
 
-    // Claims MUST match api-gateway accepted keys
     const claims = {
       uid,
-      role, // 'patient' | 'clinician' | 'staff' | 'observer' | 'admin'
+      role,
       visitId: visit.id,
       roomId: visit.roomId,
       orgId,
+      appointmentId,
+      participantId: participant.partyId,
     };
 
     const key = new TextEncoder().encode(joinSecret);
 
-    const joinJwt = await new SignJWT(claims as any)
-      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-      .setSubject(uid) // gives APIGW a fallback via 'sub' if needed
+    let jwt = new SignJWT(claims)
+      .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt(iat)
       .setNotBefore(nbf)
-      .setExpirationTime(exp)
-      .setJti(randomToken(16))
-      .setIssuer(issuer || undefined)
-      .setAudience(audience || undefined)
-      .sign(key);
+      .setExpirationTime(exp);
 
-    // Store ONLY hash (never store raw token)
+    if (issuer) {
+      jwt = jwt.setIssuer(issuer);
+    }
+
+    if (audience) {
+      jwt = jwt.setAudience(audience);
+    }
+
+    const joinJwt = await jwt.sign(key);
     const tokenHash = sha256Hex(joinJwt);
 
     const ip = ipFromReq(req);
     const ua = safeUA(req);
 
-    // Rotate: revoke any prior active tickets for same visit/user/role
-    // (best practice: keep at most one active per actor per visit)
     await prisma.$transaction(async (tx) => {
       if (existing) {
         await tx.televisitJoinTicket.updateMany({
@@ -176,14 +239,16 @@ export async function POST(req: Request) {
     return NextResponse.json(
       {
         ok: true,
-        joinToken: joinJwt, // JWT string
+        joinToken: joinJwt,
         expiresAt,
-        // helpful echoes
         visitId: visit.id,
         roomId: visit.roomId,
         role,
         uid,
         orgId,
+        appointmentId,
+        participantId: participant.partyId,
+        participantName: participant.name || null,
       },
       { status: 200, headers: { 'Cache-Control': 'no-store' } },
     );

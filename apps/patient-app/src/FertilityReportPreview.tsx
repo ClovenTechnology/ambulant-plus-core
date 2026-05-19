@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { generateHealthReport } from '../analytics/report';
+import { generateHealthReport } from '@/src/analytics/report';
 
 export default function FertilityReportPreview() {
   const [url, setUrl] = useState<string | null>(null);

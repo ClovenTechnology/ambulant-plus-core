@@ -1,9 +1,13 @@
-// apps/api-gateway/app/api/admin/insight/risk-events/route.ts
+﻿// apps/api-gateway/app/api/admin/insight/risk-events/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import { startOfISOWeek } from 'date-fns';
 import { parseRiskAlertPayload } from '@/src/insightcore/riskAlertTypes';
 import { getRiskRule } from '@/src/insightcore/riskRules';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 const prisma = new PrismaClient();
 
@@ -188,3 +192,5 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
+

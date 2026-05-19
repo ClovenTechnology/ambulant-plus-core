@@ -1,265 +1,259 @@
 // apps/api-gateway/app/api/televisit/issue/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { createHash } from 'crypto';
-import { SignJWT } from 'jose';
 import { prisma } from '@/src/lib/db';
+import {
+  getJoinWindowFromVisit,
+  normalizeTelevisitRole,
+  upsertTicket,
+} from '@/src/lib/join';
+import {
+  readIdentity,
+  requireTrustedIdentityInProduction,
+} from '@/src/lib/identity';
+import { resolveParticipantAdmission } from '@/src/lib/televisit/appointment-admission';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type RtcRole = 'patient' | 'clinician' | 'staff' | 'observer' | 'admin';
-
-function cleanStr(value: unknown): string {
-  return String(value ?? '').trim();
+function clean(value: unknown, max = 240) {
+  return String(value ?? '').trim().slice(0, max);
 }
 
-function normaliseRole(value: unknown): RtcRole {
-  const role = cleanStr(value).toLowerCase();
-
-  if (
-    role === 'patient' ||
-    role === 'clinician' ||
-    role === 'staff' ||
-    role === 'observer' ||
-    role === 'admin'
-  ) {
-    return role;
-  }
-
-  return 'patient';
+function corsHeaders() {
+  return {
+    'access-control-allow-origin': '*',
+    'access-control-allow-methods': 'POST,OPTIONS',
+    'access-control-allow-headers':
+      'content-type,authorization,cookie,x-uid,x-role,x-org-id,x-ambulant-identity,x-join-token',
+    'cache-control': 'no-store',
+  };
 }
 
-function sha256Hex(value: string) {
-  return createHash('sha256').update(value).digest('hex');
+function isAdminLike(role: string) {
+  return role === 'admin' || role === 'admin_staff' || role === 'system';
 }
 
-function envFirst(names: string[]) {
-  for (const name of names) {
-    const value = process.env[name];
-    if (value && value.trim()) return value.trim();
-  }
-
-  return '';
-}
-
-function json(data: any, status = 200) {
-  return NextResponse.json(data, {
-    status,
-    headers: {
-      'access-control-allow-origin': '*',
-    },
-  });
-}
-
-function getUid(req: NextRequest, body: any): string {
-  return (
-    cleanStr(body.uid) ||
-    cleanStr(body.userId) ||
-    cleanStr(body.patientId) ||
-    cleanStr(body.clinicianId) ||
-    cleanStr(req.headers.get('x-uid')) ||
-    cleanStr(req.headers.get('x-user-id')) ||
-    cleanStr(req.headers.get('x-ambulant-user-id'))
-  );
-}
-
-function getVisitId(req: NextRequest, body: any): string {
-  const url = new URL(req.url);
-
-  return (
-    cleanStr(body.visitId) ||
-    cleanStr(body.televisitId) ||
-    cleanStr(url.searchParams.get('visitId')) ||
-    cleanStr(url.searchParams.get('televisitId'))
-  );
-}
-
-async function mintJoinJwt(args: {
-  secret: string;
-  uid: string;
-  role: RtcRole;
-  visitId: string;
-  roomId: string;
-  orgId: string;
-  expiresAt: Date;
+function actorCanUseParticipant(args: {
+  actorRole: string;
+  actorUid: string;
+  actorRefId?: string | null;
+  participant: any;
 }) {
-  const key = new TextEncoder().encode(args.secret);
-  const nowSec = Math.floor(Date.now() / 1000);
-  const expSec = Math.floor(args.expiresAt.getTime() / 1000);
+  const { actorRole, actorUid, actorRefId, participant } = args;
+  if (isAdminLike(actorRole)) return true;
 
-  return new SignJWT({
-    uid: args.uid,
-    userId: args.uid,
-    role: args.role,
-    visitId: args.visitId,
-    roomId: args.roomId,
-    orgId: args.orgId,
-  })
-    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
-    .setIssuedAt(nowSec)
-    .setExpirationTime(Math.max(nowSec + 60, expSec))
-    .sign(key);
-}
+  const partyId = clean(participant?.partyId, 240);
+  const patientId = clean(participant?.patientId, 240);
+  const clinicianId = clean(participant?.clinicianId, 240);
 
-async function createJoinTicket(data: {
-  tokenHash: string;
-  visitId: string;
-  uid: string;
-  role: RtcRole;
-  orgId: string;
-  expiresAt: Date;
-}) {
-  const delegate = (prisma as any).televisitJoinTicket;
-
-  if (!delegate?.create) {
-    throw new Error('televisit_join_ticket_store_unavailable');
+  if (actorRole === 'clinician') {
+    return clinicianId === actorUid || partyId === actorUid || partyId === `clin-${actorUid}`;
   }
 
-  return delegate.create({
-    data: {
-      tokenHash: data.tokenHash,
-      visitId: data.visitId,
-      uid: data.uid,
-      role: data.role,
-      orgId: data.orgId,
-      expiresAt: data.expiresAt,
-      revokedAt: null,
-      lastUsedAt: null,
-    },
-  });
+  if (actorRole === 'patient') {
+    return (
+      patientId === actorUid ||
+      patientId === actorRefId ||
+      partyId === actorUid ||
+      partyId === actorRefId ||
+      partyId === `pat-${actorUid}` ||
+      (actorRefId ? partyId === `pat-${actorRefId}` : false)
+    );
+  }
+
+  return false;
 }
 
 export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'POST,OPTIONS',
-      'access-control-allow-headers': 'content-type,x-uid,x-user-id,x-ambulant-user-id,x-role,x-org-id',
-    },
-  });
+  return new NextResponse(null, { status: 204, headers: corsHeaders() });
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({} as any));
+    const who = readIdentity(req.headers);
+    requireTrustedIdentityInProduction(req.headers, who);
 
-    const visitId = getVisitId(req, body);
-    const uid = getUid(req, body);
-    const role = normaliseRole(body.role || req.headers.get('x-role'));
-    const orgId =
-      cleanStr(body.orgId) ||
-      cleanStr(req.headers.get('x-org-id')) ||
-      cleanStr(req.headers.get('x-org')) ||
-      'org-default';
+    if (!who.uid || who.role === 'anonymous') {
+      return NextResponse.json(
+        { ok: false, error: 'unauthorized' },
+        { status: 401, headers: corsHeaders() },
+      );
+    }
+
+    const body = await req.json().catch(() => ({} as any));
+    const visitId = clean(body.visitId || body.id, 120);
+    const requestedParticipantId = clean(
+      body.participantId || body.participant_id || body.uid || body.partyId || '',
+      240,
+    );
 
     if (!visitId) {
-      return json({ ok: false, message: 'visitId required' }, 400);
-    }
-
-    if (!uid) {
-      return json({ ok: false, message: 'uid required' }, 400);
-    }
-
-    const v = await prisma.televisit.findUnique({
-      where: { id: visitId },
-    });
-
-    if (!v) {
-      return json({ ok: false, message: 'Visit not found' }, 404);
-    }
-
-    const now = new Date();
-
-    const openAt = new Date(v.joinOpensAt).getTime();
-    const closeAt = new Date(v.joinClosesAt).getTime();
-    const nowMs = now.getTime();
-
-    if (nowMs < openAt) {
-      return json(
-        {
-          ok: false,
-          message: 'Join window not open yet',
-          joinOpensAt: v.joinOpensAt,
-        },
-        403,
+      return NextResponse.json(
+        { ok: false, error: 'visitId_required' },
+        { status: 400, headers: corsHeaders() },
       );
     }
 
-    if (nowMs > closeAt) {
-      return json(
-        {
-          ok: false,
-          message: 'Join window has closed',
-          joinClosesAt: v.joinClosesAt,
-        },
-        403,
+    const visit = await prisma.televisit.findUnique({ where: { id: visitId } });
+
+    if (!visit) {
+      return NextResponse.json(
+        { ok: false, error: 'visit_not_found' },
+        { status: 404, headers: corsHeaders() },
       );
     }
 
-    const secret = envFirst([
-      'TELEVISIT_JOIN_JWT_SECRET',
-      'RTC_JOIN_JWT_SECRET',
-      'JOIN_TICKET_JWT_SECRET',
-    ]);
-
-    if (!secret) {
-      return json(
-        {
-          ok: false,
-          message: 'Missing TELEVISIT_JOIN_JWT_SECRET / RTC_JOIN_JWT_SECRET',
-        },
-        500,
+    if (!visit.appointmentId) {
+      return NextResponse.json(
+        { ok: false, error: 'appointment_context_required' },
+        { status: 409, headers: corsHeaders() },
       );
     }
 
-    const expiresAt = new Date(v.joinClosesAt);
+    if (!requestedParticipantId) {
+      return NextResponse.json(
+        { ok: false, error: 'participantId_required' },
+        { status: 400, headers: corsHeaders() },
+      );
+    }
 
-    const token = await mintJoinJwt({
-      secret,
-      uid,
-      role,
-      visitId: v.id,
-      roomId: v.roomId,
-      orgId: v.orgId || orgId,
-      expiresAt,
+    const admission = await resolveParticipantAdmission({
+      appointmentId: visit.appointmentId,
+      participantId: requestedParticipantId,
+      role: body.role ? clean(body.role, 80) : null,
     });
 
-    const tokenHash = sha256Hex(token);
+    if (
+      !actorCanUseParticipant({
+        actorRole: who.role,
+        actorUid: who.uid,
+        actorRefId: who.actorRefId,
+        participant: admission.participant,
+      })
+    ) {
+      return NextResponse.json(
+        { ok: false, error: 'forbidden' },
+        { status: 403, headers: corsHeaders() },
+      );
+    }
 
-    await createJoinTicket({
-      tokenHash,
-      visitId: v.id,
-      uid,
-      role,
-      orgId: v.orgId || orgId,
-      expiresAt,
-    });
+    const win = getJoinWindowFromVisit(visit);
+    const now = Date.now();
 
-    return json({
-      ok: true,
-      visitId: v.id,
-      roomId: v.roomId,
-      token,
-      joinToken: token,
-      role,
-      uid,
-      orgId: v.orgId || orgId,
-      scheduledStartAt: v.scheduledStartAt,
-      scheduledEndAt: v.scheduledEndAt,
-      joinOpensAt: v.joinOpensAt,
-      joinClosesAt: v.joinClosesAt,
-      expiresAt,
-    });
-  } catch (err: any) {
-    console.error('televisit issue error', err);
+    if (now < win.openAt) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'join_window_not_open',
+          now,
+          visitId,
+          roomId: visit.roomId,
+          window: {
+            openAt: win.openAt,
+            closeAt: win.closeAt,
+            isOpen: false,
+            opensAt: visit.joinOpensAt.toISOString(),
+            closesAt: visit.joinClosesAt.toISOString(),
+          },
+        },
+        { status: 403, headers: corsHeaders() },
+      );
+    }
 
-    return json(
+    if (now > win.closeAt) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'join_window_closed',
+          now,
+          visitId,
+          roomId: visit.roomId,
+          window: {
+            openAt: win.openAt,
+            closeAt: win.closeAt,
+            isOpen: false,
+            opensAt: visit.joinOpensAt.toISOString(),
+            closesAt: visit.joinClosesAt.toISOString(),
+          },
+        },
+        { status: 403, headers: corsHeaders() },
+      );
+    }
+
+    const ttlSec = Math.max(
+      30,
+      Number.parseInt(process.env.JOIN_TOKEN_TTL_SEC || '90', 10) || 90,
+    );
+
+    const role = normalizeTelevisitRole(admission.rtcRole);
+    const ticket = await upsertTicket(visitId, admission.participant.partyId, ttlSec, role, req);
+
+    return NextResponse.json(
       {
-        ok: false,
-        message: err?.message || 'televisit_issue_failed',
+        ok: true,
+        now,
+        visit: {
+          id: visit.id,
+          roomId: visit.roomId,
+          status: visit.status,
+          appointmentId: visit.appointmentId,
+          encounterId: visit.encounterId,
+          scheduledStartAt: visit.scheduledStartAt.toISOString(),
+          scheduledEndAt: visit.scheduledEndAt.toISOString(),
+          joinOpensAt: visit.joinOpensAt.toISOString(),
+          joinClosesAt: visit.joinClosesAt.toISOString(),
+        },
+        window: {
+          openAt: win.openAt,
+          closeAt: win.closeAt,
+          isOpen: true,
+          opensAt: visit.joinOpensAt.toISOString(),
+          closesAt: visit.joinClosesAt.toISOString(),
+        },
+        ticket: {
+          id: ticket.id,
+          token: ticket.token || null,
+          tokenHash: ticket.tokenHash,
+          issuedAt: ticket.issuedAt.toISOString(),
+          expiresAt: ticket.expiresAt.toISOString(),
+          ttlSec,
+          reused: !ticket.token,
+        },
+        actor: {
+          uid: who.uid,
+          role: who.role,
+          participantId: admission.participant.partyId,
+          participantRole: admission.participantRole,
+        },
       },
-      500,
+      { headers: corsHeaders() },
+    );
+  } catch (err: any) {
+    const code = String(err?.code || err?.message || '');
+
+    if (code === 'Unauthorized' || code === 'unauthorized') {
+      return NextResponse.json(
+        { ok: false, error: 'unauthorized' },
+        { status: 401, headers: corsHeaders() },
+      );
+    }
+
+    if (
+      code === 'participant_id_required' ||
+      code === 'participant_not_authorized' ||
+      code === 'participant_join_not_allowed' ||
+      code === 'participant_role_mismatch'
+    ) {
+      return NextResponse.json(
+        { ok: false, error: code },
+        { status: 403, headers: corsHeaders() },
+      );
+    }
+
+    console.error('[api-gateway][televisit/issue] error', err);
+    return NextResponse.json(
+      { ok: false, error: String(err?.message || 'televisit_issue_failed') },
+      { status: 500, headers: corsHeaders() },
     );
   }
 }

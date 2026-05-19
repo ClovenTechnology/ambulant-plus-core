@@ -19,12 +19,12 @@ import SleepTab from '@/components/reminders/SleepTab';
 import {
   type ApiReminder,
   type TabId,
-  MOCK_REMINDERS,
-  MOCK_ADHERENCE_TREND,
   nowHHMM,
   timeToIsoToday,
   getReminderType,
   computeStats,
+  computeMedicationStats,
+  isMedicationVerificationRequired,
   getCategoryIcon,
   hasNotificationSupport,
 } from '@/components/reminders/shared';
@@ -36,6 +36,12 @@ type ActionResult = {
   ok: boolean;
   data?: any;
   status: number;
+};
+
+type ReminderListShape = ReminderShape & {
+  verificationRequired?: boolean;
+  verificationStatus?: string | null;
+  takenSource?: string | null;
 };
 
 function parseRemindersPayload(data: any): ApiReminder[] {
@@ -66,41 +72,32 @@ export default function RemindersPage() {
   const [reminders, setReminders] = useState<ApiReminder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [usedMock, setUsedMock] = useState(false);
 
-  // Medication adherence trend (server may override, else fallback)
-  const [adherenceTrend, setAdherenceTrend] = useState<number[]>(MOCK_ADHERENCE_TREND);
+  const [adherenceTrend, setAdherenceTrend] = useState<number[]>([]);
 
-  // Desktop / in-tab notifications
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const scheduledIdsRef = useRef<Set<string>>(new Set());
 
-  // confirm dialog state (for pills / any reminder)
   const [confirming, setConfirming] = useState<ApiReminder | null>(null);
   const [confirmMode, setConfirmMode] = useState<'now' | 'earlier'>('now');
   const [confirmTime, setConfirmTime] = useState<string>(nowHHMM());
   const [confirmBusy, setConfirmBusy] = useState(false);
 
-  // Modal accessibility refs
   const confirmDialogRef = useRef<HTMLDivElement | null>(null);
   const confirmFirstRadioRef = useRef<HTMLInputElement | null>(null);
   const lastFocusRef = useRef<HTMLElement | null>(null);
 
-  // Header micro-copy
   const [showAlertsInfo, setShowAlertsInfo] = useState(false);
 
-  // Quick scroll target when switching tabs from quick actions
   const [pendingScrollTarget, setPendingScrollTarget] = useState<
     'hydration' | 'exercise' | 'meditation' | 'sleep' | null
   >(null);
 
-  // Refs to creation forms in tabs (for quick-scroll)
   const hydrationFormRef = useRef<HTMLFormElement | null>(null);
   const exerciseFormRef = useRef<HTMLFormElement | null>(null);
   const meditationFormRef = useRef<HTMLFormElement | null>(null);
   const sleepFormRef = useRef<HTMLFormElement | null>(null);
 
-  // All reminders search/filter (overview tab)
   const [reminderSearch, setReminderSearch] = useState('');
   const [reminderFilterType, setReminderFilterType] = useState<
     'all' | 'pill' | 'hydration' | 'exercise' | 'meditation' | 'sleep'
@@ -109,53 +106,51 @@ export default function RemindersPage() {
   async function fetchTodayReminders() {
     const res = await fetch('/api/reminders?for=today', { cache: 'no-store' });
     if (!res.ok) throw new Error('Failed to load reminders');
+
     const data = await res.json().catch(() => ({}));
     const list = parseRemindersPayload(data);
-    const effectiveList = list.length ? list : MOCK_REMINDERS;
-    const usedMockNow = !list.length;
-    return { data, list, effectiveList, usedMockNow };
+
+    return { data, list };
   }
 
   function applyTrendFromData(data: any, effectiveList: ApiReminder[]) {
     const serverTrend = data?.adherenceTrend;
     if (Array.isArray(serverTrend) && serverTrend.length) {
-      setAdherenceTrend(serverTrend);
+      setAdherenceTrend(
+        serverTrend.filter(
+          (value: unknown): value is number =>
+            typeof value === 'number' && Number.isFinite(value),
+        ),
+      );
       return;
     }
 
     const pillList = effectiveList.filter((r) => getReminderType(r) === 'pill');
-    const pillStats = computeStats(pillList);
+    const pillStats = computeMedicationStats(pillList);
     const todayPct = pillStats.pct;
 
-    setAdherenceTrend((prev) => {
-      const base = prev && prev.length ? prev : MOCK_ADHERENCE_TREND;
-      return [...base.slice(1), todayPct];
-    });
+    setAdherenceTrend((prev) => [...prev.slice(-6), todayPct]);
   }
 
   async function loadReminders() {
     setLoading(true);
     setError(null);
-    setUsedMock(false);
 
     try {
-      const { data, effectiveList, usedMockNow } = await fetchTodayReminders();
+      const { data, list } = await fetchTodayReminders();
 
-      // New "today" dataset: reset scheduled notification keys
       scheduledIdsRef.current.clear();
-
-      setReminders(effectiveList);
-      setUsedMock(usedMockNow);
-      applyTrendFromData(data, effectiveList);
+      setReminders(list);
+      applyTrendFromData(data, list);
     } catch (err: any) {
       console.error('Error loading reminders', err);
       setError(err?.message || 'Could not load reminders.');
 
       scheduledIdsRef.current.clear();
-      setReminders(MOCK_REMINDERS);
-      setUsedMock(true);
+      setReminders([]);
+      setAdherenceTrend([]);
 
-      toast('Showing sample reminders while we reconnect.', { type: 'error' });
+      toast('Could not load reminders.', { type: 'error' });
     } finally {
       setLoading(false);
     }
@@ -163,19 +158,17 @@ export default function RemindersPage() {
 
   async function refreshRemindersSilent() {
     try {
-      const { data, effectiveList, usedMockNow } = await fetchTodayReminders();
+      const { data, list } = await fetchTodayReminders();
       scheduledIdsRef.current.clear();
-      setReminders(effectiveList);
-      setUsedMock(usedMockNow);
-      applyTrendFromData(data, effectiveList);
+      setReminders(list);
+      applyTrendFromData(data, list);
     } catch (err) {
-      // silent: no toast spam; just log
       console.error('Silent refresh failed', err);
     }
   }
 
   async function postReminderAction(payload: any): Promise<ActionResult> {
-    const urls = ['/api/reminders', '/api/reminders/confirm']; // confirm kept as backward compatible alias
+    const urls = ['/api/reminders', '/api/reminders/confirm'];
     let lastErr: any = null;
 
     for (const url of urls) {
@@ -187,7 +180,6 @@ export default function RemindersPage() {
           cache: 'no-store',
         });
 
-        // If the route exists but method not allowed, try the fallback.
         if (res.status === 404 || res.status === 405) continue;
 
         const data = await res.json().catch(() => null);
@@ -204,11 +196,9 @@ export default function RemindersPage() {
   }
 
   useEffect(() => {
-    loadReminders();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    void loadReminders();
   }, []);
 
-  // Detect existing notification permission (initial hint)
   useEffect(() => {
     if (!hasNotificationSupport()) return;
     if (window.Notification.permission === 'granted') {
@@ -216,24 +206,13 @@ export default function RemindersPage() {
     }
   }, []);
 
-  // Typed slices
   const pillReminders = useMemo(() => reminders.filter((r) => getReminderType(r) === 'pill'), [reminders]);
-  const hydrationReminders = useMemo(
-    () => reminders.filter((r) => getReminderType(r) === 'hydration'),
-    [reminders]
-  );
-  const exerciseReminders = useMemo(
-    () => reminders.filter((r) => getReminderType(r) === 'exercise'),
-    [reminders]
-  );
-  const meditationReminders = useMemo(
-    () => reminders.filter((r) => getReminderType(r) === 'meditation'),
-    [reminders]
-  );
+  const hydrationReminders = useMemo(() => reminders.filter((r) => getReminderType(r) === 'hydration'), [reminders]);
+  const exerciseReminders = useMemo(() => reminders.filter((r) => getReminderType(r) === 'exercise'), [reminders]);
+  const meditationReminders = useMemo(() => reminders.filter((r) => getReminderType(r) === 'meditation'), [reminders]);
   const sleepReminders = useMemo(() => reminders.filter((r) => getReminderType(r) === 'sleep'), [reminders]);
 
-  // Stats per category + overall
-  const pillStats = useMemo(() => computeStats(pillReminders), [pillReminders]);
+  const pillStats = useMemo(() => computeMedicationStats(pillReminders), [pillReminders]);
   const hydrationStats = useMemo(() => computeStats(hydrationReminders), [hydrationReminders]);
   const exerciseStats = useMemo(() => computeStats(exerciseReminders), [exerciseReminders]);
   const meditationStats = useMemo(() => computeStats(meditationReminders), [meditationReminders]);
@@ -252,7 +231,6 @@ export default function RemindersPage() {
     return Math.round(sum / adherenceTrend.length);
   }, [adherenceTrend]);
 
-  // "Today" pills = medication reminders that are still Pending
   const todaysPills = useMemo(
     () =>
       pillReminders
@@ -262,12 +240,12 @@ export default function RemindersPage() {
     [pillReminders]
   );
 
-  // normalize for ReminderList (titles WITHOUT emojis; ReminderCard handles icons)
-  const reminderShapes: ReminderShape[] = useMemo(
+  const reminderShapes: ReminderListShape[] = useMemo(
     () =>
       reminders.map((r) => {
         const type = getReminderType(r);
         const baseTitle = r.name || 'Reminder';
+
         return {
           id: r.id,
           type,
@@ -276,6 +254,9 @@ export default function RemindersPage() {
           completed: r.status === 'Taken',
           dose: r.dose ?? undefined,
           status: r.status,
+          verificationRequired: Boolean(r.verificationRequired ?? r.meta?.verificationRequired),
+          verificationStatus: r.verificationStatus ?? r.meta?.verificationStatus ?? null,
+          takenSource: r.takenSource ?? r.meta?.takenSource ?? null,
           erxId: r.meta?.erxId ?? null,
           notes: r.meta?.notes,
           recurrence: r.meta?.recurrence,
@@ -286,42 +267,73 @@ export default function RemindersPage() {
   );
 
   const pillShapes = useMemo(() => reminderShapes.filter((r) => r.type === 'pill'), [reminderShapes]);
-  const hydrationShapes = useMemo(
-    () => reminderShapes.filter((r) => r.type === 'hydration'),
-    [reminderShapes]
-  );
+  const hydrationShapes = useMemo(() => reminderShapes.filter((r) => r.type === 'hydration'), [reminderShapes]);
   const exerciseShapes = useMemo(() => reminderShapes.filter((r) => r.type === 'exercise'), [reminderShapes]);
-  const meditationShapes = useMemo(
-    () => reminderShapes.filter((r) => r.type === 'meditation'),
-    [reminderShapes]
-  );
+  const meditationShapes = useMemo(() => reminderShapes.filter((r) => r.type === 'meditation'), [reminderShapes]);
   const sleepShapes = useMemo(() => reminderShapes.filter((r) => r.type === 'sleep'), [reminderShapes]);
 
   const filteredReminderShapes = useMemo(() => {
     const query = reminderSearch.trim().toLowerCase();
+
     return reminderShapes.filter((r) => {
       if (reminderFilterType !== 'all' && r.type !== reminderFilterType) return false;
       if (!query) return true;
+
       const haystack = `${r.title ?? ''} ${r.dose ?? ''} ${r.type ?? ''}`.toLowerCase();
       return haystack.includes(query);
     });
   }, [reminderShapes, reminderSearch, reminderFilterType]);
 
-  function openConfirmDialog(rem: ApiReminder) {
-    lastFocusRef.current = (typeof document !== 'undefined'
-      ? (document.activeElement as HTMLElement | null)
-      : null) as HTMLElement | null;
+  function openConfirmDialog(rem: ApiReminder, initialMode: 'now' | 'earlier' = 'now') {
+    lastFocusRef.current =
+      typeof document !== 'undefined' ? (document.activeElement as HTMLElement | null) : null;
 
     setConfirming(rem);
-    setConfirmMode('now');
+    setConfirmMode(initialMode);
     setConfirmTime(nowHHMM());
+  }
+
+  async function startMedicationVerification(rem: ApiReminder) {
+    try {
+      const res = await fetch('/api/medication-verifications/start', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          reminderId: rem.id,
+          medicationId: rem.medicationId ?? null,
+          requiredMode: 'CAMERA_SEQUENCE',
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data?.sessionId) {
+        toast(data?.error || 'Could not start verification.', { type: 'error' });
+        return;
+      }
+
+      window.location.href = `/reminder/verify?reminderId=${encodeURIComponent(rem.id)}&sessionId=${encodeURIComponent(data.sessionId)}`;
+    } catch (err) {
+      console.error('Error starting medication verification', err);
+      toast('Network error starting verification.', { type: 'error' });
+    }
+  }
+
+  function handleMedicationPrimaryAction(rem: ApiReminder) {
+    if (getReminderType(rem) === 'pill' && isMedicationVerificationRequired(rem)) {
+      void startMedicationVerification(rem);
+      return;
+    }
+
+    openConfirmDialog(rem, 'now');
+  }
+
+  function handleMedicationEarlierAction(rem: ApiReminder) {
+    openConfirmDialog(rem, 'earlier');
   }
 
   function closeConfirmDialog() {
     if (confirmBusy) return;
     setConfirming(null);
-
-    // Restore focus to the element that opened the dialog (accessibility polish)
     window.setTimeout(() => lastFocusRef.current?.focus?.(), 0);
   }
 
@@ -330,33 +342,43 @@ export default function RemindersPage() {
     setConfirmBusy(true);
 
     try {
-      const takenAtIso = confirmMode === 'now' ? new Date().toISOString() : timeToIsoToday(confirmTime);
+      const takenAtIso =
+        confirmMode === 'now' ? new Date().toISOString() : timeToIsoToday(confirmTime);
 
-      // ✅ Unified action route: /api/reminders (legacy alias remains /api/reminders/confirm)
       const payload = {
         action: 'confirm',
         ids: [confirming.id],
-        id: confirming.id, // backward compatibility if upstream still expects "id"
+        id: confirming.id,
         takenAt: takenAtIso,
+        takenSource: 'SELF_REPORTED',
+        verificationStatus: 'SELF_REPORTED',
+        reason: confirmMode === 'earlier' ? 'already_taken_earlier' : 'manual_confirmation',
       };
 
       const result = await postReminderAction(payload);
 
-      // ✅ Fix bug: do NOT mark taken on failure
       if (!result.ok) {
         console.error('Confirm failed', result.data);
         toast('Could not confirm this reminder. We kept your list unchanged.', { type: 'error' });
         return;
       }
 
-      // optimistic UI: mark as Taken and clear snooze (only after success)
       setReminders((prev) =>
-        prev.map((r) => (r.id === confirming.id ? { ...r, status: 'Taken', snoozedUntil: null } : r))
+        prev.map((r) =>
+          r.id === confirming.id
+            ? {
+                ...r,
+                status: 'Taken',
+                snoozedUntil: null,
+                takenSource: 'SELF_REPORTED',
+                verificationStatus: 'SELF_REPORTED',
+                reportedTakenAt: takenAtIso,
+              }
+            : r
+        )
       );
 
       closeConfirmDialog();
-
-      // ✅ Server truth wins: silently refresh in background
       void refreshRemindersSilent();
     } catch (err) {
       console.error('Error confirming reminder', err);
@@ -371,7 +393,7 @@ export default function RemindersPage() {
       const payload = {
         action: 'snooze',
         ids: [id],
-        id, // backward compatibility
+        id,
         snoozeMinutes: minutes,
       };
 
@@ -383,11 +405,12 @@ export default function RemindersPage() {
         return;
       }
 
-      // optimistic UI: set snoozedUntil if we can infer it (then refresh silently)
       const optimisticUntil = new Date(Date.now() + minutes * 60_000).toISOString();
-      setReminders((prev) => prev.map((r) => (r.id === id ? { ...r, snoozedUntil: optimisticUntil } : r)));
 
-      // ✅ Server truth wins
+      setReminders((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, snoozedUntil: optimisticUntil } : r))
+      );
+
       void refreshRemindersSilent();
     } catch (err) {
       console.error('Error snoozing reminder', err);
@@ -395,38 +418,35 @@ export default function RemindersPage() {
     }
   }
 
-  // callbacks for ReminderList
   function handleListConfirm(r: ReminderShape) {
     const original = reminders.find((x) => x.id === r.id);
     if (!original) return;
-    openConfirmDialog(original);
+    handleMedicationPrimaryAction(original);
+  }
+
+  function handleListTakenEarlier(r: ReminderShape) {
+    const original = reminders.find((x) => x.id === r.id);
+    if (!original) return;
+    handleMedicationEarlierAction(original);
   }
 
   function handleListSnooze(r: ReminderShape, mins = 10) {
     if (!r.id) return;
-    handleSnoozeById(r.id, mins);
+    void handleSnoozeById(r.id, mins);
   }
 
-  /**
-   * Tier 3 hook: notify native shell (iOS/Android) that alerts changed.
-   * Mobile container can listen for this message and register native push tokens.
-   */
   function notifyNativeShellAlerts(enabled: boolean) {
     if (typeof window === 'undefined') return;
+
     try {
       const payload = JSON.stringify({ type: 'reminder-alerts-updated', enabled });
-
-      // React Native WebView bridge
       (window as any).ReactNativeWebView?.postMessage(payload);
-
-      // Optional: WKWebView / other native bridges can hook here too
       (window as any).webkit?.messageHandlers?.reminderAlertsUpdated?.postMessage?.({ enabled });
     } catch (err) {
       console.error('Error notifying native shell about alerts change', err);
     }
   }
 
-  // Alerts toggle (enable/disable in-tab scheduling + background web push)
   async function handleAlertsToggle() {
     if (!hasNotificationSupport()) {
       toast('Your browser does not support notifications.', { type: 'error' });
@@ -435,7 +455,6 @@ export default function RemindersPage() {
 
     const notificationCtor = window.Notification;
 
-    // Turning alerts OFF (in-tab + notify native shell)
     if (notificationsEnabled) {
       setNotificationsEnabled(false);
       scheduledIdsRef.current.clear();
@@ -447,22 +466,18 @@ export default function RemindersPage() {
       return;
     }
 
-    // Helper to flip local state, notify native shell, and set up web push
     const enableAndSetupPush = async () => {
       setNotificationsEnabled(true);
       notifyNativeShellAlerts(true);
       toast('Notifications enabled. We’ll alert you when it’s time.', { type: 'success' });
 
-      // Tier 2: register service worker + push subscription in the background.
       try {
         await ensureRemindersPushSubscription();
       } catch (err) {
         console.error('Error setting up push subscription', err);
-        // Non-fatal: in-tab timers still work as fallback.
       }
     };
 
-    // Turning alerts ON
     const currentPermission = notificationCtor.permission;
     if (currentPermission === 'granted') {
       await enableAndSetupPush();
@@ -484,35 +499,27 @@ export default function RemindersPage() {
     }
   }
 
-  // Local "alarm" scheduling in the browser (only while tab is open)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!notificationsEnabled) return;
 
     const hasNotification = hasNotificationSupport() && window.Notification.permission === 'granted';
-
     const now = new Date();
     const timers: number[] = [];
 
     reminders.forEach((r) => {
       if (r.status !== 'Pending') return;
 
-      // ✅ Canonical effective time (dedupe safe)
-      const effectiveIso =
-        r.snoozedUntil || (r.time ? timeToIsoToday(r.time) : null);
-
+      const effectiveIso = r.snoozedUntil || (r.time ? timeToIsoToday(r.time) : null);
       if (!effectiveIso) return;
-      const key = `${r.id}:${effectiveIso}`;
 
-      // Avoid double-scheduling the same reminder+time
+      const key = `${r.id}:${effectiveIso}`;
       if (scheduledIdsRef.current.has(key)) return;
 
       const target = new Date(effectiveIso);
       if (Number.isNaN(target.getTime())) return;
 
       const delay = target.getTime() - now.getTime();
-
-      // Only schedule future reminders within the next 24h
       if (delay <= 0 || delay > 24 * 60 * 60 * 1000) return;
 
       scheduledIdsRef.current.add(key);
@@ -530,20 +537,15 @@ export default function RemindersPage() {
           const body = bodyParts.join(' · ');
 
           if (hasNotification) {
-            // Browser notification
-            // eslint-disable-next-line no-new
             new window.Notification(title, { body, tag: r.id });
           } else {
-            // Fallback: in-app toast
             toast(`Time for: ${title}${body ? ` (${body})` : ''}`, { type: 'info' });
           }
 
           if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
             try {
               (navigator as any).vibrate?.(200);
-            } catch {
-              // ignore
-            }
+            } catch {}
           }
         } catch (err) {
           console.error('Error firing local reminder notification', err);
@@ -553,20 +555,17 @@ export default function RemindersPage() {
       timers.push(timeoutId);
     });
 
-    // Cleanup on re-run/unmount
     return () => {
       timers.forEach((id) => clearTimeout(id));
     };
   }, [notificationsEnabled, reminders]);
 
-  // Focus the first radio when confirm dialog opens
   useEffect(() => {
     if (confirming && confirmFirstRadioRef.current) {
       confirmFirstRadioRef.current.focus();
     }
   }, [confirming]);
 
-  // Handle keyboard for dialog (Escape + basic focus trap)
   function handleDialogKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (!confirming) return;
 
@@ -581,6 +580,7 @@ export default function RemindersPage() {
       const focusable = confirmDialogRef.current.querySelectorAll<HTMLElement>(
         'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
       );
+
       if (!focusable.length) return;
 
       const first = focusable[0];
@@ -598,7 +598,6 @@ export default function RemindersPage() {
     }
   }
 
-  // Quick actions: switch tab and scroll to the relevant form
   function goToTabAndScroll(
     tabId: TabId,
     target?: 'hydration' | 'exercise' | 'meditation' | 'sleep'
@@ -624,20 +623,24 @@ export default function RemindersPage() {
   }, [activeTab, pendingScrollTarget]);
 
   const today = new Date();
-  const todayLabel = today.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
+  const todayLabel = today.toLocaleDateString(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+  });
+
   const totalReminders = reminders.length;
   const totalCompleted = overallStats.taken;
   const totalPending = overallStats.pending;
 
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
-      {/* Header */}
       <ReminderHeader
         todayLabel={todayLabel}
         totalReminders={totalReminders}
         totalPending={totalPending}
         totalCompleted={totalCompleted}
-        usedMock={usedMock}
+        usedMock={false}
         showAlertsInfo={showAlertsInfo}
         onToggleAlertsInfo={() => setShowAlertsInfo((v) => !v)}
         pillStatsPct={pillStats.pct}
@@ -649,10 +652,8 @@ export default function RemindersPage() {
         onToggleAlerts={handleAlertsToggle}
       />
 
-      {/* Sticky Tabs */}
       <ReminderTabs activeTab={activeTab} onTabChange={setActiveTab} />
 
-      {/* OVERVIEW TAB */}
       {activeTab === 'overview' && (
         <section
           id="reminders-panel-overview"
@@ -660,7 +661,6 @@ export default function RemindersPage() {
           aria-labelledby="reminders-tab-overview"
           className="space-y-6"
         >
-          {/* Quick actions row (polish: match shell language) */}
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-3xl border border-slate-200/70 bg-white/70 backdrop-blur-xl p-4 text-xs shadow-sm shadow-black/[0.04]">
             <div className="space-y-0.5">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-gray-400">
@@ -670,6 +670,7 @@ export default function RemindersPage() {
                 Add new reminders for today or your routine.
               </p>
             </div>
+
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
@@ -679,6 +680,7 @@ export default function RemindersPage() {
                 <span aria-hidden="true">💧</span>
                 <span>+ Hydration</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => goToTabAndScroll('exercise', 'exercise')}
@@ -687,6 +689,7 @@ export default function RemindersPage() {
                 <span aria-hidden="true">🏋️</span>
                 <span>+ Exercise</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => goToTabAndScroll('meditation', 'meditation')}
@@ -695,6 +698,7 @@ export default function RemindersPage() {
                 <span aria-hidden="true">🧘</span>
                 <span>+ Meditation</span>
               </button>
+
               <button
                 type="button"
                 onClick={() => goToTabAndScroll('sleep', 'sleep')}
@@ -706,9 +710,8 @@ export default function RemindersPage() {
             </div>
           </div>
 
-          {/* Overview / Today’s pills + Summary */}
           <section className="grid gap-4 md:grid-cols-2">
-            <Section title="⚕️ Today's pills" subtitle="Tap to confirm or snooze." defaultOpen>
+            <Section title="⚕️ Today's pills" subtitle="Tap to verify, log earlier, or snooze." defaultOpen>
               {loading ? (
                 <div className="space-y-2">
                   {[1, 2, 3].map((i) => (
@@ -733,9 +736,17 @@ export default function RemindersPage() {
                             dose: r.dose ?? '',
                             time: r.time ?? '',
                             status: r.status,
+                            verificationRequired: Boolean(
+                              r.verificationRequired ?? r.meta?.verificationRequired
+                            ),
+                            verificationStatus:
+                              r.verificationStatus ?? r.meta?.verificationStatus ?? null,
+                            takenSource:
+                              r.takenSource ?? r.meta?.takenSource ?? null,
                           }}
-                          onConfirm={() => openConfirmDialog(r)}
-                          onSnooze={() => handleSnoozeById(r.id, 15)}
+                          onConfirm={() => handleMedicationPrimaryAction(r)}
+                          onTakenEarlier={() => handleMedicationEarlierAction(r)}
+                          onSnooze={() => void handleSnoozeById(r.id, 15)}
                         />
                       ))}
                     </div>
@@ -837,18 +848,17 @@ export default function RemindersPage() {
                 </div>
 
                 <p className="mt-2 text-xs text-gray-500">
-                  When you confirm a reminder, you can log if it happened right now or earlier in the day so adherence statistics stay accurate.
+                  When you log a reminder, you can record if it happened right now or earlier in the day so adherence statistics stay accurate.
                 </p>
 
                 <div className="mt-3 rounded-2xl border border-slate-200/70 bg-white p-2">
                   <div className="mb-1 text-xs text-slate-500">Pill adherence trend (last 7 days)</div>
-                  <Sparkline data={adherenceTrend} height={64} />
+                  <Sparkline values={adherenceTrend} height={64} />
                 </div>
               </div>
             </Section>
           </section>
 
-          {/* All upcoming (all types) */}
           <Section
             title="⏰ All upcoming reminders"
             subtitle="Search and filter across ⚕️ medication, 💧 hydration, 🏋️ exercise, 🌙 sleep, and 🧘 meditation."
@@ -875,6 +885,7 @@ export default function RemindersPage() {
                       className="w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25 focus-visible:border-emerald-400"
                     />
                   </div>
+
                   <div className="w-full md:w-52">
                     <label className="mb-1 block text-[11px] font-medium uppercase tracking-wide text-gray-400">
                       Filter by type
@@ -894,7 +905,6 @@ export default function RemindersPage() {
                   </div>
                 </div>
 
-                {/* Legend for icons */}
                 <div className="mb-2 flex flex-wrap gap-3 text-[11px] text-gray-500">
                   <span className="inline-flex items-center gap-1">
                     <span aria-hidden="true">{getCategoryIcon('pill')}</span>
@@ -928,6 +938,7 @@ export default function RemindersPage() {
                   <ReminderList
                     reminders={filteredReminderShapes}
                     onConfirm={handleListConfirm}
+                    onTakenEarlier={handleListTakenEarlier}
                     onSnooze={handleListSnooze}
                   />
                 )}
@@ -937,21 +948,21 @@ export default function RemindersPage() {
         </section>
       )}
 
-      {/* PILLS TAB */}
       {activeTab === 'pills' && (
         <PillsTab
           todaysPills={todaysPills}
           pillShapes={pillShapes}
           pillStats={pillStats}
           adherenceTrend={adherenceTrend}
-          onOpenConfirm={openConfirmDialog}
+          onOpenConfirm={handleMedicationPrimaryAction}
+          onTakenEarlier={handleMedicationEarlierAction}
           onSnoozeReminder={handleSnoozeById}
           onListConfirm={handleListConfirm}
+          onListTakenEarlier={handleListTakenEarlier}
           onListSnooze={handleListSnooze}
         />
       )}
 
-      {/* HYDRATION TAB */}
       {activeTab === 'hydration' && (
         <HydrationTab
           stats={hydrationStats}
@@ -963,7 +974,6 @@ export default function RemindersPage() {
         />
       )}
 
-      {/* EXERCISE TAB */}
       {activeTab === 'exercise' && (
         <ExerciseTab
           stats={exerciseStats}
@@ -975,7 +985,6 @@ export default function RemindersPage() {
         />
       )}
 
-      {/* MEDITATION TAB */}
       {activeTab === 'meditation' && (
         <MeditationTab
           stats={meditationStats}
@@ -987,7 +996,6 @@ export default function RemindersPage() {
         />
       )}
 
-      {/* SLEEP TAB */}
       {activeTab === 'sleep' && (
         <SleepTab
           stats={sleepStats}
@@ -999,7 +1007,6 @@ export default function RemindersPage() {
         />
       )}
 
-      {/* Confirm modal (shared across tabs) */}
       {confirming && (
         <div
           className="fixed inset-0 z-40 flex items-center justify-center bg-black/40"
@@ -1016,8 +1023,7 @@ export default function RemindersPage() {
               <div>
                 <h2 className="text-lg font-black tracking-tight text-slate-950">Log this reminder</h2>
                 <p className="mt-1 text-xs text-slate-500">
-                  {confirming.name}{' '}
-                  {confirming.dose ? <span className="text-slate-500">· {confirming.dose}</span> : null}
+                  {confirming.name} {confirming.dose ? <span className="text-slate-500">· {confirming.dose}</span> : null}
                 </p>
               </div>
 

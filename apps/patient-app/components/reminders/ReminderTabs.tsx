@@ -1,6 +1,6 @@
 // components/reminders/ReminderTabs.tsx
 import React from 'react';
-import { TabId, tabs, getTabIcon } from './shared';
+import { tabs, getTabIcon, type TabId } from './shared';
 
 type ReminderTabsProps = {
   activeTab: TabId;

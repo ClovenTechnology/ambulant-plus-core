@@ -1,16 +1,38 @@
 // apps/patient-app/app/api/orders/[id]/route.ts
 import { NextResponse } from 'next/server';
-import orders from '../../../../mock/orders.json';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+export const revalidate = 0;
+
+function getGatewayBase() {
+  return (
+    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+    process.env.NEXT_PUBLIC_GATEWAY_BASE ||
+    ''
+  ).replace(/\/+$/, '');
+}
 
 export async function GET(
-  req: Request,
-  { params }: { params: { id: string } }
+  _req: Request,
+  { params }: { params: { id: string } },
 ) {
-  const order = (orders as any[]).find(o => o.id === params.id);
-  if (!order) {
-    return NextResponse.json({ error: 'Order not found' }, { status: 404 });
+  const gateway = getGatewayBase();
+
+  if (!gateway) {
+    return NextResponse.json({ error: 'API gateway is not configured.' }, { status: 503 });
   }
-  return NextResponse.json(order);
+
+  const id = encodeURIComponent(params.id);
+  const res = await fetch(`${gateway}/api/orders/${id}`, {
+    cache: 'no-store',
+    headers: { 'x-role': 'patient' },
+  });
+
+  const data = await res.json().catch(() => null);
+  return NextResponse.json(data ?? {}, { status: res.status });
 }

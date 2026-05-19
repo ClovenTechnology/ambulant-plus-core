@@ -4,11 +4,11 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { formatDate } from '../../src/lib/date';
+import { computeMedicationAdherence } from '../../src/lib/medication-adherence';
 import { toast } from '../../components/toast';
 
 // Reuse the same “homepage-style” visuals (donut + sparkline)
 import MeterDonut from '../../components/charts/AnimatedMeterDonut';
-import Sparkline from '../../components/charts/Sparkline';
 
 /* =========================================================
    Types
@@ -71,9 +71,14 @@ type Reminder = {
   id: string;
   medicationId?: string | null;
   status: ReminderStatus;
-  // optional fields (backend may include these; we won’t assume)
-  createdAt?: string;
   scheduledFor?: string;
+  takenAt?: string;
+  reportedTakenAt?: string;
+  verifiedAt?: string;
+  verificationRequired?: boolean;
+  verificationStatus?: string | null;
+  takenSource?: string | null;
+  createdAt?: string;
   dueAt?: string;
   time?: string;
   meta?: any;
@@ -82,8 +87,12 @@ type Reminder = {
 type ReminderAgg = {
   pending: number;
   taken: number;
+  verifiedTaken: number;
+  selfReportedTaken: number;
   missed: number;
   total: number;
+  weightedPct: number;
+  confidencePct: number;
 };
 
 type ReminderSchedule = { id: string; time: string; enabled: boolean };
@@ -106,39 +115,6 @@ const STATUS_STYLES: Record<MedicationStatus, { chip: string; dot: string }> = {
   },
 };
 
-const MOCK_MEDS: Medication[] = [
-  {
-    id: 'mock-1',
-    name: 'Paracetamol',
-    dose: '500 mg',
-    frequency: '1 tablet every 6 hours',
-    route: 'Oral',
-    started: new Date().toISOString(),
-    lastFilled: new Date().toISOString(),
-    status: 'Active',
-    durationDays: 5,
-    source: 'manual',
-  },
-];
-
-const MOCK_ENCOUNTERS: EncounterSession[] = [
-  {
-    id: 'ENC-24001-1',
-    caseId: 'CASE-24001',
-    caseTitle: 'Hypertension follow-up',
-    caseStatus: 'Open',
-    start: new Date().toISOString(),
-    clinician: { id: 'CLN-001', name: 'Dr. A. Moyo', specialty: 'Cardiology' },
-  },
-  {
-    id: 'ENC-23987-1',
-    caseId: 'CASE-23987',
-    caseTitle: 'Post-viral cough',
-    caseStatus: 'Closed',
-    start: new Date().toISOString(),
-    clinician: { id: 'CLN-014', name: 'Dr. N. Jacobs', specialty: 'Internal Medicine' },
-  },
-];
 
 const emptyForm: NewMedForm = {
   name: '',
@@ -195,7 +171,7 @@ function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
 }
 
-// tiny stable pseudo “trend” series from a base percent (real-ready placeholder)
+// deterministic trend series derived from the current adherence percentage
 function buildTrendSeries(basePct: number, seed: number) {
   const clamp = (n: number) => Math.max(0, Math.min(100, n));
   const jitter = (i: number) => {
@@ -488,6 +464,45 @@ function Modal(props: {
   );
 }
 
+function AdherenceSparkline(props: { values: number[]; height?: number }) {
+  const height = props.height ?? 72;
+  const width = 420;
+  const values = props.values.length ? props.values : [0];
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = Math.max(1, max - min);
+  const step = values.length > 1 ? width / (values.length - 1) : width;
+
+  const points = values
+    .map((value, index) => {
+      const x = index * step;
+      const y = height - ((value - min) / range) * (height - 12) - 6;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      role="img"
+      aria-label="Medication adherence trend"
+      className="h-full w-full overflow-visible"
+      preserveAspectRatio="none"
+    >
+      <polyline
+        points={points}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="text-emerald-600"
+      />
+    </svg>
+  );
+}
+
 function ProgressBar(props: {
   segments: Array<{ label: string; value: number; className: string }>;
   className?: string;
@@ -564,6 +579,8 @@ export default function MedicationsPage() {
   const [reminderSchedules, setReminderSchedules] = useState<ReminderSchedule[]>([]);
   const [reminderBusy, setReminderBusy] = useState(false);
   const [reminderFreqPerDay, setReminderFreqPerDay] = useState<number | undefined>(undefined);
+  const [requireCameraVerification, setRequireCameraVerification] = useState(true);
+  const [allowManualEarlierTaken, setAllowManualEarlierTaken] = useState(true);
 
   /* ------------------------------
      Load medications
@@ -580,8 +597,8 @@ export default function MedicationsPage() {
         setMeds(list);
       } catch (err) {
         console.error('Error loading medications:', err);
-        setLoadError('Unable to load medications from the server. Showing a sample list instead.');
-        setMeds(MOCK_MEDS);
+        setLoadError('Unable to load medications from the server.');
+        setMeds([]);
       } finally {
         setIsLoading(false);
       }
@@ -600,19 +617,27 @@ export default function MedicationsPage() {
       const raw: Reminder[] = Array.isArray((data as any).reminders) ? (data as any).reminders : [];
       setRemindersAll(raw);
 
-      const map: Record<string, ReminderAgg> = {};
+      const grouped: Record<string, Reminder[]> = {};
       for (const r of raw) {
         const mid = r.medicationId;
         if (!mid) continue;
+        if (!grouped[mid]) grouped[mid] = [];
+        grouped[mid].push(r);
+      }
 
-        const cur = map[mid] ?? { pending: 0, taken: 0, missed: 0, total: 0 };
-        cur.total += 1;
-
-        if (r.status === 'Pending') cur.pending += 1;
-        else if (r.status === 'Taken') cur.taken += 1;
-        else if (r.status === 'Missed') cur.missed += 1;
-
-        map[mid] = cur;
+      const map: Record<string, ReminderAgg> = {};
+      for (const [mid, items] of Object.entries(grouped)) {
+        const summary = computeMedicationAdherence(items);
+        map[mid] = {
+          pending: summary.pending,
+          taken: summary.taken,
+          verifiedTaken: summary.verifiedTaken,
+          selfReportedTaken: summary.selfReportedTaken,
+          missed: summary.missed,
+          total: summary.pending + summary.taken + summary.missed,
+          weightedPct: summary.weightedPct,
+          confidencePct: summary.confidencePct,
+        };
       }
 
       setRemindersAggByMed(map);
@@ -669,14 +694,9 @@ export default function MedicationsPage() {
         }
       } catch (err) {
         console.error('Error loading encounters:', err);
-        setEncError('Unable to load recent sessions. Showing sample data instead.');
-        setEncounters(MOCK_ENCOUNTERS);
-
-        if (autoSelectLatestErx && MOCK_ENCOUNTERS.length > 0) {
-          const latest = [...MOCK_ENCOUNTERS].sort((a, b) => new Date(b.start).getTime() - new Date(a.start).getTime())[0];
-          setAutoSelectLatestErx(false);
-          await onEncounterChange(latest.id);
-        }
+        setEncError('Unable to load recent sessions.');
+        setEncounters([]);
+        setAutoSelectLatestErx(false);
       } finally {
         setEncLoading(false);
       }
@@ -701,7 +721,17 @@ export default function MedicationsPage() {
   const selectedErxCount = useMemo(() => erxItems.filter((i) => i.selected).length, [erxItems]);
 
   const pendingForMed = (id: string) => remindersAggByMed[id]?.pending ?? 0;
-  const aggForMed = (id: string): ReminderAgg => remindersAggByMed[id] ?? { pending: 0, taken: 0, missed: 0, total: 0 };
+  const aggForMed = (id: string): ReminderAgg =>
+    remindersAggByMed[id] ?? {
+      pending: 0,
+      taken: 0,
+      verifiedTaken: 0,
+      selfReportedTaken: 0,
+      missed: 0,
+      total: 0,
+      weightedPct: 100,
+      confidencePct: 100,
+    };
 
   const medStats = useMemo(() => {
     if (!meds.length) {
@@ -715,8 +745,12 @@ export default function MedicationsPage() {
         withAnyReminders: 0,
         pendingRemindersTotal: 0,
         takenTotal: 0,
+        verifiedTakenTotal: 0,
+        selfReportedTakenTotal: 0,
         missedTotal: 0,
         totalRemindersAll: 0,
+        weightedPctAvg: 100,
+        confidencePctAvg: 100,
       };
     }
 
@@ -730,16 +764,28 @@ export default function MedicationsPage() {
     let withAnyReminders = 0;
     let pendingRemindersTotal = 0;
     let takenTotal = 0;
+    let verifiedTakenTotal = 0;
+    let selfReportedTakenTotal = 0;
     let missedTotal = 0;
     let totalRemindersAll = 0;
+    let weightedPctSum = 0;
+    let confidencePctSum = 0;
+    let weightedCount = 0;
 
     for (const m of active) {
       const a = aggForMed(m.id);
       if (a.total > 0) withAnyReminders += 1;
       pendingRemindersTotal += a.pending;
       takenTotal += a.taken;
+      verifiedTakenTotal += a.verifiedTaken;
+      selfReportedTakenTotal += a.selfReportedTaken;
       missedTotal += a.missed;
       totalRemindersAll += a.total;
+      if (a.total > 0) {
+        weightedPctSum += a.weightedPct;
+        confidencePctSum += a.confidencePct;
+        weightedCount += 1;
+      }
     }
 
     return {
@@ -752,8 +798,12 @@ export default function MedicationsPage() {
       withAnyReminders,
       pendingRemindersTotal,
       takenTotal,
+      verifiedTakenTotal,
+      selfReportedTakenTotal,
       missedTotal,
       totalRemindersAll,
+      weightedPctAvg: weightedCount > 0 ? Math.round(weightedPctSum / weightedCount) : 100,
+      confidencePctAvg: weightedCount > 0 ? Math.round(confidencePctSum / weightedCount) : 100,
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [meds, remindersAggByMed]);
@@ -770,17 +820,21 @@ export default function MedicationsPage() {
 
     return {
       pct,
+      weightedPct: medStats.weightedPctAvg,
+      confidencePct: medStats.confidencePctAvg,
       denom,
       hasAnyTracking,
       hasHistory,
       taken: medStats.takenTotal,
+      verifiedTaken: medStats.verifiedTakenTotal,
+      selfReportedTaken: medStats.selfReportedTakenTotal,
       missed: medStats.missedTotal,
       pending: medStats.pendingRemindersTotal,
       total: medStats.totalRemindersAll,
     };
   }, [medStats]);
 
-  const adherenceSeries = useMemo(() => buildTrendSeries(adherence.pct, meds.length + medStats.active * 11), [adherence.pct, meds.length, medStats.active]);
+  const adherenceSeries = useMemo(() => buildTrendSeries(adherence.weightedPct, meds.length + medStats.active * 11), [adherence.weightedPct, meds.length, medStats.active]);
 
   /* =========================================================
      Actions
@@ -916,51 +970,36 @@ export default function MedicationsPage() {
         body: JSON.stringify(payload),
       });
 
-      let created: Medication = {
-        id: tempId,
-        name: payload.name,
-        dose: payload.dose ?? '',
-        frequency: payload.frequency ?? '',
-        route: payload.route ?? '',
-        started: payload.started,
-        lastFilled: payload.lastFilled,
-        status: payload.status,
-        durationDays: payload.durationDays,
-        orderId: payload.orderId,
-        source: payload.source,
-      };
-
-      if (res.ok) {
-        const data = await res.json().catch(() => null);
-        if (data && (data as any).id) created = { ...created, ...(data as Partial<Medication>) };
-        else if ((data as any)?.med?.id) created = { ...created, ...((data as any).med as Partial<Medication>) };
-        toast('Medication added', { type: 'success' });
-      } else {
-        toast('Could not save to server — medication added locally only', { type: 'error' });
+      if (!res.ok) {
+        throw new Error('Could not save medication');
       }
 
+      const data = await res.json().catch(() => null);
+      const created: Medication =
+        data && (data as any).id
+          ? ({ ...payload, ...(data as Partial<Medication>) } as Medication)
+          : (data as any)?.med?.id
+            ? ({ ...payload, ...((data as any).med as Partial<Medication>) } as Medication)
+            : {
+                id: tempId,
+                name: payload.name,
+                dose: payload.dose ?? '',
+                frequency: payload.frequency ?? '',
+                route: payload.route ?? '',
+                started: payload.started,
+                lastFilled: payload.lastFilled,
+                status: payload.status,
+                durationDays: payload.durationDays,
+                orderId: payload.orderId,
+                source: payload.source,
+              };
+
+      toast('Medication added', { type: 'success' });
       setMeds((prev) => [...prev, created]);
       setIsCreateOpen(false);
     } catch (err) {
       console.error('Error creating medication:', err);
-      toast('Network error — medication added locally only', { type: 'error' });
-
-      const created: Medication = {
-        id: tempId,
-        name: payload.name,
-        dose: payload.dose ?? '',
-        frequency: payload.frequency ?? '',
-        route: payload.route ?? '',
-        started: payload.started,
-        lastFilled: payload.lastFilled,
-        status: payload.status,
-        durationDays: payload.durationDays,
-        orderId: payload.orderId,
-        source: payload.source,
-      };
-
-      setMeds((prev) => [...prev, created]);
-      setIsCreateOpen(false);
+      toast('Could not save medication. Please try again.', { type: 'error' });
     } finally {
       setIsSubmitting(false);
     }
@@ -1034,15 +1073,20 @@ export default function MedicationsPage() {
         hadError = true;
       }
 
-      createdMeds.push(created);
+      if (!hadError) {
+        createdMeds.push(created);
+      }
     }
 
-    setMeds((prev) => [...prev, ...createdMeds]);
-    setIsCreateOpen(false);
-    setIsSubmitting(false);
+    if (hadError) {
+      toast('Some prescriptions could not be synced. Please try again.', { type: 'error' });
+    } else {
+      setMeds((prev) => [...prev, ...createdMeds]);
+      setIsCreateOpen(false);
+      toast('Medications added from eRx', { type: 'success' });
+    }
 
-    if (hadError) toast('Some items could not be synced to server. They were added locally.', { type: 'error' });
-    else toast('Medications added from eRx', { type: 'success' });
+    setIsSubmitting(false);
   }
 
   /* ------------------------------
@@ -1050,9 +1094,7 @@ export default function MedicationsPage() {
   --------------------------------*/
   function startEditing(m: Medication) {
     if (m.source === 'erx') {
-      toast('This medication was synced from your clinician. To change the prescription, please discuss it with them.', {
-        type: 'info',
-      });
+      toast('This medication was synced from your clinician. To change the prescription, please discuss it with them.', { type: 'info' });
       return;
     }
 
@@ -1109,7 +1151,8 @@ export default function MedicationsPage() {
       await patchMedicationOnServer(editingId, patch);
       toast('Medication updated', { type: 'success' });
     } catch {
-      toast('Could not sync changes to server. Updates kept locally for now.', { type: 'error' });
+      setMeds((prev) => prev.map((m) => (m.id === editingId ? original : m)));
+      toast('Could not save changes. Please try again.', { type: 'error' });
     } finally {
       setIsSavingEdit(false);
       setEditingId(null);
@@ -1133,7 +1176,8 @@ export default function MedicationsPage() {
       await patchMedicationOnServer(m.id, patch);
       toast('Medication marked as completed', { type: 'success' });
     } catch {
-      toast('Could not sync change to server. It will remain updated locally for now.', { type: 'error' });
+      setMeds((prev) => prev.map((x) => (x.id === m.id ? m : x)));
+      toast('Could not save change. Please try again.', { type: 'error' });
     }
   }
 
@@ -1142,6 +1186,8 @@ export default function MedicationsPage() {
   --------------------------------*/
   function openReminderFor(m: Medication) {
     setReminderMed(m);
+    setRequireCameraVerification(Boolean(m.meta?.verificationRequiredDefault ?? true));
+    setAllowManualEarlierTaken(Boolean(m.meta?.manualEarlierLoggingAllowed ?? true));
 
     const freqPerDay = guessFrequencyPerDay(m.frequency);
     setReminderFreqPerDay(freqPerDay);
@@ -1197,9 +1243,16 @@ export default function MedicationsPage() {
         status: 'Pending',
         source: 'medication',
         medicationId: reminderMed.id.startsWith('temp-') ? undefined : reminderMed.id,
+        verificationRequired: requireCameraVerification,
+        verificationMode: requireCameraVerification ? 'CAMERA_SEQUENCE' : 'NONE',
+        verificationStatus: requireCameraVerification ? 'PENDING' : 'NOT_REQUIRED',
+        takenSource: 'NONE',
         meta: {
           durationDays: reminderMed.durationDays ?? null,
           frequencyPerDay: active.length,
+          verificationRequired: requireCameraVerification,
+          verificationMode: requireCameraVerification ? 'CAMERA_SEQUENCE' : 'NONE',
+          manualEarlierLoggingAllowed: allowManualEarlierTaken,
         },
         durationDays: reminderMed.durationDays ?? null,
         frequencyPerDay: active.length,
@@ -1377,7 +1430,7 @@ export default function MedicationsPage() {
                   <div className="min-w-0">
                     <div className="text-sm font-extrabold text-slate-900">Medication adherence</div>
                     <div className="mt-1 text-xs text-slate-600">
-                      Based on reminder outcomes (Taken vs Missed). Pending reminders are treated as “not done yet.”
+                      Weighted to distinguish verified doses from self-reported doses. Pending reminders are treated as “not done yet.”
                     </div>
                   </div>
 
@@ -1392,17 +1445,20 @@ export default function MedicationsPage() {
                 <div className="mt-4 grid gap-3 sm:grid-cols-3">
                   {/* Donut */}
                   <div className="rounded-2xl border border-slate-200 bg-white p-4 flex flex-col items-center justify-center">
-                    <div className="text-xs text-slate-500 mb-2">Adherence score</div>
-                    <MeterDonut value={adherence.pct} max={100} label="Adherence" color="#10B981" unit="%" />
+                    <div className="text-xs text-slate-500 mb-2">Weighted adherence</div>
+                    <MeterDonut value={adherence.weightedPct} max={100} />
                     <div className="mt-2 text-[11px] text-slate-500 text-center">
                       {adherence.hasAnyTracking ? (
                         <>
-                          <span className="font-semibold text-slate-700">{adherence.taken}</span> taken ·{' '}
-                          <span className="font-semibold text-slate-700">{adherence.missed}</span> missed
+                          <span className="font-semibold text-slate-700">{adherence.verifiedTaken}</span> verified ·{' '}
+                          <span className="font-semibold text-slate-700">{adherence.selfReportedTaken}</span> self-reported
                         </>
                       ) : (
                         'No reminder tracking yet — create reminders for daily meds.'
                       )}
+                    </div>
+                    <div className="mt-1 text-[11px] text-slate-500 text-center">
+                      Confidence: <span className="font-semibold text-slate-700">{adherence.confidencePct}%</span>
                     </div>
                   </div>
 
@@ -1416,20 +1472,20 @@ export default function MedicationsPage() {
                       <Chip
                         className={cx(
                           'border',
-                          adherence.pct >= 90
+                          adherence.weightedPct >= 90
                             ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                            : adherence.pct >= 75
+                            : adherence.weightedPct >= 75
                             ? 'border-sky-200 bg-sky-50 text-sky-800'
                             : 'border-amber-200 bg-amber-50 text-amber-900'
                         )}
                       >
-                        {adherence.pct >= 90 ? <Icon name="check" /> : <Icon name="warn" />}
-                        {adherence.pct}% today
+                        {adherence.weightedPct >= 90 ? <Icon name="check" /> : <Icon name="warn" />}
+                        {adherence.weightedPct}% today
                       </Chip>
                     </div>
 
                     <div className="mt-3">
-                      <Sparkline data={adherenceSeries} height={72} />
+                      <AdherenceSparkline values={adherenceSeries} height={72} />
                     </div>
 
                     <div className="mt-3">
@@ -1437,7 +1493,8 @@ export default function MedicationsPage() {
                       <div className="mt-2">
                         <ProgressBar
                           segments={[
-                            { label: 'Taken', value: adherence.taken, className: 'bg-emerald-500' },
+                            { label: 'Verified', value: adherence.verifiedTaken, className: 'bg-emerald-500' },
+                            { label: 'Self-reported', value: adherence.selfReportedTaken, className: 'bg-amber-400' },
                             { label: 'Missed', value: adherence.missed, className: 'bg-rose-500' },
                             { label: 'Pending', value: adherence.pending, className: 'bg-sky-500' },
                           ]}
@@ -1676,12 +1733,16 @@ export default function MedicationsPage() {
                                   <div className="mt-2">
                                     <ProgressBar
                                       segments={[
-                                        { label: 'Taken', value: a.taken, className: 'bg-emerald-500' },
+                                        { label: 'Verified', value: a.verifiedTaken, className: 'bg-emerald-500' },
+                                        { label: 'Self-reported', value: a.selfReportedTaken, className: 'bg-amber-400' },
                                         { label: 'Missed', value: a.missed, className: 'bg-rose-500' },
                                         { label: 'Pending', value: a.pending, className: 'bg-sky-500' },
                                       ]}
                                       emptyLabel="No reminders for this medication yet."
                                     />
+                                  </div>
+                                  <div className="mt-2 text-[11px] text-slate-500">
+                                    Weighted {a.weightedPct}% · Confidence {a.confidencePct}%
                                   </div>
                                 </div>
                               ) : null}
@@ -1856,10 +1917,6 @@ export default function MedicationsPage() {
 
                           const a = aggForMed(m.id);
                           const reminderLabel = a.pending > 0 ? (a.pending === 1 ? '1 pending' : `${a.pending} pending`) : null;
-
-                          const denom = a.taken + a.missed;
-                          const pct = denom <= 0 ? (a.total > 0 ? 100 : 0) : Math.round((a.taken / denom) * 100);
-
                           const encounterId = (m.meta && m.meta.encounterId) || undefined;
 
                           return (
@@ -1950,25 +2007,27 @@ export default function MedicationsPage() {
                                       <Chip
                                         className={cx(
                                           'border',
-                                          pct >= 90
+                                          a.weightedPct >= 90
                                             ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                                            : pct >= 75
+                                            : a.weightedPct >= 75
                                             ? 'border-sky-200 bg-sky-50 text-sky-800'
                                             : 'border-amber-200 bg-amber-50 text-amber-900'
                                         )}
                                       >
-                                        {pct >= 90 ? <Icon name="check" /> : <Icon name="warn" />}
-                                        {pct}%
+                                        {a.weightedPct >= 90 ? <Icon name="check" /> : <Icon name="warn" />}
+                                        {a.weightedPct}%
                                       </Chip>
                                       <span className="text-[11px] text-slate-500">
-                                        {a.taken} taken · {a.missed} missed
+                                        {a.verifiedTaken} verified · {a.selfReportedTaken} self-reported
                                       </span>
                                     </div>
                                     <div className="h-2 w-44 overflow-hidden rounded-full border border-slate-200 bg-slate-50 flex">
-                                      <div className="bg-emerald-500 h-full" style={{ width: `${(a.taken / Math.max(1, a.total)) * 100}%` }} />
+                                      <div className="bg-emerald-500 h-full" style={{ width: `${(a.verifiedTaken / Math.max(1, a.total)) * 100}%` }} />
+                                      <div className="bg-amber-400 h-full" style={{ width: `${(a.selfReportedTaken / Math.max(1, a.total)) * 100}%` }} />
                                       <div className="bg-rose-500 h-full" style={{ width: `${(a.missed / Math.max(1, a.total)) * 100}%` }} />
                                       <div className="bg-sky-500 h-full" style={{ width: `${(a.pending / Math.max(1, a.total)) * 100}%` }} />
                                     </div>
+                                    <div className="text-[11px] text-slate-500">Confidence {a.confidencePct}%</div>
                                   </div>
                                 )}
                               </td>
@@ -2471,6 +2530,45 @@ export default function MedicationsPage() {
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 space-y-3">
+              <div>
+                <div className="text-sm font-extrabold text-slate-900">Verification policy</div>
+                <div className="mt-1 text-xs text-slate-500">
+                  Decide whether this medication should require camera verification before it counts as a verified dose.
+                </div>
+              </div>
+
+              <label className="flex items-start gap-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={requireCameraVerification}
+                  onChange={(e) => setRequireCameraVerification(e.target.checked)}
+                  className="mt-0.5 h-4 w-4"
+                />
+                <span>
+                  <span className="font-semibold text-slate-900">Require camera verification</span>
+                  <span className="block text-xs text-slate-500">
+                    When enabled, reminders start in a verification-pending state and should flow through camera sequence verification.
+                  </span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={allowManualEarlierTaken}
+                  onChange={(e) => setAllowManualEarlierTaken(e.target.checked)}
+                  className="mt-0.5 h-4 w-4"
+                />
+                <span>
+                  <span className="font-semibold text-slate-900">Allow manual “taken earlier” logging</span>
+                  <span className="block text-xs text-slate-500">
+                    Keeps support for self-reported earlier logging when policy allows it.
+                  </span>
+                </span>
+              </label>
             </div>
 
             <p className="text-xs text-slate-500">

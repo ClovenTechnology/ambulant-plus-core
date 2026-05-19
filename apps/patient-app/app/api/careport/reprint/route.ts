@@ -1,16 +1,36 @@
-﻿import { NextRequest, NextResponse } from 'next/server'
-import { promises as fs } from 'fs'
-import path from 'path'
-const store = path.join(process.cwd(), '../../packages/careport/erx.json')
-async function readSafe(){ try{ const txt = await fs.readFile(store,'utf-8'); return JSON.parse(txt.replace(/^\uFEFF/, '')) }catch{ return { outbox:[], reprints:[] } } }
-export async function POST(req: NextRequest){
-  const { id } = await req.json()
-  if(!id) return NextResponse.json({error:'id required'},{status:400})
-  const data = await readSafe()
-  const exists = (data.outbox||[]).find((x:any)=>x.id===id)
-  if(!exists) return NextResponse.json({error:'erx not found'},{status:404})
-  data.reprints = data.reprints || []
-  data.reprints.push({ id, requestedAt: new Date().toISOString() })
-  await fs.writeFile(store, JSON.stringify(data,null,2), 'utf-8')
-  return NextResponse.json({ ok:true })
+﻿// apps/patient-app/app/api/careport/reprint/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+/**
+ * Production-safe disabled endpoint.
+ *
+ * The previous implementation read/wrote packages/careport/erx.json.
+ * Local JSON/file-store behaviour must not be used for production patient eRx.
+ *
+ * Reprint must be re-enabled only after a real API-gateway/document-store
+ * endpoint exists.
+ */
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const id = String(body?.id || body?.erxOrderId || '').trim();
+
+  if (!id) {
+    return NextResponse.json(
+      { ok: false, error: 'id_required' },
+      { status: 400 },
+    );
+  }
+
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'careport_reprint_service_not_configured',
+      message:
+        'CarePort eRx reprint is disabled until the production document-store workflow is connected.',
+    },
+    { status: 503 },
+  );
 }

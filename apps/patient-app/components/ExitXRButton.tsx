@@ -1,5 +1,5 @@
 'use client';
-import { Room, DataPacket_Kind } from 'livekit-client';
+import { Room } from 'livekit-client';
 import { useState } from 'react';
 
 export default function ExitXRButton({
@@ -20,8 +20,10 @@ export default function ExitXRButton({
       const payload = { type: 'xr', value: false };
       await roomRef.current.localParticipant.publishData(
         new TextEncoder().encode(JSON.stringify(payload)),
-        DataPacket_Kind.RELIABLE,
-        'control'
+        {
+          reliable: true,
+          topic: 'control',
+        },
       );
       onLocalToggle?.(); // optimistic local hide
     } finally {

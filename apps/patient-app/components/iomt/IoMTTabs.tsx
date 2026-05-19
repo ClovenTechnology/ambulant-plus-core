@@ -28,11 +28,11 @@ async function sendCmd(id: string, cmd: string, payload?: any) {
   return res.json().catch(() => ({}));
 }
 
-// ---- tiny audio visualiser for steth demo ---------------------------------
+// ---- tiny audio visualiser for stethoscope --------------------------------
 function useMicWave(active: boolean) {
   const [ready, setReady] = useState(false);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const dataRef = useRef<Uint8Array | null>(null);
+  const dataRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
   const rafRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -48,7 +48,7 @@ function useMicWave(active: boolean) {
         analyser.fftSize = 256;
         src.connect(analyser);
         analyserRef.current = analyser;
-        dataRef.current = new Uint8Array(analyser.frequencyBinCount);
+        dataRef.current = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
         setReady(true);
       } catch (e) {
         console.error(e);
@@ -89,7 +89,7 @@ export default function IoMTTabs() {
     finally { setHmBusy(false); }
   };
 
-  // ---- Stethoscope (device mic demo) --------------------------------------
+  // ---- Stethoscope ----------------------------------------------------------
   const [stMode, setStMode] = useState<"heart"|"lung">("heart");
   const [stUsingMic, setStUsingMic] = useState(true);
   const [stStatus, setStStatus] = useState<"idle"|"recording">("idle");
@@ -124,7 +124,7 @@ export default function IoMTTabs() {
       setStStatus("recording");
       await sendCmd(ids.steth, "steth:start", { mode: stMode, source: stUsingMic ? "device-mic" : "hardware" });
     } catch (e) {
-      // still allow local mic demo to run; log only
+      // keep local microphone visualiser running if command relay fails; log only
       console.error(e);
     }
   };
@@ -135,7 +135,7 @@ export default function IoMTTabs() {
     } catch (e) { console.error(e); }
   };
 
-  // ---- Otoscope (device camera demo) --------------------------------------
+  // ---- Otoscope -------------------------------------------------------------
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [otoOn, setOtoOn] = useState(false);
   const startOto = async () => {
@@ -156,7 +156,7 @@ export default function IoMTTabs() {
     } catch (e) { console.error(e); }
   };
 
-  // ---- pair/connect demo states (toggle) -----------------------------------
+  // ---- pair/connect states (toggle) ----------------------------------------
   const [paired] = useState({ hm: true, st: true, oto: true });
   const [connected, setConnected] = useState({ hm: false, st: false, oto: false });
   const toggleConnect = (k: "hm"|"st"|"oto") =>
@@ -266,7 +266,7 @@ export default function IoMTTabs() {
             </div>
             <label className="flex items-center gap-2 text-sm">
               <input type="checkbox" checked={stUsingMic} onChange={e => setStUsingMic(e.target.checked)} />
-              Use this device microphone (demo)
+              Use this device microphone
             </label>
           </div>
 

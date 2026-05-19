@@ -1,8 +1,12 @@
-// apps/api-gateway/app/api/fx/latest/route.ts
+﻿// apps/api-gateway/app/api/fx/latest/route.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { csvQuotes, isCcy, normCcy, toNumberDecimal } from '../_shared';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 type RateOut = { rate: number; asOf?: string; source?: 'manual' | 'auto'; derived?: boolean };
 
@@ -87,7 +91,7 @@ export async function GET(req: NextRequest) {
 
     const usdToBase = base === 'USD' ? 1 : usdDirect[base]?.rate;
     if (!usdToBase || !Number.isFinite(usdToBase) || usdToBase <= 0) {
-      return NextResponse.json({ ok: false, error: `Missing USD→${base} rate (cannot derive)` }, { status: 422 });
+      return NextResponse.json({ ok: false, error: `Missing USDâ†’${base} rate (cannot derive)` }, { status: 422 });
     }
 
     let quoteList: string[];
@@ -140,3 +144,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: e?.message || 'FX error' }, { status: 500 });
   }
 }
+
+

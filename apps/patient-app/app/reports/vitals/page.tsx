@@ -2,7 +2,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   Activity,
@@ -192,6 +192,19 @@ function DualLineSpark({
   const w = 640;
   const pad = 10;
   const all = [...a, ...b].filter((x) => Number.isFinite(x));
+
+  if (!all.length) {
+    return (
+      <div
+        role="img"
+        aria-label="Blood pressure trend"
+        className="flex items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50 text-sm text-slate-500"
+        style={{ height }}
+      >
+        No blood pressure trend data available
+      </div>
+    );
+  }
   const vmin = all.length ? Math.min(...all) : 0;
   const vmax = all.length ? Math.max(...all) : 1;
   const span = Math.max(1e-6, vmax - vmin);
@@ -265,28 +278,29 @@ function classifyBp(sys?: number, dia?: number) {
   return { label: 'Normal', cls: 'bg-emerald-50 border-emerald-200 text-emerald-700' };
 }
 
-export default function VitalsReportPage() {
+function VitalsReportPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
+  const queryParam = useCallback((key: string) => sp?.get(key)?.trim() ?? '', [sp]);
+  const queryString = useMemo(() => sp?.toString() ?? '', [sp]);
 
   const range = useMemo<RangeKey>(() => {
-    const r = (sp.get('range') || '30d') as RangeKey;
+    const r = queryParam('range') as RangeKey;
     if (r === '7d' || r === '30d' || r === '90d' || r === '1y') return r;
     return '30d';
-  }, [sp]);
+  }, [queryParam]);
 
   // canonical range in URL
   useEffect(() => {
-    const current = sp.get('range');
+    const current = queryParam('range');
     if (!current) {
-      const qs = new URLSearchParams(Array.from(sp.entries()));
+      const qs = new URLSearchParams(queryString);
       qs.set('range', range);
       router.replace(`/reports/vitals?${qs.toString()}`);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [queryParam, queryString, range, router]);
 
-  const patientId = useMemo(() => sp.get('patientId') || 'patient-123', [sp]);
+  const patientId = useMemo(() => queryParam('patientId'), [queryParam]);
 
   const [discreet, setDiscreet] = useState(false);
   const [hideSensitive, setHideSensitive] = useState(false);
@@ -327,6 +341,12 @@ export default function VitalsReportPage() {
     async function load() {
       setLoading(true);
       try {
+        if (!patientId) {
+          setBpPoints([]);
+          setLatest({});
+          return;
+        }
+
         const days = rangeToDays(range);
         const today = toLocalISODate(new Date());
         const startISO = addDaysISO(today, -(days - 1));
@@ -352,15 +372,6 @@ export default function VitalsReportPage() {
           .sort((a, b) => a.ts.localeCompare(b.ts))
           .filter((p) => p.dateISO >= startISO && p.dateISO <= today);
 
-        // Graceful fallback if empty
-        const fallback: BpPoint[] =
-          points.length > 0
-            ? points
-            : [
-                { ts: new Date(today + 'T08:10:00').toISOString(), dateISO: today, systolic: 120, diastolic: 80 },
-                { ts: new Date(addDaysISO(today, -3) + 'T08:10:00').toISOString(), dateISO: addDaysISO(today, -3), systolic: 132, diastolic: 84 },
-                { ts: new Date(addDaysISO(today, -7) + 'T08:10:00').toISOString(), dateISO: addDaysISO(today, -7), systolic: 126, diastolic: 82 },
-              ].sort((a, b) => a.ts.localeCompare(b.ts));
 
         // Try to extract other vitals from any plausible history keys (non-breaking if absent)
         const candidates: Array<{ deviceId: string; modality: string }> = [
@@ -405,7 +416,7 @@ export default function VitalsReportPage() {
         }
 
         if (!alive) return;
-        setBpPoints(fallback);
+        setBpPoints(points);
         setLatest(latestVitals);
       } catch (e) {
         console.error(e);
@@ -422,7 +433,7 @@ export default function VitalsReportPage() {
     return () => {
       alive = false;
     };
-  }, [range]);
+  }, [range, patientId]);
 
   useEffect(() => {
     return () => {
@@ -469,6 +480,11 @@ export default function VitalsReportPage() {
 
   async function ensurePdfGenerated() {
     if (pdfUrl) return true;
+    if (!patientId) {
+      toast('Patient identity is required before generating this report.', 'error');
+      return false;
+    }
+
     setPdfBusy(true);
     try {
       const { blob, filename } = await generateHealthReport(patientId, { bp: true });
@@ -486,7 +502,7 @@ export default function VitalsReportPage() {
       return true;
     } catch (e) {
       console.error(e);
-      toast('Could not generate PDF right now.', { type: 'error' });
+      toast('Could not generate PDF right now.', 'error');
       return false;
     } finally {
       setPdfBusy(false);
@@ -500,7 +516,7 @@ export default function VitalsReportPage() {
     a.href = pdfUrl;
     a.download = pdfFilename || 'vitals_report.pdf';
     a.click();
-    toast('Download started.', { type: 'success' });
+    toast('Download started.', 'success');
   }
 
   async function handleSharePdf() {
@@ -511,36 +527,30 @@ export default function VitalsReportPage() {
       const blob = await res.blob();
       const file = new File([blob], pdfFilename || 'vitals_report.pdf', { type: 'application/pdf' });
 
-      if ((navigator as any).share && (navigator as any).canShare?.({ files: [file] })) {
-        await (navigator as any).share({
+      if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
           title: 'Vitals Report',
           text: 'Here is my vitals report.',
           files: [file],
         });
       } else {
-        toast('Sharing is not supported on this device/browser.', { type: 'info' });
+        toast('Sharing is not supported on this device/browser.', 'info');
       }
     } catch (e) {
       console.error(e);
-      toast('Could not share the PDF.', { type: 'error' });
+      toast('Could not share the PDF.', 'error');
     }
   }
 
   function setRange(next: RangeKey) {
-    const qs = new URLSearchParams(Array.from(sp.entries()));
+    const qs = new URLSearchParams(queryString);
     qs.set('range', next);
     router.push(`/reports/vitals?${qs.toString()}`);
   }
 
-  const chartSys = useMemo(() => {
-    const vals = sysArr.slice(-64);
-    return vals.length ? vals : [120, 132, 126, 128, 124, 130];
-  }, [sysArr]);
+  const chartSys = useMemo(() => sysArr.slice(-64), [sysArr]);
 
-  const chartDia = useMemo(() => {
-    const vals = diaArr.slice(-64);
-    return vals.length ? vals : [80, 84, 82, 83, 81, 85];
-  }, [diaArr]);
+  const chartDia = useMemo(() => diaArr.slice(-64), [diaArr]);
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -561,8 +571,8 @@ export default function VitalsReportPage() {
                 <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600">
                   {range.toUpperCase()}
                 </span>
-                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
-                  Local data + fallbacks
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+                  Local data
                 </span>
               </div>
               <div className="mt-1 text-xs text-slate-500">
@@ -768,7 +778,7 @@ export default function VitalsReportPage() {
                   </div>
 
                   <div className="text-[11px] text-slate-500">
-                    Tip: Add <code className="rounded bg-white px-1 py-0.5">?patientId=...</code> in the URL for demos.
+                    Export requires an authenticated patient identity.
                   </div>
                 </div>
               </Card>
@@ -812,6 +822,12 @@ export default function VitalsReportPage() {
                   </div>
 
                   <div className="max-h-[520px] overflow-auto">
+                    {bpPoints.length === 0 ? (
+                      <div className="border-t border-slate-100 px-4 py-6 text-sm text-slate-600">
+                        No blood pressure readings are available for the selected range.
+                      </div>
+                    ) : null}
+
                     {bpPoints
                       .slice()
                       .sort((a, b) => b.ts.localeCompare(a.ts))
@@ -897,5 +913,19 @@ export default function VitalsReportPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function VitalsReportPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-50 p-6 text-sm text-slate-600">
+          Loading vitals report…
+        </main>
+      }
+    >
+      <VitalsReportPageContent />
+    </Suspense>
   );
 }

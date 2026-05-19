@@ -2,9 +2,18 @@
 
 import React, { useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { nanoid } from 'nanoid';
 
 type ToastOptions = { type?: 'info' | 'success' | 'error' };
+
+function createToastId(): string {
+  const cryptoId =
+    typeof globalThis.crypto !== 'undefined' &&
+    typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : '';
+
+  return cryptoId || `toast-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
 
 export type ToastMessage = {
   id: string;
@@ -20,11 +29,13 @@ function ToastContainer() {
   useEffect(() => {
     pushToast = (msg: string, opts: ToastOptions = {}) => {
       const t: ToastMessage = {
-        id: nanoid(),
+        id: createToastId(),
         text: msg,
         type: opts.type ?? 'info',
       };
+
       setToasts((prev) => [...prev, t]);
+
       setTimeout(() => {
         setToasts((prev) => prev.filter((x) => x.id !== t.id));
       }, 3500);
@@ -40,8 +51,8 @@ function ToastContainer() {
             t.type === 'success'
               ? 'bg-green-600'
               : t.type === 'error'
-              ? 'bg-red-600'
-              : 'bg-gray-700'
+                ? 'bg-red-600'
+                : 'bg-gray-700'
           }`}
         >
           {t.text}
@@ -52,17 +63,20 @@ function ToastContainer() {
 }
 
 /**
- * Mount once globally (called by ToastMount).
+ * Mount once globally.
  */
 export function mountToasts(): void {
+  if (typeof document === 'undefined') return;
+
   const existing = document.getElementById('toast-root');
-  if (!existing) {
-    const el = document.createElement('div');
-    el.id = 'toast-root';
-    document.body.appendChild(el);
-    const root = createRoot(el);
-    root.render(<ToastContainer />);
-  }
+  if (existing) return;
+
+  const el = document.createElement('div');
+  el.id = 'toast-root';
+  document.body.appendChild(el);
+
+  const root = createRoot(el);
+  root.render(<ToastContainer />);
 }
 
 /**

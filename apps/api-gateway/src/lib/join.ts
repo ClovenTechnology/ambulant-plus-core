@@ -1,189 +1,373 @@
-// apps/api-gateway/src/lib/join.ts
-import { createHash } from 'crypto';
-import { prisma } from '@/src/lib/db';
+import crypto from 'node:crypto';
+import { SignJWT } from 'jose';
+import { TelevisitRole } from '@prisma/client';
+import { prisma } from './db';
 
-export type JoinTicketCompat = {
-  id: string;
-  visitId: string;
-  userId: string;
-  uid: string;
-  token: string;
-  tokenHash: string;
-  expiresAt: number;
-  expiresAtDate: Date;
-  revokedAt?: Date | null;
+export type JoinWindow = {
+  openAt: number;
+  closeAt: number;
+  isOpen: boolean;
 };
 
-function ticketDelegate() {
-  return (prisma as any).televisitJoinTicket ?? null;
+export type IssuedJoinTicket = {
+  id: string;
+  token: string;
+  tokenHash: string;
+  visitId: string;
+  uid: string;
+  role: TelevisitRole;
+  issuedAt: Date;
+  expiresAt: Date;
+  revokedAt: Date | null;
+};
+
+export function sha256Hex(value: string) {
+  return crypto.createHash('sha256').update(value).digest('hex');
 }
 
-function cleanStr(value: unknown): string {
-  return String(value ?? '').trim();
-}
-
-function sha256Hex(value: string) {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function makeLegacyToken() {
-  return `TV.${Math.random().toString(36).slice(2)}.${Math.random()
-    .toString(36)
-    .slice(2)
-    .toUpperCase()}`;
-}
-
-function toCompat(row: any, token: string): JoinTicketCompat {
-  const expiresAtDate =
-    row?.expiresAt instanceof Date ? row.expiresAt : new Date(row?.expiresAt);
+export function getJoinWindowFromVisit(visit: {
+  joinOpensAt: Date;
+  joinClosesAt: Date;
+}): JoinWindow {
+  const openAt = visit.joinOpensAt.getTime();
+  const closeAt = visit.joinClosesAt.getTime();
+  const now = Date.now();
 
   return {
-    id: String(row?.id || ''),
-    visitId: String(row?.visitId || ''),
-    userId: String(row?.uid || row?.userId || ''),
-    uid: String(row?.uid || row?.userId || ''),
-    token,
-    tokenHash: String(row?.tokenHash || sha256Hex(token)),
-    expiresAt: expiresAtDate.getTime(),
-    expiresAtDate,
-    revokedAt: row?.revokedAt ?? null,
+    openAt,
+    closeAt,
+    isOpen: now >= openAt && now <= closeAt,
   };
 }
 
-export async function upsertTicket(
-  visitId: string,
-  userId: string,
-  ttlSec: number,
-): Promise<JoinTicketCompat> {
-  const vid = cleanStr(visitId);
-  const uid = cleanStr(userId);
+/**
+ * Backward-compatible helper retained only for older imports.
+ * New code should prefer getJoinWindowFromVisit().
+ */
+export function getJoinWindow(
+  startMs: number,
+  durMin: number,
+  openLeadSec: number,
+  closeLagSec: number,
+) {
+  const openAt = startMs - openLeadSec * 1000;
+  const closeAt = startMs + durMin * 60_000 + closeLagSec * 1000;
+  return { openAt, closeAt };
+}
 
-  if (!vid) throw new Error('visitId_required');
-  if (!uid) throw new Error('userId_required');
+export function normalizeTelevisitRole(raw: unknown): TelevisitRole {
+  const role = String(raw || '').trim().toLowerCase();
 
-  const delegate = ticketDelegate();
+  if (role === 'clinician') return TelevisitRole.clinician;
+  if (role === 'staff') return TelevisitRole.staff;
+  if (role === 'observer') return TelevisitRole.observer;
+  if (role === 'admin') return TelevisitRole.admin;
 
-  if (!delegate?.findFirst || !delegate?.create) {
-    const token = makeLegacyToken();
-    const expiresAtDate = new Date(Date.now() + Math.max(60, ttlSec) * 1000);
+  return TelevisitRole.patient;
+}
 
-    return {
-      id: sha256Hex(`${vid}:${uid}:${token}`).slice(0, 24),
-      visitId: vid,
-      userId: uid,
-      uid,
-      token,
-      tokenHash: sha256Hex(token),
-      expiresAt: expiresAtDate.getTime(),
-      expiresAtDate,
-      revokedAt: null,
-    };
+function envFirst(names: string[]) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function nowSec() {
+  return Math.floor(Date.now() / 1000);
+}
+
+function cleanString(value: unknown, max = 240): string {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function roleToParticipantRole(role: TelevisitRole): string {
+  if (role === TelevisitRole.clinician) return 'lead_clinician';
+  if (role === TelevisitRole.staff) return 'advisor';
+  if (role === TelevisitRole.observer) return 'observer';
+  if (role === TelevisitRole.admin) return 'advisor';
+  return 'lead_patient';
+}
+
+function parseParticipants(meta: unknown): Array<Record<string, any>> {
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) return [];
+  const raw = (meta as any).participants;
+  return Array.isArray(raw) ? raw.filter(Boolean) : [];
+}
+
+async function resolveVisitTicketContext(args: {
+  visit: any;
+  uid: string;
+  role: TelevisitRole;
+}) {
+  const visit = args.visit;
+
+  const appointmentId = cleanString(visit.appointmentId, 160);
+  if (!appointmentId) {
+    throw new Error('visit_missing_appointment_id');
   }
 
+  const appointment = await prisma.appointment.findUnique({
+    where: { id: appointmentId },
+    select: {
+      id: true,
+      clinicianId: true,
+      patientId: true,
+      subjectPatientId: true,
+      hostUserId: true,
+      meta: true,
+    },
+  });
+
+  if (!appointment) {
+    throw new Error('appointment_not_found_for_visit');
+  }
+
+  const participants = parseParticipants(appointment.meta);
+
+  const matchingParticipant =
+    participants.find((p) => cleanString(p.partyId, 240) === args.uid) ||
+    participants.find((p) => {
+      if (args.role === TelevisitRole.clinician) {
+        return cleanString(p.clinicianId, 240) === args.uid || cleanString(p.partyId, 240) === appointment.clinicianId;
+      }
+
+      if (args.role === TelevisitRole.patient) {
+        return (
+          cleanString(p.patientId, 240) === args.uid ||
+          cleanString(p.partyId, 240) === args.uid ||
+          cleanString(p.partyId, 240) === appointment.subjectPatientId ||
+          cleanString(p.partyId, 240) === appointment.patientId
+        );
+      }
+
+      return false;
+    }) ||
+    (args.role === TelevisitRole.clinician
+      ? {
+          partyId: appointment.clinicianId,
+          role: 'LEAD_CLINICIAN',
+          clinicianId: appointment.clinicianId,
+          required: true,
+        }
+      : null) ||
+    (args.role === TelevisitRole.patient
+      ? {
+          partyId: appointment.subjectPatientId || appointment.patientId,
+          role: 'PRIMARY_PATIENT',
+          patientId: appointment.subjectPatientId || appointment.patientId,
+          required: true,
+        }
+      : null);
+
+  const participantId = cleanString(matchingParticipant?.partyId || args.uid, 240);
+
+  if (!participantId) {
+    throw new Error('participant_id_required');
+  }
+
+  return {
+    appointmentId: appointment.id,
+    participantId,
+    participantRole: roleToParticipantRole(args.role),
+  };
+}
+
+async function makeJoinJwt(args: {
+  visit: any;
+  uid: string;
+  role: TelevisitRole;
+  ttlSec: number;
+}) {
+  const secret = envFirst([
+    'TELEVISIT_JOIN_JWT_SECRET',
+    'RTC_JOIN_JWT_SECRET',
+    'JOIN_TICKET_JWT_SECRET',
+    'TELEVISIT_JOIN_TICKET_SECRET',
+  ]);
+
+  if (!secret) {
+    throw new Error('missing_join_jwt_secret');
+  }
+
+  const nbf = nowSec();
+  const visitClosesAtSec = Math.floor(new Date(args.visit.joinClosesAt).getTime() / 1000);
+  const desiredTtl = Math.max(30, Math.min(Number(args.ttlSec || 90), 30 * 60));
+  const exp = Math.min(nbf + desiredTtl, visitClosesAtSec);
+
+  if (exp <= nbf + 10) {
+    throw new Error('join_ticket_ttl_too_short');
+  }
+
+  const ctx = await resolveVisitTicketContext({
+    visit: args.visit,
+    uid: args.uid,
+    role: args.role,
+  });
+
+  const ticketUid = ctx.participantId;
+
+  const issuer = envFirst(['TELEVISIT_JOIN_JWT_ISSUER', 'JOIN_TICKET_JWT_ISSUER']);
+  const audience = envFirst(['TELEVISIT_JOIN_JWT_AUDIENCE', 'JOIN_TICKET_JWT_AUDIENCE']);
+
+  let jwt = new SignJWT({
+    // IMPORTANT:
+    // uid/sub must match Appointment.meta.participants[].partyId,
+    // because /api/rtc/token enforces ticket.uid === participant.partyId.
+    uid: ticketUid,
+    sub: ticketUid,
+    userId: args.uid,
+    actorUid: args.uid,
+
+    role: args.role,
+    televisitRole: args.role,
+    roomId: args.visit.roomId,
+    rid: args.visit.roomId,
+    visitId: args.visit.id,
+    vid: args.visit.id,
+    orgId: args.visit.orgId || 'org-default',
+    appointmentId: ctx.appointmentId,
+    participantId: ctx.participantId,
+    participantRole: ctx.participantRole,
+  })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setIssuedAt(nbf)
+    .setNotBefore(nbf)
+    .setExpirationTime(exp)
+    .setJti(crypto.randomUUID());
+
+  if (issuer) jwt = jwt.setIssuer(issuer);
+  if (audience) jwt = jwt.setAudience(audience);
+
+  const token = await jwt.sign(new TextEncoder().encode(secret));
+
+  return {
+    token,
+    expiresAt: new Date(exp * 1000),
+    ticketUid,
+  };
+}
+
+/**
+ * Legacy name retained for older imports.
+ * It now returns a JWT-compatible join ticket, not the old opaque TV.* token.
+ */
+export async function upsertTicket(
+  visitId: string,
+  uid: string,
+  ttlSec: number,
+  role: TelevisitRole = TelevisitRole.patient,
+  req?: Request,
+): Promise<IssuedJoinTicket> {
   const now = new Date();
   const minReusableExpiry = new Date(Date.now() + 10_000);
 
-  /*
-   * Existing rows store tokenHash, not the plaintext token.
-   * We can reuse the DB row only for validity checks, but we cannot return the old plaintext token.
-   * Therefore, create a fresh ticket when a token needs to be issued.
-   */
-  const existing = await delegate.findFirst({
+  const visit = await prisma.televisit.findUnique({
+    where: { id: visitId },
+  });
+
+  if (!visit) {
+    throw new Error('visit_not_found');
+  }
+
+  const issued = await makeJoinJwt({
+    visit,
+    uid,
+    role,
+    ttlSec,
+  });
+
+  const ticketUid = issued.ticketUid;
+
+  const existing = await prisma.televisitJoinTicket.findFirst({
     where: {
-      visitId: vid,
-      uid,
+      visitId,
+      uid: ticketUid,
+      role,
       revokedAt: null,
       expiresAt: { gt: minReusableExpiry },
     },
-    orderBy: {
-      expiresAt: 'desc',
-    },
+    orderBy: { issuedAt: 'desc' },
   });
 
-  if (existing?.tokenPlaintext) {
-    return toCompat(existing, String(existing.tokenPlaintext));
+  if (existing) {
+    return {
+      id: existing.id,
+      token: '',
+      tokenHash: existing.tokenHash,
+      visitId: existing.visitId,
+      uid: existing.uid,
+      role: existing.role,
+      issuedAt: existing.issuedAt,
+      expiresAt: existing.expiresAt,
+      revokedAt: existing.revokedAt,
+    };
   }
 
-  const token = makeLegacyToken();
-  const tokenHash = sha256Hex(token);
-  const expiresAtDate = new Date(Date.now() + Math.max(60, ttlSec) * 1000);
+  const tokenHash = sha256Hex(issued.token);
 
-  const row = await delegate.create({
+  const userAgent = req?.headers.get('user-agent') || null;
+  const ip =
+    req?.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+    req?.headers.get('x-real-ip') ||
+    null;
+
+  const created = await prisma.televisitJoinTicket.create({
     data: {
+      visitId,
+      uid: ticketUid,
+      role,
       tokenHash,
-      visitId: vid,
-      uid,
-      role: 'patient',
-      orgId: 'org-default',
-      expiresAt: expiresAtDate,
-      revokedAt: null,
-      lastUsedAt: null,
+      issuedAt: now,
+      expiresAt: issued.expiresAt,
+      userAgent,
+      ipHash: ip ? sha256Hex(ip) : null,
+      orgId: visit.orgId || 'org-default',
     },
   });
 
-  return toCompat(row, token);
+  return {
+    id: created.id,
+    token: issued.token,
+    tokenHash: created.tokenHash,
+    visitId: created.visitId,
+    uid: created.uid,
+    role: created.role,
+    issuedAt: created.issuedAt,
+    expiresAt: created.expiresAt,
+    revokedAt: created.revokedAt,
+  };
 }
 
-export async function validateTicket(
-  token: string,
-): Promise<JoinTicketCompat | null> {
-  const raw = cleanStr(token);
+export async function verifyJoinToken(token: string) {
+  const tokenHash = sha256Hex(token);
+  const now = new Date();
 
-  if (!raw) return null;
-
-  const delegate = ticketDelegate();
-
-  if (!delegate?.findUnique && !delegate?.findFirst) {
-    return null;
-  }
-
-  const tokenHash = sha256Hex(raw);
-
-  const row = delegate.findUnique
-    ? await delegate.findUnique({
-        where: { tokenHash },
-      })
-    : await delegate.findFirst({
-        where: { tokenHash },
-      });
-
-  if (!row) return null;
-
-  const expiresAt = new Date(row.expiresAt).getTime();
-
-  if (row.revokedAt) return null;
-  if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
-
-  if (delegate.update) {
-    await delegate
-      .update({
-        where: { tokenHash },
-        data: { lastUsedAt: new Date() },
-      })
-      .catch(() => null);
-  }
-
-  return toCompat(row, raw);
-}
-
-export async function revokeTicket(token: string) {
-  const raw = cleanStr(token);
-
-  if (!raw) return { count: 0 };
-
-  const delegate = ticketDelegate();
-
-  if (!delegate?.updateMany) {
-    return { count: 0 };
-  }
-
-  return delegate.updateMany({
-    where: {
-      tokenHash: sha256Hex(raw),
-      revokedAt: null,
-    },
-    data: {
-      revokedAt: new Date(),
-    },
+  const ticket = await prisma.televisitJoinTicket.findUnique({
+    where: { tokenHash },
+    include: { visit: true },
   });
+
+  if (!ticket) throw new Error('invalid_join_token');
+  if (ticket.revokedAt) throw new Error('ticket_revoked');
+  if (ticket.expiresAt <= now) throw new Error('ticket_expired');
+  if (ticket.visit.joinOpensAt > now) throw new Error('join_window_not_open');
+  if (ticket.visit.joinClosesAt < now) throw new Error('join_window_closed');
+
+  await prisma.televisitJoinTicket
+    .update({
+      where: { id: ticket.id },
+      data: { lastUsedAt: now },
+    })
+    .catch(() => null);
+
+  return {
+    uid: ticket.uid,
+    role: ticket.role,
+    visitId: ticket.visitId,
+    roomId: ticket.visit.roomId,
+    ticketId: ticket.id,
+    visit: ticket.visit,
+  };
 }

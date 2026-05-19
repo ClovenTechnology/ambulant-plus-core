@@ -1,109 +1,88 @@
 // apps/api-gateway/app/api/payments/[id]/refund/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import type { Prisma } from '@prisma/client';
 import { prisma } from '@/src/lib/db';
+import { getProvider } from '@/src/payments';
+import { emitEvent } from '@/src/lib/events';
+import { readIdentity } from '@/src/lib/identity';
 
 export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
 
-function asJsonObject(value: unknown): Record<string, any> {
-  if (!value) return {};
-
-  if (typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, any>;
-  }
-
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed
-        : {};
-    } catch {
-      return {};
-    }
-  }
-
-  return {};
+function jsonSafe(value: unknown): Prisma.InputJsonValue {
+  return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
 }
 
-async function refundViaProvider(ref: string, amountCents: number) {
-  try {
-    const mod: any = await import('@/src/payments/provider');
-
-    const provider =
-      typeof mod.getProvider === 'function'
-        ? mod.getProvider()
-        : typeof mod.default === 'function'
-          ? mod.default()
-          : mod.provider ?? null;
-
-    if (provider && typeof provider.refund === 'function') {
-      await provider.refund(ref, amountCents);
-      return { ok: true, providerRefunded: true };
-    }
-
-    return {
-      ok: true,
-      providerRefunded: false,
-      reason: 'refund_provider_not_available',
-    };
-  } catch (err: any) {
-    return {
-      ok: true,
-      providerRefunded: false,
-      reason: err?.message || 'refund_provider_import_failed',
-    };
-  }
+function readMeta(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
 }
 
-export async function POST(
-  _req: NextRequest,
-  { params }: { params: { id: string } },
-) {
-  try {
-    const pay = await prisma.payment.findUnique({
-      where: { id: params.id },
-    });
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const who = readIdentity(req.headers);
 
-    if (!pay) {
-      return NextResponse.json({ error: 'not_found' }, { status: 404 });
-    }
+  if (who.role !== 'admin') {
+    return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+  }
 
-    const meta = asJsonObject(pay.meta);
+  const pay = await prisma.payment.findUnique({ where: { id: params.id } });
+  if (!pay) {
+    return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
+  }
 
-    const ref =
-      typeof meta.providerRef === 'string' && meta.providerRef.trim()
-        ? meta.providerRef.trim()
-        : `mock_${pay.id}`;
+  const meta = readMeta(pay.meta);
+  const providerKind = String(meta.provider || 'mock') as 'paystack' | 'payfast' | 'mock';
+  const provider = getProvider(providerKind);
+  const ref = pay.providerRef || `mock_${pay.id}`;
 
-    const refundResult = await refundViaProvider(ref, pay.amountCents);
+  const refund = await provider.refund(ref, pay.amountCents);
 
-    const updated = await prisma.payment.update({
-      where: { id: pay.id },
-      data: {
-        status: 'refunded',
-        meta: {
-          ...meta,
+  const updated = await prisma.payment.update({
+    where: { id: pay.id },
+    data: {
+      status: refund.status === 'refunded' ? 'refunded' : 'refund_failed',
+      meta: jsonSafe({
+        ...meta,
+        refund: {
+          providerRef: ref,
+          status: refund.status,
+          meta: refund.meta ?? null,
           refundedAt: new Date().toISOString(),
-          refundProviderRef: ref,
-          refundProviderResult: refundResult,
         },
-      },
-    });
+      }),
+    },
+  });
 
-    return NextResponse.json({
-      ok: true,
-      payment: updated,
-      refundProviderResult: refundResult,
-    });
-  } catch (err: any) {
-    console.error('payment refund error', err);
+  await prisma.auditEvent.create({
+    data: {
+      kind: 'payment_refunded',
+      actorId: who.uid,
+      actorRole: who.role,
+      subjectId: updated.id,
+      meta: jsonSafe({
+        encounterId: pay.encounterId,
+        amountCents: pay.amountCents,
+        providerRef: ref,
+        refund,
+      }),
+    },
+  });
 
-    return NextResponse.json(
-      {
-        ok: false,
-        error: err?.message || 'refund_failed',
-      },
-      { status: 500 },
-    );
+  try {
+    emitEvent({
+      kind: 'payment_refunded',
+      encounterId: pay.encounterId,
+      patientId: null,
+      clinicianId: null,
+      payload: { paymentId: pay.id, amount: pay.amountCents },
+    } as any);
+  } catch {
+    // best-effort runtime event
   }
+
+  return NextResponse.json(
+    { ok: true, payment: updated, refund },
+    { headers: { 'access-control-allow-origin': '*' } },
+  );
 }

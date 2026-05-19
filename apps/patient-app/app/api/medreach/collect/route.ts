@@ -1,46 +1,109 @@
 // apps/patient-app/app/api/medreach/collect/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { medReachMockData } from '../../../../components/fallbackMocks';
+import { apigwBase } from '@/app/api/_apigw';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Basic mutable store seeded from mock (demo only)
-let JOBS = medReachMockData.map((j) => ({ ...j }));
+function json(data: any, status = 200) {
+  return NextResponse.json(data, { status });
+}
+
+function forwardJsonHeaders(req: NextRequest) {
+  const headers = new Headers();
+
+  const passthrough = [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-role',
+    'x-email',
+    'x-name',
+    'x-display-name',
+    'x-org-id',
+    'x-correlation-id',
+    'x-request-id',
+  ];
+
+  for (const key of passthrough) {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
+  }
+
+  if (!headers.has('x-role')) {
+    headers.set('x-role', 'patient');
+  }
+
+  headers.set('content-type', 'application/json');
+  headers.set('accept', 'application/json');
+
+  return headers;
+}
 
 export async function POST(req: NextRequest) {
+  const base = apigwBase();
+
+  if (!base) {
+    return json(
+      {
+        ok: false,
+        error: 'service_not_configured',
+        service: 'medreach_collect',
+      },
+      503,
+    );
+  }
+
+  const body = await req.json().catch(() => ({}));
+  const id = String(body?.id || body?.orderId || '').trim();
+  const status = String(body?.status || 'SAMPLE_COLLECTED').trim();
+
+  if (!id) {
+    return json({ ok: false, error: 'orderId_required' }, 400);
+  }
+
+  /*
+   * Gateway does not expose patient-app's old /collect mock route.
+   * Use the real lab-order PATCH workflow when available.
+   */
+  const upstream = new URL(`/api/medreach/labs/orders/${encodeURIComponent(id)}`, base);
+
   try {
-    const body = await req.json().catch(() => null);
-    const id = body?.id ? String(body.id) : null;
-    if (!id) {
-      return NextResponse.json(
-        { error: 'Missing id in body' },
-        { status: 400 },
+    const res = await fetch(upstream.toString(), {
+      method: 'PATCH',
+      headers: forwardJsonHeaders(req),
+      body: JSON.stringify({
+        action: 'updateStatus',
+        status,
+      }),
+      cache: 'no-store',
+    });
+
+    const data = await res.json().catch(() => ({}));
+
+    if (res.status === 404) {
+      return json(
+        {
+          ok: false,
+          error: 'medreach_collect_service_not_configured_or_order_not_found',
+        },
+        503,
       );
     }
 
-    const idx = JOBS.findIndex((j) => j.id === id);
-    if (idx === -1) {
-      return NextResponse.json(
-        { error: 'Job not found' },
-        { status: 404 },
-      );
-    }
-
-    const updated = {
-      ...JOBS[idx],
-      status: 'Collected',
-      eta: JOBS[idx].eta || 'Collected',
-    };
-    JOBS[idx] = updated;
-
-    // In a real system you’d persist and maybe enqueue an event here
-
-    return NextResponse.json({ job: updated });
+    return json(data, res.status);
   } catch (err: any) {
-    console.error('MedReach collect error', err);
-    return NextResponse.json(
-      { error: 'Internal error', detail: String(err) },
-      { status: 500 },
+    return json(
+      {
+        ok: false,
+        error: err?.message || 'medreach_collect_proxy_failed',
+      },
+      502,
     );
   }
 }

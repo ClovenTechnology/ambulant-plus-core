@@ -1,7 +1,12 @@
-﻿"use client";
+﻿// apps/patient-app/app/_auth/AuthClientProvider.tsx
+'use client';
 
-import { AuthProvider } from "ambulant-mock-auth/context/AuthContext";
+import type { ReactNode } from 'react';
 
-export default function AuthClientProvider({ children }: { children: React.ReactNode }) {
-  return <AuthProvider>{children}</AuthProvider>;
+/**
+ * Patient-app auth is handled by the production auth routes, cookies,
+ * middleware, and API identity headers.
+ */
+export default function AuthClientProvider({ children }: { children: ReactNode }) {
+  return <>{children}</>;
 }

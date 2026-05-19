@@ -1,7 +1,7 @@
-// apps/patient-app/app/DueCare/page.tsx
+﻿// apps/patient-app/app/DueCare/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -115,9 +115,15 @@ function variantInStock(v?: ProductVariant | null) {
   return true; // untracked => treat as available
 }
 
-export default function DueCarePage() {
+function DueCarePageContent() {
   const sp = useSearchParams();
-  const statusParam = (sp.get('status') || '').toLowerCase(); // cancelled
+
+  const qs = useMemo(
+    () => new URLSearchParams(sp?.toString() ?? ''),
+    [sp],
+  );
+
+  const statusParam = (qs.get('status') || '').toLowerCase(); // cancelled
 
   const [uid] = useState(() => getUid());
 
@@ -167,7 +173,7 @@ export default function DueCarePage() {
         if (!res.ok || !js.ok) throw new Error(js?.error || `FX failed (${res.status})`);
 
         const r = Number(js?.rates?.[ccy]?.rate);
-        if (!Number.isFinite(r) || r <= 0) throw new Error(`Missing ZAR→${ccy} rate`);
+        if (!Number.isFinite(r) || r <= 0) throw new Error(`Missing ZARâ†’${ccy} rate`);
         setFxRate(r);
       } catch (e: any) {
         if (e?.name === 'AbortError') return;
@@ -342,12 +348,12 @@ export default function DueCarePage() {
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <div className="font-medium text-sm">Catalog</div>
           <div className="text-xs text-gray-500">
-            {loading ? 'Loading…' : `${duecare.length} item(s)`} • <span className="font-mono">{fxBadge}</span>
+            {loading ? 'Loadingâ€¦' : `${duecare.length} item(s)`} â€¢ <span className="font-mono">{fxBadge}</span>
           </div>
         </div>
 
         {loading ? (
-          <div className="p-6 text-sm text-gray-500">Loading DueCare catalog…</div>
+          <div className="p-6 text-sm text-gray-500">Loading DueCare catalogâ€¦</div>
         ) : duecare.length === 0 ? (
           <div className="p-6 space-y-2">
             <div className="text-sm font-medium">No DueCare items yet</div>
@@ -407,14 +413,14 @@ export default function DueCarePage() {
                             const suffix =
                               typeof v.stockQty === 'number'
                                 ? v.stockQty <= 0
-                                  ? ' • sold out'
-                                  : ` • ${v.stockQty} left`
+                                  ? ' â€¢ sold out'
+                                  : ` â€¢ ${v.stockQty} left`
                                 : '';
 
                             const label =
                               currency.toUpperCase() === 'ZAR'
-                                ? `${v.label} — ${money(vZar, 'ZAR')}${suffix}`
-                                : `${v.label} — ${money(vLocal, currency)} (${money(vZar, 'ZAR')} base)${suffix}`;
+                                ? `${v.label} â€” ${money(vZar, 'ZAR')}${suffix}`
+                                : `${v.label} â€” ${money(vLocal, currency)} (${money(vZar, 'ZAR')} base)${suffix}`;
 
                             return (
                               <option key={v.id} value={v.id} disabled={!ok}>
@@ -441,7 +447,7 @@ export default function DueCarePage() {
                             </div>
                           )
                         ) : (
-                          <span className="text-gray-500">—</span>
+                          <span className="text-gray-500">â€”</span>
                         )}
                       </div>
 
@@ -463,7 +469,7 @@ export default function DueCarePage() {
                       disabled={busyId === p.id || !inStock}
                       className="mt-2 inline-flex items-center justify-center px-3 py-2 rounded-full text-xs bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
                     >
-                      {busyId === p.id ? 'Redirecting…' : !inStock ? 'Sold out' : 'Buy'}
+                      {busyId === p.id ? 'Redirectingâ€¦' : !inStock ? 'Sold out' : 'Buy'}
                     </button>
 
                     <div className="text-xs text-gray-500 mt-auto">
@@ -483,3 +489,12 @@ export default function DueCarePage() {
     </div>
   );
 }
+
+export default function DueCarePage() {
+  return (
+    <Suspense fallback={null}>
+      <DueCarePageContent />
+    </Suspense>
+  );
+}
+

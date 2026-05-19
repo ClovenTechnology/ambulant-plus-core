@@ -2,7 +2,6 @@
 'use client';
 
 import React, { useEffect, useState, useCallback } from 'react';
-import type { Medication } from '@/types';
 import ExportMedButton from './ExportMedButton';
 
 type Medication = {
@@ -28,9 +27,16 @@ export default function MedicationsBlockWrapper({ initialMeds }: { initialMeds?:
     try {
       const res = await fetch('/api/medications', { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to fetch');
-      const data = await res.json();
-      // assume the endpoint returns an array
-      setMeds(Array.isArray(data) ? data : (data.meds ?? data));
+      const data = await res.json().catch(() => null);
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.meds)
+          ? data.meds
+          : Array.isArray(data?.items)
+            ? data.items
+            : [];
+
+      setMeds(items);
     } catch (err: any) {
       setError(err?.message || 'Could not load medications');
     } finally {
@@ -51,9 +57,10 @@ export default function MedicationsBlockWrapper({ initialMeds }: { initialMeds?:
         body: JSON.stringify({ id, status }),
       });
       if (!res.ok) throw new Error('Update failed');
-      const data = await res.json();
-      // update local UI
-      setMeds(prev => (prev ? prev.map(m => (m.id === id ? { ...m, status } : m)) : prev));
+      const data = await res.json().catch(() => null);
+      setMeds((prev) =>
+        prev ? prev.map((m) => (m.id === id ? { ...m, status } : m)) : prev,
+      );
       return data;
     } catch (err) {
       console.error(err);

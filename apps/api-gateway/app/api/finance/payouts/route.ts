@@ -1,6 +1,10 @@
-//apps/api-gateway/app/api/finance/payouts/route.ts
+﻿//apps/api-gateway/app/api/finance/payouts/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 /**
  * GET /api/finance/payouts?status=pending
@@ -8,7 +12,7 @@ import { prisma } from '@/lib/prisma';
  *
  * Optional query params:
  * - status: pending | paid | cancelled | failed | refunded (case-insensitive)
- * - limit: number (default 25) – keeps response tiny for tiles
+ * - limit: number (default 25) â€“ keeps response tiny for tiles
  */
 export async function GET(req: NextRequest) {
   try {
@@ -43,3 +47,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'internal_error' }, { status: 500 });
   }
 }
+
+

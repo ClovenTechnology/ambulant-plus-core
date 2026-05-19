@@ -36,6 +36,8 @@ export default function ReminderHeader({
   onRefresh,
   onToggleAlerts,
 }: ReminderHeaderProps) {
+  void usedMock;
+
   return (
     <header className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
       <div className="space-y-2">
@@ -56,11 +58,6 @@ export default function ReminderHeader({
           reminders — and keep an easy, accurate record of how you&apos;re
           following your plan.
         </p>
-        {usedMock && (
-          <p className="text-xs text-amber-600">
-            Showing sample data while we reconnect to the server.
-          </p>
-        )}
         <div className="mt-1 space-y-1">
           <div className="inline-flex flex-wrap items-center gap-2 text-[11px] text-gray-500">
             <span>Alerts work best while this tab is open.</span>

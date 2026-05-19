@@ -10,13 +10,34 @@ type EcgRecord = {
   rawSummary?: any;
 };
 
-type Props = {
-  onSave?: (rec: EcgRecord) => Promise<void> | void;
-  ECGCanvas?: React.ComponentType<{ running: boolean; samples?: number[] }>; // optional canvas UI component
-  patientId?: string;
+type EcgCycleComplete = {
+  reason: 'result_received' | 'timeout' | 'manual_stop' | 'device_disconnect' | 'signal_detected_no_result';
+  sampleCount: number;
+  signalQuality: number | null;
+  recordedAt: string;
 };
 
-const uid = (p='') => p + Math.random().toString(36).slice(2,9);
+type Props = {
+  onSave?: (rec: EcgRecord) => Promise<void> | void;
+  ECGCanvas?: React.ComponentType<{ running: boolean; samples?: number[] }>;
+  patientId?: string;
+  running?: boolean;
+  samples?: number[];
+  initialHistory?: EcgRecord[];
+  latestSession?: EcgRecord | null;
+  lastCycleComplete?: EcgCycleComplete | null;
+  onStart?: () => Promise<void> | void;
+  onStop?: () => Promise<void> | void;
+};
+
+const uid = (p = '') => {
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+  return `${p}${token}`;
+};
 const nowISO = () => new Date().toISOString();
 
 /**
@@ -25,13 +46,31 @@ const nowISO = () => new Date().toISOString();
  * - optionally renders ECGCanvas if provided
  * - stops after user stops, and creates a summary record that can be persisted via onSave
  */
-export default function ECG({ onSave, ECGCanvas, patientId }: Props) {
+export default function ECG({
+  onSave,
+  ECGCanvas,
+  patientId,
+  running: controlledRunning,
+  samples: controlledSamples,
+  initialHistory,
+  latestSession,
+  lastCycleComplete,
+  onStart,
+  onStop,
+}: Props) {
+  void initialHistory;
+  void latestSession;
+  void lastCycleComplete;
+
   const [running, setRunning] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const connRef = useRef<any|null>(null);
-  const unsubRef = useRef<() => void | null>(null);
+  const unsubRef = useRef<(() => void) | null>(null);
   const samplesRef = useRef<number[]>([]); // local short buffer for canvas
   const startAtRef = useRef<number | null>(null);
+
+  const effectiveRunning = controlledRunning ?? running;
+  const effectiveSamples = controlledSamples ?? samplesRef.current;
 
   function decodeEcgSamples(dv: DataView) {
     // ECG vendor often sends 16-bit signed PCM samples at 250Hz
@@ -128,13 +167,13 @@ export default function ECG({ onSave, ECGCanvas, patientId }: Props) {
           <div className="text-xs text-gray-500">Place fingers on electrodes and press Start. ECG streams to clinician live view.</div>
         </div>
         <div className="flex gap-2">
-          <button onClick={() => running ? stopStreaming() : startStreaming()} className={`px-3 py-1 rounded ${running ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}>{running ? 'Stop' : 'Start'}</button>
+          <button onClick={() => effectiveRunning ? (onStop ? onStop() : stopStreaming()) : (onStart ? onStart() : startStreaming())} className={`px-3 py-1 rounded ${effectiveRunning ? 'bg-rose-600 text-white' : 'bg-emerald-600 text-white'}`}>{effectiveRunning ? 'Stop' : 'Start'}</button>
           <button className="px-2 py-1 border rounded bg-white">Open Viewer</button>
         </div>
       </div>
 
       <div className="rounded border bg-[#0b1020] p-2 text-slate-200">
-        {ECGCanvas ? <ECGCanvas running={running} samples={samplesRef.current.slice(-1000)}/> : <CanvasPreview />}
+        {ECGCanvas ? <ECGCanvas running={effectiveRunning} samples={effectiveSamples.slice(-1000)}/> : <CanvasPreview />}
         <div className="mt-2 text-xs text-gray-400">{msg}</div>
       </div>
     </div>

@@ -2,6 +2,21 @@
 
 import { useEffect, useRef, useState } from 'react';
 
+type WindowWithWebkitAudio = Window & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
+function createAudioContext() {
+  const AudioContextCtor =
+    window.AudioContext || (window as WindowWithWebkitAudio).webkitAudioContext;
+
+  if (!AudioContextCtor) {
+    throw new Error('AudioContext is not available in this browser.');
+  }
+
+  return new AudioContextCtor();
+}
+
 export default function PreflightPanel() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [level, setLevel] = useState(0);
@@ -49,9 +64,7 @@ export default function PreflightPanel() {
         stream = await navigator.mediaDevices.getUserMedia(constraints);
         if (videoRef.current) videoRef.current.srcObject = stream;
 
-        // @ts-ignore
-        const Ctx = window.AudioContext || window.webkitAudioContext;
-        const ctxLocal: AudioContext = new Ctx();
+        const ctxLocal = createAudioContext();
         const srcLocal = ctxLocal.createMediaStreamSource(stream);
         const analyserLocal = ctxLocal.createAnalyser();
         analyserLocal.fftSize = 512;
@@ -71,7 +84,6 @@ export default function PreflightPanel() {
         tick();
         setRunning(true);
 
-        // @ts-ignore
         ctx = ctxLocal;
       } catch {}
     }
@@ -94,9 +106,7 @@ export default function PreflightPanel() {
   }, [inp, cam, out]);
 
   async function playTone() {
-    // @ts-ignore
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    const ctx = new Ctx();
+    const ctx = createAudioContext();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.frequency.value = 440;
@@ -109,12 +119,15 @@ export default function PreflightPanel() {
     }, 500);
   }
 
-  async function setOutput(el: HTMLAudioElement | null) {
+  function setOutput(el: HTMLAudioElement | null) {
     if (!el || !out) return;
-    // @ts-ignore
-    if (typeof el.setSinkId === 'function') {
-      // @ts-ignore
-      await el.setSinkId(out).catch(() => {});
+
+    const audioEl = el as HTMLAudioElement & {
+      setSinkId?: (sinkId: string) => Promise<void>;
+    };
+
+    if (typeof audioEl.setSinkId === 'function') {
+      void audioEl.setSinkId(out).catch(() => {});
     }
   }
 

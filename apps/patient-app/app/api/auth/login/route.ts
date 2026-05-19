@@ -109,13 +109,30 @@ export async function POST(req: Request) {
 
   const now = new Date();
 
+  const patientProfile =
+    cred.actorType === 'PATIENT'
+      ? await prisma.patientProfile
+          .findFirst({
+            where: { userId: cred.id },
+            select: {
+              id: true,
+              userId: true,
+              name: true,
+              contactEmail: true,
+            },
+          })
+          .catch(() => null)
+      : null;
+
+  const actorRefId = patientProfile?.id ?? null;
+
   // Create presence session (server-side)
   const sess = await prisma.presenceSession
     .create({
       data: {
         userId: cred.id,
         actorType: cred.actorType,
-        actorRefId: null,
+        actorRefId,
         app: 'patient-app',
         lastSeenAt: now,
         ipCountry: null,
@@ -145,7 +162,9 @@ export async function POST(req: Request) {
     {
       sid: sess?.id || null,
       uid: cred.id,
+      sub: cred.id,
       actorType: cred.actorType,
+      actorRefId,
       orgId: cred.orgId || 'org-default',
       iat,
       exp,
@@ -153,7 +172,23 @@ export async function POST(req: Request) {
     secret,
   );
 
-  const res = NextResponse.json({ ok: true, userId: cred.id, actorType: cred.actorType }, { status: 200 });
+  const res = NextResponse.json(
+    {
+      ok: true,
+      userId: cred.id,
+      actorType: cred.actorType,
+      actorRefId,
+      profile: patientProfile
+        ? {
+            patientId: patientProfile.id,
+            userId: patientProfile.userId,
+            name: patientProfile.name ?? null,
+            email: patientProfile.contactEmail ?? email,
+          }
+        : null,
+    },
+    { status: 200 },
+  );
 
   res.cookies.set({
     name: 'ambulant_session',

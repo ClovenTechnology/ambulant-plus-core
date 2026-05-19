@@ -1,13 +1,46 @@
 // components/reminders/shared.ts
-import type { ReminderShape } from '@/components/ReminderList';
+import {
+  computeMedicationAdherence,
+  getMedicationEvidenceLabel,
+  isMedicationVerificationRequired,
+  isMedicationVerified,
+  isMedicationSelfReported,
+} from '@/src/lib/medication-adherence';
+
+export type ReminderVerificationMode = 'NONE' | 'CAMERA_SEQUENCE';
+export type ReminderVerificationStatus =
+  | 'NOT_REQUIRED'
+  | 'PENDING'
+  | 'IN_PROGRESS'
+  | 'VERIFIED'
+  | 'SELF_REPORTED'
+  | 'FAILED'
+  | 'ABORTED';
+
+export type ReminderTakenSource =
+  | 'NONE'
+  | 'CAMERA_VERIFIED'
+  | 'SELF_REPORTED'
+  | 'MANUAL_CLINICIAN'
+  | 'IMPORTED_SYSTEM';
 
 export type ApiReminder = {
   id: string;
   name: string;
   dose?: string | null;
   time?: string | null;
+  scheduledFor?: string | null;
   status: 'Pending' | 'Taken' | 'Missed';
   snoozedUntil?: string | null;
+  takenAt?: string | null;
+  reportedTakenAt?: string | null;
+  verifiedAt?: string | null;
+  verificationRequired?: boolean | null;
+  verificationMode?: ReminderVerificationMode | null;
+  verificationStatus?: ReminderVerificationStatus | null;
+  takenSource?: ReminderTakenSource | null;
+  confidenceScore?: number | null;
+  integrityScore?: number | null;
   source?: string | null;
   medicationId?: string | null;
   meta?: any;
@@ -33,114 +66,34 @@ export type ReminderCategory =
 export type Stats = {
   pending: number;
   taken: number;
+  verifiedTaken: number;
+  selfReportedTaken: number;
   missed: number;
+  concluded: number;
   pct: number;
+  confidencePct: number;
 };
 
-/**
- * NexRing data stubs
- */
 export type NexRingExerciseMetrics = {
-  sessionId: string;
   steps: number;
-  avgHeartRate: number;
-  peakHeartRate?: number;
-  distanceKm?: number;
-  calories?: number;
-  startTimeIso?: string;
-  endTimeIso?: string;
+  avgHeartRate?: number | null;
+  distanceKm?: number | null;
+  calories?: number | null;
+  startTimeIso?: string | null;
+  endTimeIso?: string | null;
 };
 
 export type NexRingSleepMetrics = {
-  nightId: string;
   sleepScore: number;
   totalSleepMinutes: number;
-  deepMinutes?: number;
-  remMinutes?: number;
-  efficiencyPct?: number;
-  inBedStartIso?: string;
-  inBedEndIso?: string;
+  deepMinutes?: number | null;
+  remMinutes?: number | null;
+  efficiencyPct?: number | null;
+  latencyMinutes?: number | null;
+  startTimeIso?: string | null;
+  endTimeIso?: string | null;
 };
 
-export type NexRingMetrics = {
-  exercise?: NexRingExerciseMetrics;
-  sleep?: NexRingSleepMetrics;
-};
-
-// Soft fallback data if API fails or returns nothing
-export const MOCK_REMINDERS: ApiReminder[] = [
-  {
-    id: 'mock-1',
-    name: 'Morning antihypertensive',
-    dose: '10 mg',
-    time: '08:00',
-    status: 'Pending',
-    source: 'medication',
-  },
-  {
-    id: 'mock-2',
-    name: 'Metformin',
-    dose: '500 mg',
-    time: '20:00',
-    status: 'Pending',
-    source: 'medication',
-  },
-  {
-    id: 'mock-3',
-    name: 'Hydration reminder',
-    dose: '250 ml',
-    time: '11:00',
-    status: 'Pending',
-    source: 'hydration',
-  },
-  {
-    id: 'mock-4',
-    name: 'Evening walk',
-    dose: null,
-    time: '18:30',
-    status: 'Taken',
-    source: 'exercise',
-    meta: {
-      type: 'exercise',
-      nexRing: {
-        exercise: {
-          sessionId: 'demo-walk-1',
-          steps: 3200,
-          avgHeartRate: 104,
-          peakHeartRate: 121,
-          distanceKm: 2.3,
-          calories: 145,
-          startTimeIso: new Date().toISOString(),
-        },
-      } satisfies NexRingMetrics,
-    },
-  },
-  {
-    id: 'mock-5',
-    name: 'Bedtime routine',
-    dose: '8h goal',
-    time: '22:30',
-    status: 'Pending',
-    source: 'sleep',
-    meta: {
-      type: 'sleep',
-      nexRing: {
-        sleep: {
-          nightId: 'demo-night-1',
-          sleepScore: 84,
-          totalSleepMinutes: 7.25 * 60, // 7h 15m
-          deepMinutes: 80,
-          remMinutes: 95,
-          efficiencyPct: 91,
-          inBedStartIso: new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString(),
-          inBedEndIso: new Date().toISOString(),
-        },
-      } satisfies NexRingMetrics,
-    },
-  },
-];
-
-export const MOCK_ADHERENCE_TREND = [80, 85, 88, 90, 92, 95, 93];
 
 export function nowHHMM() {
   const d = new Date();
@@ -184,13 +137,7 @@ export function getReminderType(r: ApiReminder): ReminderCategory {
   if (metaType === 'hydration') return 'hydration';
   if (metaType === 'exercise') return 'exercise';
   if (metaType === 'sleep') return 'sleep';
-  if (
-    metaType === 'meditation' ||
-    metaType === 'mindfulness' ||
-    metaType === 'breathing'
-  ) {
-    return 'meditation';
-  }
+  if (metaType === 'meditation' || metaType === 'mindfulness' || metaType === 'breathing') return 'meditation';
 
   return 'other';
 }
@@ -199,12 +146,43 @@ export function computeStats(arr: ApiReminder[]): Stats {
   const pending = arr.filter((r) => r.status === 'Pending').length;
   const taken = arr.filter((r) => r.status === 'Taken').length;
   const missed = arr.filter((r) => r.status === 'Missed').length;
-  const denom = taken + missed;
-  const pct = denom === 0 ? 100 : Math.round((taken / denom) * 100);
-  return { pending, taken, missed, pct };
+  const concluded = taken + missed;
+  const pct = concluded === 0 ? 100 : Math.round((taken / concluded) * 100);
+
+  return {
+    pending,
+    taken,
+    verifiedTaken: taken,
+    selfReportedTaken: 0,
+    missed,
+    concluded,
+    pct,
+    confidencePct: pct,
+  };
 }
 
-// Consistent icons for categories
+export function computeMedicationStats(arr: ApiReminder[]): Stats {
+  const summary = computeMedicationAdherence(arr);
+
+  return {
+    pending: summary.pending,
+    taken: summary.taken,
+    verifiedTaken: summary.verifiedTaken,
+    selfReportedTaken: summary.selfReportedTaken,
+    missed: summary.missed,
+    concluded: summary.concluded,
+    pct: summary.weightedPct,
+    confidencePct: summary.confidencePct,
+  };
+}
+
+export {
+  isMedicationVerificationRequired,
+  isMedicationVerified,
+  isMedicationSelfReported,
+  getMedicationEvidenceLabel,
+};
+
 export function getCategoryIcon(category: ReminderCategory): string {
   switch (category) {
     case 'pill':

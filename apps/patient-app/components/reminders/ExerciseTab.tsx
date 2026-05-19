@@ -3,13 +3,8 @@ import React, { useRef, useState, useMemo } from 'react';
 import Section from '@/components/Section';
 import ReminderList, { type ReminderShape } from '@/components/ReminderList';
 import MeterDonut from '@/components/charts/AnimatedMeterDonut';
-import Sparkline from '@/components/charts/Sparkline';
 import { toast } from '../toast';
-import {
-  MOCK_ADHERENCE_TREND,
-  type Stats,
-  type NexRingExerciseMetrics,
-} from './shared';
+import { type Stats, type NexRingExerciseMetrics } from './shared';
 
 type ExerciseTabProps = {
   stats: Stats;
@@ -21,6 +16,7 @@ type ExerciseTabProps = {
 };
 
 type ExerciseSchedule = 'today' | 'thisWeek' | 'everyday';
+
 
 export default function ExerciseTab({
   stats,
@@ -152,13 +148,6 @@ export default function ExerciseTab({
             </div>
           </div>
 
-          <div className="rounded-xl border bg-white p-2">
-            <div className="mb-1 text-xs text-slate-500">
-              Movement trend (placeholder)
-            </div>
-            <Sparkline data={MOCK_ADHERENCE_TREND} height={64} />
-          </div>
-
           {latestNexRingExercise && (
             <div className="rounded-xl border bg-slate-50 px-3 py-2 text-xs text-gray-700">
               <div className="flex items-center justify-between">
@@ -168,7 +157,9 @@ export default function ExerciseTab({
                 </span>
               </div>
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-gray-600">
-                <span>Avg HR {latestNexRingExercise.avgHeartRate} bpm</span>
+                {latestNexRingExercise.avgHeartRate != null && (
+                  <span>Avg HR {latestNexRingExercise.avgHeartRate} bpm</span>
+                )}
                 {latestNexRingExercise.distanceKm != null && (
                   <span>
                     {latestNexRingExercise.distanceKm.toFixed(1)} km

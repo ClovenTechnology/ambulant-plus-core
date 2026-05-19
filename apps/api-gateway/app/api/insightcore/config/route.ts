@@ -29,7 +29,7 @@ type InsightThresholdConfig = {
 
 const DEFAULT_CONFIG: InsightThresholdConfig = {
   heartRate: { min: 50, max: 120 },
-  spo2: { min: 92 },
+  spo2: { min: 94 },
   temperature: { max: 38 },
   glucoseInstability: { threshold: 0.7 },
   bp: { systolicMax: 140, diastolicMax: 90 },
@@ -59,24 +59,26 @@ const DEFAULT_CONFIG: InsightThresholdConfig = {
   },
 };
 
-function safeJsonParse(value: unknown) {
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function safeJsonObject(value: unknown): Record<string, any> | null {
   if (value == null) return null;
 
   if (typeof value === 'string') {
-    if (!value.trim()) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
 
     try {
-      return JSON.parse(value);
+      const parsed = JSON.parse(trimmed);
+      return isPlainObject(parsed) ? parsed : null;
     } catch {
       return null;
     }
   }
 
-  if (typeof value === 'object' && !Array.isArray(value)) {
-    return value;
-  }
-
-  return null;
+  return isPlainObject(value) ? value : null;
 }
 
 function getOrgId(req: Request): string {
@@ -92,7 +94,7 @@ async function loadConfig(orgId: string): Promise<InsightThresholdConfig & { upd
 
   if (!ev?.payload) return DEFAULT_CONFIG;
 
-  const p = safeJsonParse(ev.payload) || {};
+  const p = safeJsonObject(ev.payload) || {};
   const cfg: InsightThresholdConfig = {
     ...DEFAULT_CONFIG,
     ...p,

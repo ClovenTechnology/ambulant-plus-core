@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import LabTimelineItem, {
@@ -9,15 +9,15 @@ import LabTimelineItem, {
 
 type ApiItem = { status: string; at: string };
 
-export default function MedReachTimelinePage() {
+function MedReachTimelinePageContent() {
   const searchParams = useSearchParams();
-  const router = useRouter();
+const qs = searchParams ?? new URLSearchParams();
+const router = useRouter();
 
-  // Prefer id, fall back to labId, then a safe mock default
-  const initialId =
-    searchParams.get('id') ||
-    searchParams.get('labId') ||
-    'LAB-2001';
+const initialId =
+  qs.get('id') ||
+  qs.get('labId') ||
+  'LAB-2001';
 
   // inputValue = what's in the box
   // activeId   = what we're actually loading timeline for
@@ -199,3 +199,12 @@ export default function MedReachTimelinePage() {
     </main>
   );
 }
+
+export default function MedReachTimelinePage() {
+  return (
+    <Suspense fallback={null}>
+      <MedReachTimelinePageContent />
+    </Suspense>
+  );
+}
+

@@ -156,7 +156,7 @@ function stethStateInit(): StethBtState {
 
 export default function DevicesPage() {
   const { user } = useAuthMe();
-  const userId = user?.id || 'anon';
+  const userId = user?.id ? String(user.id) : '';
 
   const [loading, setLoading] = useState(false);
   const [pairingId, setPairingId] = useState<string | null>(null);
@@ -194,7 +194,7 @@ export default function DevicesPage() {
       setErr(null);
 
       if (!supportsBluetooth) {
-        toast('Web Bluetooth not supported here. Use Chrome/Edge on desktop or Android (HTTPS).', { type: 'error' });
+        toast('Web Bluetooth not supported here. Use Chrome/Edge on desktop or Android (HTTPS).', 'error');
         patchSteth(id, { error: 'Web Bluetooth not supported on this browser.' });
         return;
       }
@@ -223,7 +223,7 @@ export default function DevicesPage() {
           },
           onDisconnected: ({ reason }: any) => {
             patchSteth(id, { connected: false, connecting: false });
-            toast(`Stethoscope disconnected${reason ? `: ${String(reason)}` : ''}`, { type: 'error' });
+            toast(`Stethoscope disconnected${reason ? `: ${String(reason)}` : ''}`, 'error');
           },
           onTelemetry: (t: StethoscopeTelemetry) => {
             patchSteth(id, { telemetry: t, lastSeenAt: Date.now() });
@@ -234,11 +234,11 @@ export default function DevicesPage() {
         await st.requestAndConnect();
 
         patchSteth(id, { connected: true, packets: 0, lastSeenAt: Date.now(), error: null });
-        toast('Stethoscope connected (this tab).', { type: 'success' });
+        toast('Stethoscope connected (this tab).', 'success');
       } catch (e) {
         const c = classifyBtError(e);
         patchSteth(id, { connected: false, error: `${c.title}: ${c.detail}` });
-        toast(`${c.title}: ${c.detail}`, { type: 'error' });
+        toast(`${c.title}: ${c.detail}`, 'error');
       } finally {
         patchSteth(id, { connecting: false });
       }
@@ -252,7 +252,7 @@ export default function DevicesPage() {
       setErr(null);
 
       if (!supportsBluetooth) {
-        toast('Web Bluetooth not supported here. Use Chrome/Edge on desktop or Android (HTTPS).', { type: 'error' });
+        toast('Web Bluetooth not supported here. Use Chrome/Edge on desktop or Android (HTTPS).', 'error');
         patchSteth(id, { error: 'Web Bluetooth not supported on this browser.' });
         return;
       }
@@ -265,11 +265,11 @@ export default function DevicesPage() {
       try {
         await (st as any).reconnect?.();
         patchSteth(id, { connected: true, lastSeenAt: Date.now(), error: null });
-        toast('Stethoscope reconnected (this tab).', { type: 'success' });
+        toast('Stethoscope reconnected (this tab).', 'success');
       } catch (e) {
         const c = classifyBtError(e);
         patchSteth(id, { connected: false, error: `Reconnect failed: ${c.title}: ${c.detail}` });
-        toast(`Reconnect failed: ${c.title}: ${c.detail}`, { type: 'error' });
+        toast(`Reconnect failed: ${c.title}: ${c.detail}`, 'error');
       } finally {
         patchSteth(id, { connecting: false });
       }
@@ -292,7 +292,7 @@ export default function DevicesPage() {
           stethRefMap.current.delete(id);
         }
         patchSteth(id, { connected: false, connecting: false, lastSeenAt: null, packets: 0 });
-        toast('Stethoscope disconnected.', { type: 'success' });
+        toast('Stethoscope disconnected.', 'success');
       } finally {
         patchSteth(id, { connecting: false });
       }
@@ -306,9 +306,9 @@ export default function DevicesPage() {
       if (!st) return;
       try {
         await (st as any).refreshTelemetry?.();
-        toast('Telemetry refreshed.', { type: 'success' });
+        toast('Telemetry refreshed.', 'success');
       } catch (e) {
-        toast(`Telemetry refresh failed: ${String((e as any)?.message || e)}`, { type: 'error' });
+        toast(`Telemetry refresh failed: ${String((e as any)?.message || e)}`, 'error');
       }
     },
     [],
@@ -362,7 +362,7 @@ export default function DevicesPage() {
         return next;
       });
 
-      if (firstLoadRef.current) toast('Devices refreshed.', { type: 'success' });
+      if (firstLoadRef.current) toast('Devices refreshed.', 'success');
       firstLoadRef.current = true;
     } catch (e: any) {
       setErr(e?.message || 'Failed to load devices');
@@ -381,6 +381,11 @@ export default function DevicesPage() {
     for (const d of devices) {
       const iomt = kindToIomt(d.kind);
       if (!iomt) continue;
+      if (!userId) {
+        map.set(d.id, { iomt, ok: false, pdfUrl: consentPdfUrl(iomt), version: 'unavailable' });
+        continue;
+      }
+
       const rec = readIomtConsent(userId, iomt);
       map.set(d.id, { iomt, ok: !!rec.ok, pdfUrl: consentPdfUrl(iomt), version: rec.version });
     }
@@ -459,9 +464,9 @@ export default function DevicesPage() {
           throw new Error(t || `HTTP ${r.status}`);
         }
         await load();
-        toast('Pairing started. Confirm the system Bluetooth/USB prompt if shown.', { type: 'success' });
+        toast('Pairing started. Confirm the system Bluetooth/USB prompt if shown.', 'success');
       } catch (e: any) {
-        toast(`Pair failed: ${e?.message || e}`, { type: 'error' });
+        toast(`Pair failed: ${e?.message || e}`, 'error');
       } finally {
         setPairingId(null);
       }
@@ -490,7 +495,7 @@ export default function DevicesPage() {
       const url: string = j?.consoleUrl || `/myCare/devices/console?deviceId=${encodeURIComponent(id)}`;
       window.location.href = url;
     } catch (e: any) {
-      toast(`Stream start failed: ${e?.message || e}`, { type: 'error' });
+      toast(`Stream start failed: ${e?.message || e}`, 'error');
     } finally {
       setStreamingId(null);
     }

@@ -1,58 +1,33 @@
 ﻿// apps/patient-app/app/api/medreach/reports/file/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const STORE = path.resolve(process.cwd(), '../../.data/reports');
-const SAMPLE = path.resolve(process.cwd(), '../../apps/patient-app/public'); // fallback
-
-function inferContentType(name: string) {
-  const ext = (name.split('.').pop() || '').toLowerCase();
-  if (ext === 'pdf') return 'application/pdf';
-  if (['png', 'jpg', 'jpeg', 'webp', 'gif'].includes(ext)) {
-    return ext === 'jpg' ? 'image/jpeg' : `image/${ext}`;
-  }
-  return 'application/octet-stream';
-}
-
+/**
+ * Production-safe disabled report file route.
+ *
+ * Previous implementation served files from local .data/public sample folders.
+ * Patient lab files must come from a real document store or signed URL service.
+ */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const rawName = url.searchParams.get('name') || 'sample.pdf';
+  const name = (url.searchParams.get('name') || url.searchParams.get('fileKey') || '').trim();
 
-  // Basic sanitisation: strip path separators and disallow traversal
-  const safeName = rawName.replace(/[/\\]/g, '');
-  if (safeName.includes('..')) {
+  if (!name) {
     return NextResponse.json(
-      { error: 'invalid name' },
+      { ok: false, error: 'fileKey_required' },
       { status: 400 },
     );
   }
 
-  const filePath = path.join(STORE, safeName);
-  const altPath = path.join(SAMPLE, safeName);
-
-  try {
-    const pick = await fs.readFile(filePath).catch(() =>
-      fs.readFile(altPath),
-    );
-    const type = inferContentType(safeName);
-
-    return new NextResponse(pick, {
-      status: 200,
-      headers: {
-        'Content-Type': type,
-        'Cache-Control': 'private, max-age=60',
-        'Content-Disposition': `inline; filename="${encodeURIComponent(
-          safeName,
-        )}"`,
-      },
-    });
-  } catch (e: any) {
-    return NextResponse.json(
-      { error: 'not found', detail: String(e) },
-      { status: 404 },
-    );
-  }
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'medreach_report_file_store_not_configured',
+      message:
+        'MedReach report file delivery is disabled until the production document store is connected.',
+    },
+    { status: 503 },
+  );
 }

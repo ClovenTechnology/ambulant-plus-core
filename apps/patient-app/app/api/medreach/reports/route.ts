@@ -1,83 +1,139 @@
 ﻿// apps/patient-app/app/api/medreach/reports/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
+import { apigwBase } from '@/app/api/_apigw';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const filePath = path.resolve(process.cwd(), '../../packages/medreach/reports.json');
-
-// Helper to strip BOM if present
-async function readJsonSafe(p: string) {
-  const txt = await fs.readFile(p, 'utf-8');
-  const cleaned = txt.replace(/^\uFEFF/, '');
-  return JSON.parse(cleaned);
+function json(data: any, status = 200) {
+  return NextResponse.json(data, { status });
 }
 
-// Very light mock fallback – you can extend structure as needed
-const MOCK_REPORTS = [
-  {
-    id: 'LAB-2001',
-    patient: 'John Doe',
-    type: 'Full Blood Count',
-    createdAt: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
-    file: 'sample-lab-report.pdf',
-  },
-  {
-    id: 'LAB-2002',
-    patient: 'Jane Smith',
-    type: 'Lipid Profile',
-    createdAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    file: 'sample-lab-report-2.pdf',
-  },
-];
+function forwardHeaders(req: NextRequest) {
+  const headers = new Headers();
+
+  const passthrough = [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-role',
+    'x-org-id',
+    'x-correlation-id',
+    'x-request-id',
+  ];
+
+  for (const key of passthrough) {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
+  }
+
+  if (!headers.has('x-role')) {
+    headers.set('x-role', 'patient');
+  }
+
+  headers.set('accept', 'application/json');
+
+  return headers;
+}
+
+function normalizeReport(order: any) {
+  return {
+    id: order.id ?? order.orderId,
+    orderId: order.id ?? order.orderId,
+    encounterId: order.encounterId ?? null,
+    patientId: order.patientId ?? null,
+    patient: order.patientName ?? '',
+    type:
+      Array.isArray(order.tests) && order.tests.length
+        ? order.tests.map((t: any) => t.name || t.code).filter(Boolean).join(', ')
+        : 'Lab report',
+    createdAt: order.resultReadyAt ?? order.resultSentAt ?? order.createdAt ?? null,
+    resultStatus: order.resultStatus ?? null,
+    resultSummary: order.resultSummary ?? null,
+    resultPdfUrl: order.resultPdfUrl ?? null,
+    testResults: Array.isArray(order.testResults) ? order.testResults : [],
+  };
+}
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const encId = url.searchParams.get('encId') || url.searchParams.get('id');
-  const patient = url.searchParams.get('patient');
+  const base = apigwBase();
+
+  if (!base) {
+    return json(
+      {
+        ok: false,
+        error: 'service_not_configured',
+        service: 'medreach_reports',
+        reports: [],
+      },
+      503,
+    );
+  }
+
+  const incoming = new URL(req.url);
+  const orderId =
+    incoming.searchParams.get('orderId') ||
+    incoming.searchParams.get('id') ||
+    incoming.searchParams.get('encId') ||
+    '';
+
+  if (!orderId) {
+    return json(
+      {
+        ok: true,
+        reports: [],
+        source: 'api_gateway',
+      },
+      200,
+    );
+  }
+
+  const upstream = new URL(`/api/medreach/labs/orders/${encodeURIComponent(orderId)}`, base);
 
   try {
-    const data = await readJsonSafe(filePath);
+    const res = await fetch(upstream.toString(), {
+      method: 'GET',
+      headers: forwardHeaders(req),
+      cache: 'no-store',
+    });
 
-    // Expect either { reports: [...] } or plain [...]
-    let reports: any[] = [];
-    if (Array.isArray((data as any).reports)) {
-      reports = (data as any).reports;
-    } else if (Array.isArray(data)) {
-      reports = data as any[];
+    const data = await res.json().catch(() => ({}));
+
+    if (res.status === 404) {
+      return json({ ok: true, reports: [], source: 'api_gateway' }, 200);
     }
 
-    // Optional filtering
-    if (encId) {
-      reports = reports.filter(
-        (r) => r.encounterId === encId || r.id === encId || r.labId === encId,
-      );
-    }
-    if (patient) {
-      const needle = patient.toLowerCase();
-      reports = reports.filter(
-        (r) =>
-          (r.patient && String(r.patient).toLowerCase().includes(needle)) ||
-          (r.patientId && String(r.patientId).toLowerCase().includes(needle)),
-      );
-    }
-
-    return NextResponse.json({ reports });
-  } catch (err) {
-    console.warn('MedReach reports: failed to read file, using mock', err);
-    let reports = MOCK_REPORTS;
-
-    if (encId) {
-      reports = reports.filter((r) => r.id === encId);
-    }
-    if (patient) {
-      const needle = patient.toLowerCase();
-      reports = reports.filter((r) =>
-        String(r.patient).toLowerCase().includes(needle),
+    if (!res.ok) {
+      return json(
+        {
+          ok: false,
+          error: data?.error || `medreach_gateway_http_${res.status}`,
+          reports: [],
+        },
+        res.status,
       );
     }
 
-    return NextResponse.json({ reports });
+    const order = data?.data ?? data?.order ?? data;
+
+    return json({
+      ok: true,
+      reports: [normalizeReport(order)].filter((r) => r.id),
+      source: 'api_gateway',
+    });
+  } catch (err: any) {
+    return json(
+      {
+        ok: false,
+        error: err?.message || 'medreach_reports_proxy_failed',
+        reports: [],
+      },
+      502,
+    );
   }
 }

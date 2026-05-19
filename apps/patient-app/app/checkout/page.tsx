@@ -3,7 +3,7 @@
 
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Suspense } from 'react';
 import MedicalAidManager from '@/components/MedicalAidManager';
 
 type Appt = {
@@ -17,10 +17,16 @@ type Appt = {
 
 type PaymentMethod = 'self-pay-card' | 'medical-aid' | 'voucher-promo';
 
-export default function CheckoutPage() {
+function CheckoutPageContent() {
   const sp = useSearchParams();
   const router = useRouter();
-  const id = sp.get('a') || '';
+
+  const qs = useMemo(
+    () => new URLSearchParams(sp?.toString() ?? ''),
+    [sp],
+  );
+
+  const id = qs.get('a') || '';
 
   const [a, setA] = useState<Appt | null>(null);
   const [err, setErr] = useState('');
@@ -268,3 +274,12 @@ export default function CheckoutPage() {
     </main>
   );
 }
+
+export default function CheckoutPage() {
+  return (
+    <Suspense fallback={null}>
+      <CheckoutPageContent />
+    </Suspense>
+  );
+}
+

@@ -4,7 +4,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { CLINICIANS } from '@/mock/clinicians';
 
 type Qualification = {
   type: string;
@@ -133,88 +132,6 @@ function normalizeQualification(raw: any): Qualification {
   };
 }
 
-function buildFallbackProfile(id: string): BookingProfile | null {
-  const c = CLINICIANS.find((x) => x.id === id);
-  if (!c) return null;
-
-  const verifiedSrc =
-    (c as any).verifiedQualifications ?? (c as any).qualifications ?? [];
-  const additionalSrc =
-    (c as any).additionalQualifications ??
-    (c as any).otherQualifications ??
-    [];
-  const verifiedQualifications: Qualification[] = Array.isArray(verifiedSrc)
-    ? verifiedSrc.map(normalizeQualification)
-    : [];
-  const additionalQualifications: Qualification[] = Array.isArray(additionalSrc)
-    ? additionalSrc.map(normalizeQualification)
-    : [];
-
-  return {
-    clinician: {
-      id: c.id,
-      name: c.name,
-      specialty: c.specialty,
-      location: c.location,
-      rating: c.rating,
-      timezone: 'Africa/Johannesburg',
-
-      // NEW
-      bio: (c as any).bio ?? (c as any).about ?? undefined,
-      acceptsMedicalAid:
-        typeof (c as any).acceptsMedicalAid === 'boolean'
-          ? (c as any).acceptsMedicalAid
-          : !!(c as any).medicalAidAccepted,
-      acceptedSchemes: Array.isArray((c as any).acceptedSchemes)
-        ? (c as any).acceptedSchemes
-        : [],
-      practiceName: (c as any).practiceName ?? undefined,
-      practiceAddress1:
-        (c as any).practiceAddress1 ??
-        (c as any).practiceAddressLine1 ??
-        (c as any).practiceAddress ??
-        undefined,
-      practiceAddress2:
-        (c as any).practiceAddress2 ??
-        (c as any).practiceAddressLine2 ??
-        undefined,
-      practiceCity: (c as any).practiceCity ?? c.location ?? undefined,
-      practiceCountry: (c as any).practiceCountry ?? 'South Africa',
-      practicePhone: (c as any).phone ?? undefined,
-      practiceEmail: (c as any).email ?? undefined,
-      qualifications: [...verifiedQualifications, ...additionalQualifications],
-      verifiedQualifications,
-      additionalQualifications,
-
-      status: (c as any).status ?? 'active',
-    },
-    fees: {
-      standard: {
-        priceCents: (c as any)?.feeCents ?? 60000,
-        currency: 'ZAR',
-        durationMin: 45,
-        bufferMin: 5,
-      },
-      followUp: {
-        priceCents: Math.round(((c as any)?.feeCents ?? 60000) * 0.6),
-        currency: 'ZAR',
-        durationMin: 25,
-        bufferMin: 5,
-      },
-    },
-    refundPolicy: {
-      within24hPercent: (c as any)?.policy?.within24hPercent ?? 50,
-      noShowPercent: (c as any)?.policy?.noShowPercent ?? 0,
-      clinicianMissPercent: (c as any)?.policy?.clinicianMissPercent ?? 100,
-      networkProrate: (c as any)?.policy?.networkProrate ?? true,
-    },
-    rules: {
-      followUpRequiresOpenCase: true,
-      followUpFromCaseContextOnly: true,
-    },
-  };
-}
-
 export default function ClinicianBioPage({
   params,
 }: {
@@ -237,26 +154,26 @@ export default function ClinicianBioPage({
         setErr(null);
 
         // Preferred endpoint: effective booking profile (fees + durations + buffers + refund policy)
-        if (GATEWAY) {
-          const r = await fetch(
-            `${GATEWAY}/api/clinicians/${encodeURIComponent(
-              id,
-            )}/booking-profile`,
-            {
-              cache: 'no-store',
-            },
-          );
-          if (r.ok) {
-            const j = (await r.json()) as BookingProfile;
-            if (!cancelled) setProfile(j);
-            return;
-          }
+        if (!GATEWAY) {
+          throw new Error('Clinician profile service is not configured.');
         }
 
-        // Fallback to local mock (demo)
-        const fb = buildFallbackProfile(id);
-        if (!fb) throw new Error('Clinician not found');
-        if (!cancelled) setProfile(fb);
+        const r = await fetch(
+          `${GATEWAY}/api/clinicians/${encodeURIComponent(id)}/booking-profile`,
+          {
+            cache: 'no-store',
+          },
+        );
+
+        const j = await r.json().catch(() => null);
+
+        if (!r.ok || !j) {
+          throw new Error(
+            j?.error || j?.message || `Failed to load clinician profile: HTTP ${r.status}`,
+          );
+        }
+
+        if (!cancelled) setProfile(j as BookingProfile);
       } catch (e: any) {
         if (!cancelled) setErr(e?.message || 'Failed to load clinician');
         if (!cancelled) setProfile(null);
@@ -358,7 +275,7 @@ export default function ClinicianBioPage({
 
       {err && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          {err} (showing fallback where needed)
+          {err}
         </div>
       )}
 

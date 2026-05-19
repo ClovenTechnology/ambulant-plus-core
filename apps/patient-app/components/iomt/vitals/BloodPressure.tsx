@@ -15,17 +15,50 @@ type BPRecord = {
   raw?: any;
 };
 
+type MeasurementState = 'idle' | 'connecting' | 'measuring' | 'done' | 'error';
+
+type BpCycleComplete = {
+  reason: 'silence_after_pressure' | 'bp_result_received' | 'manual_stop' | 'device_disconnect';
+  pressureFrames: number;
+  pressureSamplesSeen: number;
+  latestPressure: number | null;
+  peakPressure: number | null;
+  recordedAt: string;
+};
+
 type Props = {
   onSave?: (rec: BPRecord) => Promise<void> | void;
   initialHistory?: BPRecord[];
   unit?: 'mmHg' | 'kPa';
   deviceKey?: string;
   defaultTab?: ViewTab;
+  measurementState?: MeasurementState;
+  livePressure?: number | null;
+  peakPressure?: number | null;
+  pressureFrames?: number;
+  pressureSamplesSeen?: number;
+  latestResult?: {
+    systolic: number;
+    diastolic: number;
+    pulse?: number | null;
+    map?: number | null;
+    recordedAt: string;
+  } | null;
+  lastCycleComplete?: BpCycleComplete | null;
+  onStart?: () => Promise<void> | void;
+  onStop?: () => Promise<void> | void;
 };
 
 // tiny classnames helper
 const cn = (...a: Array<string | false | undefined>) => a.filter(Boolean).join(' ');
-const uid = (p = '') => p + Math.random().toString(36).slice(2, 9);
+const uid = (p = '') => {
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+  return `${p}${token}`;
+};
 const nowISO = () => new Date().toISOString();
 
 const BP_MIN_MAX = { sys: [60, 260] as const, dia: [30, 200] as const, pulse: [30, 220] as const };
@@ -40,13 +73,22 @@ export default function BloodPressure({
   unit = 'mmHg',
   deviceKey = 'duecare.health-monitor',
   defaultTab = 'capture',
+  measurementState,
+  livePressure,
+  peakPressure,
+  pressureFrames,
+  pressureSamplesSeen,
+  latestResult,
+  lastCycleComplete,
+  onStart,
+  onStop,
 }: Props) {
   const [tab, setTab] = useState<ViewTab>(defaultTab);
   const [history, setHistory] = useState<BPRecord[]>(initialHistory.slice(0, 500));
   const [state, setState] = useState<BPState>('idle');
   const [msg, setMsg] = useState<string | null>(null);
 
-  const unsubRef = useRef<null | (() => void)>(null);
+  const unsubRef = useRef<(() => void) | null>(null);
   const connRef = useRef<any | null>(null);
   const timers = useRef<{ connect?: any; read?: any }>({});
   const lastRef = useRef<BPRecord | null>(null);
@@ -225,7 +267,7 @@ export default function BloodPressure({
   const PrimaryBtn = measuring ? (
     <button
       className="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700"
-      onClick={stopBleBPListener}
+      onClick={() => void (onStop ? onStop() : stopBleBPListener())}
       aria-label="Stop blood pressure measurement"
     >
       Stop
@@ -233,7 +275,7 @@ export default function BloodPressure({
   ) : (
     <button
       className="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700"
-      onClick={startBleBPListener}
+      onClick={() => void (onStart ? onStart() : startBleBPListener())}
       aria-label="Start blood pressure measurement"
     >
       Start
@@ -244,7 +286,7 @@ export default function BloodPressure({
   async function simulateOnce() {
     if (measuring) return;
     setState('measuring');
-    setMsg('Simulating…');
+    setMsg('Generating reading…');
     await new Promise((r) => setTimeout(r, 800 + Math.random() * 600)); // brief delay
     const sys = 100 + Math.floor(Math.random() * 40);
     const dia = 60 + Math.floor(Math.random() * 25);
@@ -257,11 +299,11 @@ export default function BloodPressure({
       pulse,
       unit: 'mmHg',
       cuffStatus: 'locked',
-      raw: { simulated: true },
+      raw: { source: 'manual_test' },
     };
     await pushRecord(rec);
     setState('done'); // reveal now
-    setMsg(`Simulated ${sys}/${dia} mmHg`);
+    setMsg(`Generated ${sys}/${dia} mmHg`);
   }
 
   return (

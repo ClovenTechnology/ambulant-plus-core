@@ -1,9 +1,12 @@
 'use client';
 import React, { useState } from 'react';
-import clsx from 'clsx';
 import { motion } from 'framer-motion';
 
-const bodyParts = ['Head', 'Chest', 'Abdomen', 'Arms', 'Legs'];
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
+
+const bodyParts = ['Head', 'Chest', 'Abdomen', 'Arms', 'Legs'] as const;
 
 type SymptomAvatarProps = {
   severityMap?: Record<string, number>; // 0-100
@@ -28,7 +31,8 @@ export default function SymptomAvatar({
     return 'shadow-green-400/50';
   };
 
-  const pulseDuration = 60 / heartRate;
+  const safeHeartRate = Number.isFinite(heartRate) && heartRate > 0 ? heartRate : 60;
+  const pulseDuration = Math.max(0.4, Math.min(2.5, 60 / safeHeartRate));
 
   return (
     <div className="relative flex justify-center gap-6 flex-wrap mt-6">
@@ -49,7 +53,7 @@ export default function SymptomAvatar({
           <div
             key={part}
             onClick={() => togglePart(part)}
-            className={clsx(
+            className={cx(
               'relative cursor-pointer w-20 h-20 flex items-center justify-center rounded-full border-2 border-white/30 font-semibold transition-all duration-300',
               'bg-black/20 text-cyan-200 drop-shadow-md',
               isSelected && 'animate-pulse',

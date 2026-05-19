@@ -1,1409 +1,1025 @@
 ﻿// apps/patient-app/app/appointments/new/page.tsx
 'use client';
 
-import Link from 'next/link';
+import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
 
-import MedicalAidForm, {
-  type MedicalAidPolicy,
-} from '@/components/MedicalAidForm';
-import { usePlan } from '@/components/context/PlanContext';
-
-const API =
-  process.env.NEXT_PUBLIC_APIGW_BASE ??
-  'http://localhost:3010';
-
-type PaymentMethod =
-  | 'card'
-  | 'medical_aid'
-  | 'voucher'
-  | 'eft'
-  | 'mpesa';
-
-type MedicalAidInfo = {
-  scheme: string;
-  memberNumber: string;
-  dependentCode: string;
+type CareCircleMember = {
+  patientId: string;
+  name?: string | null;
+  timezone?: string | null;
+  relationshipId?: string | null;
 };
 
-type BookingForMode = 'self' | 'family';
+type BookingParticipantRole =
+  | 'observer'
+  | 'care_ally'
+  | 'second_patient_participant';
 
-type FamilyRelationshipSummary = {
+type AuthMe = {
+  uid?: string | null;
+  orgId?: string | null;
+};
+
+type PaymentChoice = 'card' | 'medical_aid';
+
+type MedicalAidPolicy = {
   id: string;
-  relationType: string;
-  relationLabel: string;
-  subjectPatientId: string;
-  subjectName: string;
-  permissions?: {
-    canBookAppointments?: boolean;
-    canJoinTelevisit?: boolean;
+  patientId: string;
+  payerName: string;
+  planName?: string;
+  membershipNumber: string;
+  dependentCode?: string;
+  principalName?: string;
+  telemedCover?: 'none' | 'full' | 'partial';
+  telemedCopayType?: 'fixed' | 'percent';
+  telemedCopayValue?: number;
+  active?: boolean;
+  memberStatus?: string | null;
+  eligibilityStatus?: string | null;
+  verifiedUntil?: string | null;
+  reasonCode?: string | null;
+  reasonText?: string | null;
+  latestEligibility?: {
+    status?: string | null;
+    eligibilityStatus?: string | null;
+    premiumStatus?: string | null;
+    validTo?: string | null;
+    effectiveTo?: string | null;
+    reasonCode?: string | null;
+    reasonText?: string | null;
+    [key: string]: any;
+  } | null;
+  verificationStatus?: string;
+  coverageStatus?: string;
+  premiumStatus?: string;
+  clientId?: string;
+  metadata?: {
+    clientId?: string;
+    sponsorId?: string;
+    planId?: string;
+    packageName?: string;
+    optionCode?: string;
+    policyNumber?: string;
+    networkName?: string;
+    [key: string]: any;
   } | null;
 };
 
-type SubjectOption = {
-  relationshipId: string;
-  patientId: string;
-  label: string;
-  relationLabel: string;
-  canBook: boolean;
+type PreflightResult = {
+  ok?: boolean;
+  error?: string;
+  conflicts?: any;
+  warnings?: any[];
+  sponsor?: {
+    ok?: boolean;
+    decision?: string;
+    reason?: string;
+    clientId?: string;
+    clientMemberId?: string;
+    coveragePlanId?: string;
+    sponsorAmountMinor?: number;
+    patientCopayMinor?: number;
+    uncoveredGapMinor?: number;
+    currency?: string;
+    authorizationRequired?: boolean;
+  };
+  priceLock?: {
+    token?: string;
+    amountMinor?: number;
+    currency?: string;
+    expiresInSeconds?: number;
+  };
+  [key: string]: any;
 };
 
-type ObserverDraft = {
-  raw: string; // comma-separated emails for now
-};
-
-function getUid() {
-  if (typeof window === 'undefined') return 'server-user';
-  const key = 'ambulant_uid';
-  let v = localStorage.getItem(key);
-  if (!v) {
-    v =
-      (globalThis.crypto?.randomUUID?.() ||
-        Math.random().toString(36).slice(2)) +
-      '-u';
-    localStorage.setItem(key, v);
-  }
-  return v;
+function pad2(n: number) {
+  return String(n).padStart(2, '0');
 }
 
-// Simple mapper from backend relation type to UI label
-function relationTypeToLabel(t: string): string {
-  switch (t) {
-    case 'SPOUSE':
-    case 'PARTNER':
-      return 'Spouse / Partner';
-    case 'CHILD':
-    case 'DEPENDANT':
-      return 'Child / Dependant';
-    case 'PARENT':
-    case 'GUARDIAN':
-      return 'Parent / Guardian';
-    case 'FRIEND':
-    case 'CARE_ALLY':
-      return 'Friend / Care circle';
-    default:
-      return 'Family / Care circle';
+function safeParseJson<T>(s: string): T | null {
+  try {
+    return JSON.parse(s) as T;
+  } catch {
+    return null;
   }
 }
 
-export default function NewAppointmentPage() {
-  const sp = useSearchParams();
-  const router = useRouter();
-  const { isPremium } = usePlan();
+function moneyMinor(value: unknown, currency = 'ZAR') {
+  const n = Number(value || 0);
+  return new Intl.NumberFormat('en-ZA', {
+    style: 'currency',
+    currency,
+  }).format(n / 100);
+}
 
-  const clinicianId =
-    sp.get('clinicianId') || 'doctor-12';
+async function fetchAuthMe(): Promise<AuthMe | null> {
+  try {
+    const r = await fetch('/api/auth/me', { cache: 'no-store' });
+    if (!r.ok) return null;
+    return (await r.json()) as AuthMe;
+  } catch {
+    return null;
+  }
+}
+
+function policyClientId(policy: MedicalAidPolicy | null) {
+  if (!policy) return undefined;
+
+  return (
+    policy.clientId ||
+    policy.metadata?.clientId ||
+    policy.metadata?.sponsorId ||
+    (policy.payerName?.toLowerCase().includes('ambulant demo')
+      ? 'client-demo-medical-aid'
+      : undefined)
+  );
+}
+
+function policyUsable(policy: MedicalAidPolicy | null) {
+  if (!policy) return false;
+
+  const latest = policy.latestEligibility || null;
+
+  const status = String(
+    policy.eligibilityStatus ||
+      latest?.eligibilityStatus ||
+      latest?.status ||
+      policy.coverageStatus ||
+      policy.memberStatus ||
+      '',
+  ).toUpperCase();
+
+  const premiumStatus = String(
+    policy.premiumStatus ||
+      latest?.premiumStatus ||
+      '',
+  ).toUpperCase();
+
+  const blocked = new Set([
+    'UNPAID',
+    'INACTIVE',
+    'SUSPENDED',
+    'CANCELLED',
+    'CANCELED',
+    'EXPIRED',
+    'UNVERIFIED',
+    'FAILED',
+    'LAPSED',
+    'PENDING',
+    'NOT_ELIGIBLE',
+    'NOT_FOUND',
+  ]);
+
+  if (policy.active === false) return false;
+  if (blocked.has(status)) return false;
+  if (premiumStatus && blocked.has(premiumStatus)) return false;
+
+  const validTo =
+    policy.verifiedUntil ||
+    latest?.validTo ||
+    latest?.effectiveTo ||
+    null;
+
+  if (validTo) {
+    const d = new Date(validTo);
+    if (Number.isFinite(d.getTime()) && d.getTime() < Date.now()) return false;
+  }
+
+  return ['ACTIVE', 'VERIFIED', 'ELIGIBLE', 'PAID'].includes(status);
+}
+
+function policyPaymentLabel(policy: MedicalAidPolicy) {
+  if (policyUsable(policy)) return '';
+
   const reason =
-    sp.get('reason') || 'Televisit consult';
-  const pay = sp.get('pay') === '1';
+    policy.reasonText ||
+    policy.latestEligibility?.reasonText ||
+    policy.reasonCode ||
+    policy.latestEligibility?.reasonCode ||
+    policy.eligibilityStatus ||
+    policy.premiumStatus ||
+    'not verified for payment';
 
-  const initialMethod: PaymentMethod = (() => {
-    const q = sp.get('payMethod');
-    if (
-      q === 'medical_aid' ||
-      q === 'voucher' ||
-      q === 'eft' ||
-      q === 'mpesa'
-    )
-      return q;
-    return 'card';
-  })();
+  return ` — ${String(reason).replace(/_/g, ' ').toLowerCase()}`;
+}
 
-  const [paymentMethod, setPaymentMethod] =
-    useState<PaymentMethod>(initialMethod);
+function sponsorPatientPayable(preflight: PreflightResult | null) {
+  const amount = Number(preflight?.priceLock?.amountMinor || 0);
+  const sponsor = preflight?.sponsor;
+  const decision = String(sponsor?.decision || '').toUpperCase();
 
-  const [voucherCode, setVoucherCode] =
-    useState('');
-  const [medicalAid, setMedicalAid] =
-    useState<MedicalAidInfo>({
-      scheme: '',
-      memberNumber: '',
-      dependentCode: '',
-    });
+  if (!sponsor) return amount;
+  if (decision === 'COVERED') return Number(sponsor.patientCopayMinor || 0);
+  if (decision === 'REQUIRES_AUTHORIZATION') return 0;
+  if (decision === 'COVERED_WITH_COPAY') return Number(sponsor.patientCopayMinor || amount);
+  return amount;
+}
 
-  // Stored medical aids
-  const [medicalAids, setMedicalAids] = useState<
-    MedicalAidPolicy[]
-  >([]);
-  const [medicalAidsLoading, setMedicalAidsLoading] =
-    useState(false);
-  const [medicalAidsError, setMedicalAidsError] =
-    useState<string | null>(null);
-  const [selectedMedicalAidId, setSelectedMedicalAidId] =
-    useState<string | null>(null);
-  const [aidModalOpen, setAidModalOpen] =
-    useState(false);
-  const [aidEditing, setAidEditing] =
-    useState<MedicalAidPolicy | null>(null);
+function sponsorTone(decision?: string) {
+  const d = String(decision || '').toUpperCase();
 
-  // Booking context: who is this for?
-  const [bookingMode, setBookingMode] =
-    useState<BookingForMode>('self');
-  const [familyOptions, setFamilyOptions] = useState<
-    SubjectOption[]
-  >([]);
-  const [familyLoading, setFamilyLoading] =
-    useState(false);
-  const [familyError, setFamilyError] =
-    useState<string | null>(null);
-  const [selectedFamilySubjectId, setSelectedFamilySubjectId] =
-    useState<string | null>(null);
+  if (d === 'COVERED') return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+  if (d === 'COVERED_WITH_COPAY') return 'border-sky-200 bg-sky-50 text-sky-900';
+  if (d === 'REQUIRES_AUTHORIZATION') return 'border-amber-200 bg-amber-50 text-amber-900';
+  if (d === 'NOT_COVERED' || d === 'NOT_ELIGIBLE') return 'border-rose-200 bg-rose-50 text-rose-900';
+  return 'border-slate-200 bg-slate-50 text-slate-800';
+}
 
-  // Observers (simple comma-separated emails for now)
-  const [allowObservers, setAllowObservers] =
-    useState(true);
-  const [observerDraft, setObserverDraft] =
-    useState<ObserverDraft>({ raw: '' });
+function NewAppointmentPageContent() {
+  const router = useRouter();
+  const sp = useSearchParams();
+  const qs = sp ?? new URLSearchParams();
 
-  // Country / cross-border context
-  const [country, setCountry] = useState(
-    sp.get('country') || 'ZA',
-  );
-  const [subjectCountrySame, setSubjectCountrySame] =
-    useState(true);
-  const [subjectCountry, setSubjectCountry] =
-    useState('');
+  const initialClinicianId = qs.get('clinicianId') || '';
+  const initialSubjectPatientId = qs.get('subjectPatientId') || '';
+  const initialRelationshipId = qs.get('relationshipId') || '';
 
-  // SMS alert (+R5)
-  const [smsAlert, setSmsAlert] =
-    useState(false);
+  const [me, setMe] = useState<AuthMe | null>(null);
+  const [profile, setProfile] = useState<any>(null);
 
-  const [roomId] = useState(
-    () =>
-      `room-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`,
-  );
-  const [starts, setStarts] = useState(
-    () => new Date(Date.now() + 30 * 60 * 1000),
-  );
-  const [ends, setEnds] = useState(
-    () => new Date(Date.now() + 60 * 60 * 1000),
-  );
-  const [agree, setAgree] = useState(true);
-  const [err, setErr] = useState('');
+  const [clinicianId, setClinicianId] = useState(initialClinicianId);
+
+  const [careCircle, setCareCircle] = useState<CareCircleMember[]>([]);
+  const [subjectPatientId, setSubjectPatientId] = useState(initialSubjectPatientId || 'me');
+  const [relationshipId, setRelationshipId] = useState(initialRelationshipId || '');
+
+  const now = useMemo(() => new Date(), []);
+  const [dateStr, setDateStr] = useState(() => {
+    const y = now.getFullYear();
+    const m = pad2(now.getMonth() + 1);
+    const d = pad2(now.getDate());
+    return `${y}-${m}-${d}`;
+  });
+
+  const [timeStr, setTimeStr] = useState('09:00');
+  const [durationMin, setDurationMin] = useState(45);
+  const [reason, setReason] = useState('Consultation');
+
+  const [paymentChoice, setPaymentChoice] = useState<PaymentChoice>('card');
+  const [policies, setPolicies] = useState<MedicalAidPolicy[]>([]);
+  const [selectedPolicyId, setSelectedPolicyId] = useState('');
+
+  const [preflight, setPreflight] = useState<PreflightResult | null>(null);
+  const [preflightBusy, setPreflightBusy] = useState(false);
+
   const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
 
-  const startsISO = useMemo(
-    () => starts.toISOString(),
-    [starts],
-  );
-  const endsISO = useMemo(
-    () => ends.toISOString(),
-    [ends],
+  const [observerName, setObserverName] = useState('');
+  const [observerEmail, setObserverEmail] = useState('');
+  const [observerPhone, setObserverPhone] = useState('');
+
+  const [careAllyPatientId, setCareAllyPatientId] = useState('');
+  const [secondPatientParticipantId, setSecondPatientParticipantId] = useState('');
+
+  const joinableCareCircle = useMemo(
+    () => careCircle.filter((m) => m.patientId !== subjectPatientId),
+    [careCircle, subjectPatientId],
   );
 
-  const canUseFamily = isPremium;
-  const canUseObservers = isPremium;
+  const patientId = profile?.patientId || profile?.id || '';
+  const selectedPolicy = policies.find((p) => p.id === selectedPolicyId) || null;
+  const selectedPolicyOk = policyUsable(selectedPolicy);
+  const selectedClientId = policyClientId(selectedPolicy);
 
   useEffect(() => {
-    setErr('');
-  }, [paymentMethod, bookingMode, isPremium]);
-
-  // Load medical aids
-  useEffect(() => {
-    let mounted = true;
     (async () => {
-      try {
-        setMedicalAidsLoading(true);
-        const res = await fetch('/api/medical-aids', {
-          cache: 'no-store',
-        });
-        if (!res.ok) {
-          throw new Error(
-            `HTTP ${res.status}`,
-          );
-        }
-        const json = await res.json();
-        const items =
-          (json.items ||
-            []) as MedicalAidPolicy[];
-        if (!mounted) return;
-        setMedicalAids(items);
-        setMedicalAidsError(null);
-        const def =
-          items.find((p) => p.isDefault) ||
-          items[0];
-        setSelectedMedicalAidId(
-          def?.id || null,
-        );
-      } catch (e: any) {
-        if (!mounted) return;
-        console.error(
-          'load medical-aids failed',
-          e,
-        );
-        setMedicalAidsError(
-          e?.message ||
-            'Failed to load medical aids',
-        );
-      } finally {
-        if (!mounted) return;
-        setMedicalAidsLoading(false);
-      }
+      const auth = await fetchAuthMe();
+      setMe(auth);
     })();
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadProfile() {
+      try {
+        const res = await fetch('/api/profile', { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+        if (!alive) return;
+        setProfile(data?.ok === false ? null : data);
+      } catch {
+        if (alive) setProfile(null);
+      }
+    }
+
+    void loadProfile();
+
     return () => {
-      mounted = false;
+      alive = false;
     };
   }, []);
 
-  // Load family relationships for care circle booking
   useEffect(() => {
-    let mounted = true;
     (async () => {
       try {
-        setFamilyLoading(true);
-        setFamilyError(null);
-        const res = await fetch(
-          '/api/family/relationships',
-          { cache: 'no-store' },
-        );
-        if (!res.ok) {
-          throw new Error(
-            `HTTP ${res.status}`,
-          );
-        }
-        const json = await res.json();
-        const rels =
-          (json.items ||
-            json.relationships ||
-            []) as FamilyRelationshipSummary[];
+        const r = await fetch('/api/care-circle', { cache: 'no-store' });
+        if (!r.ok) return;
 
-        if (!mounted) return;
+        const data = await r.json();
 
-        const opts: SubjectOption[] =
-          rels
-            .filter((r) => {
-              const canBook =
-                r.permissions
-                  ?.canBookAppointments ?? true;
-              return canBook;
-            })
-            .map((r) => ({
-              relationshipId: r.id,
-              patientId: r.subjectPatientId,
-              label:
-                r.subjectName ||
-                'Family member',
-              relationLabel:
-                r.relationLabel ||
-                relationTypeToLabel(
-                  r.relationType,
-                ),
-              canBook:
-                r.permissions
-                  ?.canBookAppointments ?? true,
-            }));
+        const arr =
+          (Array.isArray(data) && data) ||
+          data?.members ||
+          data?.careCircle ||
+          [];
 
-        setFamilyOptions(opts);
+        const normalized: CareCircleMember[] = (arr || [])
+          .map((x: any) => ({
+            patientId: String(x.patientId || x.id || ''),
+            name: x.name ?? null,
+            timezone: x.timezone ?? null,
+            relationshipId: x.relationshipId ?? null,
+          }))
+          .filter((m: CareCircleMember) => !!m.patientId);
 
-        if (!selectedFamilySubjectId && opts[0]) {
-          setSelectedFamilySubjectId(
-            opts[0].relationshipId,
-          );
-        }
-      } catch (e: any) {
-        if (!mounted) return;
-        setFamilyError(
-          e?.message ||
-            'Failed to load care circle',
-        );
-      } finally {
-        if (!mounted) return;
-        setFamilyLoading(false);
-      }
+        setCareCircle(normalized);
+      } catch {}
     })();
+  }, []);
+
+  useEffect(() => {
+    if (!patientId) return;
+
+    let alive = true;
+
+    async function loadPolicies() {
+      try {
+        const res = await fetch(`/api/medical-aids?patientId=${encodeURIComponent(patientId)}`, {
+          cache: 'no-store',
+        });
+
+        const data = await res.json().catch(() => ({} as any));
+        const items = Array.isArray(data?.items) ? data.items : [];
+
+        if (!alive) return;
+
+        setPolicies(items);
+
+        const preferred = items.find((p: MedicalAidPolicy) => policyUsable(p));
+
+        setSelectedPolicyId(preferred?.id || '');
+      } catch {
+        if (alive) setPolicies([]);
+      }
+    }
+
+    void loadPolicies();
+
     return () => {
-      mounted = false;
+      alive = false;
     };
-  }, [selectedFamilySubjectId]);
+  }, [patientId]);
 
-  function openAddMedicalAid() {
-    setAidEditing(null);
-    setAidModalOpen(true);
+  useEffect(() => {
+    setPreflight(null);
+  }, [
+    clinicianId,
+    subjectPatientId,
+    relationshipId,
+    dateStr,
+    timeStr,
+    durationMin,
+    paymentChoice,
+    selectedPolicyId,
+  ]);
+
+  function buildParticipants() {
+    const extraParticipants: Array<{
+      role: BookingParticipantRole;
+      patientId?: string;
+      relationshipId?: string;
+      email?: string;
+      phone?: string;
+      name?: string;
+      required?: boolean;
+    }> = [];
+
+    if (observerEmail.trim() || observerPhone.trim()) {
+      extraParticipants.push({
+        role: 'observer',
+        email: observerEmail.trim() || undefined,
+        phone: observerPhone.trim() || undefined,
+        name: observerName.trim() || undefined,
+        required: false,
+      });
+    }
+
+    if (careAllyPatientId.trim()) {
+      const member = careCircle.find((m) => m.patientId === careAllyPatientId);
+
+      extraParticipants.push({
+        role: 'care_ally',
+        patientId: careAllyPatientId,
+        relationshipId: member?.relationshipId || undefined,
+        name: member?.name || undefined,
+        required: false,
+      });
+    }
+
+    if (secondPatientParticipantId.trim()) {
+      const member = careCircle.find((m) => m.patientId === secondPatientParticipantId);
+
+      extraParticipants.push({
+        role: 'second_patient_participant',
+        patientId: secondPatientParticipantId,
+        relationshipId: member?.relationshipId || undefined,
+        name: member?.name || undefined,
+        required: true,
+      });
+    }
+
+    return extraParticipants;
   }
 
-  function openEditMedicalAid(policy: MedicalAidPolicy) {
-    setAidEditing(policy);
-    setAidModalOpen(true);
+  function baseAppointmentPayload() {
+    const start = new Date(`${dateStr}T${timeStr}`);
+    const end = new Date(start.getTime() + durationMin * 60000);
+
+    const extraParticipants = buildParticipants();
+
+    const requiredPatientSeats =
+      1 +
+      (subjectPatientId !== 'me' ? 1 : 0) +
+      extraParticipants.length;
+
+    return {
+      clinicianId,
+      startsAt: start.toISOString(),
+      endsAt: end.toISOString(),
+      durationMin,
+      reason,
+
+      person:
+        subjectPatientId === 'me'
+          ? { mode: 'SELF' as const }
+          : {
+              mode: 'FAMILY' as const,
+              subjectPatientId,
+              relationshipId,
+            },
+
+      observers:
+        observerEmail || observerPhone
+          ? [
+              {
+                email: observerEmail || undefined,
+                phone: observerPhone || undefined,
+                name: observerName || undefined,
+              },
+            ]
+          : [],
+
+      participants: extraParticipants,
+
+      multiparty:
+        extraParticipants.length > 0 || subjectPatientId !== 'me'
+          ? {
+              enabled: true,
+              requiredPatientSeats,
+              requiredClinicianSeats: 1,
+              preflightPolicy: 'all_required_green' as const,
+            }
+          : undefined,
+    };
   }
 
-  function parseObserverEmails(
-    draft: ObserverDraft,
-  ) {
-    const emails = draft.raw
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    return emails.map((email) => ({ email }));
-  }
-
-  async function create() {
+  async function runPreflight(): Promise<PreflightResult> {
     setErr('');
-    if (!agree) {
-      setErr(
-        'Please accept the refund policy.',
-      );
+
+    if (!clinicianId.trim()) {
+      throw new Error('Clinician ID required');
+    }
+
+    if (paymentChoice === 'medical_aid') {
+      if (!selectedPolicy) {
+        throw new Error('Select a Medical Aid / sponsor policy first.');
+      }
+
+      if (!selectedPolicyOk) {
+        throw new Error('This policy is not active/usable for sponsor payment.');
+      }
+    }
+
+    setPreflightBusy(true);
+
+    try {
+      const base = baseAppointmentPayload();
+
+      const res = await fetch('/api/appointments/preflight', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...base,
+          paymentMethod: paymentChoice === 'medical_aid' ? 'medical_aid' : 'card',
+          clientId: paymentChoice === 'medical_aid' ? selectedClientId : undefined,
+          kind: 'standard',
+          visitMode: 'televisit',
+        }),
+      });
+
+      const text = await res.text();
+      const data = safeParseJson<PreflightResult>(text) ?? { ok: false, error: text };
+
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Preflight failed');
+      }
+
+      if (!data?.priceLock?.token) {
+        throw new Error('Preflight did not return a booking price lock.');
+      }
+
+      setPreflight(data);
+      return data;
+    } finally {
+      setPreflightBusy(false);
+    }
+  }
+
+  async function onSubmit() {
+    setErr('');
+
+    if (!clinicianId.trim()) {
+      setErr('Clinician ID required');
       return;
-    }
-
-    // Validate premium gating
-    if (!canUseFamily && bookingMode === 'family') {
-      setErr(
-        'Family & Friends bookings are a Premium feature. Please book for yourself or upgrade your plan.',
-      );
-      return;
-    }
-
-    // Validate booking subject
-    let person:
-      | {
-          mode: 'SELF' | 'FAMILY';
-          subjectPatientId?: string | null;
-          relationshipId?: string | null;
-        }
-      | undefined;
-
-    if (bookingMode === 'self') {
-      person = { mode: 'SELF' };
-    } else {
-      const selectedRel = familyOptions.find(
-        (o) =>
-          o.relationshipId ===
-          selectedFamilySubjectId,
-      );
-      if (!selectedRel) {
-        setErr(
-          'Please choose who you are booking for in your care circle.',
-        );
-        return;
-      }
-      person = {
-        mode: 'FAMILY',
-        subjectPatientId:
-          selectedRel.patientId,
-        relationshipId:
-          selectedRel.relationshipId,
-      };
-    }
-
-    const selectedPolicy =
-      selectedMedicalAidId &&
-      medicalAids.find(
-        (p) => p.id === selectedMedicalAidId,
-      );
-
-    if (paymentMethod === 'medical_aid') {
-      const hasManual =
-        medicalAid.scheme.trim() &&
-        medicalAid.memberNumber.trim();
-      if (!selectedPolicy && !hasManual) {
-        setErr(
-          'Please select a saved medical aid or enter at least scheme and membership number.',
-        );
-        return;
-      }
-    }
-
-    if (paymentMethod === 'voucher') {
-      if (!voucherCode.trim()) {
-        setErr(
-          'Please enter a voucher/promo code, or switch payment method.',
-        );
-        return;
-      }
     }
 
     setBusy(true);
 
     try {
-      if (pay) {
-        const uid = getUid();
+      const pf = preflight?.priceLock?.token ? preflight : await runPreflight();
 
-        // Build high-level payload for our BFF route
-        const payload: any = {
-          clinicianId,
-          startsAt: startsISO,
-          endsAt: endsISO,
-          reason,
-          roomId,
-          paymentMethod,
-          person,
-          country,
-          subjectCountrySame,
-          subjectCountry:
-            subjectCountrySame
-              ? country
-              : subjectCountry || country,
-          smsAlert,
-        };
+      const patientPayableMinor = sponsorPatientPayable(pf);
+      const sponsorDecision = String(pf?.sponsor?.decision || '').toUpperCase();
 
-        if (paymentMethod === 'voucher') {
-          payload.voucherCode =
-            voucherCode.trim();
-        } else if (
-          paymentMethod === 'medical_aid'
-        ) {
-          const policy = selectedPolicy;
-          if (policy) {
-            payload.medicalAid = {
-              scheme: policy.schemeName,
-              memberNumber:
-                policy.membershipNumber,
-              dependentCode:
-                policy.dependentCode ||
-                '',
-              telemedCovered:
-                policy.coversTelemedicine,
-              telemedCoverType:
-                policy.telemedicineCoverType,
-              telemedCopayType:
-                policy.coPaymentType,
-              telemedCopayValue:
-                policy.coPaymentValue,
-              policyId: policy.id,
-            };
-          } else {
-            payload.medicalAid = {
-              scheme:
-                medicalAid.scheme.trim(),
-              memberNumber:
-                medicalAid.memberNumber.trim(),
-              dependentCode:
-                medicalAid.dependentCode.trim(),
-            };
-          }
-        }
+      const finalPaymentMethod =
+        paymentChoice === 'medical_aid'
+          ? sponsorDecision === 'REQUIRES_AUTHORIZATION'
+            ? 'medical_aid'
+            : patientPayableMinor > 0
+              ? 'card'
+              : 'medical_aid'
+          : 'card';
 
-        if (canUseObservers && allowObservers) {
-          payload.observers =
-            parseObserverEmails(
-              observerDraft,
-            );
-        }
+      const reimbursementIntent =
+        finalPaymentMethod === 'card'
+          ? {
+              eligible: true,
+              claimType: 'MEMBER_REIMBURSEMENT',
+              payeeType: 'PATIENT',
+              originalPaymentMethod: 'CARD',
+              providerAlreadyPaid: true,
+              reason:
+                paymentChoice === 'medical_aid'
+                  ? ['NOT_COVERED', 'NOT_ELIGIBLE', 'FALLBACK_TO_SELF_PAY'].includes(sponsorDecision)
+                    ? sponsorDecision
+                    : patientPayableMinor > 0
+                      ? 'CARD_COPAY_OR_GAP'
+                      : 'CARD_SELECTED_AFTER_SPONSOR_PREFLIGHT'
+                  : 'SELF_PAY_CARD',
+              selectedPolicyId: selectedPolicy?.id || null,
+              selectedClientId: selectedClientId || null,
+              sponsorDecision: sponsorDecision || null,
+              sponsorAmountMinor: Number(pf?.sponsor?.sponsorAmountMinor || 0),
+              patientPayableMinor,
+              currency: pf?.priceLock?.currency || pf?.sponsor?.currency || 'ZAR',
+              createdAt: new Date().toISOString(),
+            }
+          : null;
 
-        const res = await fetch(
-          '/api/appointments/new',
-          {
-            method: 'POST',
-            headers: {
-              'content-type':
-                'application/json',
-              'x-uid': uid,
-            },
-            body: JSON.stringify(payload),
-          },
+      if (finalPaymentMethod === 'card' && !String(profile?.email || '').trim()) {
+        throw new Error('A patient email is required for card checkout.');
+      }
+
+      const payload = {
+        ...baseAppointmentPayload(),
+        paymentMethod: finalPaymentMethod,
+        priceLock: pf.priceLock?.token,
+        patientEmail: profile?.email || null,
+        callbackUrl:
+          typeof window !== 'undefined'
+            ? `${window.location.origin}/payments/return`
+            : undefined,
+        clientId: paymentChoice === 'medical_aid' ? selectedClientId : undefined,
+        kind: 'standard',
+        visitMode: 'televisit',
+        reimbursementIntent,
+        medicalAid:
+          paymentChoice === 'medical_aid' && selectedPolicy
+            ? {
+                scheme: selectedPolicy.payerName,
+                memberNumber: selectedPolicy.membershipNumber,
+                dependentCode: selectedPolicy.dependentCode || '',
+                telemedCovered: selectedPolicy.telemedCover !== 'none',
+                telemedCoverType: selectedPolicy.telemedCover || null,
+                telemedCopayType: selectedPolicy.telemedCopayType || null,
+                telemedCopayValue: selectedPolicy.telemedCopayValue ?? null,
+                policyId: selectedPolicy.id,
+              }
+            : null,
+      };
+
+      const res = await fetch('/api/appointments/new', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const text = await res.text();
+      const data = safeParseJson<any>(text) ?? { raw: text };
+
+      if (!res.ok) {
+        throw new Error(data?.message || data?.error || 'Booking failed');
+      }
+
+      const appointmentId =
+        data?.appointmentId ??
+        data?.appointment_id ??
+        data?.appointment?.id ??
+        '';
+
+      const encounterId =
+        data?.encounterId ??
+        data?.encounter_id ??
+        data?.appointment?.encounterId ??
+        '';
+
+      const paymentRef =
+        data?.payment?.ref ??
+        data?.paymentRef ??
+        data?.payment_ref ??
+        data?.appointment?.paymentRef ??
+        '';
+
+      const redirectUrl =
+        data?.redirectUrl ??
+        data?.redirect_url ??
+        '';
+
+      try {
+        sessionStorage.setItem(
+          'ambulant:lastPaymentAttempt',
+          JSON.stringify({
+            appointmentId,
+            encounterId,
+            paymentRef,
+            redirectUrl,
+            clinicianId,
+            paymentChoice,
+            finalPaymentMethod,
+            reimbursementIntent,
+            sponsorDecision,
+            createdAt: new Date().toISOString(),
+            source: 'appointments-new',
+          }),
         );
+      } catch {}
 
-        const out = await res
-          .json()
-          .catch(() => null);
-
-        if (!res.ok || !out?.ok) {
-          throw new Error(
-            out?.error ||
-              `Gateway responded ${res.status}`,
-          );
-        }
-
-        const apptId =
-          out.appointmentId ||
-          `appt-${Math.random()
-            .toString(36)
-            .slice(2, 8)}`;
-        const redirectUrl =
-          typeof out.redirectUrl ===
-          'string'
-            ? out.redirectUrl
-            : '';
-
-        if (
-          paymentMethod === 'card' &&
-          redirectUrl
-        ) {
-          router.replace(
-            `/checkout?a=${encodeURIComponent(
-              apptId,
-            )}&provider=paystack&redirect=${encodeURIComponent(
-              redirectUrl,
-            )}`,
-          );
-        } else {
-          router.replace(
-            `/checkout/success?a=${encodeURIComponent(
-              apptId,
-            )}`,
-          );
-        }
+      if (redirectUrl) {
+        window.location.href = redirectUrl;
         return;
       }
 
-      // Demo mode (no real gateway call)
-      const apptId = `appt-${Math.random()
-        .toString(36)
-        .slice(2, 8)}`;
-      router.replace(
-        `/checkout/success?a=${apptId}`,
-      );
+      if (appointmentId && paymentRef) {
+        router.push(
+          `/payments/return?appointmentId=${encodeURIComponent(appointmentId)}&reference=${encodeURIComponent(paymentRef)}`,
+        );
+        return;
+      }
+
+      if (appointmentId) {
+        router.push(`/appointments/${encodeURIComponent(appointmentId)}`);
+        return;
+      }
+
+      router.push('/appointments');
     } catch (e: any) {
-      setErr(
-        e?.message ||
-          'Failed to create appointment',
-      );
+      setErr(e?.message || 'Booking failed');
     } finally {
       setBusy(false);
     }
   }
 
-  const paymentModeDescription = (() => {
-    if (paymentMethod === 'card') {
-      return pay
-        ? 'Payment mode: Self-pay via card (Paystack). Apple Pay / Samsung Pay supported where your card & country allow it.'
-        : 'Payment mode: Self-pay via card (demo mode, no real charge).';
-    }
-    if (paymentMethod === 'medical_aid') {
-      return pay
-        ? 'Payment mode: Medical aid claim — Ambulant+ will compile a claim using your stored policy details after the virtual consult.'
-        : 'Payment mode: Medical aid (demo mode, no real claim).';
-    }
-    if (paymentMethod === 'voucher') {
-      return pay
-        ? 'Payment mode: Self-pay with voucher/promo — card gateway not used for this booking.'
-        : 'Payment mode: Voucher/promo (demo mode).';
-    }
-    if (paymentMethod === 'eft') {
-      return pay
-        ? 'Payment mode: EFT / bank transfer — your slot is reserved for a limited time while we await payment confirmation.'
-        : 'Payment mode: EFT (demo mode).';
-    }
-    // mpesa
-    return pay
-      ? 'Payment mode: M-Pesa mobile money — available for supported Kenyan flows.'
-      : 'Payment mode: M-Pesa (demo mode).';
-  })();
+  const sponsor = preflight?.sponsor;
+  const patientPayableMinor = sponsorPatientPayable(preflight);
+  const preflightCurrency = preflight?.priceLock?.currency || sponsor?.currency || 'ZAR';
 
   return (
-    <main className="p-6 max-w-4xl mx-auto space-y-4">
-      <header className="flex items-center justify-between">
-        <Link
-          href="/clinicians"
-          className="text-sm text-teal-700 hover:underline"
-        >
-          ← Back
-        </Link>
-        <h1 className="text-2xl font-semibold">
-          Confirm Televisit
-        </h1>
-        <span />
-      </header>
-
-      <section className="bg-white border rounded-lg p-5 space-y-4">
-        {/* Who is this appointment for? */}
-        <section className="border rounded-lg p-3 bg-slate-50 space-y-3">
-          <div className="flex items-center justify-between gap-2">
-            <div className="text-sm font-medium text-gray-800">
-              Who is this appointment for?
-            </div>
-            {!isPremium && (
-              <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">
-                Family &amp; observers are Premium features
-              </span>
-            )}
+    <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 md:px-8">
+      <div className="mx-auto max-w-5xl space-y-6">
+        <header>
+          <div className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-300">
+            Ambulant+ Appointment Booking
           </div>
-
-          <div className="grid md:grid-cols-2 gap-2 text-sm">
-            <label className="flex items-start gap-2 border rounded px-2 py-2 bg-white cursor-pointer">
-              <input
-                type="radio"
-                name="bookingFor"
-                value="self"
-                checked={bookingMode === 'self'}
-                onChange={() =>
-                  setBookingMode('self')
-                }
-              />
-              <span>
-                <div className="font-medium">
-                  Me
-                </div>
-                <div className="text-xs text-gray-500">
-                  Book this visit for your own care.
-                  Observers can join when your plan supports it.
-                </div>
-              </span>
-            </label>
-
-            <label className="flex items-start gap-2 border rounded px-2 py-2 bg-white">
-              <input
-                type="radio"
-                name="bookingFor"
-                value="family"
-                checked={bookingMode === 'family'}
-                disabled={!canUseFamily}
-                onChange={() =>
-                  canUseFamily &&
-                  setBookingMode('family')
-                }
-              />
-              <span className={canUseFamily ? 'cursor-pointer' : 'opacity-60'}>
-                <div className="flex items-center gap-1">
-                  <div className="font-medium">
-                    Someone in my care circle
-                  </div>
-                  {!canUseFamily && (
-                    <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">
-                      Premium
-                    </span>
-                  )}
-                </div>
-                <div className="text-xs text-gray-500">
-                  Book on behalf of a spouse, child, parent or trusted friend you support.
-                </div>
-              </span>
-            </label>
-          </div>
-
-          {bookingMode === 'family' && (
-            <div className="mt-2 text-xs space-y-1">
-              {familyLoading && (
-                <div className="text-gray-500">
-                  Loading your Family &amp; Friends…
-                </div>
-              )}
-              {familyError && (
-                <div className="text-rose-600">
-                  {familyError}
-                </div>
-              )}
-              {!familyLoading &&
-                !familyError && (
-                  <>
-                    {familyOptions.length === 0 ? (
-                      <div className="text-gray-500">
-                        You don&apos;t have any active Family &amp; Friends yet.
-                        Add them from{' '}
-                        <Link
-                          href="/family"
-                          className="underline"
-                        >
-                          Family &amp; Friends
-                        </Link>{' '}
-                        to book on their behalf.
-                      </div>
-                    ) : (
-                      <label className="flex flex-col gap-1">
-                        <span className="text-gray-600">
-                          Choose person
-                        </span>
-                        <select
-                          className="border rounded px-2 py-1"
-                          value={
-                            selectedFamilySubjectId ?? ''
-                          }
-                          onChange={(e) =>
-                            setSelectedFamilySubjectId(
-                              e.target.value || null,
-                            )
-                          }
-                        >
-                          {familyOptions.map(
-                            (o) => (
-                              <option
-                                key={o.relationshipId}
-                                value={
-                                  o.relationshipId
-                                }
-                              >
-                                {o.label} —{' '}
-                                {o.relationLabel}
-                              </option>
-                            ),
-                          )}
-                        </select>
-                      </label>
-                    )}
-                  </>
-                )}
-            </div>
-          )}
-        </section>
-
-        {/* Country / cross-border context */}
-        <section className="border rounded-lg p-3 bg-slate-50 space-y-2 text-xs">
-          <div className="text-sm font-medium text-gray-800">
-            Where will the care be delivered?
-          </div>
-          <div className="grid md:grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-gray-600">
-                Your country
-              </span>
-              <select
-                className="border rounded px-2 py-1"
-                value={country}
-                onChange={(e) =>
-                  setCountry(e.target.value)
-                }
-              >
-                <option value="ZA">South Africa</option>
-                <option value="KE">Kenya</option>
-                <option value="NG">Nigeria</option>
-                <option value="GB">United Kingdom</option>
-                <option value="US">United States</option>
-              </select>
-            </label>
-
-            {bookingMode === 'family' && (
-              <div className="flex flex-col gap-1">
-                <span className="text-gray-600">
-                  Is the person in the same country?
-                </span>
-                <div className="flex items-center gap-3">
-                  <label className="inline-flex items-center gap-1">
-                    <input
-                      type="radio"
-                      checked={subjectCountrySame}
-                      onChange={() =>
-                        setSubjectCountrySame(true)
-                      }
-                    />
-                    <span>Yes</span>
-                  </label>
-                  <label className="inline-flex items-center gap-1">
-                    <input
-                      type="radio"
-                      checked={!subjectCountrySame}
-                      onChange={() =>
-                        setSubjectCountrySame(false)
-                      }
-                    />
-                    <span>No</span>
-                  </label>
-                </div>
-                {!subjectCountrySame && (
-                  <label className="flex flex-col gap-1 mt-1">
-                    <span className="text-gray-600">
-                      Their country
-                    </span>
-                    <input
-                      className="border rounded px-2 py-1"
-                      value={subjectCountry}
-                      onChange={(e) =>
-                        setSubjectCountry(
-                          e.target.value,
-                        )
-                      }
-                      placeholder="e.g. Kenya"
-                    />
-                  </label>
-                )}
-              </div>
-            )}
-          </div>
-          <p className="text-[11px] text-gray-500">
-            Ambulant+ can support borderless, contactless care,
-            but prescriptions and medical aid rules still follow local law.
-            If the person is in another country, some payment methods,
-            medical aids and pharmacy partners may not apply.
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Book Appointment</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+            Choose a clinician, confirm the patient, run sponsor/Medical Aid cover preflight, then book with the correct payment route.
           </p>
-        </section>
+        </header>
 
-        <div className="grid md:grid-cols-2 gap-3">
-          <label className="text-sm">
-            <span className="block text-gray-600 mb-1">
-              Clinician ID
-            </span>
+        <section className="grid gap-4 rounded-3xl border border-slate-800 bg-slate-900 p-5 md:grid-cols-2">
+          <label className="space-y-1">
+            <span className="text-xs text-slate-400">Clinician ID</span>
             <input
-              className="w-full border rounded px-2 py-1"
               value={clinicianId}
-              readOnly
+              onChange={(e) => setClinicianId(e.target.value)}
+              placeholder="clinician-demo-001"
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
             />
           </label>
-          <label className="text-sm">
-            <span className="block text-gray-600 mb-1">
-              Room ID (meta)
-            </span>
+
+          <label className="space-y-1">
+            <span className="text-xs text-slate-400">Reason</span>
             <input
-              className="w-full border rounded px-2 py-1"
-              value={roomId}
-              readOnly
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Consultation"
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
             />
           </label>
-        </div>
 
-        <label className="text-sm block">
-          <span className="block text-gray-600 mb-1">
-            Reason (meta)
-          </span>
-          <input
-            className="w-full border rounded px-2 py-1"
-            value={reason}
-            readOnly
-          />
-        </label>
-
-        <div className="grid md:grid-cols-2 gap-3">
-          <label className="text-sm">
-            <span className="block text-gray-600 mb-1">
-              Starts
-            </span>
+          <label className="space-y-1">
+            <span className="text-xs text-slate-400">Date</span>
             <input
-              type="datetime-local"
-              className="w-full border rounded px-2 py-1"
-              value={new Date(starts)
-                .toISOString()
-                .slice(0, 16)}
-              onChange={(e) =>
-                setStarts(
-                  new Date(e.target.value),
-                )
-              }
+              type="date"
+              value={dateStr}
+              onChange={(e) => setDateStr(e.target.value)}
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
             />
           </label>
-          <label className="text-sm">
-            <span className="block text-gray-600 mb-1">
-              Ends
-            </span>
+
+          <label className="space-y-1">
+            <span className="text-xs text-slate-400">Time</span>
             <input
-              type="datetime-local"
-              className="w-full border rounded px-2 py-1"
-              value={new Date(ends)
-                .toISOString()
-                .slice(0, 16)}
-              onChange={(e) =>
-                setEnds(
-                  new Date(e.target.value),
-                )
-              }
+              type="time"
+              value={timeStr}
+              onChange={(e) => setTimeStr(e.target.value)}
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
             />
           </label>
-        </div>
 
-        {/* Payment method chooser */}
-        <section className="border rounded-lg p-3 space-y-2 bg-slate-50">
-          <div className="text-sm font-medium text-gray-800">
-            Payment method
-          </div>
-          {!pay && (
-            <div className="text-[11px] text-gray-500 mb-1">
-              You are currently in demo mode (no real charge). Append{' '}
-              <code className="bg-gray-100 px-1 rounded">
-                ?pay=1
-              </code>{' '}
-              to the URL to exercise real gateway flows.
-            </div>
-          )}
-          <div className="grid md:grid-cols-3 gap-2 text-sm">
-            {/* Card */}
-            <label className="flex items-start gap-2 border rounded px-2 py-2 bg-white cursor-pointer">
-              <input
-                type="radio"
-                name="paymentMethod"
-                value="card"
-                checked={paymentMethod === 'card'}
-                onChange={() =>
-                  setPaymentMethod('card')
-                }
-              />
-              <span>
-                <div className="font-medium">
-                  Card (incl. Apple / Samsung Pay)
-                </div>
-                <div className="text-xs text-gray-500">
-                  Debit/credit via Paystack; wallets where supported.
-                </div>
-              </span>
-            </label>
+          <label className="space-y-1">
+            <span className="text-xs text-slate-400">Duration</span>
+            <select
+              value={durationMin}
+              onChange={(e) => setDurationMin(Number(e.target.value))}
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
+            >
+              <option value={30}>30 minutes</option>
+              <option value={45}>45 minutes</option>
+              <option value={60}>60 minutes</option>
+            </select>
+          </label>
 
-            {/* Medical Aid */}
-            <label className="flex items-start gap-2 border rounded px-2 py-2 bg-white cursor-pointer">
-              <input
-                type="radio"
-                name="paymentMethod"
-                value="medical_aid"
-                checked={
-                  paymentMethod === 'medical_aid'
-                }
-                onChange={() =>
-                  setPaymentMethod(
-                    'medical_aid',
-                  )
-                }
-              />
-              <span>
-                <div className="font-medium">
-                  Medical Aid
-                </div>
-                <div className="text-xs text-gray-500">
-                  We submit a claim to your scheme,
-                  where supported.
-                </div>
-              </span>
-            </label>
+          <label className="space-y-1">
+            <span className="text-xs text-slate-400">Patient</span>
+            <select
+              value={subjectPatientId}
+              onChange={(e) => {
+                setSubjectPatientId(e.target.value);
+                const member = careCircle.find((m) => m.patientId === e.target.value);
+                setRelationshipId(member?.relationshipId || '');
+              }}
+              className="w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
+            >
+              <option value="me">Myself</option>
+              {careCircle.map((m) => (
+                <option key={m.patientId} value={m.patientId}>
+                  {m.name || m.patientId}
+                </option>
+              ))}
+            </select>
+          </label>
+        </section>
 
-            {/* Voucher */}
-            <label className="flex items-start gap-2 border rounded px-2 py-2 bg-white cursor-pointer">
-              <input
-                type="radio"
-                name="paymentMethod"
-                value="voucher"
-                checked={
-                  paymentMethod === 'voucher'
-                }
-                onChange={() =>
-                  setPaymentMethod(
-                    'voucher',
-                  )
-                }
-              />
-              <span>
-                <div className="font-medium">
-                  Voucher / Promo
-                </div>
-                <div className="text-xs text-gray-500">
-                  Use a prepaid or sponsored code.
-                </div>
-              </span>
-            </label>
+        <section className="rounded-3xl border border-slate-800 bg-slate-900 p-5">
+          <h2 className="text-lg font-semibold">Payment and sponsor cover</h2>
 
-            {/* EFT */}
-            <label className="flex items-start gap-2 border rounded px-2 py-2 bg-white cursor-pointer">
-              <input
-                type="radio"
-                name="paymentMethod"
-                value="eft"
-                checked={paymentMethod === 'eft'}
-                onChange={() =>
-                  setPaymentMethod('eft')
-                }
-              />
-              <span>
-                <div className="font-medium">
-                  EFT / Bank Transfer
-                </div>
-                <div className="text-xs text-gray-500">
-                  Reserve a slot while you pay via bank transfer.
-                </div>
-              </span>
-            </label>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            <button
+              type="button"
+              onClick={() => setPaymentChoice('card')}
+              className={`rounded-2xl border p-4 text-left ${
+                paymentChoice === 'card'
+                  ? 'border-sky-400 bg-sky-950/50'
+                  : 'border-slate-700 bg-slate-950'
+              }`}
+            >
+              <div className="font-semibold">Card / self-pay</div>
+              <div className="mt-1 text-xs text-slate-400">
+                Use Paystack for full payment or sponsor co-pay/gap.
+              </div>
+            </button>
 
-            {/* M-Pesa */}
-            <label className="flex items-start gap-2 border rounded px-2 py-2 bg-white cursor-pointer">
-              <input
-                type="radio"
-                name="paymentMethod"
-                value="mpesa"
-                checked={paymentMethod === 'mpesa'}
-                onChange={() =>
-                  setPaymentMethod('mpesa')
-                }
-              />
-              <span>
-                <div className="font-medium">
-                  M-Pesa (KE)
-                </div>
-                <div className="text-xs text-gray-500">
-                  Mobile money for supported Kenyan flows.
-                </div>
-              </span>
-            </label>
+            <button
+              type="button"
+              onClick={() => setPaymentChoice('medical_aid')}
+              className={`rounded-2xl border p-4 text-left ${
+                paymentChoice === 'medical_aid'
+                  ? 'border-emerald-400 bg-emerald-950/30'
+                  : 'border-slate-700 bg-slate-950'
+              }`}
+            >
+              <div className="font-semibold">Medical Aid / sponsor</div>
+              <div className="mt-1 text-xs text-slate-400">
+                Run cover preflight and route payable balance correctly.
+              </div>
+            </button>
           </div>
 
-          {/* Extra fields per method */}
-          {paymentMethod === 'medical_aid' && (
-            <div className="mt-3 space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <div className="text-gray-600">
-                  Saved medical aids
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={openAddMedicalAid}
-                    className="px-2 py-0.5 border rounded bg-white hover:bg-slate-50"
-                  >
-                    Add / Update
-                  </button>
-                </div>
-              </div>
-              <div className="border rounded bg-white divide-y">
-                {medicalAidsLoading && (
-                  <div className="p-2 text-gray-500">
-                    Loading…
-                  </div>
-                )}
-                {medicalAidsError && (
-                  <div className="p-2 text-rose-600">
-                    {medicalAidsError}
-                  </div>
-                )}
-                {!medicalAidsLoading &&
-                  !medicalAidsError &&
-                  medicalAids.length ===
-                    0 && (
-                    <div className="p-2 text-gray-500">
-                      No medical aids on file
-                      yet. You can still enter
-                      details for this booking
-                      only below.
-                    </div>
-                  )}
-                {medicalAids.map((ma) => (
-                  <label
-                    key={ma.id}
-                    className="flex items-start gap-2 p-2 cursor-pointer hover:bg-slate-50"
-                  >
-                    <input
-                      type="radio"
-                      name="medicalAidPolicy"
-                      checked={
-                        selectedMedicalAidId ===
-                        ma.id
-                      }
-                      onChange={() =>
-                        setSelectedMedicalAidId(
-                          ma.id,
-                        )
-                      }
-                    />
-                    <div>
-                      <div className="font-medium">
-                        {ma.schemeName}{' '}
-                        {ma.planName
-                          ? `· ${ma.planName}`
-                          : ''}
-                        {ma.isDefault && (
-                          <span className="ml-1 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800">
-                            Default
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-gray-700">
-                        Member{' '}
-                        <span className="font-mono">
-                          {ma.membershipNumber}
-                        </span>
-                        {ma.dependentCode && (
-                          <> · Dep {ma.dependentCode}</>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-gray-500">
-                        Telemedicine:{' '}
-                        {ma.coversTelemedicine
-                          ? ma.telemedicineCoverType ===
-                            'full'
-                            ? 'Full cover'
-                            : 'Partial (co-payment)'
-                          : 'Not explicit'}
-                        {ma.hasCom &&
-                          ' · COM on file'}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        openEditMedicalAid(ma);
-                      }}
-                      className="ml-auto text-[11px] px-2 py-0.5 border rounded bg-white hover:bg-slate-50"
-                    >
-                      Edit
-                    </button>
-                  </label>
-                ))}
-              </div>
+          {paymentChoice === 'medical_aid' ? (
+            <div className="mt-4 space-y-3">
+              <label className="space-y-1">
+                <span className="text-xs text-slate-400">Linked policy</span>
+                <select
+                  value={selectedPolicyId}
+                  onChange={(e) => setSelectedPolicyId(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
+                >
+                  <option value="">Select policy</option>
+                  {policies.map((p) => {
+                    const usable = policyUsable(p);
 
-              <div className="mt-2 text-[11px] text-gray-500">
-                If you prefer, you can provide
-                medical aid details for{' '}
-                <strong>this booking only</strong>{' '}
-                below:
-              </div>
-              <div className="grid md:grid-cols-3 gap-2 mt-1">
-                <label className="flex flex-col gap-1">
-                  <span className="text-gray-600">
-                    Scheme
-                  </span>
-                  <input
-                    className="border rounded px-2 py-1"
-                    value={medicalAid.scheme}
-                    onChange={(e) =>
-                      setMedicalAid((m) => ({
-                        ...m,
-                        scheme: e.target.value,
-                      }))
-                    }
-                    placeholder="e.g. Discovery"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-gray-600">
-                    Member number
-                  </span>
-                  <input
-                    className="border rounded px-2 py-1"
-                    value={medicalAid.memberNumber}
-                    onChange={(e) =>
-                      setMedicalAid((m) => ({
-                        ...m,
-                        memberNumber:
-                          e.target.value,
-                      }))
-                    }
-                    placeholder="e.g. 123456789"
-                  />
-                </label>
-                <label className="flex flex-col gap-1">
-                  <span className="text-gray-600">
-                    Dependent code
-                  </span>
-                  <input
-                    className="border rounded px-2 py-1"
-                    value={medicalAid.dependentCode}
-                    onChange={(e) =>
-                      setMedicalAid((m) => ({
-                        ...m,
-                        dependentCode:
-                          e.target.value,
-                      }))
-                    }
-                    placeholder="e.g. 01"
-                  />
-                </label>
-              </div>
-            </div>
-          )}
-
-          {paymentMethod === 'voucher' && (
-            <div className="mt-3 text-xs">
-              <label className="flex flex-col gap-1">
-                <span className="text-gray-600">
-                  Voucher or promo code
-                </span>
-                <input
-                  className="border rounded px-2 py-1"
-                  value={voucherCode}
-                  onChange={(e) =>
-                    setVoucherCode(
-                      e.target.value,
-                    )
-                  }
-                  placeholder="e.g. TELE-2025-ABC"
-                />
+                    return (
+                      <option key={p.id} value={p.id} disabled={!usable}>
+                        {p.payerName}
+                        {p.planName ? ` — ${p.planName}` : ''}
+                        {p.membershipNumber ? ` · ${p.membershipNumber}` : ''}
+                        {!usable ? policyPaymentLabel(p) : ''}
+                      </option>
+                    );
+                  })}
+                </select>
               </label>
-            </div>
-          )}
 
-          {paymentMethod === 'eft' && (
-            <p className="mt-2 text-[11px] text-gray-500">
-              For EFT bookings we reserve your slot for a limited time while you pay.
-              In production, we&apos;ll pair your proof of payment or Paystack bank transfer
-              reference with this booking; if not confirmed in time, the slot is released.
-            </p>
-          )}
-
-          {paymentMethod === 'mpesa' && (
-            <p className="mt-2 text-[11px] text-gray-500">
-              M-Pesa is available when your clinician and country support it.
-              Behind the scenes we&apos;ll use a mobile money provider or Paystack
-              integration optimised for Kenyan flows.
-            </p>
-          )}
-        </section>
-
-        {/* SMS alert */}
-        <section className="border rounded-lg p-3 bg-slate-50 space-y-2 text-xs">
-          <div className="flex items-center justify-between">
-            <div className="text-sm font-medium text-gray-800">
-              SMS alerts (+R5)
-            </div>
-          </div>
-          <label className="inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={smsAlert}
-              onChange={(e) =>
-                setSmsAlert(e.target.checked)
-              }
-            />
-            <span>
-              Send SMS notifications for this booking (flat R5, added to your total).
-            </span>
-          </label>
-          <p className="text-[11px] text-gray-500">
-            If it&apos;s a multi-party visit, all attending parties will receive the SMS
-            at the same flat rate. Email and in-app notifications remain free.
-          </p>
-        </section>
-
-        {/* Observers */}
-        <section className="border rounded-lg p-3 bg-slate-50 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <div className="text-sm font-medium text-gray-800">
-                Observers &amp; supporters
-              </div>
-              {!canUseObservers && (
-                <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-800">
-                  Premium
-                </span>
+              {selectedPolicy ? (
+                <div className={`rounded-2xl border p-4 text-sm ${
+                  selectedPolicyOk
+                    ? 'border-emerald-800 bg-emerald-950/30 text-emerald-100'
+                    : 'border-rose-800 bg-rose-950/30 text-rose-100'
+                }`}>
+                  <div className="font-semibold">
+                    {selectedPolicyOk ? 'Policy usable for preflight' : 'Policy not usable for sponsor payment'}
+                  </div>
+                  <div className="mt-1 text-xs opacity-80">
+                    Payment eligible: {selectedPolicyOk ? 'Yes' : 'No'} · Status:{' '}
+                    {selectedPolicy.eligibilityStatus ||
+                      selectedPolicy.latestEligibility?.eligibilityStatus ||
+                      selectedPolicy.coverageStatus ||
+                      'UNKNOWN'} · Premium:{' '}
+                    {selectedPolicy.premiumStatus ||
+                      selectedPolicy.latestEligibility?.premiumStatus ||
+                      'UNKNOWN'} · Client:{' '}
+                    {selectedClientId || 'not mapped'}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-amber-800 bg-amber-950/30 p-4 text-sm text-amber-100">
+                  No policy selected. Add or link a policy from Medical Aid / Sponsor Profile first.
+                </div>
               )}
             </div>
-            <label className="flex items-center gap-2 text-xs text-gray-600">
-              <input
-                type="checkbox"
-                checked={allowObservers}
-                disabled={!canUseObservers}
-                onChange={(e) =>
-                  canUseObservers &&
-                  setAllowObservers(
-                    e.target.checked,
-                  )
-                }
-              />
-              Allow observers to join this call
-            </label>
+          ) : null}
+
+          <div className="mt-4 flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                void runPreflight().catch((e: any) => setErr(e?.message || 'Preflight failed'));
+              }}
+              disabled={preflightBusy || busy}
+              className="rounded-2xl border border-slate-700 bg-slate-950 px-4 py-3 text-sm font-semibold hover:bg-slate-800 disabled:opacity-60"
+            >
+              {preflightBusy ? 'Checking cover…' : 'Run preflight'}
+            </button>
+
+            <button
+              type="button"
+              onClick={onSubmit}
+              disabled={busy || preflightBusy}
+              className="rounded-2xl bg-sky-500 px-5 py-3 text-sm font-semibold text-white hover:bg-sky-400 disabled:opacity-60"
+            >
+              {busy ? 'Booking…' : 'Book appointment'}
+            </button>
           </div>
-          <p className="text-[11px] text-gray-500">
-            Observers (e.g. spouse, parent or friend) can join as guests.
-            Clinical notes and billing remain tied to the person this appointment is for.
-            Guest access is limited — after a few joins we&apos;ll prompt them to sign up
-            with a simple profile.
-          </p>
-          {allowObservers && canUseObservers && (
-            <label className="flex flex-col gap-1 text-xs">
-              <span className="text-gray-600">
-                Observer emails (comma separated)
-              </span>
-              <input
-                className="border rounded px-2 py-1"
-                value={observerDraft.raw}
-                onChange={(e) =>
-                  setObserverDraft({
-                    raw: e.target.value,
-                  })
-                }
-                placeholder="e.g. spouse@example.com, parent@example.com"
-              />
-              <span className="text-[10px] text-gray-500">
-                We&apos;ll enforce a limited number of guest joins for non-registered
-                observers and encourage quick sign-up over time.
-              </span>
-            </label>
-          )}
+
+          {preflight ? (
+            <div className={`mt-4 rounded-2xl border p-4 text-sm ${sponsorTone(sponsor?.decision)}`}>
+              <div className="font-semibold">
+                Sponsor decision: {sponsor?.decision || 'No sponsor decision'}
+              </div>
+              <div className="mt-1">
+                {sponsor?.reason || 'Sponsor preflight completed.'}
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                <div className="rounded-xl border border-current/20 bg-white/40 p-3">
+                  <div className="text-xs opacity-70">Gross</div>
+                  <div className="mt-1 font-semibold">
+                    {moneyMinor(preflight.priceLock?.amountMinor, preflightCurrency)}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-current/20 bg-white/40 p-3">
+                  <div className="text-xs opacity-70">Sponsor</div>
+                  <div className="mt-1 font-semibold">
+                    {moneyMinor(sponsor?.sponsorAmountMinor, preflightCurrency)}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-current/20 bg-white/40 p-3">
+                  <div className="text-xs opacity-70">Patient payable</div>
+                  <div className="mt-1 font-semibold">
+                    {moneyMinor(patientPayableMinor, preflightCurrency)}
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-current/20 bg-white/40 p-3">
+                  <div className="text-xs opacity-70">Next payment route</div>
+                  <div className="mt-1 font-semibold">
+                    {paymentChoice === 'medical_aid'
+                      ? String(sponsor?.decision || '').toUpperCase() === 'REQUIRES_AUTHORIZATION'
+                        ? 'Pre-auth queue'
+                        : patientPayableMinor > 0
+                          ? 'Card for co-pay/gap'
+                          : 'Sponsor only'
+                      : 'Card'}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : null}
         </section>
 
-        <div className="text-sm text-gray-700">
-          <div className="font-medium">
-            {paymentModeDescription}
-          </div>
-          {pay ? (
-            <div className="text-xs text-gray-500 mt-1">
-              The gateway receives{' '}
-              <code className="bg-gray-100 px-1 rounded">
-                payment_method
-              </code>{' '}
-              plus voucher / medical aid / SMS / country metadata so
-              payouts &amp; claims can be computed correctly.
-            </div>
-          ) : (
-            <div className="text-xs text-gray-500 mt-1">
-              This environment does not call the
-              gateway; we just simulate a successful
-              appointment.
-            </div>
-          )}
-        </div>
+        <section className="rounded-3xl border border-slate-800 bg-slate-900 p-5">
+          <h2 className="text-lg font-semibold">Additional participants</h2>
 
-        <div className="text-xs text-gray-500">
-          Clinicians practising on Ambulant+ are
-          independent practitioners with their own
-          practice numbers, consulting virtually
-          via the{' '}
-          <strong>Ambulant+ Center</strong>. If
-          your policy covers telemedicine, your
-          claims will reference the virtual session
-          and, where applicable, connected IoMT
-          devices and vitals.
-        </div>
+          <div className="mt-4 grid gap-3 md:grid-cols-3">
+            <input
+              placeholder="Observer name"
+              value={observerName}
+              onChange={(e) => setObserverName(e.target.value)}
+              className="rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
+            />
+
+            <input
+              placeholder="Observer email"
+              value={observerEmail}
+              onChange={(e) => setObserverEmail(e.target.value)}
+              className="rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
+            />
+
+            <input
+              placeholder="Observer phone"
+              value={observerPhone}
+              onChange={(e) => setObserverPhone(e.target.value)}
+              className="rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
+            />
+
+            <select
+              value={careAllyPatientId}
+              onChange={(e) => setCareAllyPatientId(e.target.value)}
+              className="rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
+            >
+              <option value="">Care ally</option>
+              {joinableCareCircle.map((m) => (
+                <option key={m.patientId} value={m.patientId}>
+                  {m.name || m.patientId}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={secondPatientParticipantId}
+              onChange={(e) => setSecondPatientParticipantId(e.target.value)}
+              className="rounded-2xl border border-slate-700 bg-slate-950 p-3 text-sm outline-none"
+            >
+              <option value="">Second patient participant</option>
+              {joinableCareCircle.map((m) => (
+                <option key={m.patientId} value={m.patientId}>
+                  {m.name || m.patientId}
+                </option>
+              ))}
+            </select>
+          </div>
+        </section>
 
         {err ? (
-          <div className="text-rose-600 text-sm">
+          <div className="rounded-2xl border border-rose-800 bg-rose-950/40 p-4 text-sm text-rose-100">
             {err}
           </div>
         ) : null}
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() =>
-              alert(
-                "Refund policy: clinician-specific (demo).",
-              )
-            }
-            className="px-3 py-1 rounded border text-sm"
-          >
-            View clinician’s refund policy
-          </button>
-          <label className="text-sm inline-flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={agree}
-              onChange={(e) =>
-                setAgree(e.target.checked)
-              }
-            />{' '}
-            I have read and accept the refund policy
-          </label>
-        </div>
-
-        <div className="flex items-center gap-3">
-          <button
-            onClick={create}
-            disabled={busy}
-            className="px-4 py-2 rounded bg-emerald-600 text-white disabled:opacity-50"
-          >
-            {busy
-              ? 'Creating…'
-              : 'Create Appointment'}
-          </button>
-          <Link
-            href="/clinicians"
-            className="text-sm underline"
-          >
-            Browse clinicians
-          </Link>
-        </div>
-      </section>
-
-      {/* Medical Aid modal */}
-      {aidModalOpen && (
-        <div className="fixed inset-0 bg-black/40 grid place-items-center z-50">
-          <div className="w-full max-w-lg p-4 bg-white rounded shadow-lg">
-            <h3 className="text-lg font-semibold mb-2">
-              {aidEditing
-                ? 'Edit Medical Aid'
-                : 'Add Medical Aid'}
-            </h3>
-            <MedicalAidForm
-              initial={aidEditing || undefined}
-              onCancel={() => setAidModalOpen(false)}
-              onSaved={(policy) => {
-                setMedicalAids((prev) => {
-                  const others = prev.filter(
-                    (p) => p.id !== policy.id,
-                  );
-                  return [policy, ...others];
-                });
-                setSelectedMedicalAidId(
-                  policy.id,
-                );
-                setAidModalOpen(false);
-              }}
-            />
-          </div>
-        </div>
-      )}
+      </div>
     </main>
   );
 }
+
+export default function NewAppointmentPage() {
+  return (
+    <Suspense fallback={null}>
+      <NewAppointmentPageContent />
+    </Suspense>
+  );
+}
+

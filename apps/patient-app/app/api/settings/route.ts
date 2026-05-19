@@ -24,48 +24,78 @@ const glucoseSettings = z.object({
 
 const schema = z.union([appSettings, glucoseSettings]);
 
-type AnySettings = z.infer<typeof schema> & { userId?: string };
+function json(data: any, status = 200) {
+  return NextResponse.json(data, { status });
+}
+
+function readUserId(req: NextRequest) {
+  return (
+    req.headers.get('x-ambulant-user-id') ||
+    req.headers.get('x-user-id') ||
+    req.headers.get('x-uid') ||
+    ''
+  ).trim();
+}
 
 function ensureSettings(userId: string): UserSettings {
   let s = store.settings.get(userId);
+
   if (!s) {
     s = {
       userId,
-      contactEmail: 'patient@example.com',
+      contactEmail: '',
       notifications: true,
       theme: 'system',
       shareData: true,
     };
     store.settings.set(userId, s);
   }
+
   return s;
 }
 
 export async function GET(req: NextRequest) {
-  const userId = req.headers.get('x-uid') || 'anon';
+  const userId = readUserId(req);
+
+  if (!userId) {
+    return json({ ok: false, error: 'patient_identity_required' }, 401);
+  }
+
   const s = ensureSettings(userId);
-  return NextResponse.json(s);
+  return json({ ok: true, settings: s });
 }
 
 export async function POST(req: NextRequest) {
-  const userId = req.headers.get('x-uid') || 'anon';
+  const userId = readUserId(req);
+
+  if (!userId) {
+    return json({ ok: false, error: 'patient_identity_required' }, 401);
+  }
+
   const body = await req.json().catch(() => ({}));
   const parsed = schema.safeParse(body);
+
   if (!parsed.success) {
-    return NextResponse.json({ message: 'Invalid settings', issues: parsed.error.issues }, { status: 400 });
+    return json(
+      { ok: false, message: 'Invalid settings', issues: parsed.error.issues },
+      400,
+    );
   }
 
-  // If it's glucose settings, persist under a sub-key
   if ('fastingHigh' in parsed.data) {
     const current = ensureSettings(userId) as any;
-    const next = { ...(current || {}), glucose: { ...(current?.glucose || {}), ...parsed.data } };
+    const next = {
+      ...(current || {}),
+      glucose: { ...(current?.glucose || {}), ...parsed.data },
+    };
+
     store.settings.set(userId, next);
-    return NextResponse.json(next);
+    return json({ ok: true, settings: next });
   }
 
-  // Otherwise it's app-level settings
   const current = ensureSettings(userId);
   const next: UserSettings = { ...current, ...parsed.data };
+
   store.settings.set(userId, next);
-  return NextResponse.json(next);
+  return json({ ok: true, settings: next });
 }

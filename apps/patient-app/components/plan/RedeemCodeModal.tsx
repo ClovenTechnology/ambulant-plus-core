@@ -15,18 +15,24 @@ type RedeemResp =
 
 function clientUid() {
   try {
-    return localStorage.getItem('ambulant.uid') || localStorage.getItem('x-uid') || 'demo-patient';
+    return localStorage.getItem('ambulant.uid') || localStorage.getItem('x-uid') || 'patient-local-001';
   } catch {
-    return 'demo-patient';
+    return 'patient-local-001';
   }
 }
 
 export default function RedeemCodeModal(props: {
   open: boolean;
   onClose: () => void;
-  onRedeemed: (r: { effect: 'upgraded' | 'credit_saved'; message: string }) => void;
+  currentPlan?: string | null;
+  onRedeemed: (r: {
+    effect: 'upgraded' | 'credit_saved';
+    message: string;
+    redeemed?: { code?: string; valueZar?: number; plan?: string };
+    allowShopSpend?: boolean;
+  }) => void;
 }) {
-  const { open, onClose, onRedeemed } = props;
+  const { open, onClose, currentPlan, onRedeemed } = props;
 
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
@@ -43,7 +49,7 @@ export default function RedeemCodeModal(props: {
     const r = await fetch('/api/plan/redeem', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-uid': uid },
-      body: JSON.stringify({ code: code.trim() }),
+      body: JSON.stringify({ code: code.trim(), currentPlan }),
     }).catch(() => null);
 
     const data = (await r?.json().catch(() => null)) as RedeemResp | null;
@@ -54,7 +60,12 @@ export default function RedeemCodeModal(props: {
       return;
     }
 
-    onRedeemed({ effect: data.effect, message: data.message });
+    onRedeemed({
+      effect: data.effect,
+      message: data.message,
+      redeemed: data.redeemed,
+      allowShopSpend: data.allowShopSpend,
+    });
     setBusy(false);
     setCode('');
     onClose();

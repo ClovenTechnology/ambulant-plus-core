@@ -1,8 +1,12 @@
-// apps/api-gateway/app/api/fx/audit/route.ts
+﻿// apps/api-gateway/app/api/fx/audit/route.ts
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { assertAdminFinance, isCcy, normCcy } from '../_shared';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 export async function GET(req: NextRequest) {
   try {
@@ -42,3 +46,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ ok: false, error: e?.message || 'Audit fetch failed' }, { status });
   }
 }
+
+

@@ -1,6 +1,10 @@
-//apps/api-gateway/app/api/devices/online/route.ts
+﻿//apps/api-gateway/app/api/devices/online/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 /**
  * GET /api/devices/online?window=300
@@ -43,3 +47,5 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'internal_error' }, { status: 500 });
   }
 }
+
+

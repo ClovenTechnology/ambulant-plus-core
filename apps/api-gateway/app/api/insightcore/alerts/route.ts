@@ -29,7 +29,6 @@ type InsightThresholdConfig = {
 
 type AlertSeverity = 'low' | 'moderate' | 'high' | 'critical';
 
-// Factors that can feed into the risk engine
 type RiskFactors = {
   age?: number;
   gender?: string;
@@ -39,16 +38,16 @@ type RiskFactors = {
     tempC?: number;
     systolic?: number;
     diastolic?: number;
-    glucoseInstabilityScore?: number; // 0–1
+    glucoseInstabilityScore?: number;
   };
-  conditions?: string[]; // e.g. ['diabetes', 'hypertension']
+  conditions?: string[];
   lifestyle?: {
     avgStepsPerDay?: number;
     sleepHours?: number;
     stressScore0to10?: number;
     hydrationGlassesPerDay?: number;
     activityMinutesPerWeek?: number;
-    medicationAdherencePct?: number; // 0–100
+    medicationAdherencePct?: number;
   };
 };
 
@@ -62,81 +61,118 @@ type AlertPayload = {
   source: string;
   title: string;
   message: string;
-  riskScore: number; // 0–1
+  riskScore: number;
   severity: AlertSeverity;
   ts: string;
   tags?: string[];
   factors?: RiskFactors;
 };
 
-function safeJsonParse(value: unknown) {
+function isPlainObject(value: unknown): value is Record<string, any> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function safeJsonObject(value: unknown): Record<string, any> | null {
   if (value == null) return null;
 
   if (typeof value === 'string') {
-    if (!value.trim()) return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
 
     try {
-      return JSON.parse(value);
+      const parsed = JSON.parse(trimmed);
+      return isPlainObject(parsed) ? parsed : null;
     } catch {
       return null;
     }
   }
 
-  if (typeof value === 'object' && !Array.isArray(value)) {
-    return value;
-  }
+  return isPlainObject(value) ? value : null;
+}
 
-  return null;
+function safeNumber(value: unknown, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function safeString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
+function safeStringOrNull(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function safeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(String).map((item) => item.trim()).filter(Boolean);
+}
+
+function defaultConfig(): InsightThresholdConfig {
+  return {
+    heartRate: { min: 50, max: 120 },
+    spo2: { min: 92 },
+    temperature: { max: 38 },
+    glucoseInstability: { threshold: 0.7 },
+    bp: { systolicMax: 140, diastolicMax: 90 },
+    riskScoring: {
+      alertScoreMin: 0.65,
+      criticalScoreMin: 0.85,
+      ageBands: { lt40: 0.8, '40_64': 1.0, gte65: 1.2 },
+      genderModifiers: { female: 1.0, male: 1.0, other: 1.0 },
+      conditionWeights: {
+        diabetes: 1.3,
+        hypertension: 1.25,
+        heartFailure: 1.4,
+        renalDisease: 1.35,
+        pregnancy: 1.3,
+      },
+      lifestyleWeights: {
+        sedentary: 1.2,
+        poorSleep: 1.15,
+        highStress: 1.15,
+        lowHydration: 1.05,
+        nonAdherence: 1.3,
+      },
+    },
+  };
 }
 
 async function loadConfig(orgId: string): Promise<InsightThresholdConfig> {
+  const fallback = defaultConfig();
+
   const ev = await prisma.runtimeEvent.findFirst({
     where: { kind: 'insight.config.thresholds', orgId },
     orderBy: { ts: 'desc' },
   });
 
-  if (!ev?.payload) {
-    // Mirror defaults in /insightcore/config route
-    return {
-      heartRate: { min: 50, max: 120 },
-      spo2: { min: 92 },
-      temperature: { max: 38 },
-      glucoseInstability: { threshold: 0.7 },
-      bp: { systolicMax: 140, diastolicMax: 90 },
-      riskScoring: {
-        alertScoreMin: 0.65,
-        criticalScoreMin: 0.85,
-        ageBands: { lt40: 0.8, '40_64': 1.0, gte65: 1.2 },
-        genderModifiers: { female: 1.0, male: 1.0, other: 1.0 },
-        conditionWeights: {
-          diabetes: 1.3,
-          hypertension: 1.25,
-          heartFailure: 1.4,
-          renalDisease: 1.35,
-          pregnancy: 1.3,
-        },
-        lifestyleWeights: {
-          sedentary: 1.2,
-          poorSleep: 1.15,
-          highStress: 1.15,
-          lowHydration: 1.05,
-          nonAdherence: 1.3,
-        },
-      },
-    };
-  }
+  const p = safeJsonObject(ev?.payload);
+  if (!p) return fallback;
 
-  const p = safeJsonParse(ev.payload) || {};
   return {
-    heartRate: { min: 50, max: 120, ...(p.heartRate || {}) },
-    spo2: { min: 92, ...(p.spo2 || {}) },
-    temperature: { max: 38, ...(p.temperature || {}) },
-    glucoseInstability: { threshold: 0.7, ...(p.glucoseInstability || {}) },
-    bp: { systolicMax: 140, diastolicMax: 90, ...(p.bp || {}) },
+    heartRate: {
+      ...fallback.heartRate,
+      ...(isPlainObject(p.heartRate) ? p.heartRate : {}),
+    },
+    spo2: {
+      ...fallback.spo2,
+      ...(isPlainObject(p.spo2) ? p.spo2 : {}),
+    },
+    temperature: {
+      ...fallback.temperature,
+      ...(isPlainObject(p.temperature) ? p.temperature : {}),
+    },
+    glucoseInstability: {
+      ...fallback.glucoseInstability,
+      ...(isPlainObject(p.glucoseInstability) ? p.glucoseInstability : {}),
+    },
+    bp: {
+      ...fallback.bp,
+      ...(isPlainObject(p.bp) ? p.bp : {}),
+    },
     riskScoring: {
-      alertScoreMin: 0.65,
-      criticalScoreMin: 0.85,
-      ...(p.riskScoring || {}),
+      ...fallback.riskScoring,
+      ...(isPlainObject(p.riskScoring) ? p.riskScoring : {}),
     },
   };
 }
@@ -148,8 +184,10 @@ function clamp01(x: number) {
   return x;
 }
 
-// Very lightweight multi-factor risk engine – you can tune weights later.
-function computeRiskScore(factors: RiskFactors | undefined, cfg: InsightThresholdConfig): number {
+function computeRiskScore(
+  factors: RiskFactors | undefined,
+  cfg: InsightThresholdConfig,
+): number {
   if (!factors) return 0;
 
   const vitals = factors.vitals || {};
@@ -159,19 +197,19 @@ function computeRiskScore(factors: RiskFactors | undefined, cfg: InsightThreshol
 
   let score = 0;
 
-  // Vitals contributions (each roughly adds 0–0.3)
   if (typeof vitals.hr === 'number') {
     if (vitals.hr < cfg.heartRate.min || vitals.hr > cfg.heartRate.max) {
       const delta =
         vitals.hr < cfg.heartRate.min
           ? (cfg.heartRate.min - vitals.hr) / 40
           : (vitals.hr - cfg.heartRate.max) / 40;
+
       score += 0.15 + Math.min(0.15, Math.abs(delta));
     }
   }
 
   if (typeof vitals.spo2 === 'number' && vitals.spo2 < cfg.spo2.min) {
-    const drop = (cfg.spo2.min - vitals.spo2) / 10; // 5% drop → 0.5
+    const drop = (cfg.spo2.min - vitals.spo2) / 10;
     score += 0.2 + Math.min(0.2, drop);
   }
 
@@ -190,40 +228,38 @@ function computeRiskScore(factors: RiskFactors | undefined, cfg: InsightThreshol
     score += 0.15 + Math.min(0.2, sysDelta + diaDelta);
   }
 
-  if (typeof vitals.glucoseInstabilityScore === 'number') {
-    if (vitals.glucoseInstabilityScore >= cfg.glucoseInstability.threshold) {
-      const over = vitals.glucoseInstabilityScore - cfg.glucoseInstability.threshold;
-      score += 0.15 + Math.min(0.2, over);
-    }
+  if (
+    typeof vitals.glucoseInstabilityScore === 'number' &&
+    vitals.glucoseInstabilityScore >= cfg.glucoseInstability.threshold
+  ) {
+    const over = vitals.glucoseInstabilityScore - cfg.glucoseInstability.threshold;
+    score += 0.15 + Math.min(0.2, over);
   }
 
-  // Age band multiplier
   let multiplier = 1;
   const age = factors.age;
   const ageBands = rs.ageBands || { lt40: 0.8, '40_64': 1.0, gte65: 1.2 };
+
   if (typeof age === 'number') {
     if (age < 40) multiplier *= ageBands.lt40;
     else if (age < 65) multiplier *= ageBands['40_64'];
     else multiplier *= ageBands.gte65;
   }
 
-  // Gender modifier
   if (factors.gender && rs.genderModifiers) {
     const key = factors.gender.toLowerCase();
     if (rs.genderModifiers[key] != null) multiplier *= rs.genderModifiers[key]!;
   }
 
-  // Condition-based bumps
   if (rs.conditionWeights) {
-    for (const [cond, w] of Object.entries(rs.conditionWeights)) {
-      if (conditions.has(cond.toLowerCase())) {
-        multiplier *= w;
+    for (const [condition, weight] of Object.entries(rs.conditionWeights)) {
+      if (conditions.has(condition.toLowerCase())) {
+        multiplier *= weight;
       }
     }
   }
 
-  // Lifestyle factors
-  const lw = rs.lifestyleWeights || {
+  const lifestyleWeights = rs.lifestyleWeights || {
     sedentary: 1.2,
     poorSleep: 1.15,
     highStress: 1.15,
@@ -231,24 +267,36 @@ function computeRiskScore(factors: RiskFactors | undefined, cfg: InsightThreshol
     nonAdherence: 1.3,
   };
 
-  if (typeof lifestyle.avgStepsPerDay === 'number' && lifestyle.avgStepsPerDay < 5000) {
-    multiplier *= lw.sedentary;
+  if (
+    typeof lifestyle.avgStepsPerDay === 'number' &&
+    lifestyle.avgStepsPerDay < 5000
+  ) {
+    multiplier *= lifestyleWeights.sedentary;
   }
 
-  if (typeof lifestyle.activityMinutesPerWeek === 'number' && lifestyle.activityMinutesPerWeek < 90) {
-    multiplier *= lw.sedentary;
+  if (
+    typeof lifestyle.activityMinutesPerWeek === 'number' &&
+    lifestyle.activityMinutesPerWeek < 90
+  ) {
+    multiplier *= lifestyleWeights.sedentary;
   }
 
   if (typeof lifestyle.sleepHours === 'number' && lifestyle.sleepHours < 6) {
-    multiplier *= lw.poorSleep;
+    multiplier *= lifestyleWeights.poorSleep;
   }
 
-  if (typeof lifestyle.stressScore0to10 === 'number' && lifestyle.stressScore0to10 >= 7) {
-    multiplier *= lw.highStress;
+  if (
+    typeof lifestyle.stressScore0to10 === 'number' &&
+    lifestyle.stressScore0to10 >= 7
+  ) {
+    multiplier *= lifestyleWeights.highStress;
   }
 
-  if (typeof lifestyle.hydrationGlassesPerDay === 'number' && lifestyle.hydrationGlassesPerDay < 5) {
-    multiplier *= lw.lowHydration;
+  if (
+    typeof lifestyle.hydrationGlassesPerDay === 'number' &&
+    lifestyle.hydrationGlassesPerDay < 5
+  ) {
+    multiplier *= lifestyleWeights.lowHydration;
   }
 
   if (
@@ -256,17 +304,21 @@ function computeRiskScore(factors: RiskFactors | undefined, cfg: InsightThreshol
     lifestyle.medicationAdherencePct > 0 &&
     lifestyle.medicationAdherencePct < 80
   ) {
-    multiplier *= lw.nonAdherence;
+    multiplier *= lifestyleWeights.nonAdherence;
   }
 
-  const raw = score * multiplier;
-  return clamp01(raw);
+  return clamp01(score * multiplier);
 }
 
 function classifySeverity(score: number, cfg: InsightThresholdConfig): AlertSeverity {
-  const rs = cfg.riskScoring || { alertScoreMin: 0.65, criticalScoreMin: 0.85 };
-  const lowThreshold = rs.alertScoreMin || 0.65;
-  const criticalThreshold = rs.criticalScoreMin || Math.max(0.85, lowThreshold + 0.15);
+  const riskScoring = cfg.riskScoring || {
+    alertScoreMin: 0.65,
+    criticalScoreMin: 0.85,
+  };
+
+  const lowThreshold = riskScoring.alertScoreMin || 0.65;
+  const criticalThreshold =
+    riskScoring.criticalScoreMin || Math.max(0.85, lowThreshold + 0.15);
 
   if (score >= criticalThreshold) return 'critical';
   if (score >= criticalThreshold - 0.1) return 'high';
@@ -275,10 +327,20 @@ function classifySeverity(score: number, cfg: InsightThresholdConfig): AlertSeve
 }
 
 function getOrgId(req: Request): string {
-  return (req.headers.get('x-org-id') || 'org-default').toString();
+  return safeString(req.headers.get('x-org-id'), 'org-default');
 }
 
-/* ---------- GET: fetch alerts for patient / clinician / admin ---------- */
+function parseRiskFactors(value: unknown): RiskFactors | undefined {
+  if (!isPlainObject(value)) return undefined;
+
+  return {
+    age: typeof value.age === 'number' ? value.age : undefined,
+    gender: typeof value.gender === 'string' ? value.gender : undefined,
+    vitals: isPlainObject(value.vitals) ? value.vitals : undefined,
+    conditions: Array.isArray(value.conditions) ? value.conditions.map(String) : undefined,
+    lifestyle: isPlainObject(value.lifestyle) ? value.lifestyle : undefined,
+  };
+}
 
 export async function GET(req: Request) {
   const url = new URL(req.url);
@@ -286,7 +348,8 @@ export async function GET(req: Request) {
 
   const patientId = url.searchParams.get('patientId') || undefined;
   const clinicianId = url.searchParams.get('clinicianId') || undefined;
-  const limit = Number(url.searchParams.get('limit') || '20');
+  const rawLimit = Number(url.searchParams.get('limit') || '20');
+  const limit = Math.max(1, Math.min(100, Number.isFinite(rawLimit) ? rawLimit : 20));
   const sinceIso = url.searchParams.get('since') || undefined;
 
   const where: any = {
@@ -295,10 +358,7 @@ export async function GET(req: Request) {
   };
 
   if (patientId) {
-    where.OR = [
-      { targetPatientId: patientId },
-      { patientId },
-    ];
+    where.OR = [{ targetPatientId: patientId }, { patientId }];
   }
 
   if (clinicianId) {
@@ -317,29 +377,32 @@ export async function GET(req: Request) {
   const events = await prisma.runtimeEvent.findMany({
     where,
     orderBy: { ts: 'desc' },
-    take: Math.max(1, Math.min(100, limit)),
+    take: limit,
   });
 
   const alerts: AlertPayload[] = [];
+
   for (const ev of events) {
-    const p = safeJsonParse(ev.payload);
-    if (!p) continue;
+    const payload = safeJsonObject(ev.payload);
+    if (!payload) continue;
 
     alerts.push({
-      id: p.id || ev.id,
-      orgId: p.orgId || orgId,
-      patientId: p.patientId ?? ev.patientId ?? null,
-      patientName: p.patientName ?? null,
-      clinicianId: p.clinicianId ?? ev.clinicianId ?? null,
-      type: p.type || 'multifactor',
-      source: p.source || 'insightcore',
-      title: p.title || 'InsightCore alert',
-      message: p.message || '',
-      riskScore: typeof p.riskScore === 'number' ? p.riskScore : 0,
-      severity: (p.severity as AlertSeverity) || 'low',
-      ts: p.ts || new Date(Number(ev.ts)).toISOString(),
-      tags: Array.isArray(p.tags) ? p.tags : [],
-      factors: p.factors || undefined,
+      id: safeString(payload.id, ev.id),
+      orgId: safeString(payload.orgId, orgId),
+      patientId: safeStringOrNull(payload.patientId) ?? ev.patientId ?? null,
+      patientName: safeStringOrNull(payload.patientName),
+      clinicianId: safeStringOrNull(payload.clinicianId) ?? ev.clinicianId ?? null,
+      type: safeString(payload.type, 'multifactor'),
+      source: safeString(payload.source, 'insightcore'),
+      title: safeString(payload.title, 'InsightCore alert'),
+      message: safeString(payload.message, ''),
+      riskScore: typeof payload.riskScore === 'number' ? clamp01(payload.riskScore) : 0,
+      severity: ['low', 'moderate', 'high', 'critical'].includes(String(payload.severity))
+        ? (payload.severity as AlertSeverity)
+        : 'low',
+      ts: safeString(payload.ts, new Date(Number(ev.ts)).toISOString()),
+      tags: safeStringArray(payload.tags),
+      factors: parseRiskFactors(payload.factors),
     });
   }
 
@@ -348,26 +411,22 @@ export async function GET(req: Request) {
   });
 }
 
-/* ---------- POST: create alert (from InsightCore engine or simulator) ---------- */
-
 export async function POST(req: Request) {
   const orgId = getOrgId(req);
-  const body = (await req.json().catch(() => ({}))) as any;
+  const body = safeJsonObject(await req.json().catch(() => ({}))) || {};
 
   const now = Date.now();
-  const id = body.id || crypto.randomUUID();
-  const patientId = body.patientId ? String(body.patientId) : null;
-  const clinicianId = body.clinicianId ? String(body.clinicianId) : null;
+  const id = safeString(body.id, crypto.randomUUID());
+  const patientId = safeStringOrNull(body.patientId);
+  const clinicianId = safeStringOrNull(body.clinicianId);
 
-  const factors: RiskFactors | undefined = body.factors || undefined;
+  const factors = parseRiskFactors(body.factors);
   const cfg = await loadConfig(orgId);
 
-  let riskScore: number;
-  if (typeof body.riskScore === 'number') {
-    riskScore = clamp01(body.riskScore);
-  } else {
-    riskScore = computeRiskScore(factors, cfg);
-  }
+  const riskScore =
+    typeof body.riskScore === 'number'
+      ? clamp01(body.riskScore)
+      : computeRiskScore(factors, cfg);
 
   const severity = classifySeverity(riskScore, cfg);
 
@@ -375,16 +434,16 @@ export async function POST(req: Request) {
     id,
     orgId,
     patientId: patientId ?? undefined,
-    patientName: body.patientName || null,
+    patientName: safeStringOrNull(body.patientName),
     clinicianId: clinicianId ?? undefined,
-    type: body.type || 'multifactor',
-    source: body.source || 'insightcore',
-    title: body.title || body.type || 'InsightCore alert',
-    message: body.message || body.note || '',
+    type: safeString(body.type, 'multifactor'),
+    source: safeString(body.source, 'insightcore'),
+    title: safeString(body.title, safeString(body.type, 'InsightCore alert')),
+    message: safeString(body.message, safeString(body.note, '')),
     riskScore,
     severity,
     ts: new Date(now).toISOString(),
-    tags: Array.isArray(body.tags) ? body.tags.map(String) : [],
+    tags: safeStringArray(body.tags),
     factors,
   };
 
@@ -393,7 +452,7 @@ export async function POST(req: Request) {
       id,
       ts: BigInt(now),
       kind: 'insight.alert.multifactor',
-      encounterId: body.encounterId ? String(body.encounterId) : null,
+      encounterId: safeStringOrNull(body.encounterId),
       patientId,
       clinicianId,
       payload: JSON.stringify(payload),

@@ -38,13 +38,20 @@ export function QualityBars({
   className?: string;
   title?: string;
 }) {
+  const qualityLabel = String(quality ?? '').toLowerCase();
+
   const n =
-    quality === 5 ? 5
-    : quality === 4 ? 4
-    : quality === 2 ? 2
-    : quality === 0 ? 0
-    : quality === 1 ? 0
-    : quality ? 3 : 0;
+    qualityLabel === 'excellent'
+      ? 5
+      : qualityLabel === 'good'
+        ? 4
+        : qualityLabel === 'poor'
+          ? 2
+          : qualityLabel === 'lost'
+            ? 0
+            : qualityLabel === 'unknown' || !quality
+              ? 0
+              : 3;
 
   return (
     <div className={`flex items-end gap-0.5 ${className || ''}`} title={`${title}: ${quality ?? 'n/a'}`} aria-label={title}>

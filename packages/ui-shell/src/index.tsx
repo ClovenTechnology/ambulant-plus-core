@@ -1,68 +1,97 @@
-"use client";
+'use client';
 
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { useEffect, useState } from 'react';
 
-export type NavItem = { href: string; label: string };
-type Theme = "light" | "dark";
+export type NavItem = {
+  href: string;
+  label: string;
+};
+
+type Theme = 'light' | 'dark';
 
 function getInitialTheme(): Theme {
-  if (typeof window === "undefined") return "light"; // CHANGED: SSR fallback -> light
+  if (typeof window === 'undefined') {
+    return 'light';
+  }
+
   try {
-    const saved = localStorage.getItem("theme") as Theme | null;
-    if (saved === "light" || saved === "dark") return saved;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+    const saved = localStorage.getItem('theme') as Theme | null;
+
+    if (saved === 'light' || saved === 'dark') {
+      return saved;
+    }
+
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
   } catch {
-    return "light"; // CHANGED: error fallback -> light
+    return 'light';
   }
 }
 
 export function ThemeSwitch() {
-  const [theme, setTheme] = useState<Theme>("light"); // CHANGED: initial -> light
+  const [theme, setTheme] = useState<Theme>('light');
+
   useEffect(() => {
-    const t = getInitialTheme();
-    setTheme(t);
-    document.documentElement.setAttribute("data-theme", t);
+    const initialTheme = getInitialTheme();
+
+    setTheme(initialTheme);
+    document.documentElement.setAttribute('data-theme', initialTheme);
   }, []);
+
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-    try { localStorage.setItem("theme", theme); } catch {}
+    document.documentElement.setAttribute('data-theme', theme);
+
+    try {
+      localStorage.setItem('theme', theme);
+    } catch {
+      // Ignore storage failures.
+    }
   }, [theme]);
 
   return (
     <button
-      onClick={() => setTheme(t => (t === "dark" ? "light" : "dark"))}
+      type="button"
+      onClick={() => setTheme((current) => (current === 'dark' ? 'light' : 'dark'))}
       className="rounded border px-2 py-1 text-xs hover:bg-white/5"
       title="Toggle color theme"
       aria-label="Toggle color theme"
     >
-      {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
+      {theme === 'dark' ? '☀️ Light' : '🌙 Dark'}
     </button>
   );
 }
 
 export function Sidebar({ items }: { items: NavItem[] }) {
   const pathname = usePathname();
-  const isActive = (href: string) => pathname === href || pathname.startsWith(href + "/");
+  const currentPath = pathname ?? '';
+
+  const isActive = (href: string): boolean =>
+    currentPath === href || currentPath.startsWith(`${href}/`);
+
   return (
-    <aside className="hidden md:block w-64 shrink-0">
-      <div className="p-3 text-xs text-gray-500 uppercase">Navigation</div>
+    <aside className="hidden w-64 shrink-0 md:block">
+      <div className="p-3 text-xs uppercase text-gray-500">Navigation</div>
+
       <nav className="px-2 pb-3">
         <ul className="space-y-1">
-          {items.map((it) => {
-            const active = isActive(it.href);
+          {items.map((item) => {
+            const active = isActive(item.href);
+
             return (
-              <li key={it.href}>
+              <li key={item.href}>
                 <Link
-                  href={it.href}
+                  href={item.href}
                   className={[
-                    "block rounded px-3 py-2 text-sm",
-                    active ? "bg-gray-100/10 font-medium text-white"
-                           : "text-gray-300 hover:bg-white/5"
-                  ].join(" ")}
+                    'block rounded px-3 py-2 text-sm',
+                    active
+                      ? 'bg-gray-100/10 font-medium text-white'
+                      : 'text-gray-300 hover:bg-white/5',
+                  ].join(' ')}
                 >
-                  {it.label}
+                  {item.label}
                 </Link>
               </li>
             );
@@ -74,8 +103,8 @@ export function Sidebar({ items }: { items: NavItem[] }) {
 }
 
 export function AppShell({
-  brandHref = "/",
-  brandLabel = "Ambulant+",
+  brandHref = '/',
+  brandLabel = 'Ambulant+',
   topNav = [],
   sideNav = [],
   right,
@@ -90,24 +119,25 @@ export function AppShell({
 }) {
   return (
     <>
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-white/5 backdrop-blur-md glass">
-        <nav className="mx-auto max-w-6xl px-4 py-3 flex flex-wrap items-center gap-3 text-sm">
-          <a href={brandHref} className="font-semibold tracking-wide neon">
+      <header className="glass sticky top-0 z-40 border-b border-white/10 bg-white/5 backdrop-blur-md">
+        <nav className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-3 text-sm">
+          <Link href={brandHref} className="neon font-semibold tracking-wide">
             {brandLabel}
-          </a>
+          </Link>
 
-          {topNav.length > 0 && (
+          {topNav.length > 0 ? (
             <>
               <span className="opacity-30">|</span>
+
               <div className="flex flex-wrap items-center gap-3">
-                {topNav.map((n) => (
-                  <a key={n.href} href={n.href} className="hover:underline">
-                    {n.label}
-                  </a>
+                {topNav.map((item) => (
+                  <Link key={item.href} href={item.href} className="hover:underline">
+                    {item.label}
+                  </Link>
                 ))}
               </div>
             </>
-          )}
+          ) : null}
 
           <div className="ml-auto flex items-center gap-2">
             {right}
@@ -117,7 +147,7 @@ export function AppShell({
       </header>
 
       <main className="min-h-[calc(100vh-56px)]">
-        <div className="mx-auto max-w-6xl px-4 py-6 flex gap-6">
+        <div className="mx-auto flex max-w-6xl gap-6 px-4 py-6">
           {sideNav.length > 0 ? <Sidebar items={sideNav} /> : null}
           <section className="flex-1 space-y-6">{children}</section>
         </div>

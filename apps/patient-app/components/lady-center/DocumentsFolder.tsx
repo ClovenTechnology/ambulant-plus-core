@@ -34,11 +34,16 @@ function Pill({
   );
 }
 
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+function Card({
+  children,
+  className,
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement> & { children: React.ReactNode }) {
   return (
     <div
+      {...rest}
       className={cn(
-        'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_18px_45px_rgba(2,6,23,42,0.07)] backdrop-blur',
+        'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_18px_45px_rgba(2,6,23,0.07)] backdrop-blur',
         className
       )}
     >
@@ -100,6 +105,8 @@ export default function DocumentsFolder(props: {
   onView: (docId: string) => void;
   onSummarize: (docId: string) => void;
   onRemove: (docId: string) => void;
+
+  suggestionNote?: string | null;
 }) {
   const {
     docs,
@@ -111,6 +118,7 @@ export default function DocumentsFolder(props: {
     onView,
     onSummarize,
     onRemove,
+    suggestionNote,
   } = props;
 
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -122,6 +130,12 @@ export default function DocumentsFolder(props: {
         subtitle="Your private health folder."
         right={<Pill tone="slate">{docs.length} item{docs.length === 1 ? '' : 's'}</Pill>}
       />
+
+      {suggestionNote ? (
+        <div className="mt-3 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+          {suggestionNote}
+        </div>
+      ) : null}
 
       <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3">
         <div className="flex flex-wrap items-center justify-between gap-2">

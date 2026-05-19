@@ -2,7 +2,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import clsx from 'clsx';
 
 type SignupPayload = {
   name: string;
@@ -19,6 +18,10 @@ type SignupPayload = {
   acceptTerms?: boolean;
   acceptData?: boolean;
 };
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
 
 const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -142,7 +145,7 @@ export default function PatientSignupForm({ redirectOnSuccess = '/welcome' }: { 
         fd.append('avatar', avatarFile);
         fd.append('payload', JSON.stringify({ ...form, password }));
         const res = await fetch('/api/auth/signup', { method: 'POST', body: fd });
-        const json = await res.json();
+        const json = await res.json().catch(() => null);
         if (!res.ok) throw new Error(json?.error || 'Signup failed');
       } else {
         const res = await fetch('/api/auth/signup', {
@@ -150,7 +153,7 @@ export default function PatientSignupForm({ redirectOnSuccess = '/welcome' }: { 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ ...form, password }),
         });
-        const json = await res.json();
+        const json = await res.json().catch(() => null);
         if (!res.ok) throw new Error(json?.error || 'Signup failed');
       }
 
@@ -198,7 +201,7 @@ export default function PatientSignupForm({ redirectOnSuccess = '/welcome' }: { 
 
           <div>
             <label className="text-sm font-medium">Email</label>
-            <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={clsx('mt-1 block w-full border rounded px-3 py-2', emailValid ? '' : 'ring-1 ring-red-300')} required />
+            <input value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className={cx('mt-1 block w-full border rounded px-3 py-2', emailValid ? '' : 'ring-1 ring-red-300')} required />
             {!emailValid && form.email.length > 0 && <div className="text-xs text-red-600 mt-1">Invalid email</div>}
           </div>
 
@@ -208,7 +211,7 @@ export default function PatientSignupForm({ redirectOnSuccess = '/welcome' }: { 
             <div className="flex items-center gap-2 mt-1">
               <div className="text-xs text-gray-500">Strength:</div>
               <div className="flex-1 bg-gray-100 rounded h-2 overflow-hidden">
-                <div className={clsx('h-2', pwStrength >= 4 ? 'w-full bg-emerald-500' : pwStrength === 3 ? 'w-3/4 bg-amber-400' : pwStrength === 2 ? 'w-1/2 bg-yellow-400' : 'w-1/4 bg-red-400')} />
+                <div className={cx('h-2', pwStrength >= 4 ? 'w-full bg-emerald-500' : pwStrength === 3 ? 'w-3/4 bg-amber-400' : pwStrength === 2 ? 'w-1/2 bg-yellow-400' : 'w-1/4 bg-red-400')} />
               </div>
               <div className="text-xs text-gray-500 w-16 text-right">{pwStrength}/4</div>
             </div>
@@ -216,7 +219,7 @@ export default function PatientSignupForm({ redirectOnSuccess = '/welcome' }: { 
 
           <div>
             <label className="text-sm font-medium">Confirm password</label>
-            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={clsx('mt-1 block w-full border rounded px-3 py-2', passwordsMatch || confirm.length === 0 ? '' : 'ring-1 ring-red-300')} required />
+            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} className={cx('mt-1 block w-full border rounded px-3 py-2', passwordsMatch || confirm.length === 0 ? '' : 'ring-1 ring-red-300')} required />
             {!passwordsMatch && confirm.length > 0 && <div className="text-xs text-red-600 mt-1">Passwords do not match</div>}
           </div>
         </div>
@@ -303,7 +306,7 @@ export default function PatientSignupForm({ redirectOnSuccess = '/welcome' }: { 
 
       <div className="mt-6 flex justify-between items-center">
         <div className="text-sm text-gray-500">By signing up you confirm you are the account owner and consent to clinical messages.</div>
-        <button disabled={!canSubmit} type="submit" className={clsx('px-4 py-2 rounded shadow text-white', canSubmit ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed')}>
+        <button disabled={!canSubmit} type="submit" className={cx('px-4 py-2 rounded shadow text-white', canSubmit ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-gray-300 cursor-not-allowed')}>
           {loading ? 'Creating account…' : 'Create account'}
         </button>
       </div>

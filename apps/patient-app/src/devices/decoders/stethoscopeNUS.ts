@@ -24,11 +24,11 @@ const CH_MODEL = 0x2a24;
 const CH_FIRMWARE = 0x2a26;
 
 export type StethoscopeChunkMetrics = {
-  rms: number; // 0..1
-  peak: number; // 0..1
-  clipPct: number; // percent of samples near full-scale
-  dc: number; // mean (should be near 0)
-  zcrPerSec: number; // zero-crossings per second (noise proxy)
+  rms: number;
+  peak: number;
+  clipPct: number;
+  dc: number;
+  zcrPerSec: number;
   levelHint: 'too_quiet' | 'ok' | 'too_loud' | 'clipping';
 };
 
@@ -43,54 +43,95 @@ export type StethoscopeTelemetry = {
 };
 
 type Options = {
-  sampleRate?: number; // 8000 or 16000 (default 8000)
-  playToSpeaker?: boolean; // default true
+  sampleRate?: number;
+  playToSpeaker?: boolean;
   roomId?: string;
-  onChunk?: (c: PcmChunk) => void;
+  onChunk?: (chunk: PcmChunk) => void;
 
-  gain?: number; // scaling applied after HPF (0..1 recommended, default 0.6)
-  hpAlpha?: number; // alpha for the highpass function (default 0.995)
+  gain?: number;
+  hpAlpha?: number;
 
-  // Gap detector: if time between rx packets exceeds this, we report a dropout
-  gapWarnMs?: number; // default 250
+  gapWarnMs?: number;
 
-  // Guidance thresholds (technical, non-diagnostic)
-  tooQuietRms?: number; // default 0.02
-  tooLoudRms?: number; // default 0.25
-  clipAbs?: number; // default 0.98
-  clipPctWarn?: number; // default 0.5
+  tooQuietRms?: number;
+  tooLoudRms?: number;
+  clipAbs?: number;
+  clipPctWarn?: number;
 
-  // Optional callbacks
   onGap?: (info: { gapMs: number; ts: number }) => void;
   onDisconnected?: (info: { reason: string }) => void;
-  onTelemetry?: (t: StethoscopeTelemetry) => void;
+  onTelemetry?: (telemetry: StethoscopeTelemetry) => void;
 };
 
-function clamp01(n: number) {
-  return Math.min(1, Math.max(0, n));
+type ResolvedOptions = {
+  sampleRate: number;
+  playToSpeaker: boolean;
+  roomId?: string;
+  onChunk: (chunk: PcmChunk) => void;
+
+  gain: number;
+  hpAlpha: number;
+
+  gapWarnMs: number;
+
+  tooQuietRms: number;
+  tooLoudRms: number;
+  clipAbs: number;
+  clipPctWarn: number;
+
+  onGap?: Options['onGap'];
+  onDisconnected?: Options['onDisconnected'];
+  onTelemetry?: Options['onTelemetry'];
+};
+
+function clamp01(value: number): number {
+  return Math.min(1, Math.max(0, value));
 }
 
-// Safe base64 encoder (no spread)
-function u8ToB64(u8: Uint8Array): string {
-  let s = '';
-  const CHUNK = 0x8000;
-  for (let i = 0; i < u8.length; i += CHUNK) {
-    const sub = u8.subarray(i, i + CHUNK);
-    let part = '';
-    for (let j = 0; j < sub.length; j++) part += String.fromCharCode(sub[j]);
-    s += part;
+function toStrictArrayBuffer(data: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(buffer).set(data);
+  return buffer;
+}
+
+function getBluetooth(): Bluetooth {
+  if (typeof navigator === 'undefined' || !navigator.bluetooth) {
+    throw new Error('Web Bluetooth not supported in this browser.');
   }
-  return btoa(s);
+
+  return navigator.bluetooth;
+}
+
+// Safe base64 encoder without spreading large arrays.
+function u8ToB64(u8: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+
+  for (let i = 0; i < u8.length; i += chunkSize) {
+    const sub = u8.subarray(i, i + chunkSize);
+    let part = '';
+
+    for (let j = 0; j < sub.length; j += 1) {
+      part += String.fromCharCode(sub[j]);
+    }
+
+    binary += part;
+  }
+
+  return window.btoa(binary);
 }
 
 function decodeUtf8(u8: Uint8Array): string {
   try {
     return new TextDecoder('utf-8').decode(u8).replace(/\0+$/g, '').trim();
   } catch {
-    // fallback
-    let s = '';
-    for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
-    return s.replace(/\0+$/g, '').trim();
+    let text = '';
+
+    for (let i = 0; i < u8.length; i += 1) {
+      text += String.fromCharCode(u8[i]);
+    }
+
+    return text.replace(/\0+$/g, '').trim();
   }
 }
 
@@ -101,20 +142,19 @@ export class StethoscopeNUS {
   private tx?: BluetoothRemoteGATTCharacteristic;
   private ac?: AudioContext;
 
-  private opts: Required<Omit<Options, 'onGap' | 'onDisconnected' | 'onTelemetry'>> & {
-    onGap?: Options['onGap'];
-    onDisconnected?: Options['onDisconnected'];
-    onTelemetry?: Options['onTelemetry'];
-  };
+  private opts: ResolvedOptions;
 
   private lastRxAt = 0;
-  private lastSign = 0; // for zcr calculation
+  private lastSign = 0;
   private telemetry: StethoscopeTelemetry = { updatedAt: Date.now() };
 
-  private onDisconnectedBound = () => {
+  private onDisconnectedBound = (): void => {
     try {
       this.opts.onDisconnected?.({ reason: 'gattserverdisconnected' });
-    } catch {}
+    } catch {
+      // Ignore callback failures.
+    }
+
     this.teardownConnectionOnly();
   };
 
@@ -122,7 +162,7 @@ export class StethoscopeNUS {
     this.opts = {
       sampleRate: opts.sampleRate ?? 8000,
       playToSpeaker: opts.playToSpeaker ?? true,
-      roomId: opts.roomId ?? undefined,
+      roomId: opts.roomId,
       onChunk: opts.onChunk ?? (() => {}),
 
       gain: opts.gain ?? 0.6,
@@ -141,51 +181,64 @@ export class StethoscopeNUS {
     };
   }
 
-  async requestAndConnect() {
-    if (!('bluetooth' in navigator)) throw new Error('Web Bluetooth not supported in this browser.');
+  async requestAndConnect(): Promise<void> {
+    const bluetooth = getBluetooth();
 
-    // IMPORTANT: each filter includes NUS_SVC so we don’t match random HC devices
-    this.device = await navigator.bluetooth.requestDevice({
+    this.device = await bluetooth.requestDevice({
       filters: [
         { services: [NUS_SVC], namePrefix: 'HC-21' },
         { services: [NUS_SVC], namePrefix: 'HC21' },
         { services: [NUS_SVC] },
       ],
-      // allow battery + device info reads
       optionalServices: [NUS_SVC, SVC_BATTERY, SVC_DEVICE_INFO],
     });
 
-    // Listener hygiene
     try {
-      this.device.removeEventListener('gattserverdisconnected', this.onDisconnectedBound as EventListener);
-    } catch {}
-    this.device.addEventListener('gattserverdisconnected', this.onDisconnectedBound as EventListener);
+      this.device.removeEventListener(
+        'gattserverdisconnected',
+        this.onDisconnectedBound as EventListener
+      );
+    } catch {
+      // Ignore.
+    }
+
+    this.device.addEventListener(
+      'gattserverdisconnected',
+      this.onDisconnectedBound as EventListener
+    );
 
     await this.connectGattAndArm();
 
     this.lastRxAt = 0;
     this.lastSign = 0;
 
-    // Initial telemetry attempt
     try {
       await this.refreshTelemetry();
-    } catch {}
+    } catch {
+      // Telemetry is best-effort.
+    }
   }
 
-  /**
-   * Reconnect using the previously selected device (no new picker).
-   * Note: Browsers may still require a user gesture; caller should handle errors.
-   */
-  async reconnect() {
-    if (!this.device) throw new Error('No previously selected device to reconnect.');
-    // Clean up old connection state but keep device reference
+  async reconnect(): Promise<void> {
+    if (!this.device) {
+      throw new Error('No previously selected device to reconnect.');
+    }
+
     this.teardownConnectionOnly();
 
-    // Listener hygiene (re-add)
     try {
-      this.device.removeEventListener('gattserverdisconnected', this.onDisconnectedBound as EventListener);
-    } catch {}
-    this.device.addEventListener('gattserverdisconnected', this.onDisconnectedBound as EventListener);
+      this.device.removeEventListener(
+        'gattserverdisconnected',
+        this.onDisconnectedBound as EventListener
+      );
+    } catch {
+      // Ignore.
+    }
+
+    this.device.addEventListener(
+      'gattserverdisconnected',
+      this.onDisconnectedBound as EventListener
+    );
 
     await this.connectGattAndArm();
 
@@ -194,131 +247,183 @@ export class StethoscopeNUS {
 
     try {
       await this.refreshTelemetry();
-    } catch {}
+    } catch {
+      // Telemetry is best-effort.
+    }
   }
 
-  private async connectGattAndArm() {
-    if (!this.device?.gatt) throw new Error('Device has no GATT server.');
+  private async connectGattAndArm(): Promise<void> {
+    if (!this.device?.gatt) {
+      throw new Error('Device has no GATT server.');
+    }
 
     this.server = await this.device.gatt.connect();
 
-    const svc = await this.server.getPrimaryService(NUS_SVC);
-    this.tx = await svc.getCharacteristic(NUS_TX);
-    this.rx = await svc.getCharacteristic(NUS_RX);
+    const service = await this.server.getPrimaryService(NUS_SVC);
+    this.tx = await service.getCharacteristic(NUS_TX);
+    this.rx = await service.getCharacteristic(NUS_RX);
 
     await this.rx.startNotifications();
+
     try {
-      this.rx.removeEventListener('characteristicvaluechanged', this.onRx as EventListener);
-    } catch {}
-    this.rx.addEventListener('characteristicvaluechanged', this.onRx as EventListener);
+      this.rx.removeEventListener(
+        'characteristicvaluechanged',
+        this.onRx as EventListener
+      );
+    } catch {
+      // Ignore.
+    }
+
+    this.rx.addEventListener(
+      'characteristicvaluechanged',
+      this.onRx as EventListener
+    );
 
     if (this.opts.playToSpeaker) {
       this.ac = new AudioContext({ sampleRate: this.opts.sampleRate });
+
       try {
-        if (this.ac.state === 'suspended') await this.ac.resume();
-      } catch {}
+        if (this.ac.state === 'suspended') {
+          await this.ac.resume();
+        }
+      } catch {
+        // Ignore resume failure.
+      }
     }
 
-    // Some devices require explicit start
     try {
-      await this.tx.writeValue(Uint8Array.of(0x01));
-    } catch {}
+      await this.tx.writeValue(toStrictArrayBuffer(Uint8Array.of(0x01)));
+    } catch {
+      // Some devices may not require an explicit start command.
+    }
   }
 
-  async refreshTelemetry() {
-    const t: StethoscopeTelemetry = {
+  async refreshTelemetry(): Promise<StethoscopeTelemetry> {
+    const telemetry: StethoscopeTelemetry = {
       updatedAt: Date.now(),
       deviceName: this.device?.name || undefined,
-      deviceId: (this.device as any)?.id ? String((this.device as any).id) : undefined,
+      deviceId: this.device?.id ? String(this.device.id) : undefined,
     };
 
-    // Battery
     try {
       if (this.server) {
-        const svc = await this.server.getPrimaryService(SVC_BATTERY as any);
-        const ch = await svc.getCharacteristic(CH_BATTERY_LEVEL as any);
-        const v = await ch.readValue();
-        const pct = v.getUint8(0);
-        if (Number.isFinite(pct)) t.batteryPct = pct;
+        const service = await this.server.getPrimaryService(SVC_BATTERY);
+        const characteristic = await service.getCharacteristic(CH_BATTERY_LEVEL);
+        const value = await characteristic.readValue();
+        const pct = value.getUint8(0);
+
+        if (Number.isFinite(pct)) {
+          telemetry.batteryPct = pct;
+        }
       }
     } catch {
-      // ignore
+      // Battery is optional.
     }
 
-    // Device info
-    const readText = async (charUuid: number) => {
+    const readText = async (charUuid: number): Promise<string | undefined> => {
       if (!this.server) return undefined;
+
       try {
-        const svc = await this.server.getPrimaryService(SVC_DEVICE_INFO as any);
-        const ch = await svc.getCharacteristic(charUuid as any);
-        const v = await ch.readValue();
-        return decodeUtf8(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
+        const service = await this.server.getPrimaryService(SVC_DEVICE_INFO);
+        const characteristic = await service.getCharacteristic(charUuid);
+        const value = await characteristic.readValue();
+
+        return decodeUtf8(
+          new Uint8Array(value.buffer, value.byteOffset, value.byteLength)
+        );
       } catch {
         return undefined;
       }
     };
 
-    t.manufacturer = (await readText(CH_MANUFACTURER)) || undefined;
-    t.model = (await readText(CH_MODEL)) || undefined;
-    t.firmware = (await readText(CH_FIRMWARE)) || undefined;
+    telemetry.manufacturer = (await readText(CH_MANUFACTURER)) || undefined;
+    telemetry.model = (await readText(CH_MODEL)) || undefined;
+    telemetry.firmware = (await readText(CH_FIRMWARE)) || undefined;
 
-    this.telemetry = t;
+    this.telemetry = telemetry;
 
     try {
-      this.opts.onTelemetry?.(t);
-    } catch {}
+      this.opts.onTelemetry?.(telemetry);
+    } catch {
+      // Ignore callback failures.
+    }
 
     try {
       if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('stethoscope:telemetry', { detail: t }));
+        window.dispatchEvent(
+          new CustomEvent('stethoscope:telemetry', { detail: telemetry })
+        );
       }
-    } catch {}
+    } catch {
+      // Ignore event dispatch failures.
+    }
 
-    return t;
+    return telemetry;
   }
 
-  private onRx = (ev: Event) => {
-    const dv = (ev.target as BluetoothRemoteGATTCharacteristic).value!;
-    const u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  private onRx = (event: Event): void => {
+    const value = (event.target as BluetoothRemoteGATTCharacteristic | null)?.value;
+    if (!value) return;
 
-    const len = u8.length & ~1; // even length
+    const u8 = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    const len = u8.length & ~1;
+
     if (len <= 0) return;
 
-    // Build Int16 samples explicitly from LE bytes
-    const s16 = new Int16Array(len / 2);
-    for (let i = 0; i < len; i += 2) s16[i >> 1] = u8[i] | (u8[i + 1] << 8);
+    const samples = new Int16Array(len / 2);
+
+    for (let i = 0; i < len; i += 2) {
+      samples[i >> 1] = u8[i] | (u8[i + 1] << 8);
+    }
 
     const ts = Date.now();
 
-    // Gap detection
     if (this.lastRxAt > 0) {
       const gapMs = ts - this.lastRxAt;
+
       if (gapMs > this.opts.gapWarnMs) {
         try {
           this.opts.onGap?.({ gapMs, ts });
-        } catch {}
+        } catch {
+          // Ignore callback failures.
+        }
+
         try {
-          if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('stethoscope:gap', { detail: { gapMs, ts } }));
-        } catch {}
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(
+              new CustomEvent('stethoscope:gap', {
+                detail: { gapMs, ts },
+              })
+            );
+          }
+        } catch {
+          // Ignore event dispatch failures.
+        }
       }
     }
+
     this.lastRxAt = ts;
 
-    const chunk: PcmChunk = { ts, sampleRate: this.opts.sampleRate, samples: s16 };
+    const chunk: PcmChunk = {
+      ts,
+      sampleRate: this.opts.sampleRate,
+      samples,
+    };
 
-    // Hook
     try {
       this.opts.onChunk(chunk);
     } catch (err) {
-      console.warn('onChunk error', err);
+      console.warn('[StethoscopeNUS] onChunk error', err);
     }
 
-    // Upload to InsightCore (use raw RX bytes, endianness-safe)
     if (this.opts.roomId) {
       const payloadB64 = u8ToB64(u8.subarray(0, len));
+
       fetch(`${API}/api/insight/frame`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+        },
         body: JSON.stringify({
           kind: 'stethoscope_pcm16',
           ts,
@@ -326,63 +431,82 @@ export class StethoscopeNUS {
           roomId: this.opts.roomId,
           payloadB64,
         }),
-      }).catch(() => {});
+      }).catch(() => {
+        // Do not interrupt live audio streaming if telemetry upload fails.
+      });
     }
 
     this.handleChunkForPlaybackAndUI(chunk);
   };
 
-  // HPF
   private highpass(samples: Float32Array, alpha = 0.995): Float32Array {
-    let last = 0,
-      lastOut = 0;
+    let last = 0;
+    let lastOut = 0;
+
     const out = new Float32Array(samples.length);
-    for (let i = 0; i < samples.length; i++) {
+
+    for (let i = 0; i < samples.length; i += 1) {
       const x = samples[i];
       const hp = alpha * (lastOut + x - last);
+
       out[i] = hp;
       last = x;
       lastOut = hp;
     }
+
     return out;
   }
 
-  private computeMetrics(samples: Float32Array, sampleRate: number): StethoscopeChunkMetrics {
+  private computeMetrics(
+    samples: Float32Array,
+    sampleRate: number
+  ): StethoscopeChunkMetrics {
     let sumSq = 0;
     let maxAbs = 0;
     let clip = 0;
     let dcSum = 0;
-    let zc = 0;
+    let zeroCrossings = 0;
     let lastSign = this.lastSign;
 
     const clipAbs = this.opts.clipAbs;
 
-    for (let i = 0; i < samples.length; i++) {
+    for (let i = 0; i < samples.length; i += 1) {
       const x = samples[i] || 0;
-      const ax = Math.abs(x);
-      if (ax > maxAbs) maxAbs = ax;
-      if (ax >= clipAbs) clip += 1;
+      const absX = Math.abs(x);
+
+      if (absX > maxAbs) maxAbs = absX;
+      if (absX >= clipAbs) clip += 1;
+
       sumSq += x * x;
       dcSum += x;
 
       const sign = x >= 0 ? 1 : -1;
-      if (lastSign !== 0 && sign !== lastSign) zc += 1;
+
+      if (lastSign !== 0 && sign !== lastSign) {
+        zeroCrossings += 1;
+      }
+
       lastSign = sign;
     }
 
     this.lastSign = lastSign;
 
-    const n = Math.max(1, samples.length);
-    const rms = Math.sqrt(sumSq / n);
-    const dc = dcSum / n;
-    const clipPct = (clip / n) * 100;
-    const durationSec = n / Math.max(1, sampleRate);
-    const zcrPerSec = durationSec > 0 ? zc / durationSec : 0;
+    const sampleCount = Math.max(1, samples.length);
+    const rms = Math.sqrt(sumSq / sampleCount);
+    const dc = dcSum / sampleCount;
+    const clipPct = (clip / sampleCount) * 100;
+    const durationSec = sampleCount / Math.max(1, sampleRate);
+    const zcrPerSec = durationSec > 0 ? zeroCrossings / durationSec : 0;
 
     let levelHint: StethoscopeChunkMetrics['levelHint'] = 'ok';
-    if (clipPct >= this.opts.clipPctWarn || maxAbs >= 0.999) levelHint = 'clipping';
-    else if (rms < this.opts.tooQuietRms) levelHint = 'too_quiet';
-    else if (rms > this.opts.tooLoudRms) levelHint = 'too_loud';
+
+    if (clipPct >= this.opts.clipPctWarn || maxAbs >= 0.999) {
+      levelHint = 'clipping';
+    } else if (rms < this.opts.tooQuietRms) {
+      levelHint = 'too_quiet';
+    } else if (rms > this.opts.tooLoudRms) {
+      levelHint = 'too_loud';
+    }
 
     return {
       rms: clamp01(rms),
@@ -394,13 +518,16 @@ export class StethoscopeNUS {
     };
   }
 
-  private handleChunkForPlaybackAndUI(chunk: PcmChunk) {
+  private handleChunkForPlaybackAndUI(chunk: PcmChunk): void {
     const float32 = pcm16ToFloat32(chunk.samples);
     const hp = this.highpass(float32, this.opts.hpAlpha);
 
     const gain = Math.min(1, Math.max(0, this.opts.gain));
+
     if (gain !== 1) {
-      for (let i = 0; i < hp.length; i++) hp[i] *= gain;
+      for (let i = 0; i < hp.length; i += 1) {
+        hp[i] *= gain;
+      }
     }
 
     const metrics = this.computeMetrics(hp, chunk.sampleRate);
@@ -409,64 +536,101 @@ export class StethoscopeNUS {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('stethoscope:chunk', {
-            detail: { float32: hp, ts: chunk.ts, sampleRate: chunk.sampleRate, metrics },
+            detail: {
+              float32: hp,
+              ts: chunk.ts,
+              sampleRate: chunk.sampleRate,
+              metrics,
+            },
           })
         );
       }
     } catch (err) {
-      console.warn('stethoscope:chunk dispatch failed', err);
+      console.warn('[StethoscopeNUS] stethoscope:chunk dispatch failed', err);
     }
 
-    if (this.opts.playToSpeaker) this.playChunk(hp);
+    if (this.opts.playToSpeaker) {
+      this.playChunk(hp);
+    }
   }
 
-  private playChunk(float32: Float32Array) {
+  private playChunk(float32: Float32Array): void {
     try {
-      if (!this.ac) this.ac = new AudioContext({ sampleRate: this.opts.sampleRate });
-      const buf = this.ac.createBuffer(1, float32.length, this.opts.sampleRate);
-      buf.getChannelData(0).set(float32);
-      const src = this.ac.createBufferSource();
-      src.buffer = buf;
-      src.connect(this.ac.destination);
-      src.start();
+      if (!this.ac) {
+        this.ac = new AudioContext({ sampleRate: this.opts.sampleRate });
+      }
+
+      const buffer = this.ac.createBuffer(
+        1,
+        float32.length,
+        this.opts.sampleRate
+      );
+
+      buffer.getChannelData(0).set(float32);
+
+      const source = this.ac.createBufferSource();
+      source.buffer = buffer;
+      source.connect(this.ac.destination);
+      source.start();
     } catch (err) {
-      console.warn('StethoscopeNUS playChunk error', err);
+      console.warn('[StethoscopeNUS] playChunk error', err);
     }
   }
 
-  async stop() {
+  async stop(): Promise<void> {
     try {
-      await this.tx?.writeValue(Uint8Array.of(0x02));
-    } catch {}
+      await this.tx?.writeValue(toStrictArrayBuffer(Uint8Array.of(0x02)));
+    } catch {
+      // Ignore stop-command failures.
+    }
+
     try {
       await this.rx?.stopNotifications();
-    } catch {}
+    } catch {
+      // Ignore notification shutdown failures.
+    }
+
     this.teardownConnectionOnly();
   }
 
-  private teardownConnectionOnly() {
+  private teardownConnectionOnly(): void {
     try {
-      this.rx?.removeEventListener('characteristicvaluechanged', this.onRx as EventListener);
-    } catch {}
+      this.rx?.removeEventListener(
+        'characteristicvaluechanged',
+        this.onRx as EventListener
+      );
+    } catch {
+      // Ignore.
+    }
 
     try {
-      this.device?.removeEventListener('gattserverdisconnected', this.onDisconnectedBound as EventListener);
-    } catch {}
+      this.device?.removeEventListener(
+        'gattserverdisconnected',
+        this.onDisconnectedBound as EventListener
+      );
+    } catch {
+      // Ignore.
+    }
 
     try {
       this.server?.disconnect();
-    } catch {}
+    } catch {
+      // Ignore.
+    }
 
     if (this.ac) {
       try {
-        this.ac.close();
-      } catch {}
+        void this.ac.close();
+      } catch {
+        // Ignore.
+      }
+
       this.ac = undefined;
     }
 
     this.rx = undefined;
     this.tx = undefined;
     this.server = undefined;
-    // keep this.device for reconnect()
+    // Keep this.device for reconnect().
   }
 }

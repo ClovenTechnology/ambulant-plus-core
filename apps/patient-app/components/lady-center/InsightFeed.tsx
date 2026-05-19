@@ -40,9 +40,14 @@ function Pill({
   );
 }
 
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+function Card({
+  children,
+  className,
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement> & { children: React.ReactNode }) {
   return (
     <div
+      {...rest}
       className={cn(
         'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_18px_45px_rgba(2,6,23,0.07)] backdrop-blur',
         className
@@ -95,7 +100,8 @@ function MiniExplain({ title, text, blurred }: { title: string; text: string; bl
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
       <div className="text-xs font-medium text-slate-700">{title}</div>
-      <div className={cn('mt-1 text-sm text-slate-700', blurred ? 'blur-[6px] select-none' : '')}>{text}</div>
+      <div
+      className={cn('mt-1 text-sm text-slate-700', blurred ? 'blur-[6px] select-none' : '')}>{text}</div>
     </div>
   );
 }
@@ -107,16 +113,30 @@ export default function InsightFeed(props: {
   discreet: boolean;
   onReveal: () => void;
 
-  // optional “page banner” hook
   onBanner?: (kind: 'info' | 'success' | 'error', text: string) => void;
 
-  // your local fallback builder (so UI never goes empty in dev)
   fallbackInsights: InsightCoreInsight[];
-
-  // context signals to send to InsightCore (API can ignore unknown)
   signals?: Record<string, unknown>;
+
+  remoteInsights?: InsightCoreInsight[];
+  deliveryState?: {
+    source: 'insightcore' | 'local_fallback' | 'hybrid';
+    degradedMode: boolean;
+    error?: string | null;
+  };
 }) {
-  const { mode, todayISO, sensitiveHidden, discreet, onReveal, onBanner, fallbackInsights, signals } = props;
+  const {
+    mode,
+    todayISO,
+    sensitiveHidden,
+    discreet,
+    onReveal,
+    onBanner,
+    fallbackInsights,
+    signals,
+    remoteInsights,
+    deliveryState,
+  } = props;
 
   const swrKey = useMemo(() => ['insightcore', 'lady_center', mode, todayISO], [mode, todayISO]);
 
@@ -138,7 +158,13 @@ export default function InsightFeed(props: {
     }
   );
 
-  const insights = (data && data.length ? data : fallbackInsights).slice(0, 4);
+  const insights = (
+    remoteInsights && remoteInsights.length
+      ? remoteInsights
+      : data && data.length
+      ? data
+      : fallbackInsights
+  ).slice(0, 4);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [sending, setSending] = useState<Record<string, boolean>>({});
@@ -160,7 +186,6 @@ export default function InsightFeed(props: {
 
       if (ok) {
         onBanner?.('success', 'Thanks — your feedback improves future insights.');
-        // let API reweight / reorder if it wants
         mutate();
       } else {
         onBanner?.('error', 'Could not send feedback. Try again.');
@@ -180,11 +205,25 @@ export default function InsightFeed(props: {
       <SectionHeader
         title="Insights"
         subtitle="Explainable patterns with calm next steps."
-        right={<Pill tone="blue">InsightCore</Pill>}
+        right={
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill tone="blue">Guidance</Pill>
+            {deliveryState?.source === 'hybrid' ? <Pill tone="violet">Enhanced</Pill> : null}
+            {deliveryState?.source === 'local_fallback' || deliveryState?.degradedMode ? (
+              <Pill tone="amber">Latest available</Pill>
+            ) : null}
+          </div>
+        }
       />
 
+      {deliveryState?.error ? (
+        <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          {deliveryState.error}
+        </div>
+      ) : null}
+
       <div className="mt-4 space-y-3">
-        {isLoading ? (
+        {isLoading && !(remoteInsights && remoteInsights.length) ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-4 text-sm text-slate-600">
             Loading insights…
           </div>
@@ -205,9 +244,15 @@ export default function InsightFeed(props: {
                     <div className="text-sm font-semibold text-slate-900">
                       {sensitiveHidden ? 'Health insight' : it.title}
                     </div>
-                    <div className={cn('mt-1 text-sm text-slate-600', sensitiveHidden ? 'blur-[6px] select-none' : '')}>
+                    <div
+      className={cn('mt-1 text-sm text-slate-600', sensitiveHidden ? 'blur-[6px] select-none' : '')}>
                       {it.summary}
                     </div>
+                    {it.source ? (
+                      <div className="mt-2 text-[11px] text-slate-500">
+                        Source: {it.source}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
 
@@ -245,7 +290,6 @@ export default function InsightFeed(props: {
                 </div>
               ) : null}
 
-              {/* Feedback row */}
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <button
                   className={cn(
@@ -302,9 +346,9 @@ export default function InsightFeed(props: {
                 </button>
 
                 <div className="ml-auto flex items-center gap-2">
-                  <Pill tone="slate">No scary labels</Pill>
-                  <Pill tone="emerald">Action-first</Pill>
-                  <Pill tone="violet">You’re in control</Pill>
+                  <Pill tone="slate">Plain language</Pill>
+                  <Pill tone="emerald">Actionable</Pill>
+                  <Pill tone="violet">Patient-led</Pill>
                 </div>
               </div>
 

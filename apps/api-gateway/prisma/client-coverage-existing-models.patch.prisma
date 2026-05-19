@@ -1,0 +1,367 @@
+// =========================================================
+// EXISTING MODEL PATCHES
+// Replace the listed models in prisma/schema.prisma
+// with these exact versions.
+// =========================================================
+
+model Encounter {
+  id          String   @id
+  caseId      String
+  patientId   String
+  clinicianId String?
+
+  sessionId             String?
+  consultationStartedAt DateTime?
+  consultationEndedAt   DateTime?
+  visitMode             AppointmentVisitMode?
+  settlementSnapshot    Json?
+  summaryPayload        Json?
+
+  clientId       String?
+  clientMemberId String?
+  coveragePlanId String?
+  sponsorSnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  status    String
+
+  orgId String @default("org-default")
+
+  appointments Appointment[]
+  erxOrders    ErxOrder[]
+  labOrders    LabOrder[]
+  payments     Payment[]
+
+  diagnoses         EncounterDiagnosis[]
+  labResults        LabResult[]
+  clinicalFindings  ClinicalFinding[]
+  clinicalEvidence  ClinicalEvidence[]
+  clinicalArtifacts ClinicalArtifact[]
+
+  surgicalCases  SurgicalCase[]
+  surgicalEvents SurgicalProcedureEvent[]
+
+  @@index([orgId])
+  @@index([sessionId])
+  @@index([status])
+  @@index([clientId])
+  @@index([clientMemberId])
+}
+
+model Appointment {
+  id          String   @id
+  encounterId String
+  sessionId   String?
+  caseId      String
+
+  clinicianId String
+  patientId   String
+
+  hostUserId           String?
+  subjectPatientId     String?
+  familyRelationshipId String?
+  parentAppointmentId  String?
+
+  roomId    String?
+  reason    String?
+  kind      AppointmentKind      @default(STANDARD)
+  visitMode AppointmentVisitMode @default(TELEVISIT)
+
+  startsAt DateTime
+  endsAt   DateTime
+  status   String
+
+  paymentMethod   AppointmentPaymentMethod?
+  paymentStatus   AppointmentPaymentStatus @default(PENDING)
+  paymentIntentId String?
+  paymentProvider String?
+  paymentRef      String?
+
+  priceCents         Int
+  currency           String @default("USD")
+  platformFeeCents   Int
+  clinicianTakeCents Int
+
+  amountMinor   Int?
+  subtotalMinor Int?
+  taxMinor      Int?
+  discountMinor Int?
+  totalMinor    Int?
+
+  clientId                String?
+  clientMemberId          String?
+  coveragePlanId          String?
+  coverageAuthorizationId String?
+
+  coverageDecision       String?
+  sponsorAmountMinor     Int?
+  patientCopayMinor      Int?
+  sponsorCurrency        String? @db.VarChar(3)
+  sponsorPricingSnapshot Json?
+
+  bookingSource     String?
+  rescheduleCount   Int       @default(0)
+  cancelledAt       DateTime?
+  cancelledByUserId String?
+  cancelReason      String?
+
+  confirmedAt DateTime?
+  checkedInAt DateTime?
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  meta      Json?
+  orgId     String   @default("org-default")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  encounter Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([clinicianId, startsAt])
+  @@index([patientId, startsAt])
+  @@index([subjectPatientId, startsAt])
+  @@index([status, startsAt])
+  @@index([roomId, startsAt])
+  @@index([orgId, clinicianId, startsAt])
+  @@index([orgId, patientId, startsAt])
+  @@index([orgId, subjectPatientId, startsAt])
+  @@index([clientId, startsAt])
+  @@index([clientMemberId, startsAt])
+  @@index([coverageAuthorizationId])
+}
+
+model Payment {
+  id          String   @id
+  encounterId String
+  caseId      String
+  amountCents Int
+  currency    String
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  meta        Json?
+
+  clientId           String?
+  billableEventId    String?
+  settlementRecordId String?
+  payerType          String?
+  payerRefId         String?
+
+  orgId String @default("org-default")
+
+  encounter Encounter @relation(fields: [encounterId], references: [id])
+
+  @@index([status])
+  @@index([updatedAt])
+  @@index([orgId])
+  @@index([clientId])
+  @@index([billableEventId])
+  @@index([settlementRecordId])
+}
+
+model UserDevice {
+  id          String   @id @default(cuid())
+  userId      String
+  catalogSlug String
+  nickname    String?
+  transport   String
+  pairedAt    DateTime @default(now())
+  lastSeenAt  DateTime @default(now())
+  identifiers Json?
+  meta        Json?
+
+  ownershipType         String?
+  fundingSourceType     String?
+  fundingSourceId       String?
+  sponsoredProgramId    String?
+  sponsoredAssignmentId String?
+
+  catalog DeviceCatalog @relation(fields: [catalogSlug], references: [slug])
+
+  @@index([userId])
+  @@index([catalogSlug])
+  @@index([fundingSourceType, fundingSourceId])
+  @@index([sponsoredProgramId])
+  @@index([sponsoredAssignmentId])
+}
+
+model Delivery {
+  id          String   @id @default(cuid())
+  orderId     String
+  encounterId String
+  patientId   String
+  clinicianId String?
+  riderId     String?
+  partnerId   String?
+  status      String
+  priceCents  Int      @default(0)
+
+  clientId                String?
+  clientMemberId          String?
+  coveragePlanId          String?
+  coverageAuthorizationId String?
+  billableEventId         String?
+  sponsorAmountMinor      Int?
+  patientCopayMinor       Int?
+
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @default(now())
+
+  @@index([encounterId])
+  @@index([orderId])
+  @@index([patientId])
+  @@index([clinicianId])
+  @@index([riderId])
+  @@index([partnerId])
+  @@index([status])
+  @@index([createdAt])
+  @@index([clientId])
+  @@index([clientMemberId])
+  @@index([coverageAuthorizationId])
+  @@index([billableEventId])
+}
+
+model Draw {
+  id                     String                  @id @default(cuid())
+  orderId                String
+  encounterId            String
+  patientId              String
+  clinicianId            String?
+  phlebId                String?
+  partnerId              String?
+  status                 String
+  scheduledAt            DateTime?
+
+  clientId                String?
+  clientMemberId          String?
+  coveragePlanId          String?
+  coverageAuthorizationId String?
+  billableEventId         String?
+  sponsorAmountMinor      Int?
+  patientCopayMinor       Int?
+
+  createdAt              DateTime                @default(now())
+  updatedAt              DateTime                @default(now())
+  MedReachSpecimenBundle MedReachSpecimenBundle?
+
+  @@index([encounterId])
+  @@index([orderId])
+  @@index([patientId])
+  @@index([clinicianId])
+  @@index([phlebId])
+  @@index([partnerId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([createdAt])
+  @@index([clientId])
+  @@index([clientMemberId])
+  @@index([coverageAuthorizationId])
+  @@index([billableEventId])
+}
+
+model CarePortOrder {
+  id    String @id @default(cuid())
+  orgId String @default("org-default")
+
+  erxOrderId String
+  refillNo   Int    @default(0)
+
+  encounterId String
+  patientId   String
+
+  clientId                String?
+  clientMemberId          String?
+  coveragePlanId          String?
+  coverageAuthorizationId String?
+
+  status      CarePortOrderStatus     @default(CREATED)
+  fulfillment CarePortFulfillmentMode
+
+  destinationAddr String?
+  destinationLat  Float?
+  destinationLng  Float?
+
+  broadcastStartedAt DateTime?
+  maxBroadcastKm     Int       @default(50)
+
+  chosenPharmacyId String?
+  chosenOfferId    String?
+
+  subtotalCents    Int    @default(0)
+  deliveryFeeCents Int    @default(0)
+  totalCents       Int    @default(0)
+  currency         String @default("ZAR")
+
+  sponsorAmountMinor      Int?
+  patientCopayMinor       Int?
+  sponsorPricingSnapshot  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  chosenPharmacy PharmacyPartner? @relation("ChosenPharmacy", fields: [chosenPharmacyId], references: [id])
+
+  items      CarePortOrderItem[]
+  offers     CarePortOffer[]
+  selections CarePortSelection[]
+  payments   CarePortPaymentIntent[]
+  assignment CarePortRiderAssignment?
+
+  @@unique([erxOrderId, refillNo])
+  @@index([orgId, createdAt])
+  @@index([patientId, createdAt])
+  @@index([status, updatedAt])
+  @@index([clientId, createdAt])
+  @@index([clientMemberId, createdAt])
+  @@index([coverageAuthorizationId])
+}
+
+model MedReachOrderFinancial {
+  id      String  @id @default(cuid())
+  orderId String  @unique
+  drawId  String? @unique
+
+  labId   String
+  phlebId String?
+
+  clientId       String?
+  clientMemberId String?
+
+  billableEventLabId       String?
+  billableEventPhlebId     String?
+  billableEventLogisticsId String?
+
+  coveragePlanId  String?
+  authorizationId String?
+
+  currency String @default("ZAR") @db.VarChar(3)
+
+  subtotalCents           Int @default(0)
+  logisticsFeeCents       Int @default(0)
+  urgentSurchargeCents    Int @default(0)
+  coldChainSurchargeCents Int @default(0)
+  platformFeeCents        Int @default(0)
+
+  labGrossCents   Int @default(0)
+  phlebGrossCents Int @default(0)
+  labNetCents     Int @default(0)
+  phlebNetCents   Int @default(0)
+
+  sponsorAmountMinor     Int?
+  patientCopayMinor      Int?
+  pricingSnapshot        Json?
+  sponsorPricingSnapshot Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lab   LabPartner            @relation(fields: [labId], references: [id], onDelete: Cascade)
+  phleb MedReachPhlebProfile? @relation(fields: [phlebId], references: [id], onDelete: SetNull)
+
+  @@index([labId, createdAt])
+  @@index([phlebId, createdAt])
+  @@index([clientId, createdAt])
+  @@index([clientMemberId, createdAt])
+  @@index([authorizationId])
+}

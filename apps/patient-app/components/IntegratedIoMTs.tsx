@@ -5,6 +5,7 @@ import HealthMonitorPanel from '@/components/HealthMonitorPanel';
 import StethoscopePanel from '@/components/StethoscopePanel';
 import OtoscopePanel from '@/components/OtoscopePanel';
 import DeviceDock from '@/components/DeviceDock';
+import useVitalsSSE from '@/components/useVitalsSSE';
 
 type IoTab = 'health' | 'steth' | 'oto';
 
@@ -21,6 +22,8 @@ export default function IntegratedIoMTs({
 }) {
   const [open, setOpen] = useState<boolean>(defaultOpen);
   const [tab, setTab] = useState<IoTab>('health');
+
+  const vitals = useVitalsSSE(roomId || '', 120);
 
   return (
     <section className={`border rounded bg-white ${dense ? '' : 'shadow-sm'}`}>
@@ -52,7 +55,7 @@ export default function IntegratedIoMTs({
             ))}
           </div>
 
-          {tab === 'health' && <HealthMonitorPanel roomId={roomId} />}
+          {tab === 'health' && <HealthMonitorPanel vitals={vitals} />}
           {tab === 'steth'  && <StethoscopePanel roomId={roomId} />}
           {tab === 'oto'    && <OtoscopePanel roomId={roomId} />}
         </div>

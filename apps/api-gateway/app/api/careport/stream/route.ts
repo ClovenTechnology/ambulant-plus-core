@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/careport/stream/route.ts
 import { NextRequest } from 'next/server';
 import { addClient } from '@/src/lib/sse';
 import { readIdentity } from '@/src/lib/identity';
@@ -5,42 +6,17 @@ import { prisma } from '@/src/lib/db';
 
 export const dynamic = 'force-dynamic';
 
-type CarePortRole = 'admin' | 'rider' | 'patient' | 'clinician' | 'anonymous';
-
-function roleOf(who: ReturnType<typeof readIdentity>): CarePortRole {
-  return String((who as any)?.role || 'anonymous') as CarePortRole;
-}
-
-function uidOf(who: ReturnType<typeof readIdentity>): string {
-  return String((who as any)?.uid || '');
-}
-
-function sseWriter(controller: ReadableStreamDefaultController<Uint8Array>) {
-  return {
-    write(chunk: Uint8Array) {
-      controller.enqueue(chunk);
-    },
-  };
-}
-
 export async function GET(req: NextRequest) {
   const orderId = req.nextUrl.searchParams.get('orderId') || '';
+  if (!orderId) return new Response('orderId required', { status: 400 });
 
-  if (!orderId) {
-    return new Response('orderId required', { status: 400 });
-  }
-
+  // Authorize viewer against the delivery record
   const who = readIdentity(req.headers);
-  const role = roleOf(who);
-  const uid = uidOf(who);
+  const role = String((who as any)?.role ?? 'anonymous');
+  const uid = String((who as any)?.uid ?? '');
 
-  const delivery = await prisma.delivery.findFirst({
-    where: { orderId },
-  });
-
-  if (!delivery) {
-    return new Response('not found', { status: 404 });
-  }
+  const delivery = await prisma.delivery.findFirst({ where: { orderId } });
+  if (!delivery) return new Response('not found', { status: 404 });
 
   const allowed =
     role === 'admin' ||
@@ -48,30 +24,29 @@ export async function GET(req: NextRequest) {
     (role === 'clinician' && uid === delivery.clinicianId) ||
     (role === 'rider' && uid === delivery.riderId);
 
-  if (!allowed) {
-    return new Response('forbidden', { status: 403 });
-  }
-
-  const encoder = new TextEncoder();
+  if (!allowed) return new Response('forbidden', { status: 403 });
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const writer = sseWriter(controller);
-      const remove = addClient(orderId, {
-        id: crypto.randomUUID(),
-        res: writer,
-      });
+      const enc = new TextEncoder();
 
-      writer.write(encoder.encode(': connected\n\n'));
+      // Minimal sink object compatible with existing addClient expectations
+      const sink = {
+        write(chunk: string | Uint8Array) {
+          const data = typeof chunk === 'string' ? enc.encode(chunk) : chunk;
+          controller.enqueue(data);
+        },
+        end() {
+          try { controller.close(); } catch {}
+        },
+      };
 
-      req.signal.addEventListener('abort', () => {
+      const remove = addClient(orderId, { id: crypto.randomUUID(), res: sink as any });
+      sink.write(': connected\n\n');
+
+      (req.signal as any)?.addEventListener?.('abort', () => {
         remove();
-
-        try {
-          controller.close();
-        } catch {
-          // Stream may already be closed.
-        }
+        try { controller.close(); } catch {}
       });
     },
   });

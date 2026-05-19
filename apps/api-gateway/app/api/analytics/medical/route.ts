@@ -1,4 +1,4 @@
-// apps/api-gateway/app/api/analytics/medical/route.ts
+﻿// apps/api-gateway/app/api/analytics/medical/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaClient } from '@prisma/client';
 import {
@@ -10,6 +10,10 @@ import {
   addDays,
 } from 'date-fns';
 import { inferSyndromeFromIcd10 } from '@/src/insightcore/icd10SyndromeHelper';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 const prisma = new PrismaClient();
 
@@ -1061,13 +1065,67 @@ export async function GET(req: NextRequest) {
       .sort((a, b) => b.prescriptions - a.prescriptions)
       .slice(0, 20);
 
-    // For now, reuse overall as paeds/adults/seniors buckets (placeholder).
-    const meds = {
-      overall: overallMeds,
-      paeds: overallMeds,
-      adults: overallMeds,
-      seniors: overallMeds,
-    };
+    function buildMedRowsForPatientSet(patientSet: Set<string>): MedRow[] {
+  const scoped = new Map<string, MedAgg>();
+
+  for (const m of medsRows) {
+    if (m.patientId && !patientSet.has(m.patientId)) continue;
+
+    const key = m.name;
+    let agg = scoped.get(key);
+
+    if (!agg) {
+      agg = {
+        name: m.name,
+        atcCode: null,
+        prescriptions: 0,
+        patients: new Set(),
+      };
+      scoped.set(key, agg);
+    }
+
+    agg.prescriptions += 1;
+    if (m.patientId) agg.patients.add(m.patientId);
+  }
+
+  const total =
+    Array.from(scoped.values()).reduce((sum, m) => sum + m.prescriptions, 0) || 1;
+
+  return Array.from(scoped.values())
+    .map((m) => ({
+      atcCode: m.atcCode,
+      name: m.name,
+      prescriptions: m.prescriptions,
+      patients: m.patients.size,
+      sharePct: (m.prescriptions / total) * 100,
+      demographicSkew: undefined,
+    }))
+    .sort((a, b) => b.prescriptions - a.prescriptions)
+    .slice(0, 20);
+}
+
+const paedsPatientIdsForMeds = new Set<string>();
+const adultPatientIdsForMeds = new Set<string>();
+const seniorPatientIdsForMeds = new Set<string>();
+
+for (const [patientId, age] of patientAgeMap.entries()) {
+  if (age == null) continue;
+
+  if (age <= 17) {
+    paedsPatientIdsForMeds.add(patientId);
+  } else if (age <= 64) {
+    adultPatientIdsForMeds.add(patientId);
+  } else {
+    seniorPatientIdsForMeds.add(patientId);
+  }
+}
+
+const meds = {
+  overall: overallMeds,
+  paeds: buildMedRowsForPatientSet(paedsPatientIdsForMeds),
+  adults: buildMedRowsForPatientSet(adultPatientIdsForMeds),
+  seniors: buildMedRowsForPatientSet(seniorPatientIdsForMeds),
+};
 
     /* ---------- 14) Labs breakdown ---------- */
 

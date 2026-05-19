@@ -1,52 +1,66 @@
 ﻿// apps/patient-app/app/api/iomt/stream/route.ts
 import { NextResponse } from 'next/server';
 
-export async function GET() {
-  const enc = new TextEncoder();
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const runtime = 'nodejs';
 
-  const stream = new ReadableStream({
+export async function GET() {
+  const encoder = new TextEncoder();
+
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      // Mock: push a vitals line every 2s (replace later with MQTT)
-      const timer = setInterval(() => {
+      const send = () => {
         const payload = JSON.stringify({
           ts: Date.now(),
           hr: 60 + Math.floor(Math.random() * 30),
           spo2: 95 + Math.floor(Math.random() * 4),
           temp: 36 + Math.random(),
-          sourceMap: { hr: 'Wearable', spo2: 'Wearable', temp: 'Wearable' },
+          sourceMap: {
+            hr: 'Wearable',
+            spo2: 'Wearable',
+            temp: 'Wearable',
+          },
         });
 
         try {
-          // enqueue may throw if controller is already closed
-          controller.enqueue(enc.encode(`data: ${payload}\n\n`));
-        } catch (err) {
-          // If the controller is closed, stop the timer and try to close safely.
-          try {
+          controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+        } catch {
+          if (timer) {
             clearInterval(timer);
-          } catch {}
-          try {
-            controller.close?.();
-          } catch {}
-        }
-      }, 2000);
+            timer = null;
+          }
 
-      // keep reference for cleanup across the process (safe guard)
-      (globalThis as any).__iomtTimer = timer;
+          try {
+            controller.close();
+          } catch {
+            // Ignore already-closed stream.
+          }
+        }
+      };
+
+      controller.enqueue(encoder.encode(': connected\n\n'));
+      send();
+
+      timer = setInterval(send, 2000);
     },
 
     cancel() {
-      try {
-        const t = (globalThis as any).__iomtTimer;
-        if (t) clearInterval(t);
-      } catch {}
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
     },
   });
 
   return new NextResponse(stream, {
     headers: {
-      'Content-Type': 'text/event-stream',
+      'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
     },
   });
 }

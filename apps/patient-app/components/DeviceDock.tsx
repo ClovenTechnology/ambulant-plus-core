@@ -4,8 +4,6 @@ import { useEffect, useMemo, useState } from 'react';
 import useVitalsSSE from '@/components/useVitalsSSE';
 import Sparkline from '@/components/Sparkline';
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? '';
-
 type DeviceRow = {
   id: string;
   deviceId: string;
@@ -35,15 +33,25 @@ export default function DeviceDock({
   const [devices, setDevices] = useState<DeviceRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const { buffer } = useVitalsSSE(roomId || '', 120) as { buffer?: Array<{ type: string; ts: number; value: number }> };
-  const safeBuf = Array.isArray(buffer) ? buffer : [];
+  const { samples } = useVitalsSSE(roomId || '', 120);
+  const safeBuf = Array.isArray(samples)
+    ? samples.map((sample) => ({
+        type: sample.type,
+        ts: sample.t,
+        value: sample.value,
+      }))
+    : [];
 
   useEffect(() => {
-    if (!patientId) return;
+    if (!patientId) {
+      setDevices([]);
+      return;
+    }
+
     setLoading(true);
     const qs = new URLSearchParams();
     qs.set('patient_id', String(patientId));
-    fetch(`${GATEWAY}/api/devices/list?${qs}`, {
+    fetch(`/api/devices/list?${qs}`, {
       cache: 'no-store',
       headers: { 'x-uid': patientUid, 'x-role': 'patient' },
     })

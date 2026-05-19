@@ -35,9 +35,14 @@ function Pill({
   );
 }
 
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+function Card({
+  children,
+  className,
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement> & { children: React.ReactNode }) {
   return (
     <div
+      {...rest}
       className={cn(
         'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_18px_45px_rgba(2,6,23,0.07)] backdrop-blur',
         className
@@ -85,8 +90,23 @@ export default function TodaySummaryCard(props: {
   sensitiveHidden: boolean;
   onReveal: () => void;
   onFindCare: () => void;
+
+  deliveryState?: {
+    source: 'insightcore' | 'local_fallback' | 'hybrid';
+    degradedMode: boolean;
+    error?: string | null;
+  };
+  summaryBadge?: string | null;
 }) {
-  const { summary, discreet, sensitiveHidden, onReveal, onFindCare } = props;
+  const {
+    summary,
+    discreet,
+    sensitiveHidden,
+    onReveal,
+    onFindCare,
+    deliveryState,
+    summaryBadge,
+  } = props;
 
   return (
     <Card className="relative overflow-hidden">
@@ -100,7 +120,22 @@ export default function TodaySummaryCard(props: {
           <div>
             <div className="text-sm font-semibold text-slate-900">{summary.title}</div>
             <div className="mt-1 text-sm text-slate-600">{summary.subtitle}</div>
+
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {summaryBadge ? <Pill tone="violet">{summaryBadge}</Pill> : null}
+              {deliveryState?.source === 'insightcore' ? <Pill tone="blue">InsightCore</Pill> : null}
+              {deliveryState?.source === 'hybrid' ? <Pill tone="violet">Hybrid</Pill> : null}
+              {deliveryState?.source === 'local_fallback' ? <Pill tone="amber">Fallback</Pill> : null}
+              {deliveryState?.degradedMode ? <Pill tone="amber">Degraded mode</Pill> : null}
+            </div>
+
+            {deliveryState?.error ? (
+              <div className="mt-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                {deliveryState.error}
+              </div>
+            ) : null}
           </div>
+
           <div className="flex items-center gap-2">
             {discreet ? (
               <button
@@ -134,7 +169,9 @@ export default function TodaySummaryCard(props: {
           <Pill tone="emerald">You control tracking</Pill>
           <Pill tone="violet">Export anytime</Pill>
           <span className="text-xs text-slate-500">
-            {discreet ? 'Discreet Mode keeps labels neutral and details hidden by default.' : 'Tip: Turn on Discreet Mode for shared screens.'}
+            {discreet
+              ? 'Discreet Mode keeps labels neutral and details hidden by default.'
+              : 'Tip: Turn on Discreet Mode for shared screens.'}
           </span>
         </div>
       </div>

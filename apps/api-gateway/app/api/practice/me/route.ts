@@ -1,6 +1,10 @@
-// apps/api-gateway/app/api/practice/me/route.ts
+﻿// apps/api-gateway/app/api/practice/me/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -40,7 +44,7 @@ export async function GET(req: NextRequest) {
     const owner = members.find((m) => m.role === 'owner') ?? member;
     const ownerName = owner.fullName ?? owner.email ?? null;
 
-    // Build response – keep it simple, normalizer on the frontend will reshape it
+    // Build response â€“ keep it simple, normalizer on the frontend will reshape it
     const payload = {
       id: practice.id,
       name: practice.name,
@@ -78,3 +82,5 @@ export async function GET(req: NextRequest) {
     return jsonError(err?.message || 'Failed to load practice', 500);
   }
 }
+
+

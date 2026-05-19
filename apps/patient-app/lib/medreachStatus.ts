@@ -3,8 +3,8 @@
 /**
  * Canonical MedReach job status model for the patient app.
  *
- * This mirrors the shared FSM used by MedReach (lab + phleb + admin),
- * but is kept local here so the patient-app doesn't need the @shared/fsm package.
+ * This mirrors the shared FSM used by MedReach, but is kept local here so
+ * patient-app does not need to import @shared/fsm directly.
  */
 
 export type JobStatus =
@@ -15,67 +15,67 @@ export type JobStatus =
   | 'SAMPLING_IN_PROGRESS'
   | 'PHLEB_EN_ROUTE_TO_LAB'
   | 'DELIVERED_TO_LAB'
-  // result-oriented states
   | 'RESULT_PENDING'
   | 'RESULT_IN_PROGRESS'
   | 'RESULT_READY'
   | 'RESULT_SENT';
+
+const DEFAULT_STATUS: JobStatus = 'WAITING_LAB_SELECTION';
+
+const STATUS_ALIASES: Record<string, JobStatus> = {
+  // canonical
+  WAITING_LAB_SELECTION: 'WAITING_LAB_SELECTION',
+  WAITING_PHLEB: 'WAITING_PHLEB',
+  PHLEB_EN_ROUTE_TO_PATIENT: 'PHLEB_EN_ROUTE_TO_PATIENT',
+  PHLEB_ARRIVED: 'PHLEB_ARRIVED',
+  SAMPLING_IN_PROGRESS: 'SAMPLING_IN_PROGRESS',
+  PHLEB_EN_ROUTE_TO_LAB: 'PHLEB_EN_ROUTE_TO_LAB',
+  DELIVERED_TO_LAB: 'DELIVERED_TO_LAB',
+  RESULT_PENDING: 'RESULT_PENDING',
+  RESULT_IN_PROGRESS: 'RESULT_IN_PROGRESS',
+  RESULT_READY: 'RESULT_READY',
+  RESULT_SENT: 'RESULT_SENT',
+
+  // aliases / legacy statuses
+  IDLE: 'WAITING_LAB_SELECTION',
+  PENDING: 'WAITING_LAB_SELECTION',
+  MARKETPLACE_OPEN: 'WAITING_LAB_SELECTION',
+  LAB_MARKETPLACE: 'WAITING_LAB_SELECTION',
+
+  PHLEB_ASSIGNED: 'WAITING_PHLEB',
+
+  TRAVELING: 'PHLEB_EN_ROUTE_TO_PATIENT',
+  EN_ROUTE: 'PHLEB_EN_ROUTE_TO_PATIENT',
+  ON_THE_WAY_TO_PATIENT: 'PHLEB_EN_ROUTE_TO_PATIENT',
+
+  ARRIVED: 'PHLEB_ARRIVED',
+
+  SAMPLING: 'SAMPLING_IN_PROGRESS',
+  COLLECTING_SAMPLE: 'SAMPLING_IN_PROGRESS',
+
+  SAMPLE_COLLECTED: 'PHLEB_EN_ROUTE_TO_LAB',
+  ON_WAY_TO_LAB: 'PHLEB_EN_ROUTE_TO_LAB',
+
+  LAB_RECEIVED: 'DELIVERED_TO_LAB',
+
+  RESULT_PROCESSING: 'RESULT_IN_PROGRESS',
+  PROCESSING: 'RESULT_IN_PROGRESS',
+
+  COMPLETE: 'RESULT_READY',
+  DONE: 'RESULT_READY',
+};
 
 /**
  * Normalize any raw backend / legacy / mock status into a canonical JobStatus.
  */
 export function normalizeToJobStatus(raw: unknown): JobStatus {
   if (!raw || typeof raw !== 'string') {
-    return 'WAITING_LAB_SELECTION';
+    return DEFAULT_STATUS;
   }
 
   const upper = raw.toUpperCase().trim();
 
-  const map: Record<string, JobStatus> = {
-    // canonical
-    WAITING_LAB_SELECTION: 'WAITING_LAB_SELECTION',
-    WAITING_PHLEB: 'WAITING_PHLEB',
-    PHLEB_EN_ROUTE_TO_PATIENT: 'PHLEB_EN_ROUTE_TO_PATIENT',
-    PHLEB_ARRIVED: 'PHLEB_ARRIVED',
-    SAMPLING_IN_PROGRESS: 'SAMPLING_IN_PROGRESS',
-    PHLEB_EN_ROUTE_TO_LAB: 'PHLEB_EN_ROUTE_TO_LAB',
-    DELIVERED_TO_LAB: 'DELIVERED_TO_LAB',
-    RESULT_PENDING: 'RESULT_PENDING',
-    RESULT_IN_PROGRESS: 'RESULT_IN_PROGRESS',
-    RESULT_READY: 'RESULT_READY',
-    RESULT_SENT: 'RESULT_SENT',
-
-    // aliases / legacy statuses -> pre-lab
-    IDLE: 'WAITING_LAB_SELECTION',
-    PENDING: 'WAITING_LAB_SELECTION',
-    MARKETPLACE_OPEN: 'WAITING_LAB_SELECTION',
-    LAB_MARKETPLACE: 'WAITING_LAB_SELECTION',
-
-    PHLEB_ASSIGNED: 'WAITING_PHLEB',
-
-    TRAVELING: 'PHLEB_EN_ROUTE_TO_PATIENT',
-    EN_ROUTE: 'PHLEB_EN_ROUTE_TO_PATIENT',
-    ON_THE_WAY_TO_PATIENT: 'PHLEB_EN_ROUTE_TO_PATIENT',
-
-    ARRIVED: 'PHLEB_ARRIVED',
-
-    SAMPLING: 'SAMPLING_IN_PROGRESS',
-    COLLECTING_SAMPLE: 'SAMPLING_IN_PROGRESS',
-
-    SAMPLE_COLLECTED: 'PHLEB_EN_ROUTE_TO_LAB',
-    ON_WAY_TO_LAB: 'PHLEB_EN_ROUTE_TO_LAB',
-
-    LAB_RECEIVED: 'DELIVERED_TO_LAB',
-
-    // aliases for result statuses
-    RESULT_PROCESSING: 'RESULT_IN_PROGRESS',
-    PROCESSING: 'RESULT_IN_PROGRESS',
-
-    COMPLETE: 'RESULT_READY',
-    DONE: 'RESULT_READY',
-  };
-
-  return map[upper] ?? 'WAITING_LAB_SELECTION';
+  return STATUS_ALIASES[upper] ?? DEFAULT_STATUS;
 }
 
 /**
@@ -105,15 +105,12 @@ export function getStatusLabel(status: JobStatus): string {
       return 'Result ready';
     case 'RESULT_SENT':
       return 'Result sent to clinician';
-    default:
-      return status.replace(/_/g, ' ').toLowerCase()
-        .replace(/^./, (c) => c.toUpperCase());
   }
 }
 
 /**
  * Tailwind classes for a colored pill. Caller already adds the base
- * pill classes, so we only return color-related bits.
+ * pill classes, so we only return color-related classes.
  */
 export function getStatusClasses(status: JobStatus): string {
   switch (status) {
@@ -139,8 +136,6 @@ export function getStatusClasses(status: JobStatus): string {
       return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     case 'RESULT_SENT':
       return 'bg-teal-50 text-teal-700 border-teal-200';
-    default:
-      return 'bg-gray-50 text-gray-700 border-gray-200';
   }
 }
 

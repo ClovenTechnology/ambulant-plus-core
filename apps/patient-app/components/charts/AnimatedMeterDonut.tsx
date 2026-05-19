@@ -8,9 +8,11 @@ ChartJS.register(ArcElement, Tooltip);
 
 interface AnimatedMeterDonutProps {
   value: number; // current health score
-  max?: number;  // max value, default 100
+  max?: number; // max value, default 100
   size?: number; // pixel width/height, default 120
   unit?: string; // optional unit, default '%'
+  label?: string;
+  color?: string;
 }
 
 export default function AnimatedMeterDonut({
@@ -18,6 +20,8 @@ export default function AnimatedMeterDonut({
   max = 100,
   size = 120,
   unit = '%',
+  label,
+  color,
 }: AnimatedMeterDonutProps) {
   const [displayValue, setDisplayValue] = useState(0);
 
@@ -48,11 +52,15 @@ export default function AnimatedMeterDonut({
     return '#EF4444'; // red
   };
 
+  const safeMax = Math.max(max, 1);
+  const safeDisplayValue = Math.min(Math.max(displayValue, 0), safeMax);
+  const activeColor = color || getColor();
+
   const data = {
     datasets: [
       {
-        data: [displayValue, max - displayValue],
-        backgroundColor: [getColor(), '#E5E7EB'], // active + gray
+        data: [safeDisplayValue, Math.max(safeMax - safeDisplayValue, 0)],
+        backgroundColor: [activeColor, '#E5E7EB'], // active + gray
         borderWidth: 0,
         cutout: '70%',
         borderRadius: 8,
@@ -61,11 +69,18 @@ export default function AnimatedMeterDonut({
   };
 
   return (
-    <div className="flex flex-col items-center justify-center">
+    <div className="relative inline-flex flex-col items-center justify-center">
       <Doughnut data={data} width={size} height={size} />
-      <div className="absolute text-center mt-[-70px] font-semibold text-lg text-gray-800">
-        {displayValue}
-        <span className="text-sm text-gray-500">{unit}</span>
+      <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+        <div className="font-semibold text-lg text-gray-800">
+          {safeDisplayValue}
+          <span className="text-sm text-gray-500">{unit}</span>
+        </div>
+        {label ? (
+          <div className="mt-0.5 max-w-[90px] truncate text-[11px] font-medium text-gray-500">
+            {label}
+          </div>
+        ) : null}
       </div>
     </div>
   );

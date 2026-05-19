@@ -21,7 +21,6 @@ import { Collapse } from '@/components/Collapse';
 
 import {
   type ApiReminder,
-  MOCK_REMINDERS,
   getReminderType,
   computeStats,
 } from '@/components/reminders/shared';
@@ -56,15 +55,6 @@ const initialAllergies = [
   { name: 'Penicillin', status: 'Confirmed', severity: 'High', note: 'Hives when exposed' },
 ];
 
-const mockMedsForMyCare: Medication[] = [
-  {
-    id: 'mock-1',
-    name: 'Paracetamol',
-    dose: '500 mg',
-    frequency: '1 tablet every 6 hours',
-    status: 'Active',
-  },
-];
 
 /* ---------------------- Utility helpers ---------------------- */
 
@@ -93,7 +83,6 @@ export default function MyCareHome() {
   const [apiReminders, setApiReminders] = useState<ApiReminder[]>([]);
   const [reminderLoading, setReminderLoading] = useState(false);
   const [reminderError, setReminderError] = useState<string | null>(null);
-  const [usedMockReminders, setUsedMockReminders] = useState(false);
 
   // collapse states for panes
   const [insightsOpen, setInsightsOpen] = useState(true);
@@ -200,8 +189,8 @@ export default function MyCareHome() {
         setMeds(list);
       } catch (err: any) {
         console.error('[myCare] Error loading medications:', err);
-        setMedsError(err?.message || 'Could not load medications; showing a sample.');
-        setMeds(mockMedsForMyCare);
+        setMedsError(err?.message || 'Could not load medications.');
+        setMeds([]);
       } finally {
         setMedsLoading(false);
       }
@@ -223,7 +212,6 @@ export default function MyCareHome() {
   async function reloadReminders() {
     setReminderLoading(true);
     setReminderError(null);
-    setUsedMockReminders(false);
     try {
       const res = await fetch('/api/reminders?for=today', { cache: 'no-store' });
       if (!res.ok) throw new Error('Failed to load reminders');
@@ -234,15 +222,11 @@ export default function MyCareHome() {
         ? (data as any)
         : [];
 
-      const effective = list.length ? list : MOCK_REMINDERS;
-      if (!list.length) setUsedMockReminders(true);
-
-      setApiReminders(effective);
+      setApiReminders(list);
     } catch (err: any) {
       console.error('[myCare] Error loading reminders:', err);
-      setReminderError(err?.message || 'Could not load reminders; showing a sample.');
-      setApiReminders(MOCK_REMINDERS);
-      setUsedMockReminders(true);
+      setReminderError(err?.message || 'Could not load reminders.');
+      setApiReminders([]);
     } finally {
       setReminderLoading(false);
     }
@@ -556,21 +540,9 @@ export default function MyCareHome() {
 
             <Collapse open={vitalsOpen}>
               <div className="grid grid-cols-3 gap-4">
-                <MeterDonut value={hr} max={180} label="Heart rate (bpm)" color="#ef4444" unit="" />
-                <MeterDonut
-                  value={spo2}
-                  max={100}
-                  label="SpO₂ (%)"
-                  color="#06b6d4"
-                  unit="%"
-                />
-                <MeterDonut
-                  value={tempC}
-                  max={42}
-                  label="Body temp (°C)"
-                  color="#f97316"
-                  unit="°C"
-                />
+                <MeterDonut value={hr} max={180} label="Heart rate (bpm)" color="#ef4444" />
+                <MeterDonut value={spo2} max={100} label="SpO₂ (%)" color="#06b6d4" />
+                <MeterDonut value={tempC} max={42} label="Body temp (°C)" color="#f97316" />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
@@ -771,11 +743,6 @@ export default function MyCareHome() {
               {reminderError && (
                 <div className="mb-2 text-xs text-amber-700">{reminderError}</div>
               )}
-              {usedMockReminders && (
-                <div className="mb-2 text-[11px] text-gray-500">
-                  Showing sample reminders while we reconnect to the server.
-                </div>
-              )}
               {reminderListItems.length === 0 && !reminderLoading ? (
                 <div className="text-xs text-gray-500">
                   No reminders for today yet. You can create pill reminders from{' '}
@@ -859,7 +826,7 @@ export default function MyCareHome() {
                       </div>
                     </div>
                     <div className="w-20">
-                      <MeterDonut value={g.current} max={g.target} label="" color="#6366f1" unit="" />
+                      <MeterDonut value={g.current} max={g.target} label={g.title} color="#6366f1" />
                     </div>
                   </div>
                 ))}

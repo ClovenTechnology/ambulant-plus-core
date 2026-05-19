@@ -71,7 +71,11 @@ async function mockAnalyze(payload: any) {
   if ((symptoms.fatigue || (typeof hr === 'number' && hr > 90)) && score < 85) recommendations.push('Aim for hydration and light rest; monitor symptoms over the next 24 hours.');
   if (score > 80) recommendations.push('Vitals look stable. Keep hydrated, sleep well, and maintain balanced meals.');
 
-  const explanations = [];
+  const explanations: Array<{
+  feature: string;
+  impact: number;
+  note: string;
+}> = [];
   explanations.push({ feature: 'Symptom count', impact: -Math.min(0.5, symptomCount * 0.07), note: `${symptomCount} active` });
   if (typeof hr === 'number') explanations.push({ feature: 'Resting HR', impact: -(hr - 60) / 400, note: `${hr} bpm` });
   if (typeof spo2 === 'number') explanations.push({ feature: 'SpO₂', impact: (Math.min(100, spo2) - 95) / 200, note: `${spo2}%` });

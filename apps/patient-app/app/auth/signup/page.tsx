@@ -1,9 +1,9 @@
-// file: apps/patient-app/app/auth/signup/page.tsx
+﻿// file: apps/patient-app/app/auth/signup/page.tsx
 'use client';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, Suspense } from 'react';
 import { Sparkles, UserPlus, Mail, Lock, User, ArrowRight, ShieldCheck, Crown } from 'lucide-react';
 
 function cx(...xs: Array<string | false | null | undefined>) {
@@ -19,7 +19,7 @@ type SignupResponse = {
   redirectTo?: string;
 };
 
-export default function PatientSignupPage() {
+function PatientSignupPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -105,7 +105,7 @@ export default function PatientSignupPage() {
     <main
       className={cx(
         'min-h-screen',
-        // Worldclass gradient (clean + “health-tech” glow, no image)
+        // Worldclass gradient (clean + â€œhealth-techâ€ glow, no image)
         'bg-slate-50',
         'bg-[radial-gradient(1000px_circle_at_18%_-12%,rgba(16,185,129,0.18),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(99,102,241,0.14),transparent_55%),radial-gradient(900px_circle_at_55%_105%,rgba(2,132,199,0.10),transparent_52%),linear-gradient(to_bottom,rgba(255,255,255,0.85),rgba(248,250,252,1))]',
       )}
@@ -116,7 +116,7 @@ export default function PatientSignupPage() {
           <section className="order-2 lg:order-1">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
               <Sparkles className="h-4 w-4 text-emerald-700" />
-              Ambulant+ · Patient Portal
+              Ambulant+ Â· Patient Portal
             </div>
 
             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
@@ -146,7 +146,7 @@ export default function PatientSignupPage() {
               <div className="rounded-3xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
                 <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
                   <ArrowRight className="h-4 w-4 text-indigo-700" />
-                  Quick 1-min sign up · No fees
+                  Quick 1-min sign up Â· No fees
                 </div>
                 <div className="mt-1 text-[12px] text-slate-600">
                   Create your account in under a minute and access a clinician/clinic instantly. Complete profile details later at your pace. You can access care, use your IoMTs and without mandatory subscription. 
@@ -179,7 +179,7 @@ export default function PatientSignupPage() {
                   </div>
                 </div>
 
-                {/* ✅ Premium link patch */}
+                {/* âœ… Premium link patch */}
                 <Link
                   href={premiumHref}
                   className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-black text-slate-800 backdrop-blur hover:bg-white"
@@ -268,7 +268,7 @@ export default function PatientSignupPage() {
                         required
                       />
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you don’t reuse elsewhere.</div>
+                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you donâ€™t reuse elsewhere.</div>
                   </label>
 
                   <button
@@ -281,7 +281,7 @@ export default function PatientSignupPage() {
                       'disabled:opacity-50 disabled:cursor-not-allowed',
                     )}
                   >
-                    {loading ? 'Creating…' : 'Create account'}
+                    {loading ? 'Creatingâ€¦' : 'Create account'}
                   </button>
 
                   <div className="flex items-center justify-between gap-3 text-xs">
@@ -295,7 +295,7 @@ export default function PatientSignupPage() {
                   </div>
 
                   <div className="pt-2 text-[11px] text-slate-500">
-                    After sign up you’ll be redirected to your Main Dashboard. You can update your profile later.
+                    After sign up youâ€™ll be redirected to your Main Dashboard. You can update your profile later.
                   </div>
                 </form>
               </div>
@@ -311,3 +311,12 @@ export default function PatientSignupPage() {
     </main>
   );
 }
+
+export default function PatientSignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <PatientSignupPageContent />
+    </Suspense>
+  );
+}
+

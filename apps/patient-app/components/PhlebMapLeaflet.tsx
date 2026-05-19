@@ -6,6 +6,12 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
+const LeafletMapContainer = MapContainer as React.ComponentType<any>;
+const LeafletTileLayer = TileLayer as React.ComponentType<any>;
+const LeafletMarker = Marker as React.ComponentType<any>;
+const LeafletPopup = Popup as React.ComponentType<any>;
+const LeafletPolyline = Polyline as React.ComponentType<any>;
+
 import type {
   PhlebMapProps,
   Coord,
@@ -198,11 +204,11 @@ export default function PhlebMapLeaflet({
           </div>
         </div>
 
-        <MapContainer
+        <LeafletMapContainer
           center={[initialCenter.lat, initialCenter.lng]}
           zoom={14}
           className="w-full h-full"
-          whenCreated={(map) => {
+          whenCreated={(map: L.Map) => {
             try {
               if (allBounds.length > 0) {
                 const bounds = L.latLngBounds(
@@ -215,11 +221,11 @@ export default function PhlebMapLeaflet({
             }
           }}
         >
-          <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+          <LeafletTileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
 
           {activeTrail.length > 1 && (
-            <Polyline
-              positions={activeTrail.map((c) => [c.lat, c.lng])}
+            <LeafletPolyline
+              positions={activeTrail.map((c) => [c.lat, c.lng] as [number, number])}
               pathOptions={{
                 color: '#6366f1',
                 weight: 6,
@@ -230,8 +236,8 @@ export default function PhlebMapLeaflet({
           )}
 
           {remainingTrail.length > 1 && (
-            <Polyline
-              positions={remainingTrail.map((c) => [c.lat, c.lng])}
+            <LeafletPolyline
+              positions={remainingTrail.map((c) => [c.lat, c.lng] as [number, number])}
               pathOptions={{
                 color: '#6366f1',
                 opacity: 0.3,
@@ -242,33 +248,33 @@ export default function PhlebMapLeaflet({
           )}
 
           {patientLocation?.coords && (
-            <Marker
+            <LeafletMarker
               position={[patientLocation.coords.lat, patientLocation.coords.lng]}
               icon={patientIcon as any}
             >
-              <Popup>
+              <LeafletPopup>
                 {patientLocation.name ?? 'Home collection'}
                 <br />
                 {patientLocation.address}
-              </Popup>
-            </Marker>
+              </LeafletPopup>
+            </LeafletMarker>
           )}
 
           {labLocation?.coords && (
-            <Marker
+            <LeafletMarker
               position={[labLocation.coords.lat, labLocation.coords.lng]}
               icon={labIcon as any}
             >
-              <Popup>{labLocation.name ?? 'Lab'}</Popup>
-            </Marker>
+              <LeafletPopup>{labLocation.name ?? 'Lab'}</LeafletPopup>
+            </LeafletMarker>
           )}
 
           {markerPos && (
-            <Marker position={[markerPos.lat, markerPos.lng]} icon={phlebIcon as any}>
-              <Popup>Phlebotomist en route</Popup>
-            </Marker>
+            <LeafletMarker position={[markerPos.lat, markerPos.lng]} icon={phlebIcon as any}>
+              <LeafletPopup>Phlebotomist en route</LeafletPopup>
+            </LeafletMarker>
           )}
-        </MapContainer>
+        </LeafletMapContainer>
       </div>
 
       <style jsx global>{`

@@ -1,29 +1,67 @@
-﻿import { NextResponse } from 'next/server'
+﻿// apps/patient-app/app/vitals/stream/route.ts
+import { NextResponse } from 'next/server';
 
-function rand(n:number){ return Math.round(n) }
-export async function GET(){
-  const stream = new ReadableStream({
-    start(controller){
-      const encoder = new TextEncoder()
-      const timer = setInterval(()=>{
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const runtime = 'nodejs';
+
+function rand(value: number): number {
+  return Math.round(value);
+}
+
+export async function GET() {
+  const encoder = new TextEncoder();
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const send = () => {
         const payload = {
-          heartRate: rand(60 + Math.random()*30),
-          spo2: rand(95 + Math.random()*4),
-          temperature: (36.4 + Math.random()*0.6).toFixed(1),
-          hrv: rand(40 + Math.random()*20),
-          t: Date.now()
+          heartRate: rand(60 + Math.random() * 30),
+          spo2: rand(95 + Math.random() * 4),
+          temperature: (36.4 + Math.random() * 0.6).toFixed(1),
+          hrv: rand(40 + Math.random() * 20),
+          t: Date.now(),
+        };
+
+        try {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(payload)}\n\n`)
+          );
+        } catch {
+          if (timer) {
+            clearInterval(timer);
+            timer = null;
+          }
+
+          try {
+            controller.close();
+          } catch {
+            // Ignore already-closed stream.
+          }
         }
-        const data = `data: ${JSON.stringify(payload)}\n\n`
-        controller.enqueue(encoder.encode(data))
-      }, 1000)
-      const close = () => clearInterval(timer as any)
-      // @ts-ignore
-      controller._onClose = close
+      };
+
+      controller.enqueue(encoder.encode(': connected\n\n'));
+      send();
+
+      timer = setInterval(send, 1000);
     },
-    cancel(){
-      // @ts-ignore
-      if(this._onClose) this._onClose()
-    }
-  })
-  return new NextResponse(stream, { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive' } })
+
+    cancel() {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    },
+  });
+
+  return new NextResponse(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
+  });
 }

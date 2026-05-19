@@ -13,19 +13,53 @@ type TempRecord = {
   raw?: any;
 };
 
+type MeasurementState = 'idle' | 'connecting' | 'measuring' | 'done' | 'error';
+
+type TempCycleComplete = {
+  reason: 'result_received' | 'timeout' | 'manual_stop' | 'device_disconnect' | 'signal_detected_no_result';
+  celsius: number | null;
+  fahrenheit: number | null;
+  recordedAt: string;
+};
+
 type Props = {
   onSave?: (rec: TempRecord) => Promise<void> | void;
   initialHistory?: TempRecord[];
   defaultTab?: ViewTab;
+  measurementState?: MeasurementState;
+  latestResult?: {
+    celsius: number;
+    fahrenheit?: number | null;
+    recordedAt: string;
+  } | null;
+  lastCycleComplete?: TempCycleComplete | null;
+  onStart?: () => Promise<void> | void;
+  onStop?: () => Promise<void> | void;
 };
 
 const cn = (...a: Array<string | false | undefined>) => a.filter(Boolean).join(' ');
-const uid = (p='') => p + Math.random().toString(36).slice(2,9);
+const uid = (p = '') => {
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+  return `${p}${token}`;
+};
 const nowISO = () => new Date().toISOString();
 const cToF = (c: number) => +(c * 9/5 + 32).toFixed(1);
 const fToC = (f: number) => +((f - 32) * 5/9).toFixed(1);
 
-export default function Temperature({ onSave, initialHistory = [], defaultTab='capture' }: Props) {
+export default function Temperature({
+  onSave,
+  initialHistory = [],
+  defaultTab = 'capture',
+  measurementState,
+  latestResult,
+  lastCycleComplete,
+  onStart,
+  onStop,
+}: Props) {
   const [tab, setTab] = useState<ViewTab>(defaultTab);
   useEffect(()=> setTab(defaultTab), [defaultTab]);
 
@@ -36,7 +70,7 @@ export default function Temperature({ onSave, initialHistory = [], defaultTab='c
     return (localStorage.getItem('tempUnit') as 'C'|'F') || 'C';
   });
   const [msg, setMsg] = useState<string | null>(null);
-  const unsubRef = useRef<() => void | null>(null);
+  const unsubRef = useRef<(() => void) | null>(null);
   const connRef = useRef<any | null>(null);
 
   // Persist display unit
@@ -117,12 +151,12 @@ export default function Temperature({ onSave, initialHistory = [], defaultTab='c
   }
 
   async function simulateTemp() {
-    setState('measuring'); setMsg('Simulating…'); await new Promise(r => setTimeout(r, 700));
+    setState('measuring'); setMsg('Generating reading…'); await new Promise(r => setTimeout(r, 700));
     const c = +(36 + Math.random() * 1.8).toFixed(1);
-    const rec: TempRecord = { id: uid('t-'), timestamp: nowISO(), celsius: c, fahrenheit: cToF(c), unit: 'C', raw:{ simulated:true } };
+    const rec: TempRecord = { id: uid('t-'), timestamp: nowISO(), celsius: c, fahrenheit: cToF(c), unit: 'C', raw:{ source:'manual_test' } };
     await pushRecord(rec);
     setState('done'); // display will unlock now
-    setMsg(`Simulated ${rec.celsius}°C`);
+    setMsg(`Generated ${rec.celsius}°C`);
   }
 
   // Helpers to display in chosen unit
@@ -133,7 +167,7 @@ export default function Temperature({ onSave, initialHistory = [], defaultTab='c
   const unitSymbol = unit === 'C' ? '°C' : '°F';
 
   // Only show "Latest" after measuring stops (sync with spinner)
-  const canShowLatest = !measuring && state !== 'connecting' && history.length > 0;
+  const canShowLatest = !measuring && history.length > 0;
   const visibleLatest = canShowLatest ? history[0] : undefined;
 
   // Sparkline (still based on history)
@@ -158,8 +192,8 @@ export default function Temperature({ onSave, initialHistory = [], defaultTab='c
         ))}
         <div className="ml-auto flex items-center gap-2">
           {measuring
-            ? <button className="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={stopBleTempListener}>Stop</button>
-            : <button className="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700" onClick={startBleTempListener}>Start</button>
+            ? <button className="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={() => void (onStop ? onStop() : stopBleTempListener())}>Stop</button>
+            : <button className="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => void (onStart ? onStart() : startBleTempListener())}>Start</button>
           }
         </div>
       </div>
@@ -175,7 +209,7 @@ export default function Temperature({ onSave, initialHistory = [], defaultTab='c
           </div>
 
           <div className="flex gap-3 items-center">
-            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateTemp} disabled={measuring}>Simulate</button>
+            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateTemp} disabled={measuring}>Test reading</button>
             <div className="text-xs text-gray-500 ml-auto" aria-live="polite">{msg}</div>
           </div>
 
@@ -215,7 +249,7 @@ export default function Temperature({ onSave, initialHistory = [], defaultTab='c
                   <div className="font-medium">{val != null ? `${val.toFixed(1)} ${unitSymbol}` : '—'}</div>
                   <div className="text-xs text-gray-500">{new Date(h.timestamp).toLocaleString()}</div>
                 </div>
-                <div className="text-xs text-gray-400">{h.raw?.simulated ? 'Sim' : 'Device'}</div>
+                <div className="text-xs text-gray-400">{h.raw?.source === 'manual_test' ? 'Test reading' : 'Device'}</div>
               </div>
             );
           })}

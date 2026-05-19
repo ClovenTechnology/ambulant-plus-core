@@ -4,189 +4,543 @@ import { useCallback, useMemo, useState } from 'react';
 import { computeCardioRisk, hypertensionIndex } from '@/src/analytics/cardio';
 import { computeStressIndex } from '@/src/analytics/stress';
 import useSelfCheckHistory from './useSelfCheckHistory';
+import {
+  analyzeSelfCheckWithInsightCore,
+  postInsightLearningEvent,
+} from '@/src/lib/insightcore/api';
 
 type RiskLevel = 'low' | 'medium' | 'high';
+type AnalysisSource = 'insightcore' | 'local_fallback' | 'hybrid';
 
-async function clientFallbackAnalyze(vitals: any[], symptoms: Record<string, boolean>, bmi: number | null) {
+type Concern = {
+  name: string;
+  prob: number;
+};
+
+type Explanation = {
+  feature: string;
+  impact: number;
+  note?: string;
+};
+
+type TriageAnalyzerArgs = {
+  vitals?: any[];
+  symptoms?: Record<string, boolean>;
+  bmi?: number | null;
+  extraMeta?: Record<string, any>;
+};
+
+async function clientFallbackAnalyze(
+  vitals: any[],
+  symptoms: Record<string, boolean>,
+  bmi: number | null,
+  extraMeta?: Record<string, any>
+) {
   const symptomCount = Object.values(symptoms).filter(Boolean).length;
-  const res = await new Promise((resv) =>
-    setTimeout(
-      () =>
-        resv({
-          score: Math.max(0, Math.round((bmi && bmi >= 18.5 && bmi < 25 ? 90 : 80) - symptomCount * 7)),
-          recommendations: ['Keep hydrated, rest and monitor symptoms.'],
-          explanations: [
-            { feature: 'Symptoms count', impact: -0.07 * symptomCount, note: `${symptomCount} active` },
-            ...(bmi ? [{ feature: 'BMI', impact: bmi >= 25 ? -0.05 : 0.05, note: `${bmi.toFixed(1)}` }] : []),
-          ],
-        }),
-      450
-    )
-  );
-  return res as any;
+
+  const profile = extraMeta?.profile || {};
+  const med = extraMeta?.medicationAdherence || {};
+  const wearable = extraMeta?.wearableDrivers || {};
+
+  const chronicConditions = Array.isArray(profile?.chronicConditions)
+    ? profile.chronicConditions
+    : [];
+
+  const missedDoseCount = Number(med?.missedDoseCount || 0);
+  const poorSleep = Boolean(wearable?.poorSleep);
+  const lowRecovery = Boolean(wearable?.lowRecovery);
+  const lowActivity = Boolean(wearable?.lowActivity);
+  const elevatedStress = Boolean(wearable?.elevatedStress);
+
+  let score =
+    (bmi && bmi >= 18.5 && bmi < 25 ? 90 : 80) -
+    symptomCount * 7 -
+    missedDoseCount * 4 -
+    (poorSleep ? 5 : 0) -
+    (lowRecovery ? 4 : 0) -
+    (elevatedStress ? 4 : 0);
+
+  if (includesText(chronicConditions, 'hypertension')) {
+    score -= 2;
+  }
+
+  if (
+    includesText(chronicConditions, 'diabetes') ||
+    includesText(chronicConditions, 'prediabetes')
+  ) {
+    score -= 2;
+  }
+
+  score = Math.max(0, Math.round(score));
+
+  const recommendations: string[] = [
+    'Keep hydrated, rest and monitor symptoms.',
+  ];
+
+  if (poorSleep) {
+    recommendations.push(
+      'Sleep debt may be contributing — aim for an earlier wind-down and re-check after better rest.'
+    );
+  }
+
+  if (lowActivity) {
+    recommendations.push(
+      'A short gentle walk today may help circulation if you feel safe to do so.'
+    );
+  }
+
+  if (missedDoseCount > 0) {
+    recommendations.push(
+      'Missed medication may be contributing — review your schedule and take only as prescribed.'
+    );
+  }
+
+  if (elevatedStress) {
+    recommendations.push(
+      'Stress may be contributing — try 10 minutes of slow breathing or guided relaxation.'
+    );
+  }
+
+  const explanations: Explanation[] = [
+    {
+      feature: 'Symptoms count',
+      impact: -0.07 * symptomCount,
+      note: `${symptomCount} active`,
+    },
+    ...(bmi
+      ? [
+          {
+            feature: 'BMI',
+            impact: bmi >= 25 ? -0.05 : 0.05,
+            note: `${bmi.toFixed(1)}`,
+          },
+        ]
+      : []),
+    ...(poorSleep
+      ? [
+          {
+            feature: 'Sleep',
+            impact: -0.05,
+            note: 'Sleep debt may be contributing',
+          },
+        ]
+      : []),
+    ...(lowRecovery
+      ? [
+          {
+            feature: 'Recovery',
+            impact: -0.04,
+            note: 'Reduced recovery signal',
+          },
+        ]
+      : []),
+    ...(missedDoseCount > 0
+      ? [
+          {
+            feature: 'Medication adherence',
+            impact: -0.05 * missedDoseCount,
+            note: `${missedDoseCount} missed`,
+          },
+        ]
+      : []),
+    ...(chronicConditions.length
+      ? [
+          {
+            feature: 'Known conditions',
+            impact: -0.03,
+            note: chronicConditions.slice(0, 3).join(', '),
+          },
+        ]
+      : []),
+  ];
+
+  const diagnoses: Concern[] = [
+    {
+      name: 'Self-check baseline',
+      prob: 0.75,
+    },
+  ];
+
+  return {
+    score,
+    diagnoses,
+    recommendations,
+    explanations,
+  };
 }
 
 function extractSystolicFromEntry(v: any): number | null {
   try {
     if (!v) return null;
+
     if (typeof v.value === 'string' && v.value.includes('/')) {
       const parts = v.value.split('/').map((p: any) => Number(p.trim()));
-      if (parts.length >= 1 && Number.isFinite(parts[0])) return parts[0];
+
+      if (parts.length >= 1 && Number.isFinite(parts[0])) {
+        return parts[0];
+      }
     }
-    if (Array.isArray(v.trend) && v.trend.length && Number.isFinite(v.trend[v.trend.length - 1])) {
+
+    if (
+      Array.isArray(v.trend) &&
+      v.trend.length &&
+      Number.isFinite(v.trend[v.trend.length - 1])
+    ) {
       return Number(v.trend[v.trend.length - 1]);
     }
+
     return null;
   } catch {
     return null;
   }
 }
 
-export default function useTriageAnalyzer(args: {
-  vitals: any[];
-  symptoms: Record<string, boolean>;
-  bmi: number | null;
-  extraMeta?: Record<string, any>;
-}) {
-  const { vitals, symptoms, bmi, extraMeta } = args;
+function toNum(v: any): number | null {
+  if (typeof v === 'number' && Number.isFinite(v)) return v;
+
+  if (typeof v === 'string') {
+    const n = Number(v.trim());
+    return Number.isFinite(n) ? n : null;
+  }
+
+  return null;
+}
+
+function includesText(list: any[], needle: string): boolean {
+  const q = needle.toLowerCase();
+
+  return (Array.isArray(list) ? list : []).some((x) =>
+    String(x || '').toLowerCase().includes(q)
+  );
+}
+
+function normalizeAnalyzerArgs(
+  args?: TriageAnalyzerArgs
+): Required<TriageAnalyzerArgs> {
+  return {
+    vitals: Array.isArray(args?.vitals) ? args.vitals : [],
+    symptoms:
+      args?.symptoms &&
+      typeof args.symptoms === 'object' &&
+      !Array.isArray(args.symptoms)
+        ? args.symptoms
+        : {},
+    bmi:
+      typeof args?.bmi === 'number' && Number.isFinite(args.bmi)
+        ? args.bmi
+        : null,
+    extraMeta:
+      args?.extraMeta &&
+      typeof args.extraMeta === 'object' &&
+      !Array.isArray(args.extraMeta)
+        ? args.extraMeta
+        : {},
+  };
+}
+
+function normalizeConcerns(
+  items: Array<{ name?: unknown; prob?: unknown }> | null | undefined
+): Concern[] {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item) => {
+      const name = String(item?.name ?? '').trim();
+      const prob = Number(item?.prob);
+
+      return {
+        name,
+        prob: Number.isFinite(prob) ? prob : 0,
+      };
+    })
+    .filter((item) => item.name.length > 0);
+}
+
+function normalizeRecommendations(items: unknown): string[] {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item) => String(item ?? '').trim())
+    .filter((item) => item.length > 0);
+}
+
+function normalizeExplanations(
+  items:
+    | Array<{
+        feature?: unknown;
+        impact?: unknown;
+        note?: unknown;
+      }>
+    | null
+    | undefined
+): Explanation[] {
+  if (!Array.isArray(items)) return [];
+
+  return items
+    .map((item) => {
+      const feature = String(item?.feature ?? '').trim();
+      const impact = Number(item?.impact);
+      const note =
+        item?.note === null || item?.note === undefined
+          ? undefined
+          : String(item.note);
+
+      return {
+        feature,
+        impact: Number.isFinite(impact) ? impact : 0,
+        ...(note ? { note } : {}),
+      };
+    })
+    .filter((item) => item.feature.length > 0);
+}
+
+export default function useTriageAnalyzer(args?: TriageAnalyzerArgs) {
+  const { vitals, symptoms, bmi, extraMeta } = normalizeAnalyzerArgs(args);
   const history = useSelfCheckHistory('selfcheck', 'vitals');
 
   const [busy, setBusy] = useState(false);
   const [healthScore, setHealthScore] = useState<number>(85);
   const [riskLevel, setRiskLevel] = useState<RiskLevel>('low');
   const [recommendations, setRecommendations] = useState<string[]>([]);
-  const [concerns, setConcerns] = useState<{ name: string; prob: number }[]>([]);
-  const [explanations, setExplanations] = useState<{ feature: string; impact: number; note?: string }[]>([]);
+  const [concerns, setConcerns] = useState<Concern[]>([]);
+  const [explanations, setExplanations] = useState<Explanation[]>([]);
+  const [analysisSource, setAnalysisSource] =
+    useState<AnalysisSource>('local_fallback');
+  const [degradedMode, setDegradedMode] = useState(false);
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [hasAnalyzed, setHasAnalyzed] = useState(false);
+  const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
 
-  const analyze = useCallback(async (payloadVitals?: any[], payloadSymptoms?: Record<string, boolean>) => {
-    setBusy(true);
+  const analyze = useCallback(
+    async (
+      payloadVitals?:
+        | any[]
+        | {
+            vitals?: any[];
+            symptoms?: Record<string, boolean>;
+            bmi?: number | null;
+            extraMeta?: Record<string, any>;
+          },
+      payloadSymptoms?: Record<string, boolean>
+    ) => {
+      setBusy(true);
+      setRemoteError(null);
 
-    const usedVitals = payloadVitals ?? vitals;
-    const usedSymptoms = payloadSymptoms ?? symptoms;
+      const objectPayload =
+        payloadVitals &&
+        !Array.isArray(payloadVitals) &&
+        typeof payloadVitals === 'object'
+          ? payloadVitals
+          : null;
 
-    try {
-      const payload = {
-        vitals: usedVitals,
-        symptoms: usedSymptoms,
-        meta: {
-          clientTime: new Date().toISOString(),
-          ua: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
-          bmi,
-          ...(extraMeta || {}),
-        },
-      };
+      const usedVitals = objectPayload
+        ? Array.isArray(objectPayload.vitals)
+          ? objectPayload.vitals
+          : vitals
+        : Array.isArray(payloadVitals)
+          ? payloadVitals
+          : vitals;
 
-      const res = await fetch('/api/triage', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
+      const usedSymptoms = objectPayload
+        ? objectPayload.symptoms &&
+          typeof objectPayload.symptoms === 'object' &&
+          !Array.isArray(objectPayload.symptoms)
+          ? objectPayload.symptoms
+          : symptoms
+        : payloadSymptoms ?? symptoms;
 
-      const serverData = res.ok
-        ? await res.json().catch(async () => await clientFallbackAnalyze(payload.vitals, payload.symptoms, bmi))
-        : await clientFallbackAnalyze(payload.vitals, payload.symptoms, bmi);
+      const usedBmi =
+        objectPayload && 'bmi' in objectPayload
+          ? objectPayload.bmi ?? null
+          : bmi;
 
-      // persist snapshot
-      await history.append({ vitals: payload.vitals, symptoms: payload.symptoms, bmi, meta: payload.meta });
+      const usedExtraMeta = objectPayload?.extraMeta ?? extraMeta ?? {};
 
-      const score = serverData?.score ?? 80;
-      setHealthScore(score);
-      setRiskLevel(score > 80 ? 'low' : score > 50 ? 'medium' : 'high');
+      try {
+        const payload: {
+          vitals: any[];
+          symptoms: Record<string, boolean>;
+          meta: Record<string, any>;
+        } = {
+          vitals: usedVitals,
+          symptoms: usedSymptoms,
+          meta: {
+            clientTime: new Date().toISOString(),
+            ua:
+              typeof navigator !== 'undefined'
+                ? navigator.userAgent
+                : 'unknown',
+            bmi: usedBmi,
+            ...(usedExtraMeta || {}),
+          },
+        };
 
-      const bpEntry = (payload.vitals || []).find((v: any) => v.key === 'bp');
-      const bpTrend = bpEntry?.trend ?? [];
-      const restingHR = (payload.vitals || []).find((v: any) => v.key === 'hr')?.value ?? 60;
-      const spo2 = (payload.vitals || []).find((v: any) => v.key === 'spo2')?.value ?? 98;
+        const localServerRes = await fetch('/api/triage', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        });
 
-      const hrvVal = (payload.vitals || []).find((v: any) => v.key === 'hrv' || v.key === 'hrv_ms')?.value ?? null;
+        const localData = localServerRes.ok
+          ? await localServerRes
+              .json()
+              .catch(async () =>
+                clientFallbackAnalyze(
+                  payload.vitals,
+                  payload.symptoms,
+                  usedBmi,
+                  usedExtraMeta
+                )
+              )
+          : await clientFallbackAnalyze(
+              payload.vitals,
+              payload.symptoms,
+              usedBmi,
+              usedExtraMeta
+            );
 
-      // diastolic for cardio
-      let diastolicArr: number[] = [];
-      if (typeof bpEntry?.value === 'string' && bpEntry.value.includes('/')) {
-        const parts = bpEntry.value.split('/').map((p: any) => Number(p.trim()));
-        if (parts.length >= 2 && parts.every(Number.isFinite)) diastolicArr = [parts[1]];
-      }
+        await history.append({
+          vitals: payload.vitals,
+          symptoms: payload.symptoms,
+          bmi: usedBmi,
+          meta: payload.meta,
+          score: localData?.score,
+        });
 
-      const systolicForCall =
-        Array.isArray(bpTrend) && bpTrend.length
-          ? bpTrend
-          : (() => {
-              const s = extractSystolicFromEntry(bpEntry);
-              return s != null ? [s] : [120];
-            })();
+        const localScore = Number(localData?.score ?? 80);
 
-      const cardio = computeCardioRisk(systolicForCall, diastolicArr.length ? diastolicArr : undefined, restingHR, spo2);
-      const hypeIndex = hypertensionIndex(Array.isArray(bpTrend) && bpTrend.length ? bpTrend : [120]);
+        // Default to local immediately.
+        setHealthScore(localScore);
+        setRiskLevel(localScore > 80 ? 'low' : localScore > 50 ? 'medium' : 'high');
+        setRecommendations(normalizeRecommendations(localData?.recommendations));
+        setConcerns(normalizeConcerns(localData?.diagnoses));
+        setExplanations(normalizeExplanations(localData?.explanations));
+        setAnalysisSource('local_fallback');
+        setDegradedMode(true);
 
-      const daytimeStress = usedSymptoms['fatigue'] ? 60 : 30;
-      const stress = hrvVal != null
-        ? computeStressIndex(hrvVal, daytimeStress, 0, { inputType: 'hrv' })
-        : computeStressIndex(restingHR, daytimeStress, 0, { inputType: 'rhr' });
+        // Enrich via InsightCore.
+        try {
+          const remote = await analyzeSelfCheckWithInsightCore({
+            vitals: payload.vitals,
+            symptoms: payload.symptoms,
+            meta: {
+              ...payload.meta,
+              localScore: localData?.score ?? null,
+              localDiagnoses: localData?.diagnoses ?? [],
+              localRecommendations: localData?.recommendations ?? [],
+              localExplanations: localData?.explanations ?? [],
+            },
+          });
 
-      // trends (short)
-      const trendSummary: string[] = [];
-      for (const v of payload.vitals || []) {
-        if (Array.isArray(v.trend) && v.trend.length >= 2) {
-          const last = v.trend[v.trend.length - 1];
-          const prev = v.trend[v.trend.length - 2];
-          if (typeof last === 'number' && typeof prev === 'number') {
-            if (last > prev + Math.max(0.5, prev * 0.02)) trendSummary.push(`${v.label} trending up`);
-            else if (last < prev - Math.max(0.5, prev * 0.02)) trendSummary.push(`${v.label} trending down`);
-            else trendSummary.push(`${v.label} stable`);
-          }
+          setHealthScore(
+            Number(remote?.summary?.healthScore ?? localData?.score ?? 80)
+          );
+
+          const nextRisk: RiskLevel =
+            remote?.summary?.riskLevel === 'critical' ||
+            remote?.summary?.riskLevel === 'high'
+              ? 'high'
+              : remote?.summary?.riskLevel === 'moderate' ||
+                  remote?.summary?.riskLevel === 'watch'
+                ? 'medium'
+                : 'low';
+
+          setRiskLevel(nextRisk);
+          setRecommendations(
+            normalizeRecommendations(
+              remote?.recommendations?.length
+                ? remote.recommendations
+                : localData?.recommendations
+            )
+          );
+          setConcerns(
+            normalizeConcerns(
+              remote?.concerns?.length
+                ? remote.concerns
+                : localData?.diagnoses
+            )
+          );
+          setExplanations(
+            normalizeExplanations(
+              remote?.explanations?.length
+                ? remote.explanations
+                : localData?.explanations
+            )
+          );
+          setAnalysisSource(
+            remote?.source === 'insightcore' ? 'insightcore' : 'hybrid'
+          );
+          setDegradedMode(Boolean(remote?.degradedMode));
+
+          postInsightLearningEvent({
+            id: remote?.requestId,
+            ts: new Date().toISOString(),
+            app: 'patient-app',
+            surface: 'self-check',
+            inputSnapshot: {
+              vitals: payload.vitals,
+              symptoms: payload.symptoms,
+              medications: payload.meta?.medicationAdherence,
+              wearable: payload.meta?.wearableDrivers,
+              domain: {
+                bodyAreas: payload.meta?.bodyAreas || [],
+              },
+            },
+            outputSnapshot: {
+              riskLabel: remote?.summary?.riskLabel,
+              riskLevel: remote?.summary?.riskLevel,
+              healthScore: remote?.summary?.healthScore,
+              concerns: (remote?.concerns || []).map((c: any) => c.name),
+              recommendations: remote?.recommendations || [],
+              confidence: remote?.summary?.confidence ?? null,
+              degradedMode: remote?.degradedMode,
+              source: remote?.source,
+            },
+            userAction: {
+              action: 'viewed',
+            },
+          }).catch(() => undefined);
+        } catch {
+          setRemoteError('InsightCore unavailable, using local fallback.');
         }
+      } catch {
+        const fallback = await clientFallbackAnalyze(
+          usedVitals,
+          usedSymptoms,
+          usedBmi,
+          usedExtraMeta
+        );
+
+        setHealthScore(fallback.score);
+        setRecommendations(normalizeRecommendations(fallback.recommendations));
+        setConcerns(normalizeConcerns(fallback.diagnoses));
+        setExplanations(normalizeExplanations(fallback.explanations));
+        setRiskLevel(
+          fallback.score > 80 ? 'low' : fallback.score > 50 ? 'medium' : 'high'
+        );
+        setAnalysisSource('local_fallback');
+        setDegradedMode(true);
+        setRemoteError('Local fallback only.');
+      } finally {
+        setHasAnalyzed(true);
+        setLastAnalyzedAt(new Date().toISOString());
+        setBusy(false);
       }
+    },
+    [vitals, symptoms, bmi, extraMeta, history]
+  );
 
-      // recommendations
-      const recs: string[] = [];
-      if (restingHR > 90 && spo2 >= 92) recs.push('Hydrate and rest for 30–60 minutes, then re-check.');
-      if (usedSymptoms.fatigue || restingHR > 85) recs.push('Sleep hygiene: aim for 7–9 hours with a wind-down routine.');
-      recs.push('If comfortable, a 20–30 minute walk today supports circulation.');
-      if (stress.index > 60) recs.push('Try 10 minutes of breathing / guided relaxation.');
-      if (usedSymptoms.fever || usedSymptoms.cough) recs.push('Light meals + fluids. Avoid skipping meals.');
-
-      if (hypeIndex > 60) recs.unshift('BP concern: monitor and discuss with your clinician if elevated readings persist.');
-      if (trendSummary.length) recs.push(`Trends: ${trendSummary.join('; ')}.`);
-
-      setRecommendations(recs);
-
-      const serverConcerns = Array.isArray(serverData?.diagnoses)
-        ? serverData.diagnoses.map((d: any) => ({ name: d.name, prob: d.prob }))
-        : [];
-      setConcerns(serverConcerns);
-
-      // explanations
-      const expl: { feature: string; impact: number; note?: string }[] = [];
-      const symptomCount = Object.values(payload.symptoms || {}).filter(Boolean).length;
-      if (symptomCount > 0) expl.push({ feature: 'Symptoms active', impact: -symptomCount * 0.07, note: `${symptomCount} active` });
-      expl.push({ feature: 'Resting HR', impact: -(restingHR - 60) / 200, note: `${restingHR} bpm` });
-      expl.push({ feature: 'SpO₂', impact: (Math.min(100, spo2) - 95) / 200, note: `${spo2}%` });
-      expl.push({ feature: 'Hypertension index', impact: -(hypeIndex / 300), note: `${hypeIndex}/100` });
-      expl.push({ feature: 'Cardio note', impact: 0, note: cardio.notes });
-
-      setExplanations(
-        expl.map((e) => ({
-          feature: e.feature,
-          impact: Math.max(-1, Math.min(1, e.impact)),
-          note: e.note,
-        }))
-      );
-    } catch (err) {
-      // fallback
-      const fallback = await clientFallbackAnalyze(usedVitals, usedSymptoms, bmi);
-      setHealthScore(fallback.score);
-      setRecommendations(fallback.recommendations || []);
-      setConcerns(fallback.diagnoses || []);
-      setExplanations(fallback.explanations || []);
-      setRiskLevel(fallback.score > 80 ? 'low' : fallback.score > 50 ? 'medium' : 'high');
-    } finally {
-      setBusy(false);
-    }
-  }, [vitals, symptoms, bmi, extraMeta, history]);
-
-  const riskLabel = useMemo(() => (
-    riskLevel === 'low' ? 'All good' : riskLevel === 'medium' ? 'Monitor' : 'Follow up'
-  ), [riskLevel]);
+  const riskLabel = useMemo(
+    () =>
+      riskLevel === 'low'
+        ? 'All good'
+        : riskLevel === 'medium'
+          ? 'Monitor'
+          : 'Follow up',
+    [riskLevel]
+  );
 
   return {
     busy,
@@ -196,7 +550,14 @@ export default function useTriageAnalyzer(args: {
     recommendations,
     concerns,
     explanations,
+    analysisSource,
+    degradedMode,
+    remoteError,
+    hasAnalyzed,
+    lastAnalyzedAt,
+    confidence: healthScore,
     analyze,
+    runAnalyze: analyze,
     history,
   };
 }

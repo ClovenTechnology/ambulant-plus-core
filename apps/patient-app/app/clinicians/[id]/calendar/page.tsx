@@ -30,6 +30,22 @@ type BookingProfile = {
     name: string;
     specialty?: string;
     timezone?: string;
+
+    // ✅ optional rating fields for header consistency
+    rating?: number;
+    ratingCount?: number;
+
+    operational?: {
+      canBeListed?: boolean;
+      canBeBooked?: boolean;
+      canPrescribe?: boolean;
+      prescribingMode?: 'no' | 'conditional' | 'yes';
+      allowedWorkspaces?: string[];
+      patientCategory?: 'clinical' | 'wellness' | null;
+      blockers?: string[];
+      riskFlags?: string[];
+      ambulantId?: string | null;
+    };
   };
   fees: {
     standard: FeeProfile;
@@ -99,7 +115,6 @@ function formatMoney(cents: number, currency: string) {
   try {
     return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(v);
   } catch {
-    // fallback if currency code is weird/missing
     const rands = v.toFixed(2);
     return currency === 'ZAR' ? `R ${rands}` : `${currency} ${rands}`;
   }
@@ -111,29 +126,28 @@ function addMinutes(iso: string, mins: number) {
   return d.toISOString();
 }
 
-function apiUrl(path: string) {
-  const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? '';
-  if (!base) return path;
-  if (path.startsWith('http')) return path;
-  return `${base.replace(/\/+$/, '')}/${path.replace(/^\/+/, '')}`;
+function localApiUrl(path: string) {
+  return path;
 }
 
 async function readJsonSafe(r: Response) {
   return r.json().catch(() => null);
 }
 
+function safeNum(v: any): number | undefined {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 /* ----------------- normalizers (robust to partial API payloads) ----------------- */
 
-function normalizeFeeProfile(
-  p: Partial<FeeProfile> | null | undefined,
-  fallback: FeeProfile,
-): FeeProfile {
+function normalizeFeeProfile(p: Partial<FeeProfile> | null | undefined, fallback: FeeProfile): FeeProfile {
   const priceCents = Number.isFinite(Number(p?.priceCents)) ? Number(p!.priceCents) : fallback.priceCents;
   const durationMin = Number.isFinite(Number(p?.durationMin)) ? Number(p!.durationMin) : fallback.durationMin;
   const bufferMin = Number.isFinite(Number(p?.bufferMin)) ? Number(p!.bufferMin) : fallback.bufferMin;
   const currency = (p?.currency || fallback.currency || 'ZAR') as string;
 
-  return { priceCents, currency, durationMin, bufferMin };
+  return { priceCents, durationMin, bufferMin, currency };
 }
 
 function normalizeBookingProfile(p: any, fallback: BookingProfile): BookingProfile {
@@ -142,6 +156,40 @@ function normalizeBookingProfile(p: any, fallback: BookingProfile): BookingProfi
     name: String(p?.clinician?.name || fallback.clinician.name),
     specialty: p?.clinician?.specialty ?? fallback.clinician.specialty,
     timezone: p?.clinician?.timezone ?? fallback.clinician.timezone,
+
+    // ✅ tolerate different field names
+    rating:
+      safeNum(p?.clinician?.rating) ??
+      safeNum(p?.clinician?.ratingAvg) ??
+      safeNum(p?.clinician?.ratingAverage) ??
+      fallback.clinician.rating,
+    ratingCount:
+      safeNum(p?.clinician?.ratingCount) ??
+      safeNum(p?.clinician?.ratingsCount) ??
+      safeNum(p?.clinician?.reviewCount) ??
+      safeNum(p?.clinician?.totalRatings) ??
+      fallback.clinician.ratingCount,
+
+    operational:
+      p?.clinician?.operational && typeof p.clinician.operational === 'object'
+        ? {
+            canBeListed: p.clinician.operational.canBeListed,
+            canBeBooked: p.clinician.operational.canBeBooked,
+            canPrescribe: p.clinician.operational.canPrescribe,
+            prescribingMode: p.clinician.operational.prescribingMode ?? 'no',
+            allowedWorkspaces: Array.isArray(p.clinician.operational.allowedWorkspaces)
+              ? p.clinician.operational.allowedWorkspaces.map(String)
+              : [],
+            patientCategory: p.clinician.operational.patientCategory ?? null,
+            blockers: Array.isArray(p.clinician.operational.blockers)
+              ? p.clinician.operational.blockers.map(String)
+              : [],
+            riskFlags: Array.isArray(p.clinician.operational.riskFlags)
+              ? p.clinician.operational.riskFlags.map(String)
+              : [],
+            ambulantId: p.clinician.operational.ambulantId ?? null,
+          }
+        : fallback.clinician.operational,
   };
 
   const fees = {
@@ -159,9 +207,10 @@ function normalizeBookingProfile(p: any, fallback: BookingProfile): BookingProfi
     clinicianMissPercent: Number.isFinite(Number(p?.refundPolicy?.clinicianMissPercent))
       ? Number(p.refundPolicy.clinicianMissPercent)
       : fallback.refundPolicy.clinicianMissPercent,
-    networkProrate: typeof p?.refundPolicy?.networkProrate === 'boolean'
-      ? Boolean(p.refundPolicy.networkProrate)
-      : fallback.refundPolicy.networkProrate,
+    networkProrate:
+      typeof p?.refundPolicy?.networkProrate === 'boolean'
+        ? Boolean(p.refundPolicy.networkProrate)
+        : fallback.refundPolicy.networkProrate,
   };
 
   const rules = {
@@ -182,18 +231,17 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
   const { isPremium } = usePlan();
   const router = useRouter();
   const sp = useSearchParams();
+  const qs = sp ?? new URLSearchParams();
   const { push, Toasts } = useToasts();
 
-  const country = (sp.get('country') || 'ZA').toUpperCase();
+  const country = (qs.get('country') || 'ZA').toUpperCase();
   const apiEnabled = country === 'ZA';
 
   // Optional: case context supplied by Encounter/Case pages for follow-ups
-  const caseId = sp.get('caseId') || undefined;
+  const caseId = qs.get('caseId') || undefined;
 
-  const qpType = (sp.get('type') as ConsultType | null) ?? 'standard';
-  const [consultType, setConsultType] = useState<ConsultType>(
-    qpType === 'followup' && !caseId ? 'standard' : qpType,
-  );
+  const qpType = (qs.get('type') as ConsultType | null) ?? 'standard';
+  const [consultType, setConsultType] = useState<ConsultType>(qpType === 'followup' && !caseId ? 'standard' : qpType);
 
   const [profile, setProfile] = useState<BookingProfile | null>(null);
   const [slots, setSlots] = useState<Slot[]>([]);
@@ -204,7 +252,14 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
   const fallbackProfile = useMemo<BookingProfile>(
     () => ({
-      clinician: { id: params.id, name: 'Clinician', timezone: 'Africa/Johannesburg' },
+      clinician: {
+        id: params.id,
+        name: 'Clinician',
+        timezone: 'Africa/Johannesburg',
+        rating: undefined,
+        ratingCount: undefined,
+        operational: undefined,
+      },
       fees: {
         standard: { priceCents: 60000, currency: 'ZAR', durationMin: 45, bufferMin: 5 },
         followUp: { priceCents: 35000, currency: 'ZAR', durationMin: 25, bufferMin: 5 },
@@ -227,11 +282,15 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [followUpAllowed]);
 
+  const normalizedForUi = useMemo(() => {
+    const src = profile ?? fallbackProfile;
+    return normalizeBookingProfile(src as any, fallbackProfile);
+  }, [profile, fallbackProfile]);
+
   const fee: FeeProfile = useMemo(() => {
-    const normalized = profile ? normalizeBookingProfile(profile as any, fallbackProfile) : null;
-    const src = normalized ?? fallbackProfile;
+    const src = normalizedForUi;
     return consultType === 'followup' ? src.fees.followUp : src.fees.standard;
-  }, [profile, consultType, fallbackProfile]);
+  }, [normalizedForUi, consultType]);
 
   const tileMinutes = useMemo(() => Math.max(10, (fee.durationMin ?? 0) + (fee.bufferMin ?? 0)), [fee]);
 
@@ -252,7 +311,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
           return;
         }
 
-        const url = apiUrl(`/api/clinicians/${encodeURIComponent(params.id)}/booking-profile`);
+        const url = localApiUrl(`/api/clinicians/${encodeURIComponent(params.id)}/booking-profile`);
         const r = await fetch(url, {
           cache: 'no-store',
           headers: { 'x-role': 'patient', 'x-uid': getUid() },
@@ -285,6 +344,14 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     };
   }, [params.id, apiEnabled, fallbackProfile]);
 
+  /* ----------------- header display helpers (✅ rating in header) ----------------- */
+
+  const c = normalizedForUi.clinician;
+  const operational = c.operational ?? null;
+  const canBeBooked = operational ? operational.canBeBooked !== false : true;
+  const ratingValue = typeof c.rating === 'number' && Number.isFinite(c.rating) ? c.rating : null;
+  const ratingCount = typeof c.ratingCount === 'number' && Number.isFinite(c.ratingCount) ? c.ratingCount : null;
+
   /* ----------------- load slots ----------------- */
 
   useEffect(() => {
@@ -300,6 +367,11 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
           return;
         }
 
+        if (!canBeBooked) {
+          if (!canceled) setSlots([]);
+          return;
+        }
+
         const from = new Date();
         const q = new URLSearchParams({
           from: from.toISOString().slice(0, 10),
@@ -309,7 +381,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         });
         if (caseId) q.set('caseId', caseId);
 
-        const url = apiUrl(`/api/clinicians/${encodeURIComponent(params.id)}/availability?${q.toString()}`);
+        const url = localApiUrl(`/api/clinicians/${encodeURIComponent(params.id)}/availability?${q.toString()}`);
         const r = await fetch(url, {
           cache: 'no-store',
           headers: { 'x-role': 'patient', 'x-uid': getUid() },
@@ -334,7 +406,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     return () => {
       canceled = true;
     };
-  }, [params.id, consultType, caseId, tileMinutes, apiEnabled]);
+  }, [params.id, consultType, caseId, tileMinutes, apiEnabled, canBeBooked]);
 
   /* ----------------- create appointment with committed price ----------------- */
 
@@ -342,6 +414,12 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
   const selectedEndsAt = selectedStart ? addMinutes(selectedStart, fee.durationMin) : undefined;
 
   async function confirmBooking() {
+    if (!canBeBooked) {
+      push('This clinician is not currently bookable on Ambulant+.', 'error');
+      setConfirm({ open: false });
+      return;
+    }
+
     if (!selectedStart || !selectedEndsAt) return;
 
     if (!apiEnabled) {
@@ -361,26 +439,17 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         clinicianId: params.id,
         startsAt: selectedStart,
         endsAt: selectedEndsAt,
-        priceCents: fee.priceCents,
-        currency: fee.currency,
-        type: consultType,
-        meta: {
-          source: 'patient.clinician-calendar',
-          tileMinutes,
-          durationMin: fee.durationMin,
-          bufferMin: fee.bufferMin,
-          country,
-        },
+        reason: consultType === 'followup' ? 'Follow-up consultation' : 'New consultation',
+        kind: consultType,
+        visitMode: 'televisit',
+        country,
       };
 
-      if (consultType === 'followup') {
+      if (consultType === 'followup' && caseId) {
         payload.caseId = caseId;
-        payload.meta.followUpCaseId = caseId;
-      } else {
-        payload.meta.newCase = true;
       }
 
-      const r = await fetch(apiUrl('/api/appointments'), {
+      const r = await fetch('/api/appointments/new', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -391,24 +460,67 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
       });
 
       const j = await readJsonSafe(r);
-      if (!r.ok) throw new Error(j?.error || `Booking failed (HTTP ${r.status})`);
+
+      if (r.status === 409 && j?.error === 'PRECHECK_REQUIRED') {
+        const warningText = Array.isArray(j?.preflight?.warnings)
+          ? j.preflight.warnings.map((w: any) => w?.title || w?.message).filter(Boolean).join(' • ')
+          : 'Booking needs confirmation before proceeding.';
+        push(warningText || 'Booking needs confirmation before proceeding.', 'error');
+        return;
+      }
+
+      if (!r.ok) {
+        throw new Error(j?.error || `Booking failed (HTTP ${r.status})`);
+      }
+
+      setConfirm({ open: false });
+
+      if (j?.redirectUrl) {
+        try {
+          sessionStorage.setItem(
+            'ambulant:lastPaymentAttempt',
+            JSON.stringify({
+              appointmentId: j.appointmentId ?? j.appointment_id ?? '',
+              encounterId: j.encounterId ?? j.encounter_id ?? '',
+              paymentRef:
+                j.payment?.ref ??
+                j.paymentRef ??
+                j.payment_ref ??
+                '',
+              redirectUrl: j.redirectUrl,
+              clinicianId: params.id,
+              createdAt: new Date().toISOString(),
+            }),
+          );
+        } catch {}
+
+        push('Redirecting to secure payment…', 'info');
+        window.location.href = j.redirectUrl;
+        return;
+      }
+
+      if (j?.payment?.status === 'PENDING') {
+        push('Booking created. Payment is pending.', 'info');
+        router.push('/appointments');
+        return;
+      }
+
+      if (j?.sponsor?.decision === 'COVERED') {
+        push('Appointment booked and covered ✔️', 'success');
+        router.push('/appointments');
+        return;
+      }
 
       push('Appointment booked ✔️', 'success');
-      setConfirm({ open: false });
       router.push('/appointments');
     } catch (e: any) {
       push(e?.message || 'Failed to book appointment', 'error');
     }
   }
 
-  /* ----------------- UI helpers ----------------- */
-
   const title = consultType === 'followup' ? 'Follow-up — Calendar' : 'New consultation — Calendar';
-
   const helperText =
-    consultType === 'followup'
-      ? `Follow-up for Case: ${caseId ?? '—'}`
-      : 'This booking creates a first consultation for a new case.';
+    consultType === 'followup' ? `Follow-up for Case: ${caseId ?? '—'}` : 'This booking creates a first consultation for a new case.';
 
   return (
     <main className="p-6 max-w-6xl mx-auto space-y-4">
@@ -420,7 +532,14 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         </button>
 
         <div className="text-center">
-          <h1 className="text-xl font-semibold">{title}</h1>
+          <div className="flex items-center justify-center gap-2">
+            <div className="text-lg font-semibold">{c.name}</div>
+            <div className="text-xs text-amber-700">
+              ★ {ratingValue != null ? ratingValue.toFixed(1) : '—'}
+              {ratingCount != null ? <span className="text-gray-500"> · {ratingCount.toLocaleString()} rated</span> : null}
+            </div>
+          </div>
+          <h1 className="text-xl font-semibold mt-1">{title}</h1>
           <div className="text-xs text-gray-600 mt-1">{helperText}</div>
         </div>
 
@@ -433,8 +552,19 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
       {!apiEnabled && (
         <div className="text-sm text-amber-800 border border-amber-200 bg-amber-50 px-3 py-2 rounded">
-          Live booking is currently available for <b>South Africa (ZA)</b> only. You can still view the clinician
-          calendar layout and fee profile.
+          Live booking is currently available for <b>South Africa (ZA)</b> only. You can still view the clinician calendar
+          layout and fee profile.
+        </div>
+      )}
+
+      {!canBeBooked && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          Booking is temporarily unavailable for this clinician.
+          {Array.isArray(operational?.blockers) && operational.blockers.length ? (
+            <div className="mt-1 text-xs">
+              Reason: <b>{operational.blockers.join(', ')}</b>
+            </div>
+          ) : null}
         </div>
       )}
 
@@ -444,9 +574,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <div className="font-medium">Booking type</div>
-                <div className="text-xs text-gray-600">
-                  Follow-ups can only be booked from an active Case/Encounter context.
-                </div>
+                <div className="text-xs text-gray-600">Follow-ups can only be booked from an active Case/Encounter context.</div>
               </div>
 
               <div className="flex items-center gap-2">
@@ -461,6 +589,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                     }
                     setConsultType(v);
                   }}
+                  disabled={!canBeBooked}
                 >
                   <option value="standard">Standard (new case)</option>
                   <option value="followup" disabled={!followUpAllowed}>
@@ -468,9 +597,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                   </option>
                 </select>
 
-                {consultType === 'followup' && !followUpAllowed && (
-                  <span className="text-xs text-rose-600">caseId missing</span>
-                )}
+                {consultType === 'followup' && !followUpAllowed && <span className="text-xs text-rose-600">caseId missing</span>}
               </div>
             </div>
 
@@ -502,8 +629,8 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
             {consultType === 'standard' && (
               <div className="mt-3 text-xs text-gray-600">
-                This calendar is for a <b>first consultation</b>. For follow-ups, go to your Case/Encounter page and
-                book from the case context.
+                This calendar is for a <b>first consultation</b>. For follow-ups, go to your Case/Encounter page and book
+                from the case context.
               </div>
             )}
           </section>
@@ -542,7 +669,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                         className="w-full text-left block text-xs px-3 py-2 border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         onClick={() => setConfirm({ open: true, start })}
                         title="Select this slot"
-                        disabled={!apiEnabled}
+                        disabled={!apiEnabled || !canBeBooked}
                       >
                         <div className="font-medium">{new Date(start).toLocaleString()}</div>
                         <div className="text-[11px] text-gray-600">
@@ -617,7 +744,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
               <button
                 className="px-3 py-1 rounded bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
                 onClick={confirmBooking}
-                disabled={!apiEnabled}
+                disabled={!apiEnabled || !canBeBooked}
               >
                 Confirm &amp; book
               </button>

@@ -1,9 +1,9 @@
-// file: apps/patient-app/app/auth/signup/premium/page.tsx
+﻿// file: apps/patient-app/app/auth/signup/premium/page.tsx
 'use client';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, Suspense } from 'react';
 import {
   Sparkles,
   UserPlus,
@@ -46,7 +46,7 @@ type PremiumSignupResponse = {
   offer?: PremiumOffer;
 };
 
-export default function PremiumPatientSignupPage() {
+function PremiumPatientSignupPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -165,15 +165,15 @@ export default function PremiumPatientSignupPage() {
   const offerCopy = useMemo(() => {
     if (offer === 'bundle_40_free_year') {
       return {
-        pill: 'Bundle Deal · 40% OFF',
+        pill: 'Bundle Deal Â· 40% OFF',
         headline: 'Buy the DueCare IoMT Bundle',
-        sub: 'Get all 4 IoMTs + full consumable pack — and unlock 1 year Premium Plan access free.',
+        sub: 'Get all 4 IoMTs + full consumable pack â€” and unlock 1 year Premium Plan access free.',
         accent: 'from-emerald-700 to-indigo-700',
         icon: BadgePercent,
       };
     }
     return {
-      pill: 'Annual Premium · Prize Draw',
+      pill: 'Annual Premium Â· Prize Draw',
       headline: 'Pay Premium for 1 year',
       sub: 'Get full Premium access and stand a chance to win the IoMT bundle or branded Ambulant+ merch.',
       accent: 'from-indigo-700 to-emerald-700',
@@ -214,7 +214,7 @@ export default function PremiumPatientSignupPage() {
           <section className="order-2 lg:order-1">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
               <Sparkles className="h-4 w-4 text-emerald-700" />
-              Ambulant+ · Premium Patient Signup
+              Ambulant+ Â· Premium Patient Signup
             </div>
 
             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
@@ -273,14 +273,14 @@ export default function PremiumPatientSignupPage() {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-black text-slate-950">DueCare IoMT Bundle — 40% OFF</div>
+                        <div className="text-sm font-black text-slate-950">DueCare IoMT Bundle â€” 40% OFF</div>
                         <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[11px] font-black text-emerald-800">
                           Best Value
                         </span>
                       </div>
                       <div className="mt-1 text-[12px] text-slate-600">
                         Health Monitor, Digital Stethoscope, HD Otoscope, NexRing + consumables (2 glucose strip packs +
-                        lancets, pill sorter, gloves) — plus FREE 1-year Premium access.
+                        lancets, pill sorter, gloves) â€” plus FREE 1-year Premium access.
                       </div>
                     </div>
                   </div>
@@ -302,7 +302,7 @@ export default function PremiumPatientSignupPage() {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-black text-slate-950">Annual Premium — Prize Draw</div>
+                        <div className="text-sm font-black text-slate-950">Annual Premium â€” Prize Draw</div>
                         <span className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-black text-indigo-800">
                           Win Big
                         </span>
@@ -322,7 +322,7 @@ export default function PremiumPatientSignupPage() {
                   <div>
                     <div className="font-black text-slate-900">Note for minors</div>
                     <div className="mt-1">
-                      If you’re under 18, please ask a parent/guardian to complete payment and device purchase steps.
+                      If youâ€™re under 18, please ask a parent/guardian to complete payment and device purchase steps.
                     </div>
                   </div>
                 </div>
@@ -332,7 +332,7 @@ export default function PremiumPatientSignupPage() {
             {/* Bundle contents quick list */}
             <div className="mt-6 max-w-xl rounded-[28px] border border-slate-200 bg-white/70 p-5 backdrop-blur">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-black text-slate-950">What’s included</div>
+                <div className="text-sm font-black text-slate-950">Whatâ€™s included</div>
                 <span className="text-[11px] font-black text-slate-500">Offer depends on selection</span>
               </div>
 
@@ -394,8 +394,8 @@ export default function PremiumPatientSignupPage() {
                     <div className="font-black">Account created.</div>
                     <div className="mt-1">
                       {postSignup.checkoutUrl
-                        ? 'Redirecting you to secure checkout…'
-                        : 'If checkout isn’t enabled yet, you’ll still land on your dashboard — and we can complete billing in the next step.'}
+                        ? 'Redirecting you to secure checkoutâ€¦'
+                        : 'If checkout isnâ€™t enabled yet, youâ€™ll still land on your dashboard â€” and we can complete billing in the next step.'}
                     </div>
                   </div>
                 ) : null}
@@ -474,7 +474,7 @@ export default function PremiumPatientSignupPage() {
                         required
                       />
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you don’t reuse elsewhere.</div>
+                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you donâ€™t reuse elsewhere.</div>
                   </label>
 
                   {/* Agreements */}
@@ -545,7 +545,7 @@ export default function PremiumPatientSignupPage() {
                       'disabled:opacity-50 disabled:cursor-not-allowed',
                     )}
                   >
-                    {loading ? 'Creating…' : offer === 'bundle_40_free_year' ? 'Create account & go to Bundle Checkout' : 'Create account & go to Premium Checkout'}
+                    {loading ? 'Creatingâ€¦' : offer === 'bundle_40_free_year' ? 'Create account & go to Bundle Checkout' : 'Create account & go to Premium Checkout'}
                     <ArrowRight className="ml-2 inline h-4 w-4" />
                   </button>
 
@@ -560,7 +560,7 @@ export default function PremiumPatientSignupPage() {
                   </div>
 
                   <div className="pt-2 text-[11px] text-slate-500">
-                    After sign up, you’ll proceed to secure checkout (if enabled). Your post-signup landing is:{' '}
+                    After sign up, youâ€™ll proceed to secure checkout (if enabled). Your post-signup landing is:{' '}
                     <span className="font-semibold text-slate-700">{redirectTo}</span>
                   </div>
                 </form>
@@ -576,10 +576,19 @@ export default function PremiumPatientSignupPage() {
         </div>
 
         <div className="mt-8 text-center text-[11px] text-slate-500">
-          <span className="font-semibold">Prize Draw note:</span> “Stand a chance to win” is subject to official Promotion
+          <span className="font-semibold">Prize Draw note:</span> â€œStand a chance to winâ€ is subject to official Promotion
           Rules, eligibility, and availability. No guarantee of winning.
         </div>
       </div>
     </main>
   );
 }
+
+export default function PremiumPatientSignupPage() {
+  return (
+    <Suspense fallback={null}>
+      <PremiumPatientSignupPageContent />
+    </Suspense>
+  );
+}
+

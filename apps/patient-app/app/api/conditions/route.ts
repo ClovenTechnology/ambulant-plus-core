@@ -1,127 +1,181 @@
 // apps/patient-app/app/api/conditions/route.ts
-import { NextResponse } from 'next/server';
-import { S3Client, GetObjectCommand, PutObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NextRequest, NextResponse } from 'next/server';
 
-// Keep your existing imports if they are valid in your monorepo.
-// If you use tsconfig path aliases, prefer those instead of "/../../"
-import { prisma } from '/../../api-gateway/src/lib/db';
-import { readIdentity } from '/../../api-gateway/src/lib/identity';
+import { prisma } from '../../../../api-gateway/src/lib/db';
+import { readIdentity } from '../../../../api-gateway/src/lib/identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const S3_BUCKET = process.env.S3_BUCKET_NAME || process.env.S3_BUCKET || '';
-const REGION = process.env.AWS_REGION || 'eu-west-1';
-const PUBLIC_URL = process.env.PUBLIC_URL || '';
-const PRESIGN_EXPIRES = Number(process.env.PRESIGN_EXPIRES || 900);
-
-function s3Client() {
-  return new S3Client({ region: REGION });
+function json(data: any, status = 200) {
+  return NextResponse.json(data, { status });
 }
 
-async function uploadToS3(buffer: Buffer, key: string, contentType: string) {
-  const client = s3Client();
-  await client.send(
-    new PutObjectCommand({
-      Bucket: S3_BUCKET,
-      Key: key,
-      Body: buffer,
-      ContentType: contentType || 'application/octet-stream',
-      ACL: 'private',
-    }),
-  );
-  return { key };
+function conditionDelegate() {
+  return (prisma as any).condition ?? null;
 }
 
-async function presignedGetUrl(key: string) {
+function cleanStr(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function readPatientId(req: NextRequest, identity: any) {
+  return (
+    req.headers.get('x-ambulant-patient-id') ||
+    req.headers.get('x-patient-id') ||
+    req.headers.get('x-ambulant-user-id') ||
+    req.headers.get('x-user-id') ||
+    req.headers.get('x-uid') ||
+    identity?.patientId ||
+    identity?.uid ||
+    ''
+  ).trim();
+}
+
+function parseDate(value: string | null) {
+  if (!value) return null;
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+
+  return d;
+}
+
+export async function GET(req: NextRequest) {
   try {
-    const client = s3Client();
-    const cmd = new GetObjectCommand({ Bucket: S3_BUCKET, Key: key });
-    return await getSignedUrl(client, cmd, { expiresIn: PRESIGN_EXPIRES });
-  } catch (err) {
-    console.warn('presign get failed', err);
-    return PUBLIC_URL ? `${PUBLIC_URL}/_files/${key}` : null;
-  }
-}
+    const identity = readIdentity(req.headers);
+    const patientId = readPatientId(req, identity);
+    const condition = conditionDelegate();
 
-export async function GET() {
-  try {
-    const items = await prisma.condition.findMany({
-      where: { source: 'patient' },
-      orderBy: { createdAt: 'desc' },
-      take: 50,
-    });
-    return NextResponse.json({ ok: true, data: items }, { status: 200 });
-  } catch (err) {
-    console.error('patient.conditions.get.error', err);
-    const mock = [
-      {
-        id: 'C-1',
-        name: 'Hypertension',
-        diagnosedAt: '2020-01-01',
-        status: 'Active',
-        notes: 'Controlled with med',
-      },
-    ];
-    return NextResponse.json({ ok: true, data: mock }, { status: 200 });
-  }
-}
-
-export async function POST(req: Request) {
-  const identity = readIdentity((req as any).headers);
-
-  try {
-    const form = await req.formData();
-
-    const name = String(form.get('name') ?? '').trim();
-    const diagnosedAtVal = form.get('diagnosedAt');
-    const diagnosedAt = diagnosedAtVal ? String(diagnosedAtVal) : null;
-    const status = String(form.get('status') ?? 'Active');
-    const notesVal = form.get('notes');
-    const facilityVal = form.get('facility');
-
-    const notes = notesVal != null ? String(notesVal) : null;
-    const facility = facilityVal != null ? String(facilityVal) : null;
-
-    let fileKey: string | null = null;
-    let fileName: string | null = null;
-    let presignedUrl: string | null = null;
-
-    const file = form.get('file') as File | null;
-    if (file && typeof file.arrayBuffer === 'function') {
-      const ab = await file.arrayBuffer();
-      const buffer = Buffer.from(ab);
-      const originalName = file.name || 'attachment';
-      const extMatch = originalName.match(/\.[A-Za-z0-9]+$/);
-      const ext = extMatch ? extMatch[0] : '';
-      const key = `patient/conditions/${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`;
-
-      await uploadToS3(buffer, key, (file as any).type || 'application/octet-stream');
-
-      fileKey = key;
-      fileName = originalName;
-      presignedUrl = await presignedGetUrl(key);
+    if (!condition?.findMany) {
+      return json(
+        {
+          ok: false,
+          error: 'condition_store_unavailable',
+          data: [],
+        },
+        503,
+      );
     }
 
-    const created = await prisma.condition.create({
+    const url = new URL(req.url);
+    const take = Math.min(
+      100,
+      Math.max(1, Number(url.searchParams.get('limit') || 50)),
+    );
+
+    const where: Record<string, any> = {
+      source: 'patient',
+    };
+
+    if (patientId) {
+      where.OR = [
+        { patientId },
+        { recordedBy: patientId },
+        { userId: patientId },
+      ];
+    }
+
+    const items = await condition.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take,
+    });
+
+    return json(
+      {
+        ok: true,
+        data: Array.isArray(items) ? items : [],
+      },
+      200,
+    );
+  } catch (err: any) {
+    console.error('patient.conditions.get.error', err);
+
+    return json(
+      {
+        ok: false,
+        error: err?.message || 'failed_to_load_conditions',
+        data: [],
+      },
+      500,
+    );
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const identity = readIdentity(req.headers);
+    const patientId = readPatientId(req, identity);
+    const condition = conditionDelegate();
+
+    if (!patientId) {
+      return json({ ok: false, error: 'patient_identity_required' }, 401);
+    }
+
+    if (!condition?.create) {
+      return json(
+        {
+          ok: false,
+          error: 'condition_store_unavailable',
+        },
+        503,
+      );
+    }
+
+    const form = await req.formData();
+
+    const name = cleanStr(form.get('name'));
+    const diagnosedAtRaw = cleanStr(form.get('diagnosedAt')) || null;
+    const status = cleanStr(form.get('status')) || 'Active';
+    const notes = cleanStr(form.get('notes')) || null;
+    const facility = cleanStr(form.get('facility')) || null;
+    const clinician = cleanStr(form.get('clinician')) || null;
+    const location = cleanStr(form.get('location')) || null;
+
+    if (!name) {
+      return json({ ok: false, error: 'condition_name_required' }, 400);
+    }
+
+    const file = form.get('file');
+
+    if (file instanceof File && file.size > 0) {
+      return json(
+        {
+          ok: false,
+          error: 'condition_file_store_not_configured',
+          message:
+            'Condition file upload is disabled until the production document store is connected.',
+        },
+        503,
+      );
+    }
+
+    const created = await condition.create({
       data: {
         name,
-        diagnosedAt: diagnosedAt ? new Date(diagnosedAt) : null,
+        diagnosedAt: parseDate(diagnosedAtRaw),
         status,
         notes,
         facility,
-        fileKey,
-        fileName,
-        recordedBy: (identity as any)?.uid ?? 'patient',
+        clinician,
+        location,
+        patientId,
+        recordedBy: identity?.uid ?? patientId,
         source: 'patient',
       },
     });
 
-    const out = { ...created, fileUrl: presignedUrl, fileName };
-    return NextResponse.json({ ok: true, record: out }, { status: 201 });
-  } catch (err) {
+    return json({ ok: true, record: created }, 201);
+  } catch (err: any) {
     console.error('patient.conditions.post.error', err);
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+
+    return json(
+      {
+        ok: false,
+        error: err?.message || 'failed_to_create_condition',
+      },
+      500,
+    );
   }
 }

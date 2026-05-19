@@ -13,14 +13,41 @@ export type HrRecord = {
   raw?: any;
 };
 
+type MeasurementState = 'idle' | 'connecting' | 'measuring' | 'done' | 'error';
+
+type HrCycleComplete = {
+  reason: 'result_received' | 'timeout' | 'manual_stop' | 'device_disconnect' | 'signal_detected_no_result';
+  hr: number | null;
+  spo2: number | null;
+  recordedAt: string;
+  signalFrames?: number;
+};
+
 type Props = {
   onSave?: (rec: HrRecord) => Promise<void> | void;
   initialHistory?: HrRecord[];
   defaultTab?: ViewTab;
+  measurementState?: MeasurementState;
+  latestResult?: {
+    hr: number | null;
+    spo2: number | null;
+    recordedAt: string;
+  } | null;
+  lastCycleComplete?: HrCycleComplete | null;
+  liveSampleCount?: number;
+  onStart?: () => Promise<void> | void;
+  onStop?: () => Promise<void> | void;
 };
 
 const cn = (...a: Array<string | false | undefined>) => a.filter(Boolean).join(' ');
-const uid = (p='') => p + Math.random().toString(36).slice(2,9);
+const uid = (p = '') => {
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+  return `${p}${token}`;
+};
 const nowISO = () => new Date().toISOString();
 
 const DEDUPE_MS = 8_000;
@@ -35,7 +62,17 @@ function parseHrDV(dv: DataView) {
   } catch { return null; }
 }
 
-export default function HeartRate({ onSave, initialHistory = [], defaultTab='capture' }: Props) {
+export default function HeartRate({
+  onSave,
+  initialHistory = [],
+  defaultTab = 'capture',
+  measurementState,
+  latestResult,
+  lastCycleComplete,
+  liveSampleCount,
+  onStart,
+  onStop,
+}: Props) {
   const [tab, setTab] = useState<ViewTab>(defaultTab);
   useEffect(()=> setTab(defaultTab), [defaultTab]);
 
@@ -44,7 +81,7 @@ export default function HeartRate({ onSave, initialHistory = [], defaultTab='cap
   const [msg, setMsg] = useState<string | null>(null);
 
   const connRef = useRef<any | null>(null);
-  const unsubRef = useRef<null | (() => void)>(null);
+  const unsubRef = useRef<(() => void) | null>(null);
   const lastRef = useRef<HrRecord | null>(null);
 
   const measuring = state==='connecting' || state==='measuring';
@@ -95,12 +132,12 @@ export default function HeartRate({ onSave, initialHistory = [], defaultTab='cap
   // simulate with measuring delay to sync ring & latest
   async function simulateOnce(){
     if (measuring) return;
-    setState('measuring'); setMsg('Simulating…');
+    setState('measuring'); setMsg('Generating reading…');
     await new Promise(r => setTimeout(r, 500 + Math.random()*500));
     const hr = 55 + Math.floor(Math.random()*55);
-    const rec: HrRecord = { id: uid('hr-'), timestamp: nowISO(), hr, unit:'bpm', source:'sim', raw:{ simulated:true } };
+    const rec: HrRecord = { id: uid('hr-'), timestamp: nowISO(), hr, unit:'bpm', source:'ble', raw:{ source:'manual_test' } };
     await pushRecord(rec);
-    setState('done'); setMsg(`Simulated ${hr} bpm`);
+    setState('done'); setMsg(`Generated ${hr} bpm`);
   }
 
   // Spinner-sync: only show latest after measuring stops
@@ -125,8 +162,8 @@ export default function HeartRate({ onSave, initialHistory = [], defaultTab='cap
         ))}
         <div className="ml-auto flex items-center gap-2">
           {measuring
-            ? <button className="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={stopBle}>Stop</button>
-            : <button className="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700" onClick={startBle}>Start</button>
+            ? <button className="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={() => void (onStop ? onStop() : stopBle())}>Stop</button>
+            : <button className="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => void (onStart ? onStart() : startBle())}>Start</button>
           }
         </div>
       </div>
@@ -142,7 +179,7 @@ export default function HeartRate({ onSave, initialHistory = [], defaultTab='cap
           </div>
 
           <div className="flex gap-3 items-center">
-            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateOnce} disabled={measuring}>Simulate</button>
+            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateOnce} disabled={measuring}>Test reading</button>
             <div className="text-xs text-gray-500 ml-auto" aria-live="polite">{msg}</div>
           </div>
 

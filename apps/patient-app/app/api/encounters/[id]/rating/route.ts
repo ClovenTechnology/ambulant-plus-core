@@ -64,11 +64,14 @@ const MIN_SESSIONS_IN_WINDOW = 10; // only if 10+ rated sessions in window
 
 function getGatewayBase() {
   return (
-    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-    process.env.APIGW_BASE ??
-    process.env.NEXT_PUBLIC_GATEWAY_BASE ??
-    'http://localhost:4000'
-  );
+    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_GATEWAY_BASE ||
+    ''
+  ).replace(/\/+$/, '');
 }
 
 function getAdminKey() {
@@ -78,6 +81,9 @@ function getAdminKey() {
 async function markClinicianDisciplinary(clinicianId: string) {
   const gatewayBase = getGatewayBase();
   const adminKey = getAdminKey();
+
+  if (!gatewayBase || !adminKey) return;
+
   const url = `${gatewayBase}/api/clinicians`;
 
   try {
@@ -105,6 +111,9 @@ async function markClinicianDisciplinary(clinicianId: string) {
 async function archiveClinician(clinicianId: string) {
   const gatewayBase = getGatewayBase();
   const adminKey = getAdminKey();
+
+  if (!gatewayBase || !adminKey) return;
+
   const url = `${gatewayBase}/api/clinicians`;
 
   try {
@@ -285,8 +294,8 @@ export async function POST(
       clinicianId = (exists as any).clinicianId ?? null;
 
       const authz = authorizeForEncounter(actor, {
-        patientId: (exists as any).patientId,
-        clinicianId,
+        patientId: (exists as any).patientId ?? undefined,
+        clinicianId: clinicianId ?? undefined,
       });
       if (!authz.ok) {
         return NextResponse.json(

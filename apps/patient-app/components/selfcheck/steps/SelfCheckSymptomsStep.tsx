@@ -21,7 +21,7 @@ function labelForKey(k: string) {
   const parts = String(k).split(':');
   const side = parts[0] === 'back' ? 'BACK' : 'FRONT';
   const area = parts.slice(1).join(':');
-  const nice = (BODY_AREA_LABEL as any)[area] ?? String(area).replaceAll('_', ' ').toUpperCase();
+  const nice = BODY_AREA_LABEL[area as keyof typeof BODY_AREA_LABEL] ?? String(area).replace(/_/g, ' ').toUpperCase();
   return `${nice} (${side})`;
 }
 
@@ -94,7 +94,7 @@ export default function SelfCheckSymptomsStep(props: {
         selected={areas as BodyAreaKey[]}
         onChangeGender={onChangeGender}
         onChangeView={onChangeView}
-        onToggleKey={onToggleArea as any}
+        onToggleKey={(key) => onToggleArea(key)}
         getHintForKey={getHintForKey}
       />
 

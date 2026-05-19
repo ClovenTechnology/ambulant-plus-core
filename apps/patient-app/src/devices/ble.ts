@@ -1,5 +1,6 @@
 // apps/patient-app/src/devices/ble.ts
-// Thin Web Bluetooth helper + smart subscribe router for multiplexed vendor streams.
+// Web Bluetooth helper with aggressive service/characteristic discovery
+// and fallback aliasing for DueCare / Linktop monitor variants.
 
 import { DEVICE_MAP, DeviceKey } from './serviceMap';
 
@@ -12,75 +13,316 @@ export type BleConn = {
   write: (charKey: string, data: Uint8Array) => Promise<void>;
 };
 
+const norm = (uuid: string): string => String(uuid || '').toLowerCase();
+
+function toStrictArrayBuffer(data: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(data.byteLength);
+  new Uint8Array(buffer).set(data);
+  return buffer;
+}
+
+function charSupportsWrite(ch: BluetoothRemoteGATTCharacteristic): boolean {
+  const p = ch.properties;
+  return Boolean(p.write || p.writeWithoutResponse);
+}
+
+function charSupportsNotify(ch: BluetoothRemoteGATTCharacteristic): boolean {
+  const p = ch.properties;
+  return Boolean(p.notify || p.indicate);
+}
+
+function addIfMissing(
+  map: Map<string, BluetoothRemoteGATTCharacteristic>,
+  key: string,
+  ch?: BluetoothRemoteGATTCharacteristic | null
+): void {
+  if (!ch) return;
+  if (!map.has(key)) map.set(key, ch);
+}
+
+async function getAllPrimaryServices(
+  server: BluetoothRemoteGATTServer,
+  preferredServiceIds: string[]
+): Promise<Map<string, BluetoothRemoteGATTService>> {
+  const services = new Map<string, BluetoothRemoteGATTService>();
+
+  try {
+    const all = await server.getPrimaryServices();
+
+    for (const svc of all) {
+      services.set(norm(svc.uuid), svc);
+    }
+  } catch {
+    // Browser/device may not allow unrestricted service discovery.
+    // Fallback below attempts the preferred service list one by one.
+  }
+
+  for (const sid of preferredServiceIds) {
+    const id = norm(sid);
+
+    if (services.has(id)) continue;
+
+    try {
+      const svc = await server.getPrimaryService(id);
+      services.set(id, svc);
+    } catch {
+      // Service not exposed by this device/session.
+    }
+  }
+
+  return services;
+}
+
+async function getAllCharacteristics(
+  services: Map<string, BluetoothRemoteGATTService>
+): Promise<Map<string, BluetoothRemoteGATTCharacteristic>> {
+  const chars = new Map<string, BluetoothRemoteGATTCharacteristic>();
+
+  for (const svc of services.values()) {
+    try {
+      const list = await svc.getCharacteristics();
+
+      for (const ch of list) {
+        chars.set(`uuid:${norm(ch.uuid)}`, ch);
+      }
+    } catch {
+      // Some services may reject full characteristic enumeration.
+    }
+  }
+
+  return chars;
+}
+
+function aliasSpecCharacteristics(
+  chars: Map<string, BluetoothRemoteGATTCharacteristic>,
+  specChars?: Record<string, { uuid: string }>
+): void {
+  if (!specChars) return;
+
+  for (const [key, c] of Object.entries(specChars)) {
+    const found = chars.get(`uuid:${norm(c.uuid)}`);
+    if (found) chars.set(key, found);
+  }
+}
+
+function aliasHealthMonitorFallbacks(
+  chars: Map<string, BluetoothRemoteGATTCharacteristic>
+): void {
+  const all = Array.from(chars.entries())
+    .filter(([key]) => key.startsWith('uuid:'))
+    .map(([, ch]) => ch);
+
+  const byUuid = (uuid: string): BluetoothRemoteGATTCharacteristic | undefined =>
+    chars.get(`uuid:${norm(uuid)}`);
+
+  const fff1 = byUuid('0000fff1-0000-1000-8000-00805f9b34fb');
+  const fff4 = byUuid('0000fff4-0000-1000-8000-00805f9b34fb');
+  const fff5 = byUuid('0000fff5-0000-1000-8000-00805f9b34fb');
+  const ffe1 = byUuid('0000ffe1-0000-1000-8000-00805f9b34fb');
+  const ffd1 = byUuid('0000ffd1-0000-1000-8000-00805f9b34fb');
+
+  addIfMissing(chars, 'vendor_ctrl', fff1 && charSupportsWrite(fff1) ? fff1 : null);
+  addIfMissing(chars, 'vendor_notify', fff4 && charSupportsNotify(fff4) ? fff4 : null);
+  addIfMissing(chars, 'therm_confirm', fff5 && charSupportsNotify(fff5) ? fff5 : null);
+  addIfMissing(chars, 'temp', ffe1 && charSupportsNotify(ffe1) ? ffe1 : null);
+  addIfMissing(chars, 'glucose', ffd1 && charSupportsNotify(ffd1) ? ffd1 : null);
+
+  if (!chars.has('vendor_ctrl')) {
+    const firstWritable =
+      all.find((ch) => {
+        const uuid = norm(ch.uuid);
+
+        return (
+          charSupportsWrite(ch) &&
+          (uuid.includes('fff1') ||
+            uuid.includes('fff2') ||
+            uuid.includes('ff12') ||
+            uuid.includes('ffb2'))
+        );
+      }) || all.find((ch) => charSupportsWrite(ch));
+
+    addIfMissing(chars, 'vendor_ctrl', firstWritable ?? null);
+  }
+
+  if (!chars.has('vendor_notify')) {
+    const firstNotify = all.find((ch) => charSupportsNotify(ch));
+    addIfMissing(chars, 'vendor_notify', firstNotify ?? null);
+  }
+
+  if (!chars.has('temp')) {
+    const tempCandidate = all.find((ch) => {
+      const uuid = norm(ch.uuid);
+      return (uuid.includes('ffe1') || uuid.includes('fff5')) && charSupportsNotify(ch);
+    });
+
+    addIfMissing(chars, 'temp', tempCandidate ?? null);
+  }
+
+  if (!chars.has('glucose')) {
+    const glucoseCandidate = all.find((ch) => {
+      const uuid = norm(ch.uuid);
+      return (uuid.includes('ffd1') || uuid.includes('ffe1')) && charSupportsNotify(ch);
+    });
+
+    addIfMissing(chars, 'glucose', glucoseCandidate ?? null);
+  }
+
+  const battery = byUuid('00002a19-0000-1000-8000-00805f9b34fb');
+  const firmware = byUuid('00002a26-0000-1000-8000-00805f9b34fb');
+  const hardware = byUuid('00002a27-0000-1000-8000-00805f9b34fb');
+  const software = byUuid('00002a28-0000-1000-8000-00805f9b34fb');
+
+  addIfMissing(chars, 'batt', battery ?? null);
+  addIfMissing(chars, 'firmware_rev', firmware ?? null);
+  addIfMissing(chars, 'hardware_rev', hardware ?? null);
+  addIfMissing(chars, 'software_rev', software ?? null);
+}
+
+function getBluetooth(): Bluetooth | null {
+  if (typeof navigator === 'undefined') return null;
+  return navigator.bluetooth ?? null;
+}
+
+function formatAvailableCharKeys(
+  chars: Map<string, BluetoothRemoteGATTCharacteristic>
+): string {
+  return (
+    Array.from(chars.keys())
+      .filter((key) => !key.startsWith('uuid:'))
+      .join(', ') || 'none'
+  );
+}
+
 export async function connectBle(key: DeviceKey): Promise<BleConn> {
   const spec = DEVICE_MAP[key];
-  if (!spec || spec.transport !== 'ble') throw new Error('Not a BLE device');
+
+  if (!spec || spec.transport !== 'ble') {
+    throw new Error('Not a BLE device');
+  }
 
   const filters: BluetoothRequestDeviceFilter[] = [];
-  if (spec.filters?.namePrefix?.length) {
-    for (const p of spec.filters.namePrefix) filters.push({ namePrefix: p });
-  }
-  const optionalServices = spec.filters?.services ?? [];
 
-  const device = await navigator.bluetooth.requestDevice({
+  if (spec.filters?.namePrefix?.length) {
+    for (const prefix of spec.filters.namePrefix) {
+      filters.push({ namePrefix: prefix });
+    }
+  }
+
+  const optionalServices = Array.from(
+    new Set(
+      [
+        ...(spec.filters?.services ?? []),
+        '0000ff27-0000-1000-8000-00805f9b34fb',
+        '0000180a-0000-1000-8000-00805f9b34fb',
+        '0000180f-0000-1000-8000-00805f9b34fb',
+        '0000fff0-0000-1000-8000-00805f9b34fb',
+        '0000ffe0-0000-1000-8000-00805f9b34fb',
+        '0000ffd0-0000-1000-8000-00805f9b34fb',
+        '6e400001-b5a3-f393-e0a9-e50e24dcca9e',
+      ].map(norm)
+    )
+  );
+
+  const bluetooth = getBluetooth();
+
+  if (!bluetooth?.requestDevice) {
+    throw new Error(
+      'Bluetooth is not available in this browser. Use Chrome or Edge on desktop/Android over HTTPS, or connect through the supported native bridge.'
+    );
+  }
+
+  const device = await bluetooth.requestDevice({
     filters: filters.length ? filters : undefined,
     optionalServices,
     acceptAllDevices: filters.length === 0,
   });
 
-  const server = await device.gatt!.connect();
-  const services = new Map<string, BluetoothRemoteGATTService>();
-  for (const sid of optionalServices) {
-    try { services.set(sid, await server.getPrimaryService(sid)); } catch {}
+  if (!device.gatt) {
+    throw new Error('Selected device has no GATT server');
   }
 
-  const chars = new Map<string, BluetoothRemoteGATTCharacteristic>();
-  if (spec.characteristics) {
-    for (const [k, c] of Object.entries(spec.characteristics)) {
-      let found: BluetoothRemoteGATTCharacteristic | null = null;
-      for (const svc of services.values()) {
-        try {
-          const ch = await svc.getCharacteristic(c.uuid);
-          if (ch) { found = ch; break; }
-        } catch {}
-      }
-      if (found) chars.set(k, found);
-    }
+  const server = await device.gatt.connect();
+  const services = await getAllPrimaryServices(server, optionalServices);
+  const chars = await getAllCharacteristics(services);
+
+  aliasSpecCharacteristics(chars, spec.characteristics);
+
+  if (key === 'duecare.health-monitor') {
+    aliasHealthMonitorFallbacks(chars);
   }
 
-  const stopAll = async () => {
+  const stopAll = async (): Promise<void> => {
     try {
-      // best-effort: stop notifications on all chars we started
       for (const ch of chars.values()) {
-        try { await ch.stopNotifications(); } catch {}
+        try {
+          await ch.stopNotifications();
+        } catch {
+          // Characteristic may not support/need notification shutdown.
+        }
       }
-    } catch {}
-    try { device.gatt?.disconnect(); } catch {}
-  };
+    } catch {
+      // Continue to disconnect even if iteration fails.
+    }
 
-  const write = async (charKey: string, data: Uint8Array) => {
-    const ch = chars.get(charKey);
-    if (!ch) throw new Error(`Char not found: ${charKey}`);
-    // prefer writeWithoutResponse, fall back to writeValue
-    if ('writeValueWithoutResponse' in ch) {
-      // @ts-ignore
-      await ch.writeValueWithoutResponse?.(data);
-    } else {
-      await ch.writeValue?.(data);
+    try {
+      device.gatt?.disconnect();
+    } catch {
+      // Ignore disconnect failures.
     }
   };
 
-  return { device, server, services, chars, stopAll, write };
+  const write = async (charKey: string, data: Uint8Array): Promise<void> => {
+    const ch =
+      chars.get(charKey) ||
+      chars.get(`uuid:${norm(charKey)}`) ||
+      (charKey === 'vendor_ctrl' ? chars.get('vendor_ctrl') : null);
+
+    if (!ch) {
+      throw new Error(
+        `Char not found: ${charKey}. Available chars: ${formatAvailableCharKeys(chars)}`
+      );
+    }
+
+    console.info('[ble.write]', {
+      charKey,
+      uuid: ch.uuid,
+      write: ch.properties.write,
+      writeWithoutResponse: ch.properties.writeWithoutResponse,
+      bytes: Array.from(data),
+    });
+
+    const payload = toStrictArrayBuffer(data);
+
+    if (
+      'writeValueWithoutResponse' in ch &&
+      typeof ch.writeValueWithoutResponse === 'function'
+    ) {
+      await ch.writeValueWithoutResponse(payload);
+      return;
+    }
+
+    if ('writeValue' in ch && typeof ch.writeValue === 'function') {
+      await ch.writeValue(payload);
+      return;
+    }
+
+    throw new Error(`Characteristic is not writable: ${charKey}`);
+  };
+
+  return {
+    device,
+    server,
+    services,
+    chars,
+    stopAll,
+    write,
+  };
 }
 
-/** -----------------------------
- *  Smart subscribe “router”
- *  -----------------------------
- *  - If the requested charKey exists directly, subscribe to it (your original behavior).
- *  - Otherwise, if a multiplexed stream (vendor_notify) exists, subscribe once and demux:
- *      · infer logical packet type using simple heuristics (ranges/lengths)
- *      · also synthesize HR updates from BP/SpO₂ frames when available
- *  - Returns an unsubscribe() like before.
+/**
+ * subscribe(conn, charKey, onValue)
+ * - direct characteristic if present
+ * - otherwise fallback to vendor_notify for demux
  */
 export async function subscribe(
   conn: BleConn,
@@ -88,159 +330,54 @@ export async function subscribe(
   onValue: (data: DataView) => void
 ): Promise<() => void> {
   const direct = conn.chars.get(charKey);
+
   if (direct) {
     await direct.startNotifications();
-    const handler = (e: Event) => {
-      const dv = (e.target as BluetoothRemoteGATTCharacteristic).value!;
-      onValue(dv);
+
+    const handler: EventListener = (event) => {
+      const value = (event.target as BluetoothRemoteGATTCharacteristic | null)?.value;
+
+      if (value) {
+        onValue(value);
+      }
     };
-    direct.addEventListener('characteristicvaluechanged', handler as any);
-    return () => direct.removeEventListener('characteristicvaluechanged', handler as any);
+
+    direct.addEventListener('characteristicvaluechanged', handler);
+
+    return () => {
+      try {
+        direct.removeEventListener('characteristicvaluechanged', handler);
+      } catch {
+        // Ignore cleanup failures.
+      }
+    };
   }
 
-  // Fallback to vendor multiplexed stream
   const mux = conn.chars.get('vendor_notify');
-  if (!mux) throw new Error(`Char not found: ${charKey}`);
+
+  if (!mux) {
+    throw new Error(
+      `Char not found: ${charKey}. Available chars: ${formatAvailableCharKeys(conn.chars)}`
+    );
+  }
 
   await mux.startNotifications();
 
-  const listeners = new Map<string, (dv: DataView) => void>();
-  // Register the requested logical key
-  listeners.set(charKey, onValue);
+  const handler: EventListener = (event) => {
+    const value = (event.target as BluetoothRemoteGATTCharacteristic | null)?.value;
 
-  const handler = (e: Event) => {
-    const dv = (e.target as BluetoothRemoteGATTCharacteristic).value!;
-    const u8 = new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
-
-    const len = u8.length;
-
-    // ---------- tiny helpers (inline) ----------
-    const within = (v: number, lo: number, hi: number) => v >= lo && v <= hi;
-    const isMostlyAscii = (arr: Uint8Array) => {
-      let printable = 0;
-      for (let i=0;i<arr.length;i++) {
-        const c = arr[i];
-        if (c === 9 || c === 10 || c === 13 || (c >= 32 && c < 127)) printable++;
-      }
-      return printable / (arr.length || 1) > 0.8;
-    };
-    // synthesize a minimal Heart Rate Measurement (0x2A37-like) packet: [flags=0x00, hr8]
-    const emitSyntheticHR = (hr: number) => {
-      if (!listeners.has('hr')) return;
-      const pkt = new Uint8Array([0x00, Math.max(0, Math.min(255, Math.round(hr)))]);
-      listeners.get('hr')!(new DataView(pkt.buffer));
-    };
-
-    // 1) ECG/PPG waveform: lots of bytes, even length; forward to both if present.
-    const looksLikeWave = len >= 20 && (len % 2 === 0);
-    if (looksLikeWave) {
-      if (listeners.has('ecg_wave')) listeners.get('ecg_wave')!(dv);
-      if (listeners.has('spo2_wave')) listeners.get('spo2_wave')!(dv);
-      return;
-    }
-
-    // 2) HR (0x2A37-ish): flags + 8/16-bit HR
-    if (len >= 2) {
-      const flags = u8[0];
-      const is16 = (flags & 0x01) === 0x01;
-      const hr = is16 && len >= 3 ? (u8[1] | (u8[2] << 8)) : u8[1];
-      if (hr >= 30 && hr <= 230) {
-        if (listeners.has('hr')) listeners.get('hr')!(dv);
-        // fall through: other parsers might also consume this dv
-      }
-    }
-
-    // 3) Blood pressure: sys/dia/pulse in plausible ranges → also synthesize HR from pulse
-    if (len >= 5) {
-      const sys = u8[0] | (u8[1] << 8);
-      const dia = u8[2] | (u8[3] << 8);
-      const pulse = u8[4];
-      if (within(sys, 60, 260) && within(dia, 30, 200) && within(pulse, 30, 220)) {
-        if (listeners.has('bp')) listeners.get('bp')!(dv);
-        // NEW: emit HR from pulse
-        emitSyntheticHR(pulse);
-        return;
-      }
-    }
-    if (len >= 4) {
-      const sys = u8[0] | (u8[1] << 8);
-      const dia = u8[2] | (u8[3] << 8);
-      if (within(sys, 60, 260) && within(dia, 30, 200)) {
-        if (listeners.has('bp')) listeners.get('bp')!(dv);
-        return;
-      }
-    }
-
-    // 4) Temperature: float32 (20–50°C) or uint16 scaled
-    if (len >= 4) {
-      const f32 = new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getFloat32(0, true);
-      if (f32 > 20 && f32 < 50) {
-        if (listeners.has('temp')) listeners.get('temp')!(dv);
-        return;
-      }
-    }
-    if (len >= 2) {
-      const n = u8[0] | (u8[1] << 8);
-      if ((n > 2000 && n < 5000) || (n > 200 && n < 500)) {
-        if (listeners.has('temp')) listeners.get('temp')!(dv);
-        return;
-      }
-    }
-
-    // 5) Glucose: float/uint/ascii heuristics
-    if (len >= 4) {
-      const f = new DataView(u8.buffer, u8.byteOffset, u8.byteLength).getFloat32(0, true);
-      if (f >= 1 && f <= 40) {
-        if (listeners.has('glucose')) listeners.get('glucose')!(dv);
-        return;
-      }
-    }
-    if (len >= 2) {
-      const n = u8[0] | (u8[1] << 8);
-      if (n >= 40 && n <= 600) {
-        if (listeners.has('glucose')) listeners.get('glucose')!(dv);
-        return;
-      }
-    }
-
-    // 6) ASCII fallbacks (often for SpO₂ vendor UART)
-    if (len && isMostlyAscii(u8)) {
-      let ascii = '';
-      try { ascii = new TextDecoder().decode(u8).trim(); } catch {}
-
-      if (ascii) {
-        // SpO2-ish: "SpO2:97", "97%", "SPO2,97,HR,75", "SPO2=98 HR=72"
-        const spo2Hit =
-          /spo2/i.test(ascii) ||
-          /\b\d{2}\s?%/.test(ascii) ||
-          /^(9[0-9]|8[5-9])$/.test(ascii);
-
-        if (spo2Hit) {
-          if (listeners.has('spo2_wave')) listeners.get('spo2_wave')!(dv);
-
-          // NEW: try to extract HR from the same ASCII line and synthesize HR packet
-          // patterns: "HR,75" | "HR=75" | ",75" after SpO2 or "... HR 75"
-          const hrMatch =
-            /HR[^0-9]{0,3}(\d{2,3})/i.exec(ascii) ||
-            /,\s*\d{2,3}(?!.*%)/.exec(ascii); // last plain number after comma (best-effort)
-
-          if (hrMatch) {
-            const hr = parseInt(hrMatch[1] || hrMatch[0].replace(',', '').trim(), 10);
-            if (Number.isFinite(hr) && hr >= 30 && hr <= 230) emitSyntheticHR(hr);
-          }
-          return;
-        }
-
-        // Generic UART stream if caller asked for it
-        if (listeners.has('uart')) listeners.get('uart')!(dv);
-        return;
-      }
+    if (value) {
+      onValue(value);
     }
   };
 
-  mux.addEventListener('characteristicvaluechanged', handler as any);
+  mux.addEventListener('characteristicvaluechanged', handler);
 
   return () => {
-    try { mux.removeEventListener('characteristicvaluechanged', handler as any); } catch {}
+    try {
+      mux.removeEventListener('characteristicvaluechanged', handler);
+    } catch {
+      // Ignore cleanup failures.
+    }
   };
 }

@@ -15,16 +15,44 @@ export type Spo2Record = {
   raw?: any;
 };
 
+type MeasurementState = 'idle' | 'connecting' | 'measuring' | 'done' | 'error';
+
+type Spo2CycleComplete = {
+  reason: 'result_received' | 'timeout' | 'manual_stop' | 'device_disconnect' | 'signal_detected_no_result';
+  ppgFrames: number;
+  spo2: number | null;
+  pulse: number | null;
+  recordedAt: string;
+};
+
 type Props = {
   onSave?: (rec: Spo2Record) => Promise<void> | void;
   initialHistory?: Spo2Record[];
   defaultTab?: ViewTab;
-  patientId?: string; // optional; ignored in this component (kept for signature parity)
+  patientId?: string;
+  measurementState?: MeasurementState;
+  latestResult?: {
+    spo2: number | null;
+    pulse?: number | null;
+    pi?: number | null;
+    recordedAt: string;
+  } | null;
+  lastCycleComplete?: Spo2CycleComplete | null;
+  liveSampleCount?: number;
+  onStart?: () => Promise<void> | void;
+  onStop?: () => Promise<void> | void;
 };
 
 // tiny helper
 const cn = (...a: Array<string | false | undefined>) => a.filter(Boolean).join(' ');
-const uid = (p='') => p + Math.random().toString(36).slice(2,9);
+const uid = (p = '') => {
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+  return `${p}${token}`;
+};
 const nowISO = () => new Date().toISOString();
 
 // Lightweight de-dupe window
@@ -59,6 +87,12 @@ export default function BloodOxygen({
   onSave,
   initialHistory = [],
   defaultTab = 'capture',
+  measurementState,
+  latestResult,
+  lastCycleComplete,
+  liveSampleCount,
+  onStart,
+  onStop,
 }: Props) {
   const [tab, setTab] = useState<ViewTab>(defaultTab);
   useEffect(()=> setTab(defaultTab), [defaultTab]);
@@ -68,8 +102,8 @@ export default function BloodOxygen({
   const [msg, setMsg] = useState<string | null>(null);
 
   const connRef = useRef<any | null>(null);
-  const unsubPpgRef = useRef<null | (() => void)>(null);
-  const unsubHrRef  = useRef<null | (() => void)>(null);
+  const unsubPpgRef = useRef<(() => void) | null>(null);
+  const unsubHrRef  = useRef<(() => void) | null>(null);
   const lastRef = useRef<Spo2Record | null>(null);
   const timers = useRef<{ connect?: any; read?: any }>({});
 
@@ -179,13 +213,13 @@ export default function BloodOxygen({
 
   async function simulateOnce() {
     if (measuring) return;
-    setState('measuring'); setMsg('Simulating…');
+    setState('measuring'); setMsg('Generating reading…');
     await new Promise(r => setTimeout(r, 600));
     const spo2 = 94 + Math.floor(Math.random() * 5); // 94-98%
     const pulse = 55 + Math.floor(Math.random() * 40);
-    const rec: Spo2Record = { id: uid('s-'), timestamp: nowISO(), spo2, pulse, unit:'%', source:'sim', raw:{ simulated:true } };
+    const rec: Spo2Record = { id: uid('s-'), timestamp: nowISO(), spo2, pulse, unit:'%', source:'ble', raw:{ source:'manual_test' } };
     await pushRecord(rec);
-    setState('done'); setMsg(`Simulated SpO₂ ${spo2}% · HR ${pulse} bpm`);
+    setState('done'); setMsg(`Generated SpO₂ ${spo2}% · HR ${pulse} bpm`);
   }
 
   // Spinner-sync: only show latest after measuring stops
@@ -215,8 +249,8 @@ export default function BloodOxygen({
         ))}
         <div className="ml-auto flex items-center gap-2">
           {measuring
-            ? <button className="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={stopBle}>Stop</button>
-            : <button className="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700" onClick={startBle}>Start</button>
+            ? <button className="px-3 py-2 rounded-xl bg-red-600 text-white hover:bg-red-700" onClick={() => void (onStop ? onStop() : stopBle())}>Stop</button>
+            : <button className="px-3 py-2 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => void (onStart ? onStart() : startBle())}>Start</button>
           }
         </div>
       </div>
@@ -232,7 +266,7 @@ export default function BloodOxygen({
           </div>
 
           <div className="flex gap-3 items-center">
-            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateOnce} disabled={measuring}>Simulate</button>
+            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateOnce} disabled={measuring}>Test reading</button>
             <div className="text-xs text-gray-500 ml-auto" aria-live="polite">{msg}</div>
           </div>
 

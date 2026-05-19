@@ -4,19 +4,53 @@
 const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? '';
 
 type Uuids = {
-  hr?: string;          // e.g. 00002a37-...
-  ppg?: string;         // e.g. vendor PPG if present
+  hr?: string; // e.g. 00002a37-...
+  ppg?: string; // e.g. vendor PPG if present
   serviceHints?: string[];
 };
 
-async function postVital(roomId: string, type: string, value: number, unit?: string) {
+async function postVital(
+  roomId: string,
+  type: string,
+  value: number,
+  unit?: string
+): Promise<void> {
   try {
     await fetch(`${GATEWAY}/api/vitals/emit`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roomId, type, value, unit, t: new Date().toISOString() })
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        roomId,
+        type,
+        value,
+        unit,
+        t: new Date().toISOString(),
+      }),
     });
-  } catch {}
+  } catch {
+    // Do not interrupt live BLE notification handling if telemetry upload fails.
+  }
+}
+
+function getBluetooth(): Bluetooth {
+  if (typeof navigator === 'undefined' || !navigator.bluetooth) {
+    throw new Error(
+      'Web Bluetooth is not available in this browser. Use Chrome or Edge over HTTPS or localhost.'
+    );
+  }
+
+  return navigator.bluetooth;
+}
+
+function getCharacteristicValue(event: Event): DataView | null {
+  const target = event.target as BluetoothRemoteGATTCharacteristic | null;
+  return target?.value ?? null;
+}
+
+function getServiceHints(uuids: Uuids): BluetoothServiceUUID[] {
+  return (uuids.serviceHints ?? []).filter(Boolean);
 }
 
 export class HMBleClient {
@@ -26,52 +60,127 @@ export class HMBleClient {
 
   constructor(private uuids: Uuids) {}
 
-  async connect(roomId: string) {
-    const filters: BluetoothLEScanFilter[] = [];
-    if (this.uuids.serviceHints?.length) filters.push({ services: this.uuids.serviceHints as any });
-    const device = await navigator.bluetooth.requestDevice({
-      filters: filters.length ? filters : undefined,
-      optionalServices: this.uuids.serviceHints?.length ? this.uuids.serviceHints : ['0000180d-0000-1000-8000-00805f9b34fb'],
-      acceptAllDevices: !filters.length,
-    });
-    this.device = device;
-    this.server = await device.gatt!.connect();
+  async connect(roomId: string): Promise<void> {
+    const bluetooth = getBluetooth();
+    const serviceHints = getServiceHints(this.uuids);
 
-    // Heart Rate (0x2A37) – first two bytes contain HR (8/16-bit). We’ll decode simply.
-    if (this.uuids.hr) {
-      const svc = await this.server.getPrimaryService('0000180d-0000-1000-8000-00805f9b34fb');
-      const chr = await svc.getCharacteristic(this.uuids.hr);
-      await chr.startNotifications();
-      const onHr = (e: Event) => {
-        const v = (e.target as BluetoothRemoteGATTCharacteristic).value!;
-        // HR Measurement format: flags + HR (uint8 or uint16). We parse the 2nd byte as uint8 for typical devices.
-        const hr = v.getUint8(1);
-        if (hr > 0 && hr < 255) postVital(roomId, 'hr', hr, 'bpm');
-      };
-      chr.addEventListener('characteristicvaluechanged', onHr);
-      this.subs.push(() => chr.removeEventListener('characteristicvaluechanged', onHr));
+    const filters: BluetoothRequestDeviceFilter[] = serviceHints.length
+      ? [{ services: serviceHints }]
+      : [];
+
+    const optionalServices: BluetoothServiceUUID[] = serviceHints.length
+      ? serviceHints
+      : ['0000180d-0000-1000-8000-00805f9b34fb'];
+
+    const device = await bluetooth.requestDevice({
+      filters: filters.length ? filters : undefined,
+      optionalServices,
+      acceptAllDevices: filters.length === 0,
+    });
+
+    if (!device.gatt) {
+      throw new Error('Selected health monitor has no GATT server.');
     }
 
-    // PPG (vendor) – if present, forward averaged amplitude quickly
-    if (this.uuids.ppg) {
-      const svc = await this.server.getPrimaryService(this.uuids.serviceHints![0]);
-      const chr = await svc.getCharacteristic(this.uuids.ppg);
+    this.device = device;
+    this.server = await device.gatt.connect();
+
+    // Heart Rate (0x2A37) – first two bytes contain HR.
+    if (this.uuids.hr) {
+      const svc = await this.server.getPrimaryService(
+        '0000180d-0000-1000-8000-00805f9b34fb'
+      );
+      const chr = await svc.getCharacteristic(this.uuids.hr);
+
       await chr.startNotifications();
-      const onPpg = (e: Event) => {
-        const dv = (e.target as BluetoothRemoteGATTCharacteristic).value!;
-        // Treat as little-endian uint16 samples
-        let sum = 0, n = 0;
-        for (let i = 0; i + 1 < dv.byteLength; i += 2) { sum += dv.getUint16(i, true); n++; }
-        if (n) postVital(roomId, 'ppg', Math.round(sum / n));
+
+      const onHr = (event: Event): void => {
+        const value = getCharacteristicValue(event);
+
+        if (!value || value.byteLength < 2) {
+          return;
+        }
+
+        // HR Measurement format: flags + HR.
+        // If bit 0 is set, HR is uint16 at bytes 1-2; otherwise uint8 at byte 1.
+        const flags = value.getUint8(0);
+        const isUint16 = Boolean(flags & 0x01);
+
+        const hr =
+          isUint16 && value.byteLength >= 3
+            ? value.getUint16(1, true)
+            : value.getUint8(1);
+
+        if (hr > 0 && hr < 255) {
+          void postVital(roomId, 'hr', hr, 'bpm');
+        }
       };
+
+      chr.addEventListener('characteristicvaluechanged', onHr);
+
+      this.subs.push(() => {
+        chr.removeEventListener('characteristicvaluechanged', onHr);
+      });
+    }
+
+    // PPG (vendor) – if present, forward averaged amplitude quickly.
+    if (this.uuids.ppg) {
+      const serviceUuid = serviceHints[0];
+
+      if (!serviceUuid) {
+        throw new Error('PPG characteristic configured without a service hint.');
+      }
+
+      const svc = await this.server.getPrimaryService(serviceUuid);
+      const chr = await svc.getCharacteristic(this.uuids.ppg);
+
+      await chr.startNotifications();
+
+      const onPpg = (event: Event): void => {
+        const value = getCharacteristicValue(event);
+
+        if (!value) {
+          return;
+        }
+
+        let sum = 0;
+        let count = 0;
+
+        for (let i = 0; i + 1 < value.byteLength; i += 2) {
+          sum += value.getUint16(i, true);
+          count += 1;
+        }
+
+        if (count > 0) {
+          void postVital(roomId, 'ppg', Math.round(sum / count));
+        }
+      };
+
       chr.addEventListener('characteristicvaluechanged', onPpg);
-      this.subs.push(() => chr.removeEventListener('characteristicvaluechanged', onPpg));
+
+      this.subs.push(() => {
+        chr.removeEventListener('characteristicvaluechanged', onPpg);
+      });
     }
   }
 
-  async disconnect() {
-    for (const f of this.subs.splice(0)) try { f(); } catch {}
-    if (this.server?.connected) this.server.disconnect();
+  async disconnect(): Promise<void> {
+    for (const unsubscribe of this.subs.splice(0)) {
+      try {
+        unsubscribe();
+      } catch {
+        // Ignore listener cleanup failures.
+      }
+    }
+
+    try {
+      if (this.server?.connected) {
+        this.server.disconnect();
+      }
+    } catch {
+      // Ignore disconnect failures.
+    }
+
     this.server = null;
     this.device = null;
   }

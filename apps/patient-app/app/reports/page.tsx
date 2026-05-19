@@ -146,6 +146,7 @@ export default function ReportsHub() {
   const [loadingVitals, setLoadingVitals] = useState(true);
   const [vitalsError, setVitalsError] = useState<string | null>(null);
   const [busyExport, setBusyExport] = useState(false);
+  const [patientId, setPatientId] = useState('');
 
   const [trendWindow, setTrendWindow] = useState<TrendWindow>('1h');
 
@@ -169,6 +170,29 @@ export default function ReportsHub() {
       setDiscreet((localStorage.getItem(LS_DISCREET) || '0') === '1');
       setHideSensitive((localStorage.getItem(LS_HIDE_SENSITIVE) || '0') === '1');
     } catch {}
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadPatientIdentity() {
+      try {
+        const res = await fetch('/api/me', { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+
+        if (!cancelled && res.ok) {
+          setPatientId(String(data?.patientId || data?.id || '').trim());
+        }
+      } catch {
+        if (!cancelled) setPatientId('');
+      }
+    }
+
+    void loadPatientIdentity();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -270,9 +294,14 @@ export default function ReportsHub() {
   );
 
   async function handleDownloadAll() {
+    if (!patientId) {
+      toast('Patient identity is required before generating a report.', 'error');
+      return;
+    }
+
     setBusyExport(true);
     try {
-      const { blob, filename } = await generateHealthReport('current-user', {});
+      const { blob, filename } = await generateHealthReport(patientId, {});
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -283,34 +312,38 @@ export default function ReportsHub() {
           URL.revokeObjectURL(url);
         } catch {}
       }, 2500);
-      toast('Download started.', { type: 'success' });
+      toast('Download started.', 'success');
     } catch (e) {
       console.error(e);
-      toast('Could not generate the PDF right now.', { type: 'error' });
+      toast('Could not generate the PDF right now.', 'error');
     } finally {
       setBusyExport(false);
     }
   }
 
   async function handleShareAll() {
+    if (!patientId) {
+      toast('Patient identity is required before sharing a report.', 'error');
+      return;
+    }
+
     setBusyExport(true);
     try {
-      const { blob, filename } = await generateHealthReport('current-user', {});
+      const { blob, filename } = await generateHealthReport(patientId, {});
       const file = new File([blob], filename || 'health_report.pdf', { type: 'application/pdf' });
 
-      const navAny = navigator as any;
-      if (navAny.share && navAny.canShare?.({ files: [file] })) {
-        await navAny.share({
+      if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
           title: 'Health Report',
           text: 'Here is my latest health report.',
           files: [file],
         });
       } else {
-        toast('Sharing is not supported on this device/browser.', { type: 'info' });
+        toast('Sharing is not supported on this device/browser.', 'info');
       }
     } catch (e) {
       console.error(e);
-      toast('Could not share the PDF.', { type: 'error' });
+      toast('Could not share the PDF.', 'error');
     } finally {
       setBusyExport(false);
     }
@@ -360,7 +393,7 @@ export default function ReportsHub() {
 
             <button
               onClick={handleDownloadAll}
-              disabled={busyExport}
+              disabled={busyExport || !patientId}
               className="inline-flex items-center gap-2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-60"
             >
               <Download className="h-4 w-4" />
@@ -369,7 +402,7 @@ export default function ReportsHub() {
 
             <button
               onClick={handleShareAll}
-              disabled={busyExport}
+              disabled={busyExport || !patientId}
               className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
             >
               <Share2 className="h-4 w-4" />

@@ -200,7 +200,12 @@ function safeJsonParse<T>(s: string | null): T | null {
 }
 
 function uid(prefix = 'id') {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(16)}_${performance.now().toString(16).replace('.', '')}`;
+
+  return `${prefix}_${token}`;
 }
 
 function todayISO() {
@@ -627,13 +632,13 @@ export default function GentlemenHealthPage() {
 
   // Helper toasts
   function notifyOk(msg: string) {
-    toast(msg, { type: 'success' });
+    toast(msg, 'success');
   }
   function notifyInfo(msg: string) {
-    toast(msg, { type: 'info' });
+    toast(msg, 'info');
   }
   function notifyWarn(msg: string) {
-    toast(msg, { type: 'warning' });
+    toast(msg, 'error');
   }
 
   // Plans & logging
@@ -826,7 +831,7 @@ export default function GentlemenHealthPage() {
           label: 'Book a clinician check',
           detail: 'If this is new, persistent, or affecting activity, booking a check is a good next step.',
           action: 'Book check-up',
-          go: () => notifyInfo('Wire this button to your appointments route when ready.'),
+          go: () => notifyInfo('This action is not available from this section yet.'),
         };
       }
       return {
@@ -1098,7 +1103,7 @@ export default function GentlemenHealthPage() {
                   <>
                     <Btn
                       variant="solid"
-                      onClick={() => notifyInfo('Wire booking to your /appointments flow when ready.')}
+                      onClick={() => notifyInfo('This action is not available from this section yet.')}
                       leftIcon={<Calendar className="h-4 w-4" />}
                     >
                       Book check-up
@@ -1127,7 +1132,7 @@ export default function GentlemenHealthPage() {
                     </Btn>
                     <Btn
                       variant="outline"
-                      onClick={() => notifyInfo('When ready: route to confidential consult booking.')}
+                      onClick={() => notifyInfo('This action is not available from this section yet.')}
                       leftIcon={<Stethoscope className="h-4 w-4" />}
                     >
                       Book confidential consult
@@ -1150,7 +1155,7 @@ export default function GentlemenHealthPage() {
                     </Btn>
                     <Btn
                       variant="outline"
-                      onClick={() => notifyInfo('Wire to PSA/lab booking when ready.')}
+                      onClick={() => notifyInfo('This action is not available from this section yet.')}
                       leftIcon={<FileText className="h-4 w-4" />}
                     >
                       PSA info + booking
@@ -1173,7 +1178,7 @@ export default function GentlemenHealthPage() {
                     </Btn>
                     <Btn
                       variant="outline"
-                      onClick={() => notifyInfo('When ready: route to clinician/coach booking.')}
+                      onClick={() => notifyInfo('This action is not available from this section yet.')}
                       leftIcon={<Stethoscope className="h-4 w-4" />}
                     >
                       Talk to someone
@@ -1202,7 +1207,7 @@ export default function GentlemenHealthPage() {
                     </Btn>
                     <Btn
                       variant="outline"
-                      onClick={() => notifyInfo('When ready: route to physio referral/booking.')}
+                      onClick={() => notifyInfo('This action is not available from this section yet.')}
                       leftIcon={<Stethoscope className="h-4 w-4" />}
                     >
                       Physio path
@@ -1224,7 +1229,7 @@ export default function GentlemenHealthPage() {
                     </Btn>
                     <Btn
                       variant="outline"
-                      onClick={() => notifyInfo('Hook this to your existing reminders/scheduler when ready.')}
+                      onClick={() => notifyInfo('This action is not available from this section yet.')}
                       leftIcon={<Calendar className="h-4 w-4" />}
                     >
                       Add reminders
@@ -1263,7 +1268,7 @@ export default function GentlemenHealthPage() {
                   subtitle="Track BP and activity, see a simple risk score, and take clear next steps."
                   right={
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire booking to /appointments when ready.')} leftIcon={<Calendar className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Calendar className="h-4 w-4" />}>
                         Book check-up
                       </Btn>
                       <Btn variant="outline" onClick={() => setLabOpen(true)} leftIcon={<FileText className="h-4 w-4" />}>
@@ -1333,7 +1338,7 @@ export default function GentlemenHealthPage() {
                         </Btn>
                         <Btn
                           variant="outline"
-                          onClick={() => notifyInfo('Later: connect to your reminders/scheduler (BP plan → daily reminder).')}
+                          onClick={() => notifyInfo('This action is not available from this section yet.')}
                           leftIcon={<Calendar className="h-4 w-4" />}
                         >
                           Add reminders (later)
@@ -1398,7 +1403,7 @@ export default function GentlemenHealthPage() {
                       <Btn variant="solid" onClick={() => setLabOpen(true)} leftIcon={<FileText className="h-4 w-4" />}>
                         Lab panel
                       </Btn>
-                      <Btn variant="outline" onClick={() => notifyInfo('Wire to chat/televisit entry when ready.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
                         Chat clinician
                       </Btn>
                     </div>
@@ -1432,7 +1437,7 @@ export default function GentlemenHealthPage() {
                   privateDefault
                   right={
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire confidential consult booking when ready.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
                         Book confidential consult
                       </Btn>
                       <Btn variant="outline" onClick={() => setPrivacyOpen(true)} leftIcon={<Lock className="h-4 w-4" />}>
@@ -1456,11 +1461,11 @@ export default function GentlemenHealthPage() {
                       Basics that help most people: consistent sleep, balanced nutrition, avoiding nicotine, reducing binge drinking, and managing stress.
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire to fertility consult route when ready.')} leftIcon={<Calendar className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Calendar className="h-4 w-4" />}>
                         Book fertility consult
                       </Btn>
-                      <Btn variant="outline" onClick={() => notifyInfo('Later: add sperm test referral flow + lab logistics.')} leftIcon={<FileText className="h-4 w-4" />}>
-                        Sperm test referral (later)
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<FileText className="h-4 w-4" />}>
+                        Sperm test referral unavailable
                       </Btn>
                     </div>
                   </Card>
@@ -1483,7 +1488,7 @@ export default function GentlemenHealthPage() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire confidential booking when ready.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
                         Consult
                       </Btn>
                       <Btn variant="outline" onClick={() => setTriageOpen(true)} leftIcon={<Timer className="h-4 w-4" />}>
@@ -1498,8 +1503,8 @@ export default function GentlemenHealthPage() {
                     <Btn variant="outline" href="/myCare/devices" leftIcon={<Activity className="h-4 w-4" />}>
                       Devices
                     </Btn>
-                    <Btn variant="outline" onClick={() => notifyInfo('Later: route to STI testing/lab logistics.')} leftIcon={<FileText className="h-4 w-4" />}>
-                      STI testing (later)
+                    <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<FileText className="h-4 w-4" />}>
+                      STI testing unavailable
                     </Btn>
                   </div>
                 </Card>
@@ -1517,11 +1522,11 @@ export default function GentlemenHealthPage() {
                   privateDefault
                   right={
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire booking to clinician/urology path when ready.')} leftIcon={<Calendar className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Calendar className="h-4 w-4" />}>
                         Book a check
                       </Btn>
-                      <Btn variant="outline" onClick={() => notifyInfo('Wire PSA/lab booking when ready.')} leftIcon={<FileText className="h-4 w-4" />}>
-                        PSA booking (later)
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<FileText className="h-4 w-4" />}>
+                        PSA booking unavailable
                       </Btn>
                       <Btn variant="outline" onClick={() => setPrivacyOpen(true)} leftIcon={<Lock className="h-4 w-4" />}>
                         Privacy
@@ -1554,7 +1559,7 @@ export default function GentlemenHealthPage() {
                       <li>Anything that feels severe or sudden</li>
                     </ul>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire urgent booking / guidance when ready.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
                         Talk to clinician
                       </Btn>
                       <Btn variant="outline" onClick={() => setTriageOpen(true)} leftIcon={<Timer className="h-4 w-4" />}>
@@ -1581,10 +1586,10 @@ export default function GentlemenHealthPage() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire PSA booking when ready.')} leftIcon={<FileText className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<FileText className="h-4 w-4" />}>
                         PSA (later)
                       </Btn>
-                      <Btn variant="outline" onClick={() => notifyInfo('Wire booking to clinician/urology path when ready.')} leftIcon={<Calendar className="h-4 w-4" />}>
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Calendar className="h-4 w-4" />}>
                         Book check
                       </Btn>
                     </div>
@@ -1601,7 +1606,7 @@ export default function GentlemenHealthPage() {
                           <Pill tone="neutral">Saved</Pill>
                         </div>
                         <div className="mt-2 text-slate-700">
-                          {`Frequency: ${x.frequency.replaceAll('_', ' ')}, Urgency: ${x.urgency}, Weak stream: ${x.weakStream}, Night: ${x.nightUrination}`}
+                          {`Frequency: ${x.frequency.replace(/_/g, ' ')}, Urgency: ${x.urgency}, Weak stream: ${x.weakStream}, Night: ${x.nightUrination}`}
                         </div>
                       </div>
                     ))}
@@ -1626,7 +1631,7 @@ export default function GentlemenHealthPage() {
                   privateDefault
                   right={
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire to mental-health clinician/coach booking when ready.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
                         Talk to someone
                       </Btn>
                       <Btn variant="outline" onClick={() => setPrivacyOpen(true)} leftIcon={<Lock className="h-4 w-4" />}>
@@ -1682,7 +1687,7 @@ export default function GentlemenHealthPage() {
                       <Btn variant="solid" onClick={() => setTriageOpen(true)} leftIcon={<Timer className="h-4 w-4" />}>
                         30-sec triage
                       </Btn>
-                      <Btn variant="outline" onClick={() => notifyInfo('Wire to chat/televisit when ready.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
                         Chat
                       </Btn>
                     </div>
@@ -1723,7 +1728,7 @@ export default function GentlemenHealthPage() {
                   subtitle="Log workouts, track readiness, and capture pain/injury early — with clear next steps."
                   right={
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire to physio/clinician booking when ready.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
                         Physio path
                       </Btn>
                       <Btn variant="outline" href="/myCare/devices" leftIcon={<Activity className="h-4 w-4" />}>
@@ -1742,21 +1747,21 @@ export default function GentlemenHealthPage() {
                     <WorkoutLogger onSave={addWorkout} />
                   </Card>
 
-                  <Card title="Recovery readiness (demo-ready)" icon={<Activity className="h-4 w-4 text-slate-600" />}>
+                  <Card title="Recovery readiness" icon={<Activity className="h-4 w-4 text-slate-600" />}>
                     <div className="text-xs text-slate-600">
-                      For now this uses a simple local model. When your NexRing/Health Monitor stream is wired, map readiness to HRV/resting HR/sleep.
+                      Recovery scores are calculated from your logged sleep, stress, and training load. Device-derived readiness can be added when the live data service is available.
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2">
-                      <ReadinessChip label="Readiness" value={mockReadiness(state)} />
-                      <ReadinessChip label="Sleep" value={mockSleep(state)} />
-                      <ReadinessChip label="Load" value={mockLoad(state)} />
+                      <ReadinessChip label="Readiness" value={readinessFromState(state)} />
+                      <ReadinessChip label="Sleep" value={sleepFromState(state)} />
+                      <ReadinessChip label="Load" value={loadFromState(state)} />
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Later: wire to InsightCore readiness.')} leftIcon={<Sparkles className="h-4 w-4" />}>
-                        Use InsightCore (later)
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Sparkles className="h-4 w-4" />}>
+                        InsightCore readiness unavailable
                       </Btn>
-                      <Btn variant="outline" onClick={() => notifyInfo('Later: add training plan templates per goal.')} leftIcon={<Target className="h-4 w-4" />}>
-                        Training templates (later)
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Target className="h-4 w-4" />}>
+                        Training templates unavailable
                       </Btn>
                     </div>
                   </Card>
@@ -1800,7 +1805,7 @@ export default function GentlemenHealthPage() {
                       </div>
                     </div>
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="solid" onClick={() => notifyInfo('Wire to physio booking when ready.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
+                      <Btn variant="solid" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Stethoscope className="h-4 w-4" />}>
                         Book physio
                       </Btn>
                       <Btn variant="outline" onClick={() => setTriageOpen(true)} leftIcon={<Timer className="h-4 w-4" />}>
@@ -1822,10 +1827,10 @@ export default function GentlemenHealthPage() {
                   subtitle="Blunt and useful: weekly small wins + streaks. Consistency beats intensity."
                   right={
                     <div className="flex flex-wrap gap-2">
-                      <Btn variant="outline" onClick={() => notifyInfo('Later: connect to coaching / lifestyle consults.')} leftIcon={<Users className="h-4 w-4" />}>
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Users className="h-4 w-4" />}>
                         Coaching (later)
                       </Btn>
-                      <Btn variant="outline" onClick={() => notifyInfo('Later: compute “Health age” using real vitals + habits.')} leftIcon={<Sparkles className="h-4 w-4" />}>
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Sparkles className="h-4 w-4" />}>
                         Health age (later)
                       </Btn>
                     </div>
@@ -1870,7 +1875,7 @@ export default function GentlemenHealthPage() {
                   </div>
                 </Card>
 
-                <Card title="Optional: “Health age” (placeholder)" icon={<Sparkles className="h-4 w-4 text-slate-600" />}>
+                <Card title="Optional: “Health age” (unavailable)" icon={<Sparkles className="h-4 w-4 text-slate-600" />}>
                   <div className="text-xs text-slate-600">
                     When you’re ready, compute a stable “health age” from real vitals + habits + sleep trends.
                   </div>
@@ -1900,7 +1905,7 @@ export default function GentlemenHealthPage() {
                       <Btn variant="solid" href="/family" leftIcon={<Users className="h-4 w-4" />}>
                         Go to Family
                       </Btn>
-                      <Btn variant="outline" onClick={() => notifyInfo('Later: connect reminders via your existing scheduler/reminders.')} leftIcon={<Calendar className="h-4 w-4" />}>
+                      <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<Calendar className="h-4 w-4" />}>
                         Reminders (later)
                       </Btn>
                     </div>
@@ -1933,7 +1938,7 @@ export default function GentlemenHealthPage() {
                     <Btn variant="solid" onClick={() => setTab('mental')} leftIcon={<Brain className="h-4 w-4" />}>
                       Go to Stress + Sleep
                     </Btn>
-                    <Btn variant="outline" onClick={() => notifyInfo('Later: add parenting stress screener + resources.')} leftIcon={<FileText className="h-4 w-4" />}>
+                    <Btn variant="outline" onClick={() => notifyInfo('This action is not available from this section yet.')} leftIcon={<FileText className="h-4 w-4" />}>
                       Parenting stress (later)
                     </Btn>
                   </div>
@@ -1955,7 +1960,7 @@ export default function GentlemenHealthPage() {
                   </div>
                 </Card>
 
-                <Card title="Reminders (placeholder)" icon={<Calendar className="h-4 w-4 text-slate-600" />}>
+                <Card title="Reminders (unavailable)" icon={<Calendar className="h-4 w-4 text-slate-600" />}>
                   <div className="text-xs text-slate-600">
                     When you’re ready, connect reminders to your Notifications + Calendar flows.
                   </div>
@@ -2087,7 +2092,7 @@ export default function GentlemenHealthPage() {
           open={labOpen}
           title={
             <span className="inline-flex items-center gap-2">
-              <FileText className="h-4 w-4" /> Order lab panel (demo-ready)
+              <FileText className="h-4 w-4" /> Order lab panel
             </span>
           }
           onClose={() => setLabOpen(false)}
@@ -2111,7 +2116,7 @@ export default function GentlemenHealthPage() {
         >
           <div className="space-y-3 text-xs text-slate-700">
             <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              Demo placeholder: capture what you want to order. Later wire it to MedReach + partner labs.
+              Lab ordering from this section is not connected yet. Use this checklist to prepare what you want to discuss with a clinician.
             </div>
             <div className="grid gap-2 sm:grid-cols-2">
               <CheckItem label="Lipids (cholesterol)" />
@@ -2748,7 +2753,7 @@ function ReadinessChip({
   value,
 }: {
   label: string;
-  value: { score: number; note: string; tone: 'good' | 'warn' | 'bad' };
+  value: { score: number; note: string; tone: 'neutral' | 'good' | 'warn' | 'bad' };
 }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 text-xs">
@@ -2761,33 +2766,68 @@ function ReadinessChip({
   );
 }
 
-// Demo-ready placeholders (wire to real InsightCore later)
-function mockReadiness(state: GentlemenHealthState) {
-  const base = 72;
-  const stressPenalty = (state.mentalChecks?.[0]?.stressLevel || 3) * 3;
-  const score = clamp(Math.round(base - stressPenalty + Math.random() * 6), 10, 95);
+// Available unavailables (wire to real InsightCore later)
+function readinessFromState(state: GentlemenHealthState) {
+  const latestStress = state.mentalChecks?.[0]?.stressLevel ?? null;
+  const latestSleep = state.mentalChecks?.[0]?.sleepQuality ?? null;
+  const latestWorkout = state.workouts?.[0] ?? null;
+
+  if (latestStress == null && latestSleep == null && !latestWorkout) {
+    return {
+      score: 0,
+      note: 'Awaiting tracked data',
+      tone: 'neutral',
+    } as const;
+  }
+
+  const stressPenalty = typeof latestStress === 'number' ? latestStress * 5 : 10;
+  const sleepBoost = typeof latestSleep === 'number' ? latestSleep * 10 : 25;
+  const workoutPenalty = latestWorkout?.intensity ? latestWorkout.intensity * 3 : 0;
+  const score = clamp(Math.round(55 + sleepBoost - stressPenalty - workoutPenalty), 10, 95);
+
   return {
     score,
-    note: score >= 70 ? 'Good to train' : score >= 50 ? 'Moderate — ease in' : 'Low — prioritize recovery',
+    note: score >= 70 ? 'Good to train' : score >= 50 ? 'Moderate — ease in' : 'Low — prioritise recovery',
     tone: score >= 70 ? 'good' : score >= 50 ? 'warn' : 'bad',
   } as const;
 }
-function mockSleep(state: GentlemenHealthState) {
-  const q = state.mentalChecks?.[0]?.sleepQuality || 3;
-  const score = clamp(q * 18 + Math.round(Math.random() * 6), 10, 95);
+
+function sleepFromState(state: GentlemenHealthState) {
+  const q = state.mentalChecks?.[0]?.sleepQuality ?? null;
+
+  if (q == null) {
+    return {
+      score: 0,
+      note: 'No sleep check-in yet',
+      tone: 'neutral',
+    } as const;
+  }
+
+  const score = clamp(q * 18, 10, 95);
   return {
     score,
     note: q >= 4 ? 'Solid sleep' : q === 3 ? 'Average' : 'Needs attention',
     tone: q >= 4 ? 'good' : q === 3 ? 'warn' : 'bad',
   } as const;
 }
-function mockLoad(state: GentlemenHealthState) {
-  const w = state.workouts?.[0];
-  const score = clamp((w?.durationMin || 0) + (w?.intensity || 3) * 10, 5, 95);
+
+function loadFromState(state: GentlemenHealthState) {
+  const last7 = state.workouts.slice(0, 7);
+  if (!last7.length) {
+    return {
+      score: 0,
+      note: 'No workouts logged yet',
+      tone: 'neutral',
+    } as const;
+  }
+
+  const total = last7.reduce((sum, w) => sum + w.durationMin * w.intensity, 0);
+  const score = clamp(Math.round(total / 20), 10, 95);
+
   return {
     score,
-    note: score >= 70 ? 'High load' : score >= 40 ? 'Moderate load' : 'Low load',
-    tone: score >= 70 ? 'warn' : 'good',
+    note: score >= 70 ? 'High load' : score >= 35 ? 'Balanced' : 'Light week',
+    tone: score >= 70 ? 'warn' : score >= 35 ? 'good' : 'neutral',
   } as const;
 }
 

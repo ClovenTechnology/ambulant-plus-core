@@ -1,7 +1,7 @@
-// apps/patient-app/app/medreach/track/page.tsx
+﻿// apps/patient-app/app/medreach/track/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -181,12 +181,14 @@ function mapJobToCollectionDetails(
 
 /* ---------- component ---------- */
 
-export default function MedReachTrackPage() {
+function MedReachTrackPageContent() {
   const searchParams = useSearchParams();
+  const qs = searchParams ?? new URLSearchParams();
+
   const initialId =
-    searchParams.get('id') ||
-    searchParams.get('labId') ||
-    searchParams.get('jobId') ||
+    qs.get('id') ||
+    qs.get('labId') ||
+    qs.get('jobId') ||
     'LAB-2001';
 
   const [labId] = useState(initialId);
@@ -292,7 +294,7 @@ export default function MedReachTrackPage() {
   const details = useMemo(() => mapJobToCollectionDetails(job), [job]);
 
   const jobStatus = normalizeToJobStatus(job?.status);
-  const etaText = job?.eta || '—';
+  const etaText = job?.eta || 'â€”';
   const headerTitle = job?.patient
     ? `Collection for ${job.patient}`
     : 'MedReach collection tracking';
@@ -372,7 +374,7 @@ export default function MedReachTrackPage() {
           <h2 className="text-sm font-medium">Status history</h2>
           {(loadingTl || tlError) && (
             <div className="text-xs text-gray-500">
-              {loadingTl ? 'Loading…' : tlError}
+              {loadingTl ? 'Loadingâ€¦' : tlError}
             </div>
           )}
         </div>
@@ -395,3 +397,12 @@ export default function MedReachTrackPage() {
     </main>
   );
 }
+
+export default function MedReachTrackPage() {
+  return (
+    <Suspense fallback={null}>
+      <MedReachTrackPageContent />
+    </Suspense>
+  );
+}
+

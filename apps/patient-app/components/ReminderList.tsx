@@ -2,11 +2,13 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import ReminderCard, { ReminderShape } from './ReminderCard';
+import ReminderCard, { type ReminderShape } from './ReminderCard';
+export type { ReminderShape } from './ReminderCard';
 
 type Props = {
   reminders?: ReminderShape[] | null;
   onConfirm?: (r: ReminderShape) => Promise<void> | void;
+  onTakenEarlier?: (r: ReminderShape) => Promise<void> | void;
   onSnooze?: (r: ReminderShape, mins?: number) => Promise<void> | void;
   onEdit?: (r: ReminderShape) => void;
   onSyncErx?: (r: ReminderShape) => Promise<void>;
@@ -27,18 +29,20 @@ function shortWhen(isoOrTime?: string) {
 export default function ReminderList({
   reminders = [],
   onConfirm,
+  onTakenEarlier,
   onSnooze,
   onEdit,
   onSyncErx,
   className = '',
 }: Props) {
   // normalize items (avoid accidental undefined)
-  const normalized = reminders?.filter(Boolean).map((r) => ({
-    ...r,
-    dueTime: r?.dueTime ?? r?.meta?.displayTime ?? '',
-    title: r?.title ?? 'Untitled reminder',
-    type: r?.type ?? 'other',
-  })) ?? [];
+  const normalized =
+    reminders?.filter(Boolean).map((r) => ({
+      ...r,
+      dueTime: r?.dueTime ?? r?.meta?.displayTime ?? '',
+      title: r?.title ?? 'Untitled reminder',
+      type: r?.type ?? 'other',
+    })) ?? [];
 
   // group by type and sort by time (simple)
   const groups = useMemo(() => {
@@ -82,6 +86,7 @@ export default function ReminderList({
                   key={r.id ?? `${type}-${r.title}-${r.dueTime}`}
                   reminder={r}
                   onConfirm={onConfirm}
+                  onTakenEarlier={onTakenEarlier}
                   onSnooze={onSnooze}
                   onEdit={onEdit}
                   onSyncErx={onSyncErx}

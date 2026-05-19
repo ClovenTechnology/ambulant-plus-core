@@ -1,51 +1,36 @@
-﻿//apps/patient-app/app/api/reports/file/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { promises as fs } from "fs";
-import path from "path";
-async function watermarkPdf(buffer: Uint8Array, text: string){
-  const { PDFDocument, rgb, degrees } = await import("pdf-lib");
-  const pdfDoc = await PDFDocument.load(buffer);
-  const pages = pdfDoc.getPages();
-  for (const p of pages){
-    const { width, height } = p.getSize();
-    p.drawText(text, {
-      x: width/4, y: height/2,
-      size: 36, opacity: 0.15, color: rgb(0.6,0.6,0.6),
-      rotate: degrees(45)
-    });
-  }
-  const out = await pdfDoc.save();
-  return out;
+﻿// apps/patient-app/app/api/reports/file/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function json(data: any, status = 200) {
+  return NextResponse.json(data, { status });
 }
-const baseDir = path.join(process.cwd(), "../../sample-reports");
-const settingsPath = path.join(process.cwd(), "../../.data/settings/general.json");
-export async function GET(req: NextRequest){
-  const url = new URL(req.url);
-  const id = url.searchParams.get("id") || "RPT-1001";
-  const role = url.searchParams.get("role") || "free";
-  const adminOverride = url.searchParams.get("admin") === "1";
-  let settings: any = {};
-  try{
-    const raw = await fs.readFile(settingsPath, "utf-8");
-    settings = JSON.parse(raw.charCodeAt(0)===0xFEFF? raw.slice(1): raw);
-  }catch{}
-  const perms = role === "premium" ? (settings.reportPermissions?.premium ?? {view:true,download:true,print:true})
-                                   : (settings.reportPermissions?.free ?? {view:true,download:false,print:false});
-  if (!perms.view && !adminOverride){
-    return NextResponse.json({ error:"forbidden" }, { status: 403 });
+
+/**
+ * Production-safe report file endpoint.
+ *
+ * The previous implementation served local sample PDFs from /sample-reports
+ * and optionally watermarked them with pdf-lib. That is not acceptable for
+ * production patient records because it can expose fake/demo reports.
+ *
+ * Wire this endpoint to a real report/document store before enabling downloads.
+ */
+export async function GET(req: NextRequest) {
+  const id = req.nextUrl.searchParams.get('id') || '';
+
+  if (!id) {
+    return json({ ok: false, error: 'report_id_required' }, 400);
   }
-  const fileMap: Record<string, { path:string, module:string }> = {
-    "RPT-1001": { path: path.join(baseDir, "medreach-sample.pdf"), module:"medreach" },
-    "RPT-1002": { path: path.join(baseDir, "careport-sample.pdf"), module:"careport" }
-  };
-  const item = fileMap[id] || fileMap["RPT-1001"];
-  const data = await fs.readFile(item.path);
-  const wm = settings.pdfWatermark?.enabled;
-  let text = settings.pdfWatermark?.defaultText || "";
-  if (item.module === "careport" && settings.pdfWatermark?.careportText) text = settings.pdfWatermark.careportText;
-  if (item.module === "medreach" && settings.pdfWatermark?.medreachText) text = settings.pdfWatermark.medreachText;
-  const out = (wm && text) ? await watermarkPdf(data, text) : data;
-  return new NextResponse(Buffer.from(out), {
-    headers: { "Content-Type":"application/pdf", "Cache-Control":"no-store" }
-  });
+
+  return json(
+    {
+      ok: false,
+      error: 'report_file_store_not_configured',
+      message:
+        'Report file delivery is disabled until the production document store is connected.',
+    },
+    503,
+  );
 }

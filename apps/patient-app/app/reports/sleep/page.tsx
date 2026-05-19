@@ -2,25 +2,36 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import {
+  Moon,
+  Download,
+  Share2,
+  Info,
+  ShieldCheck,
+  Sparkles,
+  Waves,
+  Clock3,
+  Activity,
+} from 'lucide-react';
 
 import { generateHealthReport } from '@/src/analytics/report';
-import { computeSleepQuality, type SleepStages } from '@/src/analytics/sleep';
+import { type SleepStages } from '@/src/analytics/sleep';
 import { toast } from '@/components/ToastMount';
 import { usePlan } from '@/components/context/PlanContext';
 
 type RangeKey = '7d' | '30d' | '90d' | '1y';
 
 type SleepNightPoint = {
-  dateISO: string; // YYYY-MM-DD (night ending on this date)
-  bedtimeISO: string; // ISO datetime
-  wakeISO: string; // ISO datetime
-  stagesMin: SleepStages; // minutes
-  hrv: number; // ms (avg overnight)
-  efficiency: number; // 0..1
-  qualityScore: number; // 0..100
-  qualityLabel: string; // Excellent|Good|Poor (from computeSleepQuality)
+  dateISO: string;
+  bedtimeISO: string;
+  wakeISO: string;
+  stagesMin: SleepStages;
+  hrv: number;
+  efficiency: number;
+  qualityScore: number;
+  qualityLabel: string;
   note?: string | null;
 };
 
@@ -48,12 +59,14 @@ function fmtNumber(n: number, digits = 0) {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(n);
 }
 
-function fmtDatePretty(dateISO: string) {
+function fmtDatePretty(dateISO: string, hidden?: boolean) {
+  if (hidden) return 'Hidden';
   const d = new Date(dateISO + 'T00:00:00');
   return d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: '2-digit' });
 }
 
-function fmtTimeLocal(iso: string) {
+function fmtTimeLocal(iso: string, hidden?: boolean) {
+  if (hidden) return '••:••';
   const d = new Date(iso);
   return d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
 }
@@ -62,149 +75,6 @@ function minutesToHours(min: number) {
   return min / 60;
 }
 
-function smoothRand(seed: number) {
-  let t = seed % 2147483647;
-  return () => {
-    t = (t * 48271) % 2147483647;
-    return (t & 0xfffffff) / 0xfffffff;
-  };
-}
-
-function makeMockSleepReport(range: RangeKey, userId = 'patient-123'): SleepReportData {
-  const nights = range === '7d' ? 7 : range === '30d' ? 30 : range === '90d' ? 90 : 365;
-  const today = new Date();
-  const seed = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
-  const rnd = smoothRand(seed);
-
-  // Baselines
-  let baseBedMin = 420 + (rnd() * 40 - 20); // ~7h
-  let baseEff = 0.86 + (rnd() * 0.06 - 0.03); // 0.83..0.89
-  let baseHrv = 52 + (rnd() * 10 - 5); // ~47..57
-
-  const out: SleepNightPoint[] = [];
-
-  for (let i = nights - 1; i >= 0; i--) {
-    const end = new Date(today);
-    end.setDate(today.getDate() - i);
-    const dateISO = end.toISOString().slice(0, 10);
-
-    // Drift
-    baseBedMin = clamp(baseBedMin + (rnd() * 10 - 5), 330, 520);
-    baseEff = clamp(baseEff + (rnd() * 0.02 - 0.01), 0.74, 0.93);
-    baseHrv = clamp(baseHrv + (rnd() * 3 - 1.5), 28, 85);
-
-    // Occasional bad night
-    const bad = rnd() > 0.92;
-    const veryGood = rnd() > 0.94;
-
-    const timeInBedMin = clamp(baseBedMin + (bad ? 25 : 0) + (veryGood ? -10 : 0), 320, 560);
-    const awakeMin = clamp(
-      Math.round(timeInBedMin * (bad ? 0.14 : 0.07) + (rnd() * 10 - 5)),
-      18,
-      110
-    );
-
-    const sleepMin = timeInBedMin - awakeMin;
-
-    // Split sleep into stages (roughly)
-    // Deep: 14–22%, REM: 18–26%, Light: rest
-    const deepPct = clamp((bad ? 0.12 : 0.18) + (rnd() * 0.06 - 0.03), 0.10, 0.26);
-    const remPct = clamp((bad ? 0.16 : 0.22) + (rnd() * 0.06 - 0.03), 0.12, 0.30);
-
-    const deep = Math.round(sleepMin * deepPct);
-    const rem = Math.round(sleepMin * remPct);
-    const light = Math.max(0, sleepMin - deep - rem);
-
-    const efficiency = clamp(sleepMin / Math.max(1, timeInBedMin), 0.65, 0.96);
-
-    const hrv = clamp(
-      Math.round(baseHrv + (veryGood ? 6 : 0) - (bad ? 8 : 0) + (rnd() * 6 - 3)),
-      25,
-      95
-    );
-
-    // Bed / wake times (local-ish)
-    // Bedtime around 22:30–00:30
-    const bedtime = new Date(end);
-    bedtime.setDate(end.getDate() - 1);
-    bedtime.setHours(22 + Math.floor(rnd() * 3)); // 22..24
-    bedtime.setMinutes(Math.floor(rnd() * 60));
-    bedtime.setSeconds(0, 0);
-
-    const wake = new Date(bedtime);
-    wake.setMinutes(wake.getMinutes() + timeInBedMin);
-
-    const stagesMin: SleepStages = { rem, deep, light, awake: awakeMin };
-    const q = computeSleepQuality(stagesMin, hrv, efficiency);
-    const qualityScore = clamp(Math.round(q.score), 0, 100);
-
-    const note =
-      bad ? 'Fragmented night (more awakenings)' : veryGood ? 'Solid recovery night' : rnd() > 0.93 ? 'Late bedtime' : null;
-
-    out.push({
-      dateISO,
-      bedtimeISO: bedtime.toISOString(),
-      wakeISO: wake.toISOString(),
-      stagesMin,
-      hrv,
-      efficiency,
-      qualityScore,
-      qualityLabel: q.label,
-      note,
-    });
-  }
-
-  const avgScore = out.reduce((s, n) => s + n.qualityScore, 0) / Math.max(1, out.length);
-  const headline =
-    avgScore >= 80
-      ? 'Strong sleep quality overall — keep protecting your routine.'
-      : avgScore >= 60
-      ? 'Decent sleep quality — a few small tweaks can improve consistency.'
-      : 'Sleep quality is struggling — focus on routine, recovery, and stress buffers.';
-
-  const highlights = [
-    {
-      title: 'Quality trend',
-      detail: 'Use the range selector to spot patterns (workload, bedtime drift, weekends).',
-    },
-    {
-      title: 'Restorative sleep',
-      detail: 'Deep + REM are the “recovery” core — aim to protect both with consistent sleep windows.',
-    },
-    {
-      title: 'Efficiency',
-      detail: 'High efficiency usually means fewer awakenings and smoother sleep continuity.',
-    },
-  ];
-
-  const recommendations = [
-    {
-      title: 'Protect a consistent bedtime window',
-      detail: 'Try to keep bedtime within ±45 minutes for 5–6 nights per week.',
-    },
-    {
-      title: 'Wind-down cue',
-      detail: 'A 10–15 minute low-light wind-down (no heavy scrolling) improves sleep onset for many people.',
-    },
-    {
-      title: 'Recovery stacking',
-      detail: 'If your day was intense, prioritize hydration + light movement + earlier bedtime.',
-    },
-  ];
-
-  return {
-    ok: true,
-    userId,
-    range,
-    generatedAtISO: new Date().toISOString(),
-    nights: out,
-    insights: { headline, highlights, recommendations },
-  };
-}
-
-/* ------------------------------
-   UI bits
---------------------------------*/
 function Pill({
   active,
   children,
@@ -238,16 +108,23 @@ function StatCard({
   value,
   sub,
   discreet,
+  icon,
 }: {
   label: string;
   value: string;
   sub?: string;
   discreet?: boolean;
+  icon?: React.ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-      <div className="text-xs text-slate-500">{label}</div>
-      <div className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">{discreet ? '•••' : value}</div>
+      <div className="flex items-center gap-2 text-xs text-slate-500">
+        {icon ? <span className="text-slate-400">{icon}</span> : null}
+        <span>{label}</span>
+      </div>
+      <div className="mt-1 text-2xl font-semibold tracking-tight text-slate-900">
+        {discreet ? '•••' : value}
+      </div>
       {sub ? <div className="mt-1 text-xs text-slate-500">{sub}</div> : null}
     </div>
   );
@@ -264,6 +141,19 @@ function Sparkline({
 }) {
   const w = 260;
   const pad = 6;
+
+  if (!values.length) {
+    return (
+      <div
+        role="img"
+        aria-label={ariaLabel || 'Trend chart'}
+        className="flex items-center justify-center rounded-xl border border-dashed border-slate-200 bg-white/70 text-xs text-slate-500"
+        style={{ height }}
+      >
+        No trend data available
+      </div>
+    );
+  }
 
   const vmin = Math.min(...values);
   const vmax = Math.max(...values);
@@ -283,12 +173,12 @@ function Sparkline({
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${height}`} role="img" aria-label={ariaLabel || 'Trend chart'} className="block">
       <defs>
-        <linearGradient id="sparkFillLight" x1="0" x2="0" y1="0" y2="1">
+        <linearGradient id="sleepSparkFill" x1="0" x2="0" y1="0" y2="1">
           <stop offset="0%" stopColor="currentColor" stopOpacity="0.18" />
           <stop offset="100%" stopColor="currentColor" stopOpacity="0.03" />
         </linearGradient>
       </defs>
-      <path d={`M ${area}`} fill="url(#sparkFillLight)" />
+      <path d={`M ${area}`} fill="url(#sleepSparkFill)" />
       <polyline points={pts} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" />
     </svg>
   );
@@ -302,7 +192,7 @@ function StageBar({ stages }: { stages: SleepStages }) {
   const awakeW = (stages.awake / total) * 100;
 
   return (
-    <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+    <div className="flex h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
       <div className="h-full bg-indigo-600" style={{ width: `${deepW}%` }} />
       <div className="h-full bg-sky-500" style={{ width: `${remW}%` }} />
       <div className="h-full bg-emerald-500" style={{ width: `${lightW}%` }} />
@@ -317,37 +207,37 @@ function qualityTone(score: number) {
   return 'text-rose-700 bg-rose-50 border-rose-200';
 }
 
-export default function SleepReportPage() {
+function SleepReportPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
+  const queryParam = useCallback((key: string) => sp?.get(key)?.trim() ?? '', [sp]);
+  const queryString = useMemo(() => sp?.toString() ?? '', [sp]);
   const { plan, isPremium } = usePlan();
 
   const range = useMemo<RangeKey>(() => {
-    const r = (sp.get('range') || '30d') as RangeKey;
+    const r = queryParam('range') as RangeKey;
     if (r === '7d' || r === '30d' || r === '90d' || r === '1y') return r;
     return '30d';
-  }, [sp]);
+  }, [queryParam]);
 
-  // Keep range canonical in URL
   useEffect(() => {
-    const current = sp.get('range');
+    const current = queryParam('range');
     if (!current) {
-      const qs = new URLSearchParams(Array.from(sp.entries()));
+      const qs = new URLSearchParams(queryString);
       qs.set('range', range);
       router.replace(`/reports/sleep?${qs.toString()}`);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [queryParam, queryString, range, router]);
 
-  const patientId = useMemo(() => sp.get('patientId') || 'patient-123', [sp]);
+  const patientId = useMemo(() => queryParam('patientId'), [queryParam]);
 
   const [discreet, setDiscreet] = useState(false);
   const [hideSensitive, setHideSensitive] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<SleepReportData | null>(null);
+  const [loadMessage, setLoadMessage] = useState<string | null>(null);
 
-  // PDF state (on-demand)
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [pdfFilename, setPdfFilename] = useState<string>('sleep_report.pdf');
@@ -374,21 +264,60 @@ export default function SleepReportPage() {
   }, [hideSensitive]);
 
   useEffect(() => {
-    // No APIs yet → mock-first, clean UX.
-    setLoading(true);
-    const mock = makeMockSleepReport(range, patientId);
-    setData(mock);
-    setLoading(false);
+    let alive = true;
 
-    // reset pdf preview when range changes
-    if (lastObjectUrlRef.current) {
+    async function load() {
+      setLoading(true);
+      setLoadMessage(null);
+
       try {
-        URL.revokeObjectURL(lastObjectUrlRef.current);
-      } catch {}
-      lastObjectUrlRef.current = null;
+        if (!patientId) {
+          setData(null);
+          setLoadMessage('Patient identity is required before loading this report.');
+          return;
+        }
+
+        const qs = new URLSearchParams({
+          patientId,
+          range,
+        });
+
+        const res = await fetch(`/api/reports/sleep?${qs.toString()}`, { cache: 'no-store' });
+        const json = (await res.json().catch(() => null)) as SleepReportData | null;
+
+        if (!alive) return;
+
+        if (res.ok && json?.ok && Array.isArray(json.nights) && json.nights.length > 0) {
+          setData(json);
+          setLoadMessage(null);
+        } else {
+          setData(null);
+          setLoadMessage('Could not load sleep report right now.');
+        }
+      } catch (e) {
+        console.error(e);
+        if (!alive) return;
+        setData(null);
+        setLoadMessage('Could not load sleep report right now.');
+      } finally {
+        if (!alive) return;
+        setLoading(false);
+
+        if (lastObjectUrlRef.current) {
+          try {
+            URL.revokeObjectURL(lastObjectUrlRef.current);
+          } catch {}
+          lastObjectUrlRef.current = null;
+        }
+        setPdfUrl(null);
+        setShowPdfPreview(false);
+      }
     }
-    setPdfUrl(null);
-    setShowPdfPreview(false);
+
+    load();
+    return () => {
+      alive = false;
+    };
   }, [range, patientId]);
 
   useEffect(() => {
@@ -412,7 +341,6 @@ export default function SleepReportPage() {
     const avgSleepMin =
       nights.reduce((s, x) => s + (x.stagesMin.deep + x.stagesMin.rem + x.stagesMin.light), 0) / n;
 
-    // "Consistency": % of bedtimes within 60 min of median bedtime (rough)
     const bedMinutes = nights
       .map((x) => {
         const d = new Date(x.bedtimeISO);
@@ -427,7 +355,6 @@ export default function SleepReportPage() {
     }).length;
 
     const consistencyPct = bedMinutes.length ? (within / bedMinutes.length) * 100 : 0;
-
     const last = nights[nights.length - 1]?.qualityScore ?? avgScore;
 
     return {
@@ -443,7 +370,7 @@ export default function SleepReportPage() {
   const chartValues = useMemo(() => nights.map((n) => clamp(n.qualityScore, 0, 100)), [nights]);
 
   function setRange(next: RangeKey) {
-    const qs = new URLSearchParams(Array.from(sp.entries()));
+    const qs = new URLSearchParams(queryString);
     qs.set('range', next);
     router.push(`/reports/sleep?${qs.toString()}`);
   }
@@ -455,6 +382,11 @@ export default function SleepReportPage() {
 
   async function ensurePdfGenerated() {
     if (pdfUrl) return true;
+    if (!patientId) {
+      toast('Patient identity is required before generating this report.', 'error');
+      return false;
+    }
+
     setPdfBusy(true);
     try {
       const { blob, filename } = await generateHealthReport(patientId, { sleep: true });
@@ -472,7 +404,7 @@ export default function SleepReportPage() {
       return true;
     } catch (e) {
       console.error(e);
-      toast('Could not generate PDF right now.', { type: 'error' });
+      toast('Could not generate PDF right now.', 'error');
       return false;
     } finally {
       setPdfBusy(false);
@@ -486,7 +418,7 @@ export default function SleepReportPage() {
     a.href = pdfUrl;
     a.download = pdfFilename || 'sleep_report.pdf';
     a.click();
-    toast('Download started.', { type: 'success' });
+    toast('Download started.', 'success');
   }
 
   async function handleSharePdf() {
@@ -498,24 +430,23 @@ export default function SleepReportPage() {
       const blob = await res.blob();
       const file = new File([blob], pdfFilename || 'sleep_report.pdf', { type: 'application/pdf' });
 
-      if ((navigator as any).share && (navigator as any).canShare?.({ files: [file] })) {
-        await (navigator as any).share({
+      if (typeof navigator.share === 'function' && navigator.canShare?.({ files: [file] })) {
+        await navigator.share({
           title: 'Sleep Report',
           text: 'Here is my sleep report.',
           files: [file],
         });
       } else {
-        toast('Sharing is not supported on this device/browser.', { type: 'info' });
+        toast('Sharing is not supported on this device/browser.', 'info');
       }
     } catch (e) {
       console.error(e);
-      toast('Could not share the PDF.', { type: 'error' });
+      toast('Could not share the PDF.', 'error');
     }
   }
 
   return (
     <main className="min-h-screen bg-slate-50">
-      {/* Top bar */}
       <div className="mx-auto w-full max-w-6xl px-4 pt-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -527,10 +458,14 @@ export default function SleepReportPage() {
             </Link>
 
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h1 className="text-xl font-semibold tracking-tight text-slate-900">Sleep Report</h1>
                 <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs text-slate-600">
                   {range.toUpperCase()}
+                </span>
+
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
+                  Adapter-backed
                 </span>
 
                 {!isPremium ? (
@@ -538,12 +473,16 @@ export default function SleepReportPage() {
                     Premium preview
                   </span>
                 ) : (
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-                    Premium
+                  <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs text-indigo-700">
+                    {plan ? `${plan}` : 'Premium'}
                   </span>
                 )}
               </div>
-              <div className="mt-1 text-xs text-slate-500">Generated: {generatedAtText}{plan ? ` • Plan: ${plan}` : ''}</div>
+
+              <div className="mt-1 text-xs text-slate-500">
+                Generated: {generatedAtText}
+                {!hideSensitive ? ` • Patient: ${data?.userId || patientId}` : ''}
+              </div>
             </div>
           </div>
 
@@ -551,7 +490,7 @@ export default function SleepReportPage() {
             <Pill active={discreet} onClick={() => setDiscreet((v) => !v)} title="Hide numbers across the report">
               Discreet
             </Pill>
-            <Pill active={hideSensitive} onClick={() => setHideSensitive((v) => !v)} title="Hide notes and timing details">
+            <Pill active={hideSensitive} onClick={() => setHideSensitive((v) => !v)} title="Hide timing details and notes">
               Hide sensitive
             </Pill>
 
@@ -588,29 +527,21 @@ export default function SleepReportPage() {
           </div>
         </div>
 
-        {/* Range pills */}
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <div className="text-xs text-slate-500">Range</div>
-          <Pill active={range === '7d'} onClick={() => setRange('7d')}>
-            7D
-          </Pill>
-          <Pill active={range === '30d'} onClick={() => setRange('30d')}>
-            30D
-          </Pill>
-          <Pill active={range === '90d'} onClick={() => setRange('90d')}>
-            90D
-          </Pill>
-          <Pill active={range === '1y'} onClick={() => setRange('1y')}>
-            1Y
-          </Pill>
+          <Pill active={range === '7d'} onClick={() => setRange('7d')}>7D</Pill>
+          <Pill active={range === '30d'} onClick={() => setRange('30d')}>30D</Pill>
+          <Pill active={range === '90d'} onClick={() => setRange('90d')}>90D</Pill>
+          <Pill active={range === '1y'} onClick={() => setRange('1y')}>1Y</Pill>
 
-          <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
-            Demo data (APIs not wired yet)
-          </span>
+          {loadMessage ? (
+            <span className="ml-2 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-700">
+              {loadMessage}
+            </span>
+          ) : null}
         </div>
       </div>
 
-      {/* Content */}
       <div className="mx-auto w-full max-w-6xl px-4 pb-10 pt-6">
         {loading ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-600">Loading sleep report…</div>
@@ -618,16 +549,20 @@ export default function SleepReportPage() {
           <div className="rounded-2xl border border-slate-200 bg-white p-6 text-slate-600">Could not load the report.</div>
         ) : (
           <>
-            {/* Hero */}
             <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-              <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
+              <div className="grid gap-5 lg:grid-cols-[1.2fr_0.8fr]">
                 <div>
-                  <div className="text-sm text-slate-600">Current quality</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <div className="text-3xl font-semibold tracking-tight text-slate-900">
-                      {discreet ? '•••' : fmtNumber(Math.round(summary.lastScore))}{' '}
-                      <span className="text-base font-normal text-slate-500">/ 100</span>
+                  <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-[11px] font-medium text-indigo-700">
+                    <Moon className="h-3.5 w-3.5" />
+                    Sleep quality intelligence
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap items-end gap-3">
+                    <div className="text-4xl font-semibold tracking-tight text-slate-900">
+                      {discreet ? '•••' : fmtNumber(Math.round(summary.lastScore))}
+                      <span className="ml-1 text-base font-normal text-slate-500">/ 100</span>
                     </div>
+
                     <span
                       className={[
                         'inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-medium',
@@ -639,74 +574,91 @@ export default function SleepReportPage() {
                     </span>
                   </div>
 
-                  <div className="mt-3 max-w-2xl text-sm text-slate-600">
+                  <div className="mt-3 max-w-2xl text-sm leading-6 text-slate-600">
                     {data.insights?.headline ||
-                      'Your sleep quality is computed from stages + HRV + efficiency. Watch trends over time for best signal.'}
+                      'Your sleep quality is computed from stages, HRV, and efficiency. Watch the trend, not a single night.'}
+                  </div>
+
+                  <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-4">
+                    <StatCard
+                      label="Avg sleep duration"
+                      value={`${fmtNumber(minutesToHours(summary.avgSleepMin), 1)} h`}
+                      sub="Deep + REM + Light"
+                      discreet={discreet}
+                      icon={<Clock3 className="h-4 w-4" />}
+                    />
+                    <StatCard
+                      label="Avg quality score"
+                      value={`${fmtNumber(Math.round(summary.avgScore))} / 100`}
+                      sub="Across selected range"
+                      discreet={discreet}
+                      icon={<Sparkles className="h-4 w-4" />}
+                    />
+                    <StatCard
+                      label="Avg efficiency"
+                      value={`${fmtNumber(summary.avgEff * 100, 0)}%`}
+                      sub="Sleep / time in bed"
+                      discreet={discreet}
+                      icon={<Waves className="h-4 w-4" />}
+                    />
+                    <StatCard
+                      label="Avg HRV"
+                      value={`${fmtNumber(summary.avgHrv, 0)} ms`}
+                      sub="Overnight recovery signal"
+                      discreet={discreet}
+                      icon={<Activity className="h-4 w-4" />}
+                    />
                   </div>
                 </div>
 
-                <div className="w-full md:w-[360px]">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex items-center justify-between">
-                      <div className="text-xs text-slate-500">Quality trend</div>
-                      <div className="text-xs text-slate-500">{nights.length} nights</div>
+                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-slate-900">Quality trend</div>
+                      <div className="mt-1 text-xs text-slate-500">{nights.length} nights in view</div>
                     </div>
-                    <div className="mt-2 text-indigo-700">
-                      <Sparkline
-                        values={chartValues.length ? chartValues : [60, 64, 62, 66, 63, 68, 65]}
-                        ariaLabel="Sleep quality trend"
-                      />
+                    <span className="rounded-full bg-white px-2 py-1 text-xs text-slate-500 shadow-sm">
+                      {hideSensitive ? 'Timing hidden' : `${fmtNumber(summary.consistencyPct, 0)}% consistency`}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 text-indigo-700">
+                    <Sparkline
+                      values={chartValues}
+                      ariaLabel="Sleep quality trend"
+                    />
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs text-slate-500">Latest quality</div>
+                      <div className="mt-1 text-xl font-semibold text-slate-900">
+                        {discreet ? '•••' : fmtNumber(summary.lastScore, 0)}
+                      </div>
                     </div>
-                    <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
-                      <span>Lower</span>
-                      <span>Higher</span>
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                      <div className="text-xs text-slate-500">Bedtime consistency</div>
+                      <div className="mt-1 text-xl font-semibold text-slate-900">
+                        {hideSensitive ? '•••' : `${fmtNumber(summary.consistencyPct, 0)}%`}
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-
-              {/* Stats */}
-              <div className="mt-6 grid grid-cols-1 gap-3 md:grid-cols-4">
-                <StatCard
-                  label="Avg sleep duration"
-                  value={`${fmtNumber(minutesToHours(summary.avgSleepMin), 1)} h`}
-                  sub="Deep + REM + Light"
-                  discreet={discreet}
-                />
-                <StatCard
-                  label="Avg quality score"
-                  value={`${fmtNumber(Math.round(summary.avgScore))} / 100`}
-                  sub="Across selected range"
-                  discreet={discreet}
-                />
-                <StatCard
-                  label="Avg efficiency"
-                  value={`${fmtNumber(summary.avgEff * 100, 0)}%`}
-                  sub="Sleep / time in bed"
-                  discreet={discreet}
-                />
-                <StatCard
-                  label="Bedtime consistency"
-                  value={`${fmtNumber(summary.consistencyPct, 0)}%`}
-                  sub="Within ~60 min window"
-                  discreet={hideSensitive}
-                />
               </div>
             </section>
 
-            {/* Highlights + Coaching */}
             <section className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
               <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="flex items-center justify-between">
                   <h2 className="text-base font-semibold tracking-tight text-slate-900">Highlights</h2>
-                  <span className="text-xs text-slate-500">What to look at</span>
+                  <span className="text-xs text-slate-500">What matters most</span>
                 </div>
 
                 <div className="mt-4 space-y-3">
                   {(data.insights?.highlights?.length ? data.insights.highlights : []).map((h, idx) => (
                     <div key={`${h.title}-${idx}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="font-medium text-slate-900">{h.title}</div>
-                      <div className="mt-1 text-sm text-slate-600">{h.detail}</div>
+                      <div className="mt-1 text-sm leading-6 text-slate-600">{h.detail}</div>
                     </div>
                   ))}
 
@@ -728,7 +680,7 @@ export default function SleepReportPage() {
                   {(data.insights?.recommendations?.length ? data.insights.recommendations : []).map((r, idx) => (
                     <div key={`${r.title}-${idx}`} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                       <div className="font-medium text-slate-900">{r.title}</div>
-                      <div className="mt-1 text-sm text-slate-600">{r.detail}</div>
+                      <div className="mt-1 text-sm leading-6 text-slate-600">{r.detail}</div>
                     </div>
                   ))}
 
@@ -741,17 +693,16 @@ export default function SleepReportPage() {
               </div>
             </section>
 
-            {/* Nightly breakdown */}
             <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
               <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
                 <div>
                   <h2 className="text-base font-semibold tracking-tight text-slate-900">Nightly breakdown</h2>
                   <div className="mt-1 text-sm text-slate-600">
-                    Colors: Deep (indigo) • REM (sky) • Light (emerald) • Awake (amber)
+                    Deep (indigo) • REM (sky) • Light (emerald) • Awake (amber)
                   </div>
                 </div>
                 <div className="text-xs text-slate-500">
-                  Tip: Use this UI for analysis; export PDF for sending.
+                  Use this UI for analysis; export PDF for sharing.
                 </div>
               </div>
 
@@ -765,7 +716,7 @@ export default function SleepReportPage() {
                   <div className="col-span-1 text-right">Notes</div>
                 </div>
 
-                <div className="max-h-[520px] overflow-auto">
+                <div className="max-h-[560px] overflow-auto">
                   {nights
                     .slice()
                     .reverse()
@@ -780,11 +731,11 @@ export default function SleepReportPage() {
                         >
                           <div className="col-span-3">
                             <div className="text-sm font-medium text-slate-900">
-                              {hideSensitive ? '—' : fmtDatePretty(n.dateISO)}
+                              {fmtDatePretty(n.dateISO, hideSensitive)}
                             </div>
                             <div className="text-xs text-slate-500">
                               {hideSensitive ? (
-                                n.dateISO
+                                'Timing hidden'
                               ) : (
                                 <>
                                   {fmtTimeLocal(n.bedtimeISO)} → {fmtTimeLocal(n.wakeISO)} • {fmtNumber(minutesToHours(sleepMin), 1)} h
@@ -813,17 +764,20 @@ export default function SleepReportPage() {
                             <StageBar stages={n.stagesMin} />
                             {!discreet ? (
                               <div className="mt-1 text-[11px] text-slate-500">
-                                Deep {fmtNumber(n.stagesMin.deep)}m • REM {fmtNumber(n.stagesMin.rem)}m • Light {fmtNumber(n.stagesMin.light)}m • Awake{' '}
-                                {fmtNumber(n.stagesMin.awake)}m
+                                Deep {fmtNumber(n.stagesMin.deep)}m • REM {fmtNumber(n.stagesMin.rem)}m • Light {fmtNumber(n.stagesMin.light)}m • Awake {fmtNumber(n.stagesMin.awake)}m
                               </div>
                             ) : (
                               <div className="mt-1 text-[11px] text-slate-400">Stage breakdown hidden</div>
                             )}
                           </div>
 
-                          <div className="col-span-2 text-sm text-slate-700">{discreet ? '•••' : `${fmtNumber(n.hrv)} ms`}</div>
+                          <div className="col-span-2 text-sm text-slate-700">
+                            {discreet ? '•••' : `${fmtNumber(n.hrv)} ms`}
+                          </div>
 
-                          <div className="col-span-1 text-sm text-slate-700">{discreet ? '•••' : `${fmtNumber(effPct, 0)}%`}</div>
+                          <div className="col-span-1 text-sm text-slate-700">
+                            {discreet ? '•••' : `${fmtNumber(effPct, 0)}%`}
+                          </div>
 
                           <div className="col-span-1 text-right text-sm text-slate-600">
                             {hideSensitive ? (
@@ -843,7 +797,6 @@ export default function SleepReportPage() {
               </div>
             </section>
 
-            {/* PDF preview (optional) */}
             {showPdfPreview && pdfUrl ? (
               <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2 px-2 pb-3">
@@ -884,5 +837,19 @@ export default function SleepReportPage() {
         )}
       </div>
     </main>
+  );
+}
+
+export default function SleepReportPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-slate-50 p-6 text-sm text-slate-600">
+          Loading sleep report…
+        </main>
+      }
+    >
+      <SleepReportPageContent />
+    </Suspense>
   );
 }

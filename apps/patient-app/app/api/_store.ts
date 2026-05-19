@@ -1,5 +1,4 @@
 ﻿// apps/patient-app/app/api/_store.ts
-import { CLINICIANS } from '@/mock/clinicians';
 
 export type AppointmentStatus = 'booked' | 'confirmed' | 'rescheduled' | 'cancelled';
 
@@ -22,33 +21,31 @@ type Store = {
   appointments: Record<string, Appointment>;
 };
 
-const g = global as any;
-if (!g.__AMBULANT_STORE__) {
-  g.__AMBULANT_STORE__ = { appointments: {} } as Store;
+const g = globalThis as any;
+
+if (!g.__AMBULANT_PATIENT_APP_TRANSIENT_STORE__) {
+  g.__AMBULANT_PATIENT_APP_TRANSIENT_STORE__ = { appointments: {} } as Store;
 }
-const store: Store = g.__AMBULANT_STORE__;
+
+const store: Store = g.__AMBULANT_PATIENT_APP_TRANSIENT_STORE__;
 
 export function genId(prefix = 'apt_') {
   const abc = 'abcdefghijklmnopqrstuvwxyz0123456789';
   let s = '';
-  for (let i = 0; i < 6; i++) s += abc[Math.floor(Math.random() * abc.length)];
+
+  for (let i = 0; i < 6; i += 1) {
+    s += abc[Math.floor(Math.random() * abc.length)];
+  }
+
   return `${prefix}${s}`;
 }
 
 export function getCurrentUser() {
-  // Demo user â€” replace with real auth later
-  return {
-    id: 'u_demo',
-    name: 'Ambulant Patient',
-    email: 'patient@example.com',
-    phone: '+27 60 000 0000',
-  };
+  throw new Error('patient_auth_identity_not_configured_for_transient_store');
 }
 
-export function priceForClinician(clinicianId: string): number {
-  const c = CLINICIANS.find(x => x.id === clinicianId);
-  // fallback sensible demo default
-  return c?.priceZAR ?? 850;
+export function priceForClinician(_clinicianId: string): number {
+  throw new Error('clinician_price_lookup_not_configured');
 }
 
 export function createAppointment(input: {
@@ -56,29 +53,49 @@ export function createAppointment(input: {
   startISO: string;
   durationMin: number;
   priceZAR?: number;
+  patient?: { id: string; name: string; email?: string; phone?: string };
 }): Appointment {
+  if (!input.clinicianId) {
+    throw new Error('clinicianId_required');
+  }
+
+  if (!input.startISO) {
+    throw new Error('startISO_required');
+  }
+
+  if (!input.patient?.id) {
+    throw new Error('patient_identity_required');
+  }
+
+  if (!Number.isFinite(Number(input.priceZAR))) {
+    throw new Error('appointment_price_required');
+  }
+
   const id = genId();
   const start = new Date(input.startISO);
-  const end = new Date(start.getTime() + (input.durationMin || 30) * 60_000);
-  const patient = getCurrentUser();
-  const price = Number.isFinite(input.priceZAR as number)
-    ? (input.priceZAR as number)
-    : priceForClinician(input.clinicianId);
+
+  if (Number.isNaN(start.getTime())) {
+    throw new Error('invalid_startISO');
+  }
+
+  const durationMin = Number(input.durationMin || 30);
+  const end = new Date(start.getTime() + durationMin * 60_000);
 
   const appt: Appointment = {
     id,
     clinicianId: input.clinicianId,
     startISO: start.toISOString(),
     endISO: end.toISOString(),
-    durationMin: input.durationMin || 30,
+    durationMin,
     status: 'booked',
-    priceZAR: price,
+    priceZAR: Number(input.priceZAR),
     currency: 'ZAR',
-    patient,
-    notifications: { email: true, sms: true },
+    patient: input.patient,
+    notifications: { email: false, sms: false },
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
+
   store.appointments[id] = appt;
   return appt;
 }
@@ -89,22 +106,28 @@ export function getAppointment(id: string): Appointment | null {
 
 export function listAppointments(): Appointment[] {
   return Object.values(store.appointments).sort(
-    (a, b) => new Date(b.startISO).getTime() - new Date(a.startISO).getTime()
+    (a, b) => new Date(b.startISO).getTime() - new Date(a.startISO).getTime(),
   );
 }
 
-export function updateAppointment(id: string, patch: Partial<Appointment>): Appointment | null {
+export function updateAppointment(
+  id: string,
+  patch: Partial<Appointment>,
+): Appointment | null {
   const cur = store.appointments[id];
+
   if (!cur) return null;
+
   const next = { ...cur, ...patch, updatedAt: new Date().toISOString() };
   store.appointments[id] = next;
+
   return next;
 }
 
-// ---- demo "notifications" ----
-export async function sendEmail(to: string, subject: string, text: string) {
-  console.log('[demo:email]', { to, subject, text });
+export async function sendEmail() {
+  throw new Error('email_provider_not_configured');
 }
-export async function sendSMS(to: string, text: string) {
-  console.log('[demo:sms]', { to, text });
+
+export async function sendSMS() {
+  throw new Error('sms_provider_not_configured');
 }

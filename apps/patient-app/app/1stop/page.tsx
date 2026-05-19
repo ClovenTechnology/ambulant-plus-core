@@ -1,7 +1,7 @@
-// apps/patient-app/app/1stop/page.tsx
+﻿// apps/patient-app/app/1stop/page.tsx
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
@@ -49,9 +49,9 @@ function safeTime(s?: string | null) {
   return Number.isFinite(t) ? t : 0;
 }
 
-export default function OneStopOrdersPage() {
+function OneStopOrdersPageContent() {
   const sp = useSearchParams();
-  const statusParam = (sp.get('status') || '').toLowerCase(); // success | cancelled
+  const statusParam = (sp?.get('status') || '').toLowerCase(); // success | cancelled
 
   const [uid] = useState(() => getUid());
 
@@ -152,7 +152,7 @@ export default function OneStopOrdersPage() {
 
       {statusParam === 'success' ? (
         <div className="text-sm rounded-lg border border-green-200 bg-green-50 text-green-800 px-3 py-2">
-          Payment successful ✅ Your order is now recorded here.
+          Payment successful âœ… Your order is now recorded here.
         </div>
       ) : statusParam === 'cancelled' ? (
         <div className="text-sm rounded-lg border border-amber-200 bg-amber-50 text-amber-800 px-3 py-2">
@@ -184,7 +184,7 @@ export default function OneStopOrdersPage() {
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search order id…"
+            placeholder="Search order idâ€¦"
             className="w-full sm:w-72 rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-200"
           />
           {q ? (
@@ -194,7 +194,7 @@ export default function OneStopOrdersPage() {
               className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-gray-500 hover:text-gray-800"
               aria-label="Clear search"
             >
-              ✕
+              âœ•
             </button>
           ) : null}
         </div>
@@ -205,7 +205,7 @@ export default function OneStopOrdersPage() {
       <div className="rounded-xl border bg-white overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between">
           <div className="font-medium text-sm">1Stop Orders</div>
-          <div className="text-xs text-gray-500">{loading ? 'Loading…' : `${items.length} shown`}</div>
+          <div className="text-xs text-gray-500">{loading ? 'Loadingâ€¦' : `${items.length} shown`}</div>
         </div>
 
         <div className="overflow-auto">
@@ -229,7 +229,7 @@ export default function OneStopOrdersPage() {
                 return (
                   <tr key={o.id} className="border-b last:border-b-0">
                     <td className="py-2 px-4 text-xs text-gray-700">
-                      {o.createdAt ? new Date(o.createdAt).toLocaleString() : '—'}
+                      {o.createdAt ? new Date(o.createdAt).toLocaleString() : 'â€”'}
                     </td>
 
                     <td className="py-2 px-4">
@@ -270,7 +270,7 @@ export default function OneStopOrdersPage() {
                       </span>
                     </td>
 
-                    <td className="py-2 px-4 text-right">{o.itemCount ?? '—'}</td>
+                    <td className="py-2 px-4 text-right">{o.itemCount ?? 'â€”'}</td>
 
                     <td className="py-2 px-4 text-right">
                       {total != null ? (
@@ -279,7 +279,7 @@ export default function OneStopOrdersPage() {
                           <div className="text-[11px] text-gray-500 font-mono">{cur}</div>
                         </div>
                       ) : (
-                        '—'
+                        'â€”'
                       )}
                     </td>
 
@@ -316,7 +316,7 @@ export default function OneStopOrdersPage() {
               {loading && !items.length ? (
                 <tr>
                   <td colSpan={6} className="py-6 px-4 text-sm text-gray-500">
-                    Loading orders…
+                    Loading ordersâ€¦
                   </td>
                 </tr>
               ) : null}
@@ -327,3 +327,12 @@ export default function OneStopOrdersPage() {
     </div>
   );
 }
+
+export default function OneStopOrdersPage() {
+  return (
+    <Suspense fallback={null}>
+      <OneStopOrdersPageContent />
+    </Suspense>
+  );
+}
+

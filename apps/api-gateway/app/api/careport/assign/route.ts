@@ -1,3 +1,4 @@
+// apps/api-gateway/app/api/careport/assign/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { emitEvent } from '@/src/lib/events';
@@ -35,7 +36,6 @@ export async function POST(req: NextRequest) {
     patientId,
     clinicianId,
     payload: { orderId, channel: 'careport', riderId },
-    targets: { admin: true, patientId, clinicianId },
   });
 
   return NextResponse.json(row, { headers: { 'access-control-allow-origin': '*' } });

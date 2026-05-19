@@ -155,8 +155,9 @@ export default function CarePathFlow(props: {
   pathKey: string;
   discreet: boolean;
   onDone: (summary: string) => void;
+  guidanceNote?: string | null;
 }) {
-  const { pathKey, discreet, onDone } = props;
+  const { pathKey, discreet, onDone, guidanceNote } = props;
 
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, string>>({});
@@ -172,6 +173,12 @@ export default function CarePathFlow(props: {
 
   return (
     <div className="space-y-4">
+      {guidanceNote ? (
+        <div className="rounded-2xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+          {guidanceNote}
+        </div>
+      ) : null}
+
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
         <div className="flex items-center justify-between gap-3">
           <div className="text-sm font-semibold text-slate-900">Guided flow</div>

@@ -1,9 +1,9 @@
-// apps/patient-app/app/auth/login/page.tsx
+﻿// apps/patient-app/app/auth/login/page.tsx
 'use client';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import {
   ShieldCheck,
   Sparkles,
@@ -39,7 +39,7 @@ function safeInternalPath(p: string | null | undefined, fallback: string) {
   return fallback;
 }
 
-export default function PatientLoginPage() {
+function PatientLoginPageContent() {
   const router = useRouter();
   const sp = useSearchParams();
 
@@ -128,7 +128,7 @@ export default function PatientLoginPage() {
           <section className="order-2 lg:order-1">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
               <Sparkles className="h-4 w-4 text-emerald-700" />
-              Ambulant+ · Patient
+              Ambulant+ Â· Patient
             </div>
 
             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
@@ -139,7 +139,7 @@ export default function PatientLoginPage() {
             </h1>
 
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600">
-              Access vitals, appointments, CarePort eRx, MedReach labs, reminders, and your Lady Center insights — all in
+              Access vitals, appointments, CarePort eRx, MedReach labs, reminders, and your Lady Center insights â€” all in
               one place.
             </p>
 
@@ -235,7 +235,7 @@ export default function PatientLoginPage() {
                         }}
                         type={showPw ? 'text' : 'password'}
                         autoComplete="current-password"
-                        placeholder="••••••••"
+                        placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                         className={cx(
                           'w-full rounded-2xl border border-slate-200 bg-white px-10 pr-12 py-3 text-sm',
                           'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
@@ -271,7 +271,7 @@ export default function PatientLoginPage() {
                       {loading ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          Signing in…
+                          Signing inâ€¦
                         </>
                       ) : (
                         <>Sign in</>
@@ -308,3 +308,12 @@ export default function PatientLoginPage() {
     </main>
   );
 }
+
+export default function PatientLoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <PatientLoginPageContent />
+    </Suspense>
+  );
+}
+

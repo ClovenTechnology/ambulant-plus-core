@@ -3,13 +3,56 @@
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 
-import * as PracticesMock from '@/mock/practices';
-import { getMockMedicalAidsForCountry } from '@/mock/medical-aid';
-import { getMockCliniciansForCountry, COUNTRY_LABELS } from '@/mock/clinicians-by-country';
-import type { CountryCode } from '@/mock/clinicians-shared';
-import cleanText from '@/lib/cleanText';
+type CountryCode =
+  | 'ZA'
+  | 'NG'
+  | 'KE'
+  | 'GH'
+  | 'US'
+  | 'GB'
+  | 'CA'
+  | 'AU'
+  | 'AE'
+  | 'SA'
+  | 'CD'
+  | 'BW'
+  | 'ZW'
+  | 'BR'
+  | 'AR'
+  | 'NZ'
+  | 'CU'
+  | 'SG'
+  | 'JM'
+  | 'DM';
+
+const COUNTRY_LABELS: Record<CountryCode, string> = {
+  ZA: 'South Africa',
+  NG: 'Nigeria',
+  KE: 'Kenya',
+  GH: 'Ghana',
+  US: 'United States',
+  GB: 'United Kingdom',
+  CA: 'Canada',
+  AU: 'Australia',
+  AE: 'United Arab Emirates',
+  SA: 'Saudi Arabia',
+  CD: 'DR Congo',
+  BW: 'Botswana',
+  ZW: 'Zimbabwe',
+  BR: 'Brazil',
+  AR: 'Argentina',
+  NZ: 'New Zealand',
+  CU: 'Cuba',
+  SG: 'Singapore',
+  JM: 'Jamaica',
+  DM: 'Dominica',
+};
+
+function cleanText(value: unknown) {
+  return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
 
 type PracticeClinicianSummary = {
   id: string;
@@ -42,18 +85,24 @@ type PracticeSlot = {
   currency?: string;
 };
 
-const GATEWAY = process.env.NEXT_PUBLIC_APIGW_BASE ?? '';
-
 /* ----------------- tiny uid + toasts ----------------- */
 
 function getUid() {
-  if (typeof window === 'undefined') return 'server-user';
+  if (typeof window === 'undefined') return '';
+
   const key = 'ambulant_uid';
   let v = localStorage.getItem(key);
+
   if (!v) {
-    v = (crypto?.randomUUID?.() || Math.random().toString(36).slice(2)) + '-u';
+    const token =
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+    v = `${token}-u`;
     localStorage.setItem(key, v);
   }
+
   return v;
 }
 
@@ -61,7 +110,10 @@ type Toast = { id: string; text: string; tone?: 'info' | 'success' | 'error' };
 function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
   function push(text: string, tone: Toast['tone'] = 'info', ttl = 5000) {
-    const id = String(Date.now()) + Math.random().toString(36).slice(2, 6);
+    const id =
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
     setToasts((t) => [...t, { id, text, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ttl);
   }
@@ -108,214 +160,32 @@ function formatZar(cents?: number) {
 
 function normalizeCountryParam(v: string | null): CountryCode | null {
   if (!v) return null;
+
   const s = v.trim().toUpperCase();
-  if ((COUNTRY_LABELS as any)[s]) return s as CountryCode;
+  const alias: Record<string, CountryCode> = {
+    UK: 'GB',
+    USA: 'US',
+    DRC: 'CD',
+  };
+
+  const code = (alias[s] ?? s) as CountryCode;
+
+  if (code in COUNTRY_LABELS) return code;
   return null;
 }
 
 const CLINICIAN_FAV_KEY = 'clinician.favs';
 
-/* ----------------- directory fetch + safe mock helpers ----------------- */
-
-async function fetchDirectoryPractices(country: CountryCode): Promise<any[]> {
-  try {
-    const url = `/api/practices?country=${encodeURIComponent(country)}`;
-    const res = await fetch(url, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const js = await res.json().catch(() => null);
-
-    const list: any[] = Array.isArray(js)
-      ? js
-      : Array.isArray(js?.practices)
-        ? js.practices
-        : [];
-
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
-}
-
-function safeGetMockPracticesForCountry(country: CountryCode): any[] {
-  const maybeFn =
-    (PracticesMock as any).getMockPracticesForCountry ??
-    (PracticesMock as any).default?.getMockPracticesForCountry;
-
-  if (typeof maybeFn === 'function') {
-    try {
-      const res = maybeFn(country);
-      if (Array.isArray(res)) return res;
-    } catch {}
-  }
-
-  const byCountry =
-    (PracticesMock as any).PRACTICES_BY_COUNTRY ??
-    (PracticesMock as any).byCountry ??
-    (PracticesMock as any).default?.PRACTICES_BY_COUNTRY ??
-    (PracticesMock as any).default?.byCountry ??
-    null;
-
-  if (byCountry && typeof byCountry === 'object') {
-    const list = (byCountry as any)[country];
-    if (Array.isArray(list)) return list;
-  }
-
-  const base =
-    (PracticesMock as any).PRACTICES ??
-    (PracticesMock as any).MOCK_PRACTICES ??
-    (PracticesMock as any).default?.PRACTICES ??
-    (PracticesMock as any).default?.MOCK_PRACTICES ??
-    (PracticesMock as any).default ??
-    [];
-
-  if (Array.isArray(base)) return base;
-  if (Array.isArray((base as any)?.PRACTICES)) return (base as any).PRACTICES;
-
-  return [];
-}
-
-function safeAllMockLists(): any[][] {
-  const byCountry =
-    (PracticesMock as any).PRACTICES_BY_COUNTRY ??
-    (PracticesMock as any).byCountry ??
-    (PracticesMock as any).default?.PRACTICES_BY_COUNTRY ??
-    (PracticesMock as any).default?.byCountry ??
-    null;
-
-  if (byCountry && typeof byCountry === 'object') {
-    return Object.values(byCountry).filter(Array.isArray) as any[][];
-  }
-
-  const base =
-    (PracticesMock as any).PRACTICES ??
-    (PracticesMock as any).MOCK_PRACTICES ??
-    (PracticesMock as any).default?.PRACTICES ??
-    (PracticesMock as any).default?.MOCK_PRACTICES ??
-    (PracticesMock as any).default ??
-    [];
-
-  if (Array.isArray(base)) return [base];
-  if (Array.isArray((base as any)?.PRACTICES)) return [(base as any).PRACTICES];
-
-  return [];
-}
-
-/**
- * Minimal view builder so the calendar can still show a title in “directory only” mode.
- * Accepts encoded ids too (route params may be encoded).
- */
-function buildPracticeViewFromLists(id: string, country: CountryCode, lists: any[][]): PracticePatientView | null {
-  let p: any | null = null;
-
-  const wanted = String(id);
-  for (const list of lists) {
-    const found = list.find((x: any) => String(x?.id) === wanted || String(x?.slug) === wanted);
-    if (found) {
-      p = found;
-      break;
-    }
-  }
-
-  if (!p) return null;
-
-  const schemePool = getMockMedicalAidsForCountry(country).map((x) => x.name);
-  const acceptedSchemes =
-    (typeof p.acceptsMedicalAid === 'boolean' ? p.acceptsMedicalAid : !!p.medicalAidAccepted) &&
-    (!p.acceptedSchemes || p.acceptedSchemes.length === 0)
-      ? schemePool.slice(0, 3)
-      : p.acceptedSchemes ?? [];
-
-  return {
-    practice: {
-      id: String(p.id ?? id),
-      name: String(p.name ?? p.displayName ?? 'Practice'),
-      acceptsMedicalAid: typeof p.acceptsMedicalAid === 'boolean' ? p.acceptsMedicalAid : !!p.medicalAidAccepted,
-      acceptedSchemes: acceptedSchemes.length ? acceptedSchemes : undefined,
-    },
-    clinicians: [],
-  };
-}
-
-/* ----------------- mock clinicians + mock slots ----------------- */
-
-function pickPracticeMockClinicians(country: CountryCode): PracticeClinicianSummary[] {
-  const pool = (getMockCliniciansForCountry(country) as any[]) ?? [];
-  const pick = pool.slice(0, 6);
-
-  return pick.map((c: any, i: number) => {
-    const priceCents =
-      typeof c.priceCents === 'number'
-        ? c.priceCents
-        : typeof c.feeCents === 'number'
-          ? c.feeCents
-          : typeof c.priceZAR === 'number'
-            ? Math.round(Number(c.priceZAR) * 100)
-            : 60000;
-
-    return {
-      id: String(c.id ?? `mock-${country}-${i}`),
-      name: cleanText(String(c.name ?? 'Clinician')),
-      specialty: cleanText(String(c.specialty ?? c.discipline ?? 'General Practice')),
-      gender: c.gender ?? undefined,
-      priceCents,
-      currency: c.currency ?? (country === 'ZA' ? 'ZAR' : 'USD'),
-      rating: typeof c.rating === 'number' ? c.rating : typeof c.avgRating === 'number' ? c.avgRating : undefined,
-      acceptsMedicalAid:
-        typeof c.acceptsMedicalAid === 'boolean'
-          ? c.acceptsMedicalAid
-          : typeof c.medicalAidAccepted === 'boolean'
-            ? c.medicalAidAccepted
-            : undefined,
-      hasEncounter: Math.random() < 0.3,
-    };
-  });
-}
-
-function buildMockSlots(clinicians: PracticeClinicianSummary[], days = 14, durationMin = 45): PracticeSlot[] {
-  const out: PracticeSlot[] = [];
-  const base = new Date();
-  base.setHours(9, 0, 0, 0);
-
-  for (let d = 0; d < days; d++) {
-    const day = new Date(base);
-    day.setDate(base.getDate() + d);
-
-    for (const c of clinicians) {
-      // two slots per day per clinician
-      const s1 = new Date(day);
-      s1.setHours(9, 0, 0, 0);
-
-      const s2 = new Date(day);
-      s2.setHours(14, 0, 0, 0);
-
-      for (const s of [s1, s2]) {
-        const startIso = s.toISOString();
-        out.push({
-          start: startIso,
-          end: addMinutes(startIso, durationMin),
-          clinicianId: c.id,
-          clinicianName: c.name,
-          priceCents: c.priceCents,
-          currency: c.currency,
-        });
-      }
-    }
-  }
-
-  return out;
-}
-
-export default function PracticeCalendarPage({ params }: { params: { id: string } }) {
+function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
   const router = useRouter();
   const sp = useSearchParams();
+  const queryParam = useCallback((key: string) => sp?.get(key)?.trim() ?? '', [sp]);
   const { push, Toasts } = useToasts();
 
   // route params are typically decoded already, but this prevents mismatches if ids contain spaces etc.
   const practiceId = decodeURIComponent(params.id);
-  const country = (normalizeCountryParam(sp.get('country')) ?? 'ZA') as CountryCode;
+  const country = (normalizeCountryParam(queryParam('country')) ?? 'ZA') as CountryCode;
 
-  // For now: live booking available only for ZA; other countries are directory-only even if gateway exists
-  const apiEnabled = Boolean(GATEWAY) && country === 'ZA';
 
   const [view, setView] = useState<PracticePatientView | null>(null);
   const [loadingPractice, setLoadingPractice] = useState(false);
@@ -335,7 +205,7 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
     gender: string;
     maxPriceCents: number;
   }>({
-    clinicianId: sp.get('clinicianId') || '',
+    clinicianId: queryParam('clinicianId') || '',
     visitedOnly: false,
     favouritesOnly: false,
     acceptsMedicalAid: '',
@@ -365,40 +235,16 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
         setLoadingPractice(true);
         setPracticeError(null);
 
-        const directoryList = await fetchDirectoryPractices(country);
+        const url = `/api/practices/${encodeURIComponent(practiceId)}/patient-view?country=${encodeURIComponent(country)}`;
 
-        // Directory-only mode (non-ZA or no gateway): show practice + mock clinicians
-        if (!apiEnabled) {
-          const listsToSearch: any[][] = [];
-
-          if (directoryList.length) listsToSearch.push(directoryList);
-          listsToSearch.push(safeGetMockPracticesForCountry(country));
-          listsToSearch.push(...safeAllMockLists());
-
-          const fromLists = buildPracticeViewFromLists(practiceId, country, listsToSearch);
-          if (!fromLists) throw new Error('Practice not found (directory data only).');
-
-          const mockClinicians = pickPracticeMockClinicians(country);
-
-          if (!cancelled) {
-            setView({ ...fromLists, clinicians: mockClinicians });
-            setPracticeError(
-              country === 'ZA'
-                ? 'Live booking calendar is not available in this environment. Showing example clinicians + slots.'
-                : 'Live booking is currently available for South Africa (ZA) only. Showing example clinicians + slots.',
-            );
-          }
-          return;
-        }
-
-        // Live mode (ZA + gateway)
-        const res = await fetch(`${GATEWAY}/api/practices/${encodeURIComponent(practiceId)}/patient-view`, {
+        const res = await fetch(url, {
           cache: 'no-store',
           headers: { 'x-role': 'patient', 'x-uid': getUid() },
         });
 
         const js = await res.json().catch(() => null);
-        if (!res.ok || !js || !js.practice) {
+
+        if (!res.ok || !js?.practice) {
           throw new Error(js?.error || `Failed to load practice (HTTP ${res.status})`);
         }
 
@@ -406,8 +252,8 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
           ? js.clinicians.map(
               (c: any): PracticeClinicianSummary => ({
                 id: String(c.id ?? c.clinicianId),
-                name: cleanText(String(c.name ?? 'Clinician')),
-                specialty: cleanText(String(c.specialty ?? c.discipline ?? '')),
+                name: cleanText(c.name ?? 'Clinician'),
+                specialty: cleanText(c.specialty ?? c.discipline ?? ''),
                 gender: c.gender ?? undefined,
                 priceCents:
                   typeof c.priceCents === 'number'
@@ -425,8 +271,10 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
                 acceptsMedicalAid:
                   typeof c.acceptsMedicalAid === 'boolean'
                     ? c.acceptsMedicalAid
-                    : !!c.medicalAidAccepted,
-                hasEncounter: !!c.hasEncounter,
+                    : typeof c.medicalAidAccepted === 'boolean'
+                      ? c.medicalAidAccepted
+                      : undefined,
+                hasEncounter: Boolean(c.hasEncounter),
               }),
             )
           : [];
@@ -439,7 +287,9 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
               typeof js.practice.acceptsMedicalAid === 'boolean'
                 ? js.practice.acceptsMedicalAid
                 : undefined,
-            acceptedSchemes: Array.isArray(js.practice.acceptedSchemes) ? js.practice.acceptedSchemes : undefined,
+            acceptedSchemes: Array.isArray(js.practice.acceptedSchemes)
+              ? js.practice.acceptedSchemes.map(String)
+              : undefined,
           },
           clinicians,
         };
@@ -447,23 +297,8 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
         if (!cancelled) setView(payload);
       } catch (e: any) {
         if (!cancelled) {
-          const directoryList = await fetchDirectoryPractices(country);
-
-          const listsToSearch: any[][] = [];
-          if (directoryList.length) listsToSearch.push(directoryList);
-          listsToSearch.push(safeGetMockPracticesForCountry(country));
-          listsToSearch.push(...safeAllMockLists());
-
-          const fallbackView = buildPracticeViewFromLists(practiceId, country, listsToSearch);
-
-          if (fallbackView) {
-            const mockClinicians = pickPracticeMockClinicians(country);
-            setView({ ...fallbackView, clinicians: mockClinicians });
-            setPracticeError((e?.message || 'Failed to load practice') + ' – showing example clinicians + slots.');
-          } else {
-            setPracticeError(e?.message || 'Failed to load practice');
-            setView(null);
-          }
+          setPracticeError(e?.message || 'Failed to load practice');
+          setView(null);
         }
       } finally {
         if (!cancelled) setLoadingPractice(false);
@@ -471,10 +306,11 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
     }
 
     loadPractice();
+
     return () => {
       cancelled = true;
     };
-  }, [practiceId, country, apiEnabled]);
+  }, [practiceId, country]);
 
   /* ----------------- load availability slots ----------------- */
 
@@ -486,45 +322,44 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
         setLoadingSlots(true);
         setSlotsError(null);
 
-        // Directory-only mode: generate mock slots from the clinicians in view
-        if (!apiEnabled) {
-          const mockClinicians = (view?.clinicians?.length ? view.clinicians : pickPracticeMockClinicians(country)) ?? [];
-          if (!cancelled) {
-            setSlots(buildMockSlots(mockClinicians, 14, defaultDurationMin));
-            setSlotsError(null);
-          }
-          return;
-        }
-
         const from = new Date();
         const params = new URLSearchParams({
           from: from.toISOString().slice(0, 10),
           days: '14',
           slot: String(tileMinutes),
+          country,
         });
 
-        const url = `${GATEWAY}/api/practices/${encodeURIComponent(practiceId)}/availability?${params.toString()}`;
+        const url = `/api/practices/${encodeURIComponent(practiceId)}/availability?${params.toString()}`;
+
         const res = await fetch(url, {
           cache: 'no-store',
           headers: { 'x-role': 'patient', 'x-uid': getUid() },
         });
 
         const js = await res.json().catch(() => null);
+
         if (!res.ok || !js) {
           throw new Error(js?.error || `Failed to load practice availability (HTTP ${res.status})`);
         }
 
         const rawSlots: any[] = Array.isArray(js.slots) ? js.slots : [];
+
         const mapped: PracticeSlot[] = rawSlots.map((s: any) => ({
-          start: s.start,
-          end: s.end,
-          clinicianId: String(s.clinicianId ?? s.clinician_id),
+          start: String(s.start ?? s.startsAt ?? ''),
+          end: s.end ?? s.endsAt ?? undefined,
+          clinicianId: String(s.clinicianId ?? s.clinician_id ?? ''),
           clinicianName: s.clinicianName ?? s.clinician_name ?? undefined,
-          priceCents: typeof s.priceCents === 'number' ? s.priceCents : typeof s.feeCents === 'number' ? s.feeCents : undefined,
+          priceCents:
+            typeof s.priceCents === 'number'
+              ? s.priceCents
+              : typeof s.feeCents === 'number'
+                ? s.feeCents
+                : undefined,
           currency: s.currency ?? 'ZAR',
         }));
 
-        if (!cancelled) setSlots(mapped);
+        if (!cancelled) setSlots(mapped.filter((s) => s.start && s.clinicianId));
       } catch (e: any) {
         if (!cancelled) {
           setSlotsError(e?.message || 'Failed to load availability');
@@ -536,10 +371,11 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
     }
 
     loadSlots();
+
     return () => {
       cancelled = true;
     };
-  }, [practiceId, apiEnabled, country, view, tileMinutes, defaultDurationMin]);
+  }, [practiceId, country, tileMinutes]);
 
   const clinicians = view?.clinicians ?? [];
 
@@ -619,8 +455,6 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
     if (!selectedSlot) return;
 
     try {
-      if (!apiEnabled) throw new Error('Live booking is currently available for South Africa (ZA) only.');
-
       const priceCents = selectedSlot.priceCents ?? selectedClinicianForSlot?.priceCents ?? 60000;
       const currency = selectedSlot.currency ?? selectedClinicianForSlot?.currency ?? 'ZAR';
 
@@ -629,17 +463,25 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
         clinicianId: selectedSlot.clinicianId,
         startsAt: selectedSlot.start,
         endsAt: endsAt ?? addMinutes(selectedSlot.start, computedDurationMin),
-        priceCents,
-        currency,
-        type: 'standard',
+        reason: 'Practice consultation',
+        kind: 'standard',
+        visitMode: 'televisit',
+        country,
+        durationMin: computedDurationMin,
+        paymentMethod:
+          view?.practice?.acceptsMedicalAid && selectedClinicianForSlot?.acceptsMedicalAid
+            ? 'medical_aid'
+            : 'card',
         meta: {
           source: 'patient.practice-calendar',
           tileMinutes,
           durationMin: computedDurationMin,
+          priceCents,
+          currency,
         },
       };
 
-      const res = await fetch(`${GATEWAY}/api/appointments`, {
+      const res = await fetch('/api/appointments/new', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
@@ -683,12 +525,6 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
           </Link>
         </div>
       </div>
-
-      {!apiEnabled && (
-        <div className="text-sm text-amber-800 border border-amber-200 bg-amber-50 px-3 py-2 rounded">
-          Live booking is currently available for <b>South Africa (ZA)</b> only. Showing example clinicians + slots.
-        </div>
-      )}
 
       {practiceError && (
         <div className="text-sm text-rose-600 border border-rose-200 bg-rose-50 px-3 py-2 rounded">
@@ -916,8 +752,6 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
                 type="button"
                 className="px-3 py-1 rounded bg-indigo-600 text-white text-sm"
                 onClick={confirmBooking}
-                disabled={!apiEnabled}
-                aria-disabled={!apiEnabled}
               >
                 Confirm &amp; book
               </button>
@@ -926,5 +760,13 @@ export default function PracticeCalendarPage({ params }: { params: { id: string 
         </div>
       )}
     </main>
+  );
+}
+
+export default function PracticeCalendarPage({ params }: { params: { id: string } }) {
+  return (
+    <Suspense fallback={<main className="p-6 text-sm text-slate-600">Loading practice calendar…</main>}>
+      <PracticeCalendarPageContent params={params} />
+    </Suspense>
   );
 }

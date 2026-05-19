@@ -1,33 +1,154 @@
 // apps/patient-app/hooks/useMergedPills.ts
 'use client';
 
-import { useEffect, useState } from 'react';
-import { v4 as uuidv4 } from 'uuid';
-import { Pill } from '@/types';
+import { useCallback, useEffect, useState } from 'react';
+import type { Pill } from '@/types';
 
 interface UseMergedPillsResult {
   pills: Pill[];
   loading: boolean;
   error: string | null;
-  refresh: () => void;
+  refresh: () => Promise<void>;
 }
 
-// Example: manual pills could come from localStorage or /self-check API
+type UnknownMedicationRecord = Record<string, unknown>;
+
+const MANUAL_PILLS_STORAGE_KEY = 'ambulant.manualPills';
+
+function createPillId(prefix = 'pill'): string {
+  const cryptoId =
+    typeof globalThis.crypto !== 'undefined' &&
+    typeof globalThis.crypto.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : '';
+
+  return cryptoId || `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function toStringValue(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function normaliseStatus(value: unknown): Pill['status'] {
+  if (value === 'Taken' || value === 'Missed' || value === 'Pending') {
+    return value;
+  }
+
+  if (typeof value === 'string') {
+    const lower = value.toLowerCase();
+
+    if (lower === 'taken' || lower === 'completed') return 'Taken';
+    if (lower === 'missed') return 'Missed';
+  }
+
+  return 'Pending';
+}
+
+function normaliseManualPill(value: Partial<Pill>, index: number): Pill {
+  return {
+    id: value.id ?? createPillId(`manual-pill-${index}`),
+    name: value.name?.trim() || 'Unknown medication',
+    dose: value.dose ?? '',
+    time: value.time ?? '',
+    status: normaliseStatus(value.status),
+    frequency: value.frequency,
+    route: value.route,
+    started: value.started,
+    lastFilled: value.lastFilled,
+  };
+}
+
+function normaliseMedication(value: UnknownMedicationRecord, index: number): Pill {
+  const id = toStringValue(value.id) || createPillId(`erx-pill-${index}`);
+
+  const name =
+    toStringValue(value.name) ||
+    toStringValue(value.medicationName) ||
+    toStringValue(value.drugName) ||
+    'Unknown medication';
+
+  const dose =
+    toStringValue(value.dose) ||
+    toStringValue(value.dosage) ||
+    toStringValue(value.strength);
+
+  const frequency = toStringValue(value.frequency);
+  const time = toStringValue(value.time) || frequency;
+
+  return {
+    id,
+    name,
+    dose,
+    time,
+    status: normaliseStatus(value.status),
+    frequency,
+    route: toStringValue(value.route) || undefined,
+    started: toStringValue(value.started) || toStringValue(value.startedAt) || undefined,
+    lastFilled: toStringValue(value.lastFilled) || toStringValue(value.lastFilledAt) || undefined,
+  };
+}
+
 function loadManualPills(): Pill[] {
-  const raw = localStorage.getItem('ambulant.manualPills');
+  if (typeof window === 'undefined') return [];
+
+  const raw = window.localStorage.getItem(MANUAL_PILLS_STORAGE_KEY);
   if (!raw) return [];
+
   try {
-    const arr = JSON.parse(raw) as Partial<Pill>[];
-    return arr.map(p => ({
-      id: p.id ?? uuidv4(),
-      name: p.name ?? 'Unknown',
-      dose: p.dose ?? '',
-      time: p.time ?? '',
-      status: p.status ?? 'Pending',
-    }));
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) return [];
+
+    return parsed.map((item, index) =>
+      normaliseManualPill((item ?? {}) as Partial<Pill>, index)
+    );
   } catch {
     return [];
   }
+}
+
+function normaliseMedicationResponse(payload: unknown): Pill[] {
+  if (Array.isArray(payload)) {
+    return payload.map((item, index) =>
+      normaliseMedication((item ?? {}) as UnknownMedicationRecord, index)
+    );
+  }
+
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    Array.isArray((payload as { medications?: unknown }).medications)
+  ) {
+    return (payload as { medications: unknown[] }).medications.map((item, index) =>
+      normaliseMedication((item ?? {}) as UnknownMedicationRecord, index)
+    );
+  }
+
+  if (
+    payload &&
+    typeof payload === 'object' &&
+    Array.isArray((payload as { data?: unknown }).data)
+  ) {
+    return (payload as { data: unknown[] }).data.map((item, index) =>
+      normaliseMedication((item ?? {}) as UnknownMedicationRecord, index)
+    );
+  }
+
+  return [];
+}
+
+function mergePills(erxPills: Pill[], manualPills: Pill[]): Pill[] {
+  const mergedMap = new Map<string, Pill>();
+
+  for (const pill of erxPills) {
+    mergedMap.set(pill.id, pill);
+  }
+
+  for (const pill of manualPills) {
+    mergedMap.set(pill.id, pill);
+  }
+
+  return Array.from(mergedMap.values());
 }
 
 export function useMergedPills(): UseMergedPillsResult {
@@ -35,43 +156,50 @@ export function useMergedPills(): UseMergedPillsResult {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPills = async () => {
+  const fetchPills = useCallback(async (): Promise<void> => {
     setLoading(true);
     setError(null);
+
     try {
-      // Fetch eRx pills
-      const res = await fetch('/api/medications');
-      if (!res.ok) throw new Error('Failed to load eRx medications');
-      const erxMeds = await res.json() as any[];
+      const res = await fetch('/api/medications', {
+        method: 'GET',
+        cache: 'no-store',
+        headers: {
+          accept: 'application/json',
+        },
+      });
 
-      // Map eRx meds to Pill type
-      const erxPills: Pill[] = erxMeds.map(m => ({
-        id: m.id,
-        name: m.name,
-        dose: m.dose,
-        time: m.frequency ?? '', // can map frequency -> time if needed
-        status: m.status === 'Active' ? 'Pending' : 'Taken',
-      }));
+      if (!res.ok) {
+        throw new Error('Failed to load medications');
+      }
 
-      // Load manual pills
+      const payload: unknown = await res.json().catch(() => []);
+      const erxPills = normaliseMedicationResponse(payload);
       const manualPills = loadManualPills();
 
-      // Merge and deduplicate by id
-      const mergedMap = new Map<string, Pill>();
-      [...erxPills, ...manualPills].forEach(p => mergedMap.set(p.id, p));
+      setPills(mergePills(erxPills, manualPills));
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Unable to load medications';
 
-      setPills(Array.from(mergedMap.values()));
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || 'Unknown error');
+      console.error('[useMergedPills]', err);
+      setError(message);
+
+      // Keep manual pills visible even if the API gateway is temporarily unavailable.
+      setPills(loadManualPills());
     } finally {
       setLoading(false);
     }
-  };
-
-  useEffect(() => {
-    fetchPills();
   }, []);
 
-  return { pills, loading, error, refresh: fetchPills };
+  useEffect(() => {
+    void fetchPills();
+  }, [fetchPills]);
+
+  return {
+    pills,
+    loading,
+    error,
+    refresh: fetchPills,
+  };
 }

@@ -196,6 +196,9 @@ importers:
       '@prisma/client':
         specifier: ^6.17.1
         version: 6.17.1(prisma@6.17.1(typescript@5.9.3))(typescript@5.9.3)
+      '@shared/medreach':
+        specifier: workspace:*
+        version: link:../../shared/medreach
       next:
         specifier: 14.1.0
         version: 14.1.0(@babel/core@7.28.4)(react-dom@18.2.0(react@18.2.0))(react@18.2.0)
@@ -444,9 +447,21 @@ importers:
 
   apps/patient-app:
     dependencies:
+      '@ambulant/rtc':
+        specifier: workspace:*
+        version: link:../../packages/rtc
       '@ambulant/ui-shell':
         specifier: workspace:*
         version: link:../../packages/ui-shell
+      '@aws-sdk/client-s3':
+        specifier: ^3.919.0
+        version: 3.919.0
+      '@aws-sdk/lib-storage':
+        specifier: ^3.919.0
+        version: 3.919.0(@aws-sdk/client-s3@3.919.0)
+      '@aws-sdk/s3-request-presigner':
+        specifier: ^3.919.0
+        version: 3.919.0
       '@capacitor/android':
         specifier: ^5.7.8
         version: 5.7.8(@capacitor/core@7.4.4)
@@ -561,6 +576,16 @@ importers:
 
   packages/api: {}
 
+  packages/careport-core:
+    dependencies:
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
+    devDependencies:
+      typescript:
+        specifier: ^5.5.4
+        version: 5.9.3
+
   packages/client-core:
     dependencies:
       '@prisma/client':
@@ -653,6 +678,8 @@ importers:
       react-dom:
         specifier: 18.2.0
         version: 18.2.0(react@18.2.0)
+
+  shared/medreach: {}
 
 packages:
 

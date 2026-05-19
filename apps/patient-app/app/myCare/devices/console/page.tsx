@@ -1,14 +1,20 @@
-'use client';
+﻿'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { DEVICE_MAP, DeviceKey } from '@/src/devices/serviceMap';
 import { connectBle, subscribe } from '@/src/devices/ble';
 import { openInsightStream, pushInsightFrame } from '@/src/lib/insight';
 
-export default function DevicesConsole() {
+function DevicesConsoleContent() {
   const sp = useSearchParams();
-  const deviceId = (sp.get('deviceId') as DeviceKey) || 'duecare.stethoscope';
+
+  const qs = useMemo(
+    () => new URLSearchParams(sp?.toString() ?? ''),
+    [sp],
+  );
+
+  const deviceId = (qs.get('deviceId') as DeviceKey) || 'duecare.stethoscope';
   const spec = DEVICE_MAP[deviceId];
   const sessionId = useMemo(() => `devsess-${Date.now().toString(36)}`, []);
   const [conn, setConn] = useState<any>(null);
@@ -57,7 +63,7 @@ export default function DevicesConsole() {
   const startStream = async () => {
     if (!spec) return;
     if (spec.transport === 'ble' && conn) {
-      startHeartbeat(); // 👈 kick off keepalive
+      startHeartbeat(); // ðŸ‘ˆ kick off keepalive
 
       if (spec.console.panels.includes('pcm') && spec.characteristics?.pcm_stream) {
         await conn.write?.('ctrl', spec.commands?.start ?? new Uint8Array([1]));
@@ -93,7 +99,7 @@ export default function DevicesConsole() {
       unsubRef.current?.();
     } catch {}
     unsubRef.current = null;
-    stopHeartbeat(); // 👈 stop keepalive
+    stopHeartbeat(); // ðŸ‘ˆ stop keepalive
 
     if (spec.transport === 'ble' && conn && spec.commands?.stop) {
       await conn.write?.('ctrl', spec.commands.stop);
@@ -106,3 +112,12 @@ export default function DevicesConsole() {
     </main>
   );
 }
+
+export default function DevicesConsole() {
+  return (
+    <Suspense fallback={null}>
+      <DevicesConsoleContent />
+    </Suspense>
+  );
+}
+

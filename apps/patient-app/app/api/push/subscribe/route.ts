@@ -1,26 +1,44 @@
-// ============================================================================
 // apps/patient-app/app/api/push/subscribe/route.ts
-// Accepts/stubs storing push subscriptions. Replace with DB in prod.
-// ============================================================================
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
-let memSubs: any[] = []; // NOTE: dev-only in-memory store
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-export async function POST(req: Request) {
-  try {
-    const { subscription } = await req.json();
-    if (!subscription?.endpoint) return NextResponse.json({ ok: false, error: 'bad subscription' }, { status: 400 });
-    memSubs = [subscription]; // upsert single for demo
-    return NextResponse.json({ ok: true });
-  } catch {
-    return NextResponse.json({ ok: false }, { status: 400 });
+/**
+ * Production-safe push subscription route.
+ *
+ * The previous implementation stored subscriptions in process memory and exported
+ * helper functions from a route file. That is not production-safe and can break
+ * Next App Router type validation.
+ */
+export async function POST(req: NextRequest) {
+  const body = await req.json().catch(() => ({}));
+  const endpoint = String(body?.subscription?.endpoint || '').trim();
+
+  if (!endpoint) {
+    return NextResponse.json(
+      { ok: false, error: 'bad_subscription' },
+      { status: 400 },
+    );
   }
+
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'push_subscription_store_not_configured',
+      message:
+        'Push subscriptions are disabled until a durable notification-token store is connected.',
+    },
+    { status: 503 },
+  );
 }
 
 export async function DELETE() {
-  memSubs = [];
-  return NextResponse.json({ ok: true });
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'push_subscription_store_not_configured',
+    },
+    { status: 503 },
+  );
 }
-
-// Helper (not exported): used by /api/push/test
-export function __getSubs() { return memSubs; }

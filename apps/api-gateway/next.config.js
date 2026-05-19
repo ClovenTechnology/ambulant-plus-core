@@ -11,6 +11,7 @@ module.exports = {
     "@ambulant/payments",
     "@ambulant/clinical-codes",
     "@ambulant/shared-utils",
-    "@ambulant/shared-mocks"
+    "@ambulant/shared-mocks",
+    "@shared/medreach"
   ]
 };

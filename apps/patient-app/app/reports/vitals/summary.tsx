@@ -1,71 +1,179 @@
 'use client';
 
-import React, { useEffect, useState } from "react";
-import { Line } from "react-chartjs-2";
+import React, { useEffect, useMemo, useState } from 'react';
+import { Line } from 'react-chartjs-2';
 import {
   Chart as ChartJS,
-  CategoryScale, LinearScale,
-  PointElement, LineElement, Title, Tooltip, Legend
-} from "chart.js";
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Legend,
+} from 'chart.js';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Legend);
 
+type VitalsReport = {
+  summary?: Record<string, unknown>;
+  latest?: Record<string, unknown>;
+  trend?: Array<Record<string, unknown>>;
+};
+
+function formatValue(value: unknown): string {
+  if (value == null) return '—';
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value)
+      ? new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)
+      : '—';
+  }
+
+  if (typeof value === 'string') return value.trim() || '—';
+
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? '—' : value.toLocaleString();
+
+  if (Array.isArray(value)) return value.length ? `${value.length} item${value.length === 1 ? '' : 's'}` : '—';
+
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return '—';
+    }
+  }
+
+  return String(value);
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatTimestamp(value: unknown): string {
+  if (!value) return '—';
+
+  const date = new Date(String(value));
+  return Number.isNaN(date.getTime()) ? '—' : date.toLocaleString();
+}
+
 export default function VitalsSummary() {
-  const [report, setReport] = useState<any>(null);
+  const [report, setReport] = useState<VitalsReport | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    (async () => {
+    let cancelled = false;
+
+    async function loadVitalsReport() {
+      setLoading(true);
+      setError(null);
+
       try {
-        const res = await fetch("/api/reports/vitals", { cache: "no-store" });
-        const data = await res.json();
+        const res = await fetch('/api/reports/vitals', { cache: 'no-store' });
+        const data = (await res.json().catch(() => null)) as VitalsReport | null;
+
+        if (cancelled) return;
+
+        if (!res.ok || !data) {
+          setReport(null);
+          setError('Could not load vitals summary right now.');
+          return;
+        }
+
         setReport(data);
       } catch {
-        setReport(null);
+        if (!cancelled) {
+          setReport(null);
+          setError('Could not load vitals summary right now.');
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
-    })();
+    }
+
+    void loadVitalsReport();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  if (!report) return (
-    <div className="text-gray-600 mt-4">Loading…</div>
-  );
+  const summary = report?.summary && typeof report.summary === 'object' ? report.summary : {};
+  const latest = report?.latest && typeof report.latest === 'object' ? report.latest : {};
+  const trend = Array.isArray(report?.trend) ? report.trend : [];
 
-  const { summary, latest, trend } = report;
+  const chartData = useMemo(() => {
+    const labels = trend.map((point) => formatTimestamp(point.ts));
 
-  const chartData = {
-    labels: trend.map((t:any) => new Date(t.ts).toLocaleTimeString()),
-    datasets: [
-      {
-        label: "Heart Rate",
-        data: trend.map((t:any) => t.hr),
-        borderColor: "rgb(239, 68, 68)", // red
-      },
-      {
-        label: "SpO₂",
-        data: trend.map((t:any) => t.spo2),
-        borderColor: "rgb(34, 197, 94)", // green
-      },
-    ],
-  };
+    return {
+      labels,
+      datasets: [
+        {
+          label: 'Heart Rate',
+          data: trend.map((point) => toFiniteNumber(point.hr)),
+          borderColor: 'rgb(239, 68, 68)',
+          pointRadius: 0,
+          tension: 0.25,
+        },
+        {
+          label: 'SpO₂',
+          data: trend.map((point) => toFiniteNumber(point.spo2)),
+          borderColor: 'rgb(34, 197, 94)',
+          pointRadius: 0,
+          tension: 0.25,
+        },
+      ],
+    };
+  }, [trend]);
+
+  if (loading) {
+    return <div className="mt-4 text-gray-600">Loading…</div>;
+  }
+
+  if (error) {
+    return <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">{error}</div>;
+  }
+
+  if (!report) {
+    return <div className="mt-4 rounded-lg border bg-white p-4 text-sm text-gray-600">No vitals report is available yet.</div>;
+  }
 
   return (
     <section className="space-y-6">
-      <section className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-        {Object.entries(summary).map(([k,v]) => (
-          <div key={k} className="p-4 bg-white border rounded-lg">
-            <div className="text-xs text-gray-500">{k}</div>
-            <div className="text-xl font-semibold">{v}</div>
+      <section className="grid grid-cols-2 gap-4 sm:grid-cols-3">
+        {Object.entries(summary).length > 0 ? (
+          Object.entries(summary).map(([key, value]) => (
+            <div key={key} className="rounded-lg border bg-white p-4">
+              <div className="text-xs text-gray-500">{key}</div>
+              <div className="text-xl font-semibold">{formatValue(value)}</div>
+            </div>
+          ))
+        ) : (
+          <div className="col-span-full rounded-lg border bg-white p-4 text-sm text-gray-600">
+            No summary values are available yet.
           </div>
-        ))}
+        )}
       </section>
 
-      <section className="p-4 border rounded-lg bg-white">
-        <h2 className="font-semibold mb-2">Trend</h2>
-        <Line data={chartData} />
+      <section className="rounded-lg border bg-white p-4">
+        <h2 className="mb-2 font-semibold">Trend</h2>
+        {trend.length > 0 ? (
+          <Line data={chartData} />
+        ) : (
+          <div className="rounded-lg border border-dashed bg-gray-50 p-4 text-sm text-gray-600">
+            No trend data is available yet.
+          </div>
+        )}
       </section>
 
-      <section className="p-4 border rounded-lg bg-white">
-        <h2 className="font-semibold mb-3">Latest Reading</h2>
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <section className="rounded-lg border bg-white p-4">
+        <h2 className="mb-3 font-semibold">Latest Reading</h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {[
             { k: 'ts', label: 'Timestamp' },
             { k: 'hr', label: 'Heart Rate', unit: 'bpm' },
@@ -74,14 +182,16 @@ export default function VitalsSummary() {
             { k: 'sys', label: 'Systolic', unit: 'mmHg' },
             { k: 'dia', label: 'Diastolic', unit: 'mmHg' },
             { k: 'bmi', label: 'BMI' },
-          ].map(({k,label,unit}) => {
-            const v = (latest as any)?.[k];
-            const val = k === 'ts' && v ? new Date(v).toLocaleString() : (v ?? '—');
+          ].map(({ k, label, unit }) => {
+            const rawValue = latest[k];
+            const value = k === 'ts' ? formatTimestamp(rawValue) : formatValue(rawValue);
+
             return (
-              <div key={k} className="p-3 border rounded-lg">
+              <div key={k} className="rounded-lg border p-3">
                 <div className="text-xs text-gray-500">{label}</div>
                 <div className="text-lg font-semibold">
-                  {val}{v != null && unit ? ` ${unit}` : ''}
+                  {value}
+                  {rawValue != null && unit ? ` ${unit}` : ''}
                 </div>
               </div>
             );

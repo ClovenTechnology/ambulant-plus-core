@@ -1,24 +1,33 @@
 ﻿// apps/patient-app/app/api/encounters/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { getPrisma } from '@/src/lib/prisma';
-import * as store from './store';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+function json(data: any, status = 200) {
+  return NextResponse.json(data, {
+    status,
+    headers: { 'Cache-Control': 'no-store' },
+  });
+}
+
 function clampScore(n: any) {
   const v = Number(n);
   if (!Number.isFinite(v)) return null;
+
   const i = Math.round(v);
   if (i < 1 || i > 5) return null;
+
   return i as 1 | 2 | 3 | 4 | 5;
 }
 
 function extractRating(e: any) {
-  // rating JSON / object
   const r = e?.rating ?? e?.patientRating ?? null;
+
   if (r && typeof r === 'object') {
     const s = clampScore((r as any).score);
+
     if (s) {
       return {
         score: s,
@@ -35,7 +44,6 @@ function extractRating(e: any) {
     }
   }
 
-  // scalar fields (common patterns)
   const s =
     clampScore(e?.ratingScore) ??
     clampScore(e?.rating_score) ??
@@ -67,44 +75,56 @@ function extractRating(e: any) {
   };
 }
 
-/**
- * Query params:
- * - mode=cases (default) | sessions (flatten encounters)
- * - status=Open|Closed|Referred
- * - limit=N
- */
+function readPatientId(req: NextRequest) {
+  return (
+    req.headers.get('x-ambulant-patient-id') ||
+    req.headers.get('x-patient-id') ||
+    req.headers.get('x-ambulant-user-id') ||
+    req.headers.get('x-user-id') ||
+    req.headers.get('x-uid') ||
+    ''
+  ).trim();
+}
+
 function shapeEncounterForClient(e: any, caseId: string) {
   const rating = extractRating(e);
 
   return {
     id: e.id,
     caseId,
-    start: e.start,
-    stop: e.stop ?? null,
-    mode: e.mode ?? null,
+    start: e.start ?? e.startsAt ?? e.createdAt ?? null,
+    stop: e.stop ?? e.endsAt ?? e.endedAt ?? null,
+    mode: e.mode ?? e.type ?? null,
     status: e.status ?? null,
     clinician: e.clinician
       ? {
           id: e.clinician.id,
-          name: e.clinician.name,
+          name: e.clinician.name ?? e.clinician.displayName ?? null,
           specialty: e.clinician.specialty ?? null,
         }
-      : undefined,
-    devices: e.devices ?? undefined,
+      : e.clinicianId
+        ? {
+            id: e.clinicianId,
+            name: e.clinicianName ?? null,
+            specialty: e.clinicianSpecialty ?? null,
+          }
+        : undefined,
+    devices: e.devices ?? e.meta?.devices ?? undefined,
     notes: e.notes ?? undefined,
     vitals: e.vitals ?? undefined,
-
     rating: rating ?? null,
   };
 }
 
 function shapeCaseForClient(c: any) {
   const rawEncounters = Array.isArray(c.encounters) ? c.encounters : [];
+
   const encounters = rawEncounters
     .map((e: any) => shapeEncounterForClient(e, c.id))
     .sort(
       (a: any, b: any) =>
-        new Date(b.start ?? 0).getTime() - new Date(a.start ?? 0).getTime(),
+        new Date(b.stop ?? b.start ?? 0).getTime() -
+        new Date(a.stop ?? a.start ?? 0).getTime(),
     );
 
   const latestEncounter = encounters[0] ?? null;
@@ -124,63 +144,132 @@ function shapeCaseForClient(c: any) {
   };
 }
 
+function shapeStandaloneEncounterAsCase(e: any) {
+  const caseId =
+    String(
+      e.caseId ??
+        e.case_id ??
+        e.patientCaseId ??
+        e.patient_case_id ??
+        e.encounterCaseId ??
+        '',
+    ).trim() || `encounter-${String(e.id)}`;
+
+  return {
+    id: caseId,
+    title: e.caseTitle ?? e.reason ?? e.title ?? 'Encounter',
+    status: e.caseStatus ?? e.status ?? 'Open',
+    updatedAt:
+      e.updatedAt ??
+      e.stop ??
+      e.endsAt ??
+      e.start ??
+      e.startsAt ??
+      e.createdAt ??
+      new Date().toISOString(),
+    encounters: [e],
+  };
+}
+
+/**
+ * Query params:
+ * - mode=cases/default | sessions
+ * - status=Open|Closed|Referred
+ * - limit=N
+ */
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const mode = url.searchParams.get('mode'); // 'sessions' to flatten
+  const mode = url.searchParams.get('mode');
   const status = url.searchParams.get('status') ?? undefined;
-  const limit = Number(url.searchParams.get('limit') ?? 0);
+  const limitRaw = Number(url.searchParams.get('limit') ?? 0);
+  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
+  const patientId = readPatientId(req);
 
-  const useMocks = (process.env.USE_MOCKS ?? '0') === '1';
-
-  // === Try DB first (if Prisma exists) ===
   try {
-    if (!useMocks) {
-      const prisma = getPrisma();
-      if (!prisma) throw new Error('no-prisma');
+    const prisma = getPrisma() as any;
+
+    if (!prisma) {
+      return json(
+        {
+          ok: false,
+          error: 'encounter_store_unavailable',
+          cases: [],
+          encounters: [],
+        },
+        503,
+      );
+    }
+
+    /*
+     * Preferred shape: Case model with nested encounters.
+     * If this model is not available in the current Prisma schema, we fall back
+     * to direct Encounter queries below. No mock/in-memory fallback is used.
+     */
+    if (prisma.case?.findMany) {
+      const where: any = {};
+
+      if (status) where.status = status;
+
+      if (patientId) {
+        where.OR = [
+          { patientId },
+          { userId: patientId },
+          { patient: { id: patientId } },
+        ];
+      }
 
       const cases = await prisma.case.findMany({
-        where: status ? { status } : undefined,
-        include: { encounters: { include: { clinician: true } } },
+        where,
+        include: {
+          encounters: {
+            include: {
+              clinician: true,
+            },
+          },
+        },
         orderBy: { updatedAt: 'desc' },
-        take: limit > 0 ? limit : undefined,
+        take: limit,
       });
 
-      if (!cases || cases.length === 0) throw new Error('no-cases');
+      const normalized = Array.isArray(cases)
+        ? cases.map((c: any) => {
+            const latest = [...(c.encounters ?? [])].sort(
+              (a: any, b: any) =>
+                new Date(b.stop ?? b.start ?? b.updatedAt ?? 0).getTime() -
+                new Date(a.stop ?? a.start ?? a.updatedAt ?? 0).getTime(),
+            )[0];
 
-      const normalized = cases.map((c: any) => {
-        const latest = [...(c.encounters ?? [])].sort(
-          (a: any, b: any) =>
-            new Date(b.stop ?? b.start).getTime() -
-            new Date(a.stop ?? a.start).getTime(),
-        )[0];
-        const updatedAt = latest
-          ? latest.stop ?? latest.start
-          : c.updatedAt ?? new Date().toISOString();
-        return { ...c, updatedAt };
-      });
+            const updatedAt = latest
+              ? latest.stop ?? latest.start ?? latest.updatedAt
+              : c.updatedAt ?? new Date().toISOString();
+
+            return { ...c, updatedAt };
+          })
+        : [];
 
       if (mode === 'sessions') {
         const encounters = normalized
           .flatMap((c: any) =>
             (c.encounters ?? []).map((e: any) => {
               const rating = extractRating(e);
+
               return {
                 id: e.id,
                 caseId: c.id,
                 caseTitle: c.title ?? c.name,
                 caseStatus: c.status,
-                start: e.start,
-                stop: e.stop,
-                mode: e.mode,
-                status: e.status,
+                start: e.start ?? e.startsAt ?? e.createdAt ?? null,
+                stop: e.stop ?? e.endsAt ?? e.endedAt ?? null,
+                mode: e.mode ?? e.type ?? null,
+                status: e.status ?? null,
                 clinician: e.clinician
                   ? {
                       id: e.clinician.id,
-                      name: e.clinician.name,
-                      specialty: e.clinician.specialty,
+                      name: e.clinician.name ?? e.clinician.displayName ?? null,
+                      specialty: e.clinician.specialty ?? null,
                     }
                   : undefined,
-                devices: e.devices ?? undefined,
+                devices: e.devices ?? e.meta?.devices ?? undefined,
                 notes: e.notes ?? undefined,
                 vitals: e.vitals ?? undefined,
                 rating: rating ?? null,
@@ -189,116 +278,129 @@ export async function GET(req: NextRequest) {
           )
           .sort(
             (a: any, b: any) =>
-              new Date(b.stop ?? b.start).getTime() -
-              new Date(a.stop ?? a.start).getTime(),
+              new Date(b.stop ?? b.start ?? 0).getTime() -
+              new Date(a.stop ?? a.start ?? 0).getTime(),
           );
 
-        return NextResponse.json(
-          { encounters },
-          { headers: { 'Cache-Control': 'no-store' } },
-        );
+        return json({ ok: true, encounters });
       }
 
-      const shaped = normalized.map(shapeCaseForClient);
-      return NextResponse.json(
-        { cases: shaped },
-        { headers: { 'Cache-Control': 'no-store' } },
-      );
+      return json({
+        ok: true,
+        cases: normalized.map(shapeCaseForClient),
+      });
     }
-  } catch (err: any) {
-    console.warn(
-      '[encounters] prisma read failed or empty, falling back to mock store',
-      err?.message ?? err,
-    );
-  }
 
-  // === Fallback to in-memory/mock store ===
-  try {
-    const rawCases = store.listCases ? store.listCases() : null;
-    if (rawCases && rawCases.length) {
-      let cases = rawCases.map((c: any) => ({
-        ...c,
-        encounters: c.encounters ?? [],
-      }));
-      if (status) cases = cases.filter((c: any) => c.status === status);
-      if (limit > 0) cases = cases.slice(0, limit);
+    /*
+     * Direct Encounter model fallback.
+     * This is still production-safe because it uses the real database model,
+     * not mock data.
+     */
+    if (prisma.encounter?.findMany) {
+      const where: any = {};
+
+      if (status) where.status = status;
+
+      if (patientId) {
+        where.OR = [
+          { patientId },
+          { userId: patientId },
+          { patient: { id: patientId } },
+        ];
+      }
+
+      const encountersRaw = await prisma.encounter.findMany({
+        where,
+        include: {
+          clinician: true,
+        },
+        orderBy: [
+          { updatedAt: 'desc' },
+          { createdAt: 'desc' },
+        ],
+        take: limit,
+      });
+
+      const encounters = Array.isArray(encountersRaw) ? encountersRaw : [];
 
       if (mode === 'sessions') {
-        const encounters = cases
-          .flatMap((c: any) =>
-            (c.encounters ?? []).map((e: any) => {
-              const rating = extractRating(e);
-              return {
-                id: e.id,
-                caseId: c.id,
-                caseTitle: c.title,
-                caseStatus: c.status,
-                start: e.start,
-                stop: e.stop,
-                mode: e.mode,
-                status: e.status,
-                clinician: e.clinician ?? undefined,
-                devices: e.devices ?? undefined,
-                notes: e.notes ?? undefined,
-                vitals: e.vitals ?? undefined,
-                rating: rating ?? null,
-              };
-            }),
-          )
+        const sessions = encounters
+          .map((e: any) => {
+            const caseId =
+              String(
+                e.caseId ??
+                  e.case_id ??
+                  e.patientCaseId ??
+                  e.patient_case_id ??
+                  e.encounterCaseId ??
+                  '',
+              ).trim() || `encounter-${String(e.id)}`;
+
+            return {
+              ...shapeEncounterForClient(e, caseId),
+              caseTitle: e.caseTitle ?? e.reason ?? e.title ?? 'Encounter',
+              caseStatus: e.caseStatus ?? e.status ?? 'Open',
+            };
+          })
           .sort(
             (a: any, b: any) =>
-              new Date(b.stop ?? b.start).getTime() -
-              new Date(a.stop ?? a.start).getTime(),
+              new Date(b.stop ?? b.start ?? 0).getTime() -
+              new Date(a.stop ?? a.start ?? 0).getTime(),
           );
-        return NextResponse.json({ encounters });
+
+        return json({ ok: true, encounters: sessions });
       }
 
-      const shaped = cases.map(shapeCaseForClient);
-      return NextResponse.json({ cases: shaped });
+      const grouped = new Map<string, any>();
+
+      for (const e of encounters) {
+        const c = shapeStandaloneEncounterAsCase(e);
+        const existing = grouped.get(c.id);
+
+        if (!existing) {
+          grouped.set(c.id, c);
+        } else {
+          existing.encounters.push(e);
+          const existingTime = new Date(existing.updatedAt ?? 0).getTime();
+          const currentTime = new Date(c.updatedAt ?? 0).getTime();
+
+          if (currentTime > existingTime) {
+            existing.updatedAt = c.updatedAt;
+          }
+        }
+      }
+
+      const cases = Array.from(grouped.values())
+        .map(shapeCaseForClient)
+        .sort(
+          (a: any, b: any) =>
+            new Date(b.updatedAt ?? 0).getTime() -
+            new Date(a.updatedAt ?? 0).getTime(),
+        );
+
+      return json({ ok: true, cases });
     }
 
-    // Build from encounters-only store
-    const encs = store.listEncounters ? store.listEncounters() : [];
-    const grouped: Record<string, any> = {};
-    for (const e of encs) {
-      const caseId = e.caseId ?? e.case ?? 'CASE-UNKNOWN';
-      grouped[caseId] =
-        grouped[caseId] ??
-        {
-          id: caseId,
-          title: e.caseTitle ?? `Case ${caseId}`,
-          status: e.caseStatus ?? 'Open',
-          encounters: [],
-        };
-      grouped[caseId].encounters.push(e);
-    }
-    let casesArr = Object.values(grouped);
-    if (status) casesArr = casesArr.filter((c: any) => c.status === status);
-    if (limit > 0) casesArr = casesArr.slice(0, limit);
-
-    if (mode === 'sessions') {
-      const encounters = casesArr.flatMap((c: any) =>
-        (c.encounters ?? []).map((e: any) => {
-          const rating = extractRating(e);
-          return {
-            ...e,
-            caseId: c.id,
-            caseTitle: c.title,
-            caseStatus: c.status,
-            rating: rating ?? null,
-          };
-        }),
-      );
-      return NextResponse.json({ encounters });
-    }
-
-    const shaped = casesArr.map(shapeCaseForClient);
-    return NextResponse.json({ cases: shaped });
+    return json(
+      {
+        ok: false,
+        error: 'encounter_store_unavailable',
+        cases: [],
+        encounters: [],
+      },
+      503,
+    );
   } catch (err: any) {
-    console.error('[encounters] fallback store failed', err);
-    return NextResponse.json(
-      { error: 'encounters_unavailable', detail: String(err?.message ?? err) },
-      { status: 502 },
+    console.error('[patient-app/api/encounters] failed', err);
+
+    return json(
+      {
+        ok: false,
+        error: err?.message || 'encounters_unavailable',
+        cases: [],
+        encounters: [],
+      },
+      500,
     );
   }
 }

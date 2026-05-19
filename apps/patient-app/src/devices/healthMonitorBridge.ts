@@ -1,12 +1,20 @@
 // apps/patient-app/src/devices/healthMonitorBridge.ts
 'use client';
 
-import { connectBle, subscribe, BleConn } from './ble';
-import { DEVICE_MAP } from './serviceMap';
+import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { connectDevice } from './connect';
 import {
-  parseHRMeasurement, parseBPMeasurement, parseVendorTemp, parseVendorGlucose,
-  parseECGWave, parsePPGWave, autodetectECGorPPG
-} from './parsers';
+  buildLinktopCtrl,
+  extractLinktopFrames,
+  parseLinktopFrame,
+  type LinktopControlOp,
+  LINKTOP_MODULE_BP,
+  LINKTOP_MODULE_BT,
+  LINKTOP_MODULE_TEST_PAPER,
+  LINKTOP_MODULE_STATUS,
+} from './linktop/protocol';
+import { routeAndDecodeLinktop } from './linktop/router';
+import type { LinktopMeasurementMode } from './linktop/types';
 
 type VitalEmitter = (opts: {
   type: string;
@@ -17,170 +25,2333 @@ type VitalEmitter = (opts: {
   dedupeKey?: string;
 }) => Promise<void>;
 
+type BridgeStatus = {
+  connected: boolean;
+  batteryPct?: number | null;
+  rssi?: number | null;
+};
+
+type BpCycleReason =
+  | 'silence_after_pressure'
+  | 'bp_result_received'
+  | 'manual_stop'
+  | 'device_disconnect';
+
+type GenericCycleReason =
+  | 'result_received'
+  | 'timeout'
+  | 'manual_stop'
+  | 'device_disconnect'
+  | 'signal_detected_no_result';
+
+type BridgeDeviceEvent =
+  | {
+      type: 'bp_cycle_complete';
+      reason: BpCycleReason;
+      pressureFrames: number;
+      pressureSamplesSeen: number;
+      latestPressure: number | null;
+      peakPressure: number | null;
+    }
+  | {
+      type: 'bp_result';
+      systolic: number;
+      diastolic: number;
+      pulse?: number | null;
+      map?: number | null;
+    }
+  | {
+      type: 'bp_error';
+      reason: string;
+    }
+  | {
+      type: 'spo2_result';
+      spo2: number | null;
+      pulse?: number | null;
+      pi?: number | null;
+    }
+  | {
+      type: 'spo2_cycle_complete';
+      reason: GenericCycleReason;
+      ppgFrames: number;
+      spo2: number | null;
+      pulse: number | null;
+    }
+  | {
+      type: 'temp_result';
+      celsius: number;
+      fahrenheit?: number | null;
+    }
+  | {
+      type: 'temp_cycle_complete';
+      reason: GenericCycleReason;
+      celsius: number | null;
+      fahrenheit: number | null;
+    }
+  | {
+      type: 'glucose_result';
+      glucose: number;
+      unit: 'mg/dL' | 'mmol/L';
+    }
+  | {
+      type: 'glucose_cycle_complete';
+      reason: GenericCycleReason;
+      glucose: number | null;
+      unit: 'mg/dL' | 'mmol/L' | null;
+    }
+  | {
+      type: 'ecg_cycle_complete';
+      reason: GenericCycleReason;
+      sampleCount: number;
+      signalQuality: number | null;
+    };
+
 type BridgeOpts = {
   patientId: string;
   emitVital: VitalEmitter;
-  onStatus?: (s: { connected: boolean; batteryPct?: number | null; rssi?: number | null }) => void;
-  // Optional control override per-firmware (e.g., longer frames)
-  ctrlOverride?: { start?: Uint8Array; stop?: Uint8Array };
+  onStatus?: (s: BridgeStatus) => void;
+  onDeviceEvent?: (evt: BridgeDeviceEvent) => void;
 };
+
+type NativeHealthMonitorPlugin = {
+  askPermissions(): Promise<void>;
+  startScan(): Promise<void>;
+  stopScan(): Promise<void>;
+  connect(opts: { mac: string }): Promise<void>;
+  disconnect(): Promise<void>;
+  setMeasurePosition(opts: { wrist: boolean }): Promise<void>;
+  startMeasurements(): Promise<void>;
+  stopMeasurements(): Promise<void>;
+  addListener(
+    eventName: string,
+    listenerFunc: (data: any) => void,
+  ): Promise<PluginListenerHandle>;
+};
+
+const NativeHealthMonitor = registerPlugin<NativeHealthMonitorPlugin>('HealthMonitor');
+
+type ConnLike = Awaited<ReturnType<typeof connectDevice>>;
 
 const DEVICE_ID = 'duecare.health-monitor';
 
-// Defaults observed on multiple Linktop firmwares
-const DEFAULT_START = new Uint8Array([0x01]);
-const DEFAULT_STOP  = new Uint8Array([0x02]);
+const BP_SILENCE_COMPLETE_MS = 2600;
+const BP_MIN_PRESSURE_FRAMES_FOR_COMPLETE = 8;
+const BP_MIN_PRESSURE_SAMPLES_FOR_COMPLETE = 40;
+const BP_POST_CYCLE_RESULT_WAIT_MS = 1000; // native posts delayed finalize after stop()
+
+const BP_MOVING_AVG_WINDOW = 9;
+const BP_ENVELOPE_SMOOTH_WINDOW = 11;
+const BP_MIN_BEAT_GAP_SAMPLES = 40;
+const BP_MIN_BEATS_FOR_RESULT = 5;
+const BP_MAX_REASONABLE_PRESSURE = 320;
+const BP_MIN_REASONABLE_PRESSURE = 20;
+const BP_MIN_ENVELOPE_AMPLITUDE = 2.5;
+const BP_MIN_ENVELOPE_RELATIVE = 0.18;
+const BP_PEAK_SEARCH_EDGE_GUARD = 6;
+
+const SPO2_TIMEOUT_MS = 25000;
+const TEMP_TIMEOUT_MS = 12000;
+const GLUCOSE_TIMEOUT_MS = 45000;
+const ECG_TIMEOUT_MS = 30000;
+const ECG_IDLE_STOP_MS = 6000;
+
+const MODE_HANDOFF_SETTLE_MS = 180;
+const STOP_COMMAND_COOLDOWN_MS = 300;
+
+type BpBootstrapStage =
+  | 'idle'
+  | 'read_calibration'
+  | 'temp_compensate'
+  | 'pressure_zero'
+  | 'pressure_stream'
+  | 'pressure_test'
+  | 'pump_started';
+
+type GenericMeasureState = {
+  timeoutTimer: ReturnType<typeof setTimeout> | null;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+  startedAt: number;
+  lastSignalAt: number;
+  completionEmitted: boolean;
+};
+
+type TempBtAlgoState = {
+  ambientRaw: number[];
+  bodyRaw: number[];
+  finalEmitted: boolean;
+};
+
+type BpCalibrationParams = {
+  c1: number;
+  c2: number;
+  c3: number;
+  c4: number;
+  c5: number;
+};
+
+type BpComputedResult = {
+  systolic: number;
+  diastolic: number;
+  pulse: number | null;
+  map: number | null;
+  beatCount: number;
+  peakAmplitude: number;
+  mapPressure: number;
+};
+
+type BpAlgorithmState = {
+  calibration: BpCalibrationParams | null;
+  tempCompRaw: number | null;
+  rawSamples: number[];
+  scaledPressures: number[];
+  beatIndices: number[];
+  beatPressures: number[];
+  beatAmplitudes: number[];
+  finalized: boolean;
+};
 
 export class HealthMonitorBridge {
-  private conn: BleConn | null = null;
+  private readonly bpRuntimeSignature = 'BP_PATCH_SIG_2026_04_02_A';
+
+  private conn: ConnLike | null = null;
   private unsub: Array<() => void> = [];
   private opts!: BridgeOpts;
-  private ctrlStart: Uint8Array = DEFAULT_START;
-  private ctrlStop: Uint8Array = DEFAULT_STOP;
+  private mode: LinktopMeasurementMode = 'idle';
+
+  private nativeMode = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
+  private nativeListeners: PluginListenerHandle[] = [];
+  private nativeConnected = false;
+  private nativeScanStarted = false;
+  private nativeConnectIssued = false;
+  private nativeSeenMacs = new Set<string>();
+
+  private controlCharKey: string | null = null;
+  private notifyCharKeys: string[] = [];
+  private batteryCharKey: string | null = null;
+
+  private bpStage: BpBootstrapStage = 'idle';
+  private bpPressureFrames = 0;
+  private bpPressureSamplesSeen = 0;
+  private bpPressureTestStarted = false;
+  private bpPumpStartIssued = false;
+
+  private bpFallbackTimers: Array<ReturnType<typeof setTimeout>> = [];
+  private bpSilenceTimer: ReturnType<typeof setTimeout> | null = null;
+  private bpPostCycleTimer: ReturnType<typeof setTimeout> | null = null;
+  private bpLastPressureAt = 0;
+  private bpLatestPressure: number | null = null;
+  private bpPeakPressure: number | null = null;
+  private bpCompletionEmitted = false;
+
+  private bpMeasureWrist = false;
+  private bpAlgo: BpAlgorithmState = {
+    calibration: null,
+    tempCompRaw: null,
+    rawSamples: [],
+    scaledPressures: [],
+    beatIndices: [],
+    beatPressures: [],
+    beatAmplitudes: [],
+    finalized: false,
+  };
+
+  // Native BpTask keeps a raw baseline h and converts raw sensor values into cuff pressure.
+  // We do not have exact JNI parity here, so we track a native-shaped baseline and a dynamic
+  // raw-to-pressure normalization for web finalization.
+  private bpRawBaseline = 32016;
+  private bpBaselineAccumulator = 0;
+  private bpRawSampleIndex = 0;
+  private bpRawDeltaPeak = 1;
+
+  private spo2State: GenericMeasureState = this.makeGenericState();
+  private spo2PpgFrames = 0;
+  private spo2LastPulse: number | null = null;
+  private spo2LastSpo2: number | null = null;
+
+  private tempState: GenericMeasureState = this.makeGenericState();
+  private tempLastCelsius: number | null = null;
+  private tempLastFahrenheit: number | null = null;
+  private tempBtAlgo: TempBtAlgoState = {
+    ambientRaw: [],
+    bodyRaw: [],
+    finalEmitted: false,
+  };
+
+  private glucoseState: GenericMeasureState = this.makeGenericState();
+  private glucoseLastValue: number | null = null;
+  private glucoseLastUnit: 'mg/dL' | 'mmol/L' | null = null;
+
+  private ecgState: GenericMeasureState = this.makeGenericState();
+  private ecgSampleCount = 0;
+  private ecgSignalQuality: number | null = null;
+
+  private lastStopCommandAt: Partial<Record<LinktopControlOp, number>> = {};
+
+  private makeGenericState(): GenericMeasureState {
+    return {
+      timeoutTimer: null,
+      idleTimer: null,
+      startedAt: 0,
+      lastSignalAt: 0,
+      completionEmitted: false,
+    };
+  }
+
+  private sleep(ms: number) {
+    return new Promise<void>((resolve) => setTimeout(resolve, ms));
+  }
+
+  private assertNativeSupports(mode: 'bp' | 'spo2' | 'temp' | 'glucose' | 'ecg') {
+    if (!this.nativeMode) return;
+    if (mode === 'bp') return;
+
+    throw new Error(
+      `Native Android HealthMonitor plugin currently supports blood pressure only. ${mode.toUpperCase()} must use the BLE bridge path until native lifecycle support is implemented.`,
+    );
+  }
+
+  private async clearNativeListeners() {
+    for (const h of this.nativeListeners.splice(0)) {
+      try {
+        await h.remove();
+      } catch {}
+    }
+  }
+
+  private unwrapNativeData(payload: any) {
+    return payload?.data ?? payload ?? {};
+  }
+
+  private resetGenericState(state: GenericMeasureState) {
+    if (state.timeoutTimer) clearTimeout(state.timeoutTimer);
+    if (state.idleTimer) clearTimeout(state.idleTimer);
+    state.timeoutTimer = null;
+    state.idleTimer = null;
+    state.startedAt = 0;
+    state.lastSignalAt = 0;
+    state.completionEmitted = false;
+  }
+
+  private resetSpo2State() {
+    this.resetGenericState(this.spo2State);
+    this.spo2PpgFrames = 0;
+    this.spo2LastPulse = null;
+    this.spo2LastSpo2 = null;
+  }
+
+  private resetTempState() {
+    this.resetGenericState(this.tempState);
+    this.tempLastCelsius = null;
+    this.tempLastFahrenheit = null;
+    this.tempBtAlgo = {
+      ambientRaw: [],
+      bodyRaw: [],
+      finalEmitted: false,
+    };
+  }
+
+  private resetGlucoseState() {
+    this.resetGenericState(this.glucoseState);
+    this.glucoseLastValue = null;
+    this.glucoseLastUnit = null;
+  }
+
+  private resetEcgState() {
+    this.resetGenericState(this.ecgState);
+    this.ecgSampleCount = 0;
+    this.ecgSignalQuality = null;
+  }
+
+  private resetBpAlgo() {
+    this.bpAlgo = {
+      calibration: null,
+      tempCompRaw: null,
+      rawSamples: [],
+      scaledPressures: [],
+      beatIndices: [],
+      beatPressures: [],
+      beatAmplitudes: [],
+      finalized: false,
+    };
+
+    this.bpRawBaseline = 32016;
+    this.bpBaselineAccumulator = 0;
+    this.bpRawSampleIndex = 0;
+    this.bpRawDeltaPeak = 1;
+  }
+
+  private parseBpCalibrationParams(payload: Uint8Array): BpCalibrationParams | null {
+    if (!payload || payload.length < 7) return null;
+    if ((payload[0] & 0xff) !== 0x01) return null;
+
+    const c1 = ((payload[1] & 0xff) << 6) + ((payload[2] & 0xff) >> 2);
+    const c2 = ((payload[2] & 0x03) << 4) + ((payload[3] & 0xff) >> 4);
+    const c3 = ((payload[3] & 0x0f) << 9) + ((payload[4] & 0xff) << 1) + ((payload[5] & 0xff) >> 7);
+    const c4 = ((payload[5] & 0x7f) << 2) + ((payload[6] & 0xff) >> 6);
+    const c5 = payload[6] & 0x3f;
+
+    return { c1, c2, c3, c4, c5 };
+  }
+
+  private parseBpTempCompRaw(payload: Uint8Array): number | null {
+    if (!payload || payload.length < 3) return null;
+    if ((payload[0] & 0xff) !== 0x02) return null;
+    return (payload[1] & 0xff) + ((payload[2] & 0xff) << 8);
+  }
+
+  private convertRawBpSamplesToPseudoMmHg(rawSamples: number[]): number[] {
+    const out: number[] = [];
+
+    for (const raw of rawSamples) {
+      const idx = this.bpRawSampleIndex;
+
+      // Native BpTask behavior:
+      // - first 30 samples establish baseline
+      // - samples 10..29 contribute to p
+      // - when idx == 30, h = p / 20
+      if (idx < 30) {
+        if (idx > 9) {
+          this.bpBaselineAccumulator += raw;
+        }
+        this.bpRawBaseline = raw;
+      } else if (idx === 30) {
+        this.bpRawBaseline = Math.round(this.bpBaselineAccumulator / 20);
+      }
+
+      const delta = Math.abs(raw - this.bpRawBaseline);
+
+      // Dynamic normalization:
+      // native uses this.i * abs(raw - h) / 2^16 to emit cuff pressure.
+      // We do not have exact JNI parity, so normalize deltas into 0..260 mmHg.
+      if (idx >= 30 && delta > this.bpRawDeltaPeak) {
+        this.bpRawDeltaPeak = delta;
+      }
+
+      const pseudoMmHg =
+        idx < 30
+          ? 0
+          : Math.max(
+              0,
+              Math.min(300, Math.round((delta / Math.max(this.bpRawDeltaPeak, 1)) * 260)),
+            );
+
+      out.push(pseudoMmHg);
+      this.bpRawSampleIndex += 1;
+    }
+
+    return out;
+  }
+
+  private buildBpDeflationAxis(rawSamples: number[]): number[] {
+    if (rawSamples.length === 0) return [];
+
+    const usableStart = Math.min(
+      Math.max(30, Math.floor(rawSamples.length * 0.05)),
+      rawSamples.length - 1,
+    );
+    const usableEnd = rawSamples.length - 1;
+    const count = Math.max(1, usableEnd - usableStart + 1);
+
+    const out = new Array<number>(rawSamples.length).fill(0);
+
+    // Broad descending cuff-pressure axis across the whole usable measurement window.
+    for (let i = usableStart; i <= usableEnd; i++) {
+      const t = (i - usableStart) / Math.max(1, count - 1);
+      out[i] = 180 - t * 140; // 180 -> 40 mmHg
+    }
+
+    for (let i = 0; i < usableStart; i++) {
+      out[i] = 180;
+    }
+
+    return out;
+  }
+
+  private buildBpOscillationEnvelope(rawSamples: number[]): number[] {
+    if (rawSamples.length === 0) return [];
+
+    // Remove slow trend from raw sensor values, then smooth absolute residual.
+    const baseline = this.smoothSeries(rawSamples, 21);
+    const residual = rawSamples.map((v, i) => Math.abs(v - baseline[i]));
+    return this.smoothSeries(residual, BP_ENVELOPE_SMOOTH_WINDOW);
+  }
+
+  private smoothSeries(values: number[], window: number): number[] {
+    if (values.length === 0) return [];
+    const out = new Array<number>(values.length);
+    const half = Math.max(1, Math.floor(window / 2));
+
+    for (let i = 0; i < values.length; i++) {
+      let sum = 0;
+      let count = 0;
+      const start = Math.max(0, i - half);
+      const end = Math.min(values.length - 1, i + half);
+      for (let j = start; j <= end; j++) {
+        sum += values[j];
+        count += 1;
+      }
+      out[i] = count > 0 ? sum / count : values[i];
+    }
+
+    return out;
+  }
+
+  private systolicRatioForPressure(pressureMmHg: number, wrist: boolean): number {
+    const p = Math.round(pressureMmHg * 100);
+
+    if (wrist) {
+      const i = Math.floor(p / 100);
+      if (i > 200) return 0.8;
+      if (i > 150) return 0.82;
+      if (i > 135) return 0.85;
+      if (i > 120) return 0.88;
+      if (i > 110) return 0.94;
+      if (i > 90) return 0.96;
+      if (i > 70) return 0.9;
+      return 0.85;
+    }
+
+    const i = Math.floor(p / 100);
+    if (i > 200) return 0.54;
+    if (i > 150) return 0.55;
+    if (i > 135) return 0.58;
+    if (i > 120) return 0.6;
+    if (i > 110) return 0.7;
+    if (i > 90) return 0.74;
+    if (i > 70) return 0.72;
+    return 0.65;
+  }
+
+  private diastolicRatioForPressure(pressureMmHg: number, wrist: boolean): number {
+    const p = Math.round(pressureMmHg * 100);
+    const i = Math.floor(p / 100);
+
+    if (wrist) {
+      if (i > 180) return 0.4;
+      if (i > 140) return 0.45;
+      if (i > 120) return 0.5;
+      if (i > 100) return 0.48;
+      if (i > 90) return ((100 - (i - 90)) * 0.6) / 100.0;
+      if (i > 60) return 0.55;
+      if (i <= 50) return 0.38;
+      return 0.45;
+    }
+
+    if (i > 180) return 0.6;
+    if (i > 140) return 0.65;
+    if (i > 120) return 0.65;
+    if (i > 100) return 0.6160000000000001;
+    if (i > 90) return ((100 - (i - 90)) * 0.77) / 100.0;
+    if (i > 60) return 0.7;
+    if (i <= 50) return 0.5;
+    return 0.6;
+  }
+
+  private deriveBpBeats(rawSamples: number[], pressureAxis: number[]) {
+    const envelope = this.buildBpOscillationEnvelope(rawSamples);
+
+    const beatIndices: number[] = [];
+    const beatPressures: number[] = [];
+    const beatAmplitudes: number[] = [];
+
+    if (envelope.length < 3) {
+      return { beatIndices, beatPressures, beatAmplitudes };
+    }
+
+    let maxAmp = 0;
+    for (const v of envelope) {
+      if (v > maxAmp) maxAmp = v;
+    }
+
+    const ampFloor = Math.max(
+      BP_MIN_ENVELOPE_AMPLITUDE,
+      maxAmp * BP_MIN_ENVELOPE_RELATIVE,
+    );
+
+    let lastAccepted = -BP_MIN_BEAT_GAP_SAMPLES;
+
+    for (let i = 1; i < envelope.length - 1; i++) {
+      const amp = envelope[i];
+      if (amp < ampFloor) continue;
+      if (i - lastAccepted < BP_MIN_BEAT_GAP_SAMPLES) continue;
+
+      const isLocalPeak = envelope[i] >= envelope[i - 1] && envelope[i] > envelope[i + 1];
+      if (!isLocalPeak) continue;
+
+      const pressure = pressureAxis[i];
+      if (
+        !Number.isFinite(pressure) ||
+        pressure < BP_MIN_REASONABLE_PRESSURE ||
+        pressure > BP_MAX_REASONABLE_PRESSURE
+      ) {
+        continue;
+      }
+
+      beatIndices.push(i);
+      beatPressures.push(pressure);
+      beatAmplitudes.push(amp);
+      lastAccepted = i;
+    }
+
+    console.info('[HealthMonitorBridge] deriveBpBeats_stats', {
+      envelopeLength: envelope.length,
+      maxAmp,
+      ampFloor,
+      acceptedBeats: beatIndices.length,
+      minGap: BP_MIN_BEAT_GAP_SAMPLES,
+    });
+
+    return { beatIndices, beatPressures, beatAmplitudes };
+  }
+
+  private computePulseFromBeatIndices(indices: number[]): number | null {
+    if (indices.length < 3) return null;
+
+    const diffs: number[] = [];
+    for (let i = 1; i < indices.length; i++) {
+      const d = indices[i] - indices[i - 1];
+      if (d > 0) diffs.push(d);
+    }
+
+    if (diffs.length === 0) return null;
+
+    diffs.sort((a, b) => a - b);
+    const median = diffs[Math.floor(diffs.length / 2)];
+    if (!Number.isFinite(median) || median <= 0) return null;
+
+    const bpm = Math.round(5860 / median);
+    if (bpm < 25 || bpm > 180) return null;
+    return bpm;
+  }
+
+  private convertBtRawToCelsius(raw: number): number {
+    return raw * 0.02 - 273.15;
+  }
+
+  private reduceBtRawWindow(values: number[]): number | null {
+    if (values.length < 6) return null;
+
+    const tail = values.slice(2).sort((a, b) => a - b);
+    if (tail.length === 0) return null;
+
+    const idx = Math.floor((tail.length - 1) / 2);
+    return tail[idx] ?? null;
+  }
+
+  private parseBtRawPairFrame(payload: Uint8Array): {
+    bodyCandidateA: number;
+    ambientCandidateA: number;
+    bodyCandidateB: number;
+    ambientCandidateB: number;
+  } | null {
+    if (!payload || payload.length < 8) return null;
+
+    const v1 = ((payload[1] & 0xff) << 8) | (payload[0] & 0xff);
+    const v2 = ((payload[3] & 0xff) << 8) | (payload[2] & 0xff);
+    const v3 = ((payload[5] & 0xff) << 8) | (payload[4] & 0xff);
+    const v4 = ((payload[7] & 0xff) << 8) | (payload[6] & 0xff);
+
+    return {
+      bodyCandidateA: v1,
+      ambientCandidateA: v2,
+      bodyCandidateB: v3,
+      ambientCandidateB: v4,
+    };
+  }
+
+  private estimateBodyTempFromSdkInputs(ambientC: number, objectC: number): number {
+    // Conservative placeholder, not native-parity.
+    // Keeps result bounded and avoids fake extreme jumps.
+    const raw = objectC + 0.35 * (objectC - ambientC);
+    return Math.round(raw * 10) / 10;
+  }
+
+  private async handleTempBtPayload(payload: Uint8Array): Promise<boolean> {
+    const frame = this.parseBtRawPairFrame(payload);
+    if (!frame) return false;
+    if (this.mode !== 'temp') return true;
+
+    this.noteGenericSignal(this.tempState);
+
+    this.tempBtAlgo.ambientRaw.push(frame.ambientCandidateA, frame.ambientCandidateB);
+    this.tempBtAlgo.bodyRaw.push(frame.bodyCandidateA, frame.bodyCandidateB);
+
+    const ambientRaw = this.reduceBtRawWindow(this.tempBtAlgo.ambientRaw);
+    const bodyRaw = this.reduceBtRawWindow(this.tempBtAlgo.bodyRaw);
+
+    if (ambientRaw == null || bodyRaw == null || this.tempBtAlgo.finalEmitted) {
+      return true;
+    }
+
+    const ambientC = this.convertBtRawToCelsius(ambientRaw);
+    const objectC = this.convertBtRawToCelsius(bodyRaw);
+
+    // Placeholder until native TempTranslate parity is available.
+    // Keep this conservative and explicit.
+    const estimatedBodyC = this.estimateBodyTempFromSdkInputs(ambientC, objectC);
+
+    this.tempBtAlgo.finalEmitted = true;
+    this.tempLastCelsius = estimatedBodyC;
+    this.tempLastFahrenheit = (estimatedBodyC * 9) / 5 + 32;
+
+    const recordedAt = new Date().toISOString();
+
+    await this.opts.emitVital({
+      type: 'temperature',
+      recorded_at: recordedAt,
+      deviceId: DEVICE_ID,
+      payload: {
+        celsius: this.tempLastCelsius,
+        fahrenheit: this.tempLastFahrenheit,
+        unit: 'C',
+      },
+      meta: {
+        source: 'ble',
+        route: 'bt-task-shaped',
+        authoritative: false,
+        algorithm: 'bt-js-shaped',
+        ambientC,
+        objectC,
+      },
+    });
+
+    this.opts?.onDeviceEvent?.({
+      type: 'temp_result',
+      celsius: this.tempLastCelsius,
+      fahrenheit: this.tempLastFahrenheit,
+    });
+
+    await this.finishTempCycle('result_received');
+    return true;
+  }
+
+  private computeBpFromPressureSeries(_: number[]): BpComputedResult | null {
+    const raw = this.bpAlgo.rawSamples;
+    if (raw.length < BP_MIN_PRESSURE_SAMPLES_FOR_COMPLETE) return null;
+
+    const axis = this.buildBpDeflationAxis(raw);
+
+    const usableStart = Math.min(
+      Math.max(30, Math.floor(raw.length * 0.05)),
+      raw.length - 1,
+    );
+
+    const rawWorking = raw.slice(usableStart);
+    const axisWorking = axis.slice(usableStart);
+
+    const { beatIndices, beatPressures, beatAmplitudes } =
+      this.deriveBpBeats(rawWorking, axisWorking);
+
+    this.bpAlgo.beatIndices = beatIndices.map((i) => i + usableStart);
+    this.bpAlgo.beatPressures = beatPressures;
+    this.bpAlgo.beatAmplitudes = beatAmplitudes;
+
+    if (beatIndices.length < BP_MIN_BEATS_FOR_RESULT) return null;
+
+    // Avoid choosing a peak too close to either edge.
+    let peakIdx = -1;
+    let peakAmplitude = -Infinity;
+
+    for (
+      let i = BP_PEAK_SEARCH_EDGE_GUARD;
+      i < beatAmplitudes.length - BP_PEAK_SEARCH_EDGE_GUARD;
+      i++
+    ) {
+      if (beatAmplitudes[i] > peakAmplitude) {
+        peakAmplitude = beatAmplitudes[i];
+        peakIdx = i;
+      }
+    }
+
+    if (peakIdx < 0) {
+      for (let i = 0; i < beatAmplitudes.length; i++) {
+        if (beatAmplitudes[i] > peakAmplitude) {
+          peakAmplitude = beatAmplitudes[i];
+          peakIdx = i;
+        }
+      }
+    }
+
+    if (peakIdx < 0) return null;
+
+    const mapPressure = beatPressures[peakIdx];
+    if (!Number.isFinite(mapPressure) || mapPressure <= 0) return null;
+
+    const sysRatio = this.systolicRatioForPressure(mapPressure, this.bpMeasureWrist);
+    const diaRatio = this.diastolicRatioForPressure(mapPressure, this.bpMeasureWrist);
+
+    const sysTarget = peakAmplitude * sysRatio;
+    const diaTarget = peakAmplitude * diaRatio;
+
+    let sbpPressure: number | null = null;
+    for (let i = 0; i < peakIdx; i++) {
+      if (beatAmplitudes[i] >= sysTarget) {
+        sbpPressure = beatPressures[i];
+        break;
+      }
+    }
+
+    let dbpPressure: number | null = null;
+    for (let i = peakIdx + 1; i < beatAmplitudes.length; i++) {
+      if (beatAmplitudes[i] <= diaTarget) {
+        dbpPressure = beatPressures[i];
+        break;
+      }
+    }
+
+    if (sbpPressure == null || dbpPressure == null) {
+      console.warn('[HealthMonitorBridge] bp_threshold_crossing_failed', {
+        peakIdx,
+        peakAmplitude,
+        mapPressure,
+        sysTarget,
+        diaTarget,
+        prePeakCount: peakIdx,
+        postPeakCount: beatAmplitudes.length - peakIdx - 1,
+        prePeakPressures: beatPressures.slice(Math.max(0, peakIdx - 10), peakIdx),
+        prePeakAmplitudes: beatAmplitudes.slice(Math.max(0, peakIdx - 10), peakIdx),
+        postPeakPressures: beatPressures.slice(peakIdx + 1, Math.min(beatPressures.length, peakIdx + 11)),
+        postPeakAmplitudes: beatAmplitudes.slice(peakIdx + 1, Math.min(beatAmplitudes.length, peakIdx + 11)),
+      });
+      return null;
+    }
+
+    const systolic = Math.round(sbpPressure);
+    const diastolic = Math.round(dbpPressure);
+
+    if (!Number.isFinite(systolic) || !Number.isFinite(diastolic)) return null;
+    if (systolic <= diastolic || systolic - diastolic < 10) return null;
+
+    const pulse = this.computePulseFromBeatIndices(beatIndices);
+
+    return {
+      systolic,
+      diastolic,
+      pulse,
+      map: Math.round(mapPressure),
+      beatCount: beatIndices.length,
+      peakAmplitude,
+      mapPressure,
+    };
+  }
+
+  private async finalizeBpAndEmit(reason: BpCycleReason) {
+    if (this.bpAlgo.finalized) return;
+    this.bpAlgo.finalized = true;
+
+    const result = this.computeBpFromPressureSeries(this.bpAlgo.scaledPressures);
+
+    if (result) {
+      const recordedAt = new Date().toISOString();
+
+      await this.opts.emitVital({
+        type: 'blood_pressure',
+        recorded_at: recordedAt,
+        deviceId: DEVICE_ID,
+        payload: {
+          systolic: result.systolic,
+          diastolic: result.diastolic,
+          pulse: result.pulse,
+          map: result.map,
+          unit: 'mmHg',
+        },
+        meta: {
+          source: 'ble',
+          route: 'vendor_notify',
+          authoritative: false,
+          algorithm: 'bp-js-native-shaped',
+          beatCount: result.beatCount,
+          mapPressure: result.mapPressure,
+          peakAmplitude: result.peakAmplitude,
+        },
+      });
+
+      if (typeof result.pulse === 'number') {
+        await this.opts.emitVital({
+          type: 'heart_rate',
+          recorded_at: recordedAt,
+          deviceId: DEVICE_ID,
+          payload: {
+            hr: result.pulse,
+            unit: 'bpm',
+          },
+          meta: {
+            source: 'ble',
+            parent: 'blood_pressure',
+            authoritative: false,
+            algorithm: 'bp-js-native-shaped',
+          },
+          dedupeKey: 'hr',
+        });
+      }
+
+      this.opts?.onDeviceEvent?.({
+        type: 'bp_result',
+        systolic: result.systolic,
+        diastolic: result.diastolic,
+        pulse: result.pulse,
+        map: result.map,
+      });
+
+      await this.finishBpCycle('bp_result_received');
+      return;
+    }
+
+    console.warn('[HealthMonitorBridge] bp_finalize_failed', {
+      rawCount: this.bpAlgo.rawSamples.length,
+      scaledCount: this.bpAlgo.scaledPressures.length,
+      peakRaw: this.bpAlgo.rawSamples.length ? Math.max(...this.bpAlgo.rawSamples) : null,
+      minRaw: this.bpAlgo.rawSamples.length ? Math.min(...this.bpAlgo.rawSamples) : null,
+      peakScaled: this.bpAlgo.scaledPressures.length ? Math.max(...this.bpAlgo.scaledPressures) : null,
+      minScaled: this.bpAlgo.scaledPressures.length ? Math.min(...this.bpAlgo.scaledPressures) : null,
+      usableStart: Math.min(Math.max(30, Math.floor(this.bpAlgo.rawSamples.length * 0.05)), this.bpAlgo.rawSamples.length - 1),
+      beatCount: this.bpAlgo.beatIndices.length,
+      beatPressures: this.bpAlgo.beatPressures.slice(0, 20),
+      beatAmplitudes: this.bpAlgo.beatAmplitudes.slice(0, 20),
+      rawHead: this.bpAlgo.rawSamples.slice(0, 20),
+      rawTail: this.bpAlgo.rawSamples.slice(-20),
+    });
+
+    this.opts?.onDeviceEvent?.({
+      type: 'bp_error',
+      reason: 'bp_finalize_failed',
+    });
+
+    await this.finishBpCycle(reason);
+  }
+
+  private noteGenericSignal(state: GenericMeasureState, idleMs?: number, onIdle?: () => void) {
+    state.lastSignalAt = Date.now();
+    if (state.idleTimer) clearTimeout(state.idleTimer);
+    if (idleMs && onIdle) {
+      state.idleTimer = setTimeout(onIdle, idleMs);
+    }
+  }
+
+  private startGenericTimeout(state: GenericMeasureState, ms: number, onTimeout: () => void) {
+    this.resetGenericState(state);
+    state.startedAt = Date.now();
+    state.lastSignalAt = state.startedAt;
+    state.timeoutTimer = setTimeout(onTimeout, ms);
+  }
+
+  private shouldAcceptDecodedKind(
+    kind:
+      | 'bp_result'
+      | 'spo2_result'
+      | 'temperature_result'
+      | 'glucose_result'
+      | 'battery'
+      | 'ecg_wave'
+      | 'ppg_wave'
+      | 'ack'
+      | 'unknown',
+  ): boolean {
+    switch (this.mode) {
+      case 'bp':
+        return kind === 'bp_result' || kind === 'battery' || kind === 'ack' || kind === 'unknown';
+      case 'spo2':
+        return kind === 'spo2_result' || kind === 'ppg_wave' || kind === 'battery' || kind === 'ack' || kind === 'unknown';
+      case 'temp':
+        return kind === 'temperature_result' || kind === 'battery' || kind === 'ack' || kind === 'unknown';
+      case 'glucose':
+        return kind === 'glucose_result' || kind === 'battery' || kind === 'ack' || kind === 'unknown';
+      case 'ecg':
+        return kind === 'ecg_wave' || kind === 'battery' || kind === 'ack' || kind === 'unknown';
+      case 'idle':
+      default:
+        return true;
+    }
+  }
+
+  private stopOpForMode(mode: LinktopMeasurementMode): LinktopControlOp | null {
+    switch (mode) {
+      case 'bp':
+        return 'stop_bp';
+      case 'spo2':
+        return 'stop_spo2';
+      case 'temp':
+        return 'stop_temp';
+      case 'glucose':
+        return 'stop_glucose';
+      case 'ecg':
+        return 'stop_ecg';
+      case 'idle':
+      default:
+        return null;
+    }
+  }
+
+  private async sendStopCommandForMode(
+    mode: LinktopMeasurementMode,
+    context: string,
+    opts?: { respectCooldown?: boolean },
+  ) {
+    if (this.nativeMode) return;
+    if (!this.conn || !this.controlCharKey) return;
+
+    const op = this.stopOpForMode(mode);
+    if (!op) return;
+
+    const respectCooldown = opts?.respectCooldown ?? false;
+    const now = Date.now();
+    const last = this.lastStopCommandAt[op] ?? 0;
+
+    if (respectCooldown && now - last < STOP_COMMAND_COOLDOWN_MS) {
+      return;
+    }
+
+    try {
+      this.lastStopCommandAt[op] = now;
+      await this.sendControl(op);
+    } catch (err) {
+      console.warn(`[HealthMonitorBridge] ${op} during ${context} failed`, err);
+    }
+  }
+
+  private async stopActiveMeasurementForHandoff(nextMode: Exclude<LinktopMeasurementMode, 'idle'>) {
+    if (this.nativeMode) return;
+    if (this.mode === 'idle') return;
+    if (this.mode === nextMode) {
+      await this.sendStopCommandForMode(this.mode, `restart-handoff:${nextMode}`, {
+        respectCooldown: false,
+      });
+      this.resetModeState(this.mode);
+      this.mode = 'idle';
+      await this.sleep(MODE_HANDOFF_SETTLE_MS);
+      return;
+    }
+
+    const previousMode = this.mode;
+    await this.sendStopCommandForMode(previousMode, `mode-handoff:${previousMode}->${nextMode}`, {
+      respectCooldown: false,
+    });
+    this.resetModeState(previousMode);
+    this.mode = 'idle';
+    await this.sleep(MODE_HANDOFF_SETTLE_MS);
+  }
+
+  private async prepareForModeStart(nextMode: Exclude<LinktopMeasurementMode, 'idle'>) {
+    if (!this.nativeMode) {
+      await this.stopActiveMeasurementForHandoff(nextMode);
+    }
+  }
+
+  private resetModeState(mode: LinktopMeasurementMode) {
+    switch (mode) {
+      case 'bp':
+        this.resetBpBootstrap();
+        break;
+      case 'spo2':
+        this.resetSpo2State();
+        break;
+      case 'temp':
+        this.resetTempState();
+        break;
+      case 'glucose':
+        this.resetGlucoseState();
+        break;
+      case 'ecg':
+        this.resetEcgState();
+        break;
+      case 'idle':
+      default:
+        break;
+    }
+  }
+
+  private async bindNativeAndroid() {
+    await this.clearNativeListeners();
+
+    const on = async (event: string, fn: (payload: any) => void) => {
+      const handle = await NativeHealthMonitor.addListener(event, fn);
+      this.nativeListeners.push(handle);
+    };
+
+    await on('sdkError', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      console.warn('[HealthMonitorBridge/native] sdkError', data);
+      this.opts?.onDeviceEvent?.({
+        type: 'bp_error',
+        reason: data?.message || 'native_sdk_error',
+      });
+    });
+
+    await on('bleState', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      console.info('[HealthMonitorBridge/native] bleState', data);
+    });
+
+    await on('scanResult', async (payload) => {
+      const data = this.unwrapNativeData(payload);
+      const mac = String(data?.mac || '').trim();
+      if (!mac) return;
+
+      this.nativeSeenMacs.add(mac);
+
+      if (!this.nativeConnectIssued) {
+        this.nativeConnectIssued = true;
+        try {
+          await NativeHealthMonitor.stopScan();
+        } catch {}
+        try {
+          await NativeHealthMonitor.connect({ mac });
+        } catch (err) {
+          console.warn('[HealthMonitorBridge/native] connect failed', err);
+          this.nativeConnectIssued = false;
+        }
+      }
+    });
+
+    await on('connected', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      this.nativeConnected = true;
+      this.telemetry({ connected: true });
+      console.info('[HealthMonitorBridge/native] connected', data);
+    });
+
+    await on('disconnected', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      this.nativeConnected = false;
+      this.telemetry({ connected: false });
+      console.info('[HealthMonitorBridge/native] disconnected', data);
+    });
+
+    await on('bpPressure', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      const pressure = Number(data?.pressure);
+      if (!Number.isFinite(pressure)) return;
+
+      this.bpLatestPressure = pressure;
+      if (this.bpPeakPressure == null || pressure > this.bpPeakPressure) {
+        this.bpPeakPressure = pressure;
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('iomt:bp_pressure', {
+            detail: {
+              deviceId: DEVICE_ID,
+              timestamp: new Date().toISOString(),
+              latestPressure: pressure,
+              peakPressure: this.bpPeakPressure,
+              samples: [pressure],
+              raw: [],
+              pressureFrames: this.bpPressureFrames,
+              pressureSamplesSeen: this.bpPressureSamplesSeen + 1,
+              stage: 'native-android',
+            },
+          }),
+        );
+      }
+
+      this.bpPressureFrames += 1;
+      this.bpPressureSamplesSeen += 1;
+    });
+
+    await on('bpResult', async (payload) => {
+      const data = this.unwrapNativeData(payload);
+      const systolic = Number(data?.systolic);
+      const diastolic = Number(data?.diastolic);
+      const pulse = Number(data?.pulse);
+
+      if (!Number.isFinite(systolic) || !Number.isFinite(diastolic)) return;
+
+      const recordedAt = new Date().toISOString();
+
+      await this.opts.emitVital({
+        type: 'blood_pressure',
+        recorded_at: recordedAt,
+        deviceId: DEVICE_ID,
+        payload: {
+          systolic,
+          diastolic,
+          pulse: Number.isFinite(pulse) ? pulse : null,
+          map: null,
+          unit: 'mmHg',
+        },
+        meta: {
+          source: 'native-android',
+          authoritative: true,
+        },
+      });
+
+      if (Number.isFinite(pulse)) {
+        await this.opts.emitVital({
+          type: 'heart_rate',
+          recorded_at: recordedAt,
+          deviceId: DEVICE_ID,
+          payload: {
+            hr: pulse,
+            unit: 'bpm',
+          },
+          meta: {
+            source: 'native-android',
+            parent: 'blood_pressure',
+            authoritative: false,
+          },
+          dedupeKey: 'hr',
+        });
+      }
+
+      this.opts?.onDeviceEvent?.({
+        type: 'bp_result',
+        systolic,
+        diastolic,
+        pulse: Number.isFinite(pulse) ? pulse : null,
+        map: null,
+      });
+    });
+
+    await on('bpResultError', () => {
+      this.opts?.onDeviceEvent?.({
+        type: 'bp_error',
+        reason: 'bp_result_error',
+      });
+    });
+
+    await on('bpLeakError', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      const errorType = Number(data?.errorType);
+      this.opts?.onDeviceEvent?.({
+        type: 'bp_error',
+        reason:
+          errorType === 0
+            ? 'cuff_leak_or_air_path_issue'
+            : errorType === 1
+              ? 'motion_or_noisy_measurement'
+              : 'bp_leak_error',
+      });
+    });
+  }
 
   async connect(opts: BridgeOpts) {
     this.opts = opts;
-    this.ctrlStart = opts.ctrlOverride?.start ?? DEFAULT_START;
-    this.ctrlStop  = opts.ctrlOverride?.stop ?? DEFAULT_STOP;
 
-    this.conn = await connectBle(DEVICE_ID);
+    if (this.nativeMode) {
+      this.nativeSeenMacs.clear();
+      this.nativeConnectIssued = false;
+      this.nativeConnected = false;
+      this.nativeScanStarted = false;
+      this.resetBpBootstrap();
+      this.resetSpo2State();
+      this.resetTempState();
+      this.resetGlucoseState();
+      this.resetEcgState();
 
-    // Battery (read once if available)
-    try {
-      const battChar = this.conn.chars.get('batt');
-      let pct: number | null = null;
-      if (battChar) {
-        const v = await battChar.readValue();
-        pct = v.getUint8(0);
-      }
-      this.telemetry({ connected: true, batteryPct: pct, rssi: null });
-    } catch {
-      this.telemetry({ connected: true, batteryPct: null, rssi: null });
+      await this.bindNativeAndroid();
+      await NativeHealthMonitor.askPermissions();
+      await NativeHealthMonitor.setMeasurePosition({ wrist: false });
+      await NativeHealthMonitor.startScan();
+      this.nativeScanStarted = true;
+      this.telemetry({ connected: false, batteryPct: null, rssi: null });
+      return;
     }
 
-    // Subscribe optional SIG HR (some OEM builds also broadcast this)
-    if (this.conn.chars.get('hr')) {
-      this.unsub.push(await subscribe(this.conn, 'hr', async (dv) => {
-        const p = parseHRMeasurement(dv);
-        if (!p) return;
-        await this.opts.emitVital({
-          type: 'heart_rate',
-          recorded_at: new Date().toISOString(),
-          deviceId: DEVICE_ID,
-          payload: { hr: p.hr, unit: 'bpm' },
-          meta: { contactDetected: p.contactDetected, energyExpended: p.energyExpended, source: 'ble' },
-          dedupeKey: 'hr',
-        });
-      }));
-    }
-
-    // Subscribe optional SIG BP spot
-    if (this.conn.chars.get('bp')) {
-      this.unsub.push(await subscribe(this.conn, 'bp', async (dv) => {
-        const p = parseBPMeasurement(dv);
-        if (!p) return;
-        await this.opts.emitVital({
-          type: 'blood_pressure',
-          recorded_at: new Date().toISOString(),
-          deviceId: DEVICE_ID,
-          payload: { systolic: p.systolic, diastolic: p.diastolic, unit: p.unit },
-          meta: { source: 'ble' },
-          dedupeKey: 'bp',
-        });
-      }));
-    }
-
-    // Subscribe thermometer confirm (optional)
-    if (this.conn.chars.get('therm_confirm')) {
-      this.unsub.push(await subscribe(this.conn, 'therm_confirm', async (_dv) => {
-        // Some firmwares emit a short confirm packet here before temp frames
-        // No-op; kept for debugging/logging if needed
-      }));
-    }
-
-    // Fallback spot notifies for temp/glucose if present on your HW
-    if (this.conn.chars.get('temp')) {
-      this.unsub.push(await subscribe(this.conn, 'temp', async (dv) => {
-        const p = parseVendorTemp(dv);
-        if (!p) return;
-        await this.opts.emitVital({
-          type: 'temperature',
-          recorded_at: new Date().toISOString(),
-          deviceId: DEVICE_ID,
-          payload: { celsius: p.celsius, fahrenheit: p.fahrenheit, unit: 'C' },
-          meta: { source: 'ble' },
-        });
-      }));
-    }
-    if (this.conn.chars.get('glucose')) {
-      this.unsub.push(await subscribe(this.conn, 'glucose', async (dv) => {
-        const p = parseVendorGlucose(dv);
-        if (!p) return;
-        await this.opts.emitVital({
-          type: 'blood_glucose',
-          recorded_at: new Date().toISOString(),
-          deviceId: DEVICE_ID,
-          payload: { glucose: p.glucose, unit: p.unit },
-          meta: { source: 'ble' },
-        });
-      }));
-    }
-
-    // ---------- Single vendor notify stream (multiplexed) ----------
-    if (this.conn.chars.get('vendor_notify')) {
-      this.unsub.push(await subscribe(this.conn, 'vendor_notify', async (dv) => {
-        // Some firmwares prepend a type byte; keep heuristic resilient:
-        let view = dv;
-        if (dv.byteLength > 4) {
-          // If first byte looks like a small tag and the rest is plausible data, trim it
-          const first = dv.getUint8(0);
-          const restLen = dv.byteLength - 1;
-          const divisible = (restLen % 2 === 0) || (restLen % 3 === 0);
-          if (first <= 0x0F && divisible) {
-            view = new DataView(dv.buffer, dv.byteOffset + 1, dv.byteLength - 1);
-          }
-        }
-
-        const guess = autodetectECGorPPG(view);
-        if (!guess) return;
-
-        if (guess.kind === 'ecg') {
-          window.dispatchEvent(new CustomEvent('iomt:ecg', { detail: guess.chunk }));
-        } else if (guess.kind === 'ppg') {
-          window.dispatchEvent(new CustomEvent('iomt:ppg', { detail: guess.chunk }));
-        }
-      }));
-    }
-
-    // Let the app know device appeared (pills etc.)
+    this.conn = await connectDevice(DEVICE_ID);
+    this.resolveAvailableCharacteristics();
+    await this.bindBattery();
+    await this.bindDataChannels();
     this.telemetry({ connected: true });
   }
 
+  private resolveAvailableCharacteristics() {
+    if (!this.conn) return;
+
+    const chars = this.conn.chars;
+    const has = (k: string) => !!chars?.get?.(k);
+
+    const controlCandidates = [
+      'vendor_ctrl',
+      'ctrl',
+      'write',
+      'command',
+      'tx',
+      'uart_tx',
+    ];
+
+    const notifyCandidates = [
+      'vendor_notify',
+      'temp',
+      'glucose',
+      'therm_confirm',
+      'notify',
+      'rx',
+      'uart_rx',
+      'vendor_rx',
+    ];
+
+    const batteryCandidates = ['batt', 'battery'];
+
+    this.controlCharKey = controlCandidates.find(has) ?? null;
+    this.notifyCharKeys = notifyCandidates.filter(has);
+    this.batteryCharKey = batteryCandidates.find(has) ?? null;
+
+    if (typeof window !== 'undefined') {
+      const available = Array.from(chars?.keys?.() ?? []);
+      console.info('[HealthMonitorBridge] available chars:', available);
+      console.info('[HealthMonitorBridge] controlCharKey:', this.controlCharKey);
+      console.info('[HealthMonitorBridge] notifyCharKeys:', this.notifyCharKeys);
+      console.info('[HealthMonitorBridge] batteryCharKey:', this.batteryCharKey);
+    }
+  }
+
+  private async bindBattery() {
+    if (!this.conn || !this.batteryCharKey) {
+      this.telemetry({ connected: true, batteryPct: null, rssi: null });
+      return;
+    }
+
+    try {
+      const battChar = this.conn.chars?.get?.(this.batteryCharKey);
+      if (battChar && 'readValue' in battChar && typeof battChar.readValue === 'function') {
+        const v = await battChar.readValue();
+        const pct = v.getUint8(0);
+        if (pct >= 0 && pct <= 100) {
+          this.telemetry({ connected: true, batteryPct: pct, rssi: null });
+          return;
+        }
+      }
+    } catch {}
+
+    this.telemetry({ connected: true, batteryPct: null, rssi: null });
+  }
+
+  private async bindDataChannels() {
+    if (!this.conn) return;
+
+    const subscribe = this.conn.subscribe?.bind(this.conn);
+    if (!subscribe) {
+      throw new Error('HealthMonitorBridge requires a connection object with subscribe(charKey, cb)');
+    }
+
+    const uniqueKeys = Array.from(new Set(this.notifyCharKeys));
+
+    for (const charKey of uniqueKeys) {
+      try {
+        const off = await subscribe(charKey, async (dv: DataView) => {
+          await this.handleIncoming(charKey, dv);
+        });
+        this.unsub.push(off);
+      } catch (err) {
+        console.warn(`[HealthMonitorBridge] subscribe failed for ${charKey}`, err);
+      }
+    }
+  }
+
+  private dvToU8(dv: DataView): Uint8Array {
+    return new Uint8Array(dv.buffer, dv.byteOffset, dv.byteLength);
+  }
+
+  private u8ToDv(u8: Uint8Array): DataView {
+    return new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  }
+
+  private clearBpSilenceTimer() {
+    if (this.bpSilenceTimer) {
+      clearTimeout(this.bpSilenceTimer);
+      this.bpSilenceTimer = null;
+    }
+  }
+
+  private clearBpPostCycleTimer() {
+    if (this.bpPostCycleTimer) {
+      clearTimeout(this.bpPostCycleTimer);
+      this.bpPostCycleTimer = null;
+    }
+  }
+
+  private clearBpTimers() {
+    for (const t of this.bpFallbackTimers.splice(0)) {
+      clearTimeout(t);
+    }
+    this.clearBpSilenceTimer();
+    this.clearBpPostCycleTimer();
+  }
+
+  private resetBpBootstrap() {
+    this.clearBpTimers();
+    this.bpStage = 'idle';
+    this.bpPressureFrames = 0;
+    this.bpPressureSamplesSeen = 0;
+    this.bpPressureTestStarted = false;
+    this.bpPumpStartIssued = false;
+    this.bpLastPressureAt = 0;
+    this.bpLatestPressure = null;
+    this.bpPeakPressure = null;
+    this.bpCompletionEmitted = false;
+    this.resetBpAlgo();
+  }
+
+  private scheduleBpFallbackChain() {
+    this.clearBpTimers();
+
+    this.bpFallbackTimers.push(
+      setTimeout(() => {
+        if (this.mode !== 'bp') return;
+        if (this.bpStage === 'read_calibration') {
+          this.bpStage = 'temp_compensate';
+          void this.sendControl('bp_temp_compensate').catch((err) => {
+            console.warn('[HealthMonitorBridge] fallback bp_temp_compensate failed', err);
+          });
+        }
+      }, 300),
+    );
+
+    this.bpFallbackTimers.push(
+      setTimeout(() => {
+        if (this.mode !== 'bp') return;
+        if (this.bpStage === 'temp_compensate' || this.bpStage === 'read_calibration') {
+          this.bpStage = 'pressure_zero';
+          void this.sendControl('bp_get_pressure_zero').catch((err) => {
+            console.warn('[HealthMonitorBridge] fallback bp_get_pressure_zero failed', err);
+          });
+        }
+      }, 650),
+    );
+
+    this.bpFallbackTimers.push(
+      setTimeout(() => {
+        if (this.mode !== 'bp') return;
+        if (
+          this.bpStage === 'pressure_zero' ||
+          this.bpStage === 'pressure_stream' ||
+          this.bpStage === 'temp_compensate'
+        ) {
+          this.bpStage = 'pressure_test';
+          this.bpPressureTestStarted = true;
+          void this.sendControl('bp_start_pressure_test').catch((err) => {
+            console.warn('[HealthMonitorBridge] fallback bp_start_pressure_test failed', err);
+          });
+        }
+      }, 1100),
+    );
+
+    this.bpFallbackTimers.push(
+      setTimeout(() => {
+        if (this.mode !== 'bp') return;
+        if (!this.bpPumpStartIssued) {
+          this.bpPumpStartIssued = true;
+          this.bpStage = 'pump_started';
+          void this.sendControl('bp_start_pwm_arm').catch((err) => {
+            console.warn('[HealthMonitorBridge] fallback bp_start_pwm_arm failed', err);
+          });
+        }
+      }, 1450),
+    );
+  }
+
+  private parseBpPressureSamples(payload: Uint8Array): number[] {
+    if (!payload || payload.length < 11) return [];
+    if ((payload[0] & 0xff) !== 0x03) return [];
+
+    const out: number[] = [];
+    for (let i = 0; i < 5; i++) {
+      const byteIndex = 1 + i * 2;
+      const v = ((payload[byteIndex] & 0xff) << 8) | (payload[byteIndex + 1] & 0xff);
+      out.push(v);
+    }
+    return out;
+  }
+
+  private dispatchBpPressure(samples: number[], payload: Uint8Array) {
+    if (typeof window === 'undefined' || samples.length === 0) return;
+
+    window.dispatchEvent(
+      new CustomEvent('iomt:bp_pressure', {
+        detail: {
+          deviceId: DEVICE_ID,
+          timestamp: new Date().toISOString(),
+          latestPressure: samples[samples.length - 1] ?? null,
+          peakPressure: this.bpPeakPressure,
+          samples,
+          raw: Array.from(payload),
+          pressureFrames: this.bpPressureFrames,
+          pressureSamplesSeen: this.bpPressureSamplesSeen,
+          stage: this.bpStage,
+          beatCount: this.bpAlgo.beatIndices.length,
+        },
+      }),
+    );
+  }
+
+  private noteBpPressureActivity(samples: number[]) {
+    if (samples.length === 0) return;
+
+    this.bpLastPressureAt = Date.now();
+    this.bpLatestPressure = samples[samples.length - 1] ?? null;
+
+    for (const v of samples) {
+      if (this.bpPeakPressure == null || v > this.bpPeakPressure) {
+        this.bpPeakPressure = v;
+      }
+    }
+
+    this.clearBpSilenceTimer();
+    this.bpSilenceTimer = setTimeout(() => {
+      void this.handleBpSilenceCompletion();
+    }, BP_SILENCE_COMPLETE_MS);
+  }
+
+  private async handleBpSilenceCompletion() {
+    if (this.mode !== 'bp') return;
+    if (this.bpCompletionEmitted) return;
+
+    const now = Date.now();
+    const quietFor = now - this.bpLastPressureAt;
+
+    if (quietFor < BP_SILENCE_COMPLETE_MS - 100) return;
+
+    const enoughSignal =
+      this.bpPressureFrames >= BP_MIN_PRESSURE_FRAMES_FOR_COMPLETE ||
+      this.bpPressureSamplesSeen >= BP_MIN_PRESSURE_SAMPLES_FOR_COMPLETE;
+
+    if (!enoughSignal) return;
+
+    console.info('[HealthMonitorBridge] BP cycle silence-complete (native-like finalize)', {
+      pressureFrames: this.bpPressureFrames,
+      pressureSamplesSeen: this.bpPressureSamplesSeen,
+      latestPressure: this.bpLatestPressure,
+      peakPressure: this.bpPeakPressure,
+      quietFor,
+      waitMs: BP_POST_CYCLE_RESULT_WAIT_MS,
+      algoSamples: this.bpAlgo.scaledPressures.length,
+    });
+
+    this.clearBpPostCycleTimer();
+    this.bpPostCycleTimer = setTimeout(() => {
+      void this.finalizeBpAndEmit('silence_after_pressure');
+    }, BP_POST_CYCLE_RESULT_WAIT_MS);
+  }
+
+  private async finishBpCycle(reason: BpCycleReason) {
+    if (this.bpCompletionEmitted) return;
+    this.bpCompletionEmitted = true;
+
+    this.clearBpTimers();
+
+    if (!this.nativeMode && this.controlCharKey && this.mode === 'bp') {
+      await this.sendStopCommandForMode('bp', `finishBpCycle:${reason}`, {
+        respectCooldown: reason === 'manual_stop',
+      });
+    }
+
+    this.opts?.onDeviceEvent?.({
+      type: 'bp_cycle_complete',
+      reason,
+      pressureFrames: this.bpPressureFrames,
+      pressureSamplesSeen: this.bpPressureSamplesSeen,
+      latestPressure: this.bpLatestPressure,
+      peakPressure: this.bpPeakPressure,
+    });
+
+    this.resetBpBootstrap();
+    this.mode = 'idle';
+  }
+
+  private async finishSpo2Cycle(reason: GenericCycleReason) {
+    if (this.spo2State.completionEmitted) return;
+    this.spo2State.completionEmitted = true;
+
+    if (!this.nativeMode && this.mode === 'spo2') {
+      await this.sendStopCommandForMode('spo2', `finishSpo2Cycle:${reason}`, {
+        respectCooldown: reason === 'manual_stop',
+      });
+    }
+
+    this.opts?.onDeviceEvent?.({
+      type: 'spo2_cycle_complete',
+      reason,
+      ppgFrames: this.spo2PpgFrames,
+      spo2: this.spo2LastSpo2,
+      pulse: this.spo2LastPulse,
+    });
+
+    this.resetSpo2State();
+    this.mode = 'idle';
+  }
+
+  private async finishTempCycle(reason: GenericCycleReason) {
+    if (this.tempState.completionEmitted) return;
+    this.tempState.completionEmitted = true;
+
+    if (!this.nativeMode && this.mode === 'temp') {
+      await this.sendStopCommandForMode('temp', `finishTempCycle:${reason}`, {
+        respectCooldown: reason === 'manual_stop',
+      });
+    }
+
+    this.opts?.onDeviceEvent?.({
+      type: 'temp_cycle_complete',
+      reason,
+      celsius: this.tempLastCelsius,
+      fahrenheit: this.tempLastFahrenheit,
+    });
+
+    this.resetTempState();
+    this.mode = 'idle';
+  }
+
+  private async finishGlucoseCycle(reason: GenericCycleReason) {
+    if (this.glucoseState.completionEmitted) return;
+    this.glucoseState.completionEmitted = true;
+
+    if (!this.nativeMode && this.mode === 'glucose') {
+      await this.sendStopCommandForMode('glucose', `finishGlucoseCycle:${reason}`, {
+        respectCooldown: reason === 'manual_stop',
+      });
+    }
+
+    this.opts?.onDeviceEvent?.({
+      type: 'glucose_cycle_complete',
+      reason,
+      glucose: this.glucoseLastValue,
+      unit: this.glucoseLastUnit,
+    });
+
+    this.resetGlucoseState();
+    this.mode = 'idle';
+  }
+
+  private async finishEcgCycle(reason: GenericCycleReason) {
+    if (this.ecgState.completionEmitted) return;
+    this.ecgState.completionEmitted = true;
+
+    if (!this.nativeMode && this.mode === 'ecg') {
+      await this.sendStopCommandForMode('ecg', `finishEcgCycle:${reason}`, {
+        respectCooldown: reason === 'manual_stop',
+      });
+    }
+
+    const normalizedReason: GenericCycleReason =
+      reason === 'manual_stop' && this.ecgSampleCount > 0 ? 'result_received' : reason;
+
+    this.opts?.onDeviceEvent?.({
+      type: 'ecg_cycle_complete',
+      reason: normalizedReason,
+      sampleCount: this.ecgSampleCount,
+      signalQuality: this.ecgSignalQuality,
+    });
+
+    this.resetEcgState();
+    this.mode = 'idle';
+  }
+
+  private async handleBpBootstrapPayload(payload: Uint8Array) {
+    if (payload.length < 1) return;
+
+    const code = payload[0] & 0xff;
+
+    console.info('[HealthMonitorBridge] BP bootstrap payload', {
+      code,
+      stage: this.bpStage,
+      payload: Array.from(payload),
+    });
+
+    if (code === 1) {
+      this.bpAlgo.calibration = this.parseBpCalibrationParams(payload);
+
+      if (this.bpStage === 'read_calibration' || this.bpStage === 'idle') {
+        this.bpStage = 'temp_compensate';
+        await this.sendControl('bp_temp_compensate');
+      }
+      return;
+    }
+
+    if (code === 2) {
+      this.bpAlgo.tempCompRaw = this.parseBpTempCompRaw(payload);
+
+      if (
+        this.bpStage === 'temp_compensate' ||
+        this.bpStage === 'read_calibration' ||
+        this.bpStage === 'idle'
+      ) {
+        this.bpStage = 'pressure_zero';
+        this.bpPressureFrames = 0;
+        this.bpPressureSamplesSeen = 0;
+        await this.sendControl('bp_get_pressure_zero');
+      }
+      return;
+    }
+
+    if (code !== 3) {
+      return;
+    }
+
+    const rawSamples = this.parseBpPressureSamples(payload);
+    const samplesInFrame = rawSamples.length;
+
+    if (samplesInFrame > 0) {
+      const scaledSamples = this.convertRawBpSamplesToPseudoMmHg(rawSamples);
+
+      this.bpAlgo.rawSamples.push(...rawSamples);
+      this.bpAlgo.scaledPressures.push(...scaledSamples);
+
+      this.bpPressureFrames += 1;
+      this.bpPressureSamplesSeen += samplesInFrame;
+      this.noteBpPressureActivity(scaledSamples);
+      this.dispatchBpPressure(scaledSamples, payload);
+    }
+
+    if (this.bpStage === 'pressure_zero') {
+      this.bpStage = 'pressure_stream';
+    }
+
+    if (!this.bpPressureTestStarted && this.bpPressureSamplesSeen >= 30) {
+      this.bpPressureTestStarted = true;
+      this.bpStage = 'pressure_test';
+      await this.sendControl('bp_start_pressure_test');
+      return;
+    }
+
+    if (this.bpPressureTestStarted && !this.bpPumpStartIssued) {
+      this.bpPumpStartIssued = true;
+      this.bpStage = 'pump_started';
+      await this.sendControl('bp_start_pwm_arm');
+    }
+  }
+
+  private async routeOnePayload(
+    sourceChar: string,
+    payloadU8: Uint8Array,
+    moduleId?: number,
+  ) {
+    if (typeof moduleId === 'number' && moduleId === LINKTOP_MODULE_STATUS) {
+      console.info('[HealthMonitorBridge] status frame', {
+        sourceChar,
+        payload: Array.from(payloadU8),
+        mode: this.mode,
+      });
+      return;
+    }
+
+    if (typeof moduleId === 'number' && moduleId === LINKTOP_MODULE_BP) {
+      const code = payloadU8[0] & 0xff;
+      if (code === 1 || code === 2 || code === 3) {
+        if (this.mode === 'bp') {
+          await this.handleBpBootstrapPayload(payloadU8);
+        }
+        return;
+      }
+    }
+
+    if (
+      typeof moduleId !== 'number' &&
+      this.mode === 'bp' &&
+      sourceChar === 'vendor_notify' &&
+      payloadU8.length > 0
+    ) {
+      const code = payloadU8[0] & 0xff;
+      if (code === 1 || code === 2 || code === 3) {
+        await this.handleBpBootstrapPayload(payloadU8);
+        return;
+      }
+    }
+
+    if (this.mode === 'temp' && typeof moduleId === 'number') {
+      const handled = await this.handleTempBtPayload(payloadU8);
+      if (handled) return;
+    }
+
+    if (this.mode === 'temp' && sourceChar === 'temp' && payloadU8.length >= 8) {
+      const handled = await this.handleTempBtPayload(payloadU8);
+      if (handled) return;
+    }
+
+    const routedDv = this.u8ToDv(payloadU8);
+    let routedCharKey = sourceChar;
+
+    if (typeof moduleId === 'number') {
+      if (moduleId === LINKTOP_MODULE_BT) routedCharKey = 'temp';
+      else if (moduleId === LINKTOP_MODULE_TEST_PAPER) routedCharKey = 'glucose';
+      else routedCharKey = 'vendor_notify';
+    }
+
+    const { route, result } = routeAndDecodeLinktop(routedDv, {
+      sourceChar: routedCharKey,
+      mode: this.mode,
+    });
+
+    if (!this.shouldAcceptDecodedKind(result.kind)) {
+      console.info('[HealthMonitorBridge] ignored decoded payload for current mode', {
+        mode: this.mode,
+        sourceChar,
+        routedCharKey,
+        kind: result.kind,
+        payload: Array.from(payloadU8),
+      });
+      return;
+    }
+
+    const recordedAt = new Date().toISOString();
+
+    switch (result.kind) {
+      case 'bp_result': {
+        await this.opts.emitVital({
+          type: 'blood_pressure',
+          recorded_at: recordedAt,
+          deviceId: DEVICE_ID,
+          payload: {
+            systolic: result.systolic,
+            diastolic: result.diastolic,
+            pulse: result.pulse ?? null,
+            map: result.map ?? null,
+            unit: 'mmHg',
+          },
+          meta: {
+            source: 'ble',
+            route: route.channel,
+            irregular: result.irregular ?? false,
+          },
+        });
+
+        if (typeof result.pulse === 'number') {
+          await this.opts.emitVital({
+            type: 'heart_rate',
+            recorded_at: recordedAt,
+            deviceId: DEVICE_ID,
+            payload: {
+              hr: result.pulse,
+              unit: 'bpm',
+            },
+            meta: {
+              source: 'ble',
+              parent: 'blood_pressure',
+              authoritative: false,
+              route: route.channel,
+            },
+            dedupeKey: 'hr',
+          });
+        }
+
+        this.opts?.onDeviceEvent?.({
+          type: 'bp_result',
+          systolic: result.systolic,
+          diastolic: result.diastolic,
+          pulse: result.pulse ?? null,
+          map: result.map ?? null,
+        });
+
+        if (this.mode === 'bp') {
+          await this.finishBpCycle('bp_result_received');
+        }
+        break;
+      }
+
+      case 'spo2_result': {
+        this.noteGenericSignal(this.spo2State);
+
+        const validSpo2 = typeof result.spo2 === 'number' && result.spo2 > 0;
+
+const pulseValue =
+  typeof result.pulse === 'number' && result.pulse > 0
+    ? result.pulse
+    : null;
+
+const validPulse = pulseValue !== null;
+
+this.spo2LastSpo2 = validSpo2 ? result.spo2 : null;
+this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
+
+        await this.opts.emitVital({
+          type: 'spo2',
+          recorded_at: recordedAt,
+          deviceId: DEVICE_ID,
+          payload: {
+            spo2: result.spo2,
+            pulse: result.pulse ?? null,
+            unit: '%',
+          },
+          meta: {
+            source: 'ble',
+            route: route.channel,
+          },
+        });
+
+        if (validPulse) {
+          await this.opts.emitVital({
+            type: 'heart_rate',
+            recorded_at: recordedAt,
+            deviceId: DEVICE_ID,
+            payload: {
+              hr: result.pulse,
+              unit: 'bpm',
+            },
+            meta: {
+              source: 'ble',
+              parent: 'spo2',
+              authoritative: false,
+              route: route.channel,
+            },
+            dedupeKey: 'hr',
+          });
+        }
+
+        this.opts?.onDeviceEvent?.({
+          type: 'spo2_result',
+          spo2: validSpo2 ? result.spo2 : null,
+          pulse: validPulse ? result.pulse : null,
+          pi: result.pi ?? null,
+        });
+
+        if (validSpo2) {
+          await this.finishSpo2Cycle('result_received');
+        }
+        break;
+      }
+
+      case 'temperature_result': {
+        this.noteGenericSignal(this.tempState);
+        this.tempLastCelsius = result.celsius;
+        this.tempLastFahrenheit = result.fahrenheit ?? null;
+
+        await this.opts.emitVital({
+          type: 'temperature',
+          recorded_at: recordedAt,
+          deviceId: DEVICE_ID,
+          payload: {
+            celsius: result.celsius,
+            fahrenheit: result.fahrenheit ?? null,
+            unit: 'C',
+          },
+          meta: {
+            source: 'ble',
+            route: route.channel,
+          },
+        });
+
+        this.opts?.onDeviceEvent?.({
+          type: 'temp_result',
+          celsius: result.celsius,
+          fahrenheit: result.fahrenheit ?? null,
+        });
+
+        await this.finishTempCycle('result_received');
+        break;
+      }
+
+      case 'glucose_result': {
+        this.noteGenericSignal(this.glucoseState);
+        this.glucoseLastValue = result.glucose;
+        this.glucoseLastUnit = result.unit;
+
+        await this.opts.emitVital({
+          type: 'blood_glucose',
+          recorded_at: recordedAt,
+          deviceId: DEVICE_ID,
+          payload: {
+            glucose: result.glucose,
+            unit: result.unit,
+          },
+          meta: {
+            source: 'ble',
+            route: route.channel,
+          },
+        });
+
+        this.opts?.onDeviceEvent?.({
+          type: 'glucose_result',
+          glucose: result.glucose,
+          unit: result.unit,
+        });
+
+        await this.finishGlucoseCycle('result_received');
+        break;
+      }
+
+      case 'battery': {
+        if (sourceChar === 'batt' || sourceChar === 'battery') {
+          this.telemetry({
+            connected: true,
+            batteryPct: result.percent,
+            rssi: null,
+          });
+        }
+        break;
+      }
+
+      case 'ecg_wave': {
+        this.ecgSampleCount += result.samples.length;
+        this.noteGenericSignal(this.ecgState, ECG_IDLE_STOP_MS, () => {
+          void this.finishEcgCycle(
+            this.ecgSampleCount > 0 ? 'result_received' : 'signal_detected_no_result',
+          );
+        });
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('iomt:ecg', {
+              detail: {
+                deviceId: DEVICE_ID,
+                timestamp: recordedAt,
+                sampleHz: result.sampleHz,
+                samples: result.samples,
+                raw: Array.from(result.raw),
+              },
+            }),
+          );
+        }
+        break;
+      }
+
+      case 'ppg_wave': {
+        this.noteGenericSignal(this.spo2State);
+        this.spo2PpgFrames += 1;
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('iomt:ppg', {
+              detail: {
+                deviceId: DEVICE_ID,
+                timestamp: recordedAt,
+                sampleHz: result.sampleHz,
+                samples: result.samples,
+                raw: Array.from(result.raw),
+              },
+            }),
+          );
+        }
+        break;
+      }
+
+      case 'ack':
+      case 'unknown':
+      default:
+        break;
+    }
+  }
+
+  private async handleIncoming(charKey: string, dv: DataView) {
+    const raw = this.dvToU8(dv);
+
+    console.info('[HealthMonitorBridge] notify', {
+      charKey,
+      len: raw.length,
+      raw: Array.from(raw),
+    });
+
+    const exact = parseLinktopFrame(raw);
+    if (exact) {
+      console.info('[HealthMonitorBridge] parsed exact frame', {
+        charKey,
+        offset: exact.offset,
+        frameStart: exact.frameStart,
+        rawModuleId: exact.rawModuleId,
+        moduleId: exact.moduleId,
+        payload: Array.from(exact.payload),
+      });
+      await this.routeOnePayload(charKey, exact.payload, exact.moduleId);
+      return;
+    }
+
+    const scanned = extractLinktopFrames(raw);
+    if (scanned.length > 0) {
+      console.info(
+        '[HealthMonitorBridge] scanned frames',
+        scanned.map((frame) => ({
+          charKey,
+          offset: frame.offset,
+          frameStart: frame.frameStart,
+          rawModuleId: frame.rawModuleId,
+          moduleId: frame.moduleId,
+          payload: Array.from(frame.payload),
+        })),
+      );
+
+      for (const frame of scanned) {
+        await this.routeOnePayload(charKey, frame.payload, frame.moduleId);
+      }
+      return;
+    }
+
+    await this.routeOnePayload(charKey, raw);
+  }
+
+  private async sendControl(op: LinktopControlOp) {
+    if (!this.conn) throw new Error('Health monitor not connected');
+
+    if (!this.controlCharKey) {
+      throw new Error(
+        `No writable control characteristic found. Available chars: ${Array.from(
+          this.conn.chars?.keys?.() ?? [],
+        ).join(', ')}`,
+      );
+    }
+
+    const bytes = buildLinktopCtrl(op);
+
+    console.info('[HealthMonitorBridge] sendControl', {
+      op,
+      controlCharKey: this.controlCharKey,
+      mode: this.mode,
+      bytes: Array.from(bytes),
+    });
+
+    await this.conn.write(this.controlCharKey, bytes);
+  }
+
+  async startBloodPressure() {
+    console.info('[HealthMonitorBridge] bp_runtime_signature', this.bpRuntimeSignature, {
+      BP_MIN_BEAT_GAP_SAMPLES,
+      BP_ENVELOPE_SMOOTH_WINDOW,
+      BP_MIN_ENVELOPE_AMPLITUDE,
+      BP_MIN_ENVELOPE_RELATIVE,
+    });
+
+    if (this.nativeMode) {
+      this.mode = 'bp';
+      this.resetBpBootstrap();
+      await NativeHealthMonitor.setMeasurePosition({ wrist: this.bpMeasureWrist });
+      await NativeHealthMonitor.startMeasurements();
+      return;
+    }
+
+    await this.prepareForModeStart('bp');
+
+    this.mode = 'bp';
+    this.resetBpBootstrap();
+    this.bpStage = 'read_calibration';
+    await this.sendControl('start_bp');
+    this.scheduleBpFallbackChain();
+  }
+
+  async stopBloodPressure() {
+    if (this.nativeMode) {
+      await NativeHealthMonitor.stopMeasurements();
+      this.mode = 'idle';
+      return;
+    }
+
+    await this.finishBpCycle('manual_stop');
+  }
+
+  async startSpo2() {
+    this.assertNativeSupports('spo2');
+
+    await this.prepareForModeStart('spo2');
+
+    this.mode = 'spo2';
+    this.resetSpo2State();
+    this.startGenericTimeout(this.spo2State, SPO2_TIMEOUT_MS, () => {
+      void this.finishSpo2Cycle(
+        this.spo2PpgFrames > 0 || this.spo2LastPulse != null
+          ? 'signal_detected_no_result'
+          : 'timeout',
+      );
+    });
+    await this.sendControl('start_spo2');
+  }
+
+  async stopSpo2() {
+    await this.finishSpo2Cycle('manual_stop');
+  }
+
+  async startEcg() {
+    this.assertNativeSupports('ecg');
+
+    await this.prepareForModeStart('ecg');
+
+    this.mode = 'ecg';
+    this.resetEcgState();
+    this.startGenericTimeout(this.ecgState, ECG_TIMEOUT_MS, () => {
+      void this.finishEcgCycle(this.ecgSampleCount > 0 ? 'signal_detected_no_result' : 'timeout');
+    });
+    await this.sendControl('start_ecg');
+  }
+
+  async stopEcg() {
+    await this.finishEcgCycle('manual_stop');
+  }
+
+  async startTemperature() {
+    this.assertNativeSupports('temp');
+
+    await this.prepareForModeStart('temp');
+
+    this.mode = 'temp';
+    this.resetTempState();
+    this.startGenericTimeout(this.tempState, TEMP_TIMEOUT_MS, () => {
+      void this.finishTempCycle(this.tempLastCelsius != null ? 'signal_detected_no_result' : 'timeout');
+    });
+    await this.sendControl('start_temp');
+  }
+
+  async stopTemperature() {
+    await this.finishTempCycle('manual_stop');
+  }
+
+  async startGlucose() {
+    this.assertNativeSupports('glucose');
+
+    await this.prepareForModeStart('glucose');
+
+    this.mode = 'glucose';
+    this.resetGlucoseState();
+    this.startGenericTimeout(this.glucoseState, GLUCOSE_TIMEOUT_MS, () => {
+      void this.finishGlucoseCycle(this.glucoseLastValue != null ? 'signal_detected_no_result' : 'timeout');
+    });
+    await this.sendControl('start_glucose');
+  }
+
+  async stopGlucose() {
+    await this.finishGlucoseCycle('manual_stop');
+  }
+
   async startStreaming() {
-    const ctrl = this.conn?.chars.get('vendor_ctrl');
-    if (!ctrl) return;
-    await this.conn!.write('vendor_ctrl', this.ctrlStart);
+    switch (this.mode) {
+      case 'ecg':
+        await this.startEcg();
+        return;
+      case 'spo2':
+        await this.startSpo2();
+        return;
+      case 'bp':
+        await this.startBloodPressure();
+        return;
+      case 'temp':
+        await this.startTemperature();
+        return;
+      case 'glucose':
+        await this.startGlucose();
+        return;
+      case 'idle':
+      default:
+        if (!this.controlCharKey) {
+          throw new Error(
+            `Health monitor connected, but no control characteristic is available. Available chars: ${Array.from(
+              this.conn?.chars?.keys?.() ?? [],
+            ).join(', ')}`,
+          );
+        }
+        await this.sendControl('noop');
+        return;
+    }
   }
 
   async stopStreaming() {
-    const ctrl = this.conn?.chars.get('vendor_ctrl');
-    if (!ctrl) return;
-    await this.conn!.write('vendor_ctrl', this.ctrlStop);
+    switch (this.mode) {
+      case 'ecg':
+        await this.stopEcg();
+        break;
+      case 'spo2':
+        await this.stopSpo2();
+        break;
+      case 'bp':
+        await this.stopBloodPressure();
+        break;
+      case 'temp':
+        await this.stopTemperature();
+        break;
+      case 'glucose':
+        await this.stopGlucose();
+        break;
+      default:
+        this.mode = 'idle';
+        break;
+    }
   }
 
-  setControlBytes(start?: Uint8Array, stop?: Uint8Array) {
-    if (start) this.ctrlStart = start;
-    if (stop)  this.ctrlStop  = stop;
+  setMode(mode: LinktopMeasurementMode) {
+    this.mode = mode;
+    if (mode !== 'bp') {
+      this.resetBpBootstrap();
+    }
+  }
+
+  setBpMeasurePosition(isWrist: boolean) {
+    this.bpMeasureWrist = isWrist;
+  }
+
+  getMode() {
+    return this.mode;
   }
 
   async disconnect() {
-    for (const u of this.unsub.splice(0)) { try { u(); } catch {} }
-    try { await this.conn?.stopAll(); } catch {}
-    this.telemetry({ connected: false });
+    if (this.nativeMode) {
+      if (this.mode === 'bp' && !this.bpCompletionEmitted) {
+        try {
+          await this.finishBpCycle('device_disconnect');
+        } catch {}
+      }
+
+      try {
+        await NativeHealthMonitor.stopMeasurements();
+      } catch {}
+      try {
+        await NativeHealthMonitor.stopScan();
+      } catch {}
+      try {
+        await NativeHealthMonitor.disconnect();
+      } catch {}
+      await this.clearNativeListeners();
+
+      this.nativeConnected = false;
+      this.nativeScanStarted = false;
+      this.nativeConnectIssued = false;
+      this.nativeSeenMacs.clear();
+      this.mode = 'idle';
+      this.resetBpBootstrap();
+      this.resetSpo2State();
+      this.resetTempState();
+      this.resetGlucoseState();
+      this.resetEcgState();
+      this.telemetry({ connected: false });
+      return;
+    }
+
+    if (this.mode === 'bp' && !this.bpCompletionEmitted) {
+      try {
+        await this.finishBpCycle('device_disconnect');
+      } catch {}
+    } else if (this.mode === 'spo2' && !this.spo2State.completionEmitted) {
+      try {
+        await this.finishSpo2Cycle('device_disconnect');
+      } catch {}
+    } else if (this.mode === 'temp' && !this.tempState.completionEmitted) {
+      try {
+        await this.finishTempCycle('device_disconnect');
+      } catch {}
+    } else if (this.mode === 'glucose' && !this.glucoseState.completionEmitted) {
+      try {
+        await this.finishGlucoseCycle('device_disconnect');
+      } catch {}
+    } else if (this.mode === 'ecg' && !this.ecgState.completionEmitted) {
+      try {
+        await this.finishEcgCycle('device_disconnect');
+      } catch {}
+    } else {
+      this.clearBpTimers();
+      this.resetSpo2State();
+      this.resetTempState();
+      this.resetGlucoseState();
+      this.resetEcgState();
+    }
+
+    for (const u of this.unsub.splice(0)) {
+      try {
+        u();
+      } catch {}
+    }
+
+    try {
+      await this.conn?.stopAll?.();
+    } catch {}
+
     this.conn = null;
+    this.mode = 'idle';
+    this.controlCharKey = null;
+    this.notifyCharKeys = [];
+    this.batteryCharKey = null;
+    this.resetBpBootstrap();
+    this.resetSpo2State();
+    this.resetTempState();
+    this.resetGlucoseState();
+    this.resetEcgState();
+
+    this.telemetry({ connected: false });
   }
 
-  private telemetry(patch: { connected?: boolean; batteryPct?: number | null; rssi?: number | null }) {
+  private telemetry(patch: BridgeStatus) {
     const detail = {
       id: 'duecare-health-monitor',
       name: 'HealthMonitor-001',
@@ -189,7 +2360,11 @@ export class HealthMonitorBridge {
       batteryPct: patch.batteryPct ?? null,
       rssi: patch.rssi ?? null,
     };
-    window.dispatchEvent(new CustomEvent('iomt:telemetry', { detail }));
+
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('iomt:telemetry', { detail }));
+    }
+
     this.opts?.onStatus?.(detail);
   }
 }

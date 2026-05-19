@@ -1,11 +1,14 @@
 'use client';
 
-import clsx from 'clsx';
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
 
 type Vital = { t: string; type: string; value: number; unit?: string };
 type Device = { id: string; vendor?: string; model?: string; lastSeenAt?: string };
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
 
 export default function HoloVitalsOverlay({
   visible,
@@ -18,8 +21,6 @@ export default function HoloVitalsOverlay({
   devices?: Device[];
   corner?: 'tl' | 'tr' | 'bl' | 'br';
 }) {
-  if (!visible) return null;
-
   const latest = useMemo(() => {
     const map = new Map<string, Vital>();
     for (const v of vitals) map.set(v.type, v);
@@ -27,6 +28,8 @@ export default function HoloVitalsOverlay({
       .sort((a, b) => a.type.localeCompare(b.type))
       .slice(0, 6);
   }, [vitals]);
+
+  if (!visible) return null;
 
   const cornerPos = {
     tl: 'top-3 left-3',
@@ -48,7 +51,7 @@ export default function HoloVitalsOverlay({
 
   return (
     <div
-      className={clsx(
+      className={cx(
         'pointer-events-none fixed z-40',
         cornerPos,
         'glass neon holo-grid',

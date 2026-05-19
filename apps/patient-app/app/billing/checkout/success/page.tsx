@@ -20,7 +20,7 @@ function addOneYearISO(from = new Date()) {
   return d.toISOString();
 }
 
-export default function CheckoutSuccessPage() {
+function CheckoutSuccessPageContent() {
   const sp = useSearchParams();
   const orderId = sp?.get('orderId') || '';
   const offer = (sp?.get('offer') || 'bundle_40_free_year') as PremiumOffer;
@@ -163,5 +163,12 @@ export default function CheckoutSuccessPage() {
         </div>
       </div>
     </main>
+  );
+}
+export default function CheckoutSuccessPage() {
+  return (
+    <React.Suspense fallback={null}>
+      <CheckoutSuccessPageContent />
+    </React.Suspense>
   );
 }

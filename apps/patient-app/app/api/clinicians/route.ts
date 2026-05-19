@@ -2,7 +2,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import cleanText from '@/lib/cleanText';
-import { CLINICIANS as MOCK_CLINICIANS } from '@/mock/clinicians';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -10,121 +9,171 @@ export const dynamic = 'force-dynamic';
 const DEFAULT_PAGE = 1;
 const DEFAULT_PER_PAGE = 25;
 
+function json(data: any, status = 200) {
+  return NextResponse.json(data, { status });
+}
+
+function safeNumber(value: unknown, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 function mapOut(c: any) {
   return {
-    id: c.id,
+    id: String(c.id ?? ''),
     name: cleanText(c.displayName ?? c.name ?? ''),
     specialty: cleanText(c.specialty ?? ''),
     location: cleanText(c.meta?.location ?? c.city ?? c.location ?? ''),
-    cls: c.cls ?? 'Doctor',
+    cls: c.cls ?? c.meta?.class ?? 'Doctor',
     gender: c.gender ?? null,
-    priceZAR: c.feeCents ? Math.round((c.feeCents ?? 0) / 100) : undefined,
+    priceZAR:
+      typeof c.feeCents === 'number'
+        ? Math.round(c.feeCents / 100)
+        : typeof c.priceZAR === 'number'
+          ? c.priceZAR
+          : undefined,
+    priceCents: typeof c.feeCents === 'number' ? c.feeCents : undefined,
+    currency: c.currency ?? 'ZAR',
     rating: typeof c.rating === 'number' ? c.rating : 0,
+    ratingCount:
+      typeof c.ratingCount === 'number'
+        ? c.ratingCount
+        : typeof c.ratingsCount === 'number'
+          ? c.ratingsCount
+          : undefined,
     online: Boolean(c.online),
     lastBookedAt: c.lastBookedAt ? +new Date(c.lastBookedAt) : null,
     lastSeenAt: c.lastSeenAt ? +new Date(c.lastSeenAt) : null,
     onlineSeq: c.onlineSeq ?? null,
     recentBookedCount: c.recentBookedCount ?? 0,
-    meta: c.meta ?? {},
-
-    // surfaced for debugging / future tools
     status: c.status ?? null,
     disabled: Boolean(c.disabled),
     archived: Boolean(c.archived),
+    acceptsMedicalAid:
+      typeof c.acceptsMedicalAid === 'boolean'
+        ? c.acceptsMedicalAid
+        : Boolean(c.meta?.acceptsMedicalAid),
+    acceptedSchemes: Array.isArray(c.acceptedSchemes)
+      ? c.acceptedSchemes
+      : Array.isArray(c.meta?.acceptedSchemes)
+        ? c.meta.acceptedSchemes
+        : [],
+    practiceName: c.practiceName ?? c.meta?.practiceName ?? undefined,
+    country: c.country ?? c.meta?.country ?? 'ZA',
+    speaks: Array.isArray(c.speaks)
+      ? c.speaks
+      : Array.isArray(c.meta?.speaks)
+        ? c.meta.speaks
+        : undefined,
+    yearsExp:
+      typeof c.yearsExp === 'number'
+        ? c.yearsExp
+        : typeof c.meta?.yearsExp === 'number'
+          ? c.meta.yearsExp
+          : undefined,
+    joinedAt: c.createdAt ?? c.joinedAt ?? null,
+    meta: c.meta ?? {},
   };
 }
 
 export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
+
     const q = (url.searchParams.get('q') ?? '').trim();
     const specialty = url.searchParams.get('specialty') || undefined;
     const gender = url.searchParams.get('gender') || undefined;
     const location = url.searchParams.get('location') || undefined;
+    const country = url.searchParams.get('country') || undefined;
 
-    // support both perPage and legacy limit
-    const page = Math.max(DEFAULT_PAGE, Number(url.searchParams.get('page') || DEFAULT_PAGE));
-    const perPageParam =
-      url.searchParams.get('perPage') ??
-      url.searchParams.get('limit') ??
-      String(DEFAULT_PER_PAGE);
-    const perPage = Math.min(500, Math.max(5, Number(perPageParam || DEFAULT_PER_PAGE)));
+    const page = Math.max(
+      DEFAULT_PAGE,
+      safeNumber(url.searchParams.get('page'), DEFAULT_PAGE),
+    );
 
-    // If Prisma is not available in dev, return mock data gracefully.
-    if (!prisma) {
-      const start = (page - 1) * perPage;
-      let list = MOCK_CLINICIANS.slice();
+    const perPage = Math.min(
+      500,
+      Math.max(
+        5,
+        safeNumber(
+          url.searchParams.get('perPage') ??
+            url.searchParams.get('limit') ??
+            DEFAULT_PER_PAGE,
+          DEFAULT_PER_PAGE,
+        ),
+      ),
+    );
 
-      // visibility rules on mocks (missing flags => active)
-      list = list.filter((c: any) => {
-        const statusStr = c.status != null ? String(c.status).toLowerCase() : 'active';
-        const statusOk = statusStr === 'active';
-        const disabledOk = !c.disabled;
-        const archivedOk = !c.archived;
-        return statusOk && disabledOk && archivedOk;
-      });
-
-      // basic filtering to match UI
-      if (q) {
-        const qq = q.toLowerCase();
-        list = list.filter((c: any) => {
-          const name = (c.name || c.displayName || '').toLowerCase();
-          const spec = (c.specialty || '').toLowerCase();
-          const loc = (c.location || '').toLowerCase();
-          return (
-            name.includes(qq) ||
-            spec.includes(qq) ||
-            loc.includes(qq)
-          );
-        });
-      }
-      if (specialty) list = list.filter((c: any) => c.specialty === specialty);
-      if (gender) list = list.filter((c: any) => (c.gender || '').trim() === gender);
-      if (location) list = list.filter((c: any) => c.location === location);
-
-      const total = list.length;
-      const pageItems = list.slice(start, start + perPage).map((c: any) =>
-        mapOut({
-          ...c,
-          feeCents: typeof c.priceZAR === 'number' ? c.priceZAR * 100 : (c.feeCents ?? 0),
-          status: c.status ?? 'active',
-          disabled: Boolean(c.disabled),
-          archived: Boolean(c.archived),
-        })
-      );
-
-      return NextResponse.json({
+    if (!prisma || !(prisma as any).clinicianProfile?.findMany) {
+      return json({
         ok: true,
-        items: pageItems,
-        clinicians: pageItems,
-        meta: { total, page, perPage },
+        items: [],
+        clinicians: [],
+        meta: {
+          total: 0,
+          page,
+          perPage,
+          source: 'store_unavailable',
+        },
       });
     }
 
-    // Prisma-backed path
     const where: any = {
-      status: 'active',
+      status: {
+        in: ['active', 'ACTIVE'],
+      },
       disabled: false,
       archived: false,
     };
 
-    if (specialty) where.specialty = specialty;
-    if (gender) where.gender = gender;
-    if (location) {
-      // prefer meta.location if present
-      where.meta = { path: ['location'], equals: location };
+    if (specialty) {
+      where.specialty = { contains: specialty, mode: 'insensitive' };
     }
 
-    if (q) {
-      const clean = q.toLowerCase();
-      where.OR = [
-        { displayName: { contains: clean, mode: 'insensitive' } },
-        { specialty: { contains: clean, mode: 'insensitive' } },
-        { city: { contains: clean, mode: 'insensitive' } },
+    if (gender) {
+      where.gender = gender;
+    }
+
+    if (country) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { country },
+            { meta: { path: ['country'], equals: country } },
+          ],
+        },
       ];
     }
 
-    const orderBy = [
+    if (location) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { city: { contains: location, mode: 'insensitive' } },
+            { location: { contains: location, mode: 'insensitive' } },
+            { meta: { path: ['location'], string_contains: location } },
+          ],
+        },
+      ];
+    }
+
+    if (q) {
+      where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : []),
+        {
+          OR: [
+            { displayName: { contains: q, mode: 'insensitive' } },
+            { name: { contains: q, mode: 'insensitive' } },
+            { specialty: { contains: q, mode: 'insensitive' } },
+            { city: { contains: q, mode: 'insensitive' } },
+          ],
+        },
+      ];
+    }
+
+    const orderBy: any[] = [
       { online: 'desc' },
       { recentBookedCount: 'asc' },
       { lastBookedAt: 'asc' },
@@ -134,47 +183,63 @@ export async function GET(req: NextRequest) {
     ];
 
     const [items, total] = await Promise.all([
-      prisma.clinicianProfile.findMany({
+      (prisma as any).clinicianProfile.findMany({
         where,
         skip: (page - 1) * perPage,
         take: perPage,
         orderBy,
-        select: {
-          id: true,
-          displayName: true,
-          specialty: true,
-          gender: true,
-          feeCents: true,
-          rating: true,
-          online: true,
-          lastBookedAt: true,
-          lastSeenAt: true,
-          onlineSeq: true,
-          recentBookedCount: true,
-          meta: true,
-          city: true,
-
-          status: true,
-          disabled: true,
-          archived: true,
-        },
       }),
-      prisma.clinicianProfile.count({ where }),
+      (prisma as any).clinicianProfile.count({ where }),
     ]);
 
-    const mapped = items.map(mapOut);
+    const mapped = Array.isArray(items)
+      ? items
+          .map(mapOut)
+          .filter((x) => {
+            if (!x.id) return false;
 
-    return NextResponse.json({
+            const status = String(x.status || '').toLowerCase();
+            if (status !== 'active') return false;
+
+            if (x.disabled || x.archived) return false;
+
+            const op = (x as any).meta?.operational ?? (x as any).operational;
+            if (op) {
+              if (op.canBeListed === false) return false;
+              if (op.canBeBooked === false) return false;
+            }
+
+            return true;
+          })
+      : [];
+
+    return json({
       ok: true,
       items: mapped,
       clinicians: mapped,
-      meta: { total, page, perPage },
+      meta: {
+        total,
+        page,
+        perPage,
+        source: 'database',
+      },
     });
   } catch (err: any) {
-    console.error('clinicians GET error (fairness)', err);
-    return NextResponse.json(
-      { ok: false, error: String(err?.message ?? err) },
-      { status: 500 }
+    console.error('GET /api/clinicians error', err);
+
+    return json(
+      {
+        ok: false,
+        error: err?.message || 'failed_to_load_clinicians',
+        items: [],
+        clinicians: [],
+        meta: {
+          total: 0,
+          page: DEFAULT_PAGE,
+          perPage: DEFAULT_PER_PAGE,
+        },
+      },
+      500,
     );
   }
 }

@@ -1,8 +1,27 @@
 // apps/api-gateway/src/lib/auth.ts
-export type Identity = { uid?: string; role?: 'patient'|'clinician'|'admin' };
+import {
+  readIdentity as readGatewayIdentity,
+  requireTrustedIdentityInProduction,
+  type WhoRole,
+} from '@/src/lib/identity';
+
+export type Identity = {
+  uid?: string;
+  role?: WhoRole;
+  orgId?: string | null;
+  actorRefId?: string | null;
+  trusted?: boolean;
+};
+
 export function readIdentity(headers: Headers): Identity {
-  const uid = headers.get('x-uid') || undefined;
-  const role = headers.get('x-role') as Identity['role'] || undefined;
-  return { uid, role };
+  const who = readGatewayIdentity(headers);
+  requireTrustedIdentityInProduction(headers, who);
+
+  return {
+    uid: who.uid || undefined,
+    role: who.role === 'anonymous' ? undefined : who.role,
+    orgId: who.orgId ?? null,
+    actorRefId: who.actorRefId ?? null,
+    trusted: Boolean(who.trusted),
+  };
 }
-// TODO: add HMAC/JWT verification here

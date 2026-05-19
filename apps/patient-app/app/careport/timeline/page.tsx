@@ -1,177 +1,282 @@
 ﻿// apps/patient-app/app/careport/timeline/page.tsx
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
 
-type Item = { status: string; at: string };
-
-const MOCK_TIMELINE: Item[] = [
-  {
-    status: 'ORDER_CREATED',
-    at: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-  },
-  {
-    status: 'PHARMACY_ASSIGNED',
-    at: new Date(Date.now() - 45 * 60 * 1000).toISOString(),
-  },
-  {
-    status: 'RIDER_EN_ROUTE',
-    at: new Date(Date.now() - 20 * 60 * 1000).toISOString(),
-  },
-];
-
-type TimelinePageProps = {
-  searchParams?: { [key: string]: string | string[] | undefined };
+type TimelineItem = {
+  status: string;
+  at: string;
+  note?: string | null;
+  actor?: string | null;
 };
 
-export default function TimelinePage({ searchParams }: TimelinePageProps) {
-  const encIdFromQuery =
-    (searchParams?.encId as string | undefined) ||
-    (searchParams?.id as string | undefined) ||
-    '';
+type TimelineRecord = Record<string, unknown>;
 
-  const [id, setId] = useState(encIdFromQuery);
-  const [items, setItems] = useState<Item[]>([]);
+function prettyStatus(status: string) {
+  return String(status || '')
+    .replace(/_/g, ' ')
+    .toLowerCase()
+    .replace(/(^|\s)\S/g, (m) => m.toUpperCase());
+}
+
+function isValidTimelineItem(value: unknown): value is TimelineItem {
+  if (!value || typeof value !== 'object') return false;
+
+  const item = value as Record<string, unknown>;
+  return typeof item.status === 'string' && typeof item.at === 'string';
+}
+
+function extractTimelineItems(payload: unknown): TimelineItem[] {
+  if (Array.isArray(payload)) {
+    return payload.filter(isValidTimelineItem);
+  }
+
+  if (!payload || typeof payload !== 'object') return [];
+
+  const data = payload as TimelineRecord;
+
+  const directItems = data.items;
+  if (Array.isArray(directItems)) {
+    return directItems.filter(isValidTimelineItem);
+  }
+
+  const directEvents = data.events;
+  if (Array.isArray(directEvents)) {
+    return directEvents.filter(isValidTimelineItem);
+  }
+
+  const timeline = data.timeline;
+  if (Array.isArray(timeline)) {
+    return timeline.filter(isValidTimelineItem);
+  }
+
+  if (timeline && typeof timeline === 'object' && !Array.isArray(timeline)) {
+    const nested = timeline as TimelineRecord;
+    if (Array.isArray(nested.items)) {
+      return nested.items.filter(isValidTimelineItem);
+    }
+  }
+
+  const dataWrapper = data.data;
+  if (dataWrapper && typeof dataWrapper === 'object') {
+    return extractTimelineItems(dataWrapper);
+  }
+
+  return [];
+}
+
+function formatTimelineDate(iso: string) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return 'Time unavailable';
+
+  return date.toLocaleString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function TimelinePageContent() {
+  const searchParams = useSearchParams();
+  const qs = useMemo(
+    () => new URLSearchParams(searchParams?.toString() ?? ''),
+    [searchParams],
+  );
+
+  const initialId = useMemo(
+    () =>
+      (
+        qs.get('orderId') ||
+        qs.get('trackingId') ||
+        qs.get('erxId') ||
+        qs.get('encId') ||
+        qs.get('id') ||
+        ''
+      ).trim(),
+    [qs],
+  );
+
+  const [id, setId] = useState(initialId);
+  const [items, setItems] = useState<TimelineItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const abortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+
   useEffect(() => {
-    if (!id || !id.trim()) {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    setId(initialId);
+  }, [initialId]);
+
+  const load = useCallback(async (raw: string) => {
+    const value = raw.trim();
+
+    if (!value) {
       setItems([]);
-      setError('Enter an eRx, encounter or tracking ID to view its timeline.');
+      setError('Enter an eRx, order, encounter, or tracking ID to view its pharmacy delivery timeline.');
       return;
     }
 
-    let mounted = true;
-    const ac = new AbortController();
+    abortRef.current?.abort();
+    const abortController = new AbortController();
+    abortRef.current = abortController;
 
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const url = `/api/careport/timeline?id=${encodeURIComponent(
-          id.trim(),
-        )}`;
-        const res = await fetch(url, {
-          cache: 'no-store',
-          signal: ac.signal,
-        });
+    setLoading(true);
+    setError(null);
 
-        if (!mounted) return;
+    try {
+      const response = await fetch(`/api/careport/timeline?id=${encodeURIComponent(value)}`, {
+        cache: 'no-store',
+        signal: abortController.signal,
+      });
 
-        if (!res.ok) {
-          console.warn(
-            'Timeline API returned non-OK status, using mock fallback',
-          );
-          setItems(MOCK_TIMELINE);
-          setError('Live timeline unavailable — showing a recent mock example.');
-          return;
-        }
+      if (!mountedRef.current) return;
 
-        const data = await res.json();
-        const timeline: Item[] =
-          (Array.isArray(data.timeline)
-            ? data.timeline
-            : data.timeline?.items) ||
-          (Array.isArray(data) ? data : []);
-
-        if (!timeline || timeline.length === 0) {
-          setItems([]);
-          setError('No timeline events found for this ID.');
-        } else {
-          setItems(timeline);
-        }
-      } catch (err) {
-        if (!mounted || ac.signal.aborted) return;
-        console.error('Failed to load timeline; using mock fallback', err);
-        setItems(MOCK_TIMELINE);
-        setError('Unable to reach timeline service — showing a mock example.');
-      } finally {
-        if (mounted) setLoading(false);
+      if (!response.ok) {
+        setItems([]);
+        setError('CarePort could not load this pharmacy delivery timeline. Please check the ID and try again.');
+        return;
       }
-    })();
 
-    return () => {
-      mounted = false;
-      ac.abort();
-    };
+      const payload = (await response.json().catch(() => null)) as unknown;
+      const timeline = extractTimelineItems(payload)
+        .slice()
+        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+
+      if (timeline.length === 0) {
+        setItems([]);
+        setError('No pharmacy or delivery rider events were found for this ID.');
+        return;
+      }
+
+      setItems(timeline);
+    } catch (err) {
+      if (!mountedRef.current || abortController.signal.aborted) return;
+      console.error('Failed to load CarePort timeline', err);
+      setItems([]);
+      setError('Unable to reach the CarePort timeline service. Please try again.');
+    } finally {
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (initialId) {
+      void load(initialId);
+    } else {
+      setItems([]);
+      setError(null);
+    }
+  }, [initialId, load]);
+
+  const placeholder = useMemo(() => {
+    if (id.trim()) return id.trim();
+    return 'e.g. CarePort order ID, eRx order ID, encounter ID, or job tracking ID';
   }, [id]);
 
   return (
-    <main className="max-w-4xl mx-auto p-6 space-y-4">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+    <main className="mx-auto max-w-4xl space-y-4 p-6">
+      <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
-          <h1 className="text-xl md:text-2xl font-semibold">
-            CarePort Delivery Timeline
+          <h1 className="text-xl font-semibold text-slate-900 md:text-2xl">
+            CarePort Pharmacy Delivery Timeline
           </h1>
-          <p className="text-xs md:text-sm text-gray-500 mt-1">
-            View the event timeline for a specific eRx / encounter / tracking
-            ID.
+          <p className="mt-1 text-xs text-slate-500 md:text-sm">
+            View pharmacy fulfilment, dispatch, and delivery rider events for an eRx, order, or tracking ID.
           </p>
         </div>
+
         <div className="flex items-center gap-2 text-xs">
           <a
             href="/careport"
-            className="px-3 py-1 rounded border bg-white hover:bg-gray-50"
+            className="rounded-xl border bg-white px-3 py-2 shadow-sm hover:bg-slate-50"
           >
             ← Back to CarePort
           </a>
           <a
             href="/careport/track"
-            className="px-3 py-1 rounded border bg-white hover:bg-gray-50"
+            className="rounded-xl border bg-white px-3 py-2 shadow-sm hover:bg-slate-50"
           >
             Open tracking
           </a>
         </div>
       </header>
 
-      <section className="bg-white border rounded-lg p-4 space-y-3">
+      <section className="space-y-3 rounded-2xl border bg-white p-4 shadow-sm">
         <div>
-          <label htmlFor="timeline-id" className="text-xs text-gray-500">
-            eRx / Encounter / Tracking ID
+          <label htmlFor="timeline-id" className="text-xs font-medium text-slate-500">
+            CarePort / eRx / Encounter / Job ID
           </label>
-          <div className="mt-1 flex flex-col sm:flex-row gap-2">
+
+          <div className="mt-2 flex flex-col gap-2 sm:flex-row">
             <input
               id="timeline-id"
-              className="border px-3 py-2 rounded text-sm flex-1"
+              className="flex-1 rounded-xl border px-3 py-2 text-sm"
               value={id}
-              onChange={(e) => setId(e.target.value)}
-              placeholder="e.g. ERX-1001 or ENC-2001"
+              onChange={(event) => setId(event.target.value)}
+              placeholder={placeholder}
             />
+            <button
+              onClick={() => void load(id)}
+              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-60"
+              type="button"
+              disabled={loading}
+            >
+              {loading ? 'Loading…' : 'Load'}
+            </button>
           </div>
-          <p className="mt-1 text-[11px] text-gray-400">
-            If you opened this from CarePort Dispatch, the current encounter ID
-            is pre-filled.
+
+          <p className="mt-1 text-[11px] text-slate-400">
+            Use a valid CarePortOrder.id, erxOrderId, encounterId, patientId, CarePortJob.id, or CarePortJob.externalId if your API supports those lookups.
           </p>
         </div>
 
-        {loading && (
-          <div className="text-sm text-gray-500">Loading timeline…</div>
-        )}
-        {!loading && error && (
-          <div className="text-xs text-rose-600 mt-1">{error}</div>
-        )}
+        {error && !loading ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+            {error}
+          </div>
+        ) : null}
+
+        {loading ? <div className="text-sm text-slate-500">Loading timeline…</div> : null}
       </section>
 
-      <section className="bg-white border rounded-lg p-4">
-        <h2 className="text-sm font-medium mb-3">Events</h2>
+      <section className="rounded-2xl border bg-white p-4 shadow-sm">
+        <h2 className="mb-3 text-sm font-medium text-slate-900">Events</h2>
+
         {items.length === 0 && !loading ? (
-          <p className="text-sm text-gray-500">
-            No events to show yet. Check the ID above or try again later.
+          <p className="text-sm text-slate-500">
+            No events to show yet. Enter a valid CarePort order, eRx, encounter, patient, or job tracking ID.
           </p>
         ) : (
           <ul className="space-y-2 text-sm">
-            {items.map((it, i) => (
+            {items.map((item, index) => (
               <li
-                key={`${it.status}-${it.at}-${i}`}
-                className="p-2 border rounded flex justify-between items-center bg-gray-50"
+                key={`${item.status}-${item.at}-${index}`}
+                className="rounded-xl border bg-slate-50 px-3 py-2"
               >
-                <span className="font-medium">
-                  {it.status.replaceAll('_', ' ')}
-                </span>
-                <span className="text-xs text-gray-500">
-                  {new Date(it.at).toLocaleString()}
-                </span>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-medium text-slate-900">{prettyStatus(item.status)}</span>
+                  <span className="text-xs text-slate-500">{formatTimelineDate(item.at)}</span>
+                </div>
+
+                {item.actor || item.note ? (
+                  <div className="mt-1 text-xs text-slate-500">
+                    {item.actor ? <span>{item.actor}</span> : null}
+                    {item.actor && item.note ? <span> · </span> : null}
+                    {item.note ? <span>{item.note}</span> : null}
+                  </div>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -180,3 +285,12 @@ export default function TimelinePage({ searchParams }: TimelinePageProps) {
     </main>
   );
 }
+
+export default function TimelinePage() {
+  return (
+    <Suspense fallback={null}>
+      <TimelinePageContent />
+    </Suspense>
+  );
+}
+

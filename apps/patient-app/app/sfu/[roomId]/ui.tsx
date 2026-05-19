@@ -449,6 +449,63 @@ export type Allergy = {
   severity?: 'mild' | 'moderate' | 'severe';
 };
 
+export type MedicationSummary = {
+  id?: string;
+  name?: string;
+  label?: string;
+  medication?: string;
+  dose?: string;
+  frequency?: string;
+  instructions?: string;
+  status?: string;
+  adherencePct?: number;
+  adherence?: number;
+  adherenceSeries?: Array<number | { t?: number; y?: number; value?: number }>;
+};
+
+function normaliseMedicationName(med: MedicationSummary) {
+  return (
+    med.name ||
+    med.label ||
+    med.medication ||
+    [med.dose, med.frequency].filter(Boolean).join(' ') ||
+    'Medication'
+  );
+}
+
+function normaliseAdherenceValue(value: unknown): number | null {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.min(100, Math.round(n)));
+}
+
+function normaliseAdherenceSeries(
+  items: MedicationSummary[],
+): number[] {
+  const values: number[] = [];
+
+  for (const item of items) {
+    const series = item.adherenceSeries;
+
+    if (!Array.isArray(series)) continue;
+
+    for (const point of series) {
+      if (typeof point === 'number') {
+        const n = normaliseAdherenceValue(point);
+        if (n !== null) values.push(n);
+        continue;
+      }
+
+      if (point && typeof point === 'object') {
+        const n = normaliseAdherenceValue(point.y ?? point.value);
+        if (n !== null) values.push(n);
+      }
+    }
+  }
+
+  return values.slice(-60);
+}
+
 export function LeftSidebar(props: {
   dense: boolean;
   roomId: string;
@@ -461,22 +518,34 @@ export function LeftSidebar(props: {
 
   renderBedside: ReactNode;
 }) {
-  const { dense, roomId, appt, showVitals, hasRoom, sendChat, publishControl, renderBedside } = props;
+  const {
+    dense,
+    roomId,
+    appt,
+    hasRoom,
+    sendChat,
+    publishControl,
+    renderBedside,
+  } = props;
 
-  // collapses
   const [infoOpen, setInfoOpen] = useState(true);
   const [allergiesOpen, setAllergiesOpen] = useState(true);
 
-  // Allergies
   const [allergies, setAllergies] = useState<Allergy[]>([]);
   const [allergyLoading, setAllergyLoading] = useState(false);
 
+  const [medications, setMedications] = useState<MedicationSummary[]>([]);
+  const [medicationsLoading, setMedicationsLoading] = useState(false);
+  const [medicationsError, setMedicationsError] = useState<string | null>(null);
+
   async function loadAllergies() {
     setAllergyLoading(true);
+
     try {
-      const r = await fetch('/api/allergies', { cache: 'no-store' });
-      const d: Allergy[] = await r.json().catch(() => []);
-      setAllergies(Array.isArray(d) ? d : []);
+      const response = await fetch('/api/allergies', { cache: 'no-store' });
+      const data: Allergy[] = await response.json().catch(() => []);
+
+      setAllergies(Array.isArray(data) ? data : []);
     } catch {
       setAllergies([]);
     } finally {
@@ -484,74 +553,161 @@ export function LeftSidebar(props: {
     }
   }
 
+  async function loadMedications() {
+    setMedicationsLoading(true);
+    setMedicationsError(null);
+
+    try {
+      const response = await fetch('/api/medications', { cache: 'no-store' });
+
+      if (!response.ok) {
+        throw new Error(`medications_http_${response.status}`);
+      }
+
+      const data = await response.json().catch(() => null);
+
+      const items = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.items)
+          ? data.items
+          : Array.isArray(data?.medications)
+            ? data.medications
+            : [];
+
+      setMedications(items as MedicationSummary[]);
+    } catch (error: any) {
+      setMedications([]);
+      setMedicationsError(error?.message || 'medications_unavailable');
+    } finally {
+      setMedicationsLoading(false);
+    }
+  }
+
   useEffect(() => {
     loadAllergies();
-    const t = setInterval(loadAllergies, 20000);
-    return () => clearInterval(t);
+    loadMedications();
+
+    const timer = window.setInterval(() => {
+      loadAllergies();
+      loadMedications();
+    }, 20_000);
+
+    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const exportAllergiesToClinician = async () => {
-    if (!hasRoom) return alert('Join the room first');
-    const active = allergies.filter((a) => a.status === 'Active');
+    if (!hasRoom) {
+      alert('Join the room first');
+      return;
+    }
+
+    const active = allergies.filter((allergy) => allergy.status === 'Active');
+
     const lines = active.length
       ? active
-          .map((a) => `• ${a.name || 'Allergy'}${a.severity ? ` (${a.severity})` : ''}${a.note ? ` — ${a.note}` : ''}`)
+          .map(
+            (allergy) =>
+              `• ${allergy.name || 'Allergy'}${
+                allergy.severity ? ` (${allergy.severity})` : ''
+              }${allergy.note ? ` — ${allergy.note}` : ''}`,
+          )
           .join('\n')
       : 'No active allergies.';
+
     const text = `Allergies (Patient → SOAP, read-only):\n${lines}`;
 
     try {
       await sendChat(text);
-      await publishControl('allergies_export', { lines: active, at: Date.now() });
+      await publishControl('allergies_export', {
+        lines: active,
+        at: Date.now(),
+      });
+
       await fetch('/api/events/emit', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ type: 'patient.allergies.export', roomId, payload: active }),
+        body: JSON.stringify({
+          type: 'patient.allergies.export',
+          roomId,
+          payload: active,
+        }),
       }).catch(() => {});
+
       alert('Allergies sent.');
     } catch {
       alert('Failed to send allergies');
     }
   };
 
-  // Meds demo
-  const [currentMeds] = useState<string[]>(['Metformin 500 mg PO BID', 'Atorvastatin 20 mg PO QHS']);
-  const [adherencePct, setAdherencePct] = useState<number>(88);
-  const [adherenceSeries, setAdherenceSeries] = useState<Array<{ t: number; y: number }>>(() => {
-    const now = Date.now();
-    return Array.from({ length: 30 }).map((_, i) => ({ t: now - (30 - i) * 86400000, y: 70 + Math.random() * 30 }));
+  const activeMedications = medications.filter((med) => {
+    const status = String(med.status || '').toLowerCase();
+    return !status || status === 'active' || status === 'current';
   });
 
-  useEffect(() => {
-    const t = setInterval(() => {
-      setAdherenceSeries((old) => {
-        const now = Date.now();
-        const next = [
-          ...old,
-          { t: now, y: Math.max(50, Math.min(100, (old.at(-1)?.y ?? 85) + (Math.random() - 0.5) * 8)) },
-        ];
-        if (next.length > 60) next.shift();
-        setAdherencePct(Math.round(next.at(-1)!.y));
-        return next;
-      });
-    }, 60 * 1000);
-    return () => clearInterval(t);
-  }, []);
+  const adherenceValues = normaliseAdherenceSeries(activeMedications);
+
+  const adherenceScores = activeMedications
+    .map((med) => normaliseAdherenceValue(med.adherencePct ?? med.adherence))
+    .filter((value): value is number => value !== null);
+
+  const adherencePct =
+    adherenceScores.length > 0
+      ? Math.round(
+          adherenceScores.reduce((sum, value) => sum + value, 0) /
+            adherenceScores.length,
+        )
+      : null;
 
   const exportMedsToClinician = async () => {
-    if (!hasRoom) return alert('Join the room first');
-    const lines = currentMeds.length ? currentMeds.map((m) => `• ${m}`).join('\n') : 'No current medications.';
-    const text = `Current Medication (Patient):\n${lines}\nAdherence: ${adherencePct}%`;
+    if (!hasRoom) {
+      alert('Join the room first');
+      return;
+    }
+
+    const lines = activeMedications.length
+      ? activeMedications
+          .map((med) => {
+            const detail = [
+              med.dose,
+              med.frequency,
+              med.instructions,
+            ]
+              .filter(Boolean)
+              .join(' · ');
+
+            return `• ${normaliseMedicationName(med)}${detail ? ` — ${detail}` : ''}`;
+          })
+          .join('\n')
+      : 'No current medications available.';
+
+    const text = `Current Medication (Patient):\n${lines}${
+      adherencePct !== null ? `\nAdherence: ${adherencePct}%` : ''
+    }`;
 
     try {
       await sendChat(text);
-      await publishControl('meds_export', { meds: currentMeds, adherencePct, series: adherenceSeries, at: Date.now() });
+
+      await publishControl('meds_export', {
+        meds: activeMedications,
+        adherencePct,
+        series: adherenceValues,
+        at: Date.now(),
+      });
+
       await fetch('/api/events/emit', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ type: 'patient.meds.export', roomId, payload: { meds: currentMeds, adherencePct } }),
+        body: JSON.stringify({
+          type: 'patient.meds.export',
+          roomId,
+          payload: {
+            meds: activeMedications,
+            adherencePct,
+          },
+        }),
       }).catch(() => {});
+
       alert('Medication shared.');
     } catch {
       alert('Failed to share meds');
@@ -562,7 +718,12 @@ export function LeftSidebar(props: {
     <div className="flex flex-col gap-4">
       <Card
         title="Session Information"
-        toolbar={<CollapseBtn open={infoOpen} onClick={() => setInfoOpen((v) => !v)} />}
+        toolbar={
+          <CollapseBtn
+            open={infoOpen}
+            onClick={() => setInfoOpen((value) => !value)}
+          />
+        }
         dense={dense}
       >
         <Collapse open={infoOpen}>
@@ -574,7 +735,12 @@ export function LeftSidebar(props: {
 
       <Card
         title="Allergies"
-        toolbar={<CollapseBtn open={allergiesOpen} onClick={() => setAllergiesOpen((v) => !v)} />}
+        toolbar={
+          <CollapseBtn
+            open={allergiesOpen}
+            onClick={() => setAllergiesOpen((value) => !value)}
+          />
+        }
         dense={dense}
       >
         <Collapse open={allergiesOpen}>
@@ -592,23 +758,60 @@ export function LeftSidebar(props: {
         dense={dense}
         toolbar={
           <button
-            className="px-2 py-1 text-xs border rounded bg-blue-600 text-white hover:bg-blue-700"
+            className="rounded border bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700 disabled:opacity-50"
             onClick={exportMedsToClinician}
+            disabled={medicationsLoading}
           >
             Export to Clinician
           </button>
         }
       >
-        <ul className="list-disc pl-5 text-sm text-gray-800">
-          {currentMeds.map((m, i) => (
-            <li key={i}>{m}</li>
-          ))}
-        </ul>
+        {medicationsLoading ? (
+          <div className="text-sm text-gray-500">Loading current medication…</div>
+        ) : medicationsError ? (
+          <div className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
+            Medication service is currently unavailable.
+          </div>
+        ) : activeMedications.length === 0 ? (
+          <div className="text-sm text-gray-500">
+            No current medications available.
+          </div>
+        ) : (
+          <ul className="list-disc pl-5 text-sm text-gray-800">
+            {activeMedications.map((med, index) => {
+              const detail = [med.dose, med.frequency, med.instructions]
+                .filter(Boolean)
+                .join(' · ');
+
+              return (
+                <li key={med.id || `${normaliseMedicationName(med)}-${index}`}>
+                  {normaliseMedicationName(med)}
+                  {detail ? ` — ${detail}` : ''}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+
         <div className="mt-2 grid grid-cols-3 gap-2">
-          <MeterDonut value={adherencePct} max={100} label="Adherence" color="#10B981" unit="%" />
+          <MeterDonut
+            value={adherencePct ?? 0}
+            max={100}
+            label="Adherence"
+            color="#10B981"
+            unit="%"
+          />
+
           <div className="col-span-2 rounded-xl border bg-white p-2">
-            <div className="text-xs text-slate-500 mb-1">Adherence trend</div>
-            <Sparkline data={adherenceSeries} height={64} />
+            <div className="mb-1 text-xs text-slate-500">Adherence trend</div>
+
+            {adherenceValues.length > 0 ? (
+              <Sparkline values={adherenceValues} height={64} />
+            ) : (
+              <div className="grid h-16 place-items-center rounded bg-slate-50 text-xs text-slate-400">
+                No adherence trend available
+              </div>
+            )}
           </div>
         </div>
       </Card>

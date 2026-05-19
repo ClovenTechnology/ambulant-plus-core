@@ -45,7 +45,6 @@ type CaptureItem = {
 
 function isNativePlatform() {
   try {
-    // @ts-expect-error window check
     const C = typeof window !== 'undefined' ? (window as any).Capacitor : undefined;
     return !!C && (C.isNativePlatform?.() || C.isNative);
   } catch {
@@ -62,7 +61,12 @@ function fmtRes(tel: Telemetry) {
 }
 
 function nowId(prefix: string) {
-  return `${prefix}_${Date.now().toString(16)}_${Math.random().toString(16).slice(2)}`;
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(16)}_${performance.now().toString(16).replace('.', '')}`;
+
+  return `${prefix}_${token}`;
 }
 
 function guessExt(kind: 'photo' | 'video', mime?: string) {
@@ -139,7 +143,6 @@ async function fetchAsBlobBestEffort(uri: string): Promise<{ blob: Blob; mime: s
 
   // Try Capacitor convertFileSrc then fetch
   try {
-    // @ts-expect-error window check
     const C = typeof window !== 'undefined' ? (window as any).Capacitor : undefined;
     const canConvert = !!C?.convertFileSrc;
     if (canConvert) {
@@ -161,7 +164,7 @@ async function fetchAsBlobBestEffort(uri: string): Promise<{ blob: Blob; mime: s
 
 export default function OtoscopeConsole() {
   const { user } = useAuthMe();
-  const patientId = user?.id || 'anon';
+  const patientId = user?.id ? String(user.id) : '';
 
   const [native, setNative] = useState(false);
 
@@ -190,11 +193,12 @@ export default function OtoscopeConsole() {
   }, []);
 
   const apiBase = useMemo(() => {
+    if (!patientId) return '';
     return `/api/v1/patients/${encodeURIComponent(patientId)}/otoscope-captures`;
   }, [patientId]);
 
   const loadRecentFromApi = useCallback(async () => {
-    if (!native) return;
+    if (!native || !apiBase) return;
     try {
       const url = `${apiBase}?limit=12`;
       const r = await fetch(url, { cache: 'no-store' });
@@ -230,7 +234,7 @@ export default function OtoscopeConsole() {
 
   const uploadCaptureToApi = useCallback(
     async (capId: string, kind: 'photo' | 'video', pluginUri: string) => {
-      if (!native) return;
+      if (!native || !apiBase) return;
       if (!pluginUri) return;
 
       // mark uploading
@@ -545,7 +549,14 @@ export default function OtoscopeConsole() {
     const createdAt = new Date().toISOString();
 
     // optimistic UI: show immediately (plugin URI), then upload in background and replace URL
-    setCaptures((prev) => [{ id: localId, kind: 'photo', fileUrl: pluginUri, createdAt }, ...prev].slice(0, 12));
+    const capture: CaptureItem = {
+      id: localId,
+      kind: 'photo',
+      fileUrl: pluginUri,
+      createdAt,
+    };
+
+    setCaptures((prev) => [capture, ...prev].slice(0, 12));
 
     push('capture: photo saved locally (plugin)');
     void uploadCaptureToApi(localId, 'photo', pluginUri);
@@ -574,7 +585,14 @@ export default function OtoscopeConsole() {
     const localId = nowId('cap');
     const createdAt = new Date().toISOString();
 
-    setCaptures((prev) => [{ id: localId, kind: 'video', fileUrl: pluginUri, createdAt }, ...prev].slice(0, 12));
+    const capture: CaptureItem = {
+      id: localId,
+      kind: 'video',
+      fileUrl: pluginUri,
+      createdAt,
+    };
+
+    setCaptures((prev) => [capture, ...prev].slice(0, 12));
 
     push('capture: video saved locally (plugin)');
     void uploadCaptureToApi(localId, 'video', pluginUri);

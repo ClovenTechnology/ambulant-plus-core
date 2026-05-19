@@ -2,45 +2,96 @@
 import { NextResponse } from 'next/server';
 import { addClient, removeClient } from '../../_lib/broadcaster';
 
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+export const runtime = 'nodejs';
+
 /* SSE stream — keep connection open and push events */
 export async function GET(req: Request) {
-  const { readable, writable } = new TransformStream();
-  const res = new NextResponse(readable, {
-    status: 200,
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
+  const encoder = new TextEncoder();
+
+  let clientId: number | null = null;
+  let ping: ReturnType<typeof setInterval> | null = null;
+  let closed = false;
+
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      const close = () => {
+        if (closed) return;
+        closed = true;
+
+        if (ping) {
+          clearInterval(ping);
+          ping = null;
+        }
+
+        if (clientId !== null) {
+          try {
+            removeClient(clientId);
+          } catch {
+            // Ignore broadcaster cleanup failures.
+          }
+
+          clientId = null;
+        }
+
+        try {
+          controller.close();
+        } catch {
+          // Ignore already-closed stream.
+        }
+      };
+
+      const writeRaw = (message: string) => {
+        if (closed) return;
+
+        try {
+          controller.enqueue(encoder.encode(message));
+        } catch {
+          close();
+        }
+      };
+
+      clientId = addClient({
+        write: (message: string) => writeRaw(message),
+      });
+
+      writeRaw(': connected\n\n');
+
+      ping = setInterval(() => {
+        writeRaw(': ping\n\n');
+      }, 20_000);
+
+      req.signal.addEventListener('abort', close, { once: true });
+    },
+
+    cancel() {
+      closed = true;
+
+      if (ping) {
+        clearInterval(ping);
+        ping = null;
+      }
+
+      if (clientId !== null) {
+        try {
+          removeClient(clientId);
+        } catch {
+          // Ignore broadcaster cleanup failures.
+        }
+
+        clientId = null;
+      }
     },
   });
 
-  // Write function requires a writer
-  const writer = writable.getWriter();
-  function writeRaw(s: string) {
-    writer.write(new TextEncoder().encode(s));
-  }
-
-  // register client - store writer-like object in broadcaster
-  const clientId = addClient({ write: (s: string) => writeRaw(s) }); // we pass an object shaped like earlier broadcaster
-  // send a ping and initial comment
-  writeRaw(': connected\n\n');
-
-  // keep-alive ping every 20s
-  const ping = setInterval(() => writeRaw(': ping\n\n'), 20000);
-
-  // When the response is closed by the client, cleanup
-  const close = () => {
-    clearInterval(ping);
-    removeClient(clientId);
-    try { writer.close(); } catch (e) {}
-  };
-
-  // When client disconnects, Next.js doesn't provide direct hook - rely on signal:
-  const controller = new AbortController();
-  req.signal.addEventListener('abort', () => {
-    close();
-    controller.abort();
+  return new NextResponse(stream, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    },
   });
-
-  return res;
 }

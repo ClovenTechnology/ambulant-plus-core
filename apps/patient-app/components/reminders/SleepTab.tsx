@@ -3,11 +3,8 @@ import React, { useRef, useState, useMemo } from 'react';
 import Section from '@/components/Section';
 import ReminderList, { type ReminderShape } from '@/components/ReminderList';
 import MeterDonut from '@/components/charts/AnimatedMeterDonut';
-import Sparkline from '@/components/charts/Sparkline';
 import { toast } from '../toast';
-import {
-  MOCK_ADHERENCE_TREND,
-  computeWakeTime,
+import {  computeWakeTime,
   type Stats,
   type NexRingSleepMetrics,
 } from './shared';
@@ -141,13 +138,6 @@ export default function SleepTab({
                 <span className="font-medium">{stats.missed}</span> missed
               </div>
             </div>
-          </div>
-
-          <div className="rounded-xl border bg-white p-2">
-            <div className="mb-1 text-xs text-slate-500">
-              Routine consistency (placeholder)
-            </div>
-            <Sparkline data={MOCK_ADHERENCE_TREND} height={64} />
           </div>
 
           {latestNexRingSleep && (

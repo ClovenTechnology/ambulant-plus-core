@@ -3,11 +3,8 @@ import React, { useRef, useState } from 'react';
 import Section from '@/components/Section';
 import ReminderList, { type ReminderShape } from '@/components/ReminderList';
 import MeterDonut from '@/components/charts/AnimatedMeterDonut';
-import Sparkline from '@/components/charts/Sparkline';
 import { toast } from '../toast';
-import {
-  MOCK_ADHERENCE_TREND,
-  type Stats,
+import {  type Stats,
 } from './shared';
 
 type HydrationTabProps = {
@@ -155,12 +152,6 @@ export default function HydrationTab({
               </div>
             </div>
           </div>
-          <div className="rounded-xl border bg-white p-2">
-            <div className="mb-1 text-xs text-slate-500">
-              Hydration trend (placeholder)
-            </div>
-            <Sparkline data={MOCK_ADHERENCE_TREND} height={64} />
-          </div>
         </div>
       </Section>
 
@@ -176,7 +167,7 @@ export default function HydrationTab({
         >
           {/* Goal */}
           <div>
-            <p className="mb-1 text[11px] font-semibold uppercase tracking-wide text-gray-400">
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-gray-400">
               Goal
             </p>
             <div className="grid grid-cols-3 gap-2">
@@ -206,7 +197,7 @@ export default function HydrationTab({
                 <select
                   value={hydrationUnit}
                   onChange={(e) =>
-                    setHydrationUnit(e.target.value as any)
+                    setHydrationUnit(e.target.value as 'ml' | 'L' | 'oz' | 'cups')
                   }
                   className="w-full rounded-md border px-2 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:border-emerald-500"
                 >

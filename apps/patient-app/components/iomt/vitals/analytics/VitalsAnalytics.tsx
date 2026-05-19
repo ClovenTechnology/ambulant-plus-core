@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Tooltip, Legend } from 'chart.js';
 import { Line, Bar } from 'react-chartjs-2';
 import { Collapse } from '@/components/Collapse';
@@ -22,7 +22,6 @@ type Props = {
   seedSummary?: any;
 };
 
-const uid = (p='') => p + Math.random().toString(36).slice(2,9);
 
 const API = {
   bp: (pid: string, from: string, to: string) => `/api/v1/patients/${encodeURIComponent(pid)}/vitals/bp?from=${from}&to=${to}`,
@@ -97,13 +96,11 @@ function SectionCard({ title, subtitle, children, right }: { title: string; subt
 }
 
 function HeatDay({ label, row }: { label: string; row: (number|null)[] }) {
-  const red = 1, amber = 2; // dynamic per-vital in each use
   return (
     <div className="text-xxs">
       <div className="mb-1 font-medium">{label}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap:4 }}>
         {row.map((v, i) => {
-          const color = v==null ? '#e5e7eb' : v >  v! ? '#ef4444' : '#10b981'; // placeholder; set per-vital
           return (
             <div key={i} className="text-white text-xxs rounded p-1 text-center" style={{ background: v==null ? '#e5e7eb' : '#64748b' }}>
               {v==null ? '—' : v}
@@ -174,7 +171,7 @@ function BPAnalytics({ items }: { items: BPRec[] }) {
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">Out-of-range breakdown</div>
-          <Bar data={barData} options={{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, precision:0 }}}}/>
+          <Bar data={barData} options={{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } }}}}/>
           <div className="text-xs text-gray-600 mt-1">Total {counts.total} readings</div>
         </div>
       </div>
@@ -239,7 +236,7 @@ function SpO2Analytics({ items }: { items: SpO2Rec[] }) {
 
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">Distribution</div>
-          <Bar data={barData} options={{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, precision:0 }}}}/>
+          <Bar data={barData} options={{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } }}}}/>
           <div className="text-xs text-gray-600 mt-1">T90 (time &lt; 90%): {tir.t90}% • In-range ≥95%: {tir.pctGreen}%</div>
         </div>
       </div>
@@ -307,7 +304,7 @@ function HRAnalytics({ items }: { items: HRRec[] }) {
           <div className="text-xs text-gray-600 mt-1">Slope/day: {slope.toFixed(2)} bpm</div>
         </div>
         <div className="p-3 border rounded bg-white">
-          <Bar data={bar} options={{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, precision:0 }}}}/>
+          <Bar data={bar} options={{ plugins:{legend:{display:false}}, scales:{ y:{ beginAtZero:true, ticks:{ precision:0 } }}}}/>
           <div className="text-xs text-gray-600 mt-1">Total {dist.total}</div>
         </div>
       </div>
@@ -317,6 +314,7 @@ function HRAnalytics({ items }: { items: HRRec[] }) {
 
 /** ---------- Main Dashboard ---------- */
 export default function VitalsAnalytics({ patientId, defaultRangeDays = 30, seedSummary }: Props) {
+  void seedSummary;
   const [range, setRange] = useState<RangeOpt>(defaultRangeDays);
   const to = toISO();
   const from = toISO(addDays(new Date(), -range));
@@ -330,16 +328,18 @@ export default function VitalsAnalytics({ patientId, defaultRangeDays = 30, seed
     let mounted = true;
     (async () => {
       const [bpI, sI, tI, hI] = await Promise.all([
-        fetchSafe<{items:BPRec[]}>(API.bp(patientId, from, to), []),
-        fetchSafe<{items:SpO2Rec[]}>(API.spo2(patientId, from, to), []),
-        fetchSafe<{items:TempRec[]}>(API.temp(patientId, from, to), []),
-        fetchSafe<{items:HRRec[]}>(API.hr(patientId, from, to), []),
+        fetchSafe<BPRec[]>(API.bp(patientId, from, to), []),
+        fetchSafe<SpO2Rec[]>(API.spo2(patientId, from, to), []),
+        fetchSafe<TempRec[]>(API.temp(patientId, from, to), []),
+        fetchSafe<HRRec[]>(API.hr(patientId, from, to), []),
       ]);
+
       if (!mounted) return;
-      setBP(bpI as any);
-      setSPO2(sI as any);
-      setTemp(tI as any);
-      setHR(hI as any);
+
+      setBP(Array.isArray(bpI) ? bpI : []);
+      setSPO2(Array.isArray(sI) ? sI : []);
+      setTemp(Array.isArray(tI) ? tI : []);
+      setHR(Array.isArray(hI) ? hI : []);
     })();
     return () => { mounted = false; };
   }, [patientId, from, to]);

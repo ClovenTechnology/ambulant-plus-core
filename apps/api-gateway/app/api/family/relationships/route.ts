@@ -1,6 +1,10 @@
-// apps/api-gateway/app/api/family/relationships/route.ts
+﻿// apps/api-gateway/app/api/family/relationships/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
 
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
@@ -73,3 +77,5 @@ export async function GET(req: NextRequest) {
     return jsonError(err?.message || 'Failed to load family relationships', 500);
   }
 }
+
+

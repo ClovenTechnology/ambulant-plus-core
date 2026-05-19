@@ -194,7 +194,12 @@ function safeJsonParse<T>(s: string | null): T | null {
 }
 
 function uid(prefix = 'id') {
-  return `${prefix}_${Math.random().toString(16).slice(2)}_${Date.now().toString(16)}`;
+  const token =
+    typeof globalThis.crypto?.randomUUID === 'function'
+      ? globalThis.crypto.randomUUID()
+      : `${Date.now().toString(16)}_${performance.now().toString(16).replace('.', '')}`;
+
+  return `${prefix}_${token}`;
 }
 
 function todayISO() {
@@ -594,21 +599,21 @@ export default function PaediatricCenterPage() {
       typeof window !== 'undefined' ? localStorage.getItem(LS_KEY) : null,
     );
 
-    const demoChildId = uid('child');
+    const defaultChildId = uid('child');
     const base: PaediatricState = {
       discreet: true,
       sensitiveHidden: true,
 
       children: [
         {
-          id: demoChildId,
+          id: defaultChildId,
           name: 'Child',
-          dobISO: addDaysISO(todayISO(), -365 * 2), // demo-ish
+          dobISO: addDaysISO(todayISO(), -365 * 2),
           sex: 'prefer_not',
           notes: null,
         },
       ],
-      activeChildId: demoChildId,
+      activeChildId: defaultChildId,
 
       growth: [],
       vaccines: [],
@@ -643,10 +648,10 @@ export default function PaediatricCenterPage() {
 
   // Helpers
   function notifyOk(msg: string) {
-    toast(msg, { type: 'success' });
+    toast(msg, 'success');
   }
   function notifyInfo(msg: string) {
-    toast(msg, { type: 'info' });
+    toast(msg, 'info');
   }
 
   const activeChild = useMemo(() => {
@@ -1621,7 +1626,7 @@ export default function PaediatricCenterPage() {
                           <div key={x.id} className="rounded-xl border border-slate-200 bg-white p-3 text-xs">
                             <div className="flex items-center justify-between">
                               <div className="text-slate-900">{state.sensitiveHidden ? 'Hidden' : x.dateISO}</div>
-                              <Pill tone="neutral">{x.symptom.replaceAll('_', ' ')}</Pill>
+                              <Pill tone="neutral">{x.symptom.replace(/_/g, ' ')}</Pill>
                             </div>
                             <div className="mt-2 text-slate-700">
                               Severity {state.sensitiveHidden ? 'Hidden' : `${x.severity}/5`} • Fever{' '}
@@ -1711,7 +1716,7 @@ export default function PaediatricCenterPage() {
                       <div key={d.id} className="rounded-xl border border-slate-200 bg-white p-3 text-xs">
                         <div className="flex items-center justify-between">
                           <div className="text-slate-900">{state.sensitiveHidden ? 'Hidden' : d.weekOfISO}</div>
-                          <Pill tone="neutral">{d.ageBand.replaceAll('_', '')}</Pill>
+                          <Pill tone="neutral">{d.ageBand.replace(/_/g, '')}</Pill>
                         </div>
                         <div className="mt-2 text-slate-700">{d.observed.length} ticked</div>
                         <div className="mt-1 text-slate-600">{d.notes || '—'}</div>
@@ -2585,7 +2590,7 @@ function DevChecklist({
   return (
     <div className="space-y-4">
       <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-        Age band: <span className="font-semibold">{ageBand.replaceAll('_', '')}</span> • Tick what you notice this week.
+        Age band: <span className="font-semibold">{ageBand.replace(/_/g, '')}</span> • Tick what you notice this week.
       </div>
 
       <div className="grid gap-2 sm:grid-cols-2">
@@ -2805,7 +2810,7 @@ function ChronicDiary({
                   triggers.includes(t) ? 'border-slate-300 bg-slate-100 text-slate-900' : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
                 )}
               >
-                {t.replaceAll('_', ' ')}
+                {t.replace(/_/g, ' ')}
               </button>
             ))}
           </div>

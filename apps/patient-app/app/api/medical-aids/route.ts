@@ -80,7 +80,14 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const b = (await req.json().catch(() => ({}))) as Partial<MedicalAid>;
-  const patientId = String(b.patientId || 'pt-za-001');
+  const patientId = String(b.patientId || '').trim();
+
+if (!patientId) {
+  return NextResponse.json(
+    { ok: false, error: 'patientId_required' },
+    { status: 400 },
+  );
+}
   const payerName = String(b.payerName || '').trim();
   const membershipNumber = String(b.membershipNumber || '').trim();
 

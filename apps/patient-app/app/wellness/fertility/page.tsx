@@ -1,6 +1,6 @@
 'use client';
 
-import { FertilitySetup } from '@/screens/FertilitySetup';
+import { FertilitySetup } from '@/src/screens/FertilitySetup';
 
 export default function FertilityDashboardPage() {
   return (

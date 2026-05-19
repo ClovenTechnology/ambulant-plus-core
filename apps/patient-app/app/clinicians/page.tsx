@@ -1,7 +1,7 @@
 ﻿// apps/patient-app/app/clinicians/page.tsx
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import useSWR, { mutate as globalMutate } from 'swr';
@@ -9,15 +9,30 @@ import { toast } from '@/components/ToastMount';
 import { usePlan } from '@/components/context/PlanContext';
 import cleanText from '@/lib/cleanText';
 
-import { COUNTRY_LABELS, COUNTRY_OPTIONS, getMockCliniciansForCountry, type CountryCode } from '@/mock/clinicians-by-country';
+import { ClinicianCard } from '@/components/clinicians/ClinicianCard';
+import { CliniciansCompareDrawer } from '@/components/clinicians/CliniciansCompareDrawer';
+import { UpgradeRequiredModal } from '@/components/clinicians/UpgradeRequiredModal';
+import CliniciansPagination from '@/components/clinicians/CliniciansPagination';
+import DirectoryToolbar from '@/components/clinicians/DirectoryToolbar';
+import DirectoryFiltersPanel from '@/components/clinicians/DirectoryFiltersPanel';
+
+type CountryCode = 'ZA';
+
+const COUNTRY_LABELS: Record<CountryCode, string> = {
+  ZA: 'South Africa',
+};
+
 
 const UI_CLASSES = ['Doctors', 'Allied Health', 'Wellness'] as const;
 type UIClass = (typeof UI_CLASSES)[number];
 
 const PAGE_SIZE = 10;
-const FAV_KEY = 'clinician.favs';
 const ENCOUNTER_KEY = 'clinician.encounters.v1';
 const COMPARE_KEY = 'clinician.compare.v1';
+
+// ✅ ratings bump channels (non-SSE path)
+const RATINGS_BC_NAME = 'ambulant_ratings';
+const RATINGS_BUMP_STORAGE_KEY = 'ambulant.ratings.bump';
 
 // fairness tuning constants
 const BOOKING_PENALTY_WINDOW_MS = 1000 * 60 * 60 * 2;
@@ -35,7 +50,7 @@ type ClinicianItem = {
   cls?: 'Doctor' | 'Allied Health' | 'Wellness';
   gender?: string;
 
-  // price (either API ZAR or mock global)
+  // price from API
   priceZAR?: number;
   priceCents?: number;
   currency?: string;
@@ -69,7 +84,26 @@ type ClinicianItem = {
   consultMins?: number | null; // avg consult length
   followupMins?: number | null; // follow-up length
   responseTimeMins?: number | null; // typical response time
+
+  operational?: {
+    canBeListed?: boolean;
+    canBeBooked?: boolean;
+    canPrescribe?: boolean;
+    prescribingMode?: 'no' | 'conditional' | 'yes';
+    allowedWorkspaces?: string[];
+    patientCategory?: 'clinical' | 'wellness' | null;
+    blockers?: string[];
+    riskFlags?: string[];
+    ambulantId?: string | null;
+  };
 };
+
+const SURFACE =
+  'relative overflow-hidden rounded-[28px] border border-white/55 bg-white/72 backdrop-blur-2xl shadow-[0_16px_60px_rgba(15,23,42,0.08)]';
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
 
 /* ---------------------------
    Helpers
@@ -86,51 +120,28 @@ function normalizeClassParam(v: string | null): UIClass | null {
   return null;
 }
 
-const HOVER_MENUS: Record<UIClass, string[]> = {
-  Doctors: ['GPs', 'Dentists', 'Specialists'],
-  'Allied Health': ['Nurses', 'Pharmacists', 'Therapists'],
-  Wellness: ['Chiropractor', 'Dieticians', 'Lifestyle'],
-};
-
-function initialsFromName(name = '') {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return '';
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + (parts[1][0] ?? '')).toUpperCase();
-}
-
 function formatMoney(currency?: string, cents?: number, fallbackZar?: number) {
   if (typeof cents === 'number' && currency) {
     try {
-      return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(cents / 100);
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency,
+      }).format(cents / 100);
     } catch {
       return `${currency} ${(cents / 100).toFixed(2)}`;
     }
   }
-  if (typeof fallbackZar === 'number') return `R${Number(fallbackZar).toFixed(0)}`;
+
+  if (typeof fallbackZar === 'number') {
+    return `R${Number(fallbackZar).toFixed(0)}`;
+  }
+
   return '';
 }
 
 function clamp(n: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, n));
+  return Math.min(max, Math.max(min, n));
 }
-
-/**
- * ✅ No imports needed for flags.
- * Converts ISO 3166-1 alpha-2 country codes into Unicode flag emoji.
- */
-function flagEmojiFromCountryCode(code: string) {
-  const cc = (code || '').toUpperCase();
-  if (cc.length !== 2) return '🌍';
-  const A = 0x1f1e6;
-  const base = 'A'.charCodeAt(0);
-  const c1 = cc.charCodeAt(0);
-  const c2 = cc.charCodeAt(1);
-  if (c1 < 65 || c1 > 90 || c2 < 65 || c2 > 90) return '🌍';
-  return String.fromCodePoint(A + (c1 - base), A + (c2 - base));
-}
-// Backward compatibility if any older code still references this name
-const flagEmojiFromCountry = flagEmojiFromCountryCode;
 
 function safeParseMs(v: any): number | null {
   if (typeof v === 'number' && Number.isFinite(v)) return v;
@@ -141,9 +152,80 @@ function safeParseMs(v: any): number | null {
   return null;
 }
 
+
+function getUid() {
+  if (typeof window === 'undefined') return '';
+  return localStorage.getItem('ambulant_uid') || '';
+}
+
+async function readJsonSafe(r: Response) {
+  return r.json().catch(() => null);
+}
+
+function authHeaders(): Record<string, string> {
+  const uid = getUid();
+  return uid ? { 'x-role': 'patient', 'x-uid': uid } : { 'x-role': 'patient' };
+}
+
+async function fetchFavouritesFromApi(): Promise<string[]> {
+  try {
+    const r = await fetch('/api/favourites', {
+      cache: 'no-store',
+      headers: authHeaders(),
+    });
+    const j = await readJsonSafe(r);
+    if (!r.ok) return [];
+    const ids = Array.isArray(j?.ids)
+      ? j.ids
+      : Array.isArray(j?.favourites)
+        ? j.favourites
+        : [];
+    return ids.map((x: any) => String(x)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function saveFavouriteToApi(id: string) {
+  const r = await fetch('/api/favourites', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...authHeaders(),
+    },
+    body: JSON.stringify({ id }),
+  });
+  if (!r.ok) {
+    const j = await readJsonSafe(r);
+    throw new Error(j?.error || 'Failed to save favourite');
+  }
+}
+
+async function removeFavouriteFromApi(id: string) {
+  const r = await fetch(`/api/favourites?id=${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+  if (!r.ok) {
+    const j = await readJsonSafe(r);
+    throw new Error(j?.error || 'Failed to remove favourite');
+  }
+}
+
+function hasRealMeta(c: ClinicianItem) {
+  return (
+    typeof c.nextAvailableAt === 'number' ||
+    typeof c.consultMins === 'number' ||
+    typeof c.followupMins === 'number' ||
+    typeof c.responseTimeMins === 'number'
+  );
+}
+
 // Supports patterns like: "Cape Town, Western Cape", "Lagos - Ikeja", "Nairobi • Westlands"
 function parseLocationParts(raw: string) {
   const s = cleanText(raw || '');
+  if (!s) return { city: '', region: '' };
+
   const byComma = s.split(',').map((x) => x.trim()).filter(Boolean);
   if (byComma.length >= 2) return { city: byComma[0], region: byComma.slice(1).join(', ') };
 
@@ -156,23 +238,63 @@ function parseLocationParts(raw: string) {
   return { city: s, region: '' };
 }
 
+function normalizeStatus(s?: string) {
+  return String(s ?? 'active').trim().toLowerCase();
+}
+
+function clinicianBookable(c: ClinicianItem) {
+  if (!c.operational) return normalizeStatus(c.status) === 'active';
+  return !!c.operational.canBeBooked;
+}
+
+function buildPageNumbers(current: number, total: number): Array<number | '…'> {
+  if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
+
+  const pages = new Set<number>();
+  pages.add(1);
+  pages.add(total);
+  pages.add(current);
+
+  for (let d = 1; d <= 1; d++) {
+    if (current - d >= 1) pages.add(current - d);
+    if (current + d <= total) pages.add(current + d);
+  }
+
+  const sorted = Array.from(pages).sort((a, b) => a - b);
+  const out: Array<number | '…'> = [];
+  for (let i = 0; i < sorted.length; i++) {
+    const p = sorted[i];
+    const prev = sorted[i - 1];
+    if (i > 0 && p - prev > 1) out.push('…');
+    out.push(p);
+  }
+  return out;
+}
+
 /* ---------------------------
-   Stubbed “meta” (Availability + Trust block)
-   - deterministic per clinician id
-   - easy to replace once you wire backend fields
+   Availability + trust metadata
+   Production path: render only backend-supplied fields.
 --------------------------- */
-function hashToU32(s: string) {
+
+
+function stableIdFromFields(parts: Array<string | number | undefined | null>) {
+  const raw = parts
+    .map((x) => String(x ?? '').trim())
+    .filter(Boolean)
+    .join('|');
+
+  if (!raw) return '';
+
   let h = 2166136261;
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
+  for (let i = 0; i < raw.length; i++) {
+    h ^= raw.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  return h >>> 0;
+
+  return `c_${(h >>> 0).toString(36)}`;
 }
-function roundToNextMinutes(ts: number, stepMinutes = 15) {
-  const stepMs = stepMinutes * 60 * 1000;
-  return Math.ceil(ts / stepMs) * stepMs;
-}
+
+
 function sameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
@@ -193,31 +315,18 @@ function formatAvailabilityLabel(ts: number) {
 }
 
 function computeMeta(c: ClinicianItem) {
-  // If backend provides these, use them.
   const nextAvailableAt = typeof c.nextAvailableAt === 'number' ? c.nextAvailableAt : null;
   const consultMins = typeof c.consultMins === 'number' ? c.consultMins : null;
   const followupMins = typeof c.followupMins === 'number' ? c.followupMins : null;
   const responseTimeMins = typeof c.responseTimeMins === 'number' ? c.responseTimeMins : null;
 
-  const h = hashToU32(String(c.id));
-  const now = Date.now();
-
-  // Availability stub: within next 0.5h .. 72h (online clinicians skew sooner)
-  const baseOffsetMin = c.online ? 20 + (h % 90) : 90 + (h % 36) * 30; // online: 20..110min, offline: 90..(90+1050)min
-  const slotTs = roundToNextMinutes(now + baseOffsetMin * 60 * 1000, 15);
-
-  const computedNext = nextAvailableAt ?? slotTs;
-
-  // Trust stub values (deterministic)
-  const cM = consultMins ?? (12 + (h % 17)); // 12..28
-  const fM = followupMins ?? clamp(cM - (2 + (h % 6)), 8, 25); // slightly shorter
-  const rM = responseTimeMins ?? (30 + (h % 210)); // 30..239 minutes
-
   return {
-    nextAvailableAt: computedNext,
-    consultMins: cM,
-    followupMins: fM,
-    responseTimeMins: rM,
+    nextAvailableAt,
+    consultMins,
+    followupMins,
+    responseTimeMins,
+    isSynthetic: false,
+    hasReal: hasRealMeta(c),
   };
 }
 
@@ -232,10 +341,12 @@ async function fetcher(url: string) {
   } catch {
     j = null;
   }
+
   if (!r.ok) {
     const msg = j?.error ? String(j.error) : `HTTP ${r.status}`;
     throw new Error(msg);
   }
+
   return j;
 }
 
@@ -256,11 +367,13 @@ function bookedCountPenaltyMs(clin: ClinicianItem) {
 }
 function sortByFairness(a: ClinicianItem, b: ClinicianItem) {
   const statusRank = (s?: string) => {
-    if (!s || s === 'active' || s === 'pending') return 0;
-    if (s === 'disciplinary') return 1;
-    if (s === 'disabled' || s === 'archived') return 2;
+    const n = normalizeStatus(s);
+    if (!n || n === 'active' || n === 'pending') return 0;
+    if (n === 'disciplinary') return 1;
+    if (n === 'disabled' || n === 'archived') return 2;
     return 0;
   };
+
   const srA = statusRank((a as any).status);
   const srB = statusRank((b as any).status);
   if (srA !== srB) return srA - srB;
@@ -295,78 +408,7 @@ function sortByFairness(a: ClinicianItem, b: ClinicianItem) {
 --------------------------- */
 function normalizeCountryParam(v: string | null): CountryCode | null {
   if (!v) return null;
-  const s = v.trim().toUpperCase();
-
-  // backward-compat aliases
-  const alias: Record<string, string> = {
-    UK: 'GB',
-    USA: 'US',
-    DRC: 'CD',
-  };
-  const code = (alias[s] ?? s) as CountryCode;
-
-  if ((COUNTRY_LABELS as any)[code]) return code;
-  return null;
-}
-
-function mapMockToItem(country: CountryCode, c: any): ClinicianItem {
-  const priceCents = typeof c.priceCents === 'number' ? c.priceCents : undefined;
-  const currency = typeof c.currency === 'string' ? c.currency : undefined;
-
-  const rating = typeof c.rating === 'number' ? c.rating : Number(c.rating ?? 0);
-  const ratingCount =
-    typeof c.ratingCount === 'number'
-      ? c.ratingCount
-      : typeof c.reviewCount === 'number'
-        ? c.reviewCount
-        : typeof c.ratingsCount === 'number'
-          ? c.ratingsCount
-          : undefined;
-
-  const joinedAt = safeParseMs(c.joinedAt) ?? safeParseMs(c.createdAt) ?? safeParseMs(c.onboardedAt) ?? null;
-
-  return {
-    id: String(c.id ?? `${c.name}-${Math.random()}`),
-    name: cleanText(c.name ?? ''),
-    specialty: cleanText(c.specialty ?? ''),
-    location: cleanText(c.location ?? ''),
-    rating: Number.isFinite(rating) ? rating : 0,
-    ratingCount,
-    online: Boolean(c.online),
-    cls: c.cls ?? 'Doctor',
-
-    priceCents,
-    currency,
-    priceZAR:
-      typeof c.priceZAR === 'number'
-        ? c.priceZAR
-        : country === 'ZA' && typeof priceCents === 'number'
-          ? Math.round(priceCents / 100)
-          : undefined,
-
-    gender: c.gender,
-    lastBookedAt: null,
-    lastSeenAt: Date.now() - Math.floor(Math.random() * 1000 * 60 * 60 * 24 * 7),
-    onlineSeq: c.online ? Math.floor(Math.random() * 1000) + 1 : null,
-    recentBookedCount: 0,
-    status: (c as any).status ?? 'active',
-    acceptsMedicalAid: typeof c.acceptsMedicalAid === 'boolean' ? c.acceptsMedicalAid : !!(c as any).medicalAidAccepted,
-    acceptedSchemes: Array.isArray(c.acceptedSchemes) ? c.acceptedSchemes : [],
-    practiceName: c.practiceName ?? undefined,
-
-    country,
-    speaks: Array.isArray(c.speaks) ? c.speaks : undefined,
-    yearsExp:
-      typeof c.yearsExp === 'number' ? c.yearsExp : typeof c.yearsExperience === 'number' ? c.yearsExperience : undefined,
-
-    joinedAt,
-
-    // optional future fields (if mocks start carrying them)
-    nextAvailableAt: safeParseMs(c.nextAvailableAt),
-    consultMins: typeof c.consultMins === 'number' ? c.consultMins : null,
-    followupMins: typeof c.followupMins === 'number' ? c.followupMins : null,
-    responseTimeMins: typeof c.responseTimeMins === 'number' ? c.responseTimeMins : null,
-  };
+  return v.trim().toUpperCase() === 'ZA' ? 'ZA' : null;
 }
 
 function mapApiToItem(c: any): ClinicianItem {
@@ -375,12 +417,12 @@ function mapApiToItem(c: any): ClinicianItem {
     typeof c.ratingCount === 'number'
       ? c.ratingCount
       : typeof c.reviewCount === 'number'
-        ? c.reviewCount
-        : typeof c.ratingsCount === 'number'
-          ? c.ratingsCount
-          : typeof c.totalRatings === 'number'
-            ? c.totalRatings
-            : undefined;
+      ? c.reviewCount
+      : typeof c.ratingsCount === 'number'
+      ? c.ratingsCount
+      : typeof c.totalRatings === 'number'
+      ? c.totalRatings
+      : undefined;
 
   const joinedAt =
     safeParseMs(c.joinedAt) ??
@@ -391,7 +433,18 @@ function mapApiToItem(c: any): ClinicianItem {
 
   return {
     ...c,
-    id: String(c.id ?? c.slug ?? `${c.name}-${Math.random()}`),
+    id: String(
+      c.id ??
+        c.slug ??
+        stableIdFromFields([
+          c.name,
+          c.specialty,
+          c.location,
+          c.practiceName ?? c.practice ?? '',
+          c.country ?? '',
+          c.profile?.hpcsaNumber ?? '',
+        ]),
+    ),
     name: cleanText(c.name ?? ''),
     specialty: cleanText(c.specialty ?? ''),
     location: cleanText(c.location ?? ''),
@@ -403,8 +456,8 @@ function mapApiToItem(c: any): ClinicianItem {
       typeof c.priceZAR === 'number'
         ? c.priceZAR
         : typeof c.feeCents === 'number'
-          ? Math.round(c.feeCents / 100)
-          : undefined,
+        ? Math.round(c.feeCents / 100)
+        : undefined,
 
     lastBookedAt:
       typeof c.lastBookedAt === 'number' ? c.lastBookedAt : c.lastBookedAt ? Date.parse(c.lastBookedAt) : c.lastBookedAt ?? null,
@@ -418,24 +471,49 @@ function mapApiToItem(c: any): ClinicianItem {
     acceptedSchemes: Array.isArray(c.acceptedSchemes)
       ? c.acceptedSchemes
       : typeof c.acceptedSchemesCsv === 'string'
-        ? String(c.acceptedSchemesCsv)
-            .split(',')
-            .map((s: string) => s.trim())
-            .filter(Boolean)
-        : [],
+      ? String(c.acceptedSchemesCsv)
+          .split(',')
+          .map((s: string) => s.trim())
+          .filter(Boolean)
+      : [],
     practiceName: c.practiceName ?? c.practice ?? undefined,
 
     country: normalizeCountryParam(c.country ?? null) ?? 'ZA',
     speaks: Array.isArray(c.speaks) ? c.speaks : Array.isArray(c.languages) ? c.languages : undefined,
-    yearsExp: typeof c.yearsExp === 'number' ? c.yearsExp : typeof c.yearsExperience === 'number' ? c.yearsExperience : undefined,
+    yearsExp:
+      typeof c.yearsExp === 'number'
+        ? c.yearsExp
+        : typeof c.yearsExperience === 'number'
+        ? c.yearsExperience
+        : undefined,
 
     joinedAt,
 
     // optional future backend fields:
     nextAvailableAt: safeParseMs(c.nextAvailableAt) ?? safeParseMs(c.nextSlotAt) ?? null,
-    consultMins: typeof c.consultMins === 'number' ? c.consultMins : typeof c.avgConsultMins === 'number' ? c.avgConsultMins : null,
-    followupMins: typeof c.followupMins === 'number' ? c.followupMins : typeof c.followUpMins === 'number' ? c.followUpMins : null,
-    responseTimeMins: typeof c.responseTimeMins === 'number' ? c.responseTimeMins : typeof c.avgResponseMins === 'number' ? c.avgResponseMins : null,
+    consultMins:
+      typeof c.consultMins === 'number' ? c.consultMins : typeof c.avgConsultMins === 'number' ? c.avgConsultMins : null,
+    followupMins:
+      typeof c.followupMins === 'number' ? c.followupMins : typeof c.followUpMins === 'number' ? c.followUpMins : null,
+    responseTimeMins:
+      typeof c.responseTimeMins === 'number' ? c.responseTimeMins : typeof c.avgResponseMins === 'number' ? c.avgResponseMins : null,
+
+    operational:
+      c.operational && typeof c.operational === 'object'
+        ? {
+            canBeListed: !!c.operational.canBeListed,
+            canBeBooked: !!c.operational.canBeBooked,
+            canPrescribe: !!c.operational.canPrescribe,
+            prescribingMode: c.operational.prescribingMode ?? 'no',
+            allowedWorkspaces: Array.isArray(c.operational.allowedWorkspaces)
+              ? c.operational.allowedWorkspaces.map(String)
+              : [],
+            patientCategory: c.operational.patientCategory ?? null,
+            blockers: Array.isArray(c.operational.blockers) ? c.operational.blockers.map(String) : [],
+            riskFlags: Array.isArray(c.operational.riskFlags) ? c.operational.riskFlags.map(String) : [],
+            ambulantId: c.operational.ambulantId ?? null,
+          }
+        : undefined,
   };
 }
 
@@ -476,33 +554,25 @@ const RatingRow: React.FC<{ rating?: number; count?: number }> = ({ rating, coun
   );
 };
 
-const Chip: React.FC<{ label: string; onRemove?: () => void }> = ({ label, onRemove }) => (
-  <span className="inline-flex items-center gap-1 rounded-full border bg-white px-2 py-1 text-xs text-slate-700 shadow-sm">
-    <span className="max-w-[220px] truncate">{label}</span>
-    {onRemove ? (
-      <button
-        type="button"
-        onClick={onRemove}
-        className="ml-0.5 rounded-full px-1 text-slate-500 hover:text-slate-900"
-        aria-label={`Remove ${label}`}
-      >
-        ×
-      </button>
-    ) : null}
-  </span>
-);
-
 /* ---------------------------
    Page component
 --------------------------- */
-export default function CliniciansPage() {
+function CliniciansPageContent() {
   const router = useRouter();
   const { isPremium } = usePlan();
   const sp = useSearchParams();
-  const bootstrappedRef = useRef(false);
-  const fallbackToastRef = useRef(false);
+  const qs = useMemo(
+    () => new URLSearchParams(sp?.toString() ?? ''),
+    [sp],
+  );
 
-  const [country, setCountry] = useState<CountryCode>(normalizeCountryParam(sp.get('country')) ?? 'ZA');
+  const bootstrappedRef = useRef(false);
+
+  const [country, setCountry] = useState<CountryCode>(normalizeCountryParam(qs.get('country')) ?? 'ZA');
+  const handleCountryChange = useCallback((value: CountryCode) => {
+    setCountry(value === 'ZA' ? 'ZA' : 'ZA');
+  }, []);
+
   const [tab, setTab] = useState<UIClass>('Doctors');
 
   const [filters, setFilters] = useState<{
@@ -525,10 +595,13 @@ export default function CliniciansPage() {
     sort: 'rating-desc',
     specialty: '',
     gender: '',
+
     region: '',
     city: '',
+
     price: 5000,
     acceptsMedicalAid: '',
+
     previouslyConsulted: '',
     languages: [],
     minYearsExp: 0,
@@ -573,7 +646,7 @@ export default function CliniciansPage() {
     if (bootstrappedRef.current) return;
     bootstrappedRef.current = true;
 
-    const get = (k: string) => sp.get(k) ?? '';
+    const get = (k: string) => qs.get(k) ?? '';
     const cls = normalizeClassParam(get('class'));
     const qText = get('q');
     const onlineParam = get('online');
@@ -596,8 +669,37 @@ export default function CliniciansPage() {
       specialty: specFirst || prev.specialty,
     }));
     if (online) setOnlineOnly(true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sp]);
+  }, [qs]);
+
+  // URL sync (deep-link browsing state)
+  useEffect(() => {
+    const current = qs.toString();
+    const next = new URLSearchParams(current);
+
+    if (country && country !== 'ZA') next.set('country', country);
+    else next.delete('country');
+
+    const tabClass = tab === 'Doctors' ? 'doctor' : tab.toLowerCase();
+    next.set('class', tabClass);
+
+    if (debouncedQ) next.set('q', debouncedQ);
+    else next.delete('q');
+
+    if (filters.gender) next.set('gender', filters.gender);
+    else next.delete('gender');
+
+    if (filters.specialty) next.set('specialties', filters.specialty);
+    else next.delete('specialties');
+
+    if (onlineOnly) next.set('online', '1');
+    else next.delete('online');
+
+    const target = next.toString();
+
+    if (target !== current) {
+      router.replace(`/clinicians${target ? `?${target}` : ''}`, { scroll: false });
+    }
+  }, [country, tab, debouncedQ, filters.gender, filters.specialty, onlineOnly, router, qs]);
 
   // sticky shadow
   useEffect(() => {
@@ -607,18 +709,19 @@ export default function CliniciansPage() {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // load favourites from localStorage
+  // load favourites from server-backed patient API
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(FAV_KEY);
-      if (raw) setFavs(JSON.parse(raw));
-    } catch {}
+    let cancelled = false;
+
+    (async () => {
+      const ids = await fetchFavouritesFromApi();
+      if (!cancelled) setFavs(ids);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
-  useEffect(() => {
-    try {
-      localStorage.setItem(FAV_KEY, JSON.stringify(favs));
-    } catch {}
-  }, [favs]);
 
   // compare pins are PREMIUM-only: never load/save for free users
   useEffect(() => {
@@ -658,13 +761,24 @@ export default function CliniciansPage() {
       previouslyConsulted: '',
       sort: f.sort === 'soonest' ? 'rating-desc' : f.sort,
     }));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPremium]);
 
-  const toggleFav = useCallback(
-    (id: string) => setFavs((prev) => (prev.includes(id) ? prev.filter((f) => f !== id) : [...prev, id])),
-    [],
-  );
+  const toggleFav = useCallback(async (id: string) => {
+    const currentlyFav = favs.includes(id);
+
+    setFavs((prev) => (currentlyFav ? prev.filter((f) => f !== id) : [...prev, id]));
+
+    try {
+      if (currentlyFav) {
+        await removeFavouriteFromApi(id);
+      } else {
+        await saveFavouriteToApi(id);
+      }
+    } catch (e: any) {
+      setFavs((prev) => (currentlyFav ? [...prev, id] : prev.filter((f) => f !== id)));
+      toast(e?.message || 'Failed to update favourites', 'error');
+    }
+  }, [favs]);
 
   const toggleCompare = useCallback(
     (c: ClinicianItem) => {
@@ -695,9 +809,13 @@ export default function CliniciansPage() {
     [isPremium, openUpgrade],
   );
 
-  // ✅ Use API only for ZA; other countries instantly show their mock datasets.
-  const useApi = country === 'ZA';
-  const apiUrl = useApi ? `/api/clinicians?page=1&perPage=500` : null;
+  const apiUrl = useMemo(() => {
+    const params = new URLSearchParams();
+    params.set('page', '1');
+    params.set('perPage', '500');
+    params.set('country', country);
+    return `/api/clinicians?${params.toString()}`;
+  }, [country]);
 
   const { data, error, isValidating } = useSWR(apiUrl, fetcher, {
     revalidateOnFocus: false,
@@ -706,37 +824,8 @@ export default function CliniciansPage() {
 
   const [allClinicians, setAllClinicians] = useState<ClinicianItem[]>([]);
 
-  // Non-ZA: instantly populate with mocks
   useEffect(() => {
-    if (useApi) return;
-    const fallback = getMockCliniciansForCountry(country).map((c: any) => mapMockToItem(country, c));
-    setAllClinicians(fallback);
-    setPage(1);
-  }, [country, useApi]);
-
-  // ZA API path (fallback to ZA mocks on error OR empty OR ok:false)
-  useEffect(() => {
-    if (!useApi) return;
-
-    const applyZaFallback = (why: string) => {
-      const fallback = getMockCliniciansForCountry('ZA').map((c: any) => mapMockToItem('ZA', c));
-      setAllClinicians(fallback);
-      setPage(1);
-
-      if (!fallbackToastRef.current) {
-        fallbackToastRef.current = true;
-        try {
-          toast(`Using demo clinician data (${why})`, 'info');
-        } catch {}
-      }
-    };
-
     if (data) {
-      if (data?.ok === false) {
-        applyZaFallback('API said ok:false');
-        return;
-      }
-
       const list: any[] = Array.isArray(data)
         ? data
         : Array.isArray(data?.clinicians)
@@ -745,23 +834,26 @@ export default function CliniciansPage() {
             ? data.items
             : [];
 
-      if (!list.length) {
-        applyZaFallback('no clinicians returned');
-        return;
-      }
-
-      setAllClinicians(list.map(mapApiToItem));
+      const mapped = list.map(mapApiToItem).filter((c) => c?.operational?.canBeListed !== false);
+      setAllClinicians(mapped);
+      setPage(1);
       return;
     }
 
-    if (error) applyZaFallback('offline');
-  }, [data, error, useApi]);
+    if (error) {
+      setAllClinicians([]);
+      setPage(1);
+      try {
+        toast('Unable to load live clinician directory right now.', 'error');
+      } catch {}
+    }
+  }, [data, error]);
 
-  const loading = useApi ? isValidating && !data && !allClinicians.length : false;
+  const loading = isValidating && !data && !allClinicians.length;
 
   // Listen to server-sent events for presence and booking updates (ZA API mode)
   useEffect(() => {
-    if (!useApi) return;
+    if (!apiUrl) return;
 
     let es: EventSource | null = null;
     try {
@@ -778,23 +870,29 @@ export default function CliniciansPage() {
 
         if (payload.type === 'presence' || payload.type === 'booked' || payload.type === 'clinician.update') {
           globalMutate(
-            apiUrl!,
+            apiUrl,
             (current: any) => {
               const arr: any[] = Array.isArray(current)
                 ? current
                 : Array.isArray(current?.clinicians)
-                  ? current.clinicians
-                  : Array.isArray(current?.items)
-                    ? current.items
-                    : [];
+                ? current.clinicians
+                : Array.isArray(current?.items)
+                ? current.items
+                : [];
 
               const mapped = arr.map((c) => {
                 if (String(c.id) !== String(payload.clinicianId)) return c;
 
                 const updated: any = { ...c, ...payload.updates };
 
-                if (payload.lastBookedAt) updated.lastBookedAt = typeof payload.lastBookedAt === 'number' ? payload.lastBookedAt : Date.parse(payload.lastBookedAt);
-                if (payload.lastSeenAt) updated.lastSeenAt = typeof payload.lastSeenAt === 'number' ? payload.lastSeenAt : Date.parse(payload.lastSeenAt);
+                if (payload.lastBookedAt)
+                  updated.lastBookedAt =
+                    typeof payload.lastBookedAt === 'number'
+                      ? payload.lastBookedAt
+                      : Date.parse(payload.lastBookedAt);
+                if (payload.lastSeenAt)
+                  updated.lastSeenAt =
+                    typeof payload.lastSeenAt === 'number' ? payload.lastSeenAt : Date.parse(payload.lastSeenAt);
                 if (typeof payload.online !== 'undefined') updated.online = Boolean(payload.online);
                 if (typeof payload.onlineSeq !== 'undefined') updated.onlineSeq = payload.onlineSeq;
                 if (typeof payload.recentBookedCount !== 'undefined') updated.recentBookedCount = payload.recentBookedCount;
@@ -817,6 +915,7 @@ export default function CliniciansPage() {
                 if (typeof payload.nextAvailableAt !== 'undefined') updated.nextAvailableAt = safeParseMs(payload.nextAvailableAt);
                 if (typeof payload.consultMins !== 'undefined') updated.consultMins = payload.consultMins;
                 if (typeof payload.followupMins !== 'undefined') updated.followupMins = payload.followupMins;
+                if (typeof payload.responseTimeMins !== 'undefined') updated.responseTimeMins = payload.responseTimeMins;
 
                 updated.name = cleanText(updated.name ?? '');
                 updated.specialty = cleanText(updated.specialty ?? '');
@@ -825,7 +924,14 @@ export default function CliniciansPage() {
               });
 
               const found = mapped.some((c) => String(c.id) === String(payload.clinicianId));
-              if (!found && payload.full) mapped.push(payload.full);
+              if (!found && payload.full) {
+                mapped.push(mapApiToItem(payload.full));
+              }
+
+              if (Array.isArray(current)) {
+                return mapped;
+              }
+
               return { ...(current ?? {}), clinicians: mapped, items: mapped };
             },
             false,
@@ -838,7 +944,183 @@ export default function CliniciansPage() {
 
     es.onerror = (err) => console.warn('Clinician events stream error', err);
     return () => es?.close();
-  }, [useApi, apiUrl]);
+  }, [apiUrl]);
+
+  /* ---------------------------
+     ✅ Ratings bumps (non-SSE)
+     - BroadcastChannel: ambulant_ratings (same tab + other tabs)
+     - storage key: ambulant.ratings.bump (other tabs)
+     - patches SWR cache if possible; otherwise revalidates
+  --------------------------- */
+  useEffect(() => {
+    if (!apiUrl) return;
+
+    let bc: BroadcastChannel | null = null;
+    let lastRevalidateAt = 0;
+    let revalidateTimer: any = null;
+
+    const toNum = (v: any): number | null => {
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      if (typeof v === 'string' && v.trim() !== '') {
+        const n = Number(v);
+        return Number.isFinite(n) ? n : null;
+      }
+      return null;
+    };
+
+    const scheduleRevalidate = () => {
+      const now = Date.now();
+      const gap = now - lastRevalidateAt;
+
+      // simple throttle so we don't refetch in a tight loop
+      if (gap < 800) {
+        if (revalidateTimer) clearTimeout(revalidateTimer);
+        revalidateTimer = setTimeout(() => {
+          lastRevalidateAt = Date.now();
+          globalMutate(apiUrl);
+        }, 900);
+        return;
+      }
+
+      lastRevalidateAt = now;
+      globalMutate(apiUrl);
+    };
+
+    const tryPatch = (p: any) => {
+      const clinicianId = String(p?.clinicianId ?? p?.clinician_id ?? p?.id ?? p?.clinician ?? '').trim();
+      if (!clinicianId) return false;
+
+      const count =
+        toNum(p?.ratingCount) ??
+        toNum(p?.ratingsCount) ??
+        toNum(p?.reviewCount) ??
+        toNum(p?.totalRatings) ??
+        toNum(p?.count);
+
+      const avg =
+        toNum(p?.ratingAvg) ??
+        toNum(p?.ratingAverage) ??
+        toNum(p?.ratingMean) ??
+        toNum(p?.rating);
+
+      const sum = toNum(p?.ratingSum);
+
+      const nextRating =
+        avg != null
+          ? clamp(avg, 0, 5)
+          : sum != null && count != null && count > 0
+          ? clamp(sum / count, 0, 5)
+          : null;
+
+      const hasAny = nextRating != null || count != null;
+      if (!hasAny) return false;
+
+      // Patch SWR cache (fast UI update, no refetch)
+      globalMutate(
+        apiUrl,
+        (current: any) => {
+          const arr: any[] = Array.isArray(current)
+            ? current
+            : Array.isArray(current?.clinicians)
+            ? current.clinicians
+            : Array.isArray(current?.items)
+            ? current.items
+            : [];
+
+          let touched = false;
+
+          const patched = arr.map((c) => {
+            if (String(c?.id) !== clinicianId) return c;
+            touched = true;
+            const updated: any = { ...c };
+
+            if (nextRating != null) updated.rating = nextRating;
+            if (count != null) updated.ratingCount = count;
+
+            // tolerate payload variants that ship sums too
+            if (typeof p?.ratingSum !== 'undefined') updated.ratingSum = p.ratingSum;
+
+            // keep text fields clean
+            updated.name = cleanText(updated.name ?? '');
+            updated.specialty = cleanText(updated.specialty ?? '');
+            updated.location = cleanText(updated.location ?? '');
+            return updated;
+          });
+
+          // If not found, bail (caller will revalidate)
+          if (!touched) return current;
+
+          if (Array.isArray(current)) return patched;
+          return { ...(current ?? {}), clinicians: patched, items: patched };
+        },
+        false,
+      );
+
+      // Also patch local rendered list immediately (this page renders from allClinicians state)
+      setAllClinicians((prev) =>
+        prev.map((c) => {
+          if (String(c.id) !== clinicianId) return c;
+          const updated: ClinicianItem = { ...c };
+          if (nextRating != null) updated.rating = nextRating;
+          if (count != null) updated.ratingCount = count;
+          return updated;
+        }),
+      );
+
+      return true;
+    };
+
+    const handleRaw = (raw: any) => {
+      try {
+        let payload: any = raw;
+
+        if (typeof raw === 'string') {
+          const s = raw.trim();
+          if (!s) return scheduleRevalidate();
+          try {
+            payload = JSON.parse(s);
+          } catch {
+            // tolerate simple bumps like "clinicianId"
+            payload = { clinicianId: s };
+          }
+        }
+
+        if (!payload || typeof payload !== 'object') return scheduleRevalidate();
+
+        const ok = tryPatch(payload);
+        if (!ok) scheduleRevalidate();
+      } catch {
+        scheduleRevalidate();
+      }
+    };
+
+    // BroadcastChannel: same tab + other tabs
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        bc = new BroadcastChannel(RATINGS_BC_NAME);
+        bc.onmessage = (ev: MessageEvent) => handleRaw(ev.data);
+      }
+    } catch {
+      bc = null;
+    }
+
+    // Storage bump: other tabs only (same-tab storage writes do not fire storage event)
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== RATINGS_BUMP_STORAGE_KEY) return;
+      if (!e.newValue) return;
+      handleRaw(e.newValue);
+    };
+
+    window.addEventListener('storage', onStorage);
+
+    return () => {
+      try {
+        bc?.close();
+      } catch {}
+      window.removeEventListener('storage', onStorage);
+      if (revalidateTimer) clearTimeout(revalidateTimer);
+    };
+  }, [apiUrl]);
 
   /* ---------------------------
      Encounter counts (best-effort)
@@ -868,12 +1150,14 @@ export default function CliniciansPage() {
       const n = typeof v === 'number' ? v : Number(v ?? 0);
       next[String(k)] = Number.isFinite(n) ? n : 0;
     }
-    setEncounterCounts((prev) => ({ ...prev, ...next }));
 
-    try {
-      localStorage.setItem(ENCOUNTER_KEY, JSON.stringify({ ...encounterCounts, ...next }));
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    setEncounterCounts((prev) => {
+      const merged = { ...prev, ...next };
+      try {
+        localStorage.setItem(ENCOUNTER_KEY, JSON.stringify(merged));
+      } catch {}
+      return merged;
+    });
   }, [encounterData]);
 
   // compute scoped clinicians (class filter)
@@ -881,7 +1165,7 @@ export default function CliniciansPage() {
     () =>
       allClinicians.filter((c) => {
         const clsMatch = (c.cls ?? c?.cls) === toDataClass(tab) || (c.cls == null && toDataClass(tab) === 'Doctor');
-        const status = (c.status ?? 'active') as string;
+        const status = normalizeStatus(c.status ?? 'active');
         const visible = status !== 'archived' && status !== 'deleted';
         return clsMatch && visible;
       }),
@@ -911,16 +1195,26 @@ export default function CliniciansPage() {
         .filter(Boolean),
     );
 
-    setFilters((prev) => ({
-      ...prev,
-      specialty: validSpecialties.has(prev.specialty) ? prev.specialty : '',
-      gender: validGenders.has(prev.gender) ? prev.gender : '',
-      region: validRegions.has(prev.region) ? prev.region : '',
-      city: prev.city && validCities.has(prev.city) ? prev.city : '',
-    }));
+    setFilters((prev) => {
+      const next = {
+        ...prev,
+        specialty: validSpecialties.has(prev.specialty) ? prev.specialty : '',
+        gender: validGenders.has(prev.gender) ? prev.gender : '',
+        region: validRegions.has(prev.region) ? prev.region : '',
+        city: prev.city && validCities.has(prev.city) ? prev.city : '',
+      };
+
+      const same =
+        next.specialty === prev.specialty &&
+        next.gender === prev.gender &&
+        next.region === prev.region &&
+        next.city === prev.city;
+
+      return same ? prev : next;
+    });
+
     setPage(1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scoped, locPartsById]);
+  }, [scoped, locPartsById, filters.region]);
 
   const toggleOnline = useCallback(() => {
     if (!isPremium) return toast('Online-now filter is a Premium feature', 'error');
@@ -932,6 +1226,7 @@ export default function CliniciansPage() {
     setPage(1);
   }, [
     country,
+    tab,
     debouncedQ,
     filters.sort,
     filters.specialty,
@@ -989,6 +1284,13 @@ export default function CliniciansPage() {
     if (filters.acceptsMedicalAid === 'yes') L = L.filter((c) => c.acceptsMedicalAid);
     if (filters.acceptsMedicalAid === 'no') L = L.filter((c) => !c.acceptsMedicalAid);
 
+    if (L.length) {
+      L = L.filter((c) => {
+        if (!clinicianBookable(c)) return false;
+        return true;
+      });
+    }
+
     // Premium-only filters
     if (isPremium && filters.previouslyConsulted === 'yes') L = L.filter((c) => (encounterCounts[c.id] ?? 0) > 0);
 
@@ -1013,10 +1315,9 @@ export default function CliniciansPage() {
     L.sort((a, b) => {
       // Sort by soonest availability (premium only)
       if (filters.sort === 'soonest' && isPremium) {
-        const ma = getMeta(a);
-        const mb = getMeta(b);
-        const ta = ma.nextAvailableAt ?? Number.POSITIVE_INFINITY;
-        const tb = mb.nextAvailableAt ?? Number.POSITIVE_INFINITY;
+        const ta = typeof a.nextAvailableAt === 'number' ? a.nextAvailableAt : Number.POSITIVE_INFINITY;
+        const tb = typeof b.nextAvailableAt === 'number' ? b.nextAvailableAt : Number.POSITIVE_INFINITY;
+
         if (ta !== tb) return ta - tb;
 
         const f = sortByFairness(a, b);
@@ -1049,8 +1350,12 @@ export default function CliniciansPage() {
   }, [allFiltered, page]);
 
   const totalPages = Math.max(1, Math.ceil(allFiltered.length / PAGE_SIZE));
+  const pageButtons = useMemo(() => buildPageNumbers(page, totalPages), [page, totalPages]);
 
-  const specialties = useMemo(() => Array.from(new Set(scoped.map((c) => c.specialty))).filter(Boolean) as string[], [scoped]);
+  const specialties = useMemo(
+    () => Array.from(new Set(scoped.map((c) => c.specialty))).filter(Boolean) as string[],
+    [scoped],
+  );
   const genders = useMemo(() => {
     const set = new Set(scoped.map((c) => (c.gender || '').trim()).filter(Boolean));
     const from = Array.from(set);
@@ -1171,12 +1476,16 @@ export default function CliniciansPage() {
     if (filters.region) chips.push({ label: `Region: ${filters.region}`, onRemove: () => removeChip('region') });
     if (filters.city) chips.push({ label: `City: ${filters.city}`, onRemove: () => removeChip('city') });
     if (filters.price < 5000) chips.push({ label: `Up to ${filters.price}`, onRemove: () => removeChip('price') });
-    if (filters.acceptsMedicalAid === 'yes') chips.push({ label: 'Accepts Medical Aid', onRemove: () => removeChip('acceptsMedicalAid') });
-    if (filters.acceptsMedicalAid === 'no') chips.push({ label: 'Private pay only', onRemove: () => removeChip('acceptsMedicalAid') });
+    if (filters.acceptsMedicalAid === 'yes')
+      chips.push({ label: 'Accepts Medical Aid', onRemove: () => removeChip('acceptsMedicalAid') });
+    if (filters.acceptsMedicalAid === 'no')
+      chips.push({ label: 'Private pay only', onRemove: () => removeChip('acceptsMedicalAid') });
 
     if (isPremium) {
-      if (filters.previouslyConsulted === 'yes') chips.push({ label: 'Previously consulted', onRemove: () => removeChip('previouslyConsulted') });
-      if (filters.minYearsExp > 0) chips.push({ label: `≥ ${filters.minYearsExp} yrs exp`, onRemove: () => removeChip('minYearsExp') });
+      if (filters.previouslyConsulted === 'yes')
+        chips.push({ label: 'Previously consulted', onRemove: () => removeChip('previouslyConsulted') });
+      if (filters.minYearsExp > 0)
+        chips.push({ label: `≥ ${filters.minYearsExp} yrs exp`, onRemove: () => removeChip('minYearsExp') });
       for (const lang of filters.languages) chips.push({ label: `Lang: ${lang}`, onRemove: () => removeChip('lang', lang) });
     }
 
@@ -1202,120 +1511,95 @@ export default function CliniciansPage() {
     </div>
   );
 
-  const HeartButton: React.FC<{ fav: boolean; onClick: () => void; label: string }> = ({ fav, onClick, label }) => (
-    <button onClick={onClick} aria-pressed={fav} aria-label={label} className="relative p-1 rounded focus:outline-none focus:ring-2 focus:ring-offset-1" type="button">
-      <span className={`heart ${fav ? 'liked' : 'unliked'}`} aria-hidden>
-        <svg viewBox="0 0 24 24" className="h-5 w-5">
-          <defs>
-            <linearGradient id="g1" x1="0" x2="1" y1="0" y2="1">
-              <stop offset="0%" stopColor="#ff8da1" />
-              <stop offset="100%" stopColor="#ff3b6f" />
-            </linearGradient>
-          </defs>
+  const HeartButton: React.FC<{ fav: boolean; onClick: () => void; label: string }> = ({ fav, onClick, label }) => {
+    const gradientId = useId();
 
-          <path
-            className="heart-fill"
-            d="M12 21s-7.5-4.9-9.2-7C1.5 11 4 7 7.5 7 9.2 7 10 8 12 9.5 14 8 14.8 7 16.5 7 20 7 22.5 11 21.2 14c-1.7 2.1-9.2 7-9.2 7z"
-            fill="url(#g1)"
-            opacity={fav ? 1 : 0}
-            style={{ transition: 'opacity .18s linear, transform .22s cubic-bezier(.2,.9,.3,1)' }}
-          />
-          <path
-            className="heart-outine"
-            d="M16.5 7c-1.7 0-2.5 1-4.5 2.5C9.5 8 8.7 7 7 7 3.5 7 1 11 2.3 14c1.7 2.1 9.2 7 9.7 7 .5 0 7.9-4.9 9.7-7C23 11 20.5 7 16.5 7z"
-            fill="none"
-            stroke={fav ? '#ff3b6f' : '#9ca3af'}
-            strokeWidth="1.25"
-            style={{ transition: 'stroke .18s linear' }}
-          />
-        </svg>
-      </span>
-
-      <span className={`absolute -top-2 -right-2 sparkle ${fav ? 'show' : ''}`} aria-hidden>
-        <svg className="h-4 w-4" viewBox="0 0 24 24">
-          <path d="M12 2 L13 8 L19 9 L13 11 L12 18 L11 11 L5 9 L11 8 Z" fill="#ffd166" opacity={fav ? 1 : 0} />
-        </svg>
-      </span>
-
-      <style jsx>{`
-        .heart {
-          display: inline-block;
-          line-height: 0;
-        }
-        .sparkle {
-          transform-origin: center;
-          transition: transform 0.26s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.18s;
-          opacity: 0;
-          transform: scale(0.6);
-        }
-        .sparkle.show {
-          opacity: 1;
-          transform: scale(1.05);
-          animation: sparklePop 0.42s ease-out;
-        }
-        @keyframes sparklePop {
-          0% {
-            transform: scale(0.6) rotate(0deg);
-            opacity: 0;
-          }
-          40% {
-            transform: scale(1.25) rotate(18deg);
-            opacity: 1;
-          }
-          100% {
-            transform: scale(1) rotate(0deg);
-            opacity: 0;
-          }
-        }
-      `}</style>
-    </button>
-  );
-
-  const UpgradeModal: React.FC = () => {
-    if (!upgradeModalOpen) return null;
     return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center">
-        <div className="absolute inset-0 bg-black/40" onClick={() => setUpgradeModalOpen(false)} />
-        <div className="relative bg-white rounded-lg shadow-lg max-w-md w-full p-6 z-10">
-          <h2 className="text-lg font-semibold">Premium required</h2>
-          <p className="mt-2 text-sm text-gray-600">
-            {upgradeReason ? (
-              <>
-                <span className="font-medium text-gray-900">{upgradeReason}</span> is a Premium feature. Please upgrade to Premium Plan to access it.
-              </>
-            ) : (
-              <>You are currently on a free plan. Please upgrade to Premium Plan to access this function.</>
-            )}
-          </p>
+      <button
+        onClick={onClick}
+        aria-pressed={fav}
+        aria-label={label}
+        className="relative p-1 rounded focus:outline-none focus:ring-2 focus:ring-offset-1"
+        type="button"
+      >
+        <span className={`heart ${fav ? 'liked' : 'unliked'}`} aria-hidden>
+          <svg viewBox="0 0 24 24" className="h-5 w-5">
+            <defs>
+              <linearGradient id={gradientId} x1="0" x2="1" y1="0" y2="1">
+                <stop offset="0%" stopColor="#ff8da1" />
+                <stop offset="100%" stopColor="#ff3b6f" />
+              </linearGradient>
+            </defs>
 
-          {modalClinician ? (
-            <div className="mt-3 text-sm">
-              Alternatively, click{' '}
-              <Link href={`/clinicians/${modalClinician.id}`} className="underline text-teal-700">
-                View
-              </Link>{' '}
-              to access Clinician Calendar for booking.
-            </div>
-          ) : null}
+            <path
+              className="heart-fill"
+              d="M12 21s-7.5-4.9-9.2-7C1.5 11 4 7 7.5 7 9.2 7 10 8 12 9.5 14 8 14.8 7 16.5 7 20 7 22.5 11 21.2 14c-1.7 2.1-9.2 7-9.2 7z"
+              fill={`url(#${gradientId})`}
+              opacity={fav ? 1 : 0}
+              style={{ transition: 'opacity .18s linear, transform .22s cubic-bezier(.2,.9,.3,1)' }}
+            />
+            <path
+              className="heart-outline"
+              d="M16.5 7c-1.7 0-2.5 1-4.5 2.5C9.5 8 8.7 7 7 7 3.5 7 1 11 2.3 14c1.7 2.1 9.2 7 9.7 7 .5 0 7.9-4.9 9.7-7C23 11 20.5 7 16.5 7z"
+              fill="none"
+              stroke={fav ? '#ff3b6f' : '#9ca3af'}
+              strokeWidth="1.25"
+              style={{ transition: 'stroke .18s linear' }}
+            />
+          </svg>
+        </span>
 
-          <div className="mt-4 flex items-center justify-end gap-3">
-            <button onClick={() => setUpgradeModalOpen(false)} className="px-3 py-1 rounded border text-sm text-gray-700 hover:bg-gray-50" type="button">
-              Close
-            </button>
-            <button onClick={() => router.push('/pricing')} className="px-3 py-1 rounded bg-emerald-600 text-white text-sm hover:bg-emerald-700" type="button">
-              Upgrade Plan
-            </button>
-          </div>
-        </div>
-      </div>
+        <span className={`absolute -top-2 -right-2 sparkle ${fav ? 'show' : ''}`} aria-hidden>
+          <svg className="h-4 w-4" viewBox="0 0 24 24">
+            <path d="M12 2 L13 8 L19 9 L13 11 L12 18 L11 11 L5 9 L11 8 Z" fill="#ffd166" opacity={fav ? 1 : 0} />
+          </svg>
+        </span>
+
+        <style jsx>{`
+          .heart {
+            display: inline-block;
+            line-height: 0;
+          }
+          .sparkle {
+            transform-origin: center;
+            transition: transform 0.26s cubic-bezier(0.2, 0.9, 0.3, 1), opacity 0.18s;
+            opacity: 0;
+            transform: scale(0.6);
+          }
+          .sparkle.show {
+            opacity: 1;
+            transform: scale(1.05);
+            animation: sparklePop 0.42s ease-out;
+          }
+          @keyframes sparklePop {
+            0% {
+              transform: scale(0.6) rotate(0deg);
+              opacity: 0;
+            }
+            40% {
+              transform: scale(1.25) rotate(18deg);
+              opacity: 1;
+            }
+            100% {
+              transform: scale(1) rotate(0deg);
+              opacity: 0;
+            }
+          }
+        `}</style>
+      </button>
     );
   };
 
   const handleCalendarClick = useCallback(
     (c: ClinicianItem) => {
-      const status = (c.status ?? 'active') as string;
+      const status = normalizeStatus(c.status ?? 'active');
       if (status === 'disabled' || status === 'archived') {
         toast('This clinician is not accepting new bookings via Ambulant+ at the moment.', 'info');
+        return;
+      }
+
+      if (!clinicianBookable(c)) {
+        toast('This clinician is not currently available for booking.', 'info');
         return;
       }
 
@@ -1346,570 +1630,183 @@ export default function CliniciansPage() {
     return compareIds.map((id) => byId.get(id)).filter(Boolean) as ClinicianItem[];
   }, [compareIds, scoped]);
 
-  const CompareDrawer: React.FC = () => {
-    if (!compareOpen || !isPremium) return null;
-    return (
-      <div className="fixed inset-0 z-50">
-        <div className="absolute inset-0 bg-black/40" onClick={() => setCompareOpen(false)} />
-        <div className="absolute inset-x-0 bottom-0 bg-white rounded-t-2xl shadow-xl border-t max-h-[85vh] overflow-auto">
-          <div className="p-4 flex items-center justify-between gap-3">
-            <div>
-              <div className="text-sm font-semibold text-slate-900">Compare clinicians</div>
-              <div className="text-xs text-slate-500">Pin up to 3 clinicians to compare side-by-side.</div>
-            </div>
-            <button type="button" onClick={() => setCompareOpen(false)} className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-slate-50">
-              Close
-            </button>
-          </div>
-
-          {compareClinicians.length === 0 ? (
-            <div className="p-4 text-sm text-slate-600">No clinicians pinned yet.</div>
-          ) : (
-            <div className="p-4 pt-0">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                <div className="hidden md:block" />
-                {compareClinicians.map((c) => {
-                  const meta = computeMeta(c);
-                  const priceStr = formatMoney(c.currency, c.priceCents, c.priceZAR);
-                  return (
-                    <div key={c.id} className="rounded-xl border p-3">
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <div className="font-medium text-slate-900 truncate">{c.name}</div>
-                          <div className="text-xs text-slate-500 truncate">{c.specialty}</div>
-                        </div>
-                        <button type="button" className="text-xs px-2 py-1 rounded-lg border hover:bg-slate-50" onClick={() => toggleCompare(c)}>
-                          Remove
-                        </button>
-                      </div>
-
-                      <div className="mt-2 text-xs text-slate-700">
-                        {meta.nextAvailableAt ? (
-                          <div className="inline-flex items-center rounded-full border bg-slate-50 px-2 py-0.5">
-                            Availability: <span className="ml-1 font-medium">{formatAvailabilityLabel(meta.nextAvailableAt)}</span>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="mt-2 flex items-center gap-2">
-                        <Link href={`/clinicians/${c.id}`} className="text-xs underline text-slate-600">
-                          View
-                        </Link>
-                        <button
-                          type="button"
-                          onClick={() => handleCalendarClick(c)}
-                          className="ml-auto px-3 py-1 text-xs rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"
-                        >
-                          Book
-                        </button>
-                      </div>
-
-                      {priceStr ? <div className="mt-2 text-xs text-slate-600">From <b className="text-slate-900">{priceStr}</b></div> : null}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* comparison table */}
-              <div className="mt-4 overflow-auto">
-                <table className="w-full text-sm border rounded-xl overflow-hidden">
-                  <thead className="bg-slate-50">
-                    <tr>
-                      <th className="text-left p-3 border-b w-48 text-slate-600 font-medium">Field</th>
-                      {compareClinicians.map((c) => (
-                        <th key={c.id} className="text-left p-3 border-b min-w-[220px] font-medium text-slate-900">
-                          {c.name}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[
-                      {
-                        label: 'Availability',
-                        render: (c: ClinicianItem) => {
-                          const meta = computeMeta(c);
-                          return meta.nextAvailableAt ? formatAvailabilityLabel(meta.nextAvailableAt) : '—';
-                        },
-                      },
-                      {
-                        label: 'Price',
-                        render: (c: ClinicianItem) => formatMoney(c.currency, c.priceCents, c.priceZAR) || '—',
-                      },
-                      {
-                        label: 'Languages',
-                        render: (c: ClinicianItem) => (Array.isArray(c.speaks) && c.speaks.length ? c.speaks.join(', ') : '—'),
-                      },
-                      {
-                        label: 'Experience',
-                        render: (c: ClinicianItem) => (typeof c.yearsExp === 'number' ? `${c.yearsExp} yrs` : '—'),
-                      },
-                      {
-                        label: 'Rating',
-                        render: (c: ClinicianItem) =>
-                          typeof c.rating === 'number' ? `${c.rating.toFixed(1)}${typeof c.ratingCount === 'number' ? ` (${c.ratingCount})` : ''}` : '—',
-                      },
-                      {
-                        label: 'Trust (avg lengths)',
-                        render: (c: ClinicianItem) => {
-                          const meta = computeMeta(c);
-                          const resp = meta.responseTimeMins;
-                          const respLabel =
-                            typeof resp === 'number'
-                              ? resp < 60
-                                ? `~${resp}m`
-                                : `~${Math.round(resp / 60)}h`
-                              : '—';
-                          return `Consult ${meta.consultMins}m · Follow-up ${meta.followupMins}m · Response ${respLabel}`;
-                        },
-                      },
-                    ].map((row) => (
-                      <tr key={row.label} className="odd:bg-white even:bg-slate-50/40">
-                        <td className="p-3 border-b text-slate-600">{row.label}</td>
-                        {compareClinicians.map((c) => (
-                          <td key={c.id} className="p-3 border-b text-slate-900">
-                            {row.render(c)}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  };
-
   return (
-    <main className={`max-w-7xl mx-auto ${isPremium && compareIds.length ? 'pb-24' : ''}`}>
-      {/* Sticky filter bar + active chips */}
-      <div className={`sticky top-0 z-40 ${scrolled ? 'shadow-md' : ''}`}>
-        <div className="bg-white/85 backdrop-blur border-b">
-          <div className="px-6 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <Link href="/auto-triage" className="text-sm text-teal-700 hover:underline shrink-0">
-                  ← Back
-                </Link>
-                <div className="min-w-0">
-                  <h1 className="text-xl font-bold text-slate-900 truncate">Clinicians</h1>
-                  <div className="text-[11px] text-slate-500 mt-0.5 hidden sm:block">Browse and filter clinicians.</div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2 justify-end">
-                {/* Search always visible in sticky bar */}
-                <input
-                  type="text"
-                  placeholder="Search…"
-                  value={filters.q}
-                  onChange={(e) => setFilters((f) => ({ ...f, q: e.target.value }))}
-                  className="w-[220px] max-w-[60vw] rounded-lg border px-3 py-2 text-sm bg-white"
-                  aria-label="Search clinicians"
-                />
-
-                {/* Header sort: no "Rating" label here (use "Recommended") */}
-                <select
-                  value={filters.sort}
-                  onChange={(e) => setSortSafe(e.target.value as any)}
-                  className="rounded-lg border px-2 py-2 text-sm bg-white"
-                  aria-label="Sort"
-                >
-                  <option value="rating-desc">Recommended</option>
-                  <option value="soonest">Soonest available (Premium)</option>
-                  <option value="price">Price</option>
-                  <option value="name">Name A–Z</option>
-                </select>
-
-                {/* Country picker with flag */}
-                <div className="inline-flex items-center gap-2 rounded-lg border bg-white px-2 py-2">
-                  <span className="text-base leading-none" aria-hidden title={(COUNTRY_LABELS as any)[country] ?? country}>
-                    {flagEmojiFromCountryCode(country)}
-                  </span>
-                  <select
-                    className="text-sm bg-transparent outline-none"
-                    value={country}
-                    onChange={(e) => setCountry(e.target.value as CountryCode)}
-                    aria-label="Country"
-                  >
-                    {COUNTRY_OPTIONS.map((opt) => (
-                      <option key={opt.code} value={opt.code}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* Tabs */}
-                {UI_CLASSES.map((c) => (
-                  <div key={c} className="relative group">
-                    <button
-                      onClick={() => setTab(c)}
-                      className={`px-3 py-2 rounded-lg border text-sm ${tab === c ? 'bg-gray-900 text-white' : 'bg-white hover:bg-gray-100'}`}
-                      aria-pressed={tab === c}
-                      type="button"
-                    >
-                      {c}
-                    </button>
-
-                    <div
-                      role="menu"
-                      className="absolute right-0 top-full mt-1 min-w-[180px] rounded-xl border bg-white shadow-md p-2 text-sm opacity-0 invisible group-hover:opacity-100 group-hover:visible transition z-20"
-                      aria-hidden
-                    >
-                      <div className="text-[11px] uppercase tracking-wide text-gray-500 px-2 pb-1">Includes</div>
-                      <ul className="space-y-1">
-                        {HOVER_MENUS[c].map((item) => (
-                          <li key={item} className="px-2 py-1 rounded hover:bg-gray-50 cursor-default">
-                            {item}
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                ))}
-
-                <button
-                  onClick={() => setShowFilters((s) => !s)}
-                  className="px-3 py-2 rounded-lg border text-sm bg-white hover:bg-gray-100"
-                  aria-expanded={showFilters}
-                  aria-controls="filters-panel"
-                  type="button"
-                >
-                  Filters{' '}
-                  {activeFilterCount ? <span className="ml-1 text-xs px-1.5 py-0.5 rounded bg-gray-900 text-white">{activeFilterCount}</span> : null}
-                </button>
-
-                {activeFilterCount ? (
-                  <button onClick={resetFilters} className="px-3 py-2 rounded-lg border text-sm bg-white hover:bg-gray-100" type="button">
-                    Clear
-                  </button>
-                ) : null}
-              </div>
-            </div>
-
-            {/* Active filter chips (tap to remove) */}
-            {activeChips.length ? (
-              <div className="mt-3 flex items-center gap-2 overflow-auto pb-1">
-                {activeChips.map((c) => (
-                  <Chip key={c.label} label={c.label} onRemove={c.onRemove} />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        </div>
+    <main
+      className={cn(
+        'relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.10),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.12),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_42%,_#f8faff_100%)]',
+        isPremium && compareIds.length ? 'pb-24' : 'pb-10',
+      )}
+    >
+      <div className="pointer-events-none absolute inset-0 opacity-50">
+        <div className="absolute left-[-12%] top-[-8%] h-[420px] w-[420px] rounded-full bg-cyan-300/20 blur-3xl" />
+        <div className="absolute right-[-8%] top-[10%] h-[360px] w-[360px] rounded-full bg-fuchsia-300/15 blur-3xl" />
+        <div className="absolute bottom-[-10%] left-[18%] h-[300px] w-[300px] rounded-full bg-indigo-300/10 blur-3xl" />
       </div>
 
-      <div className="px-6 py-4 space-y-4">
-        {/* Quick count */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="text-sm text-slate-600">
-            <span className="font-medium text-slate-900">{allFiltered.length.toLocaleString()}</span> clinicians found
-          </div>
+      <div className="relative z-10 max-w-7xl mx-auto">
+        <DirectoryToolbar
+          country={country}
+          setCountry={handleCountryChange}
+          tab={tab}
+          setTab={setTab}
+          filters={filters}
+          setFilters={setFilters}
+          showFilters={showFilters}
+          setShowFilters={setShowFilters}
+          activeFilterCount={activeFilterCount}
+          resetFilters={resetFilters}
+          setSortSafe={setSortSafe}
+          activeChips={activeChips}
+          scrolled={scrolled}
+        />
 
-          {isPremium && compareIds.length ? (
-            <button type="button" onClick={() => setCompareOpen(true)} className="text-sm px-3 py-1.5 rounded-lg border bg-white hover:bg-slate-50">
-              Compare ({compareIds.length})
-            </button>
-          ) : null}
-        </div>
-
-        {showFilters && (
-          <section id="filters-panel" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 bg-white rounded-2xl shadow-sm border p-4">
-            {/* Sort (Rating belongs in Filters) */}
-            <div className="xl:col-span-4 md:col-span-2">
-              <label className="text-xs text-gray-600 block">Sort</label>
-              <select
-                value={filters.sort}
-                onChange={(e) => setSortSafe(e.target.value as any)}
-                className="rounded-lg border p-2 text-sm w-full"
-                aria-label="Sort clinicians"
-              >
-                <option value="rating-desc">Rating</option>
-                <option value="price">Price</option>
-                <option value="name">Name A–Z</option>
-                <option value="soonest">Soonest available (Premium)</option>
-              </select>
+        <div className="px-6 py-4 space-y-4">
+          {/* Quick count */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="text-sm text-slate-600">
+              <span className="font-medium text-slate-900">{allFiltered.length.toLocaleString()}</span> clinicians found
             </div>
 
-            <select value={filters.specialty} onChange={(e) => setFilters((f) => ({ ...f, specialty: e.target.value }))} className="rounded-lg border p-2 text-sm" aria-label="Filter by specialty">
-              <option value="">All Specialties</option>
-              {specialties.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
-              ))}
-            </select>
-
-            <select value={filters.gender} onChange={(e) => setFilters((f) => ({ ...f, gender: e.target.value }))} className="rounded-lg border p-2 text-sm" aria-label="Filter by gender">
-              <option value="">Any Gender</option>
-              {genders.map((g) => (
-                <option key={g} value={g}>
-                  {g}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={filters.region}
-              onChange={(e) => setFilters((f) => ({ ...f, region: e.target.value, city: '' }))}
-              className="rounded-lg border p-2 text-sm"
-              aria-label="Filter by region/state/province"
-            >
-              <option value="">Any Region / Province</option>
-              {regions.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </select>
-
-            <select
-              value={filters.city}
-              onChange={(e) => setFilters((f) => ({ ...f, city: e.target.value }))}
-              className="rounded-lg border p-2 text-sm"
-              aria-label="Filter by city/town"
-              disabled={!cities.length}
-            >
-              <option value="">{filters.region ? 'Any City / Town (in region)' : 'Any City / Town'}</option>
-              {cities.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-
-            {/* Languages spoken (Premium) - do NOT show language list on free tier */}
-            {isPremium ? (
-              <details className="rounded-lg border bg-white p-2">
-                <summary className="cursor-pointer text-sm text-slate-700 select-none">
-                  Languages spoken{' '}
-                  {filters.languages.length ? <span className="ml-1 text-xs px-1.5 py-0.5 rounded bg-slate-900 text-white">{filters.languages.length}</span> : null}
-                </summary>
-                <div className="mt-2 max-h-44 overflow-auto pr-1 space-y-1">
-                  {languagesAll.length ? (
-                    languagesAll.map((lang) => (
-                      <label key={lang} className="flex items-center gap-2 text-sm">
-                        <input type="checkbox" checked={filters.languages.includes(lang)} onChange={() => toggleLanguage(lang)} />
-                        <span className="text-slate-700">{lang}</span>
-                      </label>
-                    ))
-                  ) : (
-                    <div className="text-xs text-slate-500">No language data available.</div>
-                  )}
-                </div>
-              </details>
-            ) : (
+            {isPremium && compareIds.length ? (
               <button
                 type="button"
-                onClick={() => openUpgrade('Languages spoken')}
-                className="rounded-lg border bg-white p-2 text-left hover:bg-slate-50"
-                aria-label="Languages spoken (Premium)"
+                onClick={() => setCompareOpen(true)}
+                className="text-sm px-3 py-1.5 rounded-lg border bg-white hover:bg-slate-50"
               >
-                <div className="text-sm text-slate-700">Languages spoken</div>
-                <div className="text-xs text-slate-500 mt-0.5">Premium feature</div>
+                Compare ({compareIds.length})
               </button>
-            )}
+            ) : null}
+          </div>
 
-            {/* Minimum experience (Premium) */}
-            <div
-              className={`rounded-lg border bg-white p-2 ${!isPremium ? 'cursor-pointer hover:bg-slate-50' : ''}`}
-              onClick={() => {
-                if (!isPremium) openUpgrade('Years of experience filter');
-              }}
-              role={!isPremium ? 'button' : undefined}
-              tabIndex={!isPremium ? 0 : undefined}
-              onKeyDown={(e) => {
-                if (!isPremium) {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.preventDefault();
-                    openUpgrade('Years of experience filter');
-                  }
-                }
-              }}
-            >
-              <label className="text-sm text-slate-700 block">Minimum experience</label>
-              <div className="flex items-center gap-3 mt-1">
-                <input
-                  type="range"
-                  min={0}
-                  max={40}
-                  step={1}
-                  value={filters.minYearsExp}
-                  onChange={(e) => {
-                    if (!isPremium) return openUpgrade('Years of experience filter');
-                    setFilters((f) => ({ ...f, minYearsExp: +e.target.value }));
-                  }}
-                  className="w-full"
-                  aria-label="Minimum years experience"
-                  disabled={!isPremium}
-                />
-                <div className="text-sm font-medium text-slate-900 w-14 text-right">{filters.minYearsExp}+</div>
-              </div>
-              {!isPremium ? <div className="text-[11px] text-slate-500 mt-1">Premium feature</div> : null}
-            </div>
+          <DirectoryFiltersPanel
+            show={showFilters}
+            isPremium={isPremium}
+            filters={filters}
+            specialties={specialties}
+            genders={genders}
+            regions={regions}
+            cities={cities}
+            languagesAll={languagesAll}
+            setFilters={setFilters}
+            setSortSafe={setSortSafe}
+            toggleLanguage={toggleLanguage}
+            toggleOnline={toggleOnline}
+            onlineOnly={onlineOnly}
+            showFavsOnly={showFavsOnly}
+            setShowFavsOnly={setShowFavsOnly}
+            openUpgrade={openUpgrade}
+            resetFilters={resetFilters}
+          />
 
-            <div className="col-span-full grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div>
-                <label className="text-xs text-gray-600 block">Max Price: {filters.price}</label>
-                <input
-                  type="range"
-                  min={0}
-                  max={5000}
-                  step={100}
-                  value={filters.price}
-                  onChange={(e) => setFilters((f) => ({ ...f, price: +e.target.value }))}
-                  className="w-full"
-                  aria-label="Max price"
-                />
-              </div>
-
-              <div className="flex flex-col gap-2 text-sm md:col-span-2">
-                <div className="flex items-center gap-4 flex-wrap">
-                  <label className="inline-flex items-center gap-2">
-                    <input type="checkbox" checked={onlineOnly} onChange={toggleOnline} /> Online now
-                  </label>
-
-                  <label className="inline-flex items-center gap-2">
-                    <input type="checkbox" checked={showFavsOnly} onChange={() => setShowFavsOnly((f) => !f)} /> Favourites only
-                  </label>
-
-                  <label className="inline-flex items-center gap-2">
-                    <input
-                      type="checkbox"
-                      checked={filters.previouslyConsulted === 'yes'}
-                      onChange={() => {
-                        if (!isPremium) return openUpgrade('Previously consulted filter');
-                        setFilters((f) => ({ ...f, previouslyConsulted: f.previouslyConsulted === 'yes' ? '' : 'yes' }));
-                      }}
-                      disabled={!isPremium}
-                    />
-                    Previously consulted {!isPremium ? <span className="text-xs text-slate-500">(Premium)</span> : null}
-                  </label>
+          <div className={cn(SURFACE, 'divide-y overflow-hidden')}>
+            {loading ? (
+              <>
+                <div className="p-6">
+                  <SkeletonRow />
                 </div>
-
-                <div className="flex items-center gap-2 text-xs">
-                  <span className="text-gray-600">Medical Aid:</span>
-                  <select
-                    className="border rounded px-2 py-1 text-xs"
-                    value={filters.acceptsMedicalAid}
-                    onChange={(e) => setFilters((f) => ({ ...f, acceptsMedicalAid: e.target.value as '' | 'yes' | 'no' }))}
-                    aria-label="Filter by Medical Aid acceptance"
-                  >
-                    <option value="">Any</option>
-                    <option value="yes">Accepts Medical Aid</option>
-                    <option value="no">Private pay only</option>
-                  </select>
+                <div className="p-6 border-t">
+                  <SkeletonRow />
+                </div>
+                <div className="p-6 border-t">
+                  <SkeletonRow />
+                </div>
+              </>
+            ) : paginated.length === 0 ? (
+              <div className="p-6 text-sm text-gray-700">
+                <div className="font-semibold text-gray-900">No clinicians match these filters</div>
+                <p className="mt-1">Try clearing some filters or switching category to see more options.</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button type="button" onClick={resetFilters} className="px-3 py-1.5 rounded-full text-xs border bg-white hover:bg-gray-50">
+                    Reset filters
+                  </button>
+                  <Link href="/auto-triage" className="px-3 py-1.5 rounded-full text-xs bg-emerald-600 text-white hover:bg-emerald-700">
+                    Start a quick triage
+                  </Link>
+                  <Link href="/appointments" className="px-3 py-1.5 rounded-full text-xs border bg-white hover:bg-gray-50">
+                    View your appointments
+                  </Link>
                 </div>
               </div>
-            </div>
+            ) : (
+              paginated.map((c) => {
+                const status = normalizeStatus(c.status ?? 'active');
+                const isDisabled =
+                  !clinicianBookable(c) ||
+                  normalizeStatus(c.status) === 'disabled' ||
+                  normalizeStatus(c.status) === 'archived';
+                const isDisciplinary = status === 'disciplinary';
+                const isPending = status === 'pending';
 
-            <div className="col-span-full flex items-center gap-3">
-              <button onClick={resetFilters} className="text-sm text-gray-600 underline" type="button">
-                Reset filters
-              </button>
-            </div>
-          </section>
-        )}
+                // Premium-only fields: do not compute/display on free tier
+                const speaks = isPremium && Array.isArray(c.speaks) ? c.speaks.filter(Boolean).slice(0, 3) : [];
+                const exp = isPremium && typeof c.yearsExp === 'number' ? c.yearsExp : null;
 
-        <div className="bg-white rounded-xl border divide-y overflow-hidden">
-          {loading ? (
-            <>
-              <div className="p-6">
-                <SkeletonRow />
-              </div>
-              <div className="p-6 border-t">
-                <SkeletonRow />
-              </div>
-              <div className="p-6 border-t">
-                <SkeletonRow />
-              </div>
-            </>
-          ) : paginated.length === 0 ? (
-            <div className="p-6 text-sm text-gray-700">
-              <div className="font-semibold text-gray-900">No clinicians match these filters</div>
-              <p className="mt-1">Try clearing some filters or switching category to see more options.</p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button type="button" onClick={resetFilters} className="px-3 py-1.5 rounded-full text-xs border bg-white hover:bg-gray-50">
-                  Reset filters
-                </button>
-                <Link href="/auto-triage" className="px-3 py-1.5 rounded-full text-xs bg-emerald-600 text-white hover:bg-emerald-700">
-                  Start a quick triage
-                </Link>
-                <Link href="/appointments" className="px-3 py-1.5 rounded-full text-xs border bg-white hover:bg-gray-50">
-                  View your appointments
-                </Link>
-              </div>
-            </div>
-          ) : (
-            paginated.map((c) => {
-              const status = (c.status ?? 'active') as string;
-              const isDisabled = status === 'disabled' || status === 'archived';
-              const isDisciplinary = status === 'disciplinary';
-              const isPending = status === 'pending';
+                const priceStr = formatMoney(c.currency, c.priceCents, c.priceZAR);
+                const locParts = locPartsById[c.id] ?? parseLocationParts(c.location);
 
-              // Premium-only fields: do not compute/display on free tier
-              const speaks = isPremium && Array.isArray(c.speaks) ? c.speaks.filter(Boolean).slice(0, 3) : [];
-              const exp = isPremium && typeof c.yearsExp === 'number' ? c.yearsExp : null;
+                const encounters = isPremium ? (encounterCounts[c.id] ?? 0) : 0;
 
-              const priceStr = formatMoney(c.currency, c.priceCents, c.priceZAR);
-              const locParts = locPartsById[c.id] ?? parseLocationParts(c.location);
+                const joinedAt = typeof c.joinedAt === 'number' ? c.joinedAt : null;
+                const isNew = joinedAt != null ? Date.now() - joinedAt < NEW_CLINICIAN_WINDOW_MS : false;
 
-              const encounters = isPremium ? (encounterCounts[c.id] ?? 0) : 0;
+                const meta = isPremium ? computeMeta(c) : null;
 
-              const joinedAt = typeof c.joinedAt === 'number' ? c.joinedAt : null;
-              const isNew = joinedAt != null ? Date.now() - joinedAt < NEW_CLINICIAN_WINDOW_MS : false;
+                const showAvailability =
+                  isPremium && !!meta?.nextAvailableAt && !!meta?.hasReal;
 
-              const meta = isPremium ? computeMeta(c) : null;
-              const availabilityLabel = isPremium && meta?.nextAvailableAt ? formatAvailabilityLabel(meta.nextAvailableAt) : null;
+                const availabilityLabel =
+                  showAvailability && meta?.nextAvailableAt
+                    ? formatAvailabilityLabel(meta.nextAvailableAt)
+                    : null;
 
-              const pinned = isPremium ? compareIds.includes(c.id) : false;
+                const pinned = isPremium ? compareIds.includes(c.id) : false;
 
-              const resp = isPremium ? meta?.responseTimeMins : null;
-              const respLabel = typeof resp === 'number' ? (resp < 60 ? `~${resp}m` : `~${Math.round(resp / 60)}h`) : '—';
+                const showTrustBlock =
+                  isPremium &&
+                  !!meta &&
+                  meta.hasReal &&
+                  typeof meta.consultMins === 'number' &&
+                  typeof meta.followupMins === 'number' &&
+                  typeof meta.responseTimeMins === 'number';
 
-              return (
-                <div key={c.id} className="p-4 flex items-center justify-between gap-4 hover:bg-slate-50/60 transition">
-                  <div className="flex gap-3 items-start min-w-0">
-                    <div className="h-11 w-11 rounded-full bg-indigo-600 text-white grid place-items-center font-semibold shrink-0">
-                      {initialsFromName(c.name)}
-                    </div>
+                const resp = showTrustBlock ? meta?.responseTimeMins : null;
+                const respLabel =
+                  typeof resp === 'number'
+                    ? (resp < 60 ? `~${resp}m` : `~${Math.round(resp / 60)}h`)
+                    : '—';
 
-                    <div className="min-w-0">
-                      <div className="font-medium flex items-center gap-2 flex-wrap">
-                        <span className="text-slate-900 truncate">{c.name}</span>
-
-                        {/* Previously Consulted (Premium) - do NOT show on free tier */}
-                        {isPremium && encounters > 0 ? (
-                          <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700">
-                            {encounters} consult{encounters === 1 ? '' : 's'}
-                          </span>
-                        ) : null}
-
-                        {isNew ? (
-                          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">
-                            New
-                          </span>
-                        ) : null}
-
-                        {/* Next Availability (Premium) - do NOT show on free tier */}
-                        {isPremium && availabilityLabel ? (
-                          <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] text-indigo-800">
-                            Next slot: {availabilityLabel}
-                          </span>
-                        ) : null}
-
-                        {isDisciplinary ? (
-                          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">
-                            Under review
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <div className="text-sm text-gray-600">
+                return (
+                  <ClinicianCard
+                    key={c.id}
+                    clinician={c}
+                    isPremium={isPremium}
+                    isFav={favs.includes(c.id)}
+                    pinned={pinned}
+                    encounters={encounters}
+                    isNew={isNew}
+                    isDisabled={isDisabled}
+                    isDisciplinary={isDisciplinary}
+                    isPending={isPending}
+                    availabilityLabel={availabilityLabel}
+                    showTrustBlock={showTrustBlock}
+                    trustLabel={
+                      <span className="inline-flex items-center rounded-lg border bg-slate-50 px-2 py-1">
+                        Trust: <span className="ml-1">Avg consult</span>{' '}
+                        <b className="ml-1 text-slate-900">{meta?.consultMins}m</b>
+                        <span className="mx-2 text-slate-300">•</span>
+                        <span>Follow-up</span>{' '}
+                        <b className="ml-1 text-slate-900">{meta?.followupMins}m</b>
+                        <span className="mx-2 text-slate-300">•</span>
+                        <span>Response</span> <b className="ml-1 text-slate-900">{respLabel}</b>
+                      </span>
+                    }
+                    speaks={speaks}
+                    exp={exp}
+                    demoMode={false}
+                    isSyntheticMeta={!!meta?.isSynthetic}
+                    priceLabel={priceStr}
+                    locationNode={
+                      <>
                         {c.specialty}
                         {locParts.city || locParts.region ? (
                           <>
@@ -1923,191 +1820,98 @@ export default function CliniciansPage() {
                             • {c.location}
                           </>
                         )}
-                      </div>
-
-                      {c.practiceName ? <div className="text-xs text-gray-500 mt-0.5 truncate">{c.practiceName}</div> : null}
-
-                      <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px]">
-                        {/* Languages spoken (Premium) - do NOT show on free tier */}
-                        {isPremium && speaks.length > 0 ? (
-                          <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-700">
-                            Speaks: {speaks.join(' · ')}
-                          </span>
-                        ) : null}
-
-                        {/* Years of experience (Premium) - do NOT show on free tier */}
-                        {isPremium && exp != null ? (
-                          <span className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-slate-700">
-                            {exp} yrs exp
-                          </span>
-                        ) : null}
-
-                        {c.acceptsMedicalAid === true ? (
-                          <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-emerald-800">
-                            Accepts Medical Aid / insurance
-                          </span>
-                        ) : c.acceptsMedicalAid === false ? (
-                          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-gray-700">
-                            Private pay
-                          </span>
-                        ) : null}
-
-                        {isPending && !isNew ? (
-                          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-gray-700">
-                            New to Ambulant+
-                          </span>
-                        ) : null}
-
-                        {isDisabled ? (
-                          <span className="inline-flex items-center rounded-full border border-red-200 bg-red-50 px-2 py-0.5 text-red-700">
-                            Not accepting new bookings
-                          </span>
-                        ) : null}
-                      </div>
-
-                      <RatingRow rating={c.rating} count={c.ratingCount} />
-
-                      {priceStr ? (
-                        <div className="text-xs text-gray-700 mt-1">
-                          From <b>{priceStr}</b> / consult
-                        </div>
-                      ) : null}
-
-                      {/* Trust (Premium) - do NOT show on free tier */}
-                      {isPremium && meta ? (
-                        <div className="mt-2 text-[11px] text-slate-600">
-                          <span className="inline-flex items-center rounded-lg border bg-slate-50 px-2 py-1">
-                            Trust: <span className="ml-1">Avg consult</span> <b className="ml-1 text-slate-900">{meta.consultMins}m</b>
-                            <span className="mx-2 text-slate-300">•</span>
-                            <span>Follow-up</span> <b className="ml-1 text-slate-900">{meta.followupMins}m</b>
-                            <span className="mx-2 text-slate-300">•</span>
-                            <span>Response</span> <b className="ml-1 text-slate-900">{respLabel}</b>
-                          </span>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  <div className="flex gap-3 items-center shrink-0">
-                    <span
-                      className={`text-xs px-2 py-0.5 rounded-full border ${
-                        c.online ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-gray-50 border-gray-200 text-gray-700'
-                      }`}
-                    >
-                      {c.online ? 'Online' : 'Offline'}
-                    </span>
-
-                    {/* Compare pin (Premium) - show Pin always, but free tier opens upgrade modal */}
-                    <button
-                      type="button"
-                      onClick={() => toggleCompare(c)}
-                      className={`text-xs px-2 py-1 rounded-lg border ${pinned ? 'bg-slate-900 text-white border-slate-900' : 'bg-white hover:bg-slate-50'}`}
-                      aria-pressed={pinned}
-                    >
-                      {pinned ? 'Pinned' : 'Pin'}
-                    </button>
-
-                    <HeartButton fav={favs.includes(c.id)} onClick={() => toggleFav(c.id)} label={favs.includes(c.id) ? `Unfavorite ${c.name}` : `Favourite ${c.name}`} />
-
-                    <Link href={`/clinicians/${c.id}`} className="text-xs underline text-gray-600">
-                      View
-                    </Link>
-
-                    <button
-                      onClick={() => {
-                        if (isDisabled) return;
-                        handleCalendarClick(c);
-                      }}
-                      className={`px-3 py-1 text-xs rounded-lg ${
-                        isDisabled ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                      }`}
-                      type="button"
-                      disabled={isDisabled}
-                      aria-disabled={isDisabled}
-                    >
-                      {isDisabled ? 'Not bookable' : 'Book Televisit'}
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className="flex flex-wrap justify-between items-center gap-2 mt-4">
-          <div className="text-sm text-gray-600">
-            Showing {(page - 1) * PAGE_SIZE + 1}–{Math.min(page * PAGE_SIZE, allFiltered.length)} of {allFiltered.length}
+                      </>
+                    }
+                    ratingNode={<RatingRow rating={c.rating} count={c.ratingCount} />}
+                    favouriteControl={
+                      <HeartButton
+                        fav={favs.includes(c.id)}
+                        onClick={() => toggleFav(c.id)}
+                        label={favs.includes(c.id) ? `Unfavorite ${c.name}` : `Favourite ${c.name}`}
+                      />
+                    }
+                    onToggleCompare={() => toggleCompare(c)}
+                    onBook={() => {
+                      if (isDisabled) return;
+                      handleCalendarClick(c);
+                    }}
+                  />
+                );
+              })
+            )}
           </div>
 
-          <nav className="flex items-center gap-2" aria-label="Pagination">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              className="px-2 py-1 text-sm rounded bg-white border disabled:opacity-50"
-              disabled={page <= 1}
-              aria-disabled={page <= 1}
-              type="button"
-            >
-              Prev
-            </button>
-
-            {Array.from({ length: totalPages }).map((_, i) => {
-              const pageNum = i + 1;
-              return (
-                <button
-                  key={i}
-                  onClick={() => setPage(pageNum)}
-                  className={`px-2 py-1 text-sm rounded ${page === pageNum ? 'bg-gray-900 text-white' : 'bg-white border'}`}
-                  aria-current={page === pageNum ? 'page' : undefined}
-                  type="button"
-                >
-                  {pageNum}
-                </button>
-              );
-            })}
-
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              className="px-2 py-1 text-sm rounded bg-white border disabled:opacity-50"
-              disabled={page >= totalPages}
-              aria-disabled={page >= totalPages}
-              type="button"
-            >
-              Next
-            </button>
-          </nav>
+          <CliniciansPagination
+            page={page}
+            totalPages={totalPages}
+            totalItems={allFiltered.length}
+            pageSize={PAGE_SIZE}
+            pageButtons={pageButtons}
+            onPageChange={setPage}
+          />
         </div>
-      </div>
 
-      {/* Compare bar (fixed) - Premium only */}
-      {isPremium && compareIds.length ? (
-        <div className="fixed inset-x-0 bottom-0 z-40">
-          <div className="mx-auto max-w-7xl px-6 pb-4">
-            <div className="rounded-2xl border bg-white shadow-lg p-3 flex items-center justify-between gap-3">
-              <div className="text-sm text-slate-700">
-                <span className="font-semibold text-slate-900">{compareIds.length}</span> pinned for compare
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setCompareIds([]);
-                    setCompareOpen(false);
-                  }}
-                  className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-slate-50"
-                >
-                  Clear
-                </button>
-                <button type="button" onClick={() => setCompareOpen(true)} className="px-3 py-1.5 text-sm rounded-lg bg-slate-900 text-white hover:bg-slate-800">
-                  Compare
-                </button>
+        {/* Compare bar (fixed) - Premium only */}
+        {isPremium && compareIds.length ? (
+          <div className="fixed inset-x-0 bottom-0 z-40">
+            <div className="mx-auto max-w-7xl px-6 pb-4">
+              <div className="rounded-[24px] border border-white/60 bg-white/82 backdrop-blur-2xl shadow-[0_18px_40px_rgba(15,23,42,0.10)] p-3.5 flex items-center justify-between gap-3">
+                <div className="text-sm text-slate-700">
+                  <span className="font-semibold text-slate-900">{compareIds.length}</span> pinned for compare
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCompareIds([]);
+                      setCompareOpen(false);
+                    }}
+                    className="px-3 py-1.5 text-sm rounded-lg border bg-white hover:bg-slate-50"
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCompareOpen(true)}
+                    className="px-3.5 py-1.5 text-sm rounded-full bg-slate-950 text-white hover:bg-slate-800 shadow-sm"
+                  >
+                    Compare
+                  </button>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      <CompareDrawer />
-      <UpgradeModal />
+        <CliniciansCompareDrawer
+          open={compareOpen}
+          isPremium={isPremium}
+          clinicians={compareClinicians}
+          demoMode={false}
+          getMeta={computeMeta}
+          formatMoney={formatMoney}
+          formatAvailabilityLabel={formatAvailabilityLabel}
+          onClose={() => setCompareOpen(false)}
+          onToggleCompare={toggleCompare}
+          onBook={handleCalendarClick}
+        />
+        <UpgradeRequiredModal
+          open={upgradeModalOpen}
+          reason={upgradeReason}
+          clinician={modalClinician}
+          onClose={() => setUpgradeModalOpen(false)}
+          onUpgrade={() => router.push('/pricing')}
+        />
+      </div>
     </main>
   );
 }
+
+export default function CliniciansPage() {
+  return (
+    <Suspense fallback={null}>
+      <CliniciansPageContent />
+    </Suspense>
+  );
+}
+

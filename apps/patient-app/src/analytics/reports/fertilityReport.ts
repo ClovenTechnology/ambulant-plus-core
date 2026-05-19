@@ -103,9 +103,13 @@ export async function renderFertilityReport(doc: jsPDF) {
   // Baseline line
   const baseY = chartY + chartH - ((baseline - minVal) / (maxVal - minVal)) * chartH;
   doc.setDrawColor(200, 0, 0);
-  doc.setLineDash([1, 2], 0);
-  doc.line(chartX, baseY, chartX + chartW, baseY);
-  doc.setLineDash([], 0);
+  const pdfWithDash = doc as jsPDF & {
+  setLineDashPattern?: (dashArray: number[], dashPhase: number) => jsPDF;
+};
+
+pdfWithDash.setLineDashPattern?.([1, 2], 0);
+doc.line(chartX, baseY, chartX + chartW, baseY);
+pdfWithDash.setLineDashPattern?.([], 0);
   doc.setFontSize(8);
   doc.text('Baseline', chartX + chartW - 20, baseY - 2);
 

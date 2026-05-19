@@ -1,8 +1,12 @@
 //components/selfcheck/bodymap/BodyMapHintStrip.tsx
 'use client';
 
-import clsx from 'clsx';
 import { BodyAreaKey, BodyHint } from './types';
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
+
 
 export default function BodyMapHintStrip({
   selectedKeys,
@@ -30,7 +34,7 @@ export default function BodyMapHintStrip({
       {hints.map(({ key, hint }) => (
         <div
           key={key}
-          className={clsx(
+          className={cx(
             'rounded-xl border px-4 py-3',
             hint.tone === 'danger'
               ? 'border-rose-300 bg-rose-50'
@@ -45,7 +49,7 @@ export default function BodyMapHintStrip({
             </div>
 
             <span
-              className={clsx(
+              className={cx(
                 'text-[11px] font-bold px-2 py-0.5 rounded-lg',
                 hint.tone === 'danger'
                   ? 'bg-rose-600 text-white'

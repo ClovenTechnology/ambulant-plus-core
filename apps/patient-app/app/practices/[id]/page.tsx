@@ -4,7 +4,6 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { PRACTICES } from '@/mock/practices';
 
 type OperatingHours = {
   kind?: 'physical' | 'virtual' | 'both' | string;
@@ -83,7 +82,6 @@ type PracticePatientView = {
   encounters?: PracticeEncounterSummary[];
 };
 
-const GATEWAY = process.env.NEXT_PUBLIC_APIGW_BASE ?? '';
 
 function formatZarFromCents(cents?: number) {
   if (typeof cents !== 'number') return '';
@@ -158,65 +156,6 @@ function normalizeHours(raw: any): OperatingHours[] {
     .filter(Boolean) as OperatingHours[];
 }
 
-// Build a minimal patient view from mock PRACTICES as fallback
-function buildViewFromMock(id: string): PracticePatientView | null {
-  const p = PRACTICES.find((x) => x.id === id);
-  if (!p) return null;
-
-  const classLabel =
-    p.kind === 'team'
-      ? 'Team practice'
-      : p.kind === 'clinic'
-      ? 'Clinic'
-      : 'Hospital';
-
-  const loc: PracticeLocation = {
-    id: `${p.id}-loc`,
-    label: 'Primary location',
-    address1: p.location,
-    city: undefined,
-    province: undefined,
-    country: 'South Africa',
-    kind: p.kind === 'team' ? 'virtual' : 'physical',
-  };
-
-  const hours: OperatingHours[] = [
-    {
-      label: 'Mon–Fri',
-      opensAt: '08:00',
-      closesAt: '17:00',
-      timezone: 'Africa/Johannesburg',
-      kind: p.kind === 'team' ? 'virtual' : 'physical',
-    },
-  ];
-
-  return {
-    practice: {
-      id: p.id,
-      name: p.name,
-      class: classLabel,
-      subType: p.subType,
-      rating: p.rating,
-      ratingCount: p.ratingCount,
-      logoUrl: undefined,
-      tagline: undefined,
-      bio: undefined,
-      acceptsMedicalAid: p.acceptsMedicalAid,
-      acceptedSchemes: p.acceptedSchemes ?? [],
-      services: [],
-      specialties: [],
-      operatingHours: hours,
-      locations: [loc],
-      hasEncounter: p.hasEncounter,
-      lastEncounterAt: p.lastEncounterAt ?? null,
-      encounterCount: p.encounterCount,
-      yourRating: null,
-    },
-    clinicians: [],
-    encounters: [],
-  };
-}
-
 export default function PracticePage({ params }: { params: { id: string } }) {
   const router = useRouter();
   const { id } = params;
@@ -233,23 +172,13 @@ export default function PracticePage({ params }: { params: { id: string } }) {
         setBusy(true);
         setErr(null);
 
-        // If no gateway configured, go straight to mock fallback
-        if (!GATEWAY) {
-          const mockView = buildViewFromMock(id);
-          if (!mockView) {
-            throw new Error('Practice not found (demo directory)');
-          }
-          if (!cancelled) {
-            setView(mockView);
-            setErr('Showing directory view (demo data, no live bookings).');
-          }
-          return;
-        }
-
         const res = await fetch(
-          `${GATEWAY}/api/practices/${encodeURIComponent(id)}/patient-view`,
+          `/api/practices/${encodeURIComponent(id)}/patient-view`,
           {
             cache: 'no-store',
+            headers: {
+              accept: 'application/json',
+            },
           },
         );
         const js = await res.json().catch(() => null);
@@ -377,18 +306,8 @@ export default function PracticePage({ params }: { params: { id: string } }) {
         if (!cancelled) setView(normalized);
       } catch (e: any) {
         if (!cancelled) {
-          // Try mock fallback if gateway call failed
-          const mockView = buildViewFromMock(id);
-          if (mockView) {
-            setView(mockView);
-            setErr(
-              (e?.message || 'Failed to load live practice view') +
-                ' – showing directory view instead (demo data).',
-            );
-          } else {
-            setErr(e?.message || 'Failed to load practice');
-            setView(null);
-          }
+          setErr(e?.message || 'Failed to load practice');
+          setView(null);
         }
       } finally {
         if (!cancelled) setBusy(false);
@@ -467,12 +386,6 @@ export default function PracticePage({ params }: { params: { id: string } }) {
           All practices
         </Link>
       </header>
-
-      {err && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          {err} (showing what we could load)
-        </div>
-      )}
 
       <section className="bg-white rounded-2xl border p-5 flex items-start justify-between gap-6">
         {/* LEFT: practice summary */}

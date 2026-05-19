@@ -1,12 +1,15 @@
 'use client';
 
 import * as React from 'react';
-import clsx from 'clsx';
+
+function cx(...classes: Array<string | false | null | undefined>): string {
+  return classes.filter(Boolean).join(' ');
+}
 
 export default function Skeleton(props: { className?: string }) {
   return (
     <div
-      className={clsx(
+      className={cx(
         'animate-pulse rounded-xl bg-slate-200/70',
         props.className
       )}

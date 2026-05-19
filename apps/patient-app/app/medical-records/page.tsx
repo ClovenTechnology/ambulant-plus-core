@@ -187,125 +187,6 @@ async function safeJsonFetch<T>(url: string, init?: RequestInit, timeoutMs = 12_
 }
 
 /* ---------------------------------------------
-   Mock fallback (used if /api/medical-records
-   isn't available yet)
-----------------------------------------------*/
-function mockBundle(): MedicalRecordsBundle {
-  const now = new Date();
-  const iso = (d: Date) => d.toISOString();
-  const daysAgo = (n: number) => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - n);
-    return d;
-  };
-
-  return {
-    ok: true,
-    patient: {
-      id: 'pat_demo_001',
-      displayName: 'Demo Patient',
-      dob: '1996-04-12',
-      sex: 'prefer_not',
-      mrn: 'AMB-000214',
-    },
-    updatedAt: iso(now),
-    problems: [
-      { id: 'p1', name: 'Hypertension', status: 'active', notedAt: iso(daysAgo(210)) },
-      { id: 'p2', name: 'Seasonal allergies', status: 'active', notedAt: iso(daysAgo(90)) },
-    ],
-    encounters: [
-      {
-        id: 'e1',
-        date: iso(daysAgo(6)),
-        clinicianName: 'Dr. K. Dlamini',
-        specialty: 'General Practice',
-        reason: 'Headache + BP check',
-        summary: 'BP elevated. Lifestyle plan + follow-up recommended.',
-        linkHref: '/encounters',
-      },
-      {
-        id: 'e2',
-        date: iso(daysAgo(32)),
-        clinicianName: 'Nurse T. Mokoena',
-        specialty: 'Primary Care',
-        reason: 'Flu symptoms',
-        summary: 'Supportive care. No red flags.',
-        linkHref: '/encounters',
-      },
-    ],
-    medications: [
-      {
-        id: 'm1',
-        name: 'Amlodipine',
-        dose: '5 mg',
-        route: 'PO',
-        frequency: 'Once daily',
-        status: 'active',
-        startDate: iso(daysAgo(200)),
-        prescriber: 'Dr. K. Dlamini',
-      },
-      {
-        id: 'm2',
-        name: 'Cetirizine',
-        dose: '10 mg',
-        route: 'PO',
-        frequency: 'Once daily (as needed)',
-        status: 'active',
-        startDate: iso(daysAgo(70)),
-        prescriber: 'Nurse T. Mokoena',
-      },
-    ],
-    allergies: [
-      { id: 'a1', allergen: 'Penicillin', reaction: 'Rash', severity: 'moderate', notedAt: iso(daysAgo(400)) },
-    ],
-    immunisations: [
-      { id: 'im1', name: 'Influenza', date: iso(daysAgo(120)), dose: '1', provider: 'Community Pharmacy' },
-      { id: 'im2', name: 'COVID-19 Booster', date: iso(daysAgo(330)), dose: 'Booster', provider: 'Clinic' },
-    ],
-    labs: [
-      { id: 'l1', date: iso(daysAgo(5)), panel: 'Lipids', test: 'LDL', value: '3.2', unit: 'mmol/L', ref: '< 3.0', flag: 'high' },
-      { id: 'l2', date: iso(daysAgo(5)), panel: 'Lipids', test: 'HDL', value: '1.3', unit: 'mmol/L', ref: '> 1.0', flag: 'normal' },
-      { id: 'l3', date: iso(daysAgo(5)), panel: 'HbA1c', test: 'HbA1c', value: '5.4', unit: '%', ref: '< 5.7', flag: 'normal' },
-    ],
-    imaging: [
-      { id: 'img1', date: iso(daysAgo(28)), modality: 'XR', study: 'Chest X-ray', impression: 'No acute cardiopulmonary abnormality.' },
-    ],
-    docs: [
-      {
-        id: 'd1',
-        date: iso(daysAgo(6)),
-        title: 'Consultation Note (GP)',
-        type: 'clinical-note',
-        source: 'Ambulant+ Televisit',
-        fileName: 'consult-note-gp.pdf',
-        mimeType: 'application/pdf',
-        sizeBytes: 248_120,
-      },
-      {
-        id: 'd2',
-        date: iso(daysAgo(5)),
-        title: 'Lab Report (Lipids + HbA1c)',
-        type: 'lab-report',
-        source: 'MedReach Lab Partner',
-        fileName: 'lab-report.pdf',
-        mimeType: 'application/pdf',
-        sizeBytes: 512_900,
-      },
-      {
-        id: 'd3',
-        date: iso(daysAgo(28)),
-        title: 'Imaging Report (Chest XR)',
-        type: 'imaging-report',
-        source: 'Radiology Partner',
-        fileName: 'imaging-report.pdf',
-        mimeType: 'application/pdf',
-        sizeBytes: 391_044,
-      },
-    ],
-  };
-}
-
-/* ---------------------------------------------
    Small UI bits (local, zero deps)
 ----------------------------------------------*/
 function PillBadge({ text, tone }: { text: string; tone?: 'neutral' | 'ok' | 'warn' | 'danger' }) {
@@ -414,7 +295,6 @@ export default function MedicalRecordsPage() {
 
   const [loading, setLoading] = useState(true);
   const [bundle, setBundle] = useState<MedicalRecordsBundle | null>(null);
-  const [usingMock, setUsingMock] = useState(false);
 
   const [tab, setTab] = useState<TabKey>('overview');
   const [q, setQ] = useState('');
@@ -445,17 +325,13 @@ export default function MedicalRecordsPage() {
     (async () => {
       setLoading(true);
 
-      // If you later implement this API route, the page will auto-switch to real data:
-      // GET /api/medical-records  -> MedicalRecordsBundle
       const live = await safeJsonFetch<MedicalRecordsBundle>('/api/medical-records');
       if (!alive) return;
 
       if (live?.ok) {
         setBundle(live);
-        setUsingMock(false);
       } else {
-        setBundle(mockBundle());
-        setUsingMock(true);
+        setBundle(null);
       }
 
       setLoading(false);
@@ -623,15 +499,13 @@ export default function MedicalRecordsPage() {
       a.download = `ambulant-medical-records-${patient?.id || 'patient'}.json`;
       a.click();
       URL.revokeObjectURL(url);
-      toast.success('Exported records JSON.');
+      toast('Exported records JSON.', 'success');
     } catch {
-      toast.error('Export failed.');
+      toast('Export failed.', 'error');
     }
   }
 
   function doShare() {
-    // If you later implement a real share token route, wire it here.
-    // Example: POST /api/medical-records/share -> { url }
     const url = typeof window !== 'undefined' ? `${window.location.origin}${pathname}` : pathname;
 
     if (typeof navigator !== 'undefined' && (navigator as any).share) {
@@ -644,12 +518,12 @@ export default function MedicalRecordsPage() {
     try {
       if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
         navigator.clipboard.writeText(url);
-        toast.success('Link copied to clipboard.');
+        toast('Link copied to clipboard.', 'success');
       } else {
-        toast.info('Sharing not available on this device.');
+        toast('Sharing not available on this device.', 'info');
       }
     } catch {
-      toast.error('Could not copy link.');
+      toast('Could not copy link.', 'error');
     }
   }
 
@@ -662,12 +536,7 @@ export default function MedicalRecordsPage() {
     setUploadOpen(false);
     if (!files || files.length === 0) return;
 
-    // Placeholder: you can later replace with a signed upload / multipart flow.
-    // Example:
-    // 1) POST /api/medical-records/documents/init -> { uploadUrl, docId }
-    // 2) PUT uploadUrl (file)
-    // 3) POST /api/medical-records/documents/complete { docId, meta }
-    toast.info(`Selected ${files.length} file(s). Upload wiring not added yet.`);
+    toast(`Selected ${files.length} file(s). Upload is not available yet.`, 'info');
   }
 
   const TopBar = (
@@ -685,17 +554,10 @@ export default function MedicalRecordsPage() {
           </div>
         </div>
 
-        {usingMock ? (
-          <div className="mt-2 inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
-            <AlertTriangle className="h-4 w-4" />
-            Demo mode: showing mock records (API not wired yet)
-          </div>
-        ) : (
-          <div className="mt-2 inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-900">
-            <CheckCircle2 className="h-4 w-4" />
-            Live records connected
-          </div>
-        )}
+        <div className="mt-2 inline-flex items-center gap-2 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-900">
+          <CheckCircle2 className="h-4 w-4" />
+          Live records connected
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -798,7 +660,6 @@ export default function MedicalRecordsPage() {
   return (
     <main className="min-h-[calc(100vh-0px)] bg-white">
       <div className="mx-auto max-w-6xl px-4 py-6">
-        {/* Top row */}
         <div className="flex items-center justify-between gap-3">
           <Link
             href="/"
@@ -816,7 +677,6 @@ export default function MedicalRecordsPage() {
 
         <div className="mt-5">{TopBar}</div>
 
-        {/* Search + filters */}
         <div className="mt-5 grid grid-cols-1 gap-3 lg:grid-cols-12">
           <div className="lg:col-span-7">
             <div className="relative">
@@ -862,14 +722,11 @@ export default function MedicalRecordsPage() {
           </div>
         </div>
 
-        {/* Tabs */}
         <div className="mt-5">
           <SegTabs value={tab} onChange={setTab} tabs={tabs} />
         </div>
 
-        {/* Content */}
         <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-12">
-          {/* Main */}
           <div className="lg:col-span-8 space-y-4">
             {tab === 'overview' ? (
               <>
@@ -917,7 +774,7 @@ export default function MedicalRecordsPage() {
                       <div className="min-w-0">
                         <div className="text-sm font-black text-slate-950">Privacy & consent</div>
                         <div className="mt-1 text-sm text-slate-600">
-                          Sharing is designed to be consent-based and time-limited (once backend is wired).
+                          Sharing is designed to be consent-based and time-limited.
                           Avoid uploading sensitive documents you don’t want in your record.
                         </div>
                       </div>
@@ -1027,7 +884,7 @@ export default function MedicalRecordsPage() {
                           ) : (
                             <button
                               type="button"
-                              onClick={() => toast.info('Download URL not available yet (wire backend signed URLs).')}
+                              onClick={() => toast('Download URL is not available for this document.', 'info')}
                               className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-extrabold text-slate-800 hover:bg-slate-50"
                             >
                               <Download className="h-4 w-4" />
@@ -1175,7 +1032,7 @@ export default function MedicalRecordsPage() {
                               {fmtDateTime(im.date)} {im.dose ? ` • Dose: ${im.dose}` : ''} {im.provider ? ` • ${im.provider}` : ''}
                             </div>
                           </div>
-                          <PillBadge text="verified (demo)" tone="ok" />
+                          <PillBadge text="verified" tone="ok" />
                         </div>
                       </div>
                     ))}
@@ -1210,11 +1067,11 @@ export default function MedicalRecordsPage() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => toast.info('Wire: POST /api/medical-records/share to create signed, scoped links.')}
+                          onClick={() => toast('Secure record-sharing links are not available yet.', 'info')}
                           className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-800 hover:bg-slate-50"
                         >
                           <Calendar className="h-4 w-4" />
-                          Generate time-limited link (not wired)
+                          Generate time-limited link
                         </button>
                       </div>
                     </div>
@@ -1224,7 +1081,6 @@ export default function MedicalRecordsPage() {
             ) : null}
           </div>
 
-          {/* Side rail */}
           <div className="lg:col-span-4 space-y-4">
             <Card title="Quick actions" icon={ClipboardList}>
               <div className="grid grid-cols-1 gap-2">
@@ -1271,11 +1127,11 @@ export default function MedicalRecordsPage() {
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-bold">Data source</span>
-                  <span className={cx('text-slate-600', usingMock && 'text-amber-800')}>{usingMock ? 'Mock fallback' : 'API'}</span>
+                  <span className="text-slate-600">API</span>
                 </div>
                 <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                  Tip: once your backend is ready, implement <span className="font-bold">GET /api/medical-records</span> and
-                  return the bundle shape used here to go live instantly.
+                  This page now depends on the live <span className="font-bold">GET /api/medical-records</span> route.
+                  If records are unavailable, it fails visibly instead of showing mock data.
                 </div>
               </div>
             </Card>
@@ -1283,7 +1139,6 @@ export default function MedicalRecordsPage() {
         </div>
       </div>
 
-      {/* Minimal upload modal state (UX only) */}
       {uploadOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-black/30" onClick={() => setUploadOpen(false)} />

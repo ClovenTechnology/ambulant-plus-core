@@ -14,55 +14,46 @@ function allowedOrigins() {
 function corsOrigin(req: NextRequest) {
   const origin = req.headers.get("origin");
   const allowed = allowedOrigins();
-
-  if (origin && allowed.includes(origin)) {
-    return origin;
-  }
-
+  if (origin && allowed.includes(origin)) return origin;
   return allowed[0] || "http://localhost:3011";
 }
 
 function applyCors(req: NextRequest, res: NextResponse) {
   const origin = corsOrigin(req);
-
   res.headers.set("Access-Control-Allow-Origin", origin);
   res.headers.set("Access-Control-Allow-Credentials", "true");
-  res.headers.set(
-    "Access-Control-Allow-Methods",
-    "GET,POST,PATCH,PUT,DELETE,OPTIONS"
-  );
+  res.headers.set("Access-Control-Allow-Methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS");
   res.headers.set(
     "Access-Control-Allow-Headers",
     [
       "content-type",
       "authorization",
       "x-idempotency-key",
+      "x-uid",
+      "x-role",
+      "x-org-id",
+      "x-user-id",
+      "x-patient-id",
+      "x-current-patient-id",
+      "x-actor-ref-id",
+      "x-ambulant-identity",
       "x-ambulant-user-id",
       "x-ambulant-org-id",
       "x-ambulant-role",
       "x-ambulant-workspace",
       "x-ambulant-trusted",
+      "x-join-token",
     ].join(",")
   );
   res.headers.set("Vary", "Origin");
-
   return res;
 }
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
-
-  if (!pathname.startsWith("/api/")) {
-    return NextResponse.next();
-  }
-
-  if (req.method === "OPTIONS") {
-    return applyCors(req, new NextResponse(null, { status: 204 }));
-  }
-
+  if (!pathname.startsWith("/api/")) return NextResponse.next();
+  if (req.method === "OPTIONS") return applyCors(req, new NextResponse(null, { status: 204 }));
   return applyCors(req, NextResponse.next());
 }
 
-export const config = {
-  matcher: ["/api/:path*"],
-};
+export const config = { matcher: ["/api/:path*"] };

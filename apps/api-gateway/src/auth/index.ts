@@ -1,19 +1,19 @@
 // apps/api-gateway/src/auth/index.ts
 import type { NextRequest } from 'next/server';
-import { verifyAdminRequest } from '../../app/api/utils/auth';
+import { verifyAdminRequest } from '@/src/lib/admin-auth';
+import {
+  readIdentity,
+  requireTrustedIdentityInProduction,
+} from '@/src/lib/identity';
 
-/**
- * Minimal auth helpers expected by gateway routes.
- * This file deliberately imports the existing app/api/utils/auth helper
- * through a relative path so it works in Vercel/Next build without relying
- * on the "@/app/..." alias.
- */
+/** Shared auth helpers retained for older routes. */
 
 export async function requireAdmin(req: NextRequest) {
-  const result = await verifyAdminRequest(req);
+  const ok = await verifyAdminRequest(req);
 
-  if (result === false || (typeof result === 'object' && result && (result as any).ok === false)) {
-    const err: any = new Error('Unauthorized');
+  if (!ok) {
+    const err = new Error('Unauthorized');
+    // @ts-ignore legacy route compatibility
     err.status = 401;
     throw err;
   }
@@ -22,11 +22,15 @@ export async function requireAdmin(req: NextRequest) {
 }
 
 export function getUid(req: NextRequest) {
-  return (
-    req.headers.get('x-uid') ||
-    req.headers.get('x-user-id') ||
-    req.headers.get('x-ambulant-user-id') ||
-    req.headers.get('x-user') ||
-    'anon'
-  );
+  const who = readIdentity(req.headers);
+  requireTrustedIdentityInProduction(req.headers, who);
+
+  if (who.uid) return who.uid;
+
+  if (process.env.NODE_ENV !== 'production') return 'anon';
+
+  const err = new Error('Unauthorized');
+  // @ts-ignore legacy route compatibility
+  err.status = 401;
+  throw err;
 }

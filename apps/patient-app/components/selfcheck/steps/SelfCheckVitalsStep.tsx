@@ -102,7 +102,7 @@ export default function SelfCheckVitalsStep(props: {
 
       {editOpen && (
         <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div className="text-sm font-semibold text-slate-900">Quick edit (demo)</div>
+          <div className="text-sm font-semibold text-slate-900">Quick edit</div>
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
             {editable.map((v) => (
               <label key={v.key} className="block">

@@ -1,4 +1,6 @@
-// types.ts
+// apps/patient-app/types.ts
+// Shared types for patient-app.
+
 export interface VitalSeries {
   date: string;
   systolic: number;
@@ -20,11 +22,22 @@ export interface Appointment {
   status: string;
 }
 
+export type PillStatus = 'Pending' | 'Taken' | 'Missed';
+
 export interface Pill {
+  id: string;
   name: string;
-  dose: string;
-  time: string;
-  status: 'Pending' | 'Taken' | 'Missed';
+  dose?: string;
+  time?: string;
+  status: PillStatus;
+
+  /**
+   * Optional fields that may come from eRx / medication APIs.
+   */
+  frequency?: string;
+  route?: string;
+  started?: string;
+  lastFilled?: string;
 }
 
 export interface Allergy {

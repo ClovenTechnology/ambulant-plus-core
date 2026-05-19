@@ -1,7 +1,11 @@
 'use client';
 
 import React from 'react';
-import clsx from 'clsx';
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
+
 
 export type SelfCheckStep = 'data' | 'symptoms' | 'results';
 
@@ -79,7 +83,7 @@ export default function SelfCheckStepper(props: {
                   onStep(s.key);
                 }}
                 title={locked ? lockedHint : undefined}
-                className={clsx(
+                className={cx(
                   'flex items-center gap-3 px-3 py-2 rounded-xl border transition whitespace-nowrap',
                   isActive
                     ? 'bg-slate-900 text-white border-slate-900'
@@ -89,7 +93,7 @@ export default function SelfCheckStepper(props: {
                 )}
               >
                 <div
-                  className={clsx(
+                  className={cx(
                     'w-8 h-8 rounded-lg grid place-items-center border',
                     isActive
                       ? 'border-white/20 bg-white/10'
@@ -99,21 +103,21 @@ export default function SelfCheckStepper(props: {
                   )}
                 >
                   {locked ? (
-                    <IconLock className={clsx('w-4 h-4', isActive ? 'text-white' : 'text-slate-400')} />
+                    <IconLock className={cx('w-4 h-4', isActive ? 'text-white' : 'text-slate-400')} />
                   ) : isCompleted ? (
-                    <IconCheck className={clsx('w-5 h-5', isActive ? 'text-white' : 'text-emerald-600')} />
+                    <IconCheck className={cx('w-5 h-5', isActive ? 'text-white' : 'text-emerald-600')} />
                   ) : (
-                    <span className={clsx('text-sm font-extrabold', isActive ? 'text-white' : 'text-slate-700')}>
+                    <span className={cx('text-sm font-extrabold', isActive ? 'text-white' : 'text-slate-700')}>
                       {idx + 1}
                     </span>
                   )}
                 </div>
 
                 <div className="text-left leading-tight">
-                  <div className={clsx('text-[11px] uppercase tracking-wider', isActive ? 'text-white/80' : 'text-slate-400')}>
+                  <div className={cx('text-[11px] uppercase tracking-wider', isActive ? 'text-white/80' : 'text-slate-400')}>
                     {s.sub}
                   </div>
-                  <div className={clsx('text-sm font-semibold', isActive ? 'text-white' : locked ? 'text-slate-400' : 'text-slate-900')}>
+                  <div className={cx('text-sm font-semibold', isActive ? 'text-white' : locked ? 'text-slate-400' : 'text-slate-900')}>
                     {s.title}
                   </div>
                 </div>

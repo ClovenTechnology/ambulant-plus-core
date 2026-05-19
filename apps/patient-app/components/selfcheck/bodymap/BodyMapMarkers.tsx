@@ -2,11 +2,15 @@
 'use client';
 
 import React from 'react';
-import clsx from 'clsx';
 
 import { keyFor } from './bodyMapConfig';
 import type { Marker, BodyAreaKey, BodySide } from './types';
 import { BODY_AREA_LABEL } from './types';
+
+function cx(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
+
 
 function toneClass(tone: Marker['tone'], active: boolean) {
   const base =
@@ -17,7 +21,7 @@ function toneClass(tone: Marker['tone'], active: boolean) {
     : tone === 'blue' ? 'fill-blue-500'
     : 'fill-slate-400';
 
-  return clsx(base, active && 'ring-4 ring-black/10');
+  return cx(base, active && 'ring-4 ring-black/10');
 }
 
 function PinGlyph({ x, y }: { x: number; y: number }) {
@@ -110,7 +114,7 @@ export default function BodyMapMarkers({
                 cx={m.x}
                 cy={m.y}
                 r={16}
-                className={clsx(
+                className={cx(
                   toneClass(m.tone, active),
                   // ✅ subtle hover glow pulse
                   (hovered || pinned) && !dimmed && 'bm-pulse'

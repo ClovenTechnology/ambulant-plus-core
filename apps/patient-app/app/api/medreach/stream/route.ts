@@ -1,123 +1,140 @@
 // apps/patient-app/app/api/medreach/stream/route.ts
 import { NextRequest } from 'next/server';
-import { medReachMockData } from '../../../../components/fallbackMocks';
+import { apigwBase } from '@/app/api/_apigw';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Optional backend base URL (for real SSE once the service exists)
-const CLIN_BASE =
-  process.env.MEDREACH_BASE_URL ||
-  process.env.CLINICIAN_BASE_URL ||
-  process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL ||
-  '';
-
-// In-memory jobs store for mock mode
-let JOBS = medReachMockData.map((j) => ({ ...j }));
-
-/**
- * Proxy to real clinician / MedReach backend if configured.
- *
- * Expected upstream endpoint:
- *   GET /api/medreach/stream  (text/event-stream)
- *
- * This just pipes the SSE bytes straight through.
- */
-async function proxyToClinician(req: NextRequest) {
-  const url = `${CLIN_BASE.replace(/\/$/, '')}/api/medreach/stream`;
-
-  const headers: Record<string, string> = {
-    Accept: 'text/event-stream',
-  };
-
-  const cookie = req.headers.get('cookie');
-  const auth = req.headers.get('authorization');
-  if (cookie) headers.cookie = cookie;
-  if (auth) headers.authorization = auth;
-
-  const upstream = await fetch(url, {
-    headers,
-    cache: 'no-store',
-  });
-
-  if (!upstream.body) {
-    throw new Error('Upstream MedReach SSE has no body');
-  }
-
-  return new Response(upstream.body, {
-    status: upstream.status,
+function jsonResponse(data: any, status: number) {
+  return new Response(JSON.stringify(data), {
+    status,
     headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
     },
   });
 }
 
-/**
- * GET /api/medreach/stream
- */
-export async function GET(req: NextRequest) {
-  // 1) Try real backend if configured
-  if (CLIN_BASE) {
-    try {
-      return await proxyToClinician(req);
-    } catch (err) {
-      console.warn(
-        '[MedReach SSE] Failed to proxy to clinician backend, falling back to mock:',
-        err,
-      );
-      // fall through to mock mode below
-    }
+function sseHeaders() {
+  return {
+    'Content-Type': 'text/event-stream; charset=utf-8',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  } as Record<string, string>;
+}
+
+function forwardHeaders(req: NextRequest) {
+  const headers = new Headers();
+
+  const passthrough = [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-role',
+    'x-org-id',
+    'x-correlation-id',
+    'x-request-id',
+  ];
+
+  for (const key of passthrough) {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
   }
 
-  // 2) Mock mode (your existing behaviour)
-  const stream = new ReadableStream({
-    start(controller) {
-      const encoder = new TextEncoder();
+  if (!headers.has('x-role')) {
+    headers.set('x-role', 'patient');
+  }
 
-      const send = (data: any) => {
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify(data)}\n\n`),
-        );
-      };
+  headers.set('accept', 'text/event-stream');
 
-      // Initial snapshot
-      send(JOBS);
+  return headers;
+}
 
-      // Periodically "touch" jobs to simulate activity
-      const interval = setInterval(() => {
-        // In future, you could randomise statuses or re-read from DB/service
-        send(JOBS);
-      }, 15_000);
+export async function GET(req: NextRequest) {
+  const base = apigwBase();
 
-      // Keep-alive comments to avoid some proxies timing out
-      const keepAlive = setInterval(() => {
-        controller.enqueue(encoder.encode(': keep-alive\n\n'));
-      }, 45_000);
+  if (!base) {
+    return jsonResponse(
+      {
+        ok: false,
+        error: 'service_not_configured',
+        service: 'medreach_stream',
+      },
+      503,
+    );
+  }
 
-      const close = () => {
-        clearInterval(interval);
-        clearInterval(keepAlive);
-        try {
-          controller.close();
-        } catch {
-          // ignore
-        }
-      };
+  const incoming = new URL(req.url);
 
-      // @ts-ignore – not all environments expose `signal`, but fine for Node
-      controller.signal?.addEventListener('abort', close);
-    },
-    cancel() {
-      // intervals cleaned up in start()
-    },
-  });
+  const orderId =
+    incoming.searchParams.get('orderId') ||
+    incoming.searchParams.get('id') ||
+    '';
 
-  return new Response(stream, {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache, no-transform',
-      Connection: 'keep-alive',
-    },
-  });
+  const drawId = incoming.searchParams.get('drawId') || '';
+  const bundleId = incoming.searchParams.get('bundleId') || '';
+
+  if (!orderId && !drawId && !bundleId) {
+    return jsonResponse(
+      {
+        ok: false,
+        error: 'orderId_or_drawId_or_bundleId_required',
+      },
+      400,
+    );
+  }
+
+  const upstream = new URL('/api/medreach/stream', base);
+
+  if (orderId) upstream.searchParams.set('orderId', orderId);
+  if (drawId) upstream.searchParams.set('drawId', drawId);
+  if (bundleId) upstream.searchParams.set('bundleId', bundleId);
+
+  try {
+    const res = await fetch(upstream.toString(), {
+      method: 'GET',
+      headers: forwardHeaders(req),
+      cache: 'no-store',
+      signal: req.signal,
+    });
+
+    if (!res.ok) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: `medreach_stream_http_${res.status}`,
+        },
+        res.status === 404 ? 503 : res.status,
+      );
+    }
+
+    if (!res.body) {
+      return jsonResponse(
+        {
+          ok: false,
+          error: 'medreach_stream_empty_body',
+        },
+        502,
+      );
+    }
+
+    return new Response(res.body, {
+      status: 200,
+      headers: sseHeaders(),
+    });
+  } catch (err: any) {
+    return jsonResponse(
+      {
+        ok: false,
+        error: err?.message || 'medreach_stream_proxy_failed',
+      },
+      502,
+    );
+  }
 }

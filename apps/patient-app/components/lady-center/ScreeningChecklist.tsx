@@ -34,9 +34,14 @@ function Pill({
   );
 }
 
-function Card({ children, className }: { children: React.ReactNode; className?: string }) {
+function Card({
+  children,
+  className,
+  ...rest
+}: React.HTMLAttributes<HTMLDivElement> & { children: React.ReactNode }) {
   return (
     <div
+      {...rest}
       className={cn(
         'rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_18px_45px_rgba(2,6,23,0.07)] backdrop-blur',
         className
@@ -83,8 +88,27 @@ export default function ScreeningChecklist(props: {
   onMarkDone: (key: string) => void;
   onBook: (key: string) => void;
   formatNiceDate: (iso?: string | null) => string;
+
+  priorityKeys?: string[];
+  priorityNote?: string | null;
 }) {
-  const { items, onReminders, onMarkDone, onBook, formatNiceDate } = props;
+  const {
+    items,
+    onReminders,
+    onMarkDone,
+    onBook,
+    formatNiceDate,
+    priorityKeys = [],
+    priorityNote,
+  } = props;
+
+  const sortedItems = [...items].sort((a, b) => {
+    const ai = priorityKeys.indexOf(a.key);
+    const bi = priorityKeys.indexOf(b.key);
+    const av = ai === -1 ? Number.MAX_SAFE_INTEGER : ai;
+    const bv = bi === -1 ? Number.MAX_SAFE_INTEGER : bi;
+    return av - bv;
+  });
 
   return (
     <Card className="p-5">
@@ -101,8 +125,14 @@ export default function ScreeningChecklist(props: {
         }
       />
 
+      {priorityNote ? (
+        <div className="mt-3 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-800">
+          {priorityNote}
+        </div>
+      ) : null}
+
       <div className="mt-4 space-y-2">
-        {items.map((it) => {
+        {sortedItems.map((it) => {
           const tone = it.status === 'overdue' ? 'amber' : it.status === 'ok' ? 'emerald' : 'slate';
           return (
             <div key={it.key} className="rounded-2xl border border-slate-200 bg-white p-3">

@@ -1,95 +1,131 @@
 ﻿// apps/patient-app/app/api/televisit/list/route.ts
-import { NextResponse } from 'next/server';
-import { store } from '@runtime/store';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type Appt = {
-  id: string;
-  clinicianName: string;
-  specialty: string;
-  startsAt: string; // ISO
-  endsAt: string; // ISO
-  location?: string;
-};
-
-function isoIn(minutesFromNow: number) {
-  return new Date(Date.now() + minutesFromNow * 60_000).toISOString();
+function apiGatewayBase() {
+  return (
+    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    ''
+  ).replace(/\/+$/, '');
 }
 
-// TEMP: mock until DB is wired
-function mockAppts(): Appt[] {
-  const aStart = isoIn(12);
-  const aEnd = isoIn(12 + 25);
-  const bStart = isoIn(180);
-  const bEnd = isoIn(210);
+function forwardHeaders(req: NextRequest) {
+  const headers = new Headers();
 
-  return [
-    {
-      id: 'apt_001',
-      clinicianName: 'Dr. Lerato Mokoena',
-      specialty: 'General Practitioner',
-      startsAt: aStart,
-      endsAt: aEnd,
-      location: 'Virtual',
-    },
-    {
-      id: 'apt_002',
-      clinicianName: 'Dr. Sibusiso Nkosi',
-      specialty: 'Cardiologist',
-      startsAt: bStart,
-      endsAt: bEnd,
-      location: 'Virtual',
-    },
-  ];
+  [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-role',
+    'x-email',
+    'x-name',
+    'x-display-name',
+    'x-org-id',
+    'x-correlation-id',
+    'x-request-id',
+  ].forEach((key) => {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
+  });
+
+  headers.set('accept', 'application/json');
+  return headers;
 }
 
-function seedTelevisits(items: Appt[]) {
-  const tv = (store as any)?.televisits;
-  if (!tv || typeof tv.set !== 'function') return;
+export async function GET(req: NextRequest) {
+  const base = apiGatewayBase();
 
-  for (const a of items) {
-    try {
-      const prev = tv.get(a.id);
-      if (!prev) {
-        tv.set(a.id, {
-          id: a.id,
-          visitId: a.id,
-          roomId: a.id,
-          startsAt: a.startsAt,
-          endsAt: a.endsAt,
-          kind: 'televisit',
-          title: `${a.specialty} • ${a.clinicianName}`,
-          clinicianName: a.clinicianName,
-          specialty: a.specialty,
-          location: a.location ?? 'Virtual',
-        });
-      } else {
-        // keep any extra fields but ensure schedule stays current
-        tv.set(a.id, {
-          ...prev,
-          startsAt: a.startsAt,
-          endsAt: a.endsAt,
-          clinicianName: (prev as any).clinicianName ?? a.clinicianName,
-          specialty: (prev as any).specialty ?? a.specialty,
-          location: (prev as any).location ?? a.location ?? 'Virtual',
-        });
-      }
-    } catch {
-      // ignore
-    }
+  if (!base) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'api_gateway_base_not_configured',
+        items: [],
+      },
+      { status: 503 },
+    );
   }
-}
 
-export async function GET() {
-  const items = mockAppts();
+  const incoming = new URL(req.url);
+  const upstream = new URL('/api/televisit/list', base);
 
-  // Make sure /api/televisit/status + /api/televisit/issue can find these visits (dev convenience)
-  seedTelevisits(items);
+  incoming.searchParams.forEach((value, key) => {
+    upstream.searchParams.set(key, value);
+  });
 
-  return NextResponse.json(
-    { ok: true, items, serverNow: new Date().toISOString() },
-    { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } },
-  );
+  try {
+    const res = await fetch(upstream.toString(), {
+      method: 'GET',
+      headers: forwardHeaders(req),
+      cache: 'no-store',
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (res.status === 404) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'televisit_list_service_not_configured',
+          items: [],
+        },
+        { status: 503 },
+      );
+    }
+
+    if (!res.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: data?.error || `televisit_gateway_http_${res.status}`,
+          items: [],
+        },
+        { status: res.status },
+      );
+    }
+
+    const items = Array.isArray(data?.items)
+      ? data.items
+      : Array.isArray(data?.appointments)
+        ? data.appointments
+        : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data)
+            ? data
+            : [];
+
+    return NextResponse.json(
+      {
+        ok: true,
+        items,
+        serverNow: new Date().toISOString(),
+        source: 'api_gateway',
+      },
+      {
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+      },
+    );
+  } catch (err: any) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: err?.message || 'televisit_list_proxy_failed',
+        items: [],
+      },
+      { status: 502 },
+    );
+  }
 }

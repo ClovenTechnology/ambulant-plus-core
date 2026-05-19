@@ -1,0 +1,864 @@
+// =========================================================
+// Client Coverage & Settlement Layer
+// Paste this near the end of prisma/schema.prisma
+// =========================================================
+
+enum ClientType {
+  MEDICAL_AID
+  CORPORATE
+  NGO
+  GOVERNMENT
+  SCHOOL
+  PROGRAM_SPONSOR
+}
+
+enum ClientStatus {
+  DRAFT
+  PENDING_APPROVAL
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+}
+
+enum ClientBillingMode {
+  CLAIMS
+  WALLET
+  HYBRID
+}
+
+enum ClientMemberKind {
+  PRINCIPAL
+  DEPENDANT
+  EMPLOYEE
+  CONTRACTOR
+  BENEFICIARY
+}
+
+enum ClientMemberStatus {
+  PENDING
+  ACTIVE
+  SUSPENDED
+  TERMINATED
+  EXPIRED
+}
+
+enum ClientProgramStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum CoverageStatus {
+  DRAFT
+  ACTIVE
+  INACTIVE
+  EXPIRED
+}
+
+enum CoverageLimitPeriod {
+  PER_VISIT
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  ANNUAL
+  LIFETIME
+}
+
+enum CoveredServiceType {
+  CONSULT_STANDARD
+  CONSULT_FOLLOWUP
+  CONSULT_PROCEDURE
+  PHYSICAL_VISIT
+  LAB_TEST
+  PHLEB_DRAW
+  LAB_LOGISTICS
+  PHARMACY_ITEM
+  PHARMACY_DISPENSING
+  RIDER_DELIVERY
+  DEVICE_PURCHASE
+  DEVICE_RENTAL
+  DEVICE_ASSIGNMENT
+  DEVICE_MAINTENANCE
+  DEVICE_SWAP
+}
+
+enum CoverageDecision {
+  COVERED
+  COVERED_WITH_COPAY
+  REQUIRES_AUTHORIZATION
+  NOT_COVERED
+  NOT_ELIGIBLE
+  FALLBACK_TO_SELF_PAY
+}
+
+enum AuthorizationStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  PARTIALLY_APPROVED
+  DENIED
+  EXPIRED
+  CANCELLED
+  CONSUMED
+}
+
+enum AuthorizationScopeType {
+  APPOINTMENT
+  ENCOUNTER
+  LAB_ORDER
+  DRAW
+  ERX_ORDER
+  CAREPORT_ORDER
+  DEVICE_ORDER
+  DELIVERY
+  BUNDLE
+}
+
+enum BillingResponsibility {
+  CLIENT
+  PATIENT
+  SPLIT
+  PLATFORM
+}
+
+enum BillableServiceType {
+  CONSULT_STANDARD
+  CONSULT_FOLLOWUP
+  CONSULT_PROCEDURE
+  PHYSICAL_VISIT
+  LAB_TEST
+  PHLEB_DRAW
+  LAB_LOGISTICS
+  PHARMACY_ITEM
+  PHARMACY_DISPENSING
+  RIDER_DELIVERY
+  DEVICE_PURCHASE
+  DEVICE_RENTAL
+  DEVICE_ASSIGNMENT
+  DEVICE_MAINTENANCE
+  DEVICE_SWAP
+}
+
+enum ProviderLane {
+  CLINICIAN
+  CLINICIAN_STAFF_MEDICAL
+  CLINICIAN_STAFF_NON_MEDICAL
+  LAB
+  PHLEB
+  PHARMACY
+  RIDER
+  PLATFORM
+  INVENTORY
+}
+
+enum BillableEventStatus {
+  DRAFT
+  READY
+  INVOICED
+  CLAIMED
+  SETTLED
+  VOID
+  CANCELLED
+}
+
+enum ClaimType {
+  MEDICAL_AID_CLAIM
+  CORPORATE_CLAIM
+  SPONSOR_INVOICE
+}
+
+enum ClaimStatus {
+  DRAFT
+  SUBMITTED
+  RECEIVED
+  IN_REVIEW
+  APPROVED
+  PARTIALLY_APPROVED
+  REJECTED
+  PAID
+  CANCELLED
+}
+
+enum SettlementStatus {
+  PENDING
+  RESERVED
+  APPROVED
+  PAID
+  PARTIALLY_PAID
+  FAILED
+  REVERSED
+  CANCELLED
+}
+
+enum SettlementPartyType {
+  CLIENT
+  PATIENT
+  PLATFORM
+}
+
+enum ClientWalletTransactionType {
+  FUNDING
+  RESERVE
+  RELEASE
+  CAPTURE
+  REFUND
+  ADJUSTMENT
+}
+
+enum ClientWalletStatus {
+  ACTIVE
+  FROZEN
+  CLOSED
+}
+
+enum ConsentScopeKind {
+  AGGREGATED_ANALYTICS
+  INDIVIDUAL_VITALS
+  INDIVIDUAL_REPORTS
+  INDIVIDUAL_ENCOUNTERS
+  INDIVIDUAL_MEDICATIONS
+  INDIVIDUAL_DEVICES
+  DEVICE_FLEET
+  BILLING_DISCLOSURE
+  AUTHORIZATION_DISCLOSURE
+}
+
+enum ConsentGrantStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+enum SponsoredDeviceOwnershipType {
+  PATIENT_OWNED
+  CLIENT_OWNED_ASSIGNED
+  CLIENT_OWNED_POOLED
+  CLIENT_RENTED_TO_MEMBER
+  CLIENT_SPONSORED_PATIENT_OWNED
+}
+
+enum SponsoredDeviceProgramStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum SponsoredDeviceAssignmentStatus {
+  ASSIGNED
+  RETURN_REQUESTED
+  RETURNED
+  REASSIGNED
+  LOST
+  DAMAGED
+  TERMINATED
+}
+
+model Client {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  type   ClientType
+  status ClientStatus @default(DRAFT)
+
+  legalName   String
+  tradingName String?
+  code        String? @unique
+
+  billingMode ClientBillingMode @default(HYBRID)
+
+  defaultCurrency String @default("ZAR") @db.VarChar(3)
+  country         String? @db.VarChar(2)
+
+  allowsClaims        Boolean @default(true)
+  allowsWalletFunding Boolean @default(true)
+  allowsHybridFunding Boolean @default(true)
+
+  contractStartAt DateTime?
+  contractEndAt   DateTime?
+  paymentTermsDays Int @default(30)
+
+  contactsJson Json?
+  configJson   Json?
+  metadata     Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  programs         ClientProgram[]
+  members          ClientMember[]
+  coveragePlans    CoveragePlan[]
+  authorizations   CoverageAuthorization[]
+  billableEvents   BillableEvent[]
+  claims           ClientClaim[]
+  settlements      SettlementRecord[]
+  wallet           ClientWalletAccount?
+  consentPolicies  ClientConsentPolicy[]
+  consentGrants    ClientConsentGrant[]
+  sponsorContracts ClinicianClientContract[]
+  devicePrograms   SponsoredDeviceProgram[]
+
+  @@index([orgId, type, status])
+  @@index([orgId, legalName])
+}
+
+model ClientProgram {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  status      ClientProgramStatus @default(DRAFT)
+
+  startAt DateTime?
+  endAt   DateTime?
+
+  billingModeOverride ClientBillingMode?
+  metadata            Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  coveragePlans CoveragePlan[]
+  members       ClientMember[]
+
+  @@unique([clientId, name])
+  @@index([orgId, clientId, status])
+}
+
+model CoveragePlan {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  clientProgramId String?
+  clientProgram   ClientProgram? @relation(fields: [clientProgramId], references: [id], onDelete: SetNull)
+
+  name        String
+  description String?
+  status      CoverageStatus @default(DRAFT)
+
+  currency String @default("ZAR") @db.VarChar(3)
+
+  annualLimitMinor   Int?
+  monthlyLimitMinor  Int?
+  lifetimeLimitMinor Int?
+
+  requiresEligibility Boolean @default(true)
+  requiresConsent     Boolean @default(true)
+
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  serviceRules   CoverageServiceRule[]
+  members        ClientMember[]
+  authorizations CoverageAuthorization[]
+
+  @@unique([clientId, name])
+  @@index([orgId, clientId, status])
+  @@index([clientProgramId])
+}
+
+model CoverageServiceRule {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  coveragePlanId String
+  coveragePlan   CoveragePlan @relation(fields: [coveragePlanId], references: [id], onDelete: Cascade)
+
+  serviceType CoveredServiceType
+
+  enabled Boolean @default(true)
+
+  decision CoverageDecision @default(COVERED)
+
+  sponsorCapMinor    Int?
+  memberCopayMinor   Int?
+  memberCopayPercent Decimal? @db.Decimal(5, 2)
+
+  preauthRequired Boolean @default(false)
+
+  limitCount  Int?
+  limitMinor  Int?
+  limitPeriod CoverageLimitPeriod?
+
+  allowedVisitModes String[] @default([])
+  metadata          Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([coveragePlanId, serviceType])
+  @@index([orgId, serviceType, enabled])
+}
+
+model ClientMember {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  clientProgramId String?
+  clientProgram   ClientProgram? @relation(fields: [clientProgramId], references: [id], onDelete: SetNull)
+
+  coveragePlanId String?
+  coveragePlan   CoveragePlan? @relation(fields: [coveragePlanId], references: [id], onDelete: SetNull)
+
+  userId    String?
+  patientId String?
+
+  memberKind   ClientMemberKind
+  memberStatus ClientMemberStatus @default(PENDING)
+
+  memberNumber          String?
+  employeeNumber        String?
+  dependentCode         String?
+  principalMemberNumber String?
+
+  joinedAt      DateTime?
+  effectiveFrom DateTime?
+  effectiveTo   DateTime?
+
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  authorizations CoverageAuthorization[]
+
+  @@unique([clientId, memberNumber])
+  @@index([orgId, clientId, memberStatus])
+  @@index([userId])
+  @@index([patientId])
+  @@index([coveragePlanId])
+  @@index([employeeNumber])
+}
+
+model ClinicianClientContract {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  clinicianUserId String
+
+  active Boolean @default(true)
+
+  standardFeeMinor  Int?
+  followupFeeMinor  Int?
+  procedureFeeMinor Int?
+
+  sponsorCapStandardMinor  Int?
+  sponsorCapFollowupMinor  Int?
+  sponsorCapProcedureMinor Int?
+
+  currency String @default("ZAR") @db.VarChar(3)
+
+  effectiveFrom DateTime @default(now())
+  effectiveTo   DateTime?
+
+  notes     String?
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientId, clinicianUserId, effectiveFrom])
+  @@index([orgId, clientId, active])
+  @@index([clinicianUserId, active])
+}
+
+model CoverageAuthorization {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  coveragePlanId String?
+  coveragePlan   CoveragePlan? @relation(fields: [coveragePlanId], references: [id], onDelete: SetNull)
+
+  clientMemberId String?
+  clientMember   ClientMember? @relation(fields: [clientMemberId], references: [id], onDelete: SetNull)
+
+  userId    String?
+  patientId String?
+
+  scopeType AuthorizationScopeType
+  scopeId   String
+
+  serviceType CoveredServiceType
+
+  status AuthorizationStatus @default(PENDING)
+
+  requestedAmountMinor Int?
+  approvedAmountMinor  Int?
+  currency             String @default("ZAR") @db.VarChar(3)
+
+  decisionReason String?
+  ruleSnapshot   Json?
+  metadata       Json?
+
+  requestedAt DateTime @default(now())
+  decidedAt   DateTime?
+  expiresAt   DateTime?
+  consumedAt  DateTime?
+
+  @@index([orgId, clientId, status, requestedAt])
+  @@index([scopeType, scopeId])
+  @@index([patientId, requestedAt])
+  @@index([clientMemberId])
+  @@index([coveragePlanId])
+}
+
+model BillableEvent {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  clientMemberId String?
+  clientMember   ClientMember? @relation(fields: [clientMemberId], references: [id], onDelete: SetNull)
+
+  authorizationId String?
+  authorization   CoverageAuthorization? @relation(fields: [authorizationId], references: [id], onDelete: SetNull)
+
+  encounterId    String?
+  appointmentId  String?
+  labOrderId     String?
+  erxOrderId     String?
+  carePortOrderId String?
+  deliveryId     String?
+  drawId         String?
+  deviceId       String?
+
+  patientId String?
+  userId    String?
+
+  serviceType  BillableServiceType
+  providerLane ProviderLane
+
+  providerId String?
+
+  responsibility BillingResponsibility @default(SPLIT)
+  status         BillableEventStatus   @default(DRAFT)
+
+  currency String @default("ZAR") @db.VarChar(3)
+
+  grossAmountMinor    Int @default(0)
+  sponsorAmountMinor  Int @default(0)
+  patientAmountMinor  Int @default(0)
+  platformAmountMinor Int @default(0)
+  providerAmountMinor Int @default(0)
+
+  pricingSnapshot Json?
+  metadata        Json?
+
+  serviceAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  claimLines      ClientClaimLine[]
+  settlementLines SettlementLine[]
+
+  @@index([orgId, status, createdAt])
+  @@index([clientId, createdAt])
+  @@index([patientId, createdAt])
+  @@index([serviceType, providerLane, createdAt])
+  @@index([encounterId])
+  @@index([appointmentId])
+  @@index([labOrderId])
+  @@index([drawId])
+  @@index([deliveryId])
+  @@index([carePortOrderId])
+}
+
+model ClientClaim {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  claimType ClaimType
+  status    ClaimStatus @default(DRAFT)
+
+  claimNumber String? @unique
+  currency    String @default("ZAR") @db.VarChar(3)
+
+  submittedAmountMinor Int @default(0)
+  approvedAmountMinor  Int @default(0)
+  paidAmountMinor      Int @default(0)
+
+  submissionPayload Json?
+  responsePayload   Json?
+  notes             String?
+
+  submittedAt DateTime?
+  decidedAt   DateTime?
+  paidAt      DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines       ClientClaimLine[]
+  settlements SettlementRecord[]
+
+  @@index([orgId, clientId, status, createdAt])
+  @@index([claimType, status, createdAt])
+}
+
+model ClientClaimLine {
+  id String @id @default(cuid())
+
+  claimId String
+  claim   ClientClaim @relation(fields: [claimId], references: [id], onDelete: Cascade)
+
+  billableEventId String
+  billableEvent   BillableEvent @relation(fields: [billableEventId], references: [id], onDelete: Cascade)
+
+  submittedAmountMinor Int @default(0)
+  approvedAmountMinor  Int @default(0)
+  paidAmountMinor      Int @default(0)
+
+  rejectionReason String?
+  metadata        Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([claimId, billableEventId])
+  @@index([billableEventId])
+}
+
+model SettlementRecord {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String?
+  client   Client? @relation(fields: [clientId], references: [id], onDelete: SetNull)
+
+  claimId String?
+  claim   ClientClaim? @relation(fields: [claimId], references: [id], onDelete: SetNull)
+
+  status SettlementStatus @default(PENDING)
+
+  settlementPartyType SettlementPartyType
+  settlementPartyId   String?
+
+  currency String @default("ZAR") @db.VarChar(3)
+
+  grossAmountMinor Int @default(0)
+  netAmountMinor   Int @default(0)
+
+  remittanceRef String?
+  payoutRef     String?
+  metadata      Json?
+
+  settledAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  lines SettlementLine[]
+
+  @@index([orgId, status, createdAt])
+  @@index([clientId, createdAt])
+  @@index([claimId])
+  @@index([settlementPartyType, settlementPartyId, createdAt])
+}
+
+model SettlementLine {
+  id String @id @default(cuid())
+
+  settlementId String
+  settlement   SettlementRecord @relation(fields: [settlementId], references: [id], onDelete: Cascade)
+
+  billableEventId String
+  billableEvent   BillableEvent @relation(fields: [billableEventId], references: [id], onDelete: Cascade)
+
+  providerLane ProviderLane
+  providerId   String?
+
+  grossAmountMinor Int @default(0)
+  netAmountMinor   Int @default(0)
+
+  metadata Json?
+
+  createdAt DateTime @default(now())
+
+  @@unique([settlementId, billableEventId, providerLane])
+  @@index([billableEventId])
+  @@index([providerLane, providerId])
+}
+
+model ClientWalletAccount {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String @unique
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  status ClientWalletStatus @default(ACTIVE)
+
+  currency String @default("ZAR") @db.VarChar(3)
+
+  balanceMinor Int @default(0)
+  heldMinor    Int @default(0)
+
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  transactions ClientWalletTransaction[]
+
+  @@index([orgId, status])
+}
+
+model ClientWalletTransaction {
+  id String @id @default(cuid())
+
+  walletId String
+  wallet   ClientWalletAccount @relation(fields: [walletId], references: [id], onDelete: Cascade)
+
+  type ClientWalletTransactionType
+
+  amountMinor Int
+  currency    String @default("ZAR") @db.VarChar(3)
+
+  refType String?
+  refId   String?
+
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  @@index([walletId, createdAt])
+  @@index([type, createdAt])
+  @@index([refType, refId])
+}
+
+model ClientConsentPolicy {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  scope ConsentScopeKind
+  enabledByDefault      Boolean @default(false)
+  requiresExplicitGrant Boolean @default(true)
+
+  policyText    String?
+  policyVersion String
+  metadata      Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([clientId, scope, policyVersion])
+  @@index([orgId, clientId, scope])
+}
+
+model ClientConsentGrant {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  userId    String?
+  patientId String?
+
+  scope ConsentScopeKind
+  status ConsentGrantStatus @default(ACTIVE)
+
+  purpose         String?
+  grantedVia      String?
+  grantedByUserId String?
+
+  grantedAt DateTime @default(now())
+  expiresAt DateTime?
+  revokedAt DateTime?
+
+  metadata Json?
+
+  @@index([orgId, clientId, scope, status])
+  @@index([patientId, scope, status])
+  @@index([userId, scope, status])
+}
+
+model SponsoredDeviceProgram {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  name   String
+  status SponsoredDeviceProgramStatus @default(DRAFT)
+
+  ownershipType SponsoredDeviceOwnershipType
+
+  allowsTakeHome       Boolean @default(true)
+  requiresReturnOnExit Boolean @default(false)
+  allowsReassignment   Boolean @default(false)
+
+  allowedCatalogSlugs String[] @default([])
+  metadata            Json?
+
+  startAt DateTime?
+  endAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  assignments SponsoredDeviceAssignment[]
+
+  @@index([orgId, clientId, status])
+}
+
+model SponsoredDeviceAssignment {
+  id String @id @default(cuid())
+  orgId String @default("org-default")
+
+  sponsoredDeviceProgramId String
+  sponsoredDeviceProgram   SponsoredDeviceProgram @relation(fields: [sponsoredDeviceProgramId], references: [id], onDelete: Cascade)
+
+  clientId String
+  client   Client @relation(fields: [clientId], references: [id], onDelete: Cascade)
+
+  clientMemberId String?
+  clientMember   ClientMember? @relation(fields: [clientMemberId], references: [id], onDelete: SetNull)
+
+  userId    String?
+  patientId String?
+
+  userDeviceId String?
+
+  catalogSlug  String?
+  serialNumber String?
+
+  status SponsoredDeviceAssignmentStatus @default(ASSIGNED)
+
+  assignedAt        DateTime @default(now())
+  expectedReturnAt  DateTime?
+  returnedAt        DateTime?
+
+  assignmentNotes String?
+  returnNotes     String?
+  metadata        Json?
+
+  @@index([orgId, clientId, status])
+  @@index([clientMemberId])
+  @@index([userId])
+  @@index([patientId])
+  @@index([userDeviceId])
+}

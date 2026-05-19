@@ -383,6 +383,11 @@ function MedicalAidModal({ patientId, initial, onClose, onSaved }: ModalProps) {
       return;
     }
 
+    if (!patientId) {
+      setErr('Patient identity is required before saving medical aid details.');
+      return;
+    }
+
     setSaving(true);
     try {
       let comFilePath = initial?.comFilePath;
@@ -391,7 +396,7 @@ function MedicalAidModal({ patientId, initial, onClose, onSaved }: ModalProps) {
       if (comFile) {
         const fd = new FormData();
         fd.append('file', comFile);
-        fd.append('patientId', patientId || 'pt-za-001');
+        fd.append('patientId', patientId);
 
         const res = await fetch('/api/medical-aids/upload', {
           method: 'POST',
@@ -405,7 +410,7 @@ function MedicalAidModal({ patientId, initial, onClose, onSaved }: ModalProps) {
 
       const payload: any = {
         id: initial?.id,
-        patientId: patientId || 'pt-za-001',
+        patientId,
         payerName: payerName.trim(),
         planName: planName.trim() || undefined,
         membershipNumber: membershipNumber.trim(),

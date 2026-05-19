@@ -1,16 +1,13 @@
-'use client';
+﻿'use client';
 
 import React, {
-  createContext,
   useCallback,
-  useContext,
   useEffect,
   useMemo,
   useState,
   Suspense,
 } from 'react';
 import dynamic from 'next/dynamic';
-import Image from 'next/image';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
@@ -31,6 +28,18 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import BatteryIcon from '@/components/iomt/BatteryIcon';
+import { createHealthMonitorSession } from '@/src/devices/healthMonitorSession';
+import type {
+  HealthMonitorMode,
+  HealthMonitorSessionState,
+} from '@/src/devices/healthMonitorSession';
+import {
+  VitalsProvider,
+  useVitalsProvider,
+  useVitals as useVitalsContext,
+} from './useVitals';
+
+const APP_LOCALE = 'en-GB' as const;
 
 /** Lazy vitals (preserve TTI) */
 const Glucose = dynamic(() => import('@/components/iomt/vitals/Glucose'), { ssr: false });
@@ -40,13 +49,9 @@ const BloodOxygen = dynamic(() => import('@/components/iomt/vitals/BloodOxygen')
 const HeartRate = dynamic(() => import('@/components/iomt/vitals/HeartRate'), { ssr: false });
 const ECG = dynamic(() => import('@/components/iomt/vitals/ECG'), { ssr: false });
 
-/* =========================================================================================
-   PROD-FIRST FETCHING WITH MOCK FALLBACKS
-   ========================================================================================= */
 type VitalsSummary = {
   lastSyncHuman?: string;
 
-  /** Latest “now” values */
   hrNow?: number;
   spo2Now?: number;
   bpNow?: { s: number; d: number } | null;
@@ -54,14 +59,12 @@ type VitalsSummary = {
   gluNow?: number | null;
   gluUnit?: 'mg/dL' | 'mmol/L' | null;
 
-  /** Timestamps for latest values */
   hrTs?: string | null;
   spo2Ts?: string | null;
   bpTs?: string | null;
   tempTs?: string | null;
   gluTs?: string | null;
 
-  /** 24h/period series for sparklines (still kept for trend) */
   hr24?: number[];
   spo224?: number[];
   bp24?: number[];
@@ -72,51 +75,29 @@ type VitalsSummary = {
 type TodayItem = { t: string; label: string; route: string };
 type AlertItem = { id: string; vital: string; value: string; level: 'amber' | 'red'; when: string };
 
-const MOCK_PROFILE = {
-  patientId: 'patient-1111',
-  name: 'John Doe',
-  age: 54,
-  gender: 'M',
-  avatarUrl: '/images/avatar-placeholder.png',
-  chronicConditions: ['Hypertension', 'Type 2 Diabetes'],
-  primaryConditionsText: undefined as string | undefined,
+
+const EMPTY_SUMMARY: VitalsSummary = {
+  lastSyncHuman: undefined,
+  hrNow: undefined,
+  spo2Now: undefined,
+  bpNow: null,
+  tempNow: undefined,
+  gluNow: null,
+  gluUnit: null,
+  hrTs: null,
+  spo2Ts: null,
+  bpTs: null,
+  tempTs: null,
+  gluTs: null,
+  hr24: [],
+  spo224: [],
+  bp24: [],
+  temp24: [],
+  glu24: [],
 };
 
-/** Mock shows “latest” timestamps for the tiles */
-const nowISO = new Date().toISOString();
-const MOCK_SUMMARY: VitalsSummary = {
-  lastSyncHuman: new Date().toLocaleString(),
-  hrNow: 74,
-  spo2Now: 97,
-  bpNow: { s: 122, d: 78 },
-  tempNow: 36.8,
-  gluNow: 8.2,
-  gluUnit: 'mmol/L',
-
-  hrTs: nowISO,
-  spo2Ts: nowISO,
-  bpTs: nowISO,
-  tempTs: nowISO,
-  gluTs: nowISO,
-
-  hr24: [72, 74, 71, 76, 79, 77, 75],
-  spo224: [97, 96, 98, 97, 95, 97, 98],
-  bp24: [120, 118, 121, 124, 119, 122, 123],
-  temp24: [36.7, 36.8, 36.9, 36.8, 37.0, 36.9, 36.8],
-  glu24: [7.1, 6.8, 8.9, 9.3, 8.2, 7.4, 8.6],
-};
-
-const MOCK_TODAY: TodayItem[] = [
-  { t: '08:14', label: 'Blood Pressure', route: '?t=vitals&panel=bp&vtab=history' },
-  { t: '10:02', label: 'SpO₂', route: '?t=vitals&panel=spo2&vtab=history' },
-  { t: '12:25', label: 'Temperature', route: '?t=vitals&panel=temp&vtab=history' },
-  { t: '16:40', label: 'Glucose', route: '?t=vitals&panel=glu&vtab=history' },
-];
-
-const MOCK_ALERTS: AlertItem[] = [
-  { id: 'a1', vital: 'Blood Pressure', value: '165/101', level: 'red', when: 'Today 07:58' },
-  { id: 'a2', vital: 'SpO₂', value: '89%', level: 'amber', when: 'Yesterday 22:11' },
-];
+const EMPTY_TODAY: TodayItem[] = [];
+const EMPTY_ALERTS: AlertItem[] = [];
 
 async function getJSON<T>(
   url: string,
@@ -139,40 +120,31 @@ async function getJSON<T>(
   }
 }
 
-/** ------------ Utilities & Context ------------ */
 function cn(...a: Array<string | false | undefined>) {
   return a.filter(Boolean).join(' ');
 }
 function fmtTime(ts?: string | null) {
   if (!ts) return '—';
   try {
-    return new Date(ts).toLocaleTimeString();
+    return new Date(ts).toLocaleTimeString(APP_LOCALE);
   } catch {
     return '—';
   }
 }
 
-/** VitalsContext */
-type VitalsContextType = {
-  patientId: string;
-  roomId: string;
-  emitVital: (opts: {
-    type: string;
-    payload: any;
-    deviceId?: string;
-    recorded_at?: string;
-    meta?: any;
-    dedupeKey?: string;
-  }) => Promise<void>;
-};
-const VitalsContext = createContext<VitalsContextType | null>(null);
-export function useVitals() {
-  const ctx = useContext(VitalsContext);
-  if (!ctx) throw new Error('useVitals must be used inside VitalsProvider');
-  return ctx;
+function initialsFromName(value: unknown) {
+  const name = String(value || '').trim();
+  if (!name) return 'PT';
+
+  const parts = name.split(/\s+/).filter(Boolean);
+
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0]?.[0] || ''}${parts[1]?.[0] || ''}`.toUpperCase() || 'PT';
 }
 
-/** ------------ Small UI Primitives ------------ */
 function ToolbarButton({
   children,
   onClick,
@@ -186,7 +158,7 @@ function ToolbarButton({
     <button
       onClick={onClick}
       aria-label={ariaLabel}
-      className="px-2.5 py-1.5 rounded-xl border bg-white hover:bg-slate-50 active:bg-slate-100 transition"
+      className="inline-flex items-center justify-center rounded-2xl border border-white/60 bg-white/85 px-3 py-2 text-slate-700 shadow-sm shadow-slate-200/70 backdrop-blur transition hover:-translate-y-0.5 hover:bg-white hover:shadow-md active:translate-y-0"
     >
       {children}
     </button>
@@ -200,14 +172,16 @@ function SegmentedTabs({
   setTab: (t: any) => void;
 }) {
   return (
-    <nav className="flex items-center gap-1" aria-label="Sections">
+    <nav className="inline-flex items-center gap-1 rounded-2xl border border-white/60 bg-white/75 p-1 shadow-sm shadow-slate-200/70 backdrop-blur" aria-label="Sections">
       {(['overview', 'vitals', 'analytics', 'reports'] as const).map((key) => (
         <button
           key={key}
           onClick={() => setTab(key)}
           className={cn(
-            'px-3 py-1.5 rounded-xl border text-sm transition',
-            tab === key ? 'bg-slate-900 text-white' : 'bg-white hover:bg-slate-50'
+            'rounded-xl px-3 py-1.5 text-sm font-medium transition',
+            tab === key
+              ? 'bg-slate-900 text-white shadow-sm shadow-slate-900/20'
+              : 'text-slate-600 hover:bg-white hover:text-slate-900'
           )}
           aria-current={tab === key ? 'page' : undefined}
         >
@@ -229,7 +203,6 @@ function LiveBadge() {
   );
 }
 
-/** ------------ Device pills in header ------------ */
 type DeviceInfo = {
   id: string;
   name: string;
@@ -244,7 +217,7 @@ function DevicePill({ d }: { d: DeviceInfo }) {
   );
   const Icon = d.transport === 'ble' ? Bluetooth : d.transport === 'usb' ? Usb : Activity;
   return (
-    <div className="flex items-center gap-2 px-2 py-1 rounded-full border bg-white shadow-sm">
+    <div className="flex items-center gap-2 rounded-full border border-white/70 bg-white/90 px-3 py-1.5 shadow-sm shadow-slate-200/70 backdrop-blur">
       <Dot />
       <Icon className="w-3.5 h-3.5" aria-hidden />
       <span className="text-xs max-w-[8rem] truncate" title={d.name}>
@@ -258,7 +231,6 @@ function DevicePill({ d }: { d: DeviceInfo }) {
   );
 }
 
-/** ------------ Sticky header ------------ */
 function StickyHeader({
   profile,
   patientId,
@@ -283,23 +255,26 @@ function StickyHeader({
   const primaryConditions: string =
     Array.isArray(profile?.chronicConditions) && profile.chronicConditions.length
       ? profile.chronicConditions.slice(0, 3).join(', ')
-      : profile?.primaryConditionsText ?? '—';
+      : profile?.primaryConditionsText ?? 'â€”';
   return (
     <motion.header
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
-      className="sticky top-0 z-40 bg-white/80 backdrop-blur supports-[backdrop-filter]:bg-white/60 border-b"
+      className="sticky top-0 z-40 border-b border-white/60 bg-[linear-gradient(180deg,rgba(248,250,252,0.94),rgba(255,255,255,0.82))] backdrop-blur-xl supports-[backdrop-filter]:bg-white/55"
     >
-      <div className="max-w-6xl mx-auto px-4 py-2.5 grid grid-cols-1 gap-2">
-        <div className="flex items-center gap-3 min-w-0">
-          <div className="relative shrink-0 w-10 h-10 md:w-12 md:h-12">
-            <Image
-              src={profile?.avatarUrl || '/images/avatar-placeholder.png'}
-              alt={`${profile?.name ?? 'Patient'} avatar`}
-              fill
-              priority
-              className="rounded-full object-cover border-4 border-white shadow"
-            />
+      <div className="mx-auto grid max-w-6xl grid-cols-1 gap-2 px-4 py-3">
+        <div className="flex min-w-0 items-center gap-3 rounded-[28px] border border-white/60 bg-white/70 px-3 py-2 shadow-[0_20px_60px_-30px_rgba(15,23,42,0.35)] backdrop-blur-xl">
+          <div className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border-4 border-white bg-gradient-to-br from-slate-900 via-indigo-700 to-cyan-600 text-sm font-semibold text-white shadow md:h-12 md:w-12">
+            {typeof profile?.avatarUrl === 'string' && profile.avatarUrl.trim() ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={profile.avatarUrl}
+                alt={`${profile?.name ?? 'Patient'} avatar`}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <span>{initialsFromName(profile?.name)}</span>
+            )}
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
@@ -308,7 +283,7 @@ function StickyHeader({
               </span>
               <span className="text-xs md:text-sm text-gray-600">
                 {profile?.age ? `${profile.age} yrs` : ''}
-                {profile?.gender ? ` • ${profile.gender}` : ''}
+                {profile?.gender ? ` â€¢ ${profile.gender}` : ''}
               </span>
               <LiveBadge />
             </div>
@@ -317,8 +292,8 @@ function StickyHeader({
             </div>
             <div className="text-xxs md:text-xs text-gray-500 flex items-center gap-1">
               <Clock className="w-3.5 h-3.5" aria-hidden />
-              <span>Last sync: {lastSyncHuman ?? '—'}</span>
-              <span className="mx-1">•</span>
+              <span>Last sync: {lastSyncHuman ?? 'â€”'}</span>
+              <span className="mx-1">â€¢</span>
               <span>ID {profile?.patientId ?? patientId}</span>
             </div>
           </div>
@@ -345,7 +320,6 @@ function StickyHeader({
   );
 }
 
-/** ------------ KPI + spark (now “Latest @ time”) ------------ */
 function KPIStat({
   label,
   value,
@@ -366,20 +340,21 @@ function KPIStat({
     red: 'bg-red-50',
   };
   return (
-    <div className={cn('rounded-xl border p-3', tones[tone])} role="group" aria-label={`${label} summary`}>
-      <div className="text-xxs uppercase tracking-wide opacity-80">{label}</div>
+    <div className={cn('group relative overflow-hidden rounded-[28px] border border-white/70 p-4 shadow-[0_20px_50px_-35px_rgba(15,23,42,0.45)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_60px_-32px_rgba(15,23,42,0.5)]', tones[tone])} role="group" aria-label={`${label} summary`}>
+      <div className="text-[10px] uppercase tracking-[0.24em] text-slate-500/90">{label}</div>
       <div className="flex items-end justify-between gap-2">
-        <div className="text-base md:text-lg font-semibold">{value}</div>
+        <div className="text-lg font-semibold tracking-tight text-slate-900 md:text-[1.35rem]">{value}</div>
         <Sparkline points={series} />
       </div>
-      {hint ? <div className="text-xxs opacity-80 mt-0.5">{hint}</div> : null}
+      {hint ? <div className="mt-1 text-[11px] text-slate-500">{hint}</div> : null}
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent" />
     </div>
   );
 }
 function Sparkline({ points = [] as number[] }) {
   if (!points.length) return <div className="h-6" />;
-  const max = Math.max(...points),
-    min = Math.min(...points);
+  const max = Math.max(...points);
+  const min = Math.min(...points);
   const norm = points.map((p) => ((p - min) / (max - min || 1)) * 18 + 3);
   const step = 80 / (points.length - 1 || 1);
   const d = norm.map((y, i) => `${i ? 'L' : 'M'} ${i * step},${22 - y}`).join(' ');
@@ -390,7 +365,6 @@ function Sparkline({ points = [] as number[] }) {
   );
 }
 
-/** ------------ Card ------------ */
 function SectionCard({
   title,
   subtitle,
@@ -409,7 +383,7 @@ function SectionCard({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.2 }}
-      className="p-3 md:p-4 rounded-2xl border bg-white shadow-sm"
+      className="relative overflow-hidden rounded-[30px] border border-white/70 bg-white/88 p-4 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur-xl md:p-5"
       aria-labelledby={`${title}-h`}
     >
       <div className="flex items-start justify-between gap-3">
@@ -430,21 +404,24 @@ function SectionCard({
           )}
         </div>
       </div>
-      <div className="mt-3">{children}</div>
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/80 to-transparent" />
+      <div className="mt-4">{children}</div>
     </motion.section>
   );
 }
 function SkeletonRow() {
-  return <div className="animate-pulse h-10 rounded-xl bg-slate-100" />;
+  return <div className="h-12 animate-pulse rounded-2xl bg-slate-100/90" />;
 }
 
-/** ------------ Toasts ------------ */
 function useToasts() {
-  const [stack, setStack] = useState<{ id: number; title: string; tone?: 'default' | 'success' | 'error' }[]>(
+  const [stack, setStack] = useState<{ id: string | number; title: string; tone?: 'default' | 'success' | 'error' }[]>(
     []
   );
   const push = useCallback((title: string, tone: 'default' | 'success' | 'error' = 'default') => {
-    const id = Date.now() + Math.random();
+    const id =
+      typeof globalThis.crypto?.randomUUID === 'function'
+        ? globalThis.crypto.randomUUID()
+        : Date.now();
     setStack((s) => [...s, { id, title, tone }]);
     setTimeout(() => setStack((s) => s.filter((t) => t.id !== id)), 3200);
   }, []);
@@ -469,7 +446,6 @@ function useToasts() {
   return { push, Toasts };
 }
 
-/** ------------ Alert Drawer ------------ */
 function AlertDrawer({
   open,
   onClose,
@@ -508,7 +484,7 @@ function AlertDrawer({
               />
               <div className="min-w-0">
                 <div className="text-sm font-medium">
-                  {a.vital} — {a.value}
+                  {a.vital} â€” {a.value}
                 </div>
                 <div className="text-xs text-gray-500">{a.when}</div>
                 <div className="mt-2 flex items-center gap-2">
@@ -524,7 +500,6 @@ function AlertDrawer({
   );
 }
 
-/** ------------ Report Help Drawer ------------ */
 function ReportHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   return (
@@ -543,7 +518,7 @@ function ReportHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
         <div className="mt-3 space-y-3 text-sm text-slate-700">
           <p>
-            Reports include selected sections (e.g., Glucose, BP, SpO₂, Temp, HR, ECG), branding style, and
+            Reports include selected sections (e.g., Glucose, BP, SpOâ‚‚, Temp, HR, ECG), branding style, and
             optional clinician sign-off.
           </p>
           <ul className="list-disc pl-4 space-y-1">
@@ -562,7 +537,6 @@ function ReportHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
   );
 }
 
-/** ------------ Export Composer (inline) ------------ */
 function ExportComposer({
   patient,
   vitalsSummary,
@@ -631,7 +605,7 @@ function ExportComposer({
       a.click();
       URL.revokeObjectURL(url);
       onAfterDownload?.();
-    } catch (_e) {
+    } catch {
       alert('PDF export failed');
     } finally {
       setDownloading(false);
@@ -675,7 +649,7 @@ function ExportComposer({
               value={fromDate}
               onChange={(e) => setFromDate(e.target.value)}
             />
-            <span className="text-xs text-gray-500">→</span>
+            <span className="text-xs text-gray-500">â†’</span>
             <input
               type="date"
               className="p-1 border rounded text-sm w-full"
@@ -710,7 +684,7 @@ function ExportComposer({
                   checked={includeSections[k as keyof typeof includeSections]}
                   onChange={() => toggle(k)}
                 />
-                <span className="capitalize">{k.replace('spo2', 'SpO₂')}</span>
+                <span className="capitalize">{k.replace('spo2', 'SpOâ‚‚')}</span>
               </label>
             ))}
           </div>
@@ -725,7 +699,7 @@ function ExportComposer({
           disabled={downloading}
           onClick={downloadServerPdf}
         >
-          {downloading ? 'Preparing…' : 'Download PDF (server)'}
+          {downloading ? 'Preparingâ€¦' : 'Download PDF (server)'}
         </button>
       </div>
       <ReportHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
@@ -733,7 +707,6 @@ function ExportComposer({
   );
 }
 
-/** ------------ Saved Exports table ------------ */
 function SavedExports({ patientId }: { patientId: string }) {
   const [rows, setRows] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -777,7 +750,7 @@ function SavedExports({ patientId }: { patientId: string }) {
             {loading && (
               <tr>
                 <td colSpan={6} className="py-4 text-center text-slate-500">
-                  Loading…
+                  Loadingâ€¦
                 </td>
               </tr>
             )}
@@ -792,7 +765,7 @@ function SavedExports({ patientId }: { patientId: string }) {
               <tr key={r.id} className="border-b">
                 <td className="py-2 pr-3">{new Date(r.createdAt).toLocaleString()}</td>
                 <td className="py-2 pr-3">
-                  {r.fromDate?.slice(0, 10)} → {r.toDate?.slice(0, 10)}
+                  {r.fromDate?.slice(0, 10)} â†’ {r.toDate?.slice(0, 10)}
                 </td>
                 <td className="py-2 pr-3">{r.brand}</td>
                 <td className="py-2 pr-3">
@@ -801,12 +774,12 @@ function SavedExports({ patientId }: { patientId: string }) {
                       .filter(([, v]) => v)
                       .map(([k]) => (
                         <span key={k} className="px-2 py-0.5 rounded-full border text-xs">
-                          {String(k).replace('spo2', 'SpO₂')}
+                          {String(k).replace('spo2', 'SpOâ‚‚')}
                         </span>
                       ))}
                   </div>
                 </td>
-                <td className="py-2 pr-3">{r.fileBytes ? `${Math.round(r.fileBytes / 1024)} KB` : '—'}</td>
+                <td className="py-2 pr-3">{r.fileBytes ? `${Math.round(r.fileBytes / 1024)} KB` : 'â€”'}</td>
                 <td className="py-2 pr-3">
                   <div className="flex gap-2">
                     {r.fileUrl && (
@@ -829,10 +802,6 @@ function SavedExports({ patientId }: { patientId: string }) {
     </SectionCard>
   );
 }
-
-/* =========================================================================================
-   ANALYTICS TAB (Cross-vital + ECG sessions + Glucose)
-   ========================================================================================= */
 
 type RangeOpt = 7 | 14 | 30 | 90;
 
@@ -860,7 +829,6 @@ async function fetchListSafe<T>(url: string, fallback: T[], timeoutMs = 6000): P
     if (!r.ok) return fallback;
     const j = await r.json().catch(() => null);
     if (!j) return fallback;
-    // allow either {items:[]} or []
     return (j.items ?? j) ?? fallback;
   } catch {
     return fallback;
@@ -869,37 +837,46 @@ async function fetchListSafe<T>(url: string, fallback: T[], timeoutMs = 6000): P
   }
 }
 
-function toISO(date = new Date()) { return date.toISOString().slice(0,10); }
-function addDays(base: Date, d: number) { const x=new Date(base); x.setDate(x.getDate()+d); return x; }
+function toISO(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+function addDays(base: Date, d: number) {
+  const x = new Date(base);
+  x.setDate(x.getDate() + d);
+  return x;
+}
 function slopePerDay(points: Array<{ t: string; v: number }>) {
   if (!points.length) return 0;
-  const xs = points.map(p => new Date(p.t).getTime());
-  const ys = points.map(p => p.v);
+  const xs = points.map((p) => new Date(p.t).getTime());
+  const ys = points.map((p) => p.v);
   const n = xs.length;
-  const xm = xs.reduce((a,b)=>a+b,0)/n;
-  const ym = ys.reduce((a,b)=>a+b,0)/n;
-  let num=0, den=0;
-  for (let i=0;i<n;i++){ num+=(xs[i]-xm)*(ys[i]-ym); den+=(xs[i]-xm)*(xs[i]-xm); }
-  const s = den===0 ? 0 : num/den;
-  return s*1000*60*60*24;
+  const xm = xs.reduce((a, b) => a + b, 0) / n;
+  const ym = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i] - xm) * (ys[i] - ym);
+    den += (xs[i] - xm) * (xs[i] - xm);
+  }
+  const s = den === 0 ? 0 : num / den;
+  return s * 1000 * 60 * 60 * 24;
 }
 function groupCountByDay(timestamps: string[]) {
   const map = new Map<string, number>();
   for (const ts of timestamps) {
     const d = new Date(ts);
-    const key = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0,10);
+    const key = new Date(d.getFullYear(), d.getMonth(), d.getDate()).toISOString().slice(0, 10);
     map.set(key, (map.get(key) ?? 0) + 1);
   }
-  return Array.from(map.entries()).sort((a,b)=>a[0]<b[0]? -1:1);
+  return Array.from(map.entries()).sort((a, b) => (a[0] < b[0] ? -1 : 1));
 }
 function secondsBetween(a: string, b?: string | null) {
   const t1 = new Date(a).getTime();
   const t2 = b ? new Date(b).getTime() : Date.now();
-  return Math.max(0, Math.round((t2 - t1)/1000));
+  return Math.max(0, Math.round((t2 - t1) / 1000));
 }
 
-/** Tiny UI bits for analytics */
-function Badge({ children, tone='slate' as 'slate'|'green'|'amber'|'red'}) {
+function Badge({ children, tone = 'slate' as 'slate' | 'green' | 'amber' | 'red' }) {
   const map: any = {
     slate: 'bg-slate-50 text-slate-700 border',
     green: 'bg-emerald-50 text-emerald-700 border-emerald-300 border',
@@ -909,12 +886,21 @@ function Badge({ children, tone='slate' as 'slate'|'green'|'amber'|'red'}) {
   return <span className={cn('text-xs px-2 py-1 rounded-lg', map[tone])}>{children}</span>;
 }
 
-function Collapsible({ title, children, defaultOpen = true }:{ title:string; children:React.ReactNode; defaultOpen?:boolean }) {
-  const [open,setOpen]=useState(defaultOpen);
+function Collapsible({
+  title,
+  children,
+  defaultOpen = true,
+}: {
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="rounded border bg-white">
-      <button className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium"
-        onClick={()=>setOpen(o=>!o)}
+      <button
+        className="w-full flex items-center justify-between px-3 py-2 text-sm font-medium"
+        onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
       >
         <span>{title}</span>
@@ -925,64 +911,76 @@ function Collapsible({ title, children, defaultOpen = true }:{ title:string; chi
   );
 }
 
-/** Minimal charts */
-function LineMini({ labels, values }:{ labels:string[]; values:number[] }) {
+function LineMini({ labels, values }: { labels: string[]; values: number[] }) {
   if (!values.length) return <div className="h-24" />;
-  const w=320, h=90, pad=8;
-  const min = Math.min(...values), max = Math.max(...values);
-  const scaleY = (v:number)=> h - pad - ((v-min)/(max-min || 1))*(h-2*pad);
-  const step = (w-2*pad)/Math.max(1, values.length-1);
-  const d = values.map((v,i)=>`${i?'L':'M'} ${pad + i*step},${scaleY(v)}`).join(' ');
+  const w = 320;
+  const h = 90;
+  const pad = 8;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const scaleY = (v: number) => h - pad - ((v - min) / (max - min || 1)) * (h - 2 * pad);
+  const step = (w - 2 * pad) / Math.max(1, values.length - 1);
+  const d = values.map((v, i) => `${i ? 'L' : 'M'} ${pad + i * step},${scaleY(v)}`).join(' ');
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Line chart">
       <path d={d} fill="none" stroke="#334155" strokeWidth="2" />
     </svg>
   );
 }
-function BarsMini({ labels, values }:{ labels:string[]; values:number[] }) {
-  const w=320, h=90, pad=8;
+function BarsMini({ labels, values }: { labels: string[]; values: number[] }) {
+  const w = 320;
+  const h = 90;
+  const pad = 8;
   const max = Math.max(1, ...values);
-  const bw = (w-2*pad)/values.length - 6;
+  const bw = values.length ? (w - 2 * pad) / values.length - 6 : 0;
   return (
     <svg width="100%" viewBox={`0 0 ${w} ${h}`} role="img" aria-label="Bar chart">
-      {values.map((v,i)=>{
-        const bh = ((v/max) * (h-2*pad));
-        const x = pad + i*((w-2*pad)/values.length) + 3;
+      {values.map((v, i) => {
+        const bh = (v / max) * (h - 2 * pad);
+        const x = pad + i * ((w - 2 * pad) / values.length) + 3;
         const y = h - pad - bh;
         return <rect key={i} x={x} y={y} width={bw} height={bh} rx="3" ry="3" fill="#64748b" />;
       })}
     </svg>
   );
 }
-function HeatGrid({ matrix }:{ matrix:(number|null)[][] }) {
-  const day=(i:number)=>['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][i];
+function HeatGrid({ matrix }: { matrix: (number | null)[][] }) {
+  const day = (i: number) => ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][i];
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-        {[0,1,2,3].map(d=>(
+        {[0, 1, 2, 3].map((d) => (
           <div key={d} className="text-xxs">
             <div className="mb-1 font-medium">{day(d)}</div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:4}}>
-              {matrix[d]?.map((v,bi)=>(
-                <div key={bi} title={v==null? 'No data' : String(v)}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 4 }}>
+              {matrix[d]?.map((v, bi) => (
+                <div
+                  key={bi}
+                  title={v == null ? 'No data' : String(v)}
                   className="text-white text-xxs rounded p-1 text-center"
-                  style={{ background: v==null? '#e5e7eb' : '#64748b' }}
-                >{v==null? '—': v}</div>
+                  style={{ background: v == null ? '#e5e7eb' : '#64748b' }}
+                >
+                  {v == null ? 'â€”' : v}
+                </div>
               ))}
             </div>
           </div>
         ))}
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-        {[4,5,6].map(d=>(
+        {[4, 5, 6].map((d) => (
           <div key={d} className="text-xxs">
             <div className="mb-1 font-medium">{day(d)}</div>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:4}}>
-              {matrix[d]?.map((v,bi)=>(
-                <div key={bi} title={v==null? 'No data' : String(v)}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,1fr)', gap: 4 }}>
+              {matrix[d]?.map((v, bi) => (
+                <div
+                  key={bi}
+                  title={v == null ? 'No data' : String(v)}
                   className="text-white text-xxs rounded p-1 text-center"
-                  style={{ background: v==null? '#e5e7eb' : '#64748b' }}
-                >{v==null? '—': v}</div>
+                  style={{ background: v == null ? '#e5e7eb' : '#64748b' }}
+                >
+                  {v == null ? 'â€”' : v}
+                </div>
               ))}
             </div>
           </div>
@@ -991,176 +989,184 @@ function HeatGrid({ matrix }:{ matrix:(number|null)[][] }) {
     </div>
   );
 }
-function heatmapAvg(rows: Array<{ t:string; v:number }>) {
+function heatmapAvg(rows: Array<{ t: string; v: number }>) {
   const buckets = Array.from({ length: 7 }, () => Array.from({ length: 6 }, () => [] as number[]));
   for (const r of rows) {
     const d = new Date(r.t);
     const dow = d.getDay();
-    const block = Math.floor(d.getHours()/4);
+    const block = Math.floor(d.getHours() / 4);
     buckets[dow][block].push(r.v);
   }
-  return buckets.map(row => row.map(col => col.length ? +(col.reduce((a,b)=>a+b,0)/col.length).toFixed(1) : null));
+  return buckets.map((row) =>
+    row.map((col) => (col.length ? +(col.reduce((a, b) => a + b, 0) / col.length).toFixed(1) : null))
+  );
 }
 
-/** Helpers for glucose */
-function mgdlToMmol(v: number) { return v / 18.0; }
-function mmolToMgdl(v: number) { return v * 18.0; }
+function mmolToMgdl(v: number) {
+  return v * 18.0;
+}
 
-/** Threshold presets (editable in future) */
 const BPZ = {
-  normal:   (s:number,d:number)=> s<120 && d<80,
-  elevated: (s:number,d:number)=> s>=120 && s<=129 && d<80,
-  stage1:   (s:number,d:number)=> (s>=130 && s<=139) || (d>=80 && d<=89),
-  stage2:   (s:number,d:number)=> s>=140 || d>=90,
+  normal: (s: number, d: number) => s < 120 && d < 80,
+  elevated: (s: number, d: number) => s >= 120 && s <= 129 && d < 80,
+  stage1: (s: number, d: number) => (s >= 130 && s <= 139) || (d >= 80 && d <= 89),
+  stage2: (s: number, d: number) => s >= 140 || d >= 90,
 };
-const SPO2 = { green:95, amber:90 };
-const TEMP = { low:35.0, high:38.0 };
-const HRTH = { brady:60, tachy:100 };
+const SPO2 = { green: 95, amber: 90 };
+const TEMP = { low: 35.0, high: 38.0 };
+const HRTH = { brady: 60, tachy: 100 };
 const GLU = {
-  /** thresholds in mg/dL for analytics; we’ll convert if mmol/L arrives */
   hypo: 70,
   targetMin: 80,
   targetMax: 180,
   hyper: 250,
 };
 
-/** Per-vital analytics cards */
-function BPAnalytics({ items }:{ items:BPRec[] }) {
-  const ptsS = items.map(r=>({ t:r.timestamp, v:r.systolic }));
-  const ptsD = items.map(r=>({ t:r.timestamp, v:r.diastolic }));
+function BPAnalytics({ items }: { items: BPRec[] }) {
+  const ptsS = items.map((r) => ({ t: r.timestamp, v: r.systolic }));
+  const ptsD = items.map((r) => ({ t: r.timestamp, v: r.diastolic }));
   const sS = slopePerDay(ptsS).toFixed(2);
   const sD = slopePerDay(ptsD).toFixed(2);
-  const counts = useMemo(()=>{
-    let normal=0, elev=0, s1=0, s2=0;
+  const counts = useMemo(() => {
+    let normal = 0;
+    let elev = 0;
+    let s1 = 0;
+    let s2 = 0;
     for (const r of items) {
-      if (BPZ.stage2(r.systolic,r.diastolic)) s2++;
-      else if (BPZ.stage1(r.systolic,r.diastolic)) s1++;
-      else if (BPZ.elevated(r.systolic,r.diastolic)) elev++;
-      else if (BPZ.normal(r.systolic,r.diastolic)) normal++;
+      if (BPZ.stage2(r.systolic, r.diastolic)) s2++;
+      else if (BPZ.stage1(r.systolic, r.diastolic)) s1++;
+      else if (BPZ.elevated(r.systolic, r.diastolic)) elev++;
+      else if (BPZ.normal(r.systolic, r.diastolic)) normal++;
     }
     return { normal, elev, s1, s2, total: items.length };
   }, [items]);
-  const heat = useMemo(()=>heatmapAvg(ptsS), [items]);
+  const heat = useMemo(() => heatmapAvg(ptsS), [items]);
 
   return (
-    <SectionCard title="Blood Pressure — Analytics" subtitle="Zones, trend, and time-of-day">
+    <SectionCard title="Blood Pressure â€” Analytics" subtitle="Zones, trend, and time-of-day">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
           <div className="text-sm font-medium mb-1">Trend (Systolic/Diastolic)</div>
-          <LineMini labels={items.map(r=>r.timestamp)} values={items.map(r=>r.systolic)} />
-          <LineMini labels={items.map(r=>r.timestamp)} values={items.map(r=>r.diastolic)} />
-          <div className="text-xs text-slate-600 mt-1">Slope/day — Systolic {sS} • Diastolic {sD}</div>
+          <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.systolic)} />
+          <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.diastolic)} />
+          <div className="text-xs text-slate-600 mt-1">Slope/day â€” Systolic {sS} â€¢ Diastolic {sD}</div>
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">Out-of-range breakdown</div>
-          <BarsMini labels={['Normal','Elevated','Stage1','Stage2']} values={[counts.normal,counts.elev,counts.s1,counts.s2]} />
+          <BarsMini labels={['Normal', 'Elevated', 'Stage1', 'Stage2']} values={[counts.normal, counts.elev, counts.s1, counts.s2]} />
           <div className="text-xs text-slate-600 mt-1">Total {counts.total} readings</div>
         </div>
       </div>
 
       <div className="mt-3 p-3 border rounded bg-white">
         <div className="text-sm font-medium mb-1">Daily heatmap (avg Systolic)</div>
-        <div className="text-xxs text-slate-500 mb-2">Each cell ≈ 4h block</div>
+        <div className="text-xxs text-slate-500 mb-2">Each cell â‰ˆ 4h block</div>
         <HeatGrid matrix={heat} />
       </div>
 
       <div className="mt-3">
         <Collapsible title="Targets & notes" defaultOpen={false}>
-          Zones: Normal &lt;120/&lt;80 • Elevated 120–129/&lt;80 • Stage1 130–139 or 80–89 • Stage2 ≥140 or ≥90.
+          Zones: Normal &lt;120/&lt;80 â€¢ Elevated 120â€“129/&lt;80 â€¢ Stage1 130â€“139 or 80â€“89 â€¢ Stage2 â‰¥140 or â‰¥90.
         </Collapsible>
       </div>
     </SectionCard>
   );
 }
 
-function SpO2Analytics({ items }:{ items:SpO2Rec[] }) {
-  const pts = items.map(r=>({ t:r.timestamp, v:r.spo2 }));
+function SpO2Analytics({ items }: { items: SpO2Rec[] }) {
+  const pts = items.map((r) => ({ t: r.timestamp, v: r.spo2 }));
   const slope = slopePerDay(pts).toFixed(2);
-  const dist = useMemo(()=>{
-    let green=0, amber=0, red=0;
+  const dist = useMemo(() => {
+    let green = 0;
+    let amber = 0;
+    let red = 0;
     for (const r of items) {
       if (r.spo2 >= SPO2.green) green++;
       else if (r.spo2 >= SPO2.amber) amber++;
       else red++;
     }
     const total = items.length || 1;
-    return { green, amber, red, total, inRangePct: Math.round(green/total*100), t90: Math.round(red/total*100) };
+    return { green, amber, red, total, inRangePct: Math.round((green / total) * 100), t90: Math.round((red / total) * 100) };
   }, [items]);
-  const heat = useMemo(()=>heatmapAvg(pts), [items]);
+  const heat = useMemo(() => heatmapAvg(pts), [items]);
 
   return (
-    <SectionCard title="SpO₂ — Analytics" subtitle="Distribution, trend, time-of-day">
+    <SectionCard title="SpOâ‚‚ â€” Analytics" subtitle="Distribution, trend, time-of-day">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
           <div className="text-sm font-medium mb-1">Trend</div>
-          <LineMini labels={items.map(r=>r.timestamp)} values={items.map(r=>r.spo2)} />
+          <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.spo2)} />
           <div className="text-xs text-slate-600 mt-1">Slope/day: {slope} %</div>
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">Distribution</div>
-          <BarsMini labels={['≥95','90–94','<90']} values={[dist.green, dist.amber, dist.red]} />
+          <BarsMini labels={['â‰¥95', '90â€“94', '<90']} values={[dist.green, dist.amber, dist.red]} />
           <div className="text-xs text-slate-600 mt-1">
-            In-range ≥95%: {dist.inRangePct}% • T90 (&lt;90%) {dist.t90}%
+            In-range â‰¥95%: {dist.inRangePct}% â€¢ T90 (&lt;90%) {dist.t90}%
           </div>
         </div>
       </div>
 
       <div className="mt-3 p-3 border rounded bg-white">
         <div className="text-sm font-medium mb-1">Daily heatmap (avg %)</div>
-        <div className="text-xxs text-slate-500 mb-2">Each cell ≈ 4h block</div>
+        <div className="text-xxs text-slate-500 mb-2">Each cell â‰ˆ 4h block</div>
         <HeatGrid matrix={heat} />
       </div>
 
       <div className="mt-3">
         <Collapsible title="Targets & notes" defaultOpen={false}>
-          Targets: Green ≥{SPO2.green}% • Amber {SPO2.amber}–{SPO2.green-1}% • Red &lt;{SPO2.amber}%.
+          Targets: Green â‰¥{SPO2.green}% â€¢ Amber {SPO2.amber}â€“{SPO2.green - 1}% â€¢ Red &lt;{SPO2.amber}%.
         </Collapsible>
       </div>
     </SectionCard>
   );
 }
 
-function TempAnalytics({ items }:{ items:TempRec[] }) {
-  const pts = items.map(r=>({ t:r.timestamp, v:r.celsius }));
+function TempAnalytics({ items }: { items: TempRec[] }) {
+  const pts = items.map((r) => ({ t: r.timestamp, v: r.celsius }));
   const slope = slopePerDay(pts).toFixed(2);
-  const dist = useMemo(()=>{
-    let low=0, normal=0, high=0;
+  const dist = useMemo(() => {
+    let low = 0;
+    let normal = 0;
+    let high = 0;
     for (const r of items) {
       if (r.celsius < TEMP.low) low++;
       else if (r.celsius >= TEMP.high) high++;
       else normal++;
     }
     const total = items.length || 1;
-    return { low, normal, high, total, inRangePct: Math.round(normal/total*100) };
+    return { low, normal, high, total, inRangePct: Math.round((normal / total) * 100) };
   }, [items]);
 
   return (
-    <SectionCard title="Temperature — Analytics" subtitle="Trend & thresholds">
+    <SectionCard title="Temperature â€” Analytics" subtitle="Trend & thresholds">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
-          <LineMini labels={items.map(r=>r.timestamp)} values={items.map(r=>r.celsius)} />
-          <div className="text-xs text-slate-600 mt-1">Slope/day: {slope} °C</div>
+          <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.celsius)} />
+          <div className="text-xs text-slate-600 mt-1">Slope/day: {slope} Â°C</div>
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">In-range</div>
-          <BarsMini labels={['Low','Normal','High']} values={[dist.low, dist.normal, dist.high]} />
+          <BarsMini labels={['Low', 'Normal', 'High']} values={[dist.low, dist.normal, dist.high]} />
           <div className="text-xs text-slate-600 mt-1">In-range {dist.inRangePct}%</div>
         </div>
       </div>
       <div className="mt-3">
         <Collapsible title="Targets & notes" defaultOpen={false}>
-          Defaults: Low &lt; {TEMP.low}°C • High ≥ {TEMP.high}°C (editable later).
+          Defaults: Low &lt; {TEMP.low}Â°C â€¢ High â‰¥ {TEMP.high}Â°C.
         </Collapsible>
       </div>
     </SectionCard>
   );
 }
 
-function HRAnalytics({ items }:{ items:HRRec[] }) {
-  const pts = items.map(r=>({ t:r.timestamp, v:r.hr }));
+function HRAnalytics({ items }: { items: HRRec[] }) {
+  const pts = items.map((r) => ({ t: r.timestamp, v: r.hr }));
   const slope = slopePerDay(pts).toFixed(2);
-  const dist = useMemo(()=>{
-    let brady=0, normal=0, tachy=0;
+  const dist = useMemo(() => {
+    let brady = 0;
+    let normal = 0;
+    let tachy = 0;
     for (const r of items) {
       if (r.hr < HRTH.brady) brady++;
       else if (r.hr >= HRTH.tachy) tachy++;
@@ -1170,44 +1176,45 @@ function HRAnalytics({ items }:{ items:HRRec[] }) {
   }, [items]);
 
   return (
-    <SectionCard title="Heart Rate — Analytics" subtitle="Trend & brady/tachy breakdown">
+    <SectionCard title="Heart Rate â€” Analytics" subtitle="Trend & brady/tachy breakdown">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
-          <LineMini labels={items.map(r=>r.timestamp)} values={items.map(r=>r.hr)} />
+          <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.hr)} />
           <div className="text-xs text-slate-600 mt-1">Slope/day: {slope} bpm</div>
         </div>
         <div className="p-3 border rounded bg-white">
-          <BarsMini labels={['Brady','Normal','Tachy']} values={[dist.brady, dist.normal, dist.tachy]} />
+          <BarsMini labels={['Brady', 'Normal', 'Tachy']} values={[dist.brady, dist.normal, dist.tachy]} />
           <div className="text-xs text-slate-600 mt-1">Total {dist.total}</div>
         </div>
       </div>
       <div className="mt-3">
         <Collapsible title="Targets & notes" defaultOpen={false}>
-          Defaults: Brady &lt; {HRTH.brady} bpm • Tachy ≥ {HRTH.tachy} bpm.
+          Defaults: Brady &lt; {HRTH.brady} bpm â€¢ Tachy â‰¥ {HRTH.tachy} bpm.
         </Collapsible>
       </div>
     </SectionCard>
   );
 }
 
-/** Glucose analytics (trend, stats, hypo/hyper, episodes/day) */
-function GlucoseAnalytics({ items }:{ items:GluRec[] }) {
-  // normalize to mg/dL for analysis, keep unit label for display
-  const ptsMg = items.map(r => {
+function GlucoseAnalytics({ items }: { items: GluRec[] }) {
+  const ptsMg = items.map((r) => {
     const v = r.unit === 'mmol/L' ? mmolToMgdl(r.glucose) : r.glucose;
     return { t: r.timestamp, v };
   });
   const slope = slopePerDay(ptsMg).toFixed(2);
-  const vals = ptsMg.map(p=>p.v);
+  const vals = ptsMg.map((p) => p.v);
   const min = vals.length ? Math.min(...vals) : 0;
   const max = vals.length ? Math.max(...vals) : 0;
-  const avg = vals.length ? (vals.reduce((a,b)=>a+b,0)/vals.length) : 0;
+  const avg = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
 
-  const dist = useMemo(()=>{
-    let hypo=0, target=0, hyper=0, veryHigh=0;
+  const dist = useMemo(() => {
+    let hypo = 0;
+    let target = 0;
+    let hyper = 0;
+    let veryHigh = 0;
     for (const p of ptsMg) {
       if (p.v < GLU.hypo) hypo++;
-      else if (p.v < GLU.targetMin) target++; // pre-target low (counts as in-range for simplicity)
+      else if (p.v < GLU.targetMin) target++;
       else if (p.v <= GLU.targetMax) target++;
       else if (p.v <= GLU.hyper) hyper++;
       else veryHigh++;
@@ -1215,24 +1222,24 @@ function GlucoseAnalytics({ items }:{ items:GluRec[] }) {
     return { hypo, target, hyper, veryHigh, total: ptsMg.length };
   }, [items]);
 
-  const byDay = groupCountByDay(items.map(i=>i.timestamp));
-  const labels = byDay.map(([d])=>d);
-  const values = byDay.map(([,c])=>c);
+  const byDay = groupCountByDay(items.map((i) => i.timestamp));
+  const labels = byDay.map(([d]) => d);
+  const values = byDay.map(([, c]) => c);
 
   return (
-    <SectionCard title="Glucose — Analytics" subtitle="Trend, stats, and episodes per day">
+    <SectionCard title="Glucose â€” Analytics" subtitle="Trend, stats, and episodes per day">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
           <div className="text-sm font-medium mb-1">Trend (mg/dL)</div>
-          <LineMini labels={ptsMg.map(p=>p.t)} values={ptsMg.map(p=>+p.v.toFixed(1))} />
+          <LineMini labels={ptsMg.map((p) => p.t)} values={ptsMg.map((p) => +p.v.toFixed(1))} />
           <div className="text-xs text-slate-600 mt-1">
-            Slope/day: {slope} mg/dL • Min {min.toFixed(0)} • Avg {avg.toFixed(0)} • Max {max.toFixed(0)}
+            Slope/day: {slope} mg/dL â€¢ Min {min.toFixed(0)} â€¢ Avg {avg.toFixed(0)} â€¢ Max {max.toFixed(0)}
           </div>
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">Zones (mg/dL)</div>
           <BarsMini
-            labels={['Hypo<70','80–180','>180','>250']}
+            labels={['Hypo<70', '80â€“180', '>180', '>250']}
             values={[dist.hypo, dist.target, dist.hyper, dist.veryHigh]}
           />
           <div className="text-xs text-slate-600 mt-1">Total {dist.total} readings</div>
@@ -1247,27 +1254,26 @@ function GlucoseAnalytics({ items }:{ items:GluRec[] }) {
 
       <div className="mt-3">
         <Collapsible title="Notes" defaultOpen={false}>
-          Analytics use mg/dL thresholds (70 / 80–180 / &gt;180 / &gt;250). Values sent as mmol/L are converted (×18).
+          Analytics use mg/dL thresholds (70 / 80â€“180 / &gt;180 / &gt;250). Values sent as mmol/L are converted.
         </Collapsible>
       </div>
     </SectionCard>
   );
 }
 
-/** ECG sessions analytics (counts, durations, episodes/day) */
-function ECGAnalytics({ sessions }:{ sessions:ECGSess[] }) {
+function ECGAnalytics({ sessions }: { sessions: ECGSess[] }) {
   const counts = sessions.length;
-  const totalSec = sessions.reduce((a,s)=> a + (s.durationSec ?? secondsBetween(s.start, s.end)), 0);
-  const byDay = groupCountByDay(sessions.map(s=>s.start));
-  const labels = byDay.map(([d])=>d);
-  const values = byDay.map(([,c])=>c);
-  const avgPerDay = values.length ? (values.reduce((a,b)=>a+b,0)/values.length) : 0;
+  const totalSec = sessions.reduce((a, s) => a + (s.durationSec ?? secondsBetween(s.start, s.end)), 0);
+  const byDay = groupCountByDay(sessions.map((s) => s.start));
+  const labels = byDay.map(([d]) => d);
+  const values = byDay.map(([, c]) => c);
+  const avgPerDay = values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0;
 
-  const pts = sessions.map(s=>({ t:s.start, v:(s.durationSec ?? secondsBetween(s.start, s.end))/60 }));
+  const pts = sessions.map((s) => ({ t: s.start, v: (s.durationSec ?? secondsBetween(s.start, s.end)) / 60 }));
   const slope = slopePerDay(pts).toFixed(2);
 
   return (
-    <SectionCard title="ECG — Session analytics" subtitle="Counts, total duration, and episodes per day">
+    <SectionCard title="ECG â€” Session analytics" subtitle="Counts, total duration, and episodes per day">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
         <div className="p-2 border rounded bg-white">
           <div className="font-medium">Sessions</div>
@@ -1275,7 +1281,7 @@ function ECGAnalytics({ sessions }:{ sessions:ECGSess[] }) {
         </div>
         <div className="p-2 border rounded bg-white">
           <div className="font-medium">Total duration</div>
-          <div className="text-base">{Math.round(totalSec/60)} min</div>
+          <div className="text-base">{Math.round(totalSec / 60)} min</div>
         </div>
         <div className="p-2 border rounded bg-white">
           <div className="font-medium">Avg/day</div>
@@ -1295,14 +1301,14 @@ function ECGAnalytics({ sessions }:{ sessions:ECGSess[] }) {
 
       <div className="mt-3">
         <Collapsible title="Notes" defaultOpen={false}>
-          Sessions are derived from ECG start/end times. If the API omits <code>durationSec</code>, it’s computed from timestamps.
+          Sessions are derived from ECG start/end times. If the API omits <code>durationSec</code>, itâ€™s computed from timestamps.
         </Collapsible>
       </div>
     </SectionCard>
   );
 }
 
-function AnalyticsDashboard({ patientId }:{ patientId:string }) {
+function AnalyticsDashboard({ patientId }: { patientId: string }) {
   const [range, setRange] = useState<RangeOpt>(30);
   const to = toISO();
   const from = toISO(addDays(new Date(), -range));
@@ -1339,7 +1345,9 @@ function AnalyticsDashboard({ patientId }:{ patientId:string }) {
         if (mounted) setLoading(false);
       }
     })();
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, [patientId, from, to]);
 
   return (
@@ -1347,13 +1355,13 @@ function AnalyticsDashboard({ patientId }:{ patientId:string }) {
       <SectionCard
         title="Analytics"
         subtitle="Cross-vital trends for the selected date range"
-        status={<Badge tone="slate">{loading ? 'Loading…' : 'Ready'}</Badge>}
-        menu={(
+        status={<Badge tone="slate">{loading ? 'Loadingâ€¦' : 'Ready'}</Badge>}
+        menu={
           <div className="flex items-center gap-2">
             <label className="text-xs text-gray-600">Range</label>
             <select
               value={range}
-              onChange={(e)=>setRange(Number(e.target.value) as RangeOpt)}
+              onChange={(e) => setRange(Number(e.target.value) as RangeOpt)}
               className="p-1 border rounded text-sm bg-white"
             >
               <option value={7}>7d</option>
@@ -1362,38 +1370,38 @@ function AnalyticsDashboard({ patientId }:{ patientId:string }) {
               <option value={90}>90d</option>
             </select>
           </div>
-        )}
+        }
       >
         <div className="grid grid-cols-1 md:grid-cols-6 gap-3 text-xs">
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">BP readings</div>
             <div className="text-base">{bp.length}</div>
-            <div className="text-xxs text-gray-500">{from} → {to}</div>
+            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
-            <div className="font-medium">SpO₂ readings</div>
+            <div className="font-medium">SpOâ‚‚ readings</div>
             <div className="text-base">{spo2.length}</div>
-            <div className="text-xxs text-gray-500">{from} → {to}</div>
+            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">Temp readings</div>
             <div className="text-base">{temp.length}</div>
-            <div className="text-xxs text-gray-500">{from} → {to}</div>
+            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">HR readings</div>
             <div className="text-base">{hr.length}</div>
-            <div className="text-xxs text-gray-500">{from} → {to}</div>
+            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">Glucose readings</div>
             <div className="text-base">{glu.length}</div>
-            <div className="text-xxs text-gray-500">{from} → {to}</div>
+            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">ECG sessions</div>
             <div className="text-base">{ecg.length}</div>
-            <div className="text-xxs text-gray-500">{from} → {to}</div>
+            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
           </div>
         </div>
       </SectionCard>
@@ -1408,20 +1416,90 @@ function AnalyticsDashboard({ patientId }:{ patientId:string }) {
   );
 }
 
-/** ------------ Tabbed Vitals (mount-once) ------------ */
+function SimpleWaveCanvas({
+  running,
+  samples = [],
+}: {
+  running: boolean;
+  samples?: number[];
+}) {
+  const ref = React.useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const c = ref.current;
+    if (!c) return;
+    const ctx = c.getContext('2d');
+    if (!ctx) return;
+
+    const w = c.width;
+    const h = c.height;
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.fillStyle = '#0b1020';
+    ctx.fillRect(0, 0, w, h);
+
+    if (!samples.length) return;
+
+    ctx.beginPath();
+    for (let i = 0; i < samples.length; i++) {
+      const x = (i / Math.max(1, samples.length - 1)) * w;
+      const y = h / 2 - (samples[i] / 32768) * (h * 0.4);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = running ? '#60a5fa' : '#94a3b8';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+  }, [samples, running]);
+
+  return <canvas ref={ref} width={700} height={140} className="w-full h-32 rounded-xl bg-slate-950" />;
+}
+
+type VitalPanelKey = 'bp' | 'spo2' | 'temp' | 'glu' | 'hr' | 'ecg';
+type ChildVitalTab = 'capture' | 'history' | 'thresholds';
+
+function toChildVitalTab(tab: 'capture' | 'history' | 'thresholds' | 'devices' | ''): ChildVitalTab {
+  return tab === 'history' || tab === 'thresholds' ? tab : 'capture';
+}
+
+function measurementStateForPanel(
+  panel: VitalPanelKey,
+  sessionMode: HealthMonitorMode,
+  sessionStreaming: boolean,
+): 'idle' | 'connecting' | 'measuring' | 'done' | 'error' {
+  const activeForPanel =
+    panel === 'hr'
+      ? sessionMode === 'hr' || sessionMode === 'spo2'
+      : panel === 'glu'
+        ? sessionMode === 'glucose'
+        : sessionMode === panel;
+
+  if (!activeForPanel) return 'idle';
+  return sessionStreaming ? 'measuring' : 'done';
+}
+
 function TabbedVitals({
   active,
   setActive,
   deepTab,
   patientId,
-  hm,
   emitVital,
+  liveEcgSamples,
+  livePpgSamples,
+  bpHistory,
+  spo2History,
+  tempHistory,
+  gluHistory,
+  hrHistory,
+  ecgHistory,
+  sessionState,
+  startMeasurement,
+  stopMeasurement,
 }: {
-  active: 'bp' | 'spo2' | 'temp' | 'glu' | 'hr' | 'ecg';
-  setActive: (k: 'bp' | 'spo2' | 'temp' | 'glu' | 'hr' | 'ecg') => void;
+  active: VitalPanelKey;
+  setActive: (k: VitalPanelKey) => void;
   deepTab?: 'capture' | 'history' | 'thresholds' | 'devices' | '';
   patientId: string;
-  hm?: { batteryPct?: number | null; rssi?: number | null } | undefined;
   emitVital: (opts: {
     type: string;
     payload: any;
@@ -1430,10 +1508,21 @@ function TabbedVitals({
     meta?: any;
     dedupeKey?: string;
   }) => Promise<void>;
+  liveEcgSamples?: number[];
+  livePpgSamples?: number[];
+  bpHistory: any[];
+  spo2History: any[];
+  tempHistory: any[];
+  gluHistory: any[];
+  hrHistory: any[];
+  ecgHistory: any[];
+  sessionState: HealthMonitorSessionState;
+  startMeasurement: (mode: Exclude<HealthMonitorMode, 'idle'>) => Promise<void>;
+  stopMeasurement: () => Promise<void>;
 }) {
-  const tabs: Array<{ key: 'bp' | 'spo2' | 'temp' | 'glu' | 'hr' | 'ecg'; label: string; hint?: string }> = [
+  const tabs: Array<{ key: VitalPanelKey; label: string; hint?: string }> = [
     { key: 'bp', label: 'Blood Pressure', hint: 'mmHg + pulse' },
-    { key: 'spo2', label: 'SpO₂', hint: 'oxygen + HR' },
+    { key: 'spo2', label: 'SpOâ‚‚', hint: 'oxygen + HR' },
     { key: 'temp', label: 'Temperature', hint: 'C/F' },
     { key: 'glu', label: 'Glucose', hint: 'trend & export' },
     { key: 'hr', label: 'Heart Rate' },
@@ -1444,10 +1533,10 @@ function TabbedVitals({
     <SectionCard
       title="Vitals"
       subtitle="Capture, review history, adjust thresholds."
-      status={<span className="text-xs px-2 py-1 rounded-lg bg-slate-50 border">Tabbed</span>}
+      status={<span className="rounded-full border border-white/70 bg-white/90 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500 shadow-sm">Vitals hub</span>}
     >
-      {/* Tabs */}
-      <div role="tablist" aria-label="Vitals" className="flex flex-wrap gap-1 mb-3">
+      <div className="mb-4 rounded-[26px] border border-slate-200/70 bg-slate-50/70 p-2">
+        <div role="tablist" aria-label="Vitals" className="flex flex-wrap gap-2">
         {tabs.map((t) => (
           <button
             key={t.key}
@@ -1455,24 +1544,33 @@ function TabbedVitals({
             aria-selected={active === t.key}
             onClick={() => setActive(t.key)}
             className={cn(
-              'px-3 py-1.5 rounded-xl border text-xs md:text-sm',
-              active === t.key ? 'bg-slate-900 text-white' : 'bg-white hover:bg-slate-50'
+              'rounded-2xl border px-3.5 py-2 text-xs font-medium transition md:text-sm',
+              active === t.key
+                ? 'border-slate-900 bg-slate-900 text-white shadow-sm shadow-slate-900/20'
+                : 'border-white/80 bg-white text-slate-600 hover:border-slate-200 hover:text-slate-900'
             )}
           >
             {t.label}
-            {t.hint ? <span className="opacity-70"> — {t.hint}</span> : null}
+            {t.hint ? <span className="opacity-70"> â€” {t.hint}</span> : null}
           </button>
         ))}
+        </div>
       </div>
 
-      {/* Panels: ALL RENDERED, hidden toggled → mount-once */}
-      {/* BP */}
       <div role="tabpanel" hidden={active !== 'bp'} id="panel-bp">
         <Suspense fallback={<SkeletonRow />}>
           <BloodPressure
-            defaultTab={active === 'bp' && deepTab ? deepTab : 'capture'}
-            batteryPct={(hm?.batteryPct ?? null) as any}
-            rssi={(hm?.rssi ?? null) as any}
+            defaultTab={active === 'bp' ? toChildVitalTab(deepTab ?? '') : 'capture'}
+            initialHistory={bpHistory}
+            measurementState={measurementStateForPanel('bp', sessionState.mode, sessionState.streaming)}
+            livePressure={sessionState.lastBpPressure}
+            peakPressure={sessionState.bpPeakPressure}
+            pressureFrames={sessionState.bpPressureFrames}
+            pressureSamplesSeen={sessionState.bpPressureSamplesSeen}
+            latestResult={sessionState.lastBpResult}
+            lastCycleComplete={sessionState.lastBpCycleComplete}
+            onStart={() => startMeasurement('bp')}
+            onStop={() => stopMeasurement()}
             onSave={async (rec: any) => {
               await emitVital({
                 type: 'blood_pressure',
@@ -1485,17 +1583,22 @@ function TabbedVitals({
                   unit: 'mmHg',
                 },
                 meta: { cuffStatus: rec.cuffStatus, source: rec.raw?.simulated ? 'sim' : 'ble' },
-                dedupeKey: 'hr',
               });
             }}
           />
         </Suspense>
       </div>
 
-      {/* SpO₂ */}
       <div role="tabpanel" hidden={active !== 'spo2'} id="panel-spo2">
         <Suspense fallback={<SkeletonRow />}>
           <BloodOxygen
+            initialHistory={spo2History}
+            measurementState={measurementStateForPanel('spo2', sessionState.mode, sessionState.streaming)}
+            latestResult={sessionState.lastSpo2Result}
+            lastCycleComplete={sessionState.lastSpo2CycleComplete}
+            liveSampleCount={livePpgSamples?.length ?? 0}
+            onStart={() => startMeasurement('spo2')}
+            onStop={() => stopMeasurement()}
             onSave={async (rec: any) => {
               await emitVital({
                 type: 'spo2',
@@ -1503,19 +1606,22 @@ function TabbedVitals({
                 deviceId: 'duecare.health-monitor',
                 payload: { spo2: rec.spo2, pulse: rec.pulse, perfIndex: rec.perfIndex, unit: '%' },
                 meta: { source: rec.source ?? 'ble' },
-                dedupeKey: 'hr',
               });
             }}
-            patientId={patientId}
           />
         </Suspense>
       </div>
 
-      {/* Temp */}
       <div role="tabpanel" hidden={active !== 'temp'} id="panel-temp">
         <Suspense fallback={<SkeletonRow />}>
           <Temperature
-            defaultTab={active === 'temp' && deepTab ? deepTab : 'capture'}
+            defaultTab={active === 'temp' ? toChildVitalTab(deepTab ?? '') : 'capture'}
+            initialHistory={tempHistory}
+            measurementState={measurementStateForPanel('temp', sessionState.mode, sessionState.streaming)}
+            latestResult={sessionState.lastTempResult}
+            lastCycleComplete={sessionState.lastTempCycleComplete}
+            onStart={() => startMeasurement('temp')}
+            onStop={() => stopMeasurement()}
             onSave={async (rec: any) => {
               await emitVital({
                 type: 'temperature',
@@ -1529,10 +1635,13 @@ function TabbedVitals({
         </Suspense>
       </div>
 
-      {/* Glucose */}
       <div role="tabpanel" hidden={active !== 'glu'} id="panel-glu">
         <Suspense fallback={<SkeletonRow />}>
           <Glucose
+            initialHistory={gluHistory}
+            measurementState={measurementStateForPanel('glu', sessionState.mode, sessionState.streaming)}
+            onStart={() => startMeasurement('glucose')}
+            onStop={() => stopMeasurement()}
             onSave={async (rec: any) => {
               await emitVital({
                 type: 'blood_glucose',
@@ -1540,24 +1649,32 @@ function TabbedVitals({
                 recorded_at: rec.timestamp,
                 payload: {
                   glucose: rec.glucose,
-                  unit: rec.unit,
+                  unit: rec.unit === 'mg_dl' ? 'mg/dL' : 'mmol/L',
                   stripCode: rec.stripCode,
                   testType: rec.testType,
                   fasting: rec.fasting,
                   note: rec.note,
                 },
-                meta: { source: 'ble' },
+                meta: { source: rec.note ? 'manual-ui' : 'ble' },
               });
             }}
-            initialHistory={[]}
           />
         </Suspense>
       </div>
 
-      {/* ECG */}
       <div role="tabpanel" hidden={active !== 'ecg'} id="panel-ecg">
         <Suspense fallback={<SkeletonRow />}>
           <ECG
+            running={sessionState.mode === 'ecg' && sessionState.streaming}
+            samples={liveEcgSamples}
+            initialHistory={ecgHistory}
+            lastCycleComplete={sessionState.lastEcgCycleComplete}
+            latestSession={null}
+            onStart={() => startMeasurement('ecg')}
+            onStop={() => stopMeasurement()}
+            ECGCanvas={({ running }: { running: boolean }) => (
+              <SimpleWaveCanvas running={running} samples={liveEcgSamples} />
+            )}
             onSave={async (rec: any) => {
               await emitVital({
                 type: 'ecg',
@@ -1567,15 +1684,44 @@ function TabbedVitals({
                 meta: { source: 'ble' },
               });
             }}
-            patientId={patientId}
           />
         </Suspense>
       </div>
 
-      {/* HR */}
       <div role="tabpanel" hidden={active !== 'hr'} id="panel-hr">
         <Suspense fallback={<SkeletonRow />}>
           <HeartRate
+            initialHistory={hrHistory}
+            measurementState={measurementStateForPanel('hr', sessionState.mode, sessionState.streaming)}
+            latestResult={
+              sessionState.lastSpo2Result
+                ? {
+                    hr: sessionState.lastSpo2Result.pulse ?? null,
+                    spo2: sessionState.lastSpo2Result.spo2 ?? null,
+                    recordedAt: sessionState.lastSpo2Result.recordedAt,
+                  }
+                : sessionState.lastBpResult
+                  ? {
+                      hr: sessionState.lastBpResult.pulse ?? null,
+                      spo2: null,
+                      recordedAt: sessionState.lastBpResult.recordedAt,
+                    }
+                  : null
+            }
+            lastCycleComplete={
+              sessionState.lastSpo2CycleComplete
+                ? {
+                    reason: sessionState.lastSpo2CycleComplete.reason,
+                    hr: sessionState.lastSpo2CycleComplete.pulse,
+                    spo2: sessionState.lastSpo2CycleComplete.spo2,
+                    recordedAt: sessionState.lastSpo2CycleComplete.recordedAt,
+                    signalFrames: sessionState.lastSpo2CycleComplete.ppgFrames,
+                  }
+                : null
+            }
+            liveSampleCount={livePpgSamples?.length ?? 0}
+            onStart={() => startMeasurement('hr')}
+            onStop={() => stopMeasurement()}
             onSave={async (rec: any) => {
               await emitVital({
                 type: 'heart_rate',
@@ -1593,45 +1739,30 @@ function TabbedVitals({
   );
 }
 
-/** ------------ PAGE ------------ */
-export default function HealthMonitorPage() {
+function HealthMonitorPageInner() {
   const router = useRouter();
   const search = useSearchParams();
-  const deepPanel = (search.get('panel') || '') as 'bp' | 'spo2' | 'temp' | 'glu' | 'hr' | 'ecg' | '';
-  const deepTab = (search.get('vtab') || '') as 'capture' | 'history' | 'thresholds' | 'devices' | '';
+  const qs = useMemo(() => new URLSearchParams(search?.toString() ?? ''), [search]);
+  const deepPanel = (qs.get('panel') || '') as VitalPanelKey | '';
+  const deepTab = (qs.get('vtab') || '') as 'capture' | 'history' | 'thresholds' | 'devices' | '';
 
-  const patientId = 'patient-1111';
-  const roomId = `room-${patientId}`;
-  const [locale] = useState<string>(() => (typeof navigator !== 'undefined' ? navigator.language : 'en-ZA'));
+  const locale = APP_LOCALE;
 
-  const [profile, setProfile] = useState<any>(null);
-  const [vitalsSummary, setVitalsSummary] = useState<VitalsSummary | null>(null);
-  const [loadingProfile, setLoadingProfile] = useState<boolean>(true);
+  const {
+    patientId: contextPatientId,
+    roomId: contextRoomId,
+    profile,
+    vitalsSummary,
+    loadingProfile,
+    refreshOverview,
+    emitVital: persistVital,
+  } = useVitalsContext();
 
-  // Live-first with mock fallback for Overview
-  async function refreshOverview() {
-    const [p, v] = await Promise.all([
-      getJSON<any>('/api/profile', { fallback: MOCK_PROFILE }),
-      getJSON<VitalsSummary>('/api/vitals/summary', { fallback: MOCK_SUMMARY }),
-    ]);
-    setProfile(p || MOCK_PROFILE);
-    setVitalsSummary(v || MOCK_SUMMARY);
-    setLoadingProfile(false);
-  }
+  const patientId = contextPatientId ?? '';
+  const roomId = contextRoomId ?? (patientId ? `room-${patientId}` : 'room-loading');
 
-  useEffect(() => {
-    let mounted = true;
-    refreshOverview().finally(() => mounted && setLoadingProfile(false));
+  const lastSeenRef = React.useRef<Record<string, number>>({});
 
-    // light auto-refresh (every 60s)
-    const id = setInterval(() => refreshOverview(), 60_000);
-    return () => {
-      clearInterval(id);
-      mounted = false;
-    };
-  }, []);
-
-  const [lastSeenMap] = useState<Record<string, number>>({});
   const emitVital = useCallback(
     async (opts: {
       type: string;
@@ -1646,21 +1777,119 @@ export default function HealthMonitorPage() {
       const payload = opts.payload ?? {};
       const meta = opts.meta ?? {};
       const type = opts.type;
+
       if (opts.dedupeKey) {
         const key = `${opts.dedupeKey}:${type}`;
         const now = Date.now();
-        const last = lastSeenMap[key] ?? 0;
+        const last = lastSeenRef.current[key] ?? 0;
         if (now - last < 5000) return;
-        lastSeenMap[key] = now;
+        lastSeenRef.current[key] = now;
       }
+
+      if (!patientId) {
+        console.warn('emitVital skipped: no authenticated patientId available');
+        return;
+      }
+
       try {
-        const resp = await fetch(`/api/v1/patients/${encodeURIComponent(patientId)}/vitals`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ deviceId, patientId, recorded_at, type, payload, meta } ),
+        await persistVital({
+          type: type as any,
+          payload,
+          deviceId,
+          recorded_at,
+          meta,
         });
-        if (!resp.ok) console.warn('emitVital persist failed', resp.status);
-      } catch {}
+      } catch (err) {
+        console.warn('emitVital persist failed', err);
+      }
+
+      const makeId = () => {
+        const token =
+          typeof globalThis.crypto?.randomUUID === 'function'
+            ? globalThis.crypto.randomUUID()
+            : `${Date.now().toString(36)}-${performance.now().toString(36).replace('.', '')}`;
+
+        return `${type}-${token}`;
+      };
+
+      if (type === 'blood_pressure') {
+        const rec = {
+          id: makeId(),
+          timestamp: recorded_at,
+          systolic: payload.systolic,
+          diastolic: payload.diastolic,
+          pulse: payload.pulse,
+          unit: payload.unit ?? 'mmHg',
+          cuffStatus: meta?.cuffStatus,
+          raw: meta,
+        };
+        setBpHistory((prev) => [rec, ...prev].slice(0, 500));
+      }
+
+      if (type === 'spo2') {
+        const rec = {
+          id: makeId(),
+          timestamp: recorded_at,
+          spo2: payload.spo2,
+          pulse: payload.pulse,
+          perfIndex: payload.perfIndex,
+          unit: payload.unit ?? '%',
+          source: 'ble',
+          raw: meta,
+        };
+        setSpo2History((prev) => [rec, ...prev].slice(0, 500));
+      }
+
+      if (type === 'temperature') {
+        const rec = {
+          id: makeId(),
+          timestamp: recorded_at,
+          celsius: payload.celsius,
+          fahrenheit: payload.fahrenheit,
+          unit: 'C',
+          raw: meta,
+        };
+        setTempHistory((prev) => [rec, ...prev].slice(0, 500));
+      }
+
+      if (type === 'blood_glucose') {
+        const unitNorm = payload.unit === 'mg/dL' ? 'mg_dl' : 'mmol_l';
+        const rec = {
+          id: makeId(),
+          timestamp: recorded_at,
+          glucose: payload.glucose,
+          unit: unitNorm,
+          stripCode: payload.stripCode,
+          testType: payload.testType,
+          fasting: payload.fasting,
+          note: payload.note,
+        };
+        setGluHistory((prev) => [rec, ...prev].slice(0, 3000));
+      }
+
+      if (type === 'heart_rate') {
+        const rec = {
+          id: makeId(),
+          timestamp: recorded_at,
+          hr: payload.hr,
+          unit: payload.unit ?? 'bpm',
+          source: 'ble',
+          raw: meta,
+        };
+        setHrHistory((prev) => [rec, ...prev].slice(0, 500));
+      }
+
+      if (type === 'ecg') {
+        const rec = {
+          id: makeId(),
+          timestamp: recorded_at,
+          durationSec: payload.durationSec,
+          rhr: payload.rhr,
+          rawSummary: payload.summary ?? meta,
+        };
+        setEcgHistory((prev) => [rec, ...prev].slice(0, 200));
+      }
+
       try {
         await fetch('/api/iomt/push', {
           method: 'POST',
@@ -1668,46 +1897,387 @@ export default function HealthMonitorPage() {
           body: JSON.stringify({
             roomId,
             type,
-            value: payload.value ?? payload.hr ?? payload.spo2 ?? payload.glucose ?? null,
-            unit: payload.unit ?? (payload.u as any) ?? null,
+            value:
+              payload.value ??
+              payload.hr ??
+              payload.spo2 ??
+              payload.glucose ??
+              payload.systolic ??
+              payload.celsius ??
+              null,
+            unit: payload.unit ?? null,
           }),
         });
       } catch {}
     },
-    [patientId, roomId, lastSeenMap]
+    [patientId, roomId, persistVital]
   );
-  const ctxVal = useMemo(() => ({ patientId, roomId, emitVital }), [patientId, roomId, emitVital]);
+
+
+  const [hmSessionState, setHmSessionState] = useState<HealthMonitorSessionState>({
+    connected: false,
+    connecting: false,
+    streaming: false,
+    batteryPct: null,
+    rssi: null,
+    error: null,
+    mode: 'idle',
+
+    lastBpPressure: null,
+    bpPeakPressure: null,
+    bpPressureFrames: 0,
+    bpPressureSamplesSeen: 0,
+    lastBpResult: null,
+    lastBpCycleComplete: null,
+
+    lastSpo2Result: null,
+    lastSpo2CycleComplete: null,
+
+    lastTempResult: null,
+    lastTempCycleComplete: null,
+
+    lastGlucoseResult: null,
+    lastGlucoseCycleComplete: null,
+
+    ecgSampleCount: 0,
+    lastEcgCycleComplete: null,
+  });
+
+  const [liveEcgSamples, setLiveEcgSamples] = useState<number[]>([]);
+  const [livePpgSamples, setLivePpgSamples] = useState<number[]>([]);
+
+  const [bpHistory, setBpHistory] = useState<any[]>([]);
+  const [spo2History, setSpo2History] = useState<any[]>([]);
+  const [tempHistory, setTempHistory] = useState<any[]>([]);
+  const [gluHistory, setGluHistory] = useState<any[]>([]);
+  const [hrHistory, setHrHistory] = useState<any[]>([]);
+  const [ecgHistory, setEcgHistory] = useState<any[]>([]);
+  const hmSessionRef = React.useRef<ReturnType<typeof createHealthMonitorSession> | null>(null);
+
+  const lastBridgeBpResultRef = React.useRef<string | null>(null);
+  const lastBridgeSpo2ResultRef = React.useRef<string | null>(null);
+  const lastBridgeTempResultRef = React.useRef<string | null>(null);
+  const lastBridgeGlucoseResultRef = React.useRef<string | null>(null);
+  const lastBridgeEcgCycleRef = React.useRef<string | null>(null);
 
   const [tab, setTab] = useState<'overview' | 'vitals' | 'analytics' | 'reports'>(
-    ((search.get('t') as any) || 'overview')
+    ((qs.get('t') as any) || 'overview')
   );
   useEffect(() => {
-    const qp = new URLSearchParams(search.toString());
+    const qp = new URLSearchParams(qs.toString());
     qp.set('t', tab);
     router.replace(`?${qp.toString()}`, { scroll: false });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
+  }, [router, qs, tab]);
 
   const [alertsOpen, setAlertsOpen] = useState<boolean>(false);
   const [alerts, setAlerts] = useState<AlertItem[]>([]);
 
-  /** Device telemetry (header pills) */
   const [devices, setDevices] = useState<DeviceInfo[]>([
-    { id: 'duecare-health-monitor', name: 'HealthMonitor-001', transport: 'ble', connected: true, batteryPct: null, rssi: null },
+    {
+      id: 'duecare-health-monitor',
+      name: 'HealthMonitor-001',
+      transport: 'ble',
+      connected: false,
+      batteryPct: null,
+      rssi: null,
+    },
   ]);
+
   const upsertDevice = useCallback((patch: Partial<DeviceInfo> & { id: string }) => {
     setDevices((curr) => {
       const idx = curr.findIndex((d) => d.id === patch.id);
       if (idx === -1)
         return [
           ...curr,
-          { id: patch.id, name: patch.id, transport: 'ble', connected: true, batteryPct: null, rssi: null, ...patch },
+          { name: patch.id, transport: 'ble', connected: false, batteryPct: null, rssi: null, ...patch },
         ];
       const next = curr.slice();
       next[idx] = { ...next[idx], ...patch };
       return next;
     });
   }, []);
+
+  useEffect(() => {
+    if (!patientId) return;
+
+    const session = createHealthMonitorSession({
+      patientId,
+      onState: (s) => {
+        setHmSessionState(s);
+
+        upsertDevice({
+          id: 'duecare-health-monitor',
+          name: 'HealthMonitor-001',
+          transport: 'ble',
+          connected: s.connected,
+          batteryPct: s.batteryPct,
+          rssi: s.rssi,
+        });
+      },
+      onLiveEvent: (evt) => {
+        if (evt.type === 'ecg') {
+          const next = Array.isArray((evt as any).detail?.samples)
+            ? (evt as any).detail.samples
+            : (evt as any).detail?.chunk?.samples;
+          if (Array.isArray(next) && next.length) {
+            setLiveEcgSamples((prev) => prev.concat(next).slice(-2500));
+          }
+        }
+
+        if (evt.type === 'ppg') {
+          const next = Array.isArray((evt as any).detail?.samples)
+            ? (evt as any).detail.samples
+            : (evt as any).detail?.chunk?.samples;
+          if (Array.isArray(next) && next.length) {
+            setLivePpgSamples((prev) => prev.concat(next).slice(-500));
+          }
+        }
+      },
+    });
+
+    hmSessionRef.current = session;
+
+    return () => {
+      void hmSessionRef.current?.disconnect();
+      hmSessionRef.current = null;
+    };
+  }, [patientId, upsertDevice]);
+
+  const { push: pushToast, Toasts } = useToasts();
+
+  const connectHealthMonitor = useCallback(async () => {
+    const bt = typeof navigator !== 'undefined' ? (navigator as any).bluetooth : undefined;
+
+    if (!bt?.requestDevice) {
+      const msg = 'Bluetooth is not available in this browser. Use Chrome or Edge on desktop/Android over HTTPS, or connect through the supported native bridge.';
+      setHmSessionState((prev) => ({ ...prev, connecting: false, error: msg }));
+      pushToast(msg);
+      return;
+    }
+
+    try {
+      await hmSessionRef.current?.connect();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Unable to connect to the health monitor.';
+      setHmSessionState((prev) => ({ ...prev, connecting: false, error: msg }));
+      pushToast(msg);
+    }
+  }, [pushToast]);
+
+  useEffect(() => {
+    const r = hmSessionState.lastBpResult;
+    if (!r?.recordedAt) return;
+    if (lastBridgeBpResultRef.current === r.recordedAt) return;
+    lastBridgeBpResultRef.current = r.recordedAt;
+
+    const rec = {
+      id: `bp-bridge-${r.recordedAt}`,
+      timestamp: r.recordedAt,
+      systolic: r.systolic,
+      diastolic: r.diastolic,
+      pulse: r.pulse ?? undefined,
+      unit: 'mmHg' as const,
+      cuffStatus: 'completed',
+      raw: {
+        source: 'bridge-session',
+        map: r.map ?? null,
+      },
+    };
+
+    setBpHistory((prev) => {
+      const exists = prev.some(
+        (x) =>
+          x.timestamp === rec.timestamp &&
+          x.systolic === rec.systolic &&
+          x.diastolic === rec.diastolic
+      );
+      if (exists) return prev;
+      return [rec, ...prev].slice(0, 500);
+    });
+  }, [hmSessionState.lastBpResult]);
+
+  useEffect(() => {
+    const r = hmSessionState.lastSpo2Result;
+    if (!r?.recordedAt) return;
+    if (lastBridgeSpo2ResultRef.current === r.recordedAt) return;
+    lastBridgeSpo2ResultRef.current = r.recordedAt;
+
+    const rec = {
+      id: `spo2-bridge-${r.recordedAt}`,
+      timestamp: r.recordedAt,
+      spo2: r.spo2 ?? undefined,
+      pulse: r.pulse ?? undefined,
+      perfIndex: r.pi ?? undefined,
+      unit: '%',
+      source: 'ble',
+      raw: { source: 'bridge-session' },
+    };
+
+    setSpo2History((prev) => {
+      const exists = prev.some(
+        (x) =>
+          x.timestamp === rec.timestamp &&
+          x.spo2 === rec.spo2 &&
+          x.pulse === rec.pulse
+      );
+      if (exists) return prev;
+      return [rec, ...prev].slice(0, 500);
+    });
+
+    if (typeof r.pulse === 'number' && r.pulse > 0) {
+      const hrRec = {
+        id: `hr-from-spo2-${r.recordedAt}`,
+        timestamp: r.recordedAt,
+        hr: r.pulse,
+        unit: 'bpm',
+        source: 'ble',
+        raw: {
+          source: 'bridge-session',
+          parent: 'spo2',
+          spo2: r.spo2 ?? null,
+        },
+      };
+
+      setHrHistory((prev) => {
+        const exists = prev.some(
+          (x) =>
+            x.timestamp === hrRec.timestamp &&
+            x.hr === hrRec.hr
+        );
+        if (exists) return prev;
+        return [hrRec, ...prev].slice(0, 500);
+      });
+    }
+  }, [hmSessionState.lastSpo2Result]);
+
+  useEffect(() => {
+    const r = hmSessionState.lastTempResult;
+    if (!r?.recordedAt) return;
+    if (lastBridgeTempResultRef.current === r.recordedAt) return;
+    lastBridgeTempResultRef.current = r.recordedAt;
+
+    const rec = {
+      id: `temp-bridge-${r.recordedAt}`,
+      timestamp: r.recordedAt,
+      celsius: r.celsius,
+      fahrenheit: r.fahrenheit ?? undefined,
+      unit: 'C',
+      raw: { source: 'bridge-session' },
+    };
+
+    setTempHistory((prev) => {
+      const exists = prev.some(
+        (x) =>
+          x.timestamp === rec.timestamp &&
+          x.celsius === rec.celsius
+      );
+      if (exists) return prev;
+      return [rec, ...prev].slice(0, 500);
+    });
+  }, [hmSessionState.lastTempResult]);
+
+  useEffect(() => {
+    const r = hmSessionState.lastGlucoseResult;
+    if (!r?.recordedAt) return;
+    if (lastBridgeGlucoseResultRef.current === r.recordedAt) return;
+    lastBridgeGlucoseResultRef.current = r.recordedAt;
+
+    const rec = {
+      id: `glucose-bridge-${r.recordedAt}`,
+      timestamp: r.recordedAt,
+      glucose: r.glucose,
+      unit: r.unit === 'mg/dL' ? 'mg_dl' : 'mmol_l',
+      stripCode: '',
+      testType: '',
+      fasting: null,
+      note: '',
+    };
+
+    setGluHistory((prev) => {
+      const exists = prev.some(
+        (x) =>
+          x.timestamp === rec.timestamp &&
+          x.glucose === rec.glucose
+      );
+      if (exists) return prev;
+      return [rec, ...prev].slice(0, 3000);
+    });
+  }, [hmSessionState.lastGlucoseResult]);
+
+  useEffect(() => {
+    const c = hmSessionState.lastEcgCycleComplete;
+    if (!c?.recordedAt) return;
+    if (lastBridgeEcgCycleRef.current === c.recordedAt) return;
+    lastBridgeEcgCycleRef.current = c.recordedAt;
+
+    if (c.sampleCount > 0) {
+      const rec = {
+        id: `ecg-bridge-${c.recordedAt}`,
+        timestamp: c.recordedAt,
+        durationSec: undefined,
+        rhr: undefined,
+        rawSummary: {
+          source: 'bridge-session',
+          sampleCount: c.sampleCount,
+          signalQuality: c.signalQuality,
+          reason: c.reason,
+        },
+      };
+
+      setEcgHistory((prev) => {
+        const exists = prev.some((x) => x.timestamp === rec.timestamp);
+        if (exists) return prev;
+        return [rec, ...prev].slice(0, 200);
+      });
+    }
+  }, [hmSessionState.lastEcgCycleComplete]);
+
+  useEffect(() => {
+    const c = hmSessionState.lastBpCycleComplete;
+    if (!c) return;
+
+    if (
+      c.reason === 'silence_after_pressure' &&
+      !hmSessionState.lastBpResult
+    ) {
+      pushToast('Blood pressure cycle completed, but no final decoded result was received yet.', 'default');
+    }
+  }, [
+    hmSessionState.lastBpCycleComplete,
+    hmSessionState.lastBpResult,
+    pushToast,
+  ]);
+
+  useEffect(() => {
+    const c = hmSessionState.lastSpo2CycleComplete;
+    if (!c) return;
+    if (c.reason === 'signal_detected_no_result') {
+      pushToast('SpOâ‚‚ signal was detected, but no final saturation value was decoded.', 'default');
+    }
+    if (c.reason === 'timeout') {
+      pushToast('SpOâ‚‚ measurement timed out.', 'error');
+    }
+  }, [hmSessionState.lastSpo2CycleComplete, pushToast]);
+
+  useEffect(() => {
+    const c = hmSessionState.lastTempCycleComplete;
+    if (!c) return;
+    if (c.reason === 'timeout') {
+      pushToast('Temperature measurement timed out.', 'error');
+    }
+  }, [hmSessionState.lastTempCycleComplete, pushToast]);
+
+  useEffect(() => {
+    const c = hmSessionState.lastGlucoseCycleComplete;
+    if (!c) return;
+    if (c.reason === 'timeout') {
+      pushToast('Glucose measurement timed out.', 'error');
+    }
+    if (c.reason === 'signal_detected_no_result') {
+      pushToast('Glucose workflow started, but no final value was decoded.', 'default');
+    }
+  }, [hmSessionState.lastGlucoseCycleComplete, pushToast]);
+
   useEffect(() => {
     function onTelemetry(e: Event) {
       const detail = (e as CustomEvent).detail as Partial<DeviceInfo> & { id: string };
@@ -1717,11 +2287,28 @@ export default function HealthMonitorPage() {
     window.addEventListener('iomt:telemetry' as any, onTelemetry as any);
     return () => window.removeEventListener('iomt:telemetry' as any, onTelemetry as any);
   }, [upsertDevice]);
-  const hm = devices.find((d) => d.id === 'duecare-health-monitor');
 
-  const { push: pushToast, Toasts } = useToasts();
+  const startMeasurement = useCallback(
+    async (mode: Exclude<HealthMonitorMode, 'idle'>) => {
+      if (!hmSessionRef.current) return;
+      if (mode === 'ecg') {
+        setLiveEcgSamples([]);
+      }
+      if (mode === 'spo2' || mode === 'hr') {
+        setLivePpgSamples([]);
+      }
+      await hmSessionRef.current.startMeasurement(mode);
+    },
+    []
+  );
+
+  const stopMeasurement = useCallback(async () => {
+    if (!hmSessionRef.current) return;
+    await hmSessionRef.current.stopMeasurement();
+  }, []);
+
   function shareSummary() {
-    const text = `Ambulant+ Health Monitor — Patient ${patientId} on ${new Date().toLocaleString(locale)}`;
+    const text = `Ambulant+ Health Monitor â€” Patient ${patientId} on ${new Date().toLocaleString(locale)}`;
     if (navigator.share) {
       navigator.share({ title: 'Health summary', text }).catch(() => {});
     } else {
@@ -1731,6 +2318,7 @@ export default function HealthMonitorPage() {
         .catch(() => {});
     }
   }
+
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.key === 'a') setAlertsOpen(true);
@@ -1743,54 +2331,92 @@ export default function HealthMonitorPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
-  // Overview series with safe defaults
-  const hrSeries = vitalsSummary?.hr24 ?? MOCK_SUMMARY.hr24!;
-  const spo2Series = vitalsSummary?.spo224 ?? MOCK_SUMMARY.spo224!;
-  const bpSeries = vitalsSummary?.bp24 ?? MOCK_SUMMARY.bp24!;
-  const tempSeries = vitalsSummary?.temp24 ?? MOCK_SUMMARY.temp24!;
-  const gluSeries = vitalsSummary?.glu24 ?? MOCK_SUMMARY.glu24!;
+  const hrSeries = vitalsSummary?.hr24 ?? EMPTY_SUMMARY.hr24!;
+  const spo2Series = vitalsSummary?.spo224 ?? EMPTY_SUMMARY.spo224!;
+  const bpSeries = vitalsSummary?.bp24 ?? EMPTY_SUMMARY.bp24!;
+  const tempSeries = vitalsSummary?.temp24 ?? EMPTY_SUMMARY.temp24!;
+  const gluSeries = vitalsSummary?.glu24 ?? EMPTY_SUMMARY.glu24!;
 
-  /** Today timeline (live with mock fallback) */
-  const [today, setToday] = useState<TodayItem[]>([]);
-  async function refreshTodayAndAlerts() {
-    const recent = await getJSON<{ items?: any[] }>('/api/vitals/recent?since=today', { fallback: { items: [] } });
+  const [today, setToday] = useState<TodayItem[]>(EMPTY_TODAY);
+  async function refreshTodayAndAlerts(currentPatientId: string) {
+    if (!currentPatientId) {
+      setToday(EMPTY_TODAY);
+      setAlerts(EMPTY_ALERTS);
+      return;
+    }
+
+    const recent = await getJSON<{ items?: any[] }>(
+      `/api/vitals/recent?since=today&patientId=${encodeURIComponent(currentPatientId)}`,
+      { fallback: { items: [] } }
+    );
     const items: TodayItem[] = (recent.items || []).slice(0, 8).map((it: any) => ({
       t: new Date(it.timestamp || it.t || Date.now()).toLocaleTimeString(),
       label: it.label || it.type || 'Reading',
       route: `?t=vitals&panel=${it.panel || it.type || 'bp'}&vtab=history`,
     }));
-    setToday(items.length ? items : MOCK_TODAY);
+    setToday(items);
 
-    const alertRes = await getJSON<{ items?: AlertItem[] }>('/api/alerts/active', { fallback: { items: [] } });
-    setAlerts(alertRes.items && alertRes.items.length ? alertRes.items : MOCK_ALERTS);
+    const alertRes = await getJSON<{ items?: AlertItem[] }>(
+      `/api/alerts/active?patientId=${encodeURIComponent(currentPatientId)}`,
+      { fallback: { items: [] } }
+    );
+    setAlerts(alertRes.items ?? EMPTY_ALERTS);
   }
-  useEffect(() => {
-    refreshTodayAndAlerts();
-    const id = setInterval(() => refreshTodayAndAlerts(), 60_000);
-    return () => clearInterval(id);
-  }, []);
 
-  /** Deep link: default active vital tab */
-  const [activeVital, setActiveVital] = useState<'bp' | 'spo2' | 'temp' | 'glu' | 'hr' | 'ecg'>(deepPanel || 'bp');
+  useEffect(() => {
+    refreshTodayAndAlerts(patientId);
+    const id = setInterval(() => refreshTodayAndAlerts(patientId), 60_000);
+    return () => clearInterval(id);
+  }, [patientId]);
+
+  const [activeVital, setActiveVital] = useState<VitalPanelKey>(deepPanel || 'bp');
   useEffect(() => {
     if (deepPanel && deepPanel !== activeVital) setActiveVital(deepPanel);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deepPanel]);
+  }, [deepPanel, activeVital]);
 
   const setActiveVitalAndUpdateUrl = useCallback(
-    (k: 'bp' | 'spo2' | 'temp' | 'glu' | 'hr' | 'ecg') => {
+    (k: VitalPanelKey) => {
       setActiveVital(k);
-      const qp = new URLSearchParams(search.toString());
+      const qp = new URLSearchParams(qs.toString());
       qp.set('t', 'vitals');
       qp.set('panel', k);
       router.replace(`?${qp.toString()}`, { scroll: false });
       (document.querySelector('main') as HTMLElement | null)?.scrollTo?.({ top: 0, behavior: 'smooth' });
     },
-    [router, search]
+    [router, qs]
   );
 
-  /** Tone helpers for tiles */
-  const spo2Tone = (v: number | undefined) => (v ?? 100) < 92 ? 'red' : 'slate';
+  const currentMeasurementLabel = useMemo(() => {
+    switch (activeVital) {
+      case 'bp':
+        return 'Blood Pressure';
+      case 'spo2':
+        return 'SpOâ‚‚';
+      case 'temp':
+        return 'Temperature';
+      case 'glu':
+        return 'Glucose';
+      case 'hr':
+        return 'Heart Rate';
+      case 'ecg':
+        return 'ECG';
+      default:
+        return 'Measurement';
+    }
+  }, [activeVital]);
+
+  const currentMeasurementMode = useMemo<Exclude<HealthMonitorMode, 'idle'>>(() => {
+    switch (activeVital) {
+      case 'glu':
+        return 'glucose';
+      case 'hr':
+        return 'hr';
+      default:
+        return activeVital;
+    }
+  }, [activeVital]);
+
+  const spo2Tone = (v: number | undefined) => ((v ?? 100) < 92 ? 'red' : 'slate');
   const gluTone = (v: number | null | undefined, unit?: string | null) => {
     if (v == null) return 'slate' as const;
     const mg = unit === 'mmol/L' ? mmolToMgdl(v) : v;
@@ -1799,12 +2425,61 @@ export default function HealthMonitorPage() {
     return 'slate' as const;
   };
 
+  if (!patientId) {
+    return (
+      <main className="mx-auto max-w-3xl p-6">
+        <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+            <Bluetooth className="h-3.5 w-3.5" />
+            Health Monitor
+          </div>
+
+          <h1 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">
+            Patient profile required
+          </h1>
+
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            {loadingProfile
+              ? 'Resolving the signed-in patient profile...'
+              : 'Health Monitor readings must be linked to a real patient profile before measurements can be saved.'}
+          </p>
+
+          {!loadingProfile ? (
+            <div className="mt-5 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => void refreshOverview()}
+                className="inline-flex items-center rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white"
+              >
+                Retry profile lookup
+              </button>
+
+              <a
+                href="/profile"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+              >
+                Open profile
+              </a>
+
+              <a
+                href="/auth/login"
+                className="inline-flex items-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700"
+              >
+                Sign in
+              </a>
+            </div>
+          ) : null}
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <VitalsContext.Provider value={ctxVal}>
+    <>
       <StickyHeader
-        profile={profile ?? MOCK_PROFILE}
-        patientId={profile?.patientId ?? patientId}
-        lastSyncHuman={vitalsSummary?.lastSyncHuman ?? MOCK_SUMMARY.lastSyncHuman}
+        profile={profile ?? undefined}
+        patientId={patientId || 'â€”'}
+        lastSyncHuman={vitalsSummary?.lastSyncHuman}
         onExport={() => setTab('reports')}
         onShare={shareSummary}
         onOpenAlerts={() => setAlertsOpen(true)}
@@ -1813,56 +2488,115 @@ export default function HealthMonitorPage() {
         devices={devices}
       />
 
-      <main className="p-4 md:p-6 space-y-5 max-w-6xl mx-auto">
-        {/* OVERVIEW — at a glance (tiles are “Latest @ time”) */}
+      <main className="mx-auto max-w-6xl space-y-6 bg-[radial-gradient(circle_at_top,rgba(191,219,254,0.16),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(226,232,240,0.32),transparent_24%)] p-4 md:p-6">
         {tab === 'overview' && (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <SectionCard
+              title="Health Monitor overview"
+              subtitle="A refined command center for live telemetry, recent activity, and device-led capture."
+              status={
+                <span
+                  className={cn(
+                    'rounded-full border px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em]',
+                    hmSessionState.connected
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-slate-200 bg-white text-slate-500'
+                  )}
+                >
+                  {hmSessionState.connected ? 'Monitor ready' : 'Awaiting device'}
+                </span>
+              }
+            >
+              <div className="grid gap-3 lg:grid-cols-[1.35fr_0.95fr]">
+                <div className="rounded-[26px] border border-slate-700/30 bg-[linear-gradient(135deg,rgba(15,23,42,0.98),rgba(30,41,59,0.92))] p-5 text-white shadow-[0_25px_80px_-45px_rgba(15,23,42,0.9)]">
+                  <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="space-y-3">
+                      <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-200">
+                        <span className="h-2 w-2 rounded-full bg-emerald-400" />
+                        Contactless Medicine Console
+                      </div>
+                      <div>
+                        <div className="text-2xl font-semibold tracking-tight md:text-3xl">{profile?.name ?? 'Patient'}</div>
+                        <div className="mt-1 max-w-2xl text-sm text-slate-300">
+                          Unified capture for blood pressure, oxygen saturation, temperature, glucose, pulse, and ECG with stable page-owned device control.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid min-w-[220px] gap-2 sm:grid-cols-2">
+                      <div className="rounded-2xl border border-white/10 bg-white/10 p-3">
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Connection</div>
+                        <div className="mt-1 text-lg font-semibold">{hmSessionState.connected ? 'Connected' : hmSessionState.connecting ? 'Connectingâ€¦' : 'Offline'}</div>
+                        <div className="mt-1 text-xs text-slate-300">Mode: {hmSessionState.mode === 'idle' ? 'Standby' : hmSessionState.mode.toUpperCase()}</div>
+                      </div>
+                      <div className="rounded-2xl border border-white/10 bg-white/10 p-3">
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Telemetry</div>
+                        <div className="mt-1 text-lg font-semibold">{hmSessionState.batteryPct ?? 'â€”'}%</div>
+                        <div className="mt-1 text-xs text-slate-300">RSSI {hmSessionState.rssi ?? 'â€”'} dBm</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+                  <div className="rounded-[24px] border border-slate-200/70 bg-white/90 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Capture focus</div>
+                    <div className="mt-2 text-lg font-semibold text-slate-900">{currentMeasurementLabel}</div>
+                    <div className="mt-1 text-sm text-slate-500">The current panel determines the active device workflow and keeps session control centralized on this page.</div>
+                  </div>
+                  <div className="rounded-[24px] border border-slate-200/70 bg-white/90 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Recent timeline</div>
+                    <div className="mt-2 text-sm text-slate-700">{today[0]?.label ?? 'No recent reading yet'}</div>
+                    <div className="mt-1 text-xs text-slate-500">{today[0]?.t ?? 'Waiting for first reading today'}</div>
+                  </div>
+                  <div className="rounded-[24px] border border-slate-200/70 bg-white/90 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Alert posture</div>
+                    <div className="mt-2 text-sm font-medium text-slate-900">{alerts.length ? `${alerts.length} active alert${alerts.length === 1 ? '' : 's'}` : 'No active alerts'}</div>
+                    <div className="mt-1 text-xs text-slate-500">Threshold events remain available from the dedicated alert center.</div>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
               <KPIStat
                 label="Heart Rate"
-                value={<span>{vitalsSummary?.hrNow ?? MOCK_SUMMARY.hrNow} bpm</span>}
-                hint={`Latest • ${fmtTime(vitalsSummary?.hrTs ?? MOCK_SUMMARY.hrTs)}`}
+                value={<span>{vitalsSummary?.hrNow ?? "â€”"} bpm</span>}
+                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.hrTs)}`}
                 series={hrSeries}
               />
               <KPIStat
-                label="SpO₂"
-                value={<span>{vitalsSummary?.spo2Now ?? MOCK_SUMMARY.spo2Now}%</span>}
-                hint={`Latest • ${fmtTime(vitalsSummary?.spo2Ts ?? MOCK_SUMMARY.spo2Ts)}`}
+                label="SpOâ‚‚"
+                value={<span>{vitalsSummary?.spo2Now ?? "â€”"}%</span>}
+                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.spo2Ts)}`}
                 series={spo2Series}
-                tone={spo2Tone(vitalsSummary?.spo2Now ?? MOCK_SUMMARY.spo2Now)}
+                tone={spo2Tone(vitalsSummary?.spo2Now)}
               />
               <KPIStat
                 label="Blood Pressure"
                 value={
                   <span>
-                    {vitalsSummary?.bpNow
-                      ? `${vitalsSummary.bpNow.s}/${vitalsSummary.bpNow.d}`
-                      : MOCK_SUMMARY.bpNow
-                      ? `${MOCK_SUMMARY.bpNow.s}/${MOCK_SUMMARY.bpNow.d}`
-                      : '—'}{' '}
+                    {vitalsSummary?.bpNow ? `${vitalsSummary.bpNow.s}/${vitalsSummary.bpNow.d}` : 'â€”'}{' '}
                     mmHg
                   </span>
                 }
-                hint={`Latest • ${fmtTime(vitalsSummary?.bpTs ?? MOCK_SUMMARY.bpTs)}`}
+                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.bpTs)}`}
                 series={bpSeries}
               />
               <KPIStat
                 label="Temperature"
-                value={<span>{vitalsSummary?.tempNow ?? MOCK_SUMMARY.tempNow}°C</span>}
-                hint={`Latest • ${fmtTime(vitalsSummary?.tempTs ?? MOCK_SUMMARY.tempTs)}`}
+                value={<span>{vitalsSummary?.tempNow ?? "â€”"}Â°C</span>}
+                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.tempTs)}`}
                 series={tempSeries}
               />
               <KPIStat
                 label="Glucose"
                 value={
                   <span>
-                    {vitalsSummary?.gluNow ?? MOCK_SUMMARY.gluNow}{' '}
-                    {vitalsSummary?.gluUnit ?? MOCK_SUMMARY.gluUnit}
+                    {vitalsSummary?.gluNow ?? "â€”"} {vitalsSummary?.gluUnit ?? ''}
                   </span>
                 }
-                hint={`Latest • ${fmtTime(vitalsSummary?.gluTs ?? MOCK_SUMMARY.gluTs)}`}
+                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.gluTs)}`}
                 series={gluSeries}
-                tone={gluTone(vitalsSummary?.gluNow ?? MOCK_SUMMARY.gluNow, vitalsSummary?.gluUnit ?? MOCK_SUMMARY.gluUnit)}
+                tone={gluTone(vitalsSummary?.gluNow, vitalsSummary?.gluUnit)}
               />
             </div>
 
@@ -1907,11 +2641,10 @@ export default function HealthMonitorPage() {
                 <div className="mt-2 space-y-2">
                   {alerts.slice(0, 3).map((a) => (
                     <div key={a.id} className="rounded-xl border p-2 flex items-start gap-2">
-                      <div className={cn('h-2 w-2 rounded-full mt-1',
-                        a.level === 'red' ? 'bg-red-500' : 'bg-amber-500')} />
+                      <div className={cn('h-2 w-2 rounded-full mt-1', a.level === 'red' ? 'bg-red-500' : 'bg-amber-500')} />
                       <div className="text-xs">
                         <div className="font-medium">
-                          {a.vital} — {a.value}
+                          {a.vital} â€” {a.value}
                         </div>
                         <div className="text-[11px] text-slate-500">{a.when}</div>
                       </div>
@@ -1928,39 +2661,190 @@ export default function HealthMonitorPage() {
           </>
         )}
 
-        {/* VITALS — mount-once tabbed capture */}
         {tab === 'vitals' && (
-          <TabbedVitals
-            active={activeVital}
-            setActive={setActiveVitalAndUpdateUrl}
-            deepTab={deepTab || ''}
-            patientId={patientId}
-            hm={{ batteryPct: hm?.batteryPct ?? null, rssi: hm?.rssi ?? null }}
-            emitVital={emitVital}
-          />
+          <>
+            <SectionCard
+              title="Health Monitor device"
+              subtitle="Bridge-driven BLE connection for BP, SpOâ‚‚, Temperature, Glucose, HR and ECG."
+              status={
+                <span
+                  className={cn(
+                    'text-xs px-2 py-1 rounded-lg border',
+                    hmSessionState.connected ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-50 text-slate-700'
+                  )}
+                >
+                  {hmSessionState.connected
+                    ? hmSessionState.streaming
+                      ? `Connected â€¢ Streaming â€¢ ${hmSessionState.mode.toUpperCase()}`
+                      : 'Connected'
+                    : hmSessionState.connecting
+                      ? 'Connectingâ€¦'
+                      : 'Disconnected'}
+                </span>
+              }
+            >
+              <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {!hmSessionState.connected ? (
+                      <button
+                        onClick={() => void connectHealthMonitor()}
+                        disabled={hmSessionState.connecting}
+                        className="rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-slate-900/20 transition hover:-translate-y-0.5 disabled:opacity-60"
+                      >
+                        {hmSessionState.connecting ? 'Connectingâ€¦' : 'Connect monitor'}
+                      </button>
+                    ) : (
+                      <>
+                        {!hmSessionState.streaming ? (
+                          <button
+                            onClick={() => void startMeasurement(currentMeasurementMode)}
+                            className="rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-indigo-600/20 transition hover:-translate-y-0.5"
+                          >
+                            Start {currentMeasurementLabel}
+                          </button>
+                        ) : (
+                          <button
+                            onClick={() => void stopMeasurement()}
+                            className="rounded-2xl bg-amber-600 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-amber-600/20 transition hover:-translate-y-0.5"
+                          >
+                            Stop {currentMeasurementLabel}
+                          </button>
+                        )}
+
+                        <button
+                          onClick={() => void hmSessionRef.current?.disconnect()}
+                          className="rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:-translate-y-0.5 hover:bg-slate-50"
+                        >
+                          Disconnect
+                        </button>
+                      </>
+                    )}
+
+                    <div className="text-xs text-slate-500">
+                      Battery: {hmSessionState.batteryPct ?? 'â€”'}% â€¢ RSSI: {hmSessionState.rssi ?? 'â€”'}
+                    </div>
+                  </div>
+
+                  {hmSessionState.error ? (
+                    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                      {hmSessionState.error}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/80 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Session status</div>
+                    <div className="mt-2 text-lg font-semibold text-slate-900">{hmSessionState.streaming ? 'Measurement active' : hmSessionState.connected ? 'Ready for capture' : 'Waiting for connection'}</div>
+                    <div className="mt-1 text-sm text-slate-500">{hmSessionState.mode === 'idle' ? 'Select a vital tab and start from the page-owned bridge.' : `Current device mode: ${hmSessionState.mode.toUpperCase()}`}</div>
+                  </div>
+                  <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/80 p-4">
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Signal telemetry</div>
+                    <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
+                      <div className="rounded-2xl border border-white bg-white p-3">
+                        <div className="text-slate-500">Battery</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-900">{hmSessionState.batteryPct ?? 'â€”'}%</div>
+                      </div>
+                      <div className="rounded-2xl border border-white bg-white p-3">
+                        <div className="text-slate-500">RSSI</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-900">{hmSessionState.rssi ?? 'â€”'}</div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/80 p-4 sm:col-span-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Capture focus</div>
+                        <div className="mt-1 text-base font-semibold text-slate-900">{currentMeasurementLabel}</div>
+                      </div>
+                      <span className="rounded-full border border-white bg-white px-3 py-1 text-xs font-medium text-slate-600">Page-owned device orchestration</span>
+                    </div>
+                    <div className="mt-3 text-sm text-slate-500">Tabs no longer open their own Bluetooth sessions. This page remains the single source of truth for connection, battery, measurement mode, and live telemetry.</div>
+                  </div>
+                </div>
+              </div>
+            </SectionCard>
+
+            <TabbedVitals
+              active={activeVital}
+              setActive={setActiveVitalAndUpdateUrl}
+              deepTab={deepTab || ''}
+              patientId={patientId}
+              emitVital={emitVital}
+              liveEcgSamples={liveEcgSamples}
+              livePpgSamples={livePpgSamples}
+              bpHistory={bpHistory}
+              spo2History={spo2History}
+              tempHistory={tempHistory}
+              gluHistory={gluHistory}
+              hrHistory={hrHistory}
+              ecgHistory={ecgHistory}
+              sessionState={hmSessionState}
+              startMeasurement={startMeasurement}
+              stopMeasurement={stopMeasurement}
+            />
+          </>
         )}
 
-        {/* ANALYTICS — cross-vital trends + ECG + Glucose */}
-        {tab === 'analytics' && (
-          <AnalyticsDashboard patientId={patientId} />
-        )}
+        {tab === 'analytics' && <AnalyticsDashboard patientId={patientId} />}
 
-        {/* REPORTS — composer + saved exports + help */}
         {tab === 'reports' && (
           <>
-            <ExportComposer patient={profile ?? MOCK_PROFILE} vitalsSummary={vitalsSummary ?? MOCK_SUMMARY} onAfterDownload={() => {}} />
-            <SavedExports patientId={(profile?.patientId ?? MOCK_PROFILE.patientId) as string} />
+            {patientId ? (
+              <>
+                <ExportComposer patient={profile} vitalsSummary={vitalsSummary ?? EMPTY_SUMMARY} onAfterDownload={() => {}} />
+                <SavedExports patientId={patientId} />
+              </>
+            ) : (
+              <SectionCard
+                title="Reports unavailable"
+                subtitle="Sign in as a patient before generating or downloading health-monitor reports."
+              >
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  No authenticated patient profile is currently available.
+                </div>
+              </SectionCard>
+            )}
           </>
         )}
 
         <div aria-live="polite" className="sr-only">
-          Current locale {locale}. Patient {profile?.name ?? MOCK_PROFILE.name}. Room {roomId}.
+          Current locale {locale}. Patient {profile?.name ?? 'Patient'}. Room {roomId}. PPG samples {livePpgSamples.length}.
         </div>
       </main>
 
-      {/* Alerts & Toasts */}
       <AlertDrawer open={alertsOpen} onClose={() => setAlertsOpen(false)} items={alerts} />
       <Toasts />
-    </VitalsContext.Provider>
+    </>
   );
 }
+
+function HealthMonitorPageContent() {
+  const vitalsCtx = useVitalsProvider();
+
+  useEffect(() => {
+    void vitalsCtx.refreshOverview();
+
+    const id = window.setInterval(() => {
+      void vitalsCtx.refreshOverview();
+    }, 60_000);
+
+    return () => window.clearInterval(id);
+  }, [vitalsCtx.refreshOverview]);
+
+  return (
+    <VitalsProvider value={vitalsCtx}>
+      <HealthMonitorPageInner />
+    </VitalsProvider>
+  );
+}
+
+export default function HealthMonitorPage() {
+  return (
+    <Suspense fallback={null}>
+      <HealthMonitorPageContent />
+    </Suspense>
+  );
+}
+

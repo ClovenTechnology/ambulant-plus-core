@@ -23,7 +23,14 @@ export async function POST(req: NextRequest) {
   }
 
   const file = form.get('file');
-  const patientId = (form.get('patientId') as string) || 'pt-za-001';
+  const patientId = String(form.get('patientId') || '').trim();
+
+if (!patientId) {
+  return NextResponse.json(
+    { ok: false, error: 'patientId_required' },
+    { status: 400 },
+  );
+}
 
   if (!file || typeof file === 'string') {
     return NextResponse.json({ ok: false, error: 'file_required' }, { status: 400 });

@@ -1,8 +1,8 @@
-// apps/patient-app/app/premium/page.tsx
+﻿// apps/patient-app/app/premium/page.tsx
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
 type ProductVariant = {
@@ -94,9 +94,15 @@ function scorePremiumVariantLabel(label: string) {
   return { isYear, isMonth };
 }
 
-export default function PremiumLandingPage() {
+function PremiumLandingPageContent() {
   const sp = useSearchParams();
-  const statusParam = (sp.get('status') || '').toLowerCase(); // cancelled
+
+  const qs = useMemo(
+  () => new URLSearchParams(sp?.toString() ?? ''),
+  [sp],
+);
+
+  const statusParam = (qs.get('status') || '').toLowerCase();
   const [uid] = useState(() => getUid());
 
   const [busy, setBusy] = useState(false);
@@ -338,7 +344,7 @@ export default function PremiumLandingPage() {
             </div>
 
             {loadingCatalog ? (
-              <div className="text-sm text-gray-600">Loading plan options…</div>
+              <div className="text-sm text-gray-600">Loading plan optionsâ€¦</div>
             ) : !premiumProduct ? (
               <div className="text-sm text-gray-700">
                 Premium product not found in catalog. Seed a product with tags like{' '}
@@ -356,7 +362,7 @@ export default function PremiumLandingPage() {
                     const zar = pickSaleOrBase(v.unitAmountZar, v.saleUnitAmountZar ?? null);
                     return (
                       <option key={v.id} value={v.id}>
-                        {v.label} — {money(zar, 'ZAR')}
+                        {v.label} â€” {money(zar, 'ZAR')}
                       </option>
                     );
                   })}
@@ -369,7 +375,7 @@ export default function PremiumLandingPage() {
             <div className="rounded-xl border bg-white p-4">
               <div className="text-xs text-gray-600">Price</div>
               <div className="mt-1 flex items-end justify-between gap-3">
-                <div className="text-lg font-semibold">{priceZar ? money(priceZar, 'ZAR') : '—'}</div>
+                <div className="text-lg font-semibold">{priceZar ? money(priceZar, 'ZAR') : 'â€”'}</div>
                 <div className="text-[11px] text-gray-500 font-mono">ZAR</div>
               </div>
               <div className="mt-2 text-[11px] text-gray-600">
@@ -387,7 +393,7 @@ export default function PremiumLandingPage() {
               onClick={startCheckout}
               className="w-full rounded-full px-4 py-3 text-sm font-medium bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {busy ? 'Redirecting…' : 'Go Premium'}
+              {busy ? 'Redirectingâ€¦' : 'Go Premium'}
             </button>
 
             <div className="text-[11px] text-gray-500 leading-relaxed">
@@ -400,3 +406,12 @@ export default function PremiumLandingPage() {
     </div>
   );
 }
+
+export default function PremiumLandingPage() {
+  return (
+    <Suspense fallback={null}>
+      <PremiumLandingPageContent />
+    </Suspense>
+  );
+}
+

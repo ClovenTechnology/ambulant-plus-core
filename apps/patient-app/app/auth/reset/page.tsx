@@ -1,8 +1,8 @@
-//apps/patient-app/app/auth/reset/page.tsx
+﻿//apps/patient-app/app/auth/reset/page.tsx
 'use client';
 
 import Link from 'next/link';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ShieldCheck,
@@ -61,15 +61,15 @@ function scorePassword(pw: string) {
     score <= 1
       ? 'Add length and variety (upper/lower/number/symbol).'
       : score === 2
-        ? 'Good start — strengthen a bit more.'
+        ? 'Good start â€” strengthen a bit more.'
         : score === 3
-          ? 'Nice — this is a strong password.'
-          : 'Excellent — hard to guess.';
+          ? 'Nice â€” this is a strong password.'
+          : 'Excellent â€” hard to guess.';
 
   return { score, label, hint };
 }
 
-export default function ResetPasswordPage() {
+function ResetPasswordPageContent() {
   const sp = useSearchParams();
   const router = useRouter();
 
@@ -336,7 +336,7 @@ export default function ResetPasswordPage() {
                     {phase === 'submitting' ? (
                       <>
                         <Loader2 className="h-4 w-4 animate-spin" />
-                        Updating…
+                        Updatingâ€¦
                       </>
                     ) : (
                       <>
@@ -404,3 +404,12 @@ export default function ResetPasswordPage() {
     </main>
   );
 }
+
+export default function ResetPasswordPage() {
+  return (
+    <Suspense fallback={null}>
+      <ResetPasswordPageContent />
+    </Suspense>
+  );
+}
+

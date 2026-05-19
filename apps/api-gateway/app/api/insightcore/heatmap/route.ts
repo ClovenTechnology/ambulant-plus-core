@@ -1,21 +1,45 @@
 // apps/api-gateway/app/api/insightcore/heatmap/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { buildSyndromicHeatmap } from '@/src/insightcore/syndromeHeatmap';
-import type { InsightCoreConfig } from '@/src/insightcore/syndromeHeatmap';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function parseDateParam(value: string | null): Date | null {
+  if (!value) return null;
+
+  const d = new Date(value);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
-  const fromStr = searchParams.get('from');
-  const toStr = searchParams.get('to');
 
-  const to = toStr ? new Date(toStr) : new Date();
-  const from =
-    fromStr ? new Date(fromStr) : new Date(to.getTime() - 1000 * 60 * 60 * 24 * 56); // last 8 weeks
+  const parsedTo = parseDateParam(searchParams.get('to'));
+  const to = parsedTo ?? new Date();
 
-  // TODO: load config from wherever /api/insightcore/config stores it.
-  const config: InsightCoreConfig | undefined = undefined;
+  const parsedFrom = parseDateParam(searchParams.get('from'));
+  const from = parsedFrom ?? new Date(to.getTime() - 1000 * 60 * 60 * 24 * 56);
 
-  const data = await buildSyndromicHeatmap({ from, to, config });
+  if (from.getTime() >= to.getTime()) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'invalid_date_range',
+        message: '`from` must be earlier than `to`.',
+      },
+      { status: 400 },
+    );
+  }
 
-  return NextResponse.json({ ok: true, data });
+  const data = await buildSyndromicHeatmap(from, to);
+
+  return NextResponse.json({
+    ok: true,
+    data,
+    meta: {
+      from: from.toISOString(),
+      to: to.toISOString(),
+    },
+  });
 }

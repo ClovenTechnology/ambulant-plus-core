@@ -1,40 +1,132 @@
 import { DEVICE_MAP } from '@/src/devices/serviceMap';
 
-type StartOpts = { roomId: string };
+type StartOpts = {
+  roomId: string;
+};
+
 let aborter: AbortController | null = null;
+let activeCharacteristic: BluetoothRemoteGATTCharacteristic | null = null;
+let activeDevice: BluetoothDevice | null = null;
 
-export async function startHM({ roomId }: StartOpts) {
-  const spec = DEVICE_MAP['duecare.health-monitor'];
-  const filters = [{ services: spec.filters?.services || [] }];
-  const device = await navigator.bluetooth.requestDevice({ filters, optionalServices: spec.filters?.services });
+function getBluetooth(): Bluetooth {
+  if (typeof navigator === 'undefined' || !navigator.bluetooth) {
+    throw new Error(
+      'Web Bluetooth is not available in this browser. Use Chrome or Edge over HTTPS or localhost.'
+    );
+  }
 
-  const server = await device.gatt!.connect();
-  // vendor PPG pleth (your map says FFF3)
-  const ppgUuid = spec.characteristics?.spo2_wave?.uuid!;
-  const svcHint = (spec.filters?.services || [])[0];
-  const service = await server.getPrimaryService(svcHint);
-  const char = await service.getCharacteristic(ppgUuid);
-
-  aborter = new AbortController();
-  await char.startNotifications();
-  char.addEventListener('characteristicvaluechanged', (e: any) => {
-    const dv: DataView = e.target.value;
-    // Example decode: 16-bit little endian samples
-    const len = dv.byteLength / 2;
-    for (let i = 0; i < len; i++) {
-      const raw = dv.getInt16(i * 2, true);
-      const value = Math.max(0, raw); // clamp if needed
-      // throttle to ~25 Hz equivalent: send every sample or downsample as you prefer
-      fetch('/api/iomt/push', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ roomId, type: 'PPG', value, unit: 'a.u.' }),
-        keepalive: true,
-      }).catch(() => {});
-    }
-  }, { signal: aborter.signal });
+  return navigator.bluetooth;
 }
 
-export async function stopHM() {
-  aborter?.abort(); aborter = null;
+function getPrimaryServiceUuid(): BluetoothServiceUUID {
+  const spec = DEVICE_MAP['duecare.health-monitor'];
+  const services = spec.filters?.services ?? [];
+
+  if (!services.length) {
+    throw new Error('Health monitor BLE service UUID is not configured.');
+  }
+
+  return services[0];
+}
+
+function getSpo2WaveCharacteristicUuid(): BluetoothCharacteristicUUID {
+  const spec = DEVICE_MAP['duecare.health-monitor'];
+  const uuid = spec.characteristics?.spo2_wave?.uuid;
+
+  if (!uuid) {
+    throw new Error('Health monitor SpO2 wave characteristic UUID is not configured.');
+  }
+
+  return uuid;
+}
+
+function dataViewFromEvent(event: Event): DataView | null {
+  const target = event.target as BluetoothRemoteGATTCharacteristic | null;
+  return target?.value ?? null;
+}
+
+export async function startHM({ roomId }: StartOpts): Promise<void> {
+  const spec = DEVICE_MAP['duecare.health-monitor'];
+  const bluetooth = getBluetooth();
+
+  const serviceUuid = getPrimaryServiceUuid();
+  const ppgUuid = getSpo2WaveCharacteristicUuid();
+
+  const optionalServices = spec.filters?.services ?? [serviceUuid];
+
+  const device = await bluetooth.requestDevice({
+    filters: [{ services: optionalServices }],
+    optionalServices,
+  });
+
+  if (!device.gatt) {
+    throw new Error('Selected health monitor has no GATT server.');
+  }
+
+  activeDevice = device;
+
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(serviceUuid);
+  const characteristic = await service.getCharacteristic(ppgUuid);
+
+  aborter?.abort();
+  aborter = new AbortController();
+  activeCharacteristic = characteristic;
+
+  await characteristic.startNotifications();
+
+  characteristic.addEventListener(
+    'characteristicvaluechanged',
+    (event: Event) => {
+      const dv = dataViewFromEvent(event);
+
+      if (!dv) {
+        return;
+      }
+
+      const sampleCount = Math.floor(dv.byteLength / 2);
+
+      for (let i = 0; i < sampleCount; i += 1) {
+        const raw = dv.getInt16(i * 2, true);
+        const value = Math.max(0, raw);
+
+        fetch('/api/iomt/push', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            roomId,
+            type: 'PPG',
+            value,
+            unit: 'a.u.',
+          }),
+          keepalive: true,
+        }).catch(() => {
+          // Do not interrupt live BLE notifications if telemetry upload fails.
+        });
+      }
+    },
+    { signal: aborter.signal }
+  );
+}
+
+export async function stopHM(): Promise<void> {
+  aborter?.abort();
+  aborter = null;
+
+  try {
+    await activeCharacteristic?.stopNotifications();
+  } catch {
+    // Ignore notification shutdown failures.
+  }
+
+  try {
+    activeDevice?.gatt?.disconnect();
+  } catch {
+    // Ignore disconnect failures.
+  }
+
+  activeCharacteristic = null;
+  activeDevice = null;
 }
