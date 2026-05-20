@@ -8,6 +8,7 @@ import {
   Activity,
   ArrowRight,
   Bell,
+  BrainCircuit,
   CalendarDays,
   CheckCircle2,
   ChevronRight,
@@ -15,7 +16,6 @@ import {
   HeartPulse,
   ScanHeart,
   Shield,
-  Sparkles,
   Stethoscope,
   Syringe,
   TrendingUp,
@@ -28,7 +28,6 @@ import { pickPreferredVital, type VitalsType } from '@/src/lib/vitals';
 
 import MeterDonut from '../components/charts/AnimatedMeterDonut';
 import MiniMeterDonut from '../components/charts/MiniMeterDonut';
-import Sparkline from '../components/charts/Sparkline';
 import VitalsTrendChart from '../components/charts/VitalsTrendChart';
 
 import RecentActivityStrip from '../components/RecentActivityStrip';
@@ -97,6 +96,12 @@ type AppointmentPreview = {
   clinicianName?: string;
 };
 
+type AdherencePoint = {
+  label: string;
+  value: number;
+  ts?: string;
+};
+
 type RawVitalRecord = {
   id?: string;
   type?: string;
@@ -129,8 +134,6 @@ const hoverLift = {
   whileHover: { y: -6, scale: 1.01 },
   transition: { type: 'spring', stiffness: 220, damping: 18 },
 } as const;
-
-const GATEWAY = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
 
 const EMPTY_VITALS: LiveVitals = {
   hr: 0,
@@ -411,6 +414,91 @@ function normalizeAiMessages(payload: unknown): string[] {
   const root = payload as { messages?: unknown[] } | undefined;
   if (!Array.isArray(root?.messages)) return [];
   return root.messages.filter((m): m is string => typeof m === 'string').slice(0, 3);
+}
+
+function normalizeAdherenceSummary(payload: unknown): {
+  currentPct: number | null;
+  history: AdherencePoint[];
+} {
+  const root = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
+
+  const currentCandidate =
+    root.adherencePct ??
+    root.currentPct ??
+    root.percentage ??
+    root.percent ??
+    root.score ??
+    root.current;
+
+  const currentNumber =
+    typeof currentCandidate === 'number' && Number.isFinite(currentCandidate)
+      ? currentCandidate
+      : typeof currentCandidate === 'string' && currentCandidate.trim()
+        ? Number(currentCandidate)
+        : null;
+
+  const rawHistory = Array.isArray(root.history)
+    ? root.history
+    : Array.isArray(root.trend)
+      ? root.trend
+      : Array.isArray(root.series)
+        ? root.series
+        : Array.isArray(root.items)
+          ? root.items
+          : [];
+
+  const history = rawHistory
+    .map((item, index): AdherencePoint | null => {
+      if (typeof item === 'number' && Number.isFinite(item)) {
+        return { label: `Reading ${index + 1}`, value: Math.max(0, Math.min(100, Math.round(item))) };
+      }
+
+      if (!item || typeof item !== 'object') return null;
+      const record = item as Record<string, unknown>;
+
+      const valueRaw =
+        record.value ??
+        record.adherencePct ??
+        record.percentage ??
+        record.percent ??
+        record.score ??
+        record.rate;
+
+      const value =
+        typeof valueRaw === 'number' && Number.isFinite(valueRaw)
+          ? valueRaw
+          : typeof valueRaw === 'string' && valueRaw.trim()
+            ? Number(valueRaw)
+            : NaN;
+
+      if (!Number.isFinite(value)) return null;
+
+      const ts = String(record.ts ?? record.date ?? record.day ?? record.recordedAt ?? '').trim();
+      const label = ts
+        ? (() => {
+            const d = new Date(ts);
+            return Number.isNaN(d.getTime())
+              ? ts
+              : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+          })()
+        : `Reading ${index + 1}`;
+
+      return {
+        label,
+        ts: ts || undefined,
+        value: Math.max(0, Math.min(100, Math.round(value))),
+      };
+    })
+    .filter((point): point is AdherencePoint => Boolean(point))
+    .slice(-14);
+
+  return {
+    currentPct:
+      typeof currentNumber === 'number' && Number.isFinite(currentNumber)
+        ? Math.max(0, Math.min(100, Math.round(currentNumber)))
+        : null,
+    history,
+  };
 }
 
 function normalizeMedications(payload: unknown): MedLike[] {
@@ -807,6 +895,8 @@ export default function HomePage() {
   const [alertsError, setAlertsError] = useState<string | null>(null);
   const [meds, setMeds] = useState<MedLike[]>([]);
   const [cases, setCases] = useState<CaseLike[]>([]);
+  const [adherenceOverride, setAdherenceOverride] = useState<number | null>(null);
+  const [adherenceHistory, setAdherenceHistory] = useState<AdherencePoint[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -913,7 +1003,7 @@ export default function HomePage() {
     async function loadAppointment() {
       try {
         const res = await fetch(
-          `${GATEWAY}/api/appointments?patientId=${encodedPatientId}`,
+          `/api/appointments?patientId=${encodedPatientId}`,
           { cache: 'no-store' },
         );
 
@@ -1038,6 +1128,45 @@ export default function HomePage() {
   }, [profile?.patientId]);
 
   useEffect(() => {
+    const patientId = typeof profile?.patientId === 'string' ? profile.patientId : '';
+
+    if (!patientId) {
+      setAdherenceOverride(null);
+      setAdherenceHistory([]);
+      return;
+    }
+
+    const encodedPatientId = encodeURIComponent(patientId);
+    let cancelled = false;
+
+    async function loadAdherenceSummary() {
+      try {
+        const res = await fetch(`/api/patient/adherence-summary?patientId=${encodedPatientId}`, {
+          cache: 'no-store',
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (cancelled || !res.ok) return;
+
+        const parsed = normalizeAdherenceSummary(data);
+        setAdherenceOverride(parsed.currentPct);
+        setAdherenceHistory(parsed.history);
+      } catch {
+        if (!cancelled) {
+          setAdherenceOverride(null);
+          setAdherenceHistory([]);
+        }
+      }
+    }
+
+    void loadAdherenceSummary();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profile?.patientId]);
+
+  useEffect(() => {
     let cancelled = false;
 
     async function loadAiGuidance() {
@@ -1066,18 +1195,12 @@ export default function HomePage() {
           setAiInsights(
             msgs.length > 0
               ? msgs
-              : [
-                  'Your care profile is ready for richer guidance as new readings and care activity are added.',
-                  'Keep supported devices synced so InsightCore can provide stronger recommendations.',
-                ],
+              : ['Latest guidance was not refreshed. Your current care state remains visible.'],
           );
         }
       } catch {
         if (!cancelled) {
-          setAiInsights([
-            'Your care profile is ready for richer guidance as new readings and care activity are added.',
-            'Keep supported devices synced so InsightCore can provide stronger recommendations.',
-          ]);
+          setAiInsights(['Latest guidance was not refreshed. Your current care state remains visible.']);
         }
       }
     }
@@ -1115,13 +1238,17 @@ export default function HomePage() {
     );
   }, [profile?.allergies]);
 
-  const adherencePct = useMemo(() => {
+  const medicationDerivedAdherencePct = useMemo(() => {
     if (!Array.isArray(meds) || meds.length === 0) return 100;
-    const taken = meds.filter((m) => m?.status === 'Completed').length;
+    const taken = meds.filter((m) => {
+      const status = String(m?.status || '').toLowerCase();
+      return status.includes('completed') || status.includes('taken') || status.includes('active');
+    }).length;
     return Math.round((taken / meds.length) * 100);
   }, [meds]);
 
-  const adherenceSeries = useMemo(() => [82, 86, 89, 87, 91, 94, adherencePct], [adherencePct]);
+  const adherencePct = adherenceOverride ?? medicationDerivedAdherencePct;
+  const hasAdherenceHistory = adherenceHistory.length >= 2;
 
   const todaysPills: Pill[] = useMemo(
     () =>
@@ -1153,6 +1280,11 @@ export default function HomePage() {
   const recoveryScore = useMemo(
     () => computeRecoveryScore(liveVitals, adherencePct, alerts.length),
     [liveVitals, adherencePct, alerts.length],
+  );
+
+  const recoveryLabel = useMemo(
+    () => getRecoveryLabel(recoveryScore),
+    [recoveryScore],
   );
 
   const heroNarrative = useMemo(
@@ -1200,6 +1332,77 @@ export default function HomePage() {
     [liveVitals],
   );
 
+  const vitalsSummaryPanel = (
+    <div className="rounded-[24px] border border-white/72 bg-white/84 p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+            Vitals summary
+          </div>
+          <div className="mt-1 text-base font-semibold text-slate-900">
+            InsightCore summary
+          </div>
+        </div>
+        <div className="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[10px] font-medium text-indigo-700">
+          {liveVitals.lastSync}
+        </div>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
+          <div className="text-slate-400">Pulse</div>
+          <div className="mt-1 font-semibold text-slate-900">{displayVitalNumber(liveVitals.hr, ' bpm')}</div>
+        </div>
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
+          <div className="text-slate-400">SpO₂</div>
+          <div className="mt-1 font-semibold text-slate-900">{displayVitalNumber(liveVitals.spo2, '%')}</div>
+        </div>
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
+          <div className="text-slate-400">BP</div>
+          <div className="mt-1 font-semibold text-slate-900">{displayBp(liveVitals.bp)}</div>
+        </div>
+        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
+          <div className="text-slate-400">Temp</div>
+          <div className="mt-1 font-semibold text-slate-900">{displayTemp(liveVitals.temp)}</div>
+        </div>
+      </div>
+
+      <div className="mt-4">
+        <Link
+          href="/insights"
+          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm"
+        >
+          Open summary
+          <ChevronRight className="h-4 w-4" />
+        </Link>
+      </div>
+    </div>
+  );
+
+  const aiGuidancePanel = (
+    <div className="rounded-[24px] border border-indigo-100/80 bg-gradient-to-br from-indigo-50/70 via-white to-cyan-50/50 p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-indigo-100 bg-white text-indigo-700 shadow-sm">
+          <BrainCircuit className="h-4 w-4" />
+        </div>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-slate-900">AI guidance</div>
+          <div className="mt-1 text-xs leading-5 text-slate-500">
+            InsightCore context for today’s care state.
+          </div>
+        </div>
+      </div>
+      <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
+        {aiInsights.map((item) => (
+          <li key={item} className="flex gap-2">
+            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
+            <span>{item}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+
   return (
     <main
       className={cn(
@@ -1224,8 +1427,7 @@ export default function HomePage() {
 
           <div className="relative z-10 grid gap-8 xl:grid-cols-[1.12fr_0.88fr] xl:items-center">
             <div className="relative z-10">
-              <div className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-sm', moodTheme.badge)}>
-                <ScanHeart className="h-4 w-4" />
+              <div className={cn('inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-sm', moodTheme.badge)}>
                 Ambulant+ Daily Health Brief
               </div>
 
@@ -1242,8 +1444,7 @@ export default function HomePage() {
               </div>
 
               <div className="mt-6 flex flex-wrap items-center gap-3">
-                <div className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium', moodTheme.accentChip)}>
-                  <Sparkles className="h-3.5 w-3.5" />
+                <div className={cn('inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium', moodTheme.accentChip)}>
                   {moodTheme.signalTitle}
                 </div>
                 <div className="text-sm text-slate-500">{moodTheme.signalBody}</div>
@@ -1409,46 +1610,96 @@ export default function HomePage() {
                   </Link>
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-3">
-                  {[
-                    {
-                      icon: HeartPulse,
-                      label: 'Recovery index',
-                      value: `${recoveryScore}/100`,
-                      subtext: hasLiveVitalData(liveVitals)
-                        ? 'Balanced by preferred-source vitals, adherence and live care activity'
-                        : 'Currently estimated from available adherence, alerts and connected-care activity',
-                    },
-                    {
-                      icon: TrendingUp,
-                      label: 'Medication adherence',
-                      value: `${adherencePct}%`,
-                      subtext: 'Consistency remains one of your strongest controllable levers',
-                    },
-                    {
-                      icon: Shield,
-                      label: 'Care confidence',
-                      value: alerts.length
-                        ? `${alerts.length} active alert${alerts.length > 1 ? 's' : ''}`
-                        : 'No active alerts',
-                      subtext: 'Escalations are continuously monitored by your care rules',
-                    },
-                  ].map((item) => (
-                    <motion.div
-                      key={item.label}
-                      {...hoverLift}
-                      className={cn('rounded-[26px] border bg-gradient-to-br p-5 shadow-sm', uiMood === 'alert' ? 'from-rose-50/30 to-white border-white/76' : uiMood === 'watchful' ? 'from-amber-50/30 to-white border-white/76' : 'from-white to-slate-50 border-white/76')}
-                    >
-                      <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 shadow-sm">
-                        <item.icon className="h-5 w-5" />
+                <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                  <motion.div
+                    {...hoverLift}
+                    className={cn(
+                      'rounded-[30px] border bg-gradient-to-br p-5 shadow-sm md:p-6',
+                      uiMood === 'alert'
+                        ? 'border-rose-100 from-rose-50/45 to-white'
+                        : uiMood === 'watchful'
+                          ? 'border-amber-100 from-amber-50/45 to-white'
+                          : 'border-emerald-100 from-emerald-50/70 to-white',
+                    )}
+                  >
+                    <div className="grid min-h-[250px] gap-6 md:grid-cols-[minmax(0,1fr)_170px] md:items-center">
+                      <div className="min-w-0">
+                        <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                          <HeartPulse className="h-3.5 w-3.5" />
+                          Recovery index
+                        </div>
+                        <div className="mt-5 flex items-end gap-3">
+                          <div className="bg-gradient-to-br from-slate-950 via-indigo-700 to-cyan-600 bg-clip-text text-5xl font-semibold tracking-tight text-transparent">
+                            {recoveryScore}
+                          </div>
+                          <div className="pb-2 text-sm font-semibold text-slate-400">/100</div>
+                        </div>
+                        <p className="mt-4 max-w-xl text-sm leading-6 text-slate-600">
+                          {hasLiveVitalData(liveVitals)
+                            ? 'Balanced by preferred-source vitals, adherence and live care activity.'
+                            : 'Estimated from available adherence, alerts and connected-care activity until supported devices are synced.'}
+                        </p>
                       </div>
-                      <div className="mt-4 text-sm font-medium text-slate-500">{item.label}</div>
-                      <div className="mt-1 text-2xl font-semibold text-slate-900">{item.value}</div>
-                      <div className="mt-2 text-sm leading-6 text-slate-600">
-                        {item.subtext}
+
+                      <div className="flex justify-center md:justify-end">
+                        <div className="flex h-[150px] w-[150px] items-center justify-center rounded-[30px] border border-white/80 bg-white/82 shadow-sm">
+                          <MiniMeterDonut
+                            value={recoveryScore}
+                            max={100}
+                            label={recoveryLabel}
+                            unit=""
+                          />
+                        </div>
                       </div>
-                    </motion.div>
-                  ))}
+                    </div>
+                  </motion.div>
+
+                  <div className="grid gap-4">
+                    {[
+                      {
+                        icon: TrendingUp,
+                        label: 'Medication adherence',
+                        value: `${adherencePct}%`,
+                        subtext: hasAdherenceHistory
+                          ? 'Calculated from your recorded medication history.'
+                          : 'Current score shown. Trend appears once enough medication history is available.',
+                      },
+                      {
+                        icon: Shield,
+                        label: 'Care confidence',
+                        value: alerts.length
+                          ? `${alerts.length} active alert${alerts.length > 1 ? 's' : ''}`
+                          : 'No active alerts',
+                        subtext: alerts.length
+                          ? 'Active care signals are visible for review.'
+                          : 'No active escalation is visible from the latest care signals.',
+                      },
+                    ].map((item) => (
+                      <motion.div
+                        key={item.label}
+                        {...hoverLift}
+                        className={cn(
+                          'rounded-[26px] border bg-gradient-to-br p-5 shadow-sm',
+                          uiMood === 'alert'
+                            ? 'from-rose-50/30 to-white border-white/76'
+                            : uiMood === 'watchful'
+                              ? 'from-amber-50/30 to-white border-white/76'
+                              : 'from-white to-slate-50 border-white/76',
+                        )}
+                      >
+                        <div className="flex items-start gap-4">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 shadow-sm">
+                            <item.icon className="h-5 w-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-slate-500">{item.label}</div>
+                            <div className="mt-1 text-2xl font-semibold text-slate-900">{item.value}</div>
+                            <div className="mt-2 text-sm leading-6 text-slate-600">{item.subtext}</div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
@@ -1669,43 +1920,43 @@ export default function HomePage() {
               </Link>
             }
           >
-            {hasLiveVitalData(liveVitals) ? (
-              <>
-                <div className="grid gap-4 sm:grid-cols-3 mb-4">
-                  <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
-                    <MiniMeterDonut value={liveVitals.hr} max={200} unit="bpm" label="Heart rate" />
-                  </div>
-                  <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
-                    <MiniMeterDonut
-                      value={liveVitals.temp as number}
-                      max={45}
-                      unit="°C"
-                      label="Temperature"
-                    />
-                  </div>
-                  <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
-                    <MiniMeterDonut value={liveVitals.spo2} max={100} unit="%" label="SpO₂" />
-                  </div>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {[
-                    ['Heart Rate', displayVitalNumber(liveVitals.hr, ' bpm')],
-                    ['Blood Pressure', displayBp(liveVitals.bp)],
-                    ['Temperature', displayTemp(liveVitals.temp)],
-                    ['Oxygen Saturation', displayVitalNumber(liveVitals.spo2, '%')],
-                  ].map(([label, value]) => (
-                    <div
-                      key={label}
-                      className="flex items-center justify-between rounded-2xl border border-white/72 bg-white/82 px-4 py-3 text-sm"
-                    >
-                      <span className="text-slate-500">{label}</span>
-                      <span className="font-semibold text-slate-900">{value}</span>
+            <div className="space-y-4">
+              {hasLiveVitalData(liveVitals) ? (
+                <>
+                  <div className="grid gap-4 sm:grid-cols-3">
+                    <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
+                      <MiniMeterDonut value={liveVitals.hr} max={200} unit="bpm" label="Heart rate" />
                     </div>
-                  ))}
-                </div>
+                    <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
+                      <MiniMeterDonut
+                        value={liveVitals.temp as number}
+                        max={45}
+                        unit="°C"
+                        label="Temperature"
+                      />
+                    </div>
+                    <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
+                      <MiniMeterDonut value={liveVitals.spo2} max={100} unit="%" label="SpO₂" />
+                    </div>
+                  </div>
 
-                <div className="border-t border-slate-100 pt-4 mt-4">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {[
+                      ['Heart Rate', displayVitalNumber(liveVitals.hr, ' bpm')],
+                      ['Blood Pressure', displayBp(liveVitals.bp)],
+                      ['Temperature', displayTemp(liveVitals.temp)],
+                      ['Oxygen Saturation', displayVitalNumber(liveVitals.spo2, '%')],
+                    ].map(([label, value]) => (
+                      <div
+                        key={label}
+                        className="flex items-center justify-between rounded-2xl border border-white/72 bg-white/82 px-4 py-3 text-sm"
+                      >
+                        <span className="text-slate-500">{label}</span>
+                        <span className="font-semibold text-slate-900">{value}</span>
+                      </div>
+                    ))}
+                  </div>
+
                   <div className="rounded-[28px] border border-white/72 bg-white/82 p-4">
                     <div className="mb-2 flex items-center justify-between gap-2">
                       <div>
@@ -1720,25 +1971,29 @@ export default function HomePage() {
                     </div>
                     <VitalsTrendChart vitals={chartVitals} />
                   </div>
-                </div>
-              </>
-            ) : (
-              <EmptyState
-                icon={ScanHeart}
-                title="Vitals workspace ready"
-                body="Sync a supported Health Monitor reading to activate your live telemetry, trend chart, and InsightCore vitals summary."
-                tone="cyan"
-                action={
-                  <Link
-                    href="/myCare/devices"
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
-                  >
-                    Manage devices
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                }
-              />
-            )}
+                </>
+              ) : (
+                <EmptyState
+                  icon={ScanHeart}
+                  title="Vitals workspace ready"
+                  body="Sync a supported Health Monitor reading to activate your live telemetry, trend chart, and InsightCore vitals summary."
+                  tone="cyan"
+                  action={
+                    <Link
+                      href="/myCare/devices"
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
+                    >
+                      Manage devices
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  }
+                />
+              )}
+
+              {vitalsSummaryPanel}
+
+              {aiGuidancePanel}
+            </div>
           </GlassPanel>
 
           <GlassPanel
@@ -1754,7 +2009,7 @@ export default function HomePage() {
               </Link>
             }
           >
-            <div className="grid gap-4 lg:grid-cols-[0.82fr_1.18fr]">
+            <div className="grid gap-4">
               <div className={cn('rounded-[28px] border bg-gradient-to-br p-4', uiMood === 'alert' ? 'border-rose-100 from-rose-50/55 to-white' : uiMood === 'watchful' ? 'border-amber-100 from-amber-50/55 to-white' : 'border-emerald-100 from-emerald-50/75 to-white')}>
                 <div className="text-sm font-medium text-slate-500">Adherence profile</div>
                 <div className="mt-3 flex items-center justify-center">
@@ -1774,18 +2029,20 @@ export default function HomePage() {
                   <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
                     Trend
                   </div>
-                  <div className="mt-2">
-                    <Sparkline
-                      values={adherenceSeries}
-                      labels={adherenceSeries.map((_, index) => `Day ${index + 1}`)}
-                      height={72}
-                      color="#10B981"
-                      unit="%"
-                      decimals={0}
-                      showArea
-                      showLastValueBadge={false}
-                    />
-                  </div>
+                  {hasAdherenceHistory ? (
+                    <div className="mt-3 space-y-2">
+                      {adherenceHistory.slice(-4).map((point) => (
+                        <div key={`${point.label}-${point.value}`} className="flex items-center justify-between gap-3 text-sm">
+                          <span className="text-slate-500">{point.label}</span>
+                          <span className="font-semibold text-slate-900">{point.value}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm leading-6 text-slate-600">
+                      Adherence trend will appear once enough medication history is available.
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -1801,67 +2058,6 @@ export default function HomePage() {
                   <MedicationsBlockWrapper initialMeds={medicationBlockItems} />
                 </div>
 
-                <div className="mt-4 grid gap-4 xl:grid-cols-[1.02fr_0.98fr]">
-                  <div className="rounded-[24px] border border-white/72 bg-white/84 p-4 shadow-sm">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                          Vitals summary
-                        </div>
-                        <div className="mt-1 text-base font-semibold text-slate-900">
-                          InsightCore summary
-                        </div>
-                      </div>
-                      <div className="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[10px] font-medium text-indigo-700">
-                        {liveVitals.lastSync}
-                      </div>
-                    </div>
-
-                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-                      <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-                        <div className="text-slate-400">Pulse</div>
-                        <div className="mt-1 font-semibold text-slate-900">{displayVitalNumber(liveVitals.hr, ' bpm')}</div>
-                      </div>
-                      <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-                        <div className="text-slate-400">SpO₂</div>
-                        <div className="mt-1 font-semibold text-slate-900">{displayVitalNumber(liveVitals.spo2, '%')}</div>
-                      </div>
-                      <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-                        <div className="text-slate-400">BP</div>
-                        <div className="mt-1 font-semibold text-slate-900">{displayBp(liveVitals.bp)}</div>
-                      </div>
-                      <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-                        <div className="text-slate-400">Temp</div>
-                        <div className="mt-1 font-semibold text-slate-900">{displayTemp(liveVitals.temp)}</div>
-                      </div>
-                    </div>
-
-                    <div className="mt-4">
-                      <Link
-                        href="/insights"
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm"
-                      >
-                        Open summary
-                        <ChevronRight className="h-4 w-4" />
-                      </Link>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[24px] border border-indigo-100 bg-indigo-50/60 p-4 shadow-sm">
-                    <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
-                      <Sparkles className="h-4 w-4 text-indigo-600" />
-                      AI guidance
-                    </div>
-                    <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-                      {aiInsights.map((item) => (
-                        <li key={item} className="flex gap-2">
-                          <span className="mt-1 h-1.5 w-1.5 rounded-full bg-indigo-500" />
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
               </div>
             </div>
           </GlassPanel>
