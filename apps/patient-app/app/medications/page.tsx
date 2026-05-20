@@ -6,6 +6,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { formatDate } from '../../src/lib/date';
 import { computeMedicationAdherence } from '../../src/lib/medication-adherence';
 import { toast } from '../../components/toast';
+import { ensureRemindersPushSubscription } from '@/lib/pushBrowser';
 
 // Reuse the same “homepage-style” visuals (donut + sparkline)
 import MeterDonut from '../../components/charts/AnimatedMeterDonut';
@@ -21,8 +22,8 @@ type Medication = {
   dose: string;
   frequency: string;
   route: string;
-  started: string;
-  lastFilled: string;
+  started: string | null;
+  lastFilled: string | null;
   status: MedicationStatus;
   durationDays?: number | null;
   orderId?: string | null;
@@ -58,8 +59,8 @@ type NewMedForm = {
   dose: string;
   frequency: string;
   route: string;
-  started: string;
-  lastFilled: string;
+  started: string | null;
+  lastFilled: string | null;
   status: MedicationStatus;
   duration: string;
   orderId: string;
@@ -70,6 +71,9 @@ type ReminderStatus = 'Pending' | 'Taken' | 'Missed';
 type Reminder = {
   id: string;
   medicationId?: string | null;
+  name?: string | null;
+  title?: string | null;
+  dose?: string | null;
   status: ReminderStatus;
   scheduledFor?: string;
   takenAt?: string;
@@ -78,9 +82,13 @@ type Reminder = {
   verificationRequired?: boolean;
   verificationStatus?: string | null;
   takenSource?: string | null;
+  snoozedUntil?: string | null;
   createdAt?: string;
   dueAt?: string;
   time?: string;
+  source?: string | null;
+  type?: string | null;
+  category?: string | null;
   meta?: any;
 };
 
@@ -95,10 +103,16 @@ type ReminderAgg = {
   confidencePct: number;
 };
 
-type ReminderSchedule = { id: string; time: string; enabled: boolean };
+type ReminderSchedule = {
+  id: string;
+  time: string;
+  enabled: boolean;
+  label?: string;
+  scheduledFor?: string | null;
+};
 
 /* =========================================================
-   Styles + mocks
+   Styles + constants
 ========================================================= */
 const STATUS_STYLES: Record<MedicationStatus, { chip: string; dot: string }> = {
   Active: {
@@ -135,6 +149,7 @@ const emptyForm: NewMedForm = {
 // derive default times for X doses/day
 function defaultTimesForFrequencyPerDay(freq: number | undefined): string[] {
   if (!freq || freq <= 0) return ['08:00'];
+
   switch (freq) {
     case 1:
       return ['08:00'];
@@ -149,26 +164,523 @@ function defaultTimesForFrequencyPerDay(freq: number | undefined): string[] {
   }
 }
 
-// naive parser: guess times/day from SIG text
+function normalizeSigText(...values: Array<string | null | undefined>) {
+  return values
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean)
+    .join(' ');
+}
+
+// SIG/frequency parser: conservative, deterministic, and safe for patient-facing reminder defaults.
 function guessFrequencyPerDay(freq: string | undefined | null): number | undefined {
-  if (!freq) return undefined;
-  const s = freq.toLowerCase();
+  const s = normalizeSigText(freq);
+  if (!s) return undefined;
 
-  if (s.includes('q6h') || s.includes('every 6 hours')) return 4;
-  if (s.includes('q8h') || s.includes('every 8 hours')) return 3;
-  if (s.includes('q12h') || s.includes('every 12 hours')) return 2;
+  if (/\b(q4h|every\s*4\s*hours?)\b/.test(s)) return 6;
+  if (/\b(q6h|every\s*6\s*hours?)\b/.test(s)) return 4;
+  if (/\b(q8h|every\s*8\s*hours?)\b/.test(s)) return 3;
+  if (/\b(q12h|every\s*12\s*hours?)\b/.test(s)) return 2;
+  if (/\b(q24h|every\s*24\s*hours?)\b/.test(s)) return 1;
 
-  if (s.includes('four times') || s.includes('4 times') || s.includes('qid')) return 4;
-  if (s.includes('three times') || s.includes('3 times') || s.includes('tid') || s.includes('t.i.d')) return 3;
-  if (s.includes('twice') || s.includes('2 times') || s.includes('bid')) return 2;
-
-  if (s.includes('once daily') || s.includes('once a day') || s.includes('od') || s.includes('daily')) return 1;
+  if (/\b(four times|4 times|qid|q\.i\.d)\b/.test(s)) return 4;
+  if (/\b(three times|3 times|tid|t\.i\.d)\b/.test(s)) return 3;
+  if (/\b(twice|2 times|bid|b\.i\.d|bd)\b/.test(s)) return 2;
+  if (/\b(once daily|once a day|daily|od|o\.d|nocte|nightly|mane|morning)\b/.test(s)) return 1;
 
   return undefined;
 }
 
+function inferIntervalHours(freq: string | undefined | null): number | null {
+  const s = normalizeSigText(freq);
+  if (!s) return null;
+
+  const explicit = s.match(/\bevery\s*(\d{1,2})\s*hours?\b/);
+  if (explicit) {
+    const n = Number(explicit[1]);
+    return Number.isFinite(n) && n >= 4 && n <= 24 ? n : null;
+  }
+
+  const qh = s.match(/\bq(\d{1,2})h\b/);
+  if (qh) {
+    const n = Number(qh[1]);
+    return Number.isFinite(n) && n >= 4 && n <= 24 ? n : null;
+  }
+
+  return null;
+}
+
+function parseDateCandidate(value: unknown): Date | null {
+  const raw = safeText(value);
+  if (!raw) return null;
+
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return null;
+
+  return d;
+}
+
+function addMinutes(date: Date, minutes: number) {
+  return new Date(date.getTime() + minutes * 60_000);
+}
+
+function startOfDay(date: Date) {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function setClock(date: Date, hhmm: string) {
+  const [hh, mm] = hhmm.split(':').map((x) => Number(x));
+  const next = new Date(date);
+  next.setHours(Number.isFinite(hh) ? hh : 8, Number.isFinite(mm) ? mm : 0, 0, 0);
+  return next;
+}
+
+function formatHHMM(date: Date) {
+  const hh = String(date.getHours()).padStart(2, '0');
+  const mm = String(date.getMinutes()).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function roundUpToNextQuarter(date: Date) {
+  const next = new Date(date);
+  next.setSeconds(0, 0);
+  const minute = next.getMinutes();
+  const rounded = Math.ceil(minute / 15) * 15;
+
+  if (rounded >= 60) {
+    next.setHours(next.getHours() + 1, 0, 0, 0);
+  } else {
+    next.setMinutes(rounded, 0, 0);
+  }
+
+  return next;
+}
+
+function nextOccurrenceForTime(hhmm: string, from = new Date()) {
+  const today = setClock(from, hhmm);
+  if (today.getTime() >= from.getTime() - 5 * 60_000) return today;
+
+  const tomorrow = new Date(from);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  return setClock(tomorrow, hhmm);
+}
+
+function medicationIsErx(m: Medication) {
+  const source = normalizeSigText(m.source, m.meta?.source, m.meta?.rxSource);
+  return (
+    source.includes('erx') ||
+    source.includes('prescription') ||
+    Boolean(m.orderId) ||
+    Boolean(m.meta?.erxId || m.meta?.rxId || m.meta?.encounterId)
+  );
+}
+
+function inferCarePortFulfilment(m: Medication) {
+  const meta = m.meta && typeof m.meta === 'object' ? m.meta : {};
+  const careport = meta.careport && typeof meta.careport === 'object' ? meta.careport : {};
+  const delivery = meta.delivery && typeof meta.delivery === 'object' ? meta.delivery : {};
+
+  const deliveredAt =
+    parseDateCandidate(careport.deliveredAt) ||
+    parseDateCandidate(careport.completedAt) ||
+    parseDateCandidate(delivery.deliveredAt) ||
+    parseDateCandidate(delivery.completedAt) ||
+    parseDateCandidate(meta.deliveredAt);
+
+  const collectedAt =
+    parseDateCandidate(careport.collectedAt) ||
+    parseDateCandidate(delivery.collectedAt) ||
+    parseDateCandidate(meta.collectedAt);
+
+  const mode = normalizeSigText(
+    careport.mode,
+    careport.fulfilmentMode,
+    delivery.mode,
+    delivery.fulfilmentMode,
+    meta.fulfilmentMode,
+    meta.deliveryMode,
+  );
+
+  if (deliveredAt || mode.includes('delivery') || mode.includes('home')) {
+    return {
+      kind: 'careport_delivery' as const,
+      eventAt: deliveredAt,
+      label: deliveredAt
+        ? 'First dose is anchored shortly after confirmed CarePort delivery.'
+        : 'CarePort delivery detected; confirm the first practical dose time.',
+    };
+  }
+
+  if (collectedAt || mode.includes('collect') || mode.includes('pickup') || mode.includes('pick-up')) {
+    return {
+      kind: 'collection' as const,
+      eventAt: collectedAt,
+      label: collectedAt
+        ? 'First dose is anchored after collection.'
+        : 'Collection/outside fulfilment detected; confirm the first practical dose time.',
+    };
+  }
+
+  return {
+    kind: 'manual_or_unknown' as const,
+    eventAt: null,
+    label: 'Confirm the first practical dose time for this medication.',
+  };
+}
+
+function getDoseTimeLabels(freqText: string | undefined | null, count: number) {
+  const s = normalizeSigText(freqText);
+
+  if (count === 1) {
+    if (/\b(nocte|night|nightly|bedtime|at night)\b/.test(s)) return ['Night'];
+    if (/\b(evening|pm)\b/.test(s)) return ['Evening'];
+    if (/\b(afternoon|noon|midday)\b/.test(s)) return ['Afternoon'];
+    return ['Morning'];
+  }
+
+  if (count === 2) return ['Morning', 'Evening'];
+  if (count === 3) return ['Morning', 'Afternoon', 'Evening'];
+  if (count === 4) return ['Early', 'Midday', 'Evening', 'Night'];
+
+  return Array.from({ length: count }, (_, i) => `Dose ${i + 1}`);
+}
+
+function inferReminderSchedulesForMedication(m: Medication) {
+  const sig = normalizeSigText(m.frequency, m.route, m.dose);
+  const freqPerDay = guessFrequencyPerDay(sig) ?? 1;
+  const intervalHours = inferIntervalHours(sig);
+  const fulfilment = inferCarePortFulfilment(m);
+  const now = new Date();
+
+  const startCandidate =
+    fulfilment.eventAt != null
+      ? addMinutes(fulfilment.eventAt, fulfilment.kind === 'careport_delivery' ? 15 : 30)
+      : parseDateCandidate(m.started) ||
+        parseDateCandidate(m.lastFilled) ||
+        null;
+
+  let firstDose: Date;
+
+  if (startCandidate) {
+    const startIsToday = startOfDay(startCandidate).getTime() === startOfDay(now).getTime();
+    const startIsFuture = startCandidate.getTime() > now.getTime();
+
+    if (startIsFuture || startIsToday) {
+      firstDose = roundUpToNextQuarter(startCandidate.getTime() < now.getTime() ? addMinutes(now, 30) : startCandidate);
+    } else {
+      firstDose = nextOccurrenceForTime(defaultTimesForFrequencyPerDay(freqPerDay)[0], now);
+    }
+  } else if (medicationIsErx(m)) {
+    firstDose = roundUpToNextQuarter(addMinutes(now, 30));
+  } else {
+    firstDose = nextOccurrenceForTime(defaultTimesForFrequencyPerDay(freqPerDay)[0], now);
+  }
+
+  const labels = getDoseTimeLabels(sig, freqPerDay);
+  const times =
+    intervalHours && freqPerDay > 1
+      ? Array.from({ length: freqPerDay }, (_, index) => addMinutes(firstDose, index * intervalHours * 60))
+      : defaultTimesForFrequencyPerDay(freqPerDay).map((time, index) =>
+          index === 0 && (fulfilment.eventAt || medicationIsErx(m))
+            ? firstDose
+            : nextOccurrenceForTime(time, now),
+        );
+
+  const seen = new Set<string>();
+  const schedules = times
+    .map((date, index): ReminderSchedule => {
+      const hhmm = formatHHMM(date);
+      return {
+        id: `sch-${Date.now()}-${index}`,
+        time: hhmm,
+        scheduledFor: date.toISOString(),
+        enabled: !seen.has(hhmm),
+        label: labels[index] ?? `Dose ${index + 1}`,
+      };
+    })
+    .filter((schedule) => {
+      if (seen.has(schedule.time)) return false;
+      seen.add(schedule.time);
+      return true;
+    });
+
+  return {
+    freqPerDay,
+    intervalHours,
+    fulfilment,
+    firstDoseIso: firstDose.toISOString(),
+    schedules: schedules.length ? schedules : [{ id: `sch-${Date.now()}-0`, time: '08:00', scheduledFor: nextOccurrenceForTime('08:00').toISOString(), enabled: true, label: 'Morning' }],
+  };
+}
+
+function reminderVerificationDefault(m: Medication) {
+  if (typeof m.meta?.verificationRequiredDefault === 'boolean') return m.meta.verificationRequiredDefault;
+  if (typeof m.meta?.verificationRequired === 'boolean') return m.meta.verificationRequired;
+
+  return medicationIsErx(m);
+}
+
+function reminderManualEarlierDefault(m: Medication) {
+  if (typeof m.meta?.manualEarlierLoggingAllowed === 'boolean') {
+    return m.meta.manualEarlierLoggingAllowed;
+  }
+
+  return true;
+}
+
+async function postJsonWithResult(url: string, method: 'POST' | 'PUT' | 'PATCH', body: unknown) {
+  const res = await fetch(url, {
+    method,
+    headers: { 'content-type': 'application/json' },
+    cache: 'no-store',
+    body: JSON.stringify(body ?? {}),
+  });
+
+  const raw = await res.text().catch(() => '');
+  let data: any = null;
+
+  if (raw) {
+    try {
+      data = JSON.parse(raw);
+    } catch {
+      data = { raw };
+    }
+  }
+
+  const ok = res.ok && !(data && typeof data === 'object' && data.ok === false);
+  return { res, data, ok };
+}
+
+async function createMedicationReminders(items: any[]) {
+  const attempts: Array<{ method: 'POST' | 'PUT'; body: unknown; label: string }> = [
+    {
+      method: 'POST',
+      body: { action: 'create', reminders: items },
+      label: 'post_action_create',
+    },
+    {
+      method: 'POST',
+      body: { reminders: items, items },
+      label: 'post_wrapped_items',
+    },
+    {
+      method: 'PUT',
+      body: items,
+      label: 'put_legacy_array',
+    },
+  ];
+
+  let last: { data: any; status: number; label: string } | null = null;
+
+  for (const attempt of attempts) {
+    const result = await postJsonWithResult('/api/reminders', attempt.method, attempt.body);
+
+    if (result.ok) {
+      return {
+        ok: true,
+        data: result.data,
+        status: result.res.status,
+        label: attempt.label,
+      };
+    }
+
+    last = {
+      data: result.data,
+      status: result.res.status,
+      label: attempt.label,
+    };
+
+    if (![400, 404, 405, 409, 422].includes(result.res.status)) break;
+  }
+
+  return {
+    ok: false,
+    data: last?.data,
+    status: last?.status ?? 0,
+    label: last?.label ?? 'not_attempted',
+  };
+}
+
+
+async function ensureMedicationReminderPushEnabled() {
+  if (typeof window === 'undefined') return;
+
+  try {
+    if (!('Notification' in window)) return;
+
+    if (window.Notification.permission === 'default') {
+      const permission = await window.Notification.requestPermission();
+      if (permission !== 'granted') return;
+    }
+
+    if (window.Notification.permission !== 'granted') return;
+
+    await ensureRemindersPushSubscription();
+  } catch (err) {
+    console.error('Medication reminder push setup failed', err);
+  }
+}
+
+function getWeekBucket(date: Date | null) {
+  if (!date) return 'Unscheduled';
+
+  const today = startOfDay(new Date()).getTime();
+  const day = startOfDay(date).getTime();
+  const diff = Math.round((day - today) / (24 * 60 * 60 * 1000));
+
+  if (diff < 0) return 'Overdue';
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Tomorrow';
+  if (diff >= 2 && diff <= 6) {
+    return date.toLocaleDateString(undefined, { weekday: 'long' });
+  }
+
+  return 'Later';
+}
+
+
+function getReminderDisplayName(reminder: Reminder) {
+  return safeText(reminder.name ?? reminder.title ?? reminder.meta?.name ?? reminder.meta?.title) || 'Medication reminder';
+}
+
+function getReminderDose(reminder: Reminder) {
+  return safeText(reminder.dose ?? reminder.meta?.dose);
+}
+
+function getReminderStatus(reminder: Reminder) {
+  return safeText(reminder.status).toLowerCase();
+}
+
+function isMedicationReminder(reminder: Reminder) {
+  const source = normalizeSigText(reminder.source, reminder.type, reminder.category, reminder.meta?.source, reminder.meta?.type, reminder.meta?.category);
+  return (
+    source.includes('medication') ||
+    source.includes('pill') ||
+    Boolean(reminder.medicationId)
+  );
+}
+
+function getReminderDueDate(reminder: Reminder) {
+  return (
+    parseDateCandidate(reminder.snoozedUntil) ||
+    parseDateCandidate(reminder.dueAt) ||
+    parseDateCandidate(reminder.scheduledFor) ||
+    (reminder.time ? nextOccurrenceForTime(reminder.time) : null)
+  );
+}
+
+function formatDueLabel(reminder: Reminder) {
+  const due = getReminderDueDate(reminder);
+  if (!due) return reminder.time || 'Time not set';
+
+  const today = startOfDay(new Date()).getTime();
+  const dueDay = startOfDay(due).getTime();
+  const time = due.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
+  if (dueDay === today) return `Today · ${time}`;
+  if (dueDay === today + 24 * 60 * 60 * 1000) return `Tomorrow · ${time}`;
+
+  return due.toLocaleString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function reminderRequiresCamera(reminder: Reminder) {
+  return Boolean(reminder.verificationRequired ?? reminder.meta?.verificationRequired);
+}
+
+function timeToIsoToday(hhmm: string) {
+  const target = setClock(new Date(), hhmm || formatHHMM(new Date()));
+  return target.toISOString();
+}
+
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
+}
+
+function safeText(value: unknown): string {
+  return value == null ? '' : String(value).trim();
+}
+
+function safeIsoDate(value: unknown): string | null {
+  const raw = safeText(value);
+  if (!raw) return null;
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  return raw;
+}
+
+function safeDateInputValue(value: unknown): string {
+  const raw = safeText(value);
+  if (!raw) return '';
+
+  const parsed = new Date(raw);
+  if (Number.isNaN(parsed.getTime())) return '';
+
+  return raw.slice(0, 10);
+}
+
+function safeFormatDate(value: unknown, fallback = 'Not recorded'): string {
+  const iso = safeIsoDate(value);
+  if (!iso) return fallback;
+
+  try {
+    return formatDate(iso);
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeStatus(value: unknown): MedicationStatus {
+  const raw = safeText(value).toLowerCase();
+
+  if (raw === 'completed' || raw === 'taken' || raw === 'stopped' || raw === 'inactive') {
+    return 'Completed';
+  }
+
+  if (raw === 'on hold' || raw === 'hold' || raw === 'paused' || raw === 'pause') {
+    return 'On Hold';
+  }
+
+  return 'Active';
+}
+
+function normalizeMedication(item: unknown, index: number): Medication | null {
+  if (!item || typeof item !== 'object') return null;
+
+  const record = item as Record<string, any>;
+  const id = safeText(record.id ?? record.medicationId ?? record.orderId);
+  const name = safeText(record.name ?? record.drug ?? record.display ?? record.title);
+
+  if (!id || !name) return null;
+
+  return {
+    id,
+    name,
+    dose: safeText(record.dose),
+    frequency: safeText(record.frequency),
+    route: safeText(record.route),
+    started: safeIsoDate(record.started ?? record.startedAt ?? record.startDate),
+    lastFilled: safeIsoDate(record.lastFilled ?? record.filledAt ?? record.dispensedAt),
+    status: normalizeStatus(record.status),
+    durationDays:
+      typeof record.durationDays === 'number' && Number.isFinite(record.durationDays)
+        ? record.durationDays
+        : record.durationDays == null || record.durationDays === ''
+          ? null
+          : Number.isFinite(Number(record.durationDays))
+            ? Number(record.durationDays)
+            : null,
+    orderId: record.orderId == null ? null : safeText(record.orderId) || null,
+    source: record.source == null ? null : safeText(record.source) || null,
+    meta: record.meta ?? null,
+  };
 }
 
 // deterministic trend series derived from the current adherence percentage
@@ -287,7 +799,7 @@ function GhostButton(props: {
 }
 
 function Icon(props: {
-  name: 'plus' | 'sync' | 'printer' | 'x' | 'search' | 'bolt' | 'clock' | 'pill' | 'check' | 'warn';
+  name: 'plus' | 'sync' | 'printer' | 'x' | 'search' | 'bolt' | 'clock' | 'pill' | 'check' | 'warn' | 'camera';
   className?: string;
 }) {
   const common = cx('h-4 w-4', props.className);
@@ -372,6 +884,13 @@ function Icon(props: {
             strokeWidth="2"
             strokeLinejoin="round"
           />
+        </svg>
+      );
+    case 'camera':
+      return (
+        <svg className={common} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M4 8a3 3 0 0 1 3-3h1.2l1.4-2h4.8l1.4 2H17a3 3 0 0 1 3 3v9a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3V8Z" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
+          <path d="M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" strokeWidth="2" />
         </svg>
       );
     default:
@@ -582,6 +1101,14 @@ export default function MedicationsPage() {
   const [requireCameraVerification, setRequireCameraVerification] = useState(true);
   const [allowManualEarlierTaken, setAllowManualEarlierTaken] = useState(true);
 
+  const [takeModalOpen, setTakeModalOpen] = useState(false);
+  const [takeSelectedReminderId, setTakeSelectedReminderId] = useState<string>('');
+  const [takeUseCameraVerification, setTakeUseCameraVerification] = useState(false);
+  const [takeEarlierMode, setTakeEarlierMode] = useState(false);
+  const [takeEarlierTime, setTakeEarlierTime] = useState(formatHHMM(new Date()));
+  const [takeBusy, setTakeBusy] = useState(false);
+  const [todaysPillsDrawerOpen, setTodaysPillsDrawerOpen] = useState(false);
+
   /* ------------------------------
      Load medications
   --------------------------------*/
@@ -594,7 +1121,7 @@ export default function MedicationsPage() {
         if (!res.ok) throw new Error('Failed to load medications');
         const data = (await res.json()) as Medication[] | { items?: Medication[] };
         const list = Array.isArray(data) ? data : data.items ?? [];
-        setMeds(list);
+        setMeds(list.map(normalizeMedication).filter(Boolean) as Medication[]);
       } catch (err) {
         console.error('Error loading medications:', err);
         setLoadError('Unable to load medications from the server.');
@@ -836,6 +1363,73 @@ export default function MedicationsPage() {
 
   const adherenceSeries = useMemo(() => buildTrendSeries(adherence.weightedPct, meds.length + medStats.active * 11), [adherence.weightedPct, meds.length, medStats.active]);
 
+  const nextDueMedicationReminders = useMemo(
+    () =>
+      remindersAll
+        .filter((reminder) => isMedicationReminder(reminder))
+        .filter((reminder) => ['pending', 'scheduled', 'due'].some((status) => getReminderStatus(reminder).includes(status)))
+        .slice()
+        .sort((a, b) => {
+          const aTime = getReminderDueDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+          const bTime = getReminderDueDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+          return aTime - bTime;
+        })
+        .slice(0, 5),
+    [remindersAll],
+  );
+
+  const selectedTakeReminder = useMemo(
+    () => nextDueMedicationReminders.find((reminder) => reminder.id === takeSelectedReminderId) ?? null,
+    [nextDueMedicationReminders, takeSelectedReminderId],
+  );
+
+  const todaysMedicationReminders = useMemo(
+    () =>
+      remindersAll
+        .filter((reminder) => isMedicationReminder(reminder))
+        .filter((reminder) => ['pending', 'scheduled', 'due'].some((status) => getReminderStatus(reminder).includes(status)))
+        .filter((reminder) => {
+          const due = getReminderDueDate(reminder);
+          return due ? startOfDay(due).getTime() === startOfDay(new Date()).getTime() : true;
+        })
+        .slice()
+        .sort((a, b) => {
+          const aTime = getReminderDueDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+          const bTime = getReminderDueDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+          return aTime - bTime;
+        }),
+    [remindersAll],
+  );
+
+  const weeklyMedicationOrganizer = useMemo(() => {
+    const buckets = new Map<string, Reminder[]>();
+
+    remindersAll
+      .filter((reminder) => isMedicationReminder(reminder))
+      .filter((reminder) => ['pending', 'scheduled', 'due'].some((status) => getReminderStatus(reminder).includes(status)))
+      .forEach((reminder) => {
+        const bucket = getWeekBucket(getReminderDueDate(reminder));
+        if (!buckets.has(bucket)) buckets.set(bucket, []);
+        buckets.get(bucket)!.push(reminder);
+      });
+
+    const order = ['Overdue', 'Today', 'Tomorrow', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday', 'Later', 'Unscheduled'];
+
+    return Array.from(buckets.entries())
+      .sort((a, b) => order.indexOf(a[0]) - order.indexOf(b[0]))
+      .map(([label, items]) => ({
+        label,
+        items: items
+          .slice()
+          .sort((a, b) => {
+            const aTime = getReminderDueDate(a)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+            const bTime = getReminderDueDate(b)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+            return aTime - bTime;
+          })
+          .slice(0, 4),
+      }));
+  }, [remindersAll]);
+
   /* =========================================================
      Actions
   ========================================================= */
@@ -942,7 +1536,6 @@ export default function MedicationsPage() {
 
     setIsSubmitting(true);
 
-    const tempId = `temp-${Date.now()}`;
     const durationDays =
       form.duration.trim() === ''
         ? null
@@ -955,8 +1548,8 @@ export default function MedicationsPage() {
       dose: form.dose.trim() || null,
       frequency: form.frequency.trim() || null,
       route: form.route.trim() || null,
-      started: form.started,
-      lastFilled: form.lastFilled,
+      started: safeIsoDate(form.started),
+      lastFilled: safeIsoDate(form.lastFilled),
       status: form.status,
       durationDays,
       orderId: form.orderId.trim() || null,
@@ -975,27 +1568,26 @@ export default function MedicationsPage() {
       }
 
       const data = await res.json().catch(() => null);
-      const created: Medication =
-        data && (data as any).id
-          ? ({ ...payload, ...(data as Partial<Medication>) } as Medication)
-          : (data as any)?.med?.id
-            ? ({ ...payload, ...((data as any).med as Partial<Medication>) } as Medication)
-            : {
-                id: tempId,
-                name: payload.name,
-                dose: payload.dose ?? '',
-                frequency: payload.frequency ?? '',
-                route: payload.route ?? '',
-                started: payload.started,
-                lastFilled: payload.lastFilled,
-                status: payload.status,
-                durationDays: payload.durationDays,
-                orderId: payload.orderId,
-                source: payload.source,
-              };
+      const createdSource =
+        data && typeof data === 'object'
+          ? (data as any).med ?? (data as any).item ?? data
+          : null;
 
       toast('Medication added', { type: 'success' });
-      setMeds((prev) => [...prev, created]);
+      const normalizedCreated = normalizeMedication(
+        createdSource && typeof createdSource === 'object'
+          ? { ...payload, ...createdSource }
+          : createdSource,
+        meds.length,
+      );
+
+      if (normalizedCreated) {
+        setMeds((prev) => [...prev, normalizedCreated]);
+      } else {
+        const refreshed = await fetch('/api/medications', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+        const refreshedList = Array.isArray(refreshed) ? refreshed : Array.isArray(refreshed?.items) ? refreshed.items : [];
+        setMeds(refreshedList.map(normalizeMedication).filter(Boolean) as Medication[]);
+      }
       setIsCreateOpen(false);
     } catch (err) {
       console.error('Error creating medication:', err);
@@ -1023,8 +1615,6 @@ export default function MedicationsPage() {
     let hadError = false;
 
     for (const item of selected) {
-      const tempId = `temp-${Date.now()}-${item.id}`;
-
       const payload: any = {
         name: item.name,
         dose: item.dose,
@@ -1039,21 +1629,6 @@ export default function MedicationsPage() {
         meta: item.encounterId ? { encounterId: item.encounterId } : undefined,
       };
 
-      let created: Medication = {
-        id: tempId,
-        name: payload.name,
-        dose: payload.dose ?? '',
-        frequency: payload.frequency ?? '',
-        route: payload.route ?? '',
-        started: payload.started,
-        lastFilled: payload.lastFilled,
-        status: payload.status,
-        durationDays: payload.durationDays,
-        orderId: payload.orderId,
-        source: payload.source,
-        meta: payload.meta,
-      };
-
       try {
         const res = await fetch('/api/medications', {
           method: 'POST',
@@ -1063,8 +1638,20 @@ export default function MedicationsPage() {
 
         if (res.ok) {
           const data = await res.json().catch(() => null);
-          if (data && (data as any).id) created = { ...created, ...(data as Partial<Medication>) };
-          else if ((data as any)?.med?.id) created = { ...created, ...((data as any).med as Partial<Medication>) };
+          const createdSource =
+            data && typeof data === 'object'
+              ? (data as any).med ?? (data as any).item ?? data
+              : null;
+          const normalizedCreated = normalizeMedication(
+            createdSource && typeof createdSource === 'object'
+              ? { ...payload, ...createdSource }
+              : createdSource,
+            createdMeds.length,
+          );
+
+          if (normalizedCreated) {
+            createdMeds.push(normalizedCreated);
+          }
         } else {
           hadError = true;
         }
@@ -1072,16 +1659,18 @@ export default function MedicationsPage() {
         console.error('Error creating medication from eRx:', err);
         hadError = true;
       }
-
-      if (!hadError) {
-        createdMeds.push(created);
-      }
     }
 
     if (hadError) {
       toast('Some prescriptions could not be synced. Please try again.', { type: 'error' });
     } else {
-      setMeds((prev) => [...prev, ...createdMeds]);
+      if (createdMeds.length > 0) {
+        setMeds((prev) => [...createdMeds, ...prev]);
+      } else {
+        const refreshed = await fetch('/api/medications', { cache: 'no-store' }).then((r) => r.json()).catch(() => null);
+        const refreshedList = Array.isArray(refreshed) ? refreshed : Array.isArray(refreshed?.items) ? refreshed.items : [];
+        setMeds(refreshedList.map(normalizeMedication).filter(Boolean) as Medication[]);
+      }
       setIsCreateOpen(false);
       toast('Medications added from eRx', { type: 'success' });
     }
@@ -1133,8 +1722,8 @@ export default function MedicationsPage() {
       dose: String(editDraft.dose ?? original.dose).trim(),
       frequency: String(editDraft.frequency ?? original.frequency).trim(),
       route: String(editDraft.route ?? original.route).trim(),
-      started: (editDraft.started as string) ?? original.started,
-      lastFilled: (editDraft.lastFilled as string) ?? original.lastFilled,
+      started: safeIsoDate((editDraft.started as string) ?? original.started),
+      lastFilled: safeIsoDate((editDraft.lastFilled as string) ?? original.lastFilled),
       status: (editDraft.status as MedicationStatus) ?? original.status,
       durationDays:
         typeof editDraft.durationDays === 'number'
@@ -1186,30 +1775,33 @@ export default function MedicationsPage() {
   --------------------------------*/
   function openReminderFor(m: Medication) {
     setReminderMed(m);
-    setRequireCameraVerification(Boolean(m.meta?.verificationRequiredDefault ?? true));
-    setAllowManualEarlierTaken(Boolean(m.meta?.manualEarlierLoggingAllowed ?? true));
+    setRequireCameraVerification(reminderVerificationDefault(m));
+    setAllowManualEarlierTaken(reminderManualEarlierDefault(m));
 
-    const freqPerDay = guessFrequencyPerDay(m.frequency);
-    setReminderFreqPerDay(freqPerDay);
-
-    const times = defaultTimesForFrequencyPerDay(freqPerDay);
-    const scheds: ReminderSchedule[] = times.map((t, idx) => ({
-      id: `sch-${Date.now()}-${idx}`,
-      time: t,
-      enabled: true,
-    }));
-    setReminderSchedules(scheds);
+    const plan = inferReminderSchedulesForMedication(m);
+    setReminderFreqPerDay(plan.freqPerDay);
+    setReminderSchedules(plan.schedules);
   }
 
-  function closeReminder() {
-    if (reminderBusy) return;
+  function closeReminder(force = false) {
+    if (reminderBusy && !force) return;
     setReminderMed(null);
     setReminderSchedules([]);
     setReminderFreqPerDay(undefined);
   }
 
   function updateSchedule(id: string, time: string) {
-    setReminderSchedules((prev) => prev.map((s) => (s.id === id ? { ...s, time } : s)));
+    setReminderSchedules((prev) =>
+      prev.map((s) =>
+        s.id === id
+          ? {
+              ...s,
+              time,
+              scheduledFor: nextOccurrenceForTime(time).toISOString(),
+            }
+          : s,
+      ),
+    );
   }
 
   function toggleSchedule(id: string) {
@@ -1217,7 +1809,16 @@ export default function MedicationsPage() {
   }
 
   function addSchedule() {
-    setReminderSchedules((prev) => [...prev, { id: `sch-${Date.now()}`, time: '08:00', enabled: true }]);
+    setReminderSchedules((prev) => [
+      ...prev,
+      {
+        id: `sch-${Date.now()}`,
+        time: '08:00',
+        scheduledFor: nextOccurrenceForTime('08:00').toISOString(),
+        enabled: true,
+        label: `Dose ${prev.length + 1}`,
+      },
+    ]);
   }
 
   function removeSchedule(id: string) {
@@ -1228,56 +1829,198 @@ export default function MedicationsPage() {
     e.preventDefault();
     if (!reminderMed) return;
 
+    if (!reminderMed.id || reminderMed.id.startsWith('temp-')) {
+      toast('Save this medication first before creating reminders.', { type: 'error' });
+      return;
+    }
+
     const active = reminderSchedules.filter((s) => s.enabled && s.time);
     if (active.length === 0) {
       toast('Add at least one time for this reminder.', { type: 'error' });
       return;
     }
 
+    const plan = inferReminderSchedulesForMedication(reminderMed);
+    const medicationSource = medicationIsErx(reminderMed) ? 'erx' : 'manual';
+    const fulfilment = inferCarePortFulfilment(reminderMed);
+
     setReminderBusy(true);
     try {
-      const items = active.map((s) => ({
-        name: reminderMed.name,
-        dose: reminderMed.dose || null,
-        time: s.time,
-        status: 'Pending',
-        source: 'medication',
-        medicationId: reminderMed.id.startsWith('temp-') ? undefined : reminderMed.id,
-        verificationRequired: requireCameraVerification,
-        verificationMode: requireCameraVerification ? 'CAMERA_SEQUENCE' : 'NONE',
-        verificationStatus: requireCameraVerification ? 'PENDING' : 'NOT_REQUIRED',
-        takenSource: 'NONE',
-        meta: {
-          durationDays: reminderMed.durationDays ?? null,
-          frequencyPerDay: active.length,
+      const items = active.map((s, index) => {
+        const scheduledFor = s.scheduledFor || nextOccurrenceForTime(s.time).toISOString();
+
+        return {
+          name: reminderMed.name,
+          title: reminderMed.name,
+          dose: reminderMed.dose || null,
+          time: s.time,
+          dueAt: scheduledFor,
+          scheduledFor,
+          status: 'Pending',
+          source: 'medication',
+          type: 'pill',
+          category: 'medication',
+          medicationId: reminderMed.id,
+          orderId: reminderMed.orderId ?? null,
           verificationRequired: requireCameraVerification,
           verificationMode: requireCameraVerification ? 'CAMERA_SEQUENCE' : 'NONE',
-          manualEarlierLoggingAllowed: allowManualEarlierTaken,
-        },
-        durationDays: reminderMed.durationDays ?? null,
-        frequencyPerDay: active.length,
-      }));
-
-      const res = await fetch('/api/reminders', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(items),
+          verificationStatus: requireCameraVerification ? 'PENDING' : 'NOT_REQUIRED',
+          takenSource: 'NONE',
+          durationDays: reminderMed.durationDays ?? null,
+          frequencyPerDay: active.length,
+          meta: {
+            medicationSource,
+            prescriptionSource: reminderMed.source ?? null,
+            orderId: reminderMed.orderId ?? null,
+            erxId: reminderMed.meta?.erxId ?? reminderMed.meta?.rxId ?? null,
+            encounterId: reminderMed.meta?.encounterId ?? null,
+            sig: reminderMed.frequency || null,
+            route: reminderMed.route || null,
+            durationDays: reminderMed.durationDays ?? null,
+            frequencyPerDay: active.length,
+            inferredFrequencyPerDay: plan.freqPerDay,
+            intervalHours: plan.intervalHours,
+            doseSlotLabel: s.label ?? `Dose ${index + 1}`,
+            firstDoseAt: plan.firstDoseIso,
+            activationContext: fulfilment.kind,
+            activationNote: fulfilment.label,
+            fulfilmentEventAt: fulfilment.eventAt?.toISOString?.() ?? null,
+            verificationRequired: requireCameraVerification,
+            verificationMode: requireCameraVerification ? 'CAMERA_SEQUENCE' : 'NONE',
+            manualEarlierLoggingAllowed: allowManualEarlierTaken,
+            generatedBy: 'patient_medications_reminder_scheduler',
+          },
+        };
       });
-      const data = await res.json().catch(() => null);
 
-      if (!res.ok || (data && data.ok === false)) {
-        toast(data?.error || 'Could not create reminder. Please try again later.', { type: 'error' });
+      const result = await createMedicationReminders(items);
+
+      if (!result.ok) {
+        console.error('Reminder create failed', result);
+        const message =
+          result.data?.message ||
+          result.data?.error ||
+          `Could not create reminder. Reminder service returned ${result.status || 'no response'}.`;
+        toast(message, { type: 'error' });
         return;
       }
 
       toast('Reminder(s) created', { type: 'success' });
-      closeReminder();
-      reloadReminders();
+      void ensureMedicationReminderPushEnabled();
+      setReminderBusy(false);
+      closeReminder(true);
+      await reloadReminders();
     } catch (err) {
       console.error('Error creating reminder:', err);
       toast('Network error creating reminder', { type: 'error' });
     } finally {
       setReminderBusy(false);
+    }
+  }
+
+
+  function openTakeMedication() {
+    const first = nextDueMedicationReminders[0] ?? null;
+    setTakeSelectedReminderId(first?.id ?? '');
+    setTakeUseCameraVerification(first ? reminderRequiresCamera(first) : false);
+    setTakeEarlierMode(false);
+    setTakeEarlierTime(formatHHMM(new Date()));
+    setTakeModalOpen(true);
+  }
+
+  function closeTakeMedication(force = false) {
+    if (takeBusy && !force) return;
+    setTakeModalOpen(false);
+    setTakeSelectedReminderId('');
+    setTakeUseCameraVerification(false);
+    setTakeEarlierMode(false);
+  }
+
+  async function startReminderCameraVerification(reminder: Reminder) {
+    if (typeof navigator !== 'undefined' && navigator.mediaDevices?.getUserMedia) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        stream.getTracks().forEach((track) => track.stop());
+      } catch (err) {
+        throw new Error('Camera permission was not granted. Please allow camera access and try again.');
+      }
+    }
+
+    const res = await fetch('/api/medication-verifications/start', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        reminderId: reminder.id,
+        medicationId: reminder.medicationId ?? null,
+        requiredMode: 'CAMERA_SEQUENCE',
+      }),
+    });
+
+    const data = await res.json().catch(() => null);
+
+    if (!res.ok || !data?.ok || !data?.sessionId) {
+      throw new Error(data?.error || data?.message || 'Could not start camera verification.');
+    }
+
+    window.location.href = `/reminder/verify?reminderId=${encodeURIComponent(reminder.id)}&sessionId=${encodeURIComponent(data.sessionId)}&returnTo=${encodeURIComponent('/medications')}`;
+  }
+
+  async function confirmReminderTaken(reminder: Reminder) {
+    const takenAt = takeEarlierMode ? timeToIsoToday(takeEarlierTime) : new Date().toISOString();
+    const payload = {
+      action: 'confirm',
+      ids: [reminder.id],
+      id: reminder.id,
+      takenAt,
+      takenSource: 'SELF_REPORTED',
+      verificationStatus: 'SELF_REPORTED',
+      reason: takeEarlierMode ? 'already_taken_earlier' : 'manual_confirmation',
+    };
+
+    const result = await postJsonWithResult('/api/reminders', 'POST', payload);
+
+    if (!result.ok) {
+      throw new Error(result.data?.error || result.data?.message || 'Could not record this dose.');
+    }
+
+    setRemindersAll((prev) =>
+      prev.map((item) =>
+        item.id === reminder.id
+          ? {
+              ...item,
+              status: 'Taken',
+              takenAt,
+              reportedTakenAt: takenAt,
+              takenSource: 'SELF_REPORTED',
+              verificationStatus: 'SELF_REPORTED',
+            }
+          : item,
+      ),
+    );
+  }
+
+  async function handleTakeMedication() {
+    if (!selectedTakeReminder) {
+      toast('Choose a medication reminder first.', { type: 'error' });
+      return;
+    }
+
+    setTakeBusy(true);
+    try {
+      if (takeUseCameraVerification) {
+        await startReminderCameraVerification(selectedTakeReminder);
+        return;
+      }
+
+      await confirmReminderTaken(selectedTakeReminder);
+      toast('Dose recorded', { type: 'success' });
+      closeTakeMedication(true);
+      await reloadReminders();
+    } catch (err: any) {
+      console.error('Take medication failed', err);
+      toast(err?.message || 'Could not record this dose.', { type: 'error' });
+    } finally {
+      setTakeBusy(false);
     }
   }
 
@@ -1342,6 +2085,15 @@ export default function MedicationsPage() {
 
             <div className="flex flex-wrap gap-2 justify-start sm:justify-end">
               <Button
+                onClick={openTakeMedication}
+                className="bg-emerald-600 text-white hover:bg-emerald-700"
+                title="Record a medication dose due now"
+              >
+                <Icon name="pill" />
+                Take medication
+              </Button>
+
+              <Button
                 onClick={openSyncLatestErx}
                 className="bg-slate-900 text-white hover:bg-slate-800"
                 title="Sync prescriptions from your latest eRx encounter"
@@ -1350,10 +2102,14 @@ export default function MedicationsPage() {
                 Sync latest eRx
               </Button>
 
-              <Button onClick={openCreate} className="bg-emerald-600 text-white hover:bg-emerald-700" title="Add a medication manually">
+              <Link
+                href="/medications/new"
+                className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-semibold text-slate-800 ring-1 ring-slate-200 transition hover:bg-slate-50"
+                title="Add OTC, external eRx, upload an eRx document, or sync from Ambulant+ eRx"
+              >
                 <Icon name="plus" />
                 Add Medication
-              </Button>
+              </Link>
 
               <Link
                 href="/medications/print"
@@ -1378,9 +2134,8 @@ export default function MedicationsPage() {
               ]}
             />
 
-            <div className="text-xs text-slate-500 flex items-center gap-2">
-              <Icon name="bolt" className="h-4 w-4" />
-              Pro tip: create reminders for every daily med, then the adherence score becomes meaningful.
+            <div className="rounded-full border border-slate-200 bg-white/75 px-3 py-1.5 text-xs font-medium text-slate-500">
+              Tip: create reminders for active daily medications so adherence reflects real dosing activity.
             </div>
           </div>
         </div>
@@ -1513,9 +2268,14 @@ export default function MedicationsPage() {
                 </p>
 
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <Button onClick={() => setActiveTab('list')} className="bg-emerald-600 text-white hover:bg-emerald-700">
-                    Review list
+                  <Button onClick={openTakeMedication} className="bg-emerald-600 text-white hover:bg-emerald-700">
+                    <Icon name="pill" />
+                    Take medication
                   </Button>
+
+                  <GhostButton onClick={() => setActiveTab('list')}>
+                    Review list
+                  </GhostButton>
 
                   <GhostButton onClick={openSyncLatestErx}>
                     <Icon name="sync" />
@@ -1540,6 +2300,18 @@ export default function MedicationsPage() {
                 <p className="mt-2 text-xs text-sky-800/80">
                   If this number feels high, create reminders only for active daily meds — and archive meds you’ve stopped.
                 </p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    onClick={openTakeMedication}
+                    className="bg-emerald-600 px-3 py-2 text-xs text-white hover:bg-emerald-700"
+                  >
+                    <Icon name="pill" />
+                    Take due pill
+                  </Button>
+                  <GhostButton onClick={() => setTodaysPillsDrawerOpen(true)} className="text-xs">
+                    View today’s pills
+                  </GhostButton>
+                </div>
               </div>
 
               <div className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -1558,6 +2330,48 @@ export default function MedicationsPage() {
                     Use “Print” before an appointment.
                   </li>
                 </ul>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-bold text-slate-900">This week</div>
+                    <div className="mt-1 text-xs text-slate-500">Upcoming medication reminders grouped by day.</div>
+                  </div>
+                  <GhostButton onClick={() => setTodaysPillsDrawerOpen(true)} className="text-xs">Open drawer</GhostButton>
+                </div>
+
+                {weeklyMedicationOrganizer.length === 0 ? (
+                  <div className="mt-3 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
+                    No medication reminders are scheduled yet.
+                  </div>
+                ) : (
+                  <div className="mt-3 space-y-3">
+                    {weeklyMedicationOrganizer.slice(0, 4).map((group) => (
+                      <div key={group.label}>
+                        <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">{group.label}</div>
+                        <div className="mt-1 space-y-1.5">
+                          {group.items.map((reminder) => (
+                            <button
+                              key={reminder.id}
+                              type="button"
+                              onClick={() => {
+                                setTakeSelectedReminderId(reminder.id);
+                                setTakeUseCameraVerification(reminderRequiresCamera(reminder));
+                                setTakeEarlierMode(false);
+                                setTakeModalOpen(true);
+                              }}
+                              className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 px-3 py-2 text-left text-xs hover:bg-white"
+                            >
+                              <span className="min-w-0 truncate font-semibold text-slate-800">{getReminderDisplayName(reminder)}</span>
+                              <span className="shrink-0 text-slate-500">{formatDueLabel(reminder)}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </CardBody>
           </Card>
@@ -1657,10 +2471,13 @@ export default function MedicationsPage() {
               <CardHeader title="No matches" subtitle="Try adjusting your filters, or add a new medication." />
               <CardBody className="flex flex-col items-center justify-center py-10 text-center">
                 <div className="text-sm text-slate-600">No medications found.</div>
-                <Button onClick={openCreate} className="mt-4 bg-emerald-600 text-white hover:bg-emerald-700">
+                <Link
+                  href="/medications/new"
+                  className="mt-4 inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                >
                   <Icon name="plus" />
                   Add Medication
-                </Button>
+                </Link>
               </CardBody>
             </Card>
           ) : null}
@@ -1712,8 +2529,8 @@ export default function MedicationsPage() {
                               {m.dose ? <div className="mt-2 text-sm text-slate-700">{m.dose}</div> : null}
                               {m.frequency ? <div className="mt-1 text-xs text-slate-500">{m.frequency}</div> : null}
                               <div className="mt-2 text-xs text-slate-500">
-                                Started {formatDate(m.started)}
-                                {m.lastFilled ? ` · Filled ${formatDate(m.lastFilled)}` : ''}
+                                Started {safeFormatDate(m.started)}
+                                {m.lastFilled ? ` · Filled ${safeFormatDate(m.lastFilled)}` : ''}
                               </div>
 
                               {m.orderId ? <div className="mt-2 text-xs text-slate-500">Order: {m.orderId}</div> : null}
@@ -1819,7 +2636,7 @@ export default function MedicationsPage() {
                                   <label className="text-xs font-semibold text-slate-600">Started</label>
                                   <input
                                     type="date"
-                                    value={(draft.started as string) ?? m.started.slice(0, 10)}
+                                    value={(draft.started as string) ?? safeDateInputValue(m.started)}
                                     onChange={(e) => updateEdit('started', e.target.value)}
                                     className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                                   />
@@ -1828,7 +2645,7 @@ export default function MedicationsPage() {
                                   <label className="text-xs font-semibold text-slate-600">Last filled</label>
                                   <input
                                     type="date"
-                                    value={(draft.lastFilled as string) ?? m.lastFilled.slice(0, 10)}
+                                    value={(draft.lastFilled as string) ?? safeDateInputValue(m.lastFilled)}
                                     onChange={(e) => updateEdit('lastFilled', e.target.value)}
                                     className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2 text-sm"
                                   />
@@ -2055,12 +2872,12 @@ export default function MedicationsPage() {
                                 {isEditing ? (
                                   <input
                                     type="date"
-                                    value={(draft.started as string) ?? m.started.slice(0, 10)}
+                                    value={(draft.started as string) ?? safeDateInputValue(m.started)}
                                     onChange={(e) => updateEdit('started', e.target.value)}
                                     className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
                                   />
                                 ) : (
-                                  formatDate(m.started)
+                                  safeFormatDate(m.started)
                                 )}
                               </td>
 
@@ -2069,12 +2886,12 @@ export default function MedicationsPage() {
                                 {isEditing ? (
                                   <input
                                     type="date"
-                                    value={(draft.lastFilled as string) ?? m.lastFilled.slice(0, 10)}
+                                    value={(draft.lastFilled as string) ?? safeDateInputValue(m.lastFilled)}
                                     onChange={(e) => updateEdit('lastFilled', e.target.value)}
                                     className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
                                   />
                                 ) : (
-                                  formatDate(m.lastFilled)
+                                  safeFormatDate(m.lastFilled)
                                 )}
                               </td>
 
@@ -2194,8 +3011,8 @@ export default function MedicationsPage() {
                       </div>
 
                       <div className="mt-2 text-[11px] text-slate-500">
-                        Started {formatDate(m.started)}
-                        {m.lastFilled ? ` · Last filled ${formatDate(m.lastFilled)}` : ''}
+                        Started {safeFormatDate(m.started)}
+                        {m.lastFilled ? ` · Last filled ${safeFormatDate(m.lastFilled)}` : ''}
                       </div>
 
                       {m.source === 'erx' && m.meta?.encounterId ? (
@@ -2217,33 +3034,191 @@ export default function MedicationsPage() {
         </Card>
       )}
 
-      {/* CREATE / SYNC MODAL */}
-      <Modal open={isCreateOpen} onClose={closeCreate} title="Add Medication" subtitle="Capture manually, or sync from an eRx encounter." maxW="2xl">
-        <form onSubmit={handleCreate} className="space-y-4">
-          {/* Mode toggle */}
-          <div className="inline-flex rounded-2xl border border-slate-200 bg-white p-1">
-            <button
-              type="button"
-              onClick={() => setCreateMode('manual')}
-              className={cx(
-                'px-4 py-2 rounded-xl text-sm font-bold transition',
-                createMode === 'manual' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
-              )}
-            >
-              Manual entry
-            </button>
-            <button
-              type="button"
-              onClick={() => setCreateMode('erx')}
-              className={cx(
-                'px-4 py-2 rounded-xl text-sm font-bold transition',
-                createMode === 'erx' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:text-slate-900'
-              )}
-            >
-              Sync from eRx
-            </button>
-          </div>
+      {/* TAKE MEDICATION MODAL */}
+      <Modal
+        open={todaysPillsDrawerOpen}
+        onClose={() => setTodaysPillsDrawerOpen(false)}
+        title="Today’s pills"
+        subtitle="Due medication reminders for today, with quick access to logging and verification."
+        maxW="2xl"
+      >
+        <div className="space-y-4">
+          {todaysMedicationReminders.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-5 text-sm text-slate-600">
+              No medication reminders are due today. Add reminders from an active medication to start adherence tracking.
+            </div>
+          ) : (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {todaysMedicationReminders.map((reminder) => {
+                const requiresCamera = reminderRequiresCamera(reminder);
+                return (
+                  <button
+                    key={reminder.id}
+                    type="button"
+                    onClick={() => {
+                      setTakeSelectedReminderId(reminder.id);
+                      setTakeUseCameraVerification(requiresCamera);
+                      setTakeEarlierMode(false);
+                      setTodaysPillsDrawerOpen(false);
+                      setTakeModalOpen(true);
+                    }}
+                    className="rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/40"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-black text-slate-950">{getReminderDisplayName(reminder)}</div>
+                        <div className="mt-1 text-xs text-slate-600">
+                          {[getReminderDose(reminder), formatDueLabel(reminder)].filter(Boolean).join(' · ')}
+                        </div>
+                      </div>
+                      {requiresCamera ? (
+                        <Chip className="border-indigo-200 bg-indigo-50 text-indigo-800">
+                          <Icon name="camera" />
+                          Verify
+                        </Chip>
+                      ) : (
+                        <Chip className="border-slate-200 bg-slate-50 text-slate-700">Self log</Chip>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </Modal>
 
+      <Modal
+        open={takeModalOpen}
+        onClose={closeTakeMedication}
+        title="Take medication"
+        subtitle="Record a due dose, or start camera verification when required."
+        maxW="md"
+      >
+        <div className="space-y-4">
+          {nextDueMedicationReminders.length === 0 ? (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+              <div className="font-bold text-slate-900">No due medication reminders found</div>
+              <p className="mt-1">Create reminders from an active medication, or add a medication first.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link
+                  href="/medications/new"
+                  className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+                >
+                  <Icon name="plus" />
+                  Add medication
+                </Link>
+                <GhostButton onClick={() => { closeTakeMedication(true); setActiveTab('list'); }}>
+                  Review medication list
+                </GhostButton>
+              </div>
+            </div>
+          ) : (
+            <form
+              className="space-y-4"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void handleTakeMedication();
+              }}
+            >
+              <div className="space-y-2">
+                <label className="block text-sm font-bold text-slate-800">Choose due medication</label>
+                <div className="space-y-2">
+                  {nextDueMedicationReminders.map((reminder) => {
+                    const selected = reminder.id === takeSelectedReminderId;
+                    const dose = getReminderDose(reminder);
+                    const requiresCamera = reminderRequiresCamera(reminder);
+
+                    return (
+                      <button
+                        key={reminder.id}
+                        type="button"
+                        onClick={() => {
+                          setTakeSelectedReminderId(reminder.id);
+                          setTakeUseCameraVerification(requiresCamera);
+                        }}
+                        className={cx(
+                          'w-full rounded-2xl border px-4 py-3 text-left transition',
+                          selected
+                            ? 'border-emerald-300 bg-emerald-50 text-emerald-950'
+                            : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="font-bold text-slate-900">{getReminderDisplayName(reminder)}</div>
+                            <div className="mt-1 text-xs text-slate-600">
+                              {[dose, formatDueLabel(reminder)].filter(Boolean).join(' · ')}
+                            </div>
+                          </div>
+                          {requiresCamera ? (
+                            <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] font-semibold text-indigo-800">
+                              <Icon name="camera" className="h-3.5 w-3.5" />
+                              camera
+                            </span>
+                          ) : null}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 space-y-3">
+                <label className="flex items-start gap-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={takeUseCameraVerification}
+                    onChange={(event) => setTakeUseCameraVerification(event.target.checked)}
+                    className="mt-1 h-4 w-4"
+                  />
+                  <span>
+                    <span className="block font-bold text-slate-900">Use camera verification</span>
+                    <span className="block text-xs leading-5 text-slate-600">
+                      eRx reminders inherit camera verification by default. You can override it for legitimate non-camera logging.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-3 text-sm text-slate-700">
+                  <input
+                    type="checkbox"
+                    checked={takeEarlierMode}
+                    onChange={(event) => setTakeEarlierMode(event.target.checked)}
+                    className="mt-1 h-4 w-4"
+                    disabled={takeUseCameraVerification}
+                  />
+                  <span className="min-w-0">
+                    <span className="block font-bold text-slate-900">I already took this earlier today</span>
+                    <span className="mt-2 flex items-center gap-2 text-xs text-slate-600">
+                      Time
+                      <input
+                        type="time"
+                        value={takeEarlierTime}
+                        onChange={(event) => setTakeEarlierTime(event.target.value)}
+                        disabled={!takeEarlierMode || takeUseCameraVerification}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs disabled:opacity-60"
+                      />
+                    </span>
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-slate-200 pt-4">
+                <GhostButton onClick={closeTakeMedication} disabled={takeBusy}>
+                  Cancel
+                </GhostButton>
+                <Button type="submit" disabled={takeBusy || !selectedTakeReminder} className="bg-emerald-600 text-white hover:bg-emerald-700">
+                  {takeBusy ? 'Opening…' : takeUseCameraVerification ? 'Start camera verification' : 'Record dose'}
+                </Button>
+              </div>
+            </form>
+          )}
+        </div>
+      </Modal>
+
+      <Modal open={isCreateOpen} onClose={closeCreate} title="Sync latest eRx" subtitle="Pull prescribed medications from an Ambulant+ eRx encounter. Use Add Medication for manual, OTC, or external eRx document intake." maxW="2xl">
+        <form onSubmit={handleCreate} className="space-y-4">
           {createMode === 'manual' ? (
             <>
               <div>
@@ -2323,7 +3298,7 @@ export default function MedicationsPage() {
                   <label className="block text-sm font-bold text-slate-800 mb-1">Started</label>
                   <input
                     type="date"
-                    value={form.started}
+                    value={form.started ?? ''}
                     onChange={(e) => handleFormChange('started', e.target.value)}
                     className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
                   />
@@ -2332,7 +3307,7 @@ export default function MedicationsPage() {
                   <label className="block text-sm font-bold text-slate-800 mb-1">Last Filled</label>
                   <input
                     type="date"
-                    value={form.lastFilled}
+                    value={form.lastFilled ?? ''}
                     onChange={(e) => handleFormChange('lastFilled', e.target.value)}
                     className="w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
                   />
@@ -2390,7 +3365,7 @@ export default function MedicationsPage() {
                 {erxLoading ? (
                   <div className="px-4 py-6 text-sm text-slate-600">Loading prescriptions…</div>
                 ) : erxItems.length === 0 ? (
-                  <div className="px-4 py-6 text-sm text-slate-600">No prescriptions found for this encounter (live or mock).</div>
+                  <div className="px-4 py-6 text-sm text-slate-600">No prescriptions found for this encounter.</div>
                 ) : (
                   <div className="max-h-72 overflow-y-auto">
                     <table className="w-full text-sm">

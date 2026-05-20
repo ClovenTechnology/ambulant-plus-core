@@ -1,4 +1,4 @@
-// apps/patient-app/app/api/reminders/confirm/route.ts
+// apps/patient-app/app/api/medications/import-document/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -27,7 +27,7 @@ function json(body: unknown, status = 200) {
   });
 }
 
-function forwardHeaders(req: NextRequest, includeJson = false) {
+function forwardHeaders(req: NextRequest) {
   const headers = new Headers();
 
   for (const key of [
@@ -47,8 +47,6 @@ function forwardHeaders(req: NextRequest, includeJson = false) {
   }
 
   headers.set('accept', 'application/json');
-  if (includeJson) headers.set('content-type', 'application/json');
-
   return headers;
 }
 
@@ -63,56 +61,62 @@ async function readPayload(res: Response) {
   }
 }
 
-async function forward(req: NextRequest, method: 'GET' | 'POST' | 'PUT' | 'DELETE') {
-  const base = gatewayBase();
+function isAllowedFile(file: File) {
+  const allowedTypes = new Set([
+    'application/pdf',
+    'image/png',
+    'image/jpeg',
+    'image/webp',
+  ]);
 
+  if (file.type && !allowedTypes.has(file.type)) return false;
+  return file.size > 0 && file.size <= 8 * 1024 * 1024;
+}
+
+export async function POST(req: NextRequest) {
+  const base = gatewayBase();
   if (!base) {
     return json(
       {
         ok: false,
         error: 'api_gateway_base_required',
-        message: 'Reminder confirmation service is unavailable because the API gateway is not configured.',
+        message: 'External eRx document import is unavailable because the API gateway is not configured.',
       },
       503,
     );
   }
 
-  const incoming = new URL(req.url);
-  const qs = incoming.searchParams.toString();
-  const path = qs ? `/api/reminders?${qs}` : '/api/reminders';
-
-  const init: RequestInit = {
-    method,
-    cache: 'no-store',
-    headers: forwardHeaders(req, method !== 'GET'),
-  };
-
-  if (method !== 'GET') {
-    const body = await req.text().catch(() => '');
-    init.body = body || '{}';
+  const form = await req.formData().catch(() => null);
+  if (!form) {
+    return json({ ok: false, error: 'invalid_multipart_form' }, 400);
   }
 
-  const res = await fetch(`${base}${path}`, init);
+  const file = form.get('file');
+  if (!(file instanceof File)) {
+    return json({ ok: false, error: 'file_required' }, 400);
+  }
+
+  if (!isAllowedFile(file)) {
+    return json(
+      {
+        ok: false,
+        error: 'unsupported_or_oversized_file',
+        message: 'Upload a PDF, PNG, JPG, or WebP eRx document up to 8 MB.',
+      },
+      400,
+    );
+  }
+
+  const upstream = new URL(`${base}/api/medications/import-document`);
+
+  const res = await fetch(upstream.toString(), {
+    method: 'POST',
+    cache: 'no-store',
+    headers: forwardHeaders(req),
+    body: form,
+  });
+
   const payload = await readPayload(res);
 
   return json(payload ?? { ok: res.ok }, res.status);
-}
-
-// Legacy compatibility route for older confirm flows.
-// The canonical endpoint is /api/reminders, but the UI may still call this path.
-
-export async function GET(req: NextRequest) {
-  return forward(req, 'GET');
-}
-
-export async function POST(req: NextRequest) {
-  return forward(req, 'POST');
-}
-
-export async function PUT(req: NextRequest) {
-  return forward(req, 'PUT');
-}
-
-export async function DELETE(req: NextRequest) {
-  return forward(req, 'DELETE');
 }

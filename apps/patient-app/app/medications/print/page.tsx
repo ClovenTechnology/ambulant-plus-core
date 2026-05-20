@@ -76,6 +76,15 @@ type Allergy = {
   notedAt: string; // ISO
 };
 
+type Condition = {
+  id?: string;
+  name?: string | null;
+  status?: string | null;
+  diagnosedAt?: string | null;
+  notes?: string | null;
+  source?: string | null;
+};
+
 type EncounterSession = {
   id: string;
   caseId: string;
@@ -145,7 +154,37 @@ async function fetchAllergies(): Promise<Allergy[]> {
     });
     if (!res.ok) return [];
     const data = await res.json().catch(() => null);
-    return (Array.isArray(data) ? data : []) as Allergy[];
+    const list = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.items)
+      ? data.items
+      : Array.isArray(data?.allergies)
+      ? data.allergies
+      : [];
+    return list as Allergy[];
+  } catch {
+    return [];
+  }
+}
+
+async function fetchConditions(): Promise<Condition[]> {
+  try {
+    const res = await fetch(`${baseUrl()}/api/conditions?limit=100`, {
+      cache: 'no-store',
+      headers: forwardAuthHeaders(),
+    });
+    if (!res.ok) return [];
+    const data = await res.json().catch(() => null);
+    const list = Array.isArray(data)
+      ? data
+      : Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.items)
+      ? data.items
+      : Array.isArray(data?.conditions)
+      ? data.conditions
+      : [];
+    return list as Condition[];
   } catch {
     return [];
   }
@@ -254,10 +293,10 @@ function sigLine({ label }: { label: string }) {
 
 function SummaryTile(props: { label: string; value: string; sub?: string }) {
   return (
-    <div className="rounded-xl border bg-white p-3">
-      <div className="text-[11px] text-gray-500">{props.label}</div>
-      <div className="mt-1 text-xl font-semibold text-gray-900">{props.value}</div>
-      {props.sub ? <div className="mt-1 text-[11px] text-gray-500">{props.sub}</div> : null}
+    <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm print:shadow-none">
+      <div className="text-[11px] font-medium text-slate-500">{props.label}</div>
+      <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">{props.value}</div>
+      {props.sub ? <div className="mt-1 text-[11px] leading-4 text-slate-500">{props.sub}</div> : null}
     </div>
   );
 }
@@ -275,12 +314,12 @@ function SectionTitle(props: {
       : 'from-slate-50';
 
   return (
-    <div className={`rounded-xl border bg-gradient-to-b ${tone} to-white p-4`}>
+    <div className={`rounded-2xl border border-slate-200 bg-gradient-to-b ${tone} to-white p-4`}>
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-sm font-semibold text-gray-900">{props.title}</div>
+          <div className="text-sm font-bold text-slate-950">{props.title}</div>
           {props.subtitle ? (
-            <div className="text-xs text-gray-600 mt-0.5">{props.subtitle}</div>
+            <div className="mt-0.5 text-xs leading-5 text-slate-600">{props.subtitle}</div>
           ) : null}
         </div>
       </div>
@@ -315,11 +354,11 @@ function MedTable(props: {
   }
 
   return (
-    <div className="rounded-xl border bg-white overflow-hidden">
+    <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm print:shadow-none">
       <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="print:table-header-group">
-            <tr className="text-left text-[11px] uppercase tracking-wide text-gray-500 border-b bg-gray-50">
+            <tr className="border-b bg-slate-50 text-left text-[11px] uppercase tracking-wide text-slate-500">
               <th className="py-2.5 px-3">Medication</th>
               <th className="py-2.5 px-3">Dose</th>
               <th className="py-2.5 px-3">SIG</th>
@@ -387,7 +426,7 @@ function MedTable(props: {
                     {m.source === 'erx' ? (
                       <div className="text-[11px] text-gray-500">clinician prescribed</div>
                     ) : null}
-                    {m.source === 'manual' ? (
+                    {safeStr(m.source).startsWith('manual') ? (
                       <div className="text-[11px] text-gray-500">patient added</div>
                     ) : null}
                   </td>
@@ -430,12 +469,35 @@ function uniqBy<T>(arr: T[], keyFn: (x: T) => string) {
   return out;
 }
 
+function isErxMedication(med: Medication) {
+  const source = safeStr(med.source).toLowerCase();
+  return source.includes('erx') || Boolean(med?.meta?.encounterId);
+}
+
+function displayValue(value?: string | null) {
+  const clean = safeStr(value).trim();
+  return clean || 'Not recorded';
+}
+
+function normaliseConditionName(item: unknown) {
+  if (typeof item === 'string') return item.trim();
+  if (!item || typeof item !== 'object') return '';
+  const record = item as Record<string, unknown>;
+  return safeStr(record.name ?? record.condition ?? record.title ?? '').trim();
+}
+
+function conditionStatusLabel(item: Condition) {
+  const status = safeStr(item.status).trim();
+  return status || 'Recorded';
+}
+
 export default async function MedicationsPrintPage() {
-  const [meds, reminders, profile, allergiesApi] = await Promise.all([
+  const [meds, reminders, profile, allergiesApi, conditionsApi] = await Promise.all([
     fetchMeds(),
     fetchReminders(),
     fetchProfile(),
     fetchAllergies(),
+    fetchConditions(),
   ]);
 
   const now = new Date();
@@ -466,7 +528,34 @@ export default async function MedicationsPrintPage() {
   const patientMobile = profile?.mobile ?? null;
   const patientEmail = profile?.email ?? null;
   const patientAddress = profile?.address ?? null;
-  const patientPrimaryConditions = profile?.primaryConditionsText ?? null;
+  const profileConditionNames = [
+    ...(Array.isArray(profile?.chronicConditions) ? profile!.chronicConditions : []),
+    ...(profile?.primaryConditionsText
+      ? profile.primaryConditionsText.split(',').map((item) => item.trim())
+      : []),
+  ].filter(Boolean);
+
+  const activeConditions = uniqBy(
+    [
+      ...conditionsApi
+        .filter((condition) => !safeStr(condition.status).toLowerCase().includes('resolved'))
+        .map((condition) => ({
+          name: normaliseConditionName(condition),
+          status: conditionStatusLabel(condition),
+          diagnosedAt: condition.diagnosedAt ?? null,
+          notes: condition.notes ?? null,
+          source: condition.source ?? null,
+        })),
+      ...profileConditionNames.map((name) => ({
+        name,
+        status: 'Reported',
+        diagnosedAt: null,
+        notes: null,
+        source: 'profile',
+      })),
+    ].filter((condition) => condition.name),
+    (condition) => condition.name.toLowerCase(),
+  );
 
   // Allergies: merge profile allergies[] + allergies API (Active)
   const activeAllergies = allergiesApi.filter((a) => a.status === 'Active');
@@ -511,10 +600,11 @@ export default async function MedicationsPrintPage() {
     );
   }
 
-  const hasErxContext = erxEncounterIds.length > 0 && (erxSessions.length > 0 || erxClinicians.length > 0);
+  const hasErxMedication = meds.some(isErxMedication);
+  const hasErxContext = hasErxMedication;
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-5 print:space-y-4 print:p-0">
+    <main className="mx-auto max-w-6xl space-y-5 bg-slate-50/60 p-6 text-slate-900 print:max-w-none print:bg-white print:p-0 print:text-black print:space-y-4">
       <style>{`
         @media print {
           html, body { background: #fff !important; }
@@ -526,130 +616,148 @@ export default async function MedicationsPrintPage() {
       `}</style>
 
       {/* Header */}
-      <header className="flex items-start justify-between gap-4 print:gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <div className="h-9 w-9 rounded-xl border bg-gradient-to-b from-emerald-50 to-white flex items-center justify-center font-semibold text-emerald-700">
-              A+
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900 leading-tight">Medication Summary</h1>
-              <div className="text-xs text-gray-500">
-                Clinician-grade printable list · Generated {formatDateTime(now)}
+      <header className="avoid-break overflow-hidden rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 via-white to-cyan-50 p-5 shadow-sm print:rounded-none print:border-gray-200 print:bg-white print:shadow-none">
+        <div className="flex items-start justify-between gap-4 print:gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl border border-emerald-200 bg-white text-sm font-black text-emerald-700">
+                A+
+              </div>
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-emerald-700">
+                  Medication reconciliation record
+                </div>
+                <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-950">
+                  Medication Summary
+                </h1>
+                <div className="mt-1 text-xs text-slate-500">
+                  Generated {formatDateTime(now)}
+                </div>
               </div>
             </div>
+
+            <div className="mt-3 max-w-3xl text-xs leading-5 text-slate-600">
+              Confidential medication information for clinical review. Reconcile eRx-synced medicines against prescribing records and patient-added medicines against patient history.
+            </div>
           </div>
 
-          <div className="mt-2 text-[11px] text-gray-500">
-            Confidential medical information. Share only with authorized healthcare professionals.
+          <div className="flex items-center gap-2 print:hidden">
+            <PrintButton />
           </div>
-        </div>
-
-        <div className="flex items-center gap-2 print:hidden">
-          <PrintButton />
         </div>
       </header>
 
       {/* Patient profile block (wired) */}
-      <section className="rounded-2xl border bg-white p-4 avoid-break">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-gray-900">Patient profile</div>
-            <div className="text-xs text-gray-500 mt-0.5">
-              Pulled from patient profile (and allergies API where available).
+      <section className="avoid-break overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm print:rounded-none print:shadow-none">
+        <div className="border-b border-slate-100 bg-gradient-to-r from-slate-50 to-white px-5 py-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <div className="text-sm font-bold text-slate-950">Patient profile</div>
+              <div className="mt-0.5 text-xs text-slate-500">
+                Pulled from the patient profile, allergies service, and conditions service where available.
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-right text-[11px] text-slate-500">
+              <div className="font-semibold text-slate-800">{patientId ? `MRN: ${patientId}` : 'MRN: Not recorded'}</div>
+              <div>{patientDob ? `DOB: ${fmtMaybeDate(patientDob)}` : 'DOB: Not recorded'}</div>
             </div>
           </div>
-
-          <div className="text-[11px] text-gray-500 text-right">
-            <div className="font-medium text-gray-700">{patientId ? `MRN: ${patientId}` : 'MRN: —'}</div>
-            <div>{patientDob ? `DOB: ${fmtMaybeDate(patientDob)}` : 'DOB: —'}</div>
-          </div>
         </div>
 
-        <div className="mt-3 grid gap-2 sm:grid-cols-2">
-          <div className="rounded-xl border bg-gray-50 p-3">
-            <div className="text-[11px] text-gray-500">Full name</div>
-            <div className="mt-1 text-sm font-medium text-gray-900">{patientName || '—'}</div>
-            {!patientName ? <div className="mt-2">{sigLine({ label: 'Write here' })}</div> : null}
+        <div className="grid gap-3 p-5 md:grid-cols-4">
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3 md:col-span-2">
+            <div className="text-[11px] font-medium text-slate-500">Full name</div>
+            <div className="mt-1 text-sm font-semibold text-slate-950">{displayValue(patientName)}</div>
           </div>
 
-          <div className="rounded-xl border bg-gray-50 p-3">
-            <div className="text-[11px] text-gray-500">Sex / gender</div>
-            <div className="mt-1 text-sm font-medium text-gray-900">{patientGender || '—'}</div>
-            {!patientGender ? <div className="mt-2">{sigLine({ label: 'Write here' })}</div> : null}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+            <div className="text-[11px] font-medium text-slate-500">Gender</div>
+            <div className="mt-1 text-sm font-semibold text-slate-950">{displayValue(patientGender)}</div>
           </div>
 
-          <div className="rounded-xl border bg-gray-50 p-3">
-            <div className="text-[11px] text-gray-500">Mobile</div>
-            <div className="mt-1 text-sm font-medium text-gray-900">{patientMobile || '—'}</div>
-            {!patientMobile ? <div className="mt-2">{sigLine({ label: 'Write here' })}</div> : null}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-3">
+            <div className="text-[11px] font-medium text-slate-500">Blood type</div>
+            <div className="mt-1 text-sm font-semibold text-slate-950">{displayValue(patientBlood)}</div>
           </div>
 
-          <div className="rounded-xl border bg-gray-50 p-3">
-            <div className="text-[11px] text-gray-500">Email</div>
-            <div className="mt-1 text-sm font-medium text-gray-900">{patientEmail || '—'}</div>
-            {!patientEmail ? <div className="mt-2">{sigLine({ label: 'Write here' })}</div> : null}
-          </div>
-        </div>
-
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          <div className="rounded-xl border bg-white p-3">
-            <div className="text-[11px] text-gray-500">Blood type</div>
-            <div className="mt-1 text-sm text-gray-900">{patientBlood || '—'}</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 md:col-span-2">
+            <div className="text-[11px] font-medium text-slate-500">Mobile</div>
+            <div className="mt-1 text-sm text-slate-900">{displayValue(patientMobile)}</div>
           </div>
 
-          <div className="rounded-xl border bg-white p-3">
-            <div className="text-[11px] text-gray-500">Address</div>
-            <div className="mt-1 text-sm text-gray-900">{patientAddress || '—'}</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 md:col-span-2">
+            <div className="text-[11px] font-medium text-slate-500">Email</div>
+            <div className="mt-1 break-all text-sm text-slate-900">{displayValue(patientEmail)}</div>
           </div>
-        </div>
 
-        <div className="mt-2 rounded-xl border bg-white p-3">
-          <div className="text-[11px] text-gray-500">Primary conditions (reported)</div>
-          <div className="mt-1 text-sm text-gray-900">{patientPrimaryConditions || '—'}</div>
-        </div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 md:col-span-4">
+            <div className="text-[11px] font-medium text-slate-500">Address</div>
+            <div className="mt-1 text-sm text-slate-900">{displayValue(patientAddress)}</div>
+          </div>
 
-        <div className="mt-2 rounded-xl border bg-white p-3">
-          <div className="text-[11px] text-gray-500">Allergies / intolerances</div>
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 md:col-span-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] font-medium text-slate-500">Clinical conditions</div>
+              <div className="text-[11px] text-slate-400">{activeConditions.length} recorded</div>
+            </div>
 
-          {merged.length === 0 ? (
-            <div className="mt-1 text-sm text-gray-700">—</div>
-          ) : (
-            <div className="mt-2 flex flex-wrap gap-2">
-              {merged.map((a: any) => {
-                const substance = safeStr(a.substance);
-                const reaction = safeStr(a.reaction);
-                const sev = (a.severity as Allergy['severity']) || 'Mild';
-                const pill = pillToneForSeverity(sev);
-
-                return (
+            {activeConditions.length === 0 ? (
+              <div className="mt-1 text-sm text-slate-700">Not recorded</div>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {activeConditions.map((condition) => (
                   <span
-                    key={substance.toLowerCase()}
-                    className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] ${pill}`}
+                    key={condition.name.toLowerCase()}
+                    className="inline-flex items-center gap-2 rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[11px] text-indigo-800"
                   >
-                    <span className="font-medium">{substance}</span>
-                    <span className="text-gray-600">
-                      {reaction ? `· ${reaction}` : ''}
-                      {sev ? `${reaction ? ' · ' : '· '}${sev}` : ''}
-                    </span>
+                    <span className="font-semibold">{condition.name}</span>
+                    <span className="text-indigo-600">· {condition.status}</span>
                   </span>
-                );
-              })}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
 
-          {merged.length === 0 ? (
-            <div className="mt-2">{sigLine({ label: 'If any, write here' })}</div>
-          ) : null}
+          <div className="rounded-2xl border border-slate-200 bg-white p-3 md:col-span-4">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-[11px] font-medium text-slate-500">Allergies / intolerances</div>
+              <div className="text-[11px] text-slate-400">{merged.length} active</div>
+            </div>
+
+            {merged.length === 0 ? (
+              <div className="mt-1 text-sm text-slate-700">No active allergies recorded</div>
+            ) : (
+              <div className="mt-2 flex flex-wrap gap-2">
+                {merged.map((a: any) => {
+                  const substance = safeStr(a.substance);
+                  const reaction = safeStr(a.reaction);
+                  const sev = (a.severity as Allergy['severity']) || 'Mild';
+                  const pill = pillToneForSeverity(sev);
+
+                  return (
+                    <span
+                      key={substance.toLowerCase()}
+                      className={`inline-flex items-center gap-2 rounded-full border px-2.5 py-1 text-[11px] ${pill}`}
+                    >
+                      <span className="font-semibold">{substance}</span>
+                      {reaction ? <span className="text-slate-600">· {reaction}</span> : null}
+                      {sev ? <span className="text-slate-600">· {sev}</span> : null}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </section>
 
       {/* eRx context (only when applicable) */}
       {hasErxContext ? (
         <section className="rounded-2xl border bg-white p-4 avoid-break">
-          <div className="text-sm font-semibold text-gray-900">Prescription context (from eRx)</div>
-          <div className="text-xs text-gray-500 mt-0.5">
-            Only shown when medications were synced from an eRx encounter.
+          <div className="text-sm font-semibold text-slate-950">Prescription context</div>
+          <div className="mt-0.5 text-xs text-slate-500">
+            Shown because this report includes eRx-synced medication records. Encounter and clinician details are displayed when available from the encounters service.
           </div>
 
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -759,47 +867,46 @@ export default async function MedicationsPrintPage() {
         </div>
       </section>
 
-      {/* Clinician reconciliation block:
-          Only show when we have eRx context. If the list is purely manual, this should not appear. */}
-      {hasErxContext ? (
-        <section className="rounded-2xl border bg-white p-4 avoid-break">
-          <div className="text-sm font-semibold text-gray-900">Clinician reconciliation</div>
-          <div className="text-xs text-gray-500 mt-0.5">
-            (Visible because this list includes eRx-synced medications.)
+      {/* Review / declaration block */}
+      {hasErxMedication ? (
+        <section className="avoid-break rounded-3xl border border-slate-200 bg-white p-5 shadow-sm print:shadow-none">
+          <div className="text-sm font-bold text-slate-950">Clinician reconciliation</div>
+          <div className="mt-0.5 text-xs leading-5 text-slate-500">
+            This report includes eRx-synced medicines. Please reconcile against the current prescription record before making treatment decisions.
           </div>
 
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-xl border bg-gray-50 p-3 space-y-2">
-              {sigLine({ label: 'Reviewed on (date)' })}
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
+              {sigLine({ label: 'Reviewed on' })}
               {sigLine({ label: 'Clinician name' })}
               {sigLine({ label: 'Practice / facility' })}
             </div>
 
-            <div className="rounded-xl border bg-gray-50 p-3 space-y-2">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
               {sigLine({ label: 'Signature' })}
-              {sigLine({ label: 'HPCSA / reg no.' })}
+              {sigLine({ label: 'Registration no.' })}
               {sigLine({ label: 'Next review' })}
             </div>
           </div>
 
-          <div className="mt-3 rounded-xl border bg-white p-3">
-            <div className="text-[11px] text-gray-500 mb-1">Notes</div>
-            <div className="h-24 border border-dashed rounded-lg border-gray-300" />
+          <div className="mt-3 rounded-2xl border border-slate-200 bg-white p-3">
+            <div className="mb-2 text-[11px] font-medium text-slate-500">Clinical reconciliation notes</div>
+            <div className="h-24 rounded-xl border border-dashed border-slate-300" />
           </div>
         </section>
       ) : (
-        <section className="rounded-2xl border bg-white p-4 avoid-break">
-          <div className="text-sm font-semibold text-gray-900">Patient attestation</div>
-          <div className="text-xs text-gray-500 mt-0.5">
-            This list appears to be manually maintained by the patient (no eRx context detected).
+        <section className="avoid-break rounded-3xl border border-slate-200 bg-white p-5 shadow-sm print:shadow-none">
+          <div className="text-sm font-bold text-slate-950">Patient-maintained medication declaration</div>
+          <div className="mt-0.5 text-xs leading-5 text-slate-500">
+            This report contains patient-maintained medication records only; no eRx-synced medication context was detected.
           </div>
 
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <div className="rounded-xl border bg-gray-50 p-3 space-y-2">
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
               {sigLine({ label: 'Patient name' })}
-              {sigLine({ label: 'Signed on (date)' })}
+              {sigLine({ label: 'Signed on' })}
             </div>
-            <div className="rounded-xl border bg-gray-50 p-3 space-y-2">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3">
               {sigLine({ label: 'Signature' })}
               {sigLine({ label: 'Contact number' })}
             </div>
@@ -807,7 +914,7 @@ export default async function MedicationsPrintPage() {
         </section>
       )}
 
-      <footer className="text-[11px] text-gray-500 flex items-center justify-between print:pt-2">
+      <footer className="flex items-center justify-between text-[11px] text-slate-500 print:pt-2">
         <div>Ambulant+ · Medication Summary</div>
         <div className="print:hidden">Use your browser’s Print dialog to save as PDF.</div>
       </footer>

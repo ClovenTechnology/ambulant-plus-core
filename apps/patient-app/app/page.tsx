@@ -34,7 +34,6 @@ import RecentActivityStrip from '../components/RecentActivityStrip';
 
 import AllergiesBlockWrapper from '@/components/AllergiesBlockWrapper';
 import PillRemindersWrapper from '@/components/PillRemindersWrapper';
-import MedicationsBlockWrapper from '@/components/MedicationsBlockWrapper';
 import ReportsBlockWrapper from '@/components/ReportsBlockWrapper';
 
 type AlertSeverity = 'low' | 'moderate' | 'high' | 'critical';
@@ -56,17 +55,6 @@ type MedLike = {
   status?: string;
 };
 
-type MedicationBlockItem = {
-  id: string;
-  name: string;
-  dose?: string;
-  frequency?: string;
-  route?: string;
-  started?: string;
-  lastFilled?: string;
-  status?: string;
-  orderId?: string | null;
-};
 
 type CaseLike = {
   id?: string;
@@ -1262,17 +1250,6 @@ export default function HomePage() {
     [meds],
   );
 
-  const medicationBlockItems: MedicationBlockItem[] = useMemo(
-    () =>
-      meds.map((m, index) => ({
-        id: deriveStablePillId(m, index),
-        name: typeof m.name === 'string' && m.name.trim() ? m.name.trim() : 'Medication',
-        dose: m.dose,
-        status: m.status,
-        orderId: m.orderId ?? null,
-      })),
-    [meds],
-  );
 
   const recentCases = Array.isArray(cases) ? cases.slice(0, 3) : [];
   const recentClinicians: Clinician[] = [];
@@ -2053,10 +2030,6 @@ export default function HomePage() {
                 </div>
 
                 <PillRemindersWrapper pills={todaysPills} />
-
-                <div className="mt-4 border-t border-slate-100 pt-4">
-                  <MedicationsBlockWrapper initialMeds={medicationBlockItems} />
-                </div>
 
               </div>
             </div>

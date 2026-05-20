@@ -32,12 +32,23 @@ const STEP_LABELS: Record<Exclude<VerifyStep, 'done'>, string> = {
 
 const MAX_SECONDS = 60;
 
+function sanitizeReturnTo(value: string | null): string {
+  const trimmed = String(value || '').trim();
+
+  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) {
+    return '/reminder';
+  }
+
+  return trimmed;
+}
+
 function ReminderVerifyPageContent() {
   const params = useSearchParams();
   const router = useRouter();
 
   const reminderId = useMemo(() => params?.get('reminderId')?.trim() ?? '', [params]);
   const sessionId = useMemo(() => params?.get('sessionId')?.trim() ?? '', [params]);
+  const returnTo = useMemo(() => sanitizeReturnTo(params?.get('returnTo') ?? null), [params]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -124,7 +135,7 @@ function ReminderVerifyPageContent() {
           }
 
           toast('Verification timed out. Please restart.', { type: 'error' });
-          router.replace('/reminder');
+          router.replace(returnTo);
           return 0;
         }
         return prev - 1;
@@ -132,7 +143,7 @@ function ReminderVerifyPageContent() {
     }, 1000);
 
     return () => window.clearInterval(id);
-  }, [cameraReady, isDone, busy, router]);
+  }, [cameraReady, isDone, busy, router, returnTo]);
 
   function captureSnapshot(step: string) {
     const video = videoRef.current;
@@ -220,7 +231,7 @@ function ReminderVerifyPageContent() {
       }
 
       toast('Medication verified and recorded.', { type: 'success' });
-      router.replace('/reminder');
+      router.replace(returnTo);
       router.refresh();
     } catch (err) {
       console.error('finish verification error', err);
@@ -248,7 +259,7 @@ function ReminderVerifyPageContent() {
           </div>
 
           <Link
-            href="/reminder"
+            href={returnTo}
             className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
           >
             Exit

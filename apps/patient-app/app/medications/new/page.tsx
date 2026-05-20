@@ -7,17 +7,11 @@ import { useRouter } from 'next/navigation';
 import { toast } from '../../../components/toast';
 
 type Drug = { name: string; strengths: string[] };
-type Mode = 'choose' | 'manual' | 'sync';
+type Mode = 'choose' | 'manual' | 'sync' | 'upload';
 type ManualKind = 'otc' | 'external_erx';
 type MedicationStatus = 'Active' | 'Completed' | 'On Hold';
 
-const DRUGS: Drug[] = [
-  { name: 'Amoxicillin', strengths: ['250 mg', '500 mg'] },
-  { name: 'Paracetamol', strengths: ['500 mg', '1 g'] },
-  { name: 'Ibuprofen', strengths: ['200 mg', '400 mg'] },
-  { name: 'Atorvastatin', strengths: ['10 mg', '20 mg', '40 mg'] },
-  { name: 'Metformin', strengths: ['500 mg', '850 mg', '1 g'] },
-];
+const DRUGS: Drug[] = [];
 
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
@@ -42,6 +36,25 @@ async function postJson(url: string, body: any) {
   const data = raw ? safeJsonParse(raw) : null;
 
   return { res, data };
+}
+
+async function postFormData(url: string, formData: FormData) {
+  const res = await fetch(url, {
+    method: 'POST',
+    body: formData,
+  });
+
+  const raw = await res.text().catch(() => '');
+  const data = raw ? safeJsonParse(raw) : null;
+
+  return { res, data };
+}
+
+function extractMessage(data: any, fallback: string) {
+  if (data && typeof data === 'object') {
+    return String(data.error || data.message || fallback);
+  }
+  return fallback;
 }
 
 function PillBtn(props: {
@@ -102,6 +115,13 @@ export default function NewMedicationPage() {
 
   // Sync from Ambulant+ eRx
   const [encounterId, setEncounterId] = useState('');
+
+  // Import external eRx document
+  const [erxDocument, setErxDocument] = useState<File | null>(null);
+  const [documentMedicationName, setDocumentMedicationName] = useState('');
+  const [documentNotes, setDocumentNotes] = useState('');
+  const [documentPharmacy, setDocumentPharmacy] = useState('');
+  const [documentRxNumber, setDocumentRxNumber] = useState('');
 
   const [busy, setBusy] = useState(false);
 
@@ -217,7 +237,7 @@ export default function NewMedicationPage() {
 
       // Try common endpoints (safe best-effort)
       const endpoints = ['/api/medications/sync-erx', '/api/medications/sync'];
-      let lastErr = 'Sync endpoint not found';
+      let lastErr = 'eRx sync is not available from this form yet';
 
       for (const url of endpoints) {
         const { res, data } = await postJson(url, body);
@@ -240,11 +260,67 @@ export default function NewMedicationPage() {
       }
 
       toast(
-        `${lastErr}. If your repo already has a different sync route, wire this button to it.`,
+        `${lastErr}. Please use the main Medications page sync action or try again after the eRx sync endpoint is enabled.`,
         { type: 'error' },
       );
     } catch {
       toast('Network error syncing eRx', { type: 'error' });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+
+  async function importExternalErxDocument(e: React.FormEvent) {
+    e.preventDefault();
+    if (busy) return;
+
+    if (!erxDocument) {
+      toast('Upload the eRx document first', { type: 'error' });
+      return;
+    }
+
+    const allowed = new Set([
+      'application/pdf',
+      'image/png',
+      'image/jpeg',
+      'image/webp',
+    ]);
+
+    if (erxDocument.type && !allowed.has(erxDocument.type)) {
+      toast('Upload a PDF or image file only.', { type: 'error' });
+      return;
+    }
+
+    const maxBytes = 8 * 1024 * 1024;
+    if (erxDocument.size > maxBytes) {
+      toast('The eRx document must be 8 MB or smaller.', { type: 'error' });
+      return;
+    }
+
+    setBusy(true);
+    try {
+      const formData = new FormData();
+      formData.set('file', erxDocument);
+      formData.set('source', 'external_erx_document');
+      formData.set('medicationName', documentMedicationName.trim());
+      formData.set('rxNumber', documentRxNumber.trim());
+      formData.set('pharmacy', documentPharmacy.trim());
+      formData.set('notes', documentNotes.trim());
+
+      const { res, data } = await postFormData('/api/medications/import-document', formData);
+
+      if (!res.ok || (data && typeof data === 'object' && (data as any).ok === false)) {
+        toast(extractMessage(data, 'Could not import this eRx document.'), { type: 'error' });
+        return;
+      }
+
+      toast('eRx document imported', { type: 'success' });
+      router.push('/medications');
+      router.refresh();
+    } catch (err) {
+      console.error('External eRx document import failed', err);
+      toast('Network error importing eRx document', { type: 'error' });
     } finally {
       setBusy(false);
     }
@@ -256,7 +332,7 @@ export default function NewMedicationPage() {
         <div className="text-xs font-bold text-slate-600">Medications</div>
         <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950">Add medication</h1>
         <p className="mt-2 text-sm text-slate-600">
-          Add an OTC item, record an external prescription (outside Ambulant+), or sync from Ambulant+ eRx.
+          Add an OTC item, record an external prescription, upload an eRx document, or sync from Ambulant+ eRx.
         </p>
 
         <div className="mt-4 flex flex-wrap gap-2">
@@ -315,6 +391,25 @@ export default function NewMedicationPage() {
               </span>
             </div>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setMode('upload')}
+            className="p-5 bg-white border border-slate-200 rounded-2xl space-y-2 shadow-sm shadow-black/[0.03] text-left hover:bg-slate-50 transition sm:col-span-2"
+          >
+            <div className="text-sm font-black text-slate-900">Upload external eRx document</div>
+            <div className="text-xs text-slate-600">
+              Use this when the patient already has a PDF/photo of a prescription from another pharmacy, clinic, or downloaded script.
+            </div>
+            <div className="pt-1 flex flex-wrap gap-2">
+              <span className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-extrabold text-indigo-800">
+                PDF / image
+              </span>
+              <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-extrabold text-amber-800">
+                Reconcile before use
+              </span>
+            </div>
+          </button>
         </section>
       ) : null}
 
@@ -369,7 +464,7 @@ export default function NewMedicationPage() {
                 setDrug(null);
                 setStrength('');
               }}
-              placeholder="Type to search (e.g., Paracetamol)…"
+              placeholder="Type the medication name…"
               className={cx(
                 'w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm',
                 'focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-400',
@@ -403,7 +498,7 @@ export default function NewMedicationPage() {
             ) : null}
 
             <div className="text-xs text-slate-500">
-              Tip: if you don’t see it, type the full medication name and proceed.
+              Type the medication name exactly as written on the prescription or package.
             </div>
           </section>
 
@@ -680,6 +775,120 @@ export default function NewMedicationPage() {
         </>
       ) : null}
 
+
+      {mode === 'upload' ? (
+        <form
+          onSubmit={importExternalErxDocument}
+          className="p-5 bg-white border border-slate-200 rounded-2xl space-y-4 shadow-sm shadow-black/[0.03]"
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            <div>
+              <div className="text-sm font-black text-slate-900">Upload external eRx document</div>
+              <p className="mt-1 text-xs text-slate-600">
+                Upload a prescription document already in the patient’s possession. The import service must validate/extract it; this page does not fake medication parsing.
+              </p>
+            </div>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={() => setMode('choose')}
+              className="px-4 py-2 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 font-bold text-sm"
+              disabled={busy}
+            >
+              Back
+            </button>
+          </div>
+
+          <div className="rounded-2xl border border-dashed border-indigo-200 bg-indigo-50/40 p-4">
+            <label className="block text-sm font-bold text-slate-800">eRx document *</label>
+            <input
+              type="file"
+              accept="application/pdf,image/png,image/jpeg,image/webp"
+              onChange={(e) => setErxDocument(e.target.files?.[0] ?? null)}
+              className="mt-2 block w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm"
+              disabled={busy}
+            />
+            <div className="mt-2 text-xs text-slate-500">
+              Accepted: PDF, PNG, JPG, WebP. Maximum 8 MB.
+            </div>
+            {erxDocument ? (
+              <div className="mt-2 rounded-xl border border-white bg-white/80 px-3 py-2 text-xs text-slate-700">
+                Selected: <span className="font-bold">{erxDocument.name}</span> · {Math.ceil(erxDocument.size / 1024)} KB
+              </div>
+            ) : null}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-800">Medication name, if visible</label>
+              <input
+                value={documentMedicationName}
+                onChange={(e) => setDocumentMedicationName(e.target.value)}
+                placeholder="Optional helper for reconciliation"
+                className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+                disabled={busy}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-800">Rx / script number</label>
+              <input
+                value={documentRxNumber}
+                onChange={(e) => setDocumentRxNumber(e.target.value)}
+                placeholder="Optional"
+                className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+                disabled={busy}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-800">Pharmacy / clinic</label>
+              <input
+                value={documentPharmacy}
+                onChange={(e) => setDocumentPharmacy(e.target.value)}
+                placeholder="Optional"
+                className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+                disabled={busy}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-800">Notes</label>
+              <input
+                value={documentNotes}
+                onChange={(e) => setDocumentNotes(e.target.value)}
+                placeholder="Optional patient note"
+                className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+                disabled={busy}
+              />
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs leading-relaxed text-amber-900">
+            Imported external prescriptions should be reconciled before they are treated as verified Ambulant+ eRx. Camera verification can still be enabled for dose tracking after reminders are created.
+          </div>
+
+          <div className="flex flex-wrap gap-2 pt-2">
+            <button
+              type="submit"
+              disabled={busy || !erxDocument}
+              className={cx(
+                'px-5 py-3 rounded-2xl bg-indigo-600 text-white font-extrabold text-sm',
+                'hover:bg-indigo-700 transition disabled:opacity-50',
+              )}
+            >
+              {busy ? 'Importing…' : 'Import document'}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMode('manual')}
+              disabled={busy}
+              className="px-5 py-3 rounded-2xl border border-slate-200 bg-white hover:bg-slate-50 font-bold text-sm disabled:opacity-50"
+            >
+              Enter manually instead
+            </button>
+          </div>
+        </form>
+      ) : null}
+
       {mode === 'sync' ? (
         <form
           onSubmit={syncFromErx}
@@ -748,7 +957,7 @@ export default function NewMedicationPage() {
           </div>
 
           <div className="text-xs text-slate-500">
-            If your sync route is different, tell me the existing endpoint and I’ll wire this button to it.
+            eRx sync will appear here once the production sync endpoint is enabled.
           </div>
         </form>
       ) : null}
