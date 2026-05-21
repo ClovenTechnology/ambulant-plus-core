@@ -1,4 +1,4 @@
+// apps/patient-app/src/lib/insightcore/degraded.ts
 export type InsightDeliveryState =
   | { source: 'insightcore'; degradedMode: false }
-  | { source: 'hybrid'; degradedMode: false }
-  | { source: 'local_fallback'; degradedMode: true; reason?: string };
+  | { source: 'insightcore'; degradedMode: true; reason: string };

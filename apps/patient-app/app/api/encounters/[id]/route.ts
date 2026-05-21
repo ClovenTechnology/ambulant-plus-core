@@ -1,366 +1,206 @@
 // apps/patient-app/app/api/encounters/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import crypto from 'node:crypto';
-import { store } from '@/lib/store';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-let prisma: any = null;
-try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
-  prisma = require('@/src/lib/prisma').prisma;
-} catch (e) {
-  prisma = null;
+function trimSlash(value: string) {
+  return String(value || '').replace(/\/+$/, '');
 }
 
-function nowIso() {
-  return new Date().toISOString();
+function gatewayBase() {
+  const configured =
+    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    '';
+
+  return configured ? trimSlash(configured) : '';
 }
 
-function clampScore(n: any) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return null;
-  const i = Math.round(v);
-  if (i < 1 || i > 5) return null;
-  return i;
-}
-
-function extractRating(e: any) {
-  const r = e?.rating ?? e?.patientRating ?? null;
-  if (r && typeof r === 'object') {
-    const s = clampScore((r as any).score);
-    if (s) {
-      return {
-        score: s,
-        comment: (r as any).comment ?? null,
-        createdAt: String(
-          (r as any).createdAt ??
-            e?.ratingCreatedAt ??
-            e?.updatedAt ??
-            e?.stop ??
-            e?.start ??
-            nowIso(),
-        ),
-      };
-    }
-  }
-
-  const s =
-    clampScore(e?.ratingScore) ??
-    clampScore(e?.rating_score) ??
-    clampScore(e?.ratingValue) ??
-    clampScore(e?.rating_value);
-
-  if (!s) return null;
-
-  const comment =
-    (typeof e?.ratingComment === 'string' ? e.ratingComment : null) ??
-    (typeof e?.rating_comment === 'string' ? e.rating_comment : null) ??
-    null;
-
-  const createdAt =
-    e?.ratingCreatedAt ??
-    e?.rating_created_at ??
-    e?.ratedAt ??
-    e?.rated_at ??
-    e?.updatedAt ??
-    e?.stop ??
-    e?.start ??
-    nowIso();
-
-  return { score: s, comment, createdAt: String(createdAt) };
-}
-
-/** Basic auth extraction from headers: returns { ok, uid, role, reason } */
-function extractAuthFromHeaders(
-  headers: Headers | Record<string, string> | undefined,
-) {
-  const get = (k: string) => {
-    if (!headers) return null;
-    if ((headers as Headers).get) return (headers as Headers).get!(k);
-    return (
-      (headers as Record<string, string>)[k.toLowerCase()] ??
-      (headers as Record<string, string>)[k]
-    );
-  };
-  const uid = get('x-uid') ?? get('x-user') ?? get('x-user-id');
-  const role = (get('x-role') ?? 'patient') as string | null;
-  if (!uid) return { ok: false, reason: 'unauthenticated' };
-  return { ok: true, uid: String(uid), role: role ? String(role) : 'patient' };
-}
-
-/** Authorize action on an encounter for a given actor */
-function authorizeForEncounter(
-  actor: { uid: string; role: string },
-  enc: { patientId?: string; clinicianId?: string } | null,
-) {
-  if (!actor || !actor.uid) return { ok: false, reason: 'unauthenticated' };
-  if (actor.role === 'admin') return { ok: true };
-  if (!enc) return { ok: false, reason: 'encounter_not_found' };
-  if (
-    actor.role === 'patient' &&
-    enc.patientId &&
-    actor.uid === enc.patientId
-  )
-    return { ok: true };
-  if (
-    actor.role === 'clinician' &&
-    enc.clinicianId &&
-    actor.uid === enc.clinicianId
-  )
-    return { ok: true };
-  return { ok: false, reason: 'forbidden' };
-}
-
-function makeInMemoryNote({
-  encounterId,
-  text,
-  source,
-  visitId,
-  authorId,
-  authorRole,
-}: {
-  encounterId: string;
-  text: string;
-  source?: string;
-  visitId?: string;
-  authorId?: string;
-  authorRole?: string;
-}) {
-  return {
-    id: crypto.randomUUID(),
-    encounterId,
-    text,
-    source: source ?? null,
-    visitId: visitId ?? null,
-    authorId: authorId ?? null,
-    authorRole: authorRole ?? null,
-    createdAt: nowIso(),
-  };
-}
-
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { id: string } },
-) {
-  const id = params.id;
-
-  try {
-    if (prisma && prisma.encounter) {
-      const enc = await prisma.encounter
-        .findUnique({
-          where: { id },
-          include: { notes: true },
-        })
-        .catch(() => null);
-
-      if (enc) {
-        const inferred = extractRating(enc);
-        return NextResponse.json({
-          ...enc,
-          rating: (enc as any).rating ?? inferred ?? null,
-        });
-      }
-    }
-  } catch (err) {
-    console.warn(
-      'prisma encounter GET failed - falling back to store',
-      (err as any)?.message ?? err,
-    );
-  }
-
-  const enc = store.encounters.get(id);
-  if (!enc) return NextResponse.json({ message: 'Not found' }, { status: 404 });
-
-  const inferred = extractRating(enc);
-  return NextResponse.json({
-    ...enc,
-    rating: (enc as any).rating ?? inferred ?? null,
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
 }
 
-/* ---------- POST handler - create note ---------- */
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
-  const encId = params.id;
+function forwardHeaders(req: NextRequest, includeJson = false) {
+  const headers = new Headers();
 
-  const auth = extractAuthFromHeaders(req.headers);
-  if (!auth.ok) {
-    return NextResponse.json(
-      { ok: false, error: 'unauthenticated' },
-      { status: 401 },
-    );
-  }
-  const actor = { uid: auth.uid!, role: auth.role ?? 'patient' };
-
-  const body = await req.json().catch(() => ({}));
-  const text = (body?.text ?? '').toString().trim();
-  const source = body?.source ? String(body.source) : undefined;
-  const visitId = body?.visitId ? String(body.visitId) : undefined;
-
-  if (!text)
-    return NextResponse.json(
-      { ok: false, error: 'text required' },
-      { status: 400 },
-    );
-
-  const twoMinAgo = new Date(Date.now() - 2 * 60 * 1000);
-
-  if (prisma && prisma.note && typeof prisma.note.create === 'function') {
-    try {
-      const enc = await prisma.encounter.findUnique({ where: { id: encId } });
-      if (!enc)
-        return NextResponse.json(
-          { ok: false, error: 'encounter_not_found' },
-          { status: 404 },
-        );
-
-      const authz = authorizeForEncounter(actor, {
-        patientId: enc.patientId,
-        clinicianId: enc.clinicianId,
-      });
-      if (!authz.ok)
-        return NextResponse.json(
-          { ok: false, error: authz.reason ?? 'forbidden' },
-          { status: 403 },
-        );
-
-      const dup = await prisma.note
-        .findFirst({
-          where: {
-            encounterId: encId,
-            text,
-            createdAt: { gte: twoMinAgo },
-          },
-        })
-        .catch(() => null);
-
-      if (dup)
-        return NextResponse.json(
-          { ok: false, error: 'duplicate_recent', note: dup },
-          { status: 409 },
-        );
-
-      const created = await prisma.note.create({
-        data: {
-          encounterId: encId,
-          text,
-          source: source ?? null,
-          visitId: visitId ?? null,
-          authorId: actor.uid,
-          authorRole: actor.role,
-        },
-      });
-
-      try {
-        const localEnc = store.encounters.get(encId);
-        if (localEnc) {
-          (localEnc as any).notes = (localEnc as any).notes ?? [];
-          (localEnc as any).notes.unshift(created);
-          store.encounters.set(encId, localEnc as any);
-        }
-      } catch {}
-
-      try {
-        await fetch(
-          `${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/events/emit`,
-          {
-            method: 'POST',
-            headers: {
-              'content-type': 'application/json',
-              'x-uid': actor.uid,
-              'x-role': actor.role,
-            },
-            body: JSON.stringify({
-              kind: 'note_created',
-              encounterId: encId,
-              note: created,
-              actor: { id: actor.uid, role: actor.role },
-            }),
-          },
-        ).catch(() => {});
-      } catch {}
-
-      return NextResponse.json({ ok: true, note: created }, { status: 201 });
-    } catch (prErr: any) {
-      console.warn(
-        'prisma note create failed, will fallback to in-memory store',
-        prErr?.message ?? prErr,
-      );
-    }
+  for (const key of [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-patient-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-role',
+    'x-org-id',
+    'x-correlation-id',
+    'x-request-id',
+    'idempotency-key',
+    'x-idempotency-key',
+  ]) {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
   }
 
+  headers.set('accept', 'application/json');
+  if (includeJson) headers.set('content-type', 'application/json');
+  if (!headers.has('x-role')) headers.set('x-role', 'patient');
+
+  return headers;
+}
+
+async function readPayload(res: Response) {
+  const text = await res.text().catch(() => '');
+  if (!text) return null;
   try {
-    const enc = store.encounters.get(encId) as any;
-    if (!enc)
-      return NextResponse.json(
-        { ok: false, error: 'encounter_not_found' },
-        { status: 404 },
-      );
-
-    const authz = authorizeForEncounter(actor, {
-      patientId: enc.patientId,
-      clinicianId: enc.clinicianId,
-    });
-    if (!authz.ok)
-      return NextResponse.json(
-        { ok: false, error: authz.reason ?? 'forbidden' },
-        { status: 403 },
-      );
-
-    const recentDup = (enc.notes ?? []).find((n: any) => {
-      if (!n?.text || !n?.createdAt) return false;
-      return (
-        n.text.trim() === text &&
-        new Date(n.createdAt).getTime() >= twoMinAgo.getTime()
-      );
-    });
-    if (recentDup)
-      return NextResponse.json(
-        { ok: false, error: 'duplicate_recent', note: recentDup },
-        { status: 409 },
-      );
-
-    const note = makeInMemoryNote({
-      encounterId: encId,
-      text,
-      source,
-      visitId,
-      authorId: actor.uid,
-      authorRole: actor.role,
-    });
-    enc.notes = enc.notes ?? [];
-    enc.notes.unshift(note);
-    store.encounters.set(encId, enc);
-
-    try {
-      await fetch(
-        `${process.env.NEXT_PUBLIC_BASE_URL ?? ''}/api/events/emit`,
-        {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-            'x-uid': actor.uid,
-            'x-role': actor.role,
-          },
-          body: JSON.stringify({
-            kind: 'note_created',
-            encounterId: encId,
-            note,
-            actor: { id: actor.uid, role: actor.role },
-          }),
-        },
-      ).catch(() => {});
-    } catch {}
-
-    return NextResponse.json({ ok: true, note }, { status: 201 });
-  } catch (err: any) {
-    console.error('note POST error', err);
-    return NextResponse.json(
-      { ok: false, error: String(err?.message ?? err) },
-      { status: 500 },
-    );
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
   }
+}
+
+function normalizeEncounter(row: any) {
+  if (!row || typeof row !== 'object') return null;
+  const id = String(row.id || row.encounterId || '').trim();
+  if (!id) return null;
+
+  return {
+    ...row,
+    id,
+    caseId: row.caseId || row.case_id || row.patientCaseId || `encounter-${id}`,
+    status: row.status || 'open',
+    visitMode: row.visitMode || row.mode || row.type || row.appointment?.visitMode || null,
+    primaryTime:
+      row.primaryTime ||
+      row.endedAt ||
+      row.stop ||
+      row.consultationEndedAt ||
+      row.startedAt ||
+      row.start ||
+      row.consultationStartedAt ||
+      row.updatedAt ||
+      row.createdAt ||
+      null,
+    start: row.start || row.startedAt || row.consultationStartedAt || row.createdAt || null,
+    stop: row.stop || row.endedAt || row.consultationEndedAt || null,
+    startedAt: row.startedAt || row.start || row.consultationStartedAt || null,
+    endedAt: row.endedAt || row.stop || row.consultationEndedAt || null,
+    clinician: row.clinician || (row.clinicianId ? { id: row.clinicianId, name: row.clinicianName || 'Clinician' } : null),
+    documents: Array.isArray(row.documents) ? row.documents : [],
+    counts: row.counts || {},
+  };
+}
+
+function unwrapEncounter(payload: any, id: string) {
+  const direct = normalizeEncounter(payload?.encounter ?? payload?.item ?? payload);
+  if (direct?.id === id) return direct;
+
+  const fromEncounters = Array.isArray(payload?.encounters)
+    ? payload.encounters.map(normalizeEncounter).find((e: any) => e?.id === id)
+    : null;
+  if (fromEncounters) return fromEncounters;
+
+  const fromCases = Array.isArray(payload?.cases)
+    ? payload.cases
+        .flatMap((c: any) => (Array.isArray(c.encounters) ? c.encounters : [c.latestEncounter]).filter(Boolean))
+        .map(normalizeEncounter)
+        .find((e: any) => e?.id === id)
+    : null;
+
+  return fromCases ?? null;
+}
+
+async function fetchGatewayJson(req: NextRequest, path: string, init?: RequestInit) {
+  const base = gatewayBase();
+  if (!base) {
+    return { ok: false, status: 503, payload: { ok: false, error: 'api_gateway_base_required' } };
+  }
+
+  const res = await fetch(`${base}${path}`, {
+    cache: 'no-store',
+    ...init,
+  });
+  const payload = await readPayload(res);
+  return { ok: res.ok, status: res.status, payload };
+}
+
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const id = encodeURIComponent(params.id);
+  const headers = forwardHeaders(req);
+
+  const direct = await fetchGatewayJson(req, `/api/encounters/${id}`, { method: 'GET', headers });
+  if (direct.ok) {
+    const encounter = unwrapEncounter(direct.payload, params.id);
+    if (encounter) return json({ ok: true, encounter, source: direct.payload?.source || 'api-gateway.encounter' });
+  }
+
+  if (![404, 405, 501].includes(direct.status)) {
+    return json(direct.payload ?? { ok: false, error: `encounter_upstream_${direct.status}` }, direct.status);
+  }
+
+  const list = await fetchGatewayJson(req, `/api/encounters?limit=100`, { method: 'GET', headers });
+  if (!list.ok) {
+    return json(list.payload ?? { ok: false, error: `encounter_list_upstream_${list.status}` }, list.status);
+  }
+
+  const encounter = unwrapEncounter(list.payload, params.id);
+  if (!encounter) return json({ ok: false, error: 'encounter_not_found' }, 404);
+
+  return json({ ok: true, encounter, source: 'patient-app.encounter.from-list' });
+}
+
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const bodyText = await req.text().catch(() => '{}');
+  const id = encodeURIComponent(params.id);
+  const headers = forwardHeaders(req, true);
+
+  const attempts = [
+    `/api/encounters/${id}/notes`,
+    `/api/encounters/${id}`,
+  ];
+
+  let last: { status: number; payload: any } | null = null;
+  for (const path of attempts) {
+    const result = await fetchGatewayJson(req, path, {
+      method: 'POST',
+      headers,
+      body: bodyText || '{}',
+    });
+
+    if (result.ok) return json(result.payload ?? { ok: true }, result.status);
+    last = { status: result.status, payload: result.payload };
+    if (![404, 405, 501].includes(result.status)) break;
+  }
+
+  return json(
+    last?.payload ?? {
+      ok: false,
+      error: 'encounter_note_service_unavailable',
+      message: 'Patient note creation is not available from the encounter service yet.',
+    },
+    last?.status ?? 503,
+  );
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
+  const base = gatewayBase();
+  if (!base) return json({ ok: false, error: 'api_gateway_base_required' }, 503);
+
+  const upstream = await fetch(`${base}/api/encounters/${encodeURIComponent(params.id)}`, {
+    method: 'PATCH',
+    cache: 'no-store',
+    headers: forwardHeaders(req, true),
+    body: await req.text().catch(() => '{}') || '{}',
+  });
+  const payload = await readPayload(upstream);
+  return json(payload ?? { ok: upstream.ok }, upstream.status);
 }

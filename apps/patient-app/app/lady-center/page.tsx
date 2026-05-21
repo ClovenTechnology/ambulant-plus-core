@@ -699,7 +699,7 @@ function LadyCenterPageContent() {
     requestId: string;
     generatedAt: string;
     degradedMode: boolean;
-    source: "insightcore" | "local_fallback" | "hybrid";
+    source: "insightcore";
     todaySummary?: {
       subtitle?: string;
       primary?: { k: string; v: string };
@@ -2348,8 +2348,8 @@ function LadyCenterPageContent() {
                   onReveal={() => revealSensitive(30)}
                   onFindCare={() => track("lady_find_care")}
                   deliveryState={{
-                    source: ladyInsight?.source ?? "local_fallback",
-                    degradedMode: ladyInsight?.degradedMode ?? true,
+                    source: "insightcore",
+                    degradedMode: ladyInsight?.degradedMode ?? Boolean(ladyInsightError),
                     error: ladyInsightError,
                   }}
                   summaryBadge={ladyInsight?.todaySummary?.badge ?? null}
@@ -2503,8 +2503,8 @@ function LadyCenterPageContent() {
                   onBanner={showBanner}
                   remoteInsights={ladyInsight?.insights ?? []}
                   deliveryState={{
-                    source: ladyInsight?.source ?? "local_fallback",
-                    degradedMode: ladyInsight?.degradedMode ?? true,
+                    source: "insightcore",
+                    degradedMode: ladyInsight?.degradedMode ?? Boolean(ladyInsightError),
                     error: ladyInsightError,
                   }}
                   fallbackInsights={

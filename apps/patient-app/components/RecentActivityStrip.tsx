@@ -1,10 +1,8 @@
 // apps/patient-app/components/RecentActivityStrip.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-
-const GATEWAY = process.env.NEXT_PUBLIC_APIGW_BASE ?? '';
 
 type CasePreview = {
   id: string;
@@ -73,9 +71,9 @@ function normaliseCases(payload: unknown): CasePreview[] {
 
       return {
         id,
-        title: toStringValue(item.title ?? item.case).trim(),
+        title: toStringValue(item.title ?? item.caseTitle ?? item.case).trim(),
         updatedAt:
-          toStringValue(item.updatedAt ?? item.start ?? item.startedAt).trim() ||
+          toStringValue(item.updatedAt ?? item.stop ?? item.start ?? item.startedAt).trim() ||
           new Date().toISOString(),
       };
     })
@@ -86,14 +84,18 @@ function normaliseCases(payload: unknown): CasePreview[] {
 
 function normaliseAppointments(payload: unknown): ApptPreview[] {
   const root = isRecord(payload) ? payload : {};
-  const rawAppts = Array.isArray(root.appointments) ? root.appointments : [];
+  const rawAppts = Array.isArray(root.appointments)
+    ? root.appointments
+    : Array.isArray(root.items)
+      ? root.items
+      : [];
 
   return rawAppts
     .map((item): ApptPreview | null => {
       if (!isRecord(item)) return null;
 
       const id = toStringValue(item.id).trim();
-      const startsAt = toStringValue(item.startsAt ?? item.when).trim();
+      const startsAt = toStringValue(item.startsAt ?? item.startTime ?? item.when).trim();
 
       if (!id || !startsAt) return null;
 
@@ -113,34 +115,34 @@ export default function RecentActivityStrip({ patientId = null }: RecentActivity
   const [appts, setAppts] = useState<ApptPreview[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const encodedPatientId =
-    typeof patientId === 'string' && patientId.trim()
-      ? encodeURIComponent(patientId.trim())
-      : '';
+  const encodedPatientId = useMemo(
+    () =>
+      typeof patientId === 'string' && patientId.trim()
+        ? encodeURIComponent(patientId.trim())
+        : '',
+    [patientId],
+  );
 
   useEffect(() => {
     let cancelled = false;
 
     async function load() {
+      if (!encodedPatientId) {
+        setCases([]);
+        setAppts([]);
+        setLoading(false);
+        return;
+      }
+
       try {
         setLoading(true);
 
-        const casesUrl = encodedPatientId
-          ? `/api/encounters?mode=cases&patientId=${encodedPatientId}`
-          : '/api/encounters?mode=cases';
-
-        const appointmentsUrl = encodedPatientId
-          ? `${GATEWAY}/api/appointments?patientId=${encodedPatientId}`
-          : `${GATEWAY}/api/appointments`;
+        const casesUrl = `/api/encounters?mode=cases&patientId=${encodedPatientId}&limit=2`;
+        const appointmentsUrl = `/api/appointments?patientId=${encodedPatientId}&limit=2`;
 
         const [casesRes, apptsRes] = await Promise.allSettled([
           fetch(casesUrl, { cache: 'no-store' }),
-          GATEWAY
-            ? fetch(appointmentsUrl, {
-                cache: 'no-store',
-                headers: { 'x-role': 'patient' },
-              })
-            : Promise.reject(new Error('API gateway is not configured.')),
+          fetch(appointmentsUrl, { cache: 'no-store' }),
         ]);
 
         if (cancelled) return;
@@ -184,7 +186,7 @@ export default function RecentActivityStrip({ patientId = null }: RecentActivity
       <div className="relative z-10 flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div>
-            <span className="font-semibold uppercase tracking-[0.2em] text-[11px] text-slate-400">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">
               Recent activity
             </span>
             <p className="mt-1 text-[12px] text-slate-500">
@@ -225,7 +227,7 @@ export default function RecentActivityStrip({ patientId = null }: RecentActivity
             {cases.map((item) => (
               <Link
                 key={item.id}
-                href="/encounters"
+                href={`/encounters`}
                 className="inline-flex max-w-full items-center gap-2 rounded-full border border-slate-200 bg-white/86 px-3 py-2 shadow-sm transition hover:-translate-y-0.5 hover:bg-slate-50"
               >
                 <span className="rounded-full bg-cyan-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-700">

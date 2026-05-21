@@ -1,406 +1,253 @@
 ﻿// apps/patient-app/app/api/encounters/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { getPrisma } from '@/src/lib/prisma';
 
-export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
-function json(data: any, status = 200) {
-  return NextResponse.json(data, {
+function trimSlash(value: string) {
+  return String(value || '').replace(/\/+$/, '');
+}
+
+function gatewayBase() {
+  const configured =
+    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    '';
+
+  return configured ? trimSlash(configured) : '';
+}
+
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
     status,
-    headers: { 'Cache-Control': 'no-store' },
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
   });
 }
 
-function clampScore(n: any) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return null;
+function forwardHeaders(req: NextRequest, includeJson = false) {
+  const headers = new Headers();
 
-  const i = Math.round(v);
-  if (i < 1 || i > 5) return null;
+  for (const key of [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-patient-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-role',
+    'x-org-id',
+    'x-correlation-id',
+    'x-request-id',
+    'idempotency-key',
+    'x-idempotency-key',
+  ]) {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
+  }
 
-  return i as 1 | 2 | 3 | 4 | 5;
+  headers.set('accept', 'application/json');
+  if (includeJson) headers.set('content-type', 'application/json');
+  if (!headers.has('x-role')) headers.set('x-role', 'patient');
+
+  return headers;
 }
 
-function extractRating(e: any) {
-  const r = e?.rating ?? e?.patientRating ?? null;
+async function readPayload(res: Response) {
+  const text = await res.text().catch(() => '');
+  if (!text) return null;
 
-  if (r && typeof r === 'object') {
-    const s = clampScore((r as any).score);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
 
-    if (s) {
-      return {
-        score: s,
-        comment: (r as any).comment ?? undefined,
-        createdAt: String(
-          (r as any).createdAt ??
-            e?.ratingCreatedAt ??
-            e?.updatedAt ??
-            e?.stop ??
-            e?.start ??
-            new Date().toISOString(),
-        ),
-      };
+function statusText(status: number) {
+  if (status === 401) return 'Encounter access requires a signed-in patient session.';
+  if (status === 403) return 'You do not have access to this encounter scope.';
+  if (status === 404) return 'No encounters were found for this account.';
+  return 'Encounter service is temporarily unavailable.';
+}
+
+function normalizeEncounter(row: any) {
+  if (!row || typeof row !== 'object') return null;
+  const id = String(row.id || row.encounterId || '').trim();
+  if (!id) return null;
+
+  const clinician = row.clinician && typeof row.clinician === 'object'
+    ? row.clinician
+    : row.clinicianId
+      ? { id: row.clinicianId, name: row.clinicianName || 'Clinician' }
+      : null;
+
+  const primaryTime =
+    row.primaryTime ||
+    row.endedAt ||
+    row.stop ||
+    row.consultationEndedAt ||
+    row.startedAt ||
+    row.start ||
+    row.consultationStartedAt ||
+    row.updatedAt ||
+    row.createdAt ||
+    null;
+
+  return {
+    ...row,
+    id,
+    caseId: row.caseId || row.case_id || row.patientCaseId || `encounter-${id}`,
+    status: row.status || 'open',
+    visitMode: row.visitMode || row.mode || row.type || row.appointment?.visitMode || null,
+    clinician,
+    primaryTime,
+    start: row.start || row.startedAt || row.consultationStartedAt || row.createdAt || null,
+    stop: row.stop || row.endedAt || row.consultationEndedAt || null,
+    startedAt: row.startedAt || row.start || row.consultationStartedAt || null,
+    endedAt: row.endedAt || row.stop || row.consultationEndedAt || null,
+    counts: row.counts || {},
+    documents: Array.isArray(row.documents) ? row.documents : [],
+  };
+}
+
+function encounterTitle(row: any) {
+  const summary = row?.summaryPayload && typeof row.summaryPayload === 'object' ? row.summaryPayload : null;
+  return (
+    row?.caseTitle ||
+    row?.title ||
+    summary?.reason ||
+    summary?.diagnosisText ||
+    summary?.chiefComplaint ||
+    'Clinical encounter'
+  );
+}
+
+function groupIntoCases(encounters: any[]) {
+  const map = new Map<string, any>();
+
+  for (const original of encounters) {
+    const e = normalizeEncounter(original);
+    if (!e) continue;
+    const key = String(e.caseId || `encounter-${e.id}`);
+    const existing = map.get(key);
+
+    if (!existing) {
+      map.set(key, {
+        id: key,
+        title: encounterTitle(e),
+        status: e.caseStatus || e.status || 'open',
+        updatedAt: e.primaryTime,
+        encountersCount: 1,
+        latestEncounter: e,
+        encounters: [e],
+      });
+      continue;
+    }
+
+    existing.encounters.push(e);
+    existing.encountersCount = existing.encounters.length;
+    const current = Date.parse(String(e.primaryTime || '')) || 0;
+    const previous = Date.parse(String(existing.updatedAt || '')) || 0;
+    if (current >= previous) {
+      existing.latestEncounter = e;
+      existing.updatedAt = e.primaryTime;
+      existing.status = e.caseStatus || e.status || existing.status;
+      existing.title = existing.title || encounterTitle(e);
     }
   }
 
-  const s =
-    clampScore(e?.ratingScore) ??
-    clampScore(e?.rating_score) ??
-    clampScore(e?.ratingValue) ??
-    clampScore(e?.rating_value);
-
-  if (!s) return null;
-
-  const comment =
-    (typeof e?.ratingComment === 'string' ? e.ratingComment : null) ??
-    (typeof e?.rating_comment === 'string' ? e.rating_comment : null) ??
-    (typeof e?.comment === 'string' ? e.comment : null) ??
-    undefined;
-
-  const createdAt =
-    e?.ratingCreatedAt ??
-    e?.rating_created_at ??
-    e?.ratedAt ??
-    e?.rated_at ??
-    e?.updatedAt ??
-    e?.stop ??
-    e?.start ??
-    new Date().toISOString();
-
-  return {
-    score: s,
-    comment,
-    createdAt: String(createdAt),
-  };
+  return Array.from(map.values()).sort(
+    (a, b) => (Date.parse(String(b.updatedAt || '')) || 0) - (Date.parse(String(a.updatedAt || '')) || 0),
+  );
 }
 
-function readPatientId(req: NextRequest) {
-  return (
-    req.headers.get('x-ambulant-patient-id') ||
-    req.headers.get('x-patient-id') ||
-    req.headers.get('x-ambulant-user-id') ||
-    req.headers.get('x-user-id') ||
-    req.headers.get('x-uid') ||
-    ''
-  ).trim();
-}
-
-function shapeEncounterForClient(e: any, caseId: string) {
-  const rating = extractRating(e);
-
-  return {
-    id: e.id,
-    caseId,
-    start: e.start ?? e.startsAt ?? e.createdAt ?? null,
-    stop: e.stop ?? e.endsAt ?? e.endedAt ?? null,
-    mode: e.mode ?? e.type ?? null,
-    status: e.status ?? null,
-    clinician: e.clinician
-      ? {
-          id: e.clinician.id,
-          name: e.clinician.name ?? e.clinician.displayName ?? null,
-          specialty: e.clinician.specialty ?? null,
-        }
-      : e.clinicianId
-        ? {
-            id: e.clinicianId,
-            name: e.clinicianName ?? null,
-            specialty: e.clinicianSpecialty ?? null,
-          }
-        : undefined,
-    devices: e.devices ?? e.meta?.devices ?? undefined,
-    notes: e.notes ?? undefined,
-    vitals: e.vitals ?? undefined,
-    rating: rating ?? null,
-  };
-}
-
-function shapeCaseForClient(c: any) {
-  const rawEncounters = Array.isArray(c.encounters) ? c.encounters : [];
-
-  const encounters = rawEncounters
-    .map((e: any) => shapeEncounterForClient(e, c.id))
-    .sort(
-      (a: any, b: any) =>
-        new Date(b.stop ?? b.start ?? 0).getTime() -
-        new Date(a.stop ?? a.start ?? 0).getTime(),
-    );
-
-  const latestEncounter = encounters[0] ?? null;
-
-  return {
-    id: c.id,
-    title: c.title ?? c.name ?? null,
-    status: c.status ?? 'Open',
-    updatedAt:
-      c.updatedAt ??
-      latestEncounter?.stop ??
-      latestEncounter?.start ??
-      new Date().toISOString(),
-    encountersCount: encounters.length,
-    latestEncounter,
-    encounters,
-  };
-}
-
-function shapeStandaloneEncounterAsCase(e: any) {
-  const caseId =
-    String(
-      e.caseId ??
-        e.case_id ??
-        e.patientCaseId ??
-        e.patient_case_id ??
-        e.encounterCaseId ??
-        '',
-    ).trim() || `encounter-${String(e.id)}`;
-
-  return {
-    id: caseId,
-    title: e.caseTitle ?? e.reason ?? e.title ?? 'Encounter',
-    status: e.caseStatus ?? e.status ?? 'Open',
-    updatedAt:
-      e.updatedAt ??
-      e.stop ??
-      e.endsAt ??
-      e.start ??
-      e.startsAt ??
-      e.createdAt ??
-      new Date().toISOString(),
-    encounters: [e],
-  };
-}
-
-/**
- * Query params:
- * - mode=cases/default | sessions
- * - status=Open|Closed|Referred
- * - limit=N
- */
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const mode = url.searchParams.get('mode');
-  const status = url.searchParams.get('status') ?? undefined;
-  const limitRaw = Number(url.searchParams.get('limit') ?? 0);
-  const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? limitRaw : undefined;
-  const patientId = readPatientId(req);
-
-  try {
-    const prisma = getPrisma() as any;
-
-    if (!prisma) {
-      return json(
-        {
-          ok: false,
-          error: 'encounter_store_unavailable',
-          cases: [],
-          encounters: [],
-        },
-        503,
-      );
-    }
-
-    /*
-     * Preferred shape: Case model with nested encounters.
-     * If this model is not available in the current Prisma schema, we fall back
-     * to direct Encounter queries below. No mock/in-memory fallback is used.
-     */
-    if (prisma.case?.findMany) {
-      const where: any = {};
-
-      if (status) where.status = status;
-
-      if (patientId) {
-        where.OR = [
-          { patientId },
-          { userId: patientId },
-          { patient: { id: patientId } },
-        ];
-      }
-
-      const cases = await prisma.case.findMany({
-        where,
-        include: {
-          encounters: {
-            include: {
-              clinician: true,
-            },
-          },
-        },
-        orderBy: { updatedAt: 'desc' },
-        take: limit,
-      });
-
-      const normalized = Array.isArray(cases)
-        ? cases.map((c: any) => {
-            const latest = [...(c.encounters ?? [])].sort(
-              (a: any, b: any) =>
-                new Date(b.stop ?? b.start ?? b.updatedAt ?? 0).getTime() -
-                new Date(a.stop ?? a.start ?? a.updatedAt ?? 0).getTime(),
-            )[0];
-
-            const updatedAt = latest
-              ? latest.stop ?? latest.start ?? latest.updatedAt
-              : c.updatedAt ?? new Date().toISOString();
-
-            return { ...c, updatedAt };
-          })
+function normalizeListPayload(payload: any) {
+  const rawCases = Array.isArray(payload?.cases) ? payload.cases : [];
+  const rawEncounters = Array.isArray(payload?.encounters)
+    ? payload.encounters
+    : Array.isArray(payload?.items)
+      ? payload.items
+      : Array.isArray(payload)
+        ? payload
         : [];
 
-      if (mode === 'sessions') {
-        const encounters = normalized
-          .flatMap((c: any) =>
-            (c.encounters ?? []).map((e: any) => {
-              const rating = extractRating(e);
+  const encounters = rawEncounters.map(normalizeEncounter).filter(Boolean);
+  const cases = rawCases.length ? rawCases : groupIntoCases(encounters);
 
-              return {
-                id: e.id,
-                caseId: c.id,
-                caseTitle: c.title ?? c.name,
-                caseStatus: c.status,
-                start: e.start ?? e.startsAt ?? e.createdAt ?? null,
-                stop: e.stop ?? e.endsAt ?? e.endedAt ?? null,
-                mode: e.mode ?? e.type ?? null,
-                status: e.status ?? null,
-                clinician: e.clinician
-                  ? {
-                      id: e.clinician.id,
-                      name: e.clinician.name ?? e.clinician.displayName ?? null,
-                      specialty: e.clinician.specialty ?? null,
-                    }
-                  : undefined,
-                devices: e.devices ?? e.meta?.devices ?? undefined,
-                notes: e.notes ?? undefined,
-                vitals: e.vitals ?? undefined,
-                rating: rating ?? null,
-              };
-            }),
-          )
-          .sort(
-            (a: any, b: any) =>
-              new Date(b.stop ?? b.start ?? 0).getTime() -
-              new Date(a.stop ?? a.start ?? 0).getTime(),
-          );
+  return {
+    ok: payload?.ok !== false,
+    source: payload?.source || 'patient-app.encounters.proxy',
+    count: encounters.length,
+    cases,
+    encounters,
+    summary: {
+      totalCases: cases.length,
+      totalEncounters: encounters.length,
+      openCases: cases.filter((c: any) => /open|active|progress|scheduled/i.test(String(c.status || c.latestEncounter?.status || ''))).length,
+      completedEncounters: encounters.filter((e: any) => /complete|closed|done|ended/i.test(String(e.status || ''))).length,
+      documents: encounters.reduce((sum: number, e: any) => sum + Number(e.counts?.documents || e.documents?.length || 0), 0),
+      erxOrders: encounters.reduce((sum: number, e: any) => sum + Number(e.counts?.erxOrders || 0), 0),
+      labOrders: encounters.reduce((sum: number, e: any) => sum + Number(e.counts?.labOrders || 0), 0),
+    },
+  };
+}
 
-        return json({ ok: true, encounters });
-      }
-
-      return json({
-        ok: true,
-        cases: normalized.map(shapeCaseForClient),
-      });
-    }
-
-    /*
-     * Direct Encounter model fallback.
-     * This is still production-safe because it uses the real database model,
-     * not mock data.
-     */
-    if (prisma.encounter?.findMany) {
-      const where: any = {};
-
-      if (status) where.status = status;
-
-      if (patientId) {
-        where.OR = [
-          { patientId },
-          { userId: patientId },
-          { patient: { id: patientId } },
-        ];
-      }
-
-      const encountersRaw = await prisma.encounter.findMany({
-        where,
-        include: {
-          clinician: true,
-        },
-        orderBy: [
-          { updatedAt: 'desc' },
-          { createdAt: 'desc' },
-        ],
-        take: limit,
-      });
-
-      const encounters = Array.isArray(encountersRaw) ? encountersRaw : [];
-
-      if (mode === 'sessions') {
-        const sessions = encounters
-          .map((e: any) => {
-            const caseId =
-              String(
-                e.caseId ??
-                  e.case_id ??
-                  e.patientCaseId ??
-                  e.patient_case_id ??
-                  e.encounterCaseId ??
-                  '',
-              ).trim() || `encounter-${String(e.id)}`;
-
-            return {
-              ...shapeEncounterForClient(e, caseId),
-              caseTitle: e.caseTitle ?? e.reason ?? e.title ?? 'Encounter',
-              caseStatus: e.caseStatus ?? e.status ?? 'Open',
-            };
-          })
-          .sort(
-            (a: any, b: any) =>
-              new Date(b.stop ?? b.start ?? 0).getTime() -
-              new Date(a.stop ?? a.start ?? 0).getTime(),
-          );
-
-        return json({ ok: true, encounters: sessions });
-      }
-
-      const grouped = new Map<string, any>();
-
-      for (const e of encounters) {
-        const c = shapeStandaloneEncounterAsCase(e);
-        const existing = grouped.get(c.id);
-
-        if (!existing) {
-          grouped.set(c.id, c);
-        } else {
-          existing.encounters.push(e);
-          const existingTime = new Date(existing.updatedAt ?? 0).getTime();
-          const currentTime = new Date(c.updatedAt ?? 0).getTime();
-
-          if (currentTime > existingTime) {
-            existing.updatedAt = c.updatedAt;
-          }
-        }
-      }
-
-      const cases = Array.from(grouped.values())
-        .map(shapeCaseForClient)
-        .sort(
-          (a: any, b: any) =>
-            new Date(b.updatedAt ?? 0).getTime() -
-            new Date(a.updatedAt ?? 0).getTime(),
-        );
-
-      return json({ ok: true, cases });
-    }
-
+async function forward(req: NextRequest, method: 'GET' | 'POST') {
+  const base = gatewayBase();
+  if (!base) {
     return json(
       {
         ok: false,
-        error: 'encounter_store_unavailable',
+        error: 'api_gateway_base_required',
+        message: 'Encounter service is unavailable because the API gateway base URL is not configured.',
         cases: [],
         encounters: [],
       },
       503,
     );
-  } catch (err: any) {
-    console.error('[patient-app/api/encounters] failed', err);
+  }
 
+  const incoming = new URL(req.url);
+  const path = `/api/encounters${incoming.search || ''}`;
+  const init: RequestInit = {
+    method,
+    cache: 'no-store',
+    headers: forwardHeaders(req, method !== 'GET'),
+  };
+
+  if (method !== 'GET') {
+    init.body = await req.text().catch(() => '{}') || '{}';
+  }
+
+  const upstream = await fetch(`${base}${path}`, init);
+  const payload = await readPayload(upstream);
+
+  if (!upstream.ok) {
     return json(
       {
         ok: false,
-        error: err?.message || 'encounters_unavailable',
+        error: payload?.error || `encounters_upstream_${upstream.status}`,
+        message: payload?.message || statusText(upstream.status),
         cases: [],
         encounters: [],
       },
-      500,
+      upstream.status,
     );
   }
+
+  return json(normalizeListPayload(payload), upstream.status);
+}
+
+export async function GET(req: NextRequest) {
+  return forward(req, 'GET');
+}
+
+export async function POST(req: NextRequest) {
+  return forward(req, 'POST');
 }

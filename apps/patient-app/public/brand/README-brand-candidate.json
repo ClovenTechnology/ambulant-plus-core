@@ -1,0 +1,14 @@
+{
+  "decision": "Use the first Ambulant+ logo as the parent master because it is the only supplied full brand lockup that is not side-clipped and has the complete CONTACTLESS MEDICINE descriptor.",
+  "source_file": "ChatGPT Image Dec 20, 2025, 07_19_34 PM(1).png",
+  "full_crop_source_px": [
+    733,
+    467
+  ],
+  "mark_crop_source_px": [
+    244,
+    276
+  ],
+  "generated_folder": "apps/patient-app/public/brand/",
+  "medreach_note": "Not generated: no MedReach-specific source logo was supplied; Cloven Technology artwork should not be renamed as MedReach."
+}

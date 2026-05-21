@@ -44,9 +44,13 @@ type DeviceCatalogItem = {
 
 type VitalsSummary = {
   hr?: number | { value?: number };
+  hrNow?: number | { value?: number };
   bp?: string;
+  bpNow?: string | { s?: number | null; d?: number | null } | null;
   temp?: number;
+  tempNow?: number;
   spo2?: number;
+  spo2Now?: number;
   overallStatus?: string;
   lastSyncHuman?: string;
   score?: number;
@@ -128,14 +132,34 @@ type SharingPreference = {
 type EmergencyContact = {
   name?: string;
   phone?: string;
+  relationship?: string;
+  email?: string;
 };
 
 type ProfileForm = {
   name: string;
+  contactEmail: string;
+  phone: string;
+  primaryComm: string;
+  dob: string;
+  gender: string;
+  idNumber: string;
+  photoUrl: string;
+
   heightCm: number | "";
   weightKg: number | "";
+  bloodType: string;
+
+  addressLine1: string;
+  addressLine2: string;
+  city: string;
+  postalCode: string;
+  useAsDefaultDelivery: boolean;
+
+  // legacy display compatibility
   address: string;
   mobile: string;
+
   emergencyContact: EmergencyContact;
 };
 
@@ -156,6 +180,33 @@ function toNumber(value: unknown) {
     return toNumber((value as any).value);
   }
   return null;
+}
+
+function formatBpNow(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value;
+
+  if (value && typeof value === "object") {
+    const s = (value as any).s ?? (value as any).systolic;
+    const d = (value as any).d ?? (value as any).diastolic;
+
+    if (s || d) {
+      return `${s ?? "—"}/${d ?? "—"}`;
+    }
+  }
+
+  return null;
+}
+
+function normalizeVitalsSummaryPayload(payload: any): VitalsSummary | null {
+  if (!payload || payload?.ok === false) return null;
+
+  return {
+    ...payload,
+    hr: payload.hr ?? payload.hrNow,
+    spo2: payload.spo2 ?? payload.spo2Now,
+    bp: payload.bp ?? formatBpNow(payload.bpNow),
+    temp: payload.temp ?? payload.tempNow,
+  };
 }
 
 function hasVitals(summary: VitalsSummary | null) {
@@ -230,12 +281,6 @@ function displayMetric(value: unknown, suffix = "") {
   return `${n}${suffix}`;
 }
 
-function displayTemperature(value: unknown) {
-  const n = toNumber(value);
-  if (n === null) return "—";
-  return `${n} °C`;
-}
-
 function displayBloodPressure(value: unknown) {
   if (typeof value !== "string" || !value.trim()) return "—";
   return value;
@@ -305,7 +350,14 @@ function defaultDeviceCapabilities(kind: DeviceCatalogItem["kind"]) {
       return ["Pulse", "SpO₂", "HRV", "Sleep insights"];
     case "vitals":
     default:
-      return ["Temperature", "SpO₂", "Blood pressure", "Glucose", "Heart rate", "ECG"];
+      return [
+        "Temperature",
+        "SpO₂",
+        "Blood pressure",
+        "Glucose",
+        "Heart rate",
+        "ECG",
+      ];
   }
 }
 
@@ -334,7 +386,9 @@ function normalizeDeviceCatalogItem(item: any): DeviceCatalogItem | null {
 
   const kind = normalizeDeviceKind(item.kind ?? item.modality ?? item.type);
   const capabilities = Array.isArray(item.capabilities)
-    ? item.capabilities.map((cap: unknown) => String(cap || "").trim()).filter(Boolean)
+    ? item.capabilities
+        .map((cap: unknown) => String(cap || "").trim())
+        .filter(Boolean)
     : defaultDeviceCapabilities(kind);
 
   return {
@@ -345,7 +399,9 @@ function normalizeDeviceCatalogItem(item: any): DeviceCatalogItem | null {
     model: String(item.model ?? ""),
     category: normalizeDeviceCategory(item.category),
     kind,
-    summary: String(item.summary ?? item.description ?? defaultDeviceSummary(kind)),
+    summary: String(
+      item.summary ?? item.description ?? defaultDeviceSummary(kind),
+    ),
     href: String(item.href ?? defaultDeviceHref(kind)),
     status: "supported",
     capabilities,
@@ -408,7 +464,7 @@ function OrbitalScore({ score }: { score: number }) {
       />
       <div className="relative z-10 flex h-[68%] w-[68%] flex-col items-center justify-center rounded-full border border-white/65 bg-white/84 shadow-[0_24px_90px_rgba(59,130,246,0.14)] backdrop-blur-xl">
         <div className="text-[10px] font-medium uppercase tracking-[0.3em] text-slate-500">
-          Health index
+          Connected care signal
         </div>
         <div className="mt-2 bg-gradient-to-br from-slate-900 via-indigo-700 to-cyan-600 bg-clip-text text-5xl font-semibold text-transparent sm:text-6xl">
           {score}
@@ -431,11 +487,33 @@ export default function Profile() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState<ProfileForm>({
     name: "",
+    contactEmail: "",
+    phone: "",
+    primaryComm: "sms",
+    dob: "",
+    gender: "",
+    idNumber: "",
+    photoUrl: "",
+
     heightCm: "",
     weightKg: "",
+    bloodType: "",
+
+    addressLine1: "",
+    addressLine2: "",
+    city: "",
+    postalCode: "",
+    useAsDefaultDelivery: false,
+
     address: "",
     mobile: "",
-    emergencyContact: { name: "", phone: "" },
+
+    emergencyContact: {
+      name: "",
+      phone: "",
+      relationship: "",
+      email: "",
+    },
   });
   const [saving, setSaving] = useState(false);
   const [devices, setDevices] = useState<DeviceCatalogItem[]>([]);
@@ -474,13 +552,21 @@ export default function Profile() {
 
         if (!mounted) return;
 
-        const safeProfile = p?.ok === false ? null : p || null;
+        const safeProfile = p?.ok === false ? null : p?.profile || p || null;
 
         setProfile(safeProfile);
         setAdherenceSummary(safeProfile?.adherenceSummary ?? null);
         setForm((prev) => ({
           ...prev,
           name: safeProfile?.name || "",
+          contactEmail: safeProfile?.contactEmail || safeProfile?.email || "",
+          phone: safeProfile?.phone || safeProfile?.mobile || "",
+          primaryComm: safeProfile?.primaryComm || "sms",
+          dob: safeProfile?.dob || "",
+          gender: safeProfile?.gender || "",
+          idNumber: safeProfile?.idNumber || "",
+          photoUrl: safeProfile?.photoUrl || safeProfile?.avatarUrl || "",
+
           heightCm:
             typeof safeProfile?.heightCm === "number"
               ? safeProfile.heightCm
@@ -489,11 +575,32 @@ export default function Profile() {
             typeof safeProfile?.weightKg === "number"
               ? safeProfile.weightKg
               : "",
-          address: safeProfile?.address || "",
-          mobile: safeProfile?.mobile || "",
-          emergencyContact: safeProfile?.emergencyContact || {
-            name: "",
-            phone: "",
+          bloodType:
+            safeProfile?.bloodType || safeProfile?.profileMetadata?.bloodType || "",
+
+          addressLine1: safeProfile?.addressLine1 || safeProfile?.address || "",
+          addressLine2: safeProfile?.addressLine2 || "",
+          city: safeProfile?.city || "",
+          postalCode: safeProfile?.postalCode || "",
+          useAsDefaultDelivery: Boolean(safeProfile?.useAsDefaultDelivery),
+
+          address:
+            safeProfile?.address ||
+            [
+              safeProfile?.addressLine1,
+              safeProfile?.addressLine2,
+              safeProfile?.city,
+              safeProfile?.postalCode,
+            ]
+              .filter(Boolean)
+              .join(", "),
+          mobile: safeProfile?.phone || safeProfile?.mobile || "",
+
+          emergencyContact: {
+            name: safeProfile?.emergencyContact?.name || "",
+            phone: safeProfile?.emergencyContact?.phone || "",
+            relationship: safeProfile?.emergencyContact?.relationship || "",
+            email: safeProfile?.emergencyContact?.email || "",
           },
         }));
 
@@ -518,7 +625,7 @@ export default function Profile() {
         }
 
         setDevices(normalizeDeviceCatalogPayload(d));
-        setVitalsSummary(v?.ok === false ? null : v || null);
+        setVitalsSummary(normalizeVitalsSummaryPayload(v));
         setCareTeam(Array.isArray(c) ? c : []);
         setFavs(Array.isArray(f?.ids) ? f.ids : []);
       } catch (err) {
@@ -539,12 +646,17 @@ export default function Profile() {
       : null;
 
   function completenessScore() {
-    const fields = ["name", "mobile", "address", "emergencyContact"];
+    const fields = ["name", "phone", "address", "emergencyContact"];
     let filled = 0;
     if (form.name?.trim()) filled++;
-    if (form.mobile?.trim()) filled++;
-    if (form.address?.trim()) filled++;
-    if (form.emergencyContact?.name?.trim() && form.emergencyContact?.phone?.trim()) filled++;
+    if ((form.phone || form.mobile)?.trim()) filled++;
+    if ((form.addressLine1 || form.address)?.trim()) filled++;
+    if (
+      form.emergencyContact?.name?.trim() &&
+      form.emergencyContact?.phone?.trim()
+    ) {
+      filled++;
+    }
     return Math.round((filled / fields.length) * 100);
   }
 
@@ -598,18 +710,43 @@ export default function Profile() {
       const payload = {
         patientId: profile?.patientId || profile?.id || undefined,
         userId: profile?.userId || undefined,
+
+        name: form.name || null,
+        contactEmail: form.contactEmail || null,
+        email: form.contactEmail || null,
+        phone: form.phone || form.mobile || null,
+        mobile: form.phone || form.mobile || null,
+        primaryComm: form.primaryComm || null,
+
+        dob: form.dob || null,
+        gender: form.gender || null,
+        idNumber: form.idNumber || null,
+        photoUrl: form.photoUrl || null,
+
         heightCm:
           typeof form.heightCm === "number" ? Number(form.heightCm) : null,
         weightKg:
           typeof form.weightKg === "number" ? Number(form.weightKg) : null,
-        address: form.address || null,
-        mobile: form.mobile || null,
+        bloodType: form.bloodType || null,
+
+        addressLine1: form.addressLine1 || form.address || null,
+        addressLine2: form.addressLine2 || null,
+        city: form.city || null,
+        postalCode: form.postalCode || null,
+        useAsDefaultDelivery: form.useAsDefaultDelivery,
+
+        address:
+          form.address ||
+          [form.addressLine1, form.addressLine2, form.city, form.postalCode]
+            .filter(Boolean)
+            .join(", ") ||
+          null,
+
         emergencyContact: form.emergencyContact || null,
-        name: form.name || null,
       };
 
       const res = await fetch("/api/profile", {
-        method: "POST",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -630,12 +767,38 @@ export default function Profile() {
       setForm((prev) => ({
         ...prev,
         name: saved.name || prev.name,
+        contactEmail: saved.contactEmail || saved.email || prev.contactEmail,
+        phone: saved.phone || saved.mobile || prev.phone,
+        mobile: saved.phone || saved.mobile || prev.mobile,
+        primaryComm: saved.primaryComm || prev.primaryComm,
+        dob: saved.dob || prev.dob,
+        gender: saved.gender || prev.gender,
+        idNumber: saved.idNumber || prev.idNumber,
+        photoUrl: saved.photoUrl || saved.avatarUrl || prev.photoUrl,
+
         heightCm:
           typeof saved.heightCm === "number" ? saved.heightCm : prev.heightCm,
         weightKg:
           typeof saved.weightKg === "number" ? saved.weightKg : prev.weightKg,
-        address: saved.address || prev.address,
-        mobile: saved.mobile || prev.mobile,
+        bloodType:
+          saved.bloodType || saved.profileMetadata?.bloodType || prev.bloodType,
+
+        addressLine1: saved.addressLine1 || prev.addressLine1,
+        addressLine2: saved.addressLine2 || prev.addressLine2,
+        city: saved.city || prev.city,
+        postalCode: saved.postalCode || prev.postalCode,
+        useAsDefaultDelivery:
+          typeof saved.useAsDefaultDelivery === "boolean"
+            ? saved.useAsDefaultDelivery
+            : prev.useAsDefaultDelivery,
+
+        address:
+          saved.address ||
+          [saved.addressLine1, saved.addressLine2, saved.city, saved.postalCode]
+            .filter(Boolean)
+            .join(", ") ||
+          prev.address,
+
         emergencyContact: saved.emergencyContact || prev.emergencyContact,
       }));
 
@@ -700,7 +863,9 @@ export default function Profile() {
           return next.length > 0 ? next : prev;
         });
 
-        setVitalsSummary(payload.vitalsSummary || vitalsSummary);
+        setVitalsSummary(
+          normalizeVitalsSummaryPayload(payload.vitalsSummary) || vitalsSummary,
+        );
       }
     } catch (err) {
       console.error("Sync failed", err);
@@ -729,6 +894,18 @@ export default function Profile() {
   }
 
   const patientIdForMedicalAid = profile?.patientId || profile?.id || "";
+  const profilePhotoUrl = profile?.photoUrl || profile?.avatarUrl;
+
+  const orderedDevices = useMemo(() => {
+    const rank: Record<DeviceCatalogItem["kind"], number> = {
+      vitals: 0,
+      ring: 1,
+      stethoscope: 2,
+      otoscope: 3,
+    };
+
+    return [...devices].sort((a, b) => rank[a.kind] - rank[b.kind]);
+  }, [devices]);
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.14),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_42%,_#f8faff_100%)] px-4 pb-12 pt-4 md:px-6 md:pb-14 md:pt-6 lg:px-8">
@@ -754,7 +931,12 @@ export default function Profile() {
               </div>
 
               <div className="mt-6 flex flex-col gap-5 sm:flex-row sm:items-center">
-                <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setEditing(true)}
+                  className="relative text-left"
+                  title="Edit profile photo"
+                >
                   <motion.div
                     animate={syncing ? { rotate: 360 } : { rotate: 0 }}
                     transition={{
@@ -764,9 +946,10 @@ export default function Profile() {
                     }}
                     className="rounded-full bg-gradient-to-br from-sky-400 via-indigo-500 to-fuchsia-500 p-[3px] shadow-[0_12px_40px_rgba(59,130,246,0.28)]"
                   >
-                    {typeof profile?.avatarUrl === "string" && profile.avatarUrl.trim() ? (
+                    {typeof profilePhotoUrl === "string" &&
+                    profilePhotoUrl.trim() ? (
                       <img
-                        src={profile.avatarUrl}
+                        src={profilePhotoUrl}
                         alt={`${profile?.name || "Patient"} profile`}
                         className="h-28 w-28 rounded-full border-4 border-white object-cover shadow-md sm:h-32 sm:w-32"
                       />
@@ -779,7 +962,7 @@ export default function Profile() {
                   <span className="absolute -bottom-2 left-1/2 -translate-x-1/2 rounded-full border border-white/80 bg-white/90 px-3 py-1 text-[11px] font-semibold text-slate-600 shadow-sm backdrop-blur">
                     ID {profile?.patientId || "Not assigned"}
                   </span>
-                </div>
+                </button>
 
                 <div className="flex-1">
                   <h1 className="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
@@ -924,7 +1107,7 @@ export default function Profile() {
               </Link>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-[1.2fr_0.8fr]">
+            <div className="grid gap-4">
               <div className="rounded-[28px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm">
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -936,8 +1119,9 @@ export default function Profile() {
                       {profile?.name || form.name || "Your profile"}
                     </div>
                     <div className="mt-2 text-sm text-slate-600">
-                      Blood: {profile?.bloodType || "Not provided"} • Allergies:{" "}
-                      {Array.isArray(profile?.allergies) && profile.allergies.length > 0
+                      Blood: {profile?.bloodType || form.bloodType || "Not provided"} • Allergies:{" "}
+                      {Array.isArray(profile?.allergies) &&
+                      profile.allergies.length > 0
                         ? profile.allergies.join(", ")
                         : "None recorded"}
                     </div>
@@ -980,8 +1164,13 @@ export default function Profile() {
                 </div>
                 <div className="mt-2 text-sm text-slate-600">
                   BMI • Height{" "}
-                  {typeof form.heightCm === "number" ? `${form.heightCm} cm` : "—"} • Weight{" "}
-                  {typeof form.weightKg === "number" ? `${form.weightKg} kg` : "—"}
+                  {typeof form.heightCm === "number"
+                    ? `${form.heightCm} cm`
+                    : "—"}{" "}
+                  • Weight{" "}
+                  {typeof form.weightKg === "number"
+                    ? `${form.weightKg} kg`
+                    : "—"}
                 </div>
                 <div className="mt-5 rounded-2xl border border-white/70 bg-white/78 p-4">
                   <div className="text-sm font-medium text-slate-500">
@@ -1010,7 +1199,7 @@ export default function Profile() {
                 Live overview
               </div>
             </div>
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3">
               <div className="rounded-[26px] border border-white/72 bg-white/82 p-4 shadow-sm">
                 <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
                   <Activity className="h-4 w-4 text-cyan-600" />
@@ -1018,26 +1207,33 @@ export default function Profile() {
                 </div>
                 <div className="mt-4 text-3xl font-semibold text-slate-900">
                   {displayMetric(enhancedVitalsSummary?.hr)}
-                  <span className="ml-1 text-sm font-medium text-slate-400">bpm</span>
+                  <span className="ml-1 text-sm font-medium text-slate-400">
+                    bpm
+                  </span>
                 </div>
                 <p className="mt-3 text-sm leading-6 text-slate-600">
-                  {hasVitals(enhancedVitalsSummary) ? "Latest synced pulse reading from your connected vitals profile." : "No heart-rate reading has been synced yet."}
+                  {hasVitals(enhancedVitalsSummary)
+                    ? "Latest synced pulse reading from your connected vitals profile."
+                    : "No heart-rate reading has been synced yet."}
                 </p>
               </div>
               <div className="rounded-[26px] border border-white/72 bg-white/82 p-4 shadow-sm">
                 <div className="flex items-center gap-2 text-sm font-medium text-slate-900">
                   <CheckCircle2 className="h-4 w-4 text-emerald-600" />
-                  Health Score
+                  Care Readiness
                 </div>
                 <div className="mt-4 text-3xl font-semibold text-slate-900">
                   {healthScore}
-                  <span className="ml-1 text-sm font-medium text-slate-400">/99</span>
+                  <span className="ml-1 text-sm font-medium text-slate-400">
+                    /100
+                  </span>
                 </div>
                 <div className="mt-3 inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
                   {getHealthLabel(healthScore)}
                 </div>
                 <p className="mt-3 text-sm leading-6 text-slate-600">
-                  {enhancedVitalsSummary.overallStatus || "Calculated from your profile completeness and latest synced vitals."}
+                  {enhancedVitalsSummary.overallStatus ||
+                    "Calculated from your profile completeness and latest synced vitals."}
                 </p>
               </div>
               <div className="rounded-[26px] border border-white/72 bg-white/82 p-4 shadow-sm">
@@ -1074,7 +1270,7 @@ export default function Profile() {
                 Connected devices
               </div>
               <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">
-                Device catalog sourced from /api/devices/list
+                Supported Ambulant+ devices
               </h2>
             </div>
             <Link
@@ -1085,97 +1281,99 @@ export default function Profile() {
             </Link>
           </div>
 
-          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-            {devices.length === 0 && (
+          <div className="grid gap-4 md:grid-cols-2">
+            {orderedDevices.length === 0 && (
               <div className="col-span-full rounded-[24px] border border-dashed border-slate-200 bg-white/60 p-6 text-sm text-slate-500">
                 No devices connected.
               </div>
             )}
 
-            {devices.map((d) => {
-              const capabilities = Array.isArray(d.capabilities) ? d.capabilities : [];
+            {orderedDevices.map((d) => {
+              const capabilities = Array.isArray(d.capabilities)
+                ? d.capabilities
+                : [];
 
               return (
-              <motion.div
-                key={d.id || d.name}
-                whileHover={{ y: -4 }}
-                className="rounded-[28px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
-                      {d.category === "wearable" ? (
-                        <Smartphone className="h-3.5 w-3.5" />
-                      ) : (
-                        <Cpu className="h-3.5 w-3.5" />
-                      )}
-                      {d.category}
-                    </div>
-                    <div className="mt-4 text-lg font-semibold text-slate-900">
-                      {d.name}
-                    </div>
-                    <div className="text-sm text-slate-500">
-                      {d.vendor} • {d.model}
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
-                    {d.connected ? "Active" : d.status}
-                  </div>
-                </div>
-
-                <p className="mt-4 min-h-[48px] text-sm leading-6 text-slate-600">
-                  {d.summary}
-                </p>
-
-                <div className="mt-4 rounded-2xl border border-white/70 bg-white/78 p-3">
-                  <div className="flex items-center justify-between text-xs text-slate-500">
-                    <span>Telemetry preview</span>
-                    <span>
-                      {typeof d.battery === "number"
-                        ? `${d.battery}% battery`
-                        : d.lastSeenHuman || "No live telemetry preview"}
-                    </span>
-                  </div>
-                  <div className="mt-2 h-[64px]">
-                    {Array.isArray(d.recent) && d.recent.length > 0 ? (
-                      <Sparkline
-                        data={d.recent.map((x, index) => ({
-                          t: index,
-                          y: x.value,
-                        }))}
-                        height={64}
-                      />
-                    ) : (
-                      <div className="flex h-full items-center justify-center text-xs text-slate-400">
-                        No recent telemetry available
+                <motion.div
+                  key={d.id || d.name}
+                  whileHover={{ y: -4 }}
+                  className="rounded-[28px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
+                        {d.category === "wearable" ? (
+                          <Smartphone className="h-3.5 w-3.5" />
+                        ) : (
+                          <Cpu className="h-3.5 w-3.5" />
+                        )}
+                        {d.category}
                       </div>
-                    )}
+                      <div className="mt-4 text-lg font-semibold text-slate-900">
+                        {d.name}
+                      </div>
+                      <div className="text-sm text-slate-500">
+                        {d.vendor} • {d.model}
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700">
+                      {d.connected ? "Active" : d.status}
+                    </div>
                   </div>
-                </div>
 
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {capabilities.slice(0, 3).map((cap) => (
-                    <span
-                      key={cap}
-                      className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
+                  <p className="mt-4 min-h-[48px] text-sm leading-6 text-slate-600">
+                    {d.summary}
+                  </p>
+
+                  <div className="mt-4 rounded-2xl border border-white/70 bg-white/78 p-3">
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>Telemetry preview</span>
+                      <span>
+                        {typeof d.battery === "number"
+                          ? `${d.battery}% battery`
+                          : d.lastSeenHuman || "No live telemetry preview"}
+                      </span>
+                    </div>
+                    <div className="mt-2 h-[64px]">
+                      {Array.isArray(d.recent) && d.recent.length > 0 ? (
+                        <Sparkline
+                          data={d.recent.map((x, index) => ({
+                            t: index,
+                            y: x.value,
+                          }))}
+                          height={64}
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center text-xs text-slate-400">
+                          No recent telemetry available
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    {capabilities.slice(0, 3).map((cap) => (
+                      <span
+                        key={cap}
+                        className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600"
+                      >
+                        {cap}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-4">
+                    <Link
+                      href={d.href}
+                      className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600"
                     >
-                      {cap}
-                    </span>
-                  ))}
-                </div>
-
-                <div className="mt-4">
-                  <Link
-                    href={d.href}
-                    className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600"
-                  >
-                    Open device
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </div>
-              </motion.div>
-            );
+                      Open device
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </div>
+                </motion.div>
+              );
             })}
           </div>
         </section>
@@ -1190,10 +1388,15 @@ export default function Profile() {
               onRefresh={async () => {
                 try {
                   const res = await fetch("/api/allergies");
-                  const data = await res.json();
+                  const data = await res.json().catch(() => null);
+
                   setProfile((prev: any) => ({
                     ...(prev || {}),
-                    allergiesList: data,
+                    allergiesList: Array.isArray(data?.items)
+                      ? data.items
+                      : Array.isArray(data?.allergies)
+                        ? data.allergies
+                        : [],
                   }));
                 } catch (err) {
                   console.error("Allergies refresh failed", err);
@@ -1258,7 +1461,9 @@ export default function Profile() {
               <div className="space-y-4">
                 <div className="grid gap-3 md:grid-cols-4">
                   <div className="rounded-2xl border border-slate-200 bg-white/85 p-4">
-                    <div className="text-xs text-slate-500">Weighted adherence</div>
+                    <div className="text-xs text-slate-500">
+                      Weighted adherence
+                    </div>
                     <div className="mt-2 text-2xl font-semibold text-slate-900">
                       {adherenceHeadline.weightedPct}%
                     </div>
@@ -1276,7 +1481,9 @@ export default function Profile() {
                     </div>
                   </div>
                   <div className="rounded-2xl border border-slate-200 bg-white/85 p-4">
-                    <div className="text-xs text-slate-500">Reminder coverage</div>
+                    <div className="text-xs text-slate-500">
+                      Reminder coverage
+                    </div>
                     <div className="mt-2 text-2xl font-semibold text-slate-900">
                       {adherenceHeadline.reminderCoveragePct}%
                     </div>
@@ -1286,7 +1493,9 @@ export default function Profile() {
                 <div className="rounded-2xl border border-slate-200 bg-white/85 p-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <div className="text-sm font-semibold text-slate-900">30-day trend</div>
+                      <div className="text-sm font-semibold text-slate-900">
+                        30-day trend
+                      </div>
                       <div className="text-xs text-slate-500">
                         Weighted adherence by day
                       </div>
@@ -1295,10 +1504,12 @@ export default function Profile() {
 
                   <div className="mt-3 h-[72px]">
                     <Sparkline
-                      data={(adherenceSummary.dailyTrend || []).map((x, index) => ({
-                        t: index,
-                        y: x.weightedPct,
-                      }))}
+                      data={(adherenceSummary.dailyTrend || []).map(
+                        (x, index) => ({
+                          t: index,
+                          y: x.weightedPct,
+                        }),
+                      )}
                       height={72}
                     />
                   </div>
@@ -1310,17 +1521,25 @@ export default function Profile() {
                       Highest intervention need
                     </div>
                     <div className="mt-3 space-y-2">
-                      {(adherenceSummary.interventions?.highRiskMedications || []).slice(0, 5).map((m: any) => (
-                        <div
-                          key={m.medicationId}
-                          className="rounded-xl border border-rose-100 bg-rose-50/60 px-3 py-2"
-                        >
-                          <div className="text-sm font-medium text-slate-900">{m.name}</div>
-                          <div className="text-xs text-slate-500">
-                            {m.missed} missed · {m.pending} pending · {m.weightedPct}% adherence
+                      {(
+                        adherenceSummary.interventions?.highRiskMedications ||
+                        []
+                      )
+                        .slice(0, 5)
+                        .map((m: any) => (
+                          <div
+                            key={m.medicationId}
+                            className="rounded-xl border border-rose-100 bg-rose-50/60 px-3 py-2"
+                          >
+                            <div className="text-sm font-medium text-slate-900">
+                              {m.name}
+                            </div>
+                            <div className="text-xs text-slate-500">
+                              {m.missed} missed · {m.pending} pending ·{" "}
+                              {m.weightedPct}% adherence
+                            </div>
                           </div>
-                        </div>
-                      ))}
+                        ))}
                     </div>
                   </div>
 
@@ -1330,21 +1549,26 @@ export default function Profile() {
                     </div>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
-                        <div className="text-xs text-slate-500">Verified days</div>
+                        <div className="text-xs text-slate-500">
+                          Verified days
+                        </div>
                         <div className="mt-1 text-xl font-semibold text-slate-900">
                           {adherenceSummary.rewardSignals?.verifiedDays ?? 0}
                         </div>
                       </div>
                       <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-3">
-                        <div className="text-xs text-slate-500">Reward points estimate</div>
+                        <div className="text-xs text-slate-500">
+                          Reward points estimate
+                        </div>
                         <div className="mt-1 text-xl font-semibold text-slate-900">
-                          {adherenceSummary.rewardSignals?.rewardPointsEstimate ?? 0}
+                          {adherenceSummary.rewardSignals
+                            ?.rewardPointsEstimate ?? 0}
                         </div>
                       </div>
                     </div>
 
                     <div className="mt-3 rounded-xl border px-3 py-2 text-sm font-medium">
-                      {(adherenceSummary.rewardSignals?.rewardEligible ?? false)
+                      {adherenceSummary.rewardSignals?.rewardEligible ?? false
                         ? "Reward eligible"
                         : "Not yet reward eligible"}
                     </div>
@@ -1377,7 +1601,9 @@ export default function Profile() {
 
             <div className="mt-5 grid gap-3">
               <label className="flex items-center justify-between rounded-2xl border border-white/70 bg-white/78 px-4 py-3">
-                <span className="text-sm text-slate-700">Clinician access</span>
+                <span className="text-sm text-slate-700">
+                  Clinician access
+                </span>
                 <input
                   type="checkbox"
                   checked={sharingPreference?.allowClinicianAccess ?? true}
@@ -1488,118 +1714,322 @@ export default function Profile() {
           <motion.div
             initial={{ y: 20, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
-            className="w-full max-w-2xl rounded-[32px] border border-white/60 bg-white/88 p-6 shadow-[0_24px_90px_rgba(15,23,42,0.18)] backdrop-blur-2xl"
+            className="w-full max-w-5xl rounded-[32px] border border-white/60 bg-white/92 p-6 shadow-[0_24px_90px_rgba(15,23,42,0.18)] backdrop-blur-2xl"
           >
             <h3 className="text-2xl font-semibold tracking-tight text-slate-900">
               Edit Profile
             </h3>
 
-            <div className="mt-5 grid grid-cols-1 gap-4">
-              <div>
-                <label className="text-sm text-slate-500">Full name</label>
-                <input
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none ring-0"
-                />
-              </div>
+            <div className="mt-5 max-h-[70vh] overflow-y-auto pr-2">
+              <div className="grid grid-cols-1 gap-5">
+                <section className="rounded-3xl border border-slate-200 bg-white/80 p-4">
+                  <div className="text-sm font-semibold text-slate-900">Photo & identity</div>
+                  <div className="mt-4 grid gap-4 md:grid-cols-[120px_1fr]">
+                    <div className="flex flex-col items-center gap-2">
+                      <div className="grid h-24 w-24 place-items-center overflow-hidden rounded-full border border-slate-200 bg-slate-50">
+                        {form.photoUrl ? (
+                          <img src={form.photoUrl} alt="Profile preview" className="h-full w-full object-cover" />
+                        ) : (
+                          <span className="text-xl font-semibold text-slate-500">
+                            {initialsFromName(form.name)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-center text-[11px] text-slate-500">
+                        Paste a secure image URL for now. File upload can be connected to document storage next.
+                      </div>
+                    </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm text-slate-500">Height (cm)</label>
-                  <input
-                    type="number"
-                    value={form.heightCm}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        heightCm: e.target.value ? Number(e.target.value) : "",
-                      })
-                    }
-                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none ring-0"
-                  />
-                </div>
+                    <div className="grid gap-3">
+                      <label className="text-sm text-slate-500">
+                        Photo URL
+                        <input
+                          value={form.photoUrl}
+                          onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
+                          placeholder="https://..."
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                        />
+                      </label>
 
-                <div>
-                  <label className="text-sm text-slate-500">Weight (kg)</label>
-                  <input
-                    type="number"
-                    value={form.weightKg}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        weightKg: e.target.value ? Number(e.target.value) : "",
-                      })
-                    }
-                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none ring-0"
-                  />
-                </div>
-              </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="text-sm text-slate-500">
+                          Full name
+                          <input
+                            value={form.name}
+                            onChange={(e) => setForm({ ...form, name: e.target.value })}
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                          />
+                        </label>
 
-              <div>
-                <label className="text-sm text-slate-500">Mobile</label>
-                <input
-                  value={form.mobile}
-                  onChange={(e) =>
-                    setForm({ ...form, mobile: e.target.value })
-                  }
-                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none ring-0"
-                />
-              </div>
+                        <label className="text-sm text-slate-500">
+                          ID / Passport number
+                          <input
+                            value={form.idNumber}
+                            onChange={(e) => setForm({ ...form, idNumber: e.target.value })}
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                          />
+                        </label>
+                      </div>
 
-              <div>
-                <label className="text-sm text-slate-500">Address</label>
-                <input
-                  value={form.address}
-                  onChange={(e) =>
-                    setForm({ ...form, address: e.target.value })
-                  }
-                  className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none ring-0"
-                />
-              </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="text-sm text-slate-500">
+                          Date of birth
+                          <input
+                            type="date"
+                            value={form.dob}
+                            onChange={(e) => setForm({ ...form, dob: e.target.value })}
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                          />
+                        </label>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-sm text-slate-500">
-                    Emergency contact name
-                  </label>
-                  <input
-                    value={form.emergencyContact?.name || ""}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        emergencyContact: {
-                          ...form.emergencyContact,
-                          name: e.target.value,
-                        },
-                      })
-                    }
-                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none ring-0"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm text-slate-500">
-                    Emergency contact phone
-                  </label>
-                  <input
-                    value={form.emergencyContact?.phone || ""}
-                    onChange={(e) =>
-                      setForm({
-                        ...form,
-                        emergencyContact: {
-                          ...form.emergencyContact,
-                          phone: e.target.value,
-                        },
-                      })
-                    }
-                    className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none ring-0"
-                  />
-                </div>
-              </div>
+                        <label className="text-sm text-slate-500">
+                          Gender
+                          <select
+                            value={form.gender}
+                            onChange={(e) => setForm({ ...form, gender: e.target.value })}
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                          >
+                            <option value="">Select…</option>
+                            <option value="female">Female</option>
+                            <option value="male">Male</option>
+                            <option value="intersex">Intersex</option>
+                            <option value="unknown">Prefer not to say</option>
+                          </select>
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+                </section>
 
-              <div className="text-xs text-slate-500">
-                Email and gender are linked to your account and cannot be
-                changed here.
+                <section className="rounded-3xl border border-slate-200 bg-white/80 p-4">
+                  <div className="text-sm font-semibold text-slate-900">Contact</div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <label className="text-sm text-slate-500">
+                      Email
+                      <input
+                        type="email"
+                        value={form.contactEmail}
+                        onChange={(e) => setForm({ ...form, contactEmail: e.target.value })}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm text-slate-500">
+                      Mobile
+                      <input
+                        value={form.phone || form.mobile}
+                        onChange={(e) =>
+                          setForm({ ...form, phone: e.target.value, mobile: e.target.value })
+                        }
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm text-slate-500">
+                      Preferred contact
+                      <select
+                        value={form.primaryComm}
+                        onChange={(e) => setForm({ ...form, primaryComm: e.target.value })}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      >
+                        <option value="sms">SMS</option>
+                        <option value="whatsapp">WhatsApp</option>
+                        <option value="email">Email</option>
+                        <option value="phone">Phone call</option>
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="rounded-3xl border border-slate-200 bg-white/80 p-4">
+                  <div className="text-sm font-semibold text-slate-900">Delivery address</div>
+                  <div className="mt-4 grid gap-3">
+                    <label className="text-sm text-slate-500">
+                      Address line 1
+                      <input
+                        value={form.addressLine1}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            addressLine1: e.target.value,
+                            address: [e.target.value, form.addressLine2, form.city, form.postalCode]
+                              .filter(Boolean)
+                              .join(", "),
+                          })
+                        }
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm text-slate-500">
+                      Address line 2
+                      <input
+                        value={form.addressLine2}
+                        onChange={(e) => setForm({ ...form, addressLine2: e.target.value })}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="text-sm text-slate-500">
+                        City
+                        <input
+                          value={form.city}
+                          onChange={(e) => setForm({ ...form, city: e.target.value })}
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                        />
+                      </label>
+
+                      <label className="text-sm text-slate-500">
+                        Postal code
+                        <input
+                          value={form.postalCode}
+                          onChange={(e) => setForm({ ...form, postalCode: e.target.value })}
+                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                        />
+                      </label>
+                    </div>
+
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-600">
+                      <input
+                        type="checkbox"
+                        checked={form.useAsDefaultDelivery}
+                        onChange={(e) =>
+                          setForm({ ...form, useAsDefaultDelivery: e.target.checked })
+                        }
+                      />
+                      Use this as my default delivery address
+                    </label>
+                  </div>
+                </section>
+
+                <section className="rounded-3xl border border-slate-200 bg-white/80 p-4">
+                  <div className="text-sm font-semibold text-slate-900">Clinical basics</div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <label className="text-sm text-slate-500">
+                      Height (cm)
+                      <input
+                        type="number"
+                        value={form.heightCm}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            heightCm: e.target.value ? Number(e.target.value) : "",
+                          })
+                        }
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm text-slate-500">
+                      Weight (kg)
+                      <input
+                        type="number"
+                        value={form.weightKg}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            weightKg: e.target.value ? Number(e.target.value) : "",
+                          })
+                        }
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm text-slate-500">
+                      Blood group
+                      <select
+                        value={form.bloodType}
+                        onChange={(e) => setForm({ ...form, bloodType: e.target.value })}
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      >
+                        <option value="">Unknown</option>
+                        <option value="A+">A+</option>
+                        <option value="A-">A-</option>
+                        <option value="B+">B+</option>
+                        <option value="B-">B-</option>
+                        <option value="AB+">AB+</option>
+                        <option value="AB-">AB-</option>
+                        <option value="O+">O+</option>
+                        <option value="O-">O-</option>
+                      </select>
+                    </label>
+                  </div>
+                </section>
+
+                <section className="rounded-3xl border border-slate-200 bg-white/80 p-4">
+                  <div className="text-sm font-semibold text-slate-900">Emergency contact</div>
+                  <div className="mt-4 grid gap-3 md:grid-cols-2">
+                    <label className="text-sm text-slate-500">
+                      Name
+                      <input
+                        value={form.emergencyContact?.name || ""}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            emergencyContact: {
+                              ...form.emergencyContact,
+                              name: e.target.value,
+                            },
+                          })
+                        }
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm text-slate-500">
+                      Phone
+                      <input
+                        value={form.emergencyContact?.phone || ""}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            emergencyContact: {
+                              ...form.emergencyContact,
+                              phone: e.target.value,
+                            },
+                          })
+                        }
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm text-slate-500">
+                      Relationship
+                      <input
+                        value={form.emergencyContact?.relationship || ""}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            emergencyContact: {
+                              ...form.emergencyContact,
+                              relationship: e.target.value,
+                            },
+                          })
+                        }
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+
+                    <label className="text-sm text-slate-500">
+                      Email
+                      <input
+                        type="email"
+                        value={form.emergencyContact?.email || ""}
+                        onChange={(e) =>
+                          setForm({
+                            ...form,
+                            emergencyContact: {
+                              ...form.emergencyContact,
+                              email: e.target.value,
+                            },
+                          })
+                        }
+                        className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
+                      />
+                    </label>
+                  </div>
+                </section>
               </div>
             </div>
 

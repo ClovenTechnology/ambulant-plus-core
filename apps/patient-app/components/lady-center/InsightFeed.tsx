@@ -120,7 +120,7 @@ export default function InsightFeed(props: {
 
   remoteInsights?: InsightCoreInsight[];
   deliveryState?: {
-    source: 'insightcore' | 'local_fallback' | 'hybrid';
+    source: 'insightcore';
     degradedMode: boolean;
     error?: string | null;
   };
@@ -132,7 +132,6 @@ export default function InsightFeed(props: {
     discreet,
     onReveal,
     onBanner,
-    fallbackInsights,
     signals,
     remoteInsights,
     deliveryState,
@@ -162,8 +161,8 @@ export default function InsightFeed(props: {
     remoteInsights && remoteInsights.length
       ? remoteInsights
       : data && data.length
-      ? data
-      : fallbackInsights
+        ? data
+        : []
   ).slice(0, 4);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -207,10 +206,9 @@ export default function InsightFeed(props: {
         subtitle="Explainable patterns with calm next steps."
         right={
           <div className="flex flex-wrap items-center gap-2">
-            <Pill tone="blue">Guidance</Pill>
-            {deliveryState?.source === 'hybrid' ? <Pill tone="violet">Enhanced</Pill> : null}
-            {deliveryState?.source === 'local_fallback' || deliveryState?.degradedMode ? (
-              <Pill tone="amber">Latest available</Pill>
+            <Pill tone="blue">InsightCore</Pill>
+            {deliveryState?.degradedMode ? (
+              <Pill tone="amber">Service degraded</Pill>
             ) : null}
           </div>
         }

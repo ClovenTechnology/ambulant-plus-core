@@ -92,7 +92,7 @@ export default function TodaySummaryCard(props: {
   onFindCare: () => void;
 
   deliveryState?: {
-    source: 'insightcore' | 'local_fallback' | 'hybrid';
+    source: 'insightcore';
     degradedMode: boolean;
     error?: string | null;
   };
@@ -123,10 +123,8 @@ export default function TodaySummaryCard(props: {
 
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {summaryBadge ? <Pill tone="violet">{summaryBadge}</Pill> : null}
-              {deliveryState?.source === 'insightcore' ? <Pill tone="blue">InsightCore</Pill> : null}
-              {deliveryState?.source === 'hybrid' ? <Pill tone="violet">Hybrid</Pill> : null}
-              {deliveryState?.source === 'local_fallback' ? <Pill tone="amber">Fallback</Pill> : null}
-              {deliveryState?.degradedMode ? <Pill tone="amber">Degraded mode</Pill> : null}
+              <Pill tone="blue">InsightCore</Pill>
+              {deliveryState?.degradedMode ? <Pill tone="amber">Service degraded</Pill> : null}
             </div>
 
             {deliveryState?.error ? (

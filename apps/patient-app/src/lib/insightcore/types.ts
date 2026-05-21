@@ -1,4 +1,4 @@
-export type InsightSource = 'insightcore' | 'local_fallback' | 'hybrid';
+export type InsightSource = 'insightcore';
 
 export type PatientInsightResponse = {
   requestId: string;
@@ -59,7 +59,7 @@ export type LadyCenterInsightResponse = {
   requestId: string;
   generatedAt: string;
   degradedMode: boolean;
-  source: 'insightcore' | 'local_fallback' | 'hybrid';
+  source: 'insightcore';
 
   todaySummary?: {
     subtitle?: string;

@@ -1,74 +1,38 @@
 ﻿// apps/patient-app/app/encounters/print/page.tsx
 'use client';
 
-import { useMemo, Suspense } from 'react';
-import { useSearchParams } from 'next/navigation';
-import { formatDateTime } from '../../../src/lib/date';
-import { fmt2 } from '../../../src/lib/number';
+import React, { Suspense, useEffect } from 'react';
+import Link from 'next/link';
+import { useRouter, useSearchParams } from 'next/navigation';
 
-const MOCK = {
-  id: 'enc-001',
-  ts: new Date().toISOString(),
-  summary: 'Televisit – cough and fever',
-  notes: ['Cough 3 days', 'Temp 38.5 °C', 'Advised rest + fluids'],
-  vitals: { hr: 88.2345, bp: '120/80', spo2: 97.8912 },
-};
+function PrintRedirectContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const id = searchParams?.get('id') || searchParams?.get('encounterId') || '';
 
-function EncounterPrintPageContent() {
-  const sp = useSearchParams();
+  useEffect(() => {
+    if (id) router.replace(`/encounters/${encodeURIComponent(id)}/print`);
+  }, [id, router]);
 
-  const qs = useMemo(
-    () => new URLSearchParams(sp?.toString() ?? ''),
-    [sp],
-  );
-
-  const id = qs.get('id') ?? '';
-  const enc = id === MOCK.id ? MOCK : null;
-
-  if (!enc) {
-    return <div className="p-6 text-gray-500">Encounter not found.</div>;
+  if (id) {
+    return <main className="p-6 text-sm text-slate-600">Opening encounter print view…</main>;
   }
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-4 print:w-full print:p-0">
-      <h1 className="text-2xl font-bold">Encounter Summary</h1>
-      <div className="text-sm text-gray-500">{formatDateTime(new Date(enc.ts))}</div>
-
-      <div className="p-4 border rounded bg-white space-y-3">
-        <div className="font-semibold">{enc.summary}</div>
-
-        <div className="space-y-1">
-          {enc.notes.map((n, i) => (
-            <div key={i} className="text-sm">
-              • {n}
-            </div>
-          ))}
-        </div>
-
-        {enc.vitals && (
-          <div className="mt-4 text-sm">
-            <div>HR: {fmt2(enc.vitals.hr)} bpm</div>
-            <div>BP: {enc.vitals.bp}</div>
-            <div>SpO₂: {fmt2(enc.vitals.spo2)}%</div>
-          </div>
-        )}
+    <main className="mx-auto max-w-2xl p-8">
+      <div className="rounded-3xl border border-slate-200 bg-white p-6 text-center shadow-sm">
+        <h1 className="text-xl font-black text-slate-950">Choose an encounter to print</h1>
+        <p className="mt-2 text-sm text-slate-600">The legacy print URL now requires an encounter id. Open a specific encounter and use Print summary.</p>
+        <Link href="/encounters" className="mt-5 inline-flex rounded-full bg-slate-950 px-5 py-2.5 text-sm font-black text-white">Back to encounters</Link>
       </div>
-
-      <button
-        onClick={() => window.print()}
-        className="px-3 py-2 border rounded bg-emerald-600 text-white hover:bg-emerald-700 print:hidden"
-      >
-        Print
-      </button>
     </main>
   );
 }
 
-export default function EncounterPrintPage() {
+export default function EncounterPrintRedirectPage() {
   return (
     <Suspense fallback={null}>
-      <EncounterPrintPageContent />
+      <PrintRedirectContent />
     </Suspense>
   );
 }
-

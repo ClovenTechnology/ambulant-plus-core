@@ -1,8 +1,6 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import { computeCardioRisk, hypertensionIndex } from '@/src/analytics/cardio';
-import { computeStressIndex } from '@/src/analytics/stress';
 import useSelfCheckHistory from './useSelfCheckHistory';
 import {
   analyzeSelfCheckWithInsightCore,
@@ -10,7 +8,7 @@ import {
 } from '@/src/lib/insightcore/api';
 
 type RiskLevel = 'low' | 'medium' | 'high';
-type AnalysisSource = 'insightcore' | 'local_fallback' | 'hybrid';
+type AnalysisSource = 'insightcore';
 
 type Concern = {
   name: string;
@@ -29,190 +27,6 @@ type TriageAnalyzerArgs = {
   bmi?: number | null;
   extraMeta?: Record<string, any>;
 };
-
-async function clientFallbackAnalyze(
-  vitals: any[],
-  symptoms: Record<string, boolean>,
-  bmi: number | null,
-  extraMeta?: Record<string, any>
-) {
-  const symptomCount = Object.values(symptoms).filter(Boolean).length;
-
-  const profile = extraMeta?.profile || {};
-  const med = extraMeta?.medicationAdherence || {};
-  const wearable = extraMeta?.wearableDrivers || {};
-
-  const chronicConditions = Array.isArray(profile?.chronicConditions)
-    ? profile.chronicConditions
-    : [];
-
-  const missedDoseCount = Number(med?.missedDoseCount || 0);
-  const poorSleep = Boolean(wearable?.poorSleep);
-  const lowRecovery = Boolean(wearable?.lowRecovery);
-  const lowActivity = Boolean(wearable?.lowActivity);
-  const elevatedStress = Boolean(wearable?.elevatedStress);
-
-  let score =
-    (bmi && bmi >= 18.5 && bmi < 25 ? 90 : 80) -
-    symptomCount * 7 -
-    missedDoseCount * 4 -
-    (poorSleep ? 5 : 0) -
-    (lowRecovery ? 4 : 0) -
-    (elevatedStress ? 4 : 0);
-
-  if (includesText(chronicConditions, 'hypertension')) {
-    score -= 2;
-  }
-
-  if (
-    includesText(chronicConditions, 'diabetes') ||
-    includesText(chronicConditions, 'prediabetes')
-  ) {
-    score -= 2;
-  }
-
-  score = Math.max(0, Math.round(score));
-
-  const recommendations: string[] = [
-    'Keep hydrated, rest and monitor symptoms.',
-  ];
-
-  if (poorSleep) {
-    recommendations.push(
-      'Sleep debt may be contributing — aim for an earlier wind-down and re-check after better rest.'
-    );
-  }
-
-  if (lowActivity) {
-    recommendations.push(
-      'A short gentle walk today may help circulation if you feel safe to do so.'
-    );
-  }
-
-  if (missedDoseCount > 0) {
-    recommendations.push(
-      'Missed medication may be contributing — review your schedule and take only as prescribed.'
-    );
-  }
-
-  if (elevatedStress) {
-    recommendations.push(
-      'Stress may be contributing — try 10 minutes of slow breathing or guided relaxation.'
-    );
-  }
-
-  const explanations: Explanation[] = [
-    {
-      feature: 'Symptoms count',
-      impact: -0.07 * symptomCount,
-      note: `${symptomCount} active`,
-    },
-    ...(bmi
-      ? [
-          {
-            feature: 'BMI',
-            impact: bmi >= 25 ? -0.05 : 0.05,
-            note: `${bmi.toFixed(1)}`,
-          },
-        ]
-      : []),
-    ...(poorSleep
-      ? [
-          {
-            feature: 'Sleep',
-            impact: -0.05,
-            note: 'Sleep debt may be contributing',
-          },
-        ]
-      : []),
-    ...(lowRecovery
-      ? [
-          {
-            feature: 'Recovery',
-            impact: -0.04,
-            note: 'Reduced recovery signal',
-          },
-        ]
-      : []),
-    ...(missedDoseCount > 0
-      ? [
-          {
-            feature: 'Medication adherence',
-            impact: -0.05 * missedDoseCount,
-            note: `${missedDoseCount} missed`,
-          },
-        ]
-      : []),
-    ...(chronicConditions.length
-      ? [
-          {
-            feature: 'Known conditions',
-            impact: -0.03,
-            note: chronicConditions.slice(0, 3).join(', '),
-          },
-        ]
-      : []),
-  ];
-
-  const diagnoses: Concern[] = [
-    {
-      name: 'Self-check baseline',
-      prob: 0.75,
-    },
-  ];
-
-  return {
-    score,
-    diagnoses,
-    recommendations,
-    explanations,
-  };
-}
-
-function extractSystolicFromEntry(v: any): number | null {
-  try {
-    if (!v) return null;
-
-    if (typeof v.value === 'string' && v.value.includes('/')) {
-      const parts = v.value.split('/').map((p: any) => Number(p.trim()));
-
-      if (parts.length >= 1 && Number.isFinite(parts[0])) {
-        return parts[0];
-      }
-    }
-
-    if (
-      Array.isArray(v.trend) &&
-      v.trend.length &&
-      Number.isFinite(v.trend[v.trend.length - 1])
-    ) {
-      return Number(v.trend[v.trend.length - 1]);
-    }
-
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function toNum(v: any): number | null {
-  if (typeof v === 'number' && Number.isFinite(v)) return v;
-
-  if (typeof v === 'string') {
-    const n = Number(v.trim());
-    return Number.isFinite(n) ? n : null;
-  }
-
-  return null;
-}
-
-function includesText(list: any[], needle: string): boolean {
-  const q = needle.toLowerCase();
-
-  return (Array.isArray(list) ? list : []).some((x) =>
-    String(x || '').toLowerCase().includes(q)
-  );
-}
 
 function normalizeAnalyzerArgs(
   args?: TriageAnalyzerArgs
@@ -305,7 +119,7 @@ export default function useTriageAnalyzer(args?: TriageAnalyzerArgs) {
   const [concerns, setConcerns] = useState<Concern[]>([]);
   const [explanations, setExplanations] = useState<Explanation[]>([]);
   const [analysisSource, setAnalysisSource] =
-    useState<AnalysisSource>('local_fallback');
+    useState<AnalysisSource>('insightcore');
   const [degradedMode, setDegradedMode] = useState(false);
   const [remoteError, setRemoteError] = useState<string | null>(null);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
@@ -375,154 +189,72 @@ export default function useTriageAnalyzer(args?: TriageAnalyzerArgs) {
           },
         };
 
-        const localServerRes = await fetch('/api/triage', {
-          method: 'POST',
-          headers: {
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify(payload),
-        });
-
-        const localData = localServerRes.ok
-          ? await localServerRes
-              .json()
-              .catch(async () =>
-                clientFallbackAnalyze(
-                  payload.vitals,
-                  payload.symptoms,
-                  usedBmi,
-                  usedExtraMeta
-                )
-              )
-          : await clientFallbackAnalyze(
-              payload.vitals,
-              payload.symptoms,
-              usedBmi,
-              usedExtraMeta
-            );
-
         await history.append({
           vitals: payload.vitals,
           symptoms: payload.symptoms,
           bmi: usedBmi,
           meta: payload.meta,
-          score: localData?.score,
+          score: null,
         });
 
-        const localScore = Number(localData?.score ?? 80);
+        const remote = await analyzeSelfCheckWithInsightCore({
+          vitals: payload.vitals,
+          symptoms: payload.symptoms,
+          meta: payload.meta,
+        });
 
-        // Default to local immediately.
-        setHealthScore(localScore);
-        setRiskLevel(localScore > 80 ? 'low' : localScore > 50 ? 'medium' : 'high');
-        setRecommendations(normalizeRecommendations(localData?.recommendations));
-        setConcerns(normalizeConcerns(localData?.diagnoses));
-        setExplanations(normalizeExplanations(localData?.explanations));
-        setAnalysisSource('local_fallback');
-        setDegradedMode(true);
+        const score = Number(remote?.summary?.healthScore ?? 80);
 
-        // Enrich via InsightCore.
-        try {
-          const remote = await analyzeSelfCheckWithInsightCore({
+        setHealthScore(score);
+
+        const nextRisk: RiskLevel =
+          remote?.summary?.riskLevel === 'critical' ||
+          remote?.summary?.riskLevel === 'high'
+            ? 'high'
+            : remote?.summary?.riskLevel === 'moderate' ||
+                remote?.summary?.riskLevel === 'watch'
+              ? 'medium'
+              : 'low';
+
+        setRiskLevel(nextRisk);
+        setRecommendations(normalizeRecommendations(remote?.recommendations));
+        setConcerns(normalizeConcerns(remote?.concerns));
+        setExplanations(normalizeExplanations(remote?.explanations));
+        setAnalysisSource('insightcore');
+        setDegradedMode(Boolean(remote?.degradedMode));
+
+        postInsightLearningEvent({
+          id: remote?.requestId,
+          ts: new Date().toISOString(),
+          app: 'patient-app',
+          surface: 'self-check',
+          inputSnapshot: {
             vitals: payload.vitals,
             symptoms: payload.symptoms,
-            meta: {
-              ...payload.meta,
-              localScore: localData?.score ?? null,
-              localDiagnoses: localData?.diagnoses ?? [],
-              localRecommendations: localData?.recommendations ?? [],
-              localExplanations: localData?.explanations ?? [],
+            medications: payload.meta?.medicationAdherence,
+            wearable: payload.meta?.wearableDrivers,
+            domain: {
+              bodyAreas: payload.meta?.bodyAreas || [],
             },
-          });
-
-          setHealthScore(
-            Number(remote?.summary?.healthScore ?? localData?.score ?? 80)
-          );
-
-          const nextRisk: RiskLevel =
-            remote?.summary?.riskLevel === 'critical' ||
-            remote?.summary?.riskLevel === 'high'
-              ? 'high'
-              : remote?.summary?.riskLevel === 'moderate' ||
-                  remote?.summary?.riskLevel === 'watch'
-                ? 'medium'
-                : 'low';
-
-          setRiskLevel(nextRisk);
-          setRecommendations(
-            normalizeRecommendations(
-              remote?.recommendations?.length
-                ? remote.recommendations
-                : localData?.recommendations
-            )
-          );
-          setConcerns(
-            normalizeConcerns(
-              remote?.concerns?.length
-                ? remote.concerns
-                : localData?.diagnoses
-            )
-          );
-          setExplanations(
-            normalizeExplanations(
-              remote?.explanations?.length
-                ? remote.explanations
-                : localData?.explanations
-            )
-          );
-          setAnalysisSource(
-            remote?.source === 'insightcore' ? 'insightcore' : 'hybrid'
-          );
-          setDegradedMode(Boolean(remote?.degradedMode));
-
-          postInsightLearningEvent({
-            id: remote?.requestId,
-            ts: new Date().toISOString(),
-            app: 'patient-app',
-            surface: 'self-check',
-            inputSnapshot: {
-              vitals: payload.vitals,
-              symptoms: payload.symptoms,
-              medications: payload.meta?.medicationAdherence,
-              wearable: payload.meta?.wearableDrivers,
-              domain: {
-                bodyAreas: payload.meta?.bodyAreas || [],
-              },
-            },
-            outputSnapshot: {
-              riskLabel: remote?.summary?.riskLabel,
-              riskLevel: remote?.summary?.riskLevel,
-              healthScore: remote?.summary?.healthScore,
-              concerns: (remote?.concerns || []).map((c: any) => c.name),
-              recommendations: remote?.recommendations || [],
-              confidence: remote?.summary?.confidence ?? null,
-              degradedMode: remote?.degradedMode,
-              source: remote?.source,
-            },
-            userAction: {
-              action: 'viewed',
-            },
-          }).catch(() => undefined);
-        } catch {
-          setRemoteError('InsightCore unavailable, using local fallback.');
-        }
-      } catch {
-        const fallback = await clientFallbackAnalyze(
-          usedVitals,
-          usedSymptoms,
-          usedBmi,
-          usedExtraMeta
-        );
-
-        setHealthScore(fallback.score);
-        setRecommendations(normalizeRecommendations(fallback.recommendations));
-        setConcerns(normalizeConcerns(fallback.diagnoses));
-        setExplanations(normalizeExplanations(fallback.explanations));
-        setRiskLevel(
-          fallback.score > 80 ? 'low' : fallback.score > 50 ? 'medium' : 'high'
-        );
-        setAnalysisSource('local_fallback');
+          },
+          outputSnapshot: {
+            riskLabel: remote?.summary?.riskLabel,
+            riskLevel: remote?.summary?.riskLevel,
+            healthScore: remote?.summary?.healthScore,
+            concerns: (remote?.concerns || []).map((c: any) => c.name),
+            recommendations: remote?.recommendations || [],
+            confidence: remote?.summary?.confidence ?? null,
+            degradedMode: remote?.degradedMode,
+            source: 'insightcore',
+          },
+          userAction: {
+            action: 'viewed',
+          },
+        }).catch(() => undefined);
+      } catch (err: any) {
+        setRemoteError(err?.message || 'InsightCore self-check failed.');
         setDegradedMode(true);
-        setRemoteError('Local fallback only.');
+        setAnalysisSource('insightcore');
       } finally {
         setHasAnalyzed(true);
         setLastAnalyzedAt(new Date().toISOString());

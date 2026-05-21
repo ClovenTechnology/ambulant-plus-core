@@ -3,7 +3,17 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-const APIGW = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+const APIGW = process.env.NEXT_PUBLIC_APIGW_BASE;
+
+function requireApiGatewayBase(): string {
+  const base = String(APIGW || '').replace(/\/+$/, '');
+
+  if (!base) {
+    throw new Error('NEXT_PUBLIC_APIGW_BASE_required');
+  }
+
+  return base;
+}
 
 type InboxItem = {
   id: string;
@@ -62,7 +72,7 @@ export default function PatientInsightsPage() {
     setErr(null);
 
     try {
-      const url = new URL(`${APIGW}/api/events/inbox`);
+      const url = new URL(`${requireApiGatewayBase()}/api/events/inbox`);
       url.searchParams.set('patientId', patientId);
 
       // optional: your inbox endpoint may support kinds; if not, harmless

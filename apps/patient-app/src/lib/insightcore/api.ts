@@ -38,7 +38,7 @@ export type PatientInsightResponse = {
   requestId: string;
   generatedAt: string;
   degradedMode: boolean;
-  source: 'insightcore' | 'local_fallback' | 'hybrid';
+  source: 'insightcore';
   summary: {
     riskLabel: string;
     riskLevel: 'low' | 'watch' | 'moderate' | 'high' | 'critical';
@@ -60,10 +60,6 @@ export type PatientInsightResponse = {
   whenToSeekCare?: { urgency: 'routine' | 'soon' | 'urgent'; message: string } | null;
   handoffAvailable?: boolean;
 };
-
-/* =========================================================
-   Lady Center InsightCore Request
-========================================================= */
 
 export type LadyCenterInsightRequest = {
   mode: string;
@@ -105,10 +101,6 @@ export type LadyCenterInsightRequest = {
   signals?: Record<string, unknown>;
 };
 
-/* =========================================================
-   Config
-========================================================= */
-
 const API_BASE = (
   process.env.NEXT_PUBLIC_APIGW_BASE ||
   process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
@@ -132,17 +124,17 @@ function authHeaders(extra?: HeadersInit): HeadersInit {
 }
 
 function apiUrl(path: string) {
-  if (!API_BASE) return path;
+  if (!API_BASE) {
+    throw new Error('NEXT_PUBLIC_APIGW_BASE_or_GATEWAY_ORIGIN_required_for_insightcore');
+  }
+
   return `${API_BASE}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
-/* =========================================================
-   Helpers
-========================================================= */
-
-async function readJsonSafe(r: Response): Promise<any> {
-  const text = await r.text();
+async function readJsonSafe(response: Response): Promise<any> {
+  const text = await response.text();
   if (!text) return null;
+
   try {
     return JSON.parse(text);
   } catch {
@@ -159,51 +151,24 @@ function unwrapInsights(payload: any): InsightCoreInsight[] {
   return [];
 }
 
-/* =========================================================
-   APIs
-========================================================= */
+async function requireOk(response: Response, label: string): Promise<any> {
+  const payload = await readJsonSafe(response);
 
-export async function listInsightCoreInsights(req: InsightListRequest): Promise<InsightCoreInsight[]> {
-  const postUrl = apiUrl('/api/insightcore/insights');
+  if (!response.ok) {
+    const message =
+      payload?.error ||
+      payload?.message ||
+      payload?.details?.message ||
+      `${label}_failed_with_status_${response.status}`;
 
-  try {
-    const r = await fetch(postUrl, {
-      method: 'POST',
-      headers: authHeaders({
-      'content-type': 'application/json',
-    }),
-      body: JSON.stringify(req),
-      cache: 'no-store',
-    });
+    throw new Error(String(message));
+  }
 
-    if (r.ok) {
-      const payload = await readJsonSafe(r);
-      return unwrapInsights(payload);
-    }
-  } catch {}
-
-  const qs = new URLSearchParams();
-  if (req.context) qs.set('context', req.context);
-  if (req.mode) qs.set('mode', req.mode);
-  if (req.dateISO) qs.set('date', req.dateISO);
-  if (typeof req.limit === 'number') qs.set('limit', String(req.limit));
-
-  const getUrl = apiUrl(`/api/insightcore/insights?${qs.toString()}`);
-  const r2 = await fetch(getUrl, {
-    method: 'GET',
-    headers: authHeaders(),
-    cache: 'no-store',
-  });
-
-  if (!r2.ok) return [];
-  const payload2 = await readJsonSafe(r2);
-  return unwrapInsights(payload2);
+  return payload;
 }
 
-export async function postInsightCoreFeedback(req: InsightFeedbackRequest): Promise<boolean> {
-  const url = apiUrl('/api/insightcore/feedback');
-
-  const r = await fetch(url, {
+export async function listInsightCoreInsights(req: InsightListRequest): Promise<InsightCoreInsight[]> {
+  const response = await fetch(apiUrl('/api/insightcore/insights'), {
     method: 'POST',
     headers: authHeaders({
       'content-type': 'application/json',
@@ -212,13 +177,29 @@ export async function postInsightCoreFeedback(req: InsightFeedbackRequest): Prom
     cache: 'no-store',
   });
 
-  return r.ok;
+  const payload = await requireOk(response, 'insightcore_insights');
+  return unwrapInsights(payload);
+}
+
+export async function postInsightCoreFeedback(req: InsightFeedbackRequest): Promise<boolean> {
+  const response = await fetch(apiUrl('/api/insightcore/feedback'), {
+    method: 'POST',
+    headers: authHeaders({
+      'content-type': 'application/json',
+    }),
+    body: JSON.stringify(req),
+    cache: 'no-store',
+  });
+
+  if (!response.ok) {
+    await requireOk(response, 'insightcore_feedback');
+  }
+
+  return true;
 }
 
 export async function analyzeSelfCheckWithInsightCore(input: any): Promise<PatientInsightResponse> {
-  const url = apiUrl('/api/insightcore/patient/self-check');
-
-  const r = await fetch(url, {
+  const response = await fetch(apiUrl('/api/insightcore/patient/self-check'), {
     method: 'POST',
     headers: authHeaders({
       'content-type': 'application/json',
@@ -227,20 +208,13 @@ export async function analyzeSelfCheckWithInsightCore(input: any): Promise<Patie
     cache: 'no-store',
   });
 
-  if (!r.ok) throw new Error('InsightCore self-check failed');
-  return r.json();
+  return requireOk(response, 'insightcore_self_check') as Promise<PatientInsightResponse>;
 }
 
-/* =========================================================
-   NEW: Lady Center InsightCore API
-========================================================= */
-
 export async function analyzeLadyCenterWithInsightCore(
-  input: LadyCenterInsightRequest
+  input: LadyCenterInsightRequest,
 ): Promise<LadyCenterInsightResponse> {
-  const url = apiUrl('/api/insightcore/patient/lady-center');
-
-  const r = await fetch(url, {
+  const response = await fetch(apiUrl('/api/insightcore/patient/lady-center'), {
     method: 'POST',
     headers: authHeaders({
       'content-type': 'application/json',
@@ -249,14 +223,11 @@ export async function analyzeLadyCenterWithInsightCore(
     cache: 'no-store',
   });
 
-  if (!r.ok) throw new Error('InsightCore lady-center failed');
-  return r.json();
+  return requireOk(response, 'insightcore_lady_center') as Promise<LadyCenterInsightResponse>;
 }
 
 export async function postInsightLearningEvent(input: any): Promise<boolean> {
-  const url = apiUrl('/api/insightcore/learning/events');
-
-  const r = await fetch(url, {
+  const response = await fetch(apiUrl('/api/insightcore/learning/events'), {
     method: 'POST',
     headers: authHeaders({
       'content-type': 'application/json',
@@ -265,5 +236,9 @@ export async function postInsightLearningEvent(input: any): Promise<boolean> {
     cache: 'no-store',
   });
 
-  return r.ok;
+  if (!response.ok) {
+    await requireOk(response, 'insightcore_learning_event');
+  }
+
+  return true;
 }

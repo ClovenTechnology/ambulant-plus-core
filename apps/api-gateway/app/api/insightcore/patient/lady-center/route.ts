@@ -1,4 +1,4 @@
-import crypto from 'node:crypto';
+﻿import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -47,7 +47,7 @@ function buildInsights(body: any) {
         summary: 'Recent cycle timing appears less predictable, so a calmer watch-and-review plan is better than assuming one fixed rhythm.',
         why: 'Your current cycle signals suggest variability rather than a single stable pattern.',
         next: 'Keep logging for consistency and consider clinician review if the pattern remains irregular.',
-        source: 'lady_center_gateway_adapter',
+        source: 'insightcore',
       });
     } else {
       insights.push({
@@ -57,7 +57,7 @@ function buildInsights(body: any) {
         summary: 'Your current pattern looks stable enough to support planning and self-tracking.',
         why: 'Prediction confidence is supported by your current context and logs.',
         next: 'Keep logging cycle changes and symptoms to maintain accuracy.',
-        source: 'lady_center_gateway_adapter',
+        source: 'insightcore',
       });
     }
 
@@ -69,7 +69,7 @@ function buildInsights(body: any) {
         summary: `Your current timing window is estimated from ${prediction.fertileStart} to ${prediction.fertileEnd}.`,
         why: 'The estimate is based on your cycle context and logged patterns.',
         next: 'Use this as planning guidance, not certainty.',
-        source: 'lady_center_gateway_adapter',
+        source: 'insightcore',
       });
     }
   }
@@ -82,7 +82,7 @@ function buildInsights(body: any) {
       summary: 'This looks strong enough to shift from cycle monitoring into antenatal planning and guided check-ins.',
       why: 'Pregnancy-confirmed context should change the kind of support you receive.',
       next: 'Open the Antenatal Center and begin trimester-aware support.',
-      source: 'lady_center_gateway_adapter',
+      source: 'insightcore',
     });
   } else if (pregnancy?.status === 'likely') {
     insights.push({
@@ -90,9 +90,9 @@ function buildInsights(body: any) {
       tone: 'attention',
       title: 'Possible early pregnancy signal',
       summary: 'A possible pregnancy pattern is present, so confirmation and gentle next-step guidance matter more than over-interpretation.',
-      why: Array.isArray(pregnancy?.reasons) ? pregnancy.reasons.join(' • ') : 'Signal pattern suggests possible pregnancy.',
+      why: Array.isArray(pregnancy?.reasons) ? pregnancy.reasons.join(' â€¢ ') : 'Signal pattern suggests possible pregnancy.',
       next: 'Log any test result and book review if you feel unsure or symptoms change.',
-      source: 'lady_center_gateway_adapter',
+      source: 'insightcore',
     });
   }
 
@@ -104,7 +104,7 @@ function buildInsights(body: any) {
       summary: `${overdue.length} screening item${overdue.length === 1 ? '' : 's'} look overdue or worth reviewing now.`,
       why: 'Preventive care matters more when timing slips quietly.',
       next: 'Prioritize the top overdue item first rather than trying to do everything at once.',
-      source: 'lady_center_gateway_adapter',
+      source: 'insightcore',
     });
   } else if (unknown.length > 0) {
     insights.push({
@@ -114,7 +114,7 @@ function buildInsights(body: any) {
       summary: 'A few preventive items do not yet have a clear completion history.',
       why: 'Clear screening history improves care planning and reminders.',
       next: 'Mark completed items and schedule reminders for the rest.',
-      source: 'lady_center_gateway_adapter',
+      source: 'insightcore',
     });
   }
 
@@ -126,7 +126,7 @@ function buildInsights(body: any) {
       summary: 'Keeping results, scans, and clinician notes in one place makes future reviews much easier.',
       why: 'Documents become more useful over time when combined with trends and logs.',
       next: 'Upload recent labs, imaging, or clinician notes if you have them.',
-      source: 'lady_center_gateway_adapter',
+      source: 'insightcore',
     });
   }
 
@@ -268,7 +268,7 @@ export async function POST(req: NextRequest) {
     requestId,
     generatedAt: new Date().toISOString(),
     degradedMode: false,
-    source: 'hybrid',
+    source: 'insightcore',
     todaySummary: buildTodaySummary(body),
     insights,
     prioritizedScreeningKeys,

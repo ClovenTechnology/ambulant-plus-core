@@ -1,59 +1,89 @@
 // apps/patient-app/app/api/insightcore/alerts/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const GW =
+const GATEWAY_ORIGIN = (
+  process.env.APIGW_BASE ||
+  process.env.NEXT_PUBLIC_APIGW_BASE ||
   process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
   process.env.NEXT_PUBLIC_GATEWAY_BASE ||
-  '';
+  ''
+).replace(/\/+$/, '');
 
-const filePath = path.join(process.cwd(), '../../packages/insightcore/alerts.json');
+function jsonError(message: string, status = 500, details?: Record<string, unknown>) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+      ...(details ? { details } : {}),
+    },
+    { status },
+  );
+}
 
-async function readJsonSafe(file: string) {
-  const txt = await fs.readFile(file, 'utf-8').then((t) => t.replace(/^\uFEFF/, ''));
-  return JSON.parse(txt);
+function requireGatewayOrigin(): string {
+  if (!GATEWAY_ORIGIN) {
+    throw Object.assign(new Error('insightcore_gateway_not_configured'), {
+      status: 500,
+    });
+  }
+
+  return GATEWAY_ORIGIN;
 }
 
 export async function GET(req: NextRequest) {
-  // Prefer gateway alerts (DB-backed)
-  if (GW) {
-    const url = new URL(`${GW.replace(/\/+$/, '')}/api/insightcore/alerts`);
-    url.searchParams.set('limit', '5');
+  try {
+    const gateway = requireGatewayOrigin();
 
-    // Optionally allow patientId override via query
+    const url = new URL(`${gateway}/api/insightcore/alerts`);
+    url.searchParams.set('limit', req.nextUrl.searchParams.get('limit') || '5');
+
     const patientId = req.nextUrl.searchParams.get('patientId');
     if (patientId) url.searchParams.set('patientId', patientId);
 
-    const r = await fetch(url.toString(), {
+    const orgId = req.nextUrl.searchParams.get('orgId');
+    if (orgId) url.searchParams.set('orgId', orgId);
+
+    const cookie = req.headers.get('cookie');
+    const uid = req.headers.get('x-uid');
+    const role = req.headers.get('x-role') || 'patient';
+
+    const response = await fetch(url.toString(), {
+      method: 'GET',
       headers: {
-        ...(req.headers.get('cookie') ? { cookie: req.headers.get('cookie') as string } : {}),
+        ...(cookie ? { cookie } : {}),
+        ...(uid ? { 'x-uid': uid } : {}),
+        'x-role': role,
       },
       cache: 'no-store',
     });
 
-    if (!r.ok) {
-      // soft fallback to local file
-      try {
-        const data = await readJsonSafe(filePath).catch(() => ({ alerts: [] }));
-        return NextResponse.json({ alerts: (data.alerts || []).slice(-5) });
-      } catch {
-        return NextResponse.json({ alerts: [] });
-      }
+    const text = await response.text();
+    let payload: unknown = null;
+
+    try {
+      payload = text ? JSON.parse(text) : null;
+    } catch {
+      payload = text;
     }
 
-    const data = (await r.json().catch(() => ({ alerts: [] }))) as { alerts?: any[] };
-    return NextResponse.json({ alerts: (data.alerts || []).slice(0, 5) });
-  }
+    if (!response.ok) {
+      return jsonError('insightcore_alerts_gateway_failed', response.status, {
+        upstreamStatus: response.status,
+        upstreamPayload: payload,
+      });
+    }
 
-  // No gateway – dev: read from flat JSON
-  try {
-    const data = await readJsonSafe(filePath).catch(() => ({ alerts: [] }));
-    return NextResponse.json({ alerts: (data.alerts || []).slice(-5) });
-  } catch {
-    return NextResponse.json({ alerts: [] });
+    const data = payload as { alerts?: unknown[] };
+
+    return NextResponse.json({
+      ok: true,
+      source: 'insightcore',
+      alerts: Array.isArray(data?.alerts) ? data.alerts.slice(0, 5) : [],
+    });
+  } catch (err: any) {
+    return jsonError(err?.message || 'insightcore_alerts_failed', err?.status || 500);
   }
 }
