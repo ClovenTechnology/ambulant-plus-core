@@ -19,3 +19,10 @@ packages/clinical-codes/sources/**/*.RRF
 # Safety: never commit large binaries
 *.bin
 *.RRF
+
+# Local environment files
+.env
+.env.local
+.env.production
+.env.bridge
+*.local.backup
