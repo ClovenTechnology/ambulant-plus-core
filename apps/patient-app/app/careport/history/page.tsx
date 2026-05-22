@@ -1,51 +1,92 @@
 // apps/patient-app/app/careport/history/page.tsx
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 
 type HistoryItem = {
   id: string;
-  encId?: string;
-  orderNo?: string;
+  encId?: string | null;
+  orderNo?: string | null;
   status: string;
-  createdAt?: string;
+  fulfillment?: 'DELIVERY' | 'PICKUP' | string | null;
+  createdAt?: string | null;
   deliveredAt?: string | null;
-  pharmacyName?: string;
-  riderName?: string;
-  total?: number;
-  paymentMethod?: string;
+  pharmacyName?: string | null;
+  riderName?: string | null;
+  total?: number | null;
+  paymentMethod?: string | null;
+  currency?: string | null;
 };
-
-const MOCK_HISTORY: HistoryItem[] = [
-  {
-    id: 'H-1',
-    encId: 'E-2000',
-    orderNo: 'ORD-1001',
-    status: 'Delivered',
-    createdAt: new Date(Date.now() - 3 * 60 * 60 * 1000).toISOString(),
-    deliveredAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-    pharmacyName: 'MedCare Sandton',
-    riderName: 'Sipho R.',
-    total: 120.0,
-    paymentMethod: 'Medical Aid',
-  },
-  {
-    id: 'H-2',
-    encId: 'E-2001',
-    orderNo: 'ORD-1002',
-    status: 'Out for delivery',
-    createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-    deliveredAt: null,
-    pharmacyName: 'HealthPlus Rosebank',
-    riderName: 'Thandi M.',
-    total: 85.5,
-    paymentMethod: 'Card',
-  },
-];
 
 type HistoryPageProps = {
   searchParams?: { [key: string]: string | string[] | undefined };
 };
+
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(' ');
+}
+
+function formatWhen(value?: string | null) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString();
+}
+
+function money(amount?: number | null, currency = 'ZAR') {
+  if (typeof amount !== 'number' || !Number.isFinite(amount)) return '—';
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency,
+  }).format(amount);
+}
+
+function statusTone(status?: string | null) {
+  const s = String(status || '').toUpperCase();
+
+  if (['DELIVERED', 'COLLECTED', 'COMPLETED'].includes(s)) return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (['PAID', 'DISPATCHED', 'OUT_FOR_DELIVERY', 'READY_FOR_PICKUP'].includes(s)) return 'border-blue-200 bg-blue-50 text-blue-700';
+  if (['PAYMENT_PENDING', 'OFFERS_OPEN', 'CREATED'].includes(s)) return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (['FAILED', 'CANCELLED', 'REJECTED'].includes(s)) return 'border-rose-200 bg-rose-50 text-rose-700';
+
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
+function StatusPill({ status }: { status?: string | null }) {
+  return (
+    <span className={cx('inline-flex rounded-full border px-3 py-1 text-xs font-medium', statusTone(status))}>
+      {String(status || 'Unknown').replace(/_/g, ' ')}
+    </span>
+  );
+}
+
+function normalizeItems(payload: any): HistoryItem[] {
+  const rows = Array.isArray(payload?.items)
+    ? payload.items
+    : Array.isArray(payload?.history)
+      ? payload.history
+      : Array.isArray(payload)
+        ? payload
+        : [];
+
+  return rows
+    .map((x: any) => ({
+      id: String(x?.id || x?.orderId || x?.orderNo || '').trim(),
+      encId: x?.encId ?? x?.encounterId ?? null,
+      orderNo: x?.orderNo ?? x?.id ?? null,
+      status: String(x?.status || 'UNKNOWN'),
+      fulfillment: x?.fulfillment ?? null,
+      createdAt: x?.createdAt ?? null,
+      deliveredAt: x?.deliveredAt ?? null,
+      pharmacyName: x?.pharmacyName ?? x?.chosenPharmacyName ?? null,
+      riderName: x?.riderName ?? null,
+      total: typeof x?.total === 'number' ? x.total : null,
+      paymentMethod: x?.paymentMethod ?? null,
+      currency: x?.currency ?? 'ZAR',
+    }))
+    .filter((x: HistoryItem) => x.id);
+}
 
 export default function HistoryPage({ searchParams }: HistoryPageProps) {
   const encIdFilter =
@@ -58,185 +99,188 @@ export default function HistoryPage({ searchParams }: HistoryPageProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let mounted = true;
+  async function load(currentEncId = encId) {
     const ac = new AbortController();
 
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        const param =
-          encId && encId.trim()
-            ? `?encId=${encodeURIComponent(encId.trim())}`
-            : '';
-        const url = `/api/careport/history${param}`;
-        const res = await fetch(url, {
-          cache: 'no-store',
-          signal: ac.signal,
-        });
+    setLoading(true);
+    setError(null);
 
-        if (!mounted) return;
+    try {
+      const param = currentEncId && currentEncId.trim() ? `?encId=${encodeURIComponent(currentEncId.trim())}` : '';
+      const res = await fetch(`/api/careport/history${param}`, {
+        cache: 'no-store',
+        signal: ac.signal,
+      });
 
-        if (!res.ok) {
-          console.warn(
-            'History API returned non-OK status, using mock fallback',
-          );
-          setItems(MOCK_HISTORY);
-          setError(
-            'Live history unavailable — showing a recent mock example.',
-          );
-          return;
-        }
+      const data = await res.json().catch(() => ({}));
 
-        const data = await res.json();
-        let list: HistoryItem[] = [];
-
-        if (Array.isArray(data.items)) list = data.items;
-        else if (Array.isArray(data.history)) list = data.history;
-        else if (Array.isArray(data)) list = data;
-
-        if (!list || list.length === 0) {
-          setItems([]);
-          setError('No delivery history found for the selected filter.');
-        } else {
-          setItems(list);
-        }
-      } catch (err) {
-        if (!mounted || ac.signal.aborted) return;
-        console.error(
-          'Failed to load delivery history; using mock fallback',
-          err,
-        );
-        setItems(MOCK_HISTORY);
-        setError(
-          'Unable to reach history service — showing a mock example.',
-        );
-      } finally {
-        if (mounted) setLoading(false);
+      if (!res.ok || data?.ok === false) {
+        setItems([]);
+        setError(data?.error || `CarePort history unavailable. HTTP ${res.status}`);
+        return;
       }
-    })();
 
-    return () => {
-      mounted = false;
-      ac.abort();
-    };
-  }, [encId]);
+      setItems(normalizeItems(data));
+    } catch (err: any) {
+      if (ac.signal.aborted) return;
+      setItems([]);
+      setError(err?.message || 'Unable to load CarePort history.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    load(encIdFilter);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [encIdFilter]);
+
+  const summary = useMemo(() => {
+    const total = items.length;
+    const delivery = items.filter((x) => String(x.fulfillment || '').toUpperCase() === 'DELIVERY').length;
+    const pickup = items.filter((x) => String(x.fulfillment || '').toUpperCase() === 'PICKUP').length;
+    const complete = items.filter((x) => ['DELIVERED', 'COLLECTED', 'COMPLETED'].includes(String(x.status || '').toUpperCase())).length;
+    return { total, delivery, pickup, complete };
+  }, [items]);
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-4">
-      <header className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-        <div>
-          <h1 className="text-xl md:text-2xl font-semibold">
-            CarePort Delivery History
-          </h1>
-          <p className="text-xs md:text-sm text-gray-500 mt-1">
-            View recent CarePort deliveries. Filter by encounter ID if needed.
-          </p>
-        </div>
-        <div className="flex items-center gap-2 text-xs">
-          <a
-            href="/careport"
-            className="px-3 py-1 rounded border bg-white hover:bg-gray-50"
-          >
-            ← Back to CarePort
-          </a>
-        </div>
-      </header>
+    <main className="min-h-screen bg-slate-50">
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6">
+        <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-900">CarePort history</h1>
+              <p className="mt-1 max-w-2xl text-sm text-slate-600">
+                Review pharmacy marketplace orders, fulfilment mode, payment status and delivery or pickup progress.
+              </p>
+            </div>
 
-      <section className="bg-white border rounded-lg p-4 space-y-3">
-        <div>
-          <label htmlFor="history-encId" className="text-xs text-gray-500">
-            Filter by encounter ID (optional)
-          </label>
-          <div className="mt-1 flex flex-col sm:flex-row gap-2">
-            <input
-              id="history-encId"
-              className="border px-3 py-2 rounded text-sm flex-1"
-              value={encId}
-              onChange={(e) => setEncId(e.target.value)}
-              placeholder="e.g. E-2000 (leave blank to see all)"
-            />
+            <div className="flex flex-wrap gap-2">
+              <Link href="/careport" className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">
+                CarePort
+              </Link>
+              <button
+                type="button"
+                onClick={() => load(encId)}
+                disabled={loading}
+                className="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+              >
+                {loading ? 'Refreshing...' : 'Refresh'}
+              </button>
+            </div>
           </div>
-          <p className="mt-1 text-[11px] text-gray-400">
-            If opened from CarePort Dispatch, the current encounter ID is
-            pre-filled.
-          </p>
-        </div>
 
-        {loading && (
-          <div className="text-sm text-gray-500">Loading delivery history…</div>
-        )}
-        {!loading && error && (
-          <div className="text-xs text-rose-600 mt-1">{error}</div>
-        )}
-      </section>
-
-      <section className="bg-white border rounded-lg p-4">
-        <h2 className="text-sm font-medium mb-3">Deliveries</h2>
-        {items.length === 0 && !loading ? (
-          <p className="text-sm text-gray-500">
-            No deliveries to show yet. Adjust the filter above or try again
-            later.
-          </p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-xs md:text-sm">
-              <thead>
-                <tr className="text-left text-gray-500 border-b">
-                  <th className="py-2 pr-4">Order</th>
-                  <th className="py-2 pr-4">Encounter</th>
-                  <th className="py-2 pr-4">Status</th>
-                  <th className="py-2 pr-4">Pharmacy</th>
-                  <th className="py-2 pr-4">Rider</th>
-                  <th className="py-2 pr-4">Created</th>
-                  <th className="py-2 pr-4">Delivered</th>
-                  <th className="py-2 pr-4 text-right">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.map((it) => (
-                  <tr
-                    key={it.id}
-                    className="border-b last:border-b-0 hover:bg-gray-50"
-                  >
-                    <td className="py-2 pr-4 font-medium">
-                      {it.orderNo ?? it.id}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-600">
-                      {it.encId ?? '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-700">{it.status}</td>
-                    <td className="py-2 pr-4 text-gray-600">
-                      {it.pharmacyName ?? '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-600">
-                      {it.riderName ?? '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-500">
-                      {it.createdAt
-                        ? new Date(it.createdAt).toLocaleString()
-                        : '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-gray-500">
-                      {it.deliveredAt
-                        ? new Date(it.deliveredAt).toLocaleString()
-                        : '—'}
-                    </td>
-                    <td className="py-2 pr-4 text-right text-gray-700">
-                      {typeof it.total === 'number'
-                        ? `R ${it.total.toFixed(2)}${
-                            it.paymentMethod ? ` • ${it.paymentMethod}` : ''
-                          }`
-                        : it.paymentMethod || '—'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="mt-5 grid gap-3 sm:grid-cols-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Orders</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">{summary.total}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Home delivery</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">{summary.delivery}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Collection</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">{summary.pickup}</div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <div className="text-xs text-slate-500">Completed</div>
+              <div className="mt-1 text-2xl font-semibold text-slate-900">{summary.complete}</div>
+            </div>
           </div>
-        )}
-      </section>
+        </header>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+            <label className="block flex-1">
+              <div className="text-xs font-medium text-slate-600">Filter by encounter ID</div>
+              <input
+                value={encId}
+                onChange={(e) => setEncId(e.target.value)}
+                placeholder="Optional encounter ID"
+                className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+              />
+            </label>
+
+            <button
+              type="button"
+              onClick={() => load(encId)}
+              disabled={loading}
+              className="rounded-2xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            >
+              Apply filter
+            </button>
+          </div>
+
+          {error ? (
+            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+              {error}
+            </div>
+          ) : null}
+
+          <div className="mt-5 space-y-3">
+            {loading ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                Loading CarePort history...
+              </div>
+            ) : items.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No CarePort orders found for this filter.
+              </div>
+            ) : (
+              items.map((it) => (
+                <article key={it.id} className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h2 className="text-base font-semibold text-slate-900">{it.orderNo || it.id}</h2>
+                        <StatusPill status={it.status} />
+                        {it.fulfillment ? (
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-600">
+                            {String(it.fulfillment).toUpperCase() === 'PICKUP' ? 'In-store collection' : 'Home delivery'}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="mt-2 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
+                        <div>Created: {formatWhen(it.createdAt)}</div>
+                        <div>Completed: {formatWhen(it.deliveredAt)}</div>
+                        <div>Pharmacy: {it.pharmacyName || '—'}</div>
+                        <div>Rider: {it.riderName || '—'}</div>
+                        <div>Total: {money(it.total, it.currency || 'ZAR')}</div>
+                        <div>Payment: {it.paymentMethod || '—'}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                      <Link
+                        href={`/careport/timeline?id=${encodeURIComponent(it.id)}`}
+                        className="rounded-full border border-slate-200 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                      >
+                        Timeline
+                      </Link>
+                      {String(it.fulfillment || '').toUpperCase() === 'DELIVERY' ? (
+                        <Link
+                          href={`/careport/track?orderId=${encodeURIComponent(it.id)}`}
+                          className="rounded-full bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                        >
+                          Track
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/careport/marketplace/${encodeURIComponent(it.id)}`}
+                          className="rounded-full bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                        >
+                          Pickup details
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

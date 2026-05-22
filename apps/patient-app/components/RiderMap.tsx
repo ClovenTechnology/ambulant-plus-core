@@ -8,6 +8,7 @@ interface Coord {
   lng: number;
   ts?: number;
 }
+
 interface RiderProfile {
   id?: string;
   name?: string;
@@ -19,6 +20,7 @@ interface RiderProfile {
   regPlate?: string;
   tripsCount?: number;
 }
+
 interface PharmacyProfile {
   id?: string;
   name?: string;
@@ -31,83 +33,103 @@ interface RiderMapProps {
   coords: Coord[];
   rider?: RiderProfile;
   pharmacy?: PharmacyProfile;
-  onClose?: () => void; // kept for API compatibility, unused for now
+  onClose?: () => void;
 }
 
-export default function RiderMap({ coords, pharmacy }: RiderMapProps) {
+function formatWhen(ts?: number) {
+  if (!ts) return 'Awaiting update';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return 'Awaiting update';
+  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
+
+export default function RiderMap({ coords, rider, pharmacy }: RiderMapProps) {
   const lastPoint = useMemo(() => {
     if (coords && coords.length > 0) {
       const last = coords[coords.length - 1];
-      if (typeof last.lat === 'number' && typeof last.lng === 'number') {
-        return last;
-      }
+      if (typeof last.lat === 'number' && typeof last.lng === 'number') return last;
     }
-    if (pharmacy?.coords) {
-      return { lat: pharmacy.coords.lat, lng: pharmacy.coords.lng };
-    }
+
+    if (pharmacy?.coords) return { lat: pharmacy.coords.lat, lng: pharmacy.coords.lng, ts: undefined };
     return null;
   }, [coords, pharmacy]);
 
   const openGoogleMaps = () => {
     if (!lastPoint) return;
-    const url = `https://www.google.com/maps?q=${lastPoint.lat},${lastPoint.lng}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
+    window.open(`https://www.google.com/maps?q=${lastPoint.lat},${lastPoint.lng}`, '_blank', 'noopener,noreferrer');
   };
 
   const openWaze = () => {
     if (!lastPoint) return;
-    const wazeUrl = `waze://?ll=${lastPoint.lat},${lastPoint.lng}&navigate=yes`;
     const webFallback = `https://waze.com/ul?ll=${lastPoint.lat},${lastPoint.lng}&navigate=yes`;
-    // try app, fall back to web (mobile browsers will handle scheme if available)
-    window.open(wazeUrl, '_blank');
-    setTimeout(() => {
-      window.open(webFallback, '_blank', 'noopener,noreferrer');
-    }, 500);
+    window.open(webFallback, '_blank', 'noopener,noreferrer');
   };
 
   return (
-    <div className="h-full w-full flex flex-col items-center justify-center p-4 text-xs text-gray-600">
-      <div className="max-w-sm text-center">
-        <div className="font-medium text-sm mb-1">
-          In-app live map is temporarily disabled
-        </div>
-        <p className="text-xs text-gray-500 mb-3">
-          You still get real-time ETA, progress and timeline here. Use the buttons
-          below to open navigation in your preferred maps app.
-        </p>
-
-        {lastPoint ? (
-          <>
-            <div className="mb-3 text-[11px] text-gray-500">
-              Current location:&nbsp;
-              <span className="font-mono">
-                {lastPoint.lat.toFixed(5)}, {lastPoint.lng.toFixed(5)}
-              </span>
-            </div>
-            <div className="flex flex-wrap gap-2 justify-center">
-              <button
-                type="button"
-                onClick={openGoogleMaps}
-                className="px-3 py-1.5 rounded border bg-white hover:bg-gray-50 text-xs"
-              >
-                Open in Google Maps
-              </button>
-              <button
-                type="button"
-                onClick={openWaze}
-                className="px-3 py-1.5 rounded border bg-white hover:bg-gray-50 text-xs"
-              >
-                Open in Waze
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="text-[11px] text-gray-500">
-            We don’t have a location yet. As soon as coordinates are available,
-            this panel will offer “Open in Maps” links.
+    <section className="flex h-full min-h-[360px] w-full flex-col overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <div className="border-b border-slate-100 p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Live location</p>
+            <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-950">
+              {rider?.name || 'Rider assignment pending'}
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {pharmacy?.name ? `From ${pharmacy.name}` : 'The route appears as soon as dispatch begins.'}
+            </p>
           </div>
-        )}
+
+          <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+            {formatWhen(lastPoint?.ts)}
+          </div>
+        </div>
       </div>
-    </div>
+
+      <div className="grid flex-1 place-items-center bg-gradient-to-br from-slate-50 via-white to-cyan-50 p-6">
+        <div className="w-full max-w-lg rounded-3xl border border-slate-200 bg-white/90 p-5 text-center shadow-sm backdrop-blur">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50">
+            <span className="h-3 w-3 rounded-full bg-emerald-500 ring-8 ring-emerald-100" aria-hidden />
+          </div>
+
+          <h3 className="mt-4 text-base font-semibold text-slate-950">
+            {lastPoint ? 'Current delivery position is available' : 'Waiting for first location ping'}
+          </h3>
+
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            CarePort keeps the order timeline live inside Ambulant+. When coordinates are available, patients can open
+            the location in their preferred navigation app.
+          </p>
+
+          {lastPoint ? (
+            <>
+              <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-3 font-mono text-xs text-slate-600">
+                {lastPoint.lat.toFixed(5)}, {lastPoint.lng.toFixed(5)}
+              </div>
+
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                <button
+                  type="button"
+                  onClick={openGoogleMaps}
+                  className="rounded-full bg-slate-900 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+                >
+                  Open in Google Maps
+                </button>
+                <button
+                  type="button"
+                  onClick={openWaze}
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Open in Waze
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+              Tracking becomes active after pharmacy handover and rider assignment.
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }

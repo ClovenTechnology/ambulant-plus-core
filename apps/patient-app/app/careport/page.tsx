@@ -1,14 +1,13 @@
 ﻿// FILE: apps/patient-app/app/careport/page.tsx
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useActiveEncounter } from '../../components/context/ActiveEncounterContext';
 import { toast } from '../../components/ToastMount';
 import StatusBadge from '../../components/StatusBadge';
 import DeliveryDestinationSheet from '@/components/careport/DeliveryDestinationSheet';
 
-type Status = 'Idle' | 'Preparing' | 'Out for delivery' | 'Delivered';
 type Rx = {
   drug: string;
   sig: string;
@@ -23,633 +22,789 @@ type Activity = {
   entity?: 'system' | 'pharmacy' | 'rider';
 };
 
-const MOCK_RX: Rx = {
-  drug: 'Amoxicillin 500mg (30 caps)',
-  sig: '1 capsule PO TID x 10 days',
-  status: 'ACTIVE',
-  expiresAt: null
+type EncounterOption = {
+  id: string;
+  label: string;
 };
 
-const MOCK_ACTIVITIES: Activity[] = [
-  { id: 'a1', t: new Date(Date.now() - 1000 * 60 * 60).toISOString(), msg: 'Order created', entity: 'system' },
-  { id: 'a2', t: new Date(Date.now() - 1000 * 60 * 45).toISOString(), msg: 'Pharmacy assigned', entity: 'pharmacy' },
-  { id: 'a3', t: new Date(Date.now() - 1000 * 60 * 20).toISOString(), msg: 'Rider en route', entity: 'rider' }
-];
+type ProfilePayload = {
+  ok?: boolean;
+  address?: string | null;
+  patientId?: string | null;
+  name?: string | null;
+};
+
+type ExistingOrder = {
+  id: string;
+  status?: string | null;
+  fulfillment?: 'DELIVERY' | 'PICKUP' | string | null;
+  createdAt?: string | null;
+  destinationAddr?: string | null;
+  chosenPharmacyId?: string | null;
+  chosenOfferId?: string | null;
+};
+
+type DestinationPayload = {
+  fulfillment: 'DELIVERY' | 'PICKUP';
+  destination?: {
+    label: string;
+    addr: string;
+    lat: number;
+    lng: number;
+    source: 'last' | 'home' | 'gps' | 'manual';
+  };
+};
+
+function cx(...parts: Array<string | false | null | undefined>) {
+  return parts.filter(Boolean).join(' ');
+}
+
+function asArray(value: unknown): any[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function formatWhen(value?: string | null) {
+  if (!value) return '—';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleString();
+}
+
+function normalizeEncounterOptions(payload: any): EncounterOption[] {
+  const direct = asArray(payload?.encounters);
+  const fromCases = asArray(payload?.cases).flatMap((c: any) => asArray(c?.encounters));
+
+  const source = direct.length ? direct : fromCases;
+
+  return source
+    .map((e: any) => {
+      const id = String(e?.id || e?.encounterId || '').trim();
+      if (!id) return null;
+
+      const date = e?.startedAt || e?.createdAt || e?.updatedAt || '';
+      const clinician =
+        e?.clinician?.name ||
+        e?.clinicianName ||
+        e?.clinicianId ||
+        'Clinician';
+      const label = `${clinician}${date ? ` • ${formatWhen(date)}` : ''}`;
+
+      return { id, label };
+    })
+    .filter(Boolean)
+    .slice(0, 50) as EncounterOption[];
+}
+
+function normalizeRx(payload: any): Rx {
+  if (!payload || payload?.ok === false) return null;
+
+  const drug = String(payload?.drug || payload?.name || payload?.medication || '').trim();
+  const sig = String(payload?.sig || payload?.directions || payload?.instructions || '').trim();
+
+  if (!drug) return null;
+
+  return {
+    drug,
+    sig: sig || 'Use as directed',
+    status: payload?.status ? String(payload.status) : 'ACTIVE',
+    expiresAt: payload?.expiresAt ?? null,
+  };
+}
+
+function normalizeOrder(payload: any): ExistingOrder | null {
+  const row = payload?.order ?? payload;
+  const id = String(row?.id || row?.orderId || '').trim();
+
+  if (!id) return null;
+
+  return {
+    id,
+    status: row?.status ?? null,
+    fulfillment: row?.fulfillment ?? null,
+    createdAt: row?.createdAt ?? null,
+    destinationAddr: row?.destinationAddr ?? null,
+    chosenPharmacyId: row?.chosenPharmacyId ?? null,
+    chosenOfferId: row?.chosenOfferId ?? null,
+  };
+}
+
+function normalizeActivities(payload: any): Activity[] {
+  const rows = asArray(payload?.timeline || payload?.items || payload?.events || payload);
+
+  return rows
+    .map((x: any, idx: number) => {
+      const t = String(x?.t || x?.at || x?.createdAt || '');
+      const msg = String(x?.msg || x?.message || x?.status || x?.note || '').trim();
+
+      if (!t || !msg) return null;
+
+      return {
+        id: String(x?.id || `${t}-${idx}`),
+        t,
+        msg,
+        entity:
+          x?.entity === 'rider' || x?.entity === 'pharmacy' || x?.entity === 'system'
+            ? x.entity
+            : 'system',
+      };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => new Date(b.t).getTime() - new Date(a.t).getTime()) as Activity[];
+}
+
+function isScriptInactive(rx: Rx) {
+  if (!rx) return false;
+
+  const status = String(rx.status || '').toLowerCase();
+  if (['expired', 'cancelled', 'canceled', 'inactive', 'voided'].includes(status)) return true;
+
+  if (rx.expiresAt) {
+    const dt = new Date(rx.expiresAt);
+    if (!Number.isNaN(dt.getTime()) && dt.getTime() < Date.now()) return true;
+  }
+
+  return false;
+}
+
+function statusTone(status?: string | null) {
+  const s = String(status || '').toUpperCase();
+
+  if (['PAID', 'DISPATCHED', 'OUT_FOR_DELIVERY', 'READY_FOR_PICKUP'].includes(s)) {
+    return 'border-blue-200 bg-blue-50 text-blue-700';
+  }
+
+  if (['DELIVERED', 'COLLECTED', 'COMPLETED'].includes(s)) {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  }
+
+  if (['FAILED', 'CANCELLED', 'REJECTED'].includes(s)) {
+    return 'border-rose-200 bg-rose-50 text-rose-700';
+  }
+
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
+function StatusPill({ status }: { status?: string | null }) {
+  return (
+    <span className={cx('inline-flex rounded-full border px-3 py-1 text-xs font-medium', statusTone(status))}>
+      {String(status || 'Not started').replace(/_/g, ' ')}
+    </span>
+  );
+}
 
 function LiveBadge({ connected, error }: { connected: boolean; error: string | null }) {
   return (
     <div className="flex flex-col items-end gap-0.5 text-xs">
       <div
-        className={`inline-flex items-center gap-2 px-3 py-1 rounded-full font-medium ${
-          connected ? 'bg-green-50 text-green-700 border border-green-100' : 'bg-gray-100 text-gray-600 border border-gray-200'
-        }`}
+        className={cx(
+          'inline-flex items-center gap-2 rounded-full border px-3 py-1 font-medium',
+          connected
+            ? 'border-emerald-100 bg-emerald-50 text-emerald-700'
+            : 'border-slate-200 bg-slate-100 text-slate-600',
+        )}
       >
-        <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-gray-400'}`} aria-hidden />
+        <span className={cx('h-2 w-2 rounded-full', connected ? 'bg-emerald-500' : 'bg-slate-400')} aria-hidden />
         {connected ? 'Live' : 'Offline'}
       </div>
       {error ? (
-        <div className="text-[11px] text-rose-600 max-w-xs text-right">{error}</div>
+        <div className="max-w-xs text-right text-[11px] text-rose-600">{error}</div>
       ) : (
-        <div className="text-[10px] text-gray-400 text-right">Live status auto-reconnects in the background.</div>
+        <div className="text-right text-[10px] text-slate-400">Live order updates when tracking is available.</div>
       )}
     </div>
   );
-}
-
-type Sub = (activities: Activity[]) => void;
-type SSEStatusSub = (connected: boolean, error?: string | null) => void;
-
-class CareportActivityStore {
-  activities: Activity[] = [];
-  subs: Set<Sub> = new Set();
-  sseStatusSubs: Set<SSEStatusSub> = new Set();
-  es: EventSource | null = null;
-  backoff = 500;
-  reconnectTimer: number | null = null;
-  sseConnected = false;
-  sseError: string | null = null;
-  encId: string | null = null;
-
-  constructor() {
-    this.activities = MOCK_ACTIVITIES.slice();
-  }
-
-  get() {
-    return this.activities.slice();
-  }
-
-  subscribe(fn: Sub) {
-    this.subs.add(fn);
-    fn(this.get());
-    return () => this.subs.delete(fn);
-  }
-
-  subscribeStatus(fn: SSEStatusSub) {
-    this.sseStatusSubs.add(fn);
-    fn(this.sseConnected, this.sseError);
-    return () => this.sseStatusSubs.delete(fn);
-  }
-
-  push(activity: Activity) {
-    if (activity.id && this.activities.some((a) => a.id === activity.id)) return;
-    this.activities = [...this.activities.slice(-19), activity];
-    for (const s of this.subs) s(this.get());
-  }
-
-  notifyStatus() {
-    for (const s of this.sseStatusSubs) s(this.sseConnected, this.sseError);
-  }
-
-  async connect(encId?: string | null) {
-    if (encId !== undefined) this.encId = encId;
-
-    try {
-      this.es?.close();
-    } catch {}
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    this.es = null;
-    this.sseConnected = false;
-    this.sseError = null;
-    this.notifyStatus();
-
-    const tryConnect = () => {
-      try {
-        const param = this.encId ? `?encId=${encodeURIComponent(this.encId)}` : '';
-        const url = `/api/careport/stream${param}`;
-        const es = new EventSource(url);
-        this.es = es;
-
-        es.onopen = () => {
-          this.backoff = 500;
-          this.sseConnected = true;
-          this.sseError = null;
-          this.notifyStatus();
-        };
-
-        es.onmessage = (ev) => {
-          try {
-            const data = JSON.parse(ev.data);
-            if (data?.activity) this.push(data.activity as Activity);
-            if (data?.status) {
-              this.push({
-                id: `status-${Date.now()}`,
-                t: new Date().toISOString(),
-                msg: `Status: ${data.status}`,
-                entity: 'system'
-              });
-            }
-          } catch {}
-        };
-
-        es.addEventListener('activity', (ev: MessageEvent) => {
-          try {
-            const a = JSON.parse((ev as any).data) as Activity;
-            if (a) this.push(a);
-          } catch {}
-        });
-
-        es.onerror = () => {
-          this.sseConnected = false;
-          this.sseError = 'Connection error — reconnecting';
-          this.notifyStatus();
-          try {
-            es.close();
-          } catch {}
-          this.es = null;
-          this.reconnectTimer = window.setTimeout(() => {
-            this.backoff = Math.min(30000, Math.round(this.backoff * 1.8));
-            tryConnect();
-          }, this.backoff);
-        };
-      } catch (err: any) {
-        this.sseConnected = false;
-        this.sseError = String(err);
-        this.notifyStatus();
-        this.reconnectTimer = window.setTimeout(() => {
-          this.backoff = Math.min(30000, Math.round(this.backoff * 1.8));
-          tryConnect();
-        }, this.backoff);
-      }
-    };
-
-    tryConnect();
-  }
-
-  disconnect() {
-    try {
-      this.es?.close();
-    } catch {}
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer);
-      this.reconnectTimer = null;
-    }
-    this.es = null;
-    this.sseConnected = false;
-    this.sseError = null;
-    this.notifyStatus();
-  }
-}
-
-declare global {
-  interface Window {
-    __careportActivityStore?: CareportActivityStore;
-  }
-}
-
-if (typeof window !== 'undefined' && !window.__careportActivityStore) {
-  window.__careportActivityStore = new CareportActivityStore();
 }
 
 export default function CarePortPage() {
   const { activeEncounter, setActiveEncounter } =
     (useActiveEncounter() as any) || { activeEncounter: null, setActiveEncounter: undefined };
 
-  const encIdFromContext = activeEncounter?.id ?? null;
-  const [encId, setEncId] = useState<string | null>(encIdFromContext);
+  const activeEncounterId = String(activeEncounter?.id || '').trim() || null;
 
-  const [encounters, setEncounters] = useState<{ id: string; label: string }[]>([]);
+  const [profile, setProfile] = useState<ProfilePayload | null>(null);
+  const [encounters, setEncounters] = useState<EncounterOption[]>([]);
+  const [encId, setEncId] = useState<string | null>(activeEncounterId);
+
   const [rx, setRx] = useState<Rx>(null);
   const [loadingRx, setLoadingRx] = useState(false);
+  const [rxError, setRxError] = useState<string | null>(null);
 
-  const [marketplaceOrderId, setMarketplaceOrderId] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false);
+  const [order, setOrder] = useState<ExistingOrder | null>(null);
+  const [loadingOrder, setLoadingOrder] = useState(false);
 
-  const [activities, setActivities] = useState<Activity[]>(
-    typeof window !== 'undefined' ? window.__careportActivityStore?.get() ?? MOCK_ACTIVITIES : MOCK_ACTIVITIES
-  );
-  const [sseConnected, setSseConnected] = useState<boolean>(
-    typeof window !== 'undefined' ? window.__careportActivityStore?.sseConnected ?? false : false
-  );
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [sseConnected, setSseConnected] = useState(false);
   const [sseError, setSseError] = useState<string | null>(null);
 
-  const [profile, setProfile] = useState<any>(null);
   const [destOpen, setDestOpen] = useState(false);
+  const [starting, setStarting] = useState(false);
 
   const [useSponsor, setUseSponsor] = useState(true);
-  const [allowPartialFulfillment, setAllowPartialFulfillment] = useState(false);
   const [allowGenericSubstitution, setAllowGenericSubstitution] = useState(true);
+  const [allowPartialFulfillment, setAllowPartialFulfillment] = useState(false);
   const [preferredPaymentMethod, setPreferredPaymentMethod] = useState<'CARD' | 'COD'>('CARD');
   const [gapPaymentMethod, setGapPaymentMethod] = useState<'CARD' | 'COD'>('CARD');
 
   useEffect(() => {
+    let alive = true;
+
     fetch('/api/profile', { cache: 'no-store' })
       .then((r) => r.json())
-      .then(setProfile)
-      .catch(() => setProfile(null));
-  }, []);
-
-  useEffect(() => {
-    const store = window.__careportActivityStore!;
-    const unsub = store.subscribe((list) => setActivities(list));
-    const unsubStatus = store.subscribeStatus((connected, err) => {
-      setSseConnected(connected);
-      setSseError(err ?? null);
-    });
-    store.connect(encId ?? undefined);
-    return () => {
-      unsub();
-      unsubStatus();
-    };
-  }, [encId]);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const res = await fetch('/api/encounters?mode=list', { cache: 'no-store' });
-        if (!mounted) return;
-        if (!res.ok) throw new Error('no encounters');
-        const json = await res.json();
-        if (Array.isArray(json.encounters)) {
-          setEncounters(json.encounters.map((e: any) => ({ id: e.id, label: e.title ?? e.id })));
-        } else if (Array.isArray(json)) {
-          setEncounters(json.map((e: any) => ({ id: e.id, label: e.title ?? e.id })));
-        } else {
-          setEncounters([]);
-        }
-      } catch {
-        setEncounters([
-          { id: 'E-2000', label: 'Encounter E-2000 (mock)' },
-          { id: 'E-2001', label: 'Encounter E-2001 (mock)' }
-        ]);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!encId) {
-      setRx(null);
-      setMarketplaceOrderId(null);
-      window.__careportActivityStore?.connect(undefined);
-      return;
-    }
-    if (typeof setActiveEncounter === 'function') {
-      try {
-        setActiveEncounter({ id: encId });
-      } catch {}
-    }
-    window.__careportActivityStore?.connect(encId);
-  }, [encId, setActiveEncounter]);
-
-  useEffect(() => {
-    if (!encId) return;
-    let alive = true;
-    fetch(`/api/careport/orders/lookup?encId=${encodeURIComponent(encId)}`, { cache: 'no-store' })
-      .then((r) => r.json().then((j) => ({ r, j })))
-      .then(({ r, j }) => {
-        if (!alive) return;
-        if (!r.ok || !j?.ok) {
-          setMarketplaceOrderId(null);
-          return;
-        }
-        setMarketplaceOrderId(j?.order?.id ? String(j.order.id) : null);
+      .then((data) => {
+        if (alive) setProfile(data || null);
       })
-      .catch(() => alive && setMarketplaceOrderId(null));
+      .catch(() => {
+        if (alive) setProfile(null);
+      });
+
+    fetch('/api/encounters', { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!alive) return;
+        const options = normalizeEncounterOptions(data);
+        setEncounters(options);
+        if (!encId && activeEncounterId) setEncId(activeEncounterId);
+      })
+      .catch(() => {
+        if (alive) setEncounters([]);
+      });
+
     return () => {
       alive = false;
     };
-  }, [encId]);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!encId || !setActiveEncounter) return;
+    setActiveEncounter((prev: any) => (prev?.id === encId ? prev : { id: encId }));
+  }, [encId, setActiveEncounter]);
+
+  const loadRx = useCallback(async (currentEncId: string) => {
+    setLoadingRx(true);
+    setRxError(null);
+    setRx(null);
+
+    try {
+      const r = await fetch(`/api/careport/lastRx?encId=${encodeURIComponent(currentEncId)}`, {
+        cache: 'no-store',
+      });
+
+      const data = await r.json().catch(() => ({}));
+
+      if (!r.ok) {
+        setRxError(data?.error || 'No active eRx was found for this encounter.');
+        setRx(null);
+        return;
+      }
+
+      setRx(normalizeRx(data));
+    } catch (err: any) {
+      setRxError(err?.message || 'Could not load latest eRx.');
+      setRx(null);
+    } finally {
+      setLoadingRx(false);
+    }
+  }, []);
+
+  const loadOrder = useCallback(async (currentEncId: string) => {
+    setLoadingOrder(true);
+
+    try {
+      const r = await fetch(`/api/careport/orders/lookup?encId=${encodeURIComponent(currentEncId)}`, {
+        cache: 'no-store',
+      });
+      const data = await r.json().catch(() => ({}));
+      setOrder(r.ok && data?.ok ? normalizeOrder(data) : null);
+    } catch {
+      setOrder(null);
+    } finally {
+      setLoadingOrder(false);
+    }
+  }, []);
 
   useEffect(() => {
     if (!encId) {
       setRx(null);
+      setOrder(null);
+      setActivities([]);
       return;
     }
-    let mounted = true;
-    const ac = new AbortController();
-    setLoadingRx(true);
 
-    (async () => {
-      try {
-        const res = await fetch(`/api/careport/lastRx?encId=${encodeURIComponent(encId)}`, { signal: ac.signal });
-        if (!mounted) return;
-        if (!res.ok) {
-          setRx(MOCK_RX);
-          return;
-        }
-        const json = await res.json();
-        setRx(json ?? MOCK_RX);
-      } catch {
-        if (!mounted) return;
-        setRx(MOCK_RX);
-      } finally {
-        if (mounted) setLoadingRx(false);
-      }
-    })();
+    loadRx(encId);
+    loadOrder(encId);
+  }, [encId, loadOrder, loadRx]);
+
+  useEffect(() => {
+    const orderId = order?.id;
+
+    if (!orderId) {
+      setActivities([]);
+      return;
+    }
+
+    let alive = true;
+
+    fetch(`/api/careport/timeline?id=${encodeURIComponent(orderId)}`, { cache: 'no-store' })
+      .then((r) => r.json())
+      .then((data) => {
+        if (alive) setActivities(normalizeActivities(data));
+      })
+      .catch(() => {
+        if (alive) setActivities([]);
+      });
 
     return () => {
-      mounted = false;
-      ac.abort();
+      alive = false;
     };
-  }, [encId]);
+  }, [order?.id]);
 
-  const status = useMemo<Status>(() => {
-    const mostRecentStatus = activities.slice().reverse().find((a) => /^Status:/i.test(a.msg));
-    if (mostRecentStatus) {
-      const parts = mostRecentStatus.msg.split(':');
-      const st = parts[1]?.trim() as Status | undefined;
-      if (st) return st;
-    }
-    return 'Idle';
-  }, [activities]);
+  useEffect(() => {
+    const orderId = order?.id;
 
-  const scriptInactive = useMemo(() => {
-    if (!rx) return true;
-    if (rx.status && String(rx.status).toUpperCase() === 'EXPIRED') return true;
-    if (rx.expiresAt) {
-      const ts = new Date(rx.expiresAt).getTime();
-      if (Number.isFinite(ts) && ts < Date.now()) return true;
-    }
-    return false;
-  }, [rx]);
-
-  const startMarketplace = async () => {
-    if (!encId) {
-      toast('Select an encounter first', 'error');
+    if (!orderId || typeof window === 'undefined') {
+      setSseConnected(false);
+      setSseError(null);
       return;
     }
-    if (!rx || scriptInactive) {
-      toast('This prescription is not active for marketplace use.', 'error');
-      return;
+
+    let es: EventSource | null = null;
+
+    try {
+      es = new EventSource(`/api/careport/stream?orderId=${encodeURIComponent(orderId)}`);
+
+      es.onopen = () => {
+        setSseConnected(true);
+        setSseError(null);
+      };
+
+      es.onmessage = (ev) => {
+        try {
+          const data = JSON.parse(ev.data);
+          const activity: Activity | null =
+            data?.activity ||
+            (data?.kind
+              ? {
+                  id: String(data.id || `${data.kind}-${Date.now()}`),
+                  t: new Date().toISOString(),
+                  msg: String(data.status || data.kind).replace(/_/g, ' '),
+                  entity: data.kind === 'rider_ping' ? 'rider' : 'system',
+                }
+              : null);
+
+          if (activity) {
+            setActivities((prev) => [activity, ...prev.filter((x) => x.id !== activity.id)].slice(0, 20));
+          }
+        } catch {
+          // Ignore malformed keepalive payloads.
+        }
+      };
+
+      es.onerror = () => {
+        setSseConnected(false);
+        setSseError('Live connection unavailable. Refreshing timeline still works.');
+      };
+    } catch (err: any) {
+      setSseConnected(false);
+      setSseError(err?.message || 'Live connection unavailable.');
     }
+
+    return () => {
+      try {
+        es?.close();
+      } catch {}
+    };
+  }, [order?.id]);
+
+  const scriptInactive = isScriptInactive(rx);
+  const canStart = Boolean(encId && rx && !scriptInactive && !starting);
+
+  const startMarketplace = () => {
+    if (!encId) return toast('Select an encounter first.', 'error');
+    if (!rx) return toast('No active eRx is available for this encounter.', 'error');
+    if (scriptInactive) return toast('This eRx is inactive or expired.', 'error');
+
     setDestOpen(true);
   };
 
-  const doStartMarketplace = async (payload: { fulfillment: 'DELIVERY' | 'PICKUP'; destination?: any }) => {
-    if (!encId) {
-      toast('Select an encounter first', 'error');
-      return;
+  async function broadcastOrder(orderId: string) {
+    try {
+      await fetch(`/api/careport/orders/${encodeURIComponent(orderId)}/broadcast`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+    } catch {
+      // Non-blocking. Marketplace can still be opened and refreshed.
     }
+  }
+
+  async function doStartMarketplace(payload: DestinationPayload) {
+    if (!encId) return;
 
     setStarting(true);
+
     try {
       const res = await fetch('/api/careport/start', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'idempotency-key': `pt-start:${encId}:${payload.fulfillment}`
+          'idempotency-key': `careport-start:${encId}:${payload.fulfillment}`,
         },
         body: JSON.stringify({
           encId,
           fulfillment: payload.fulfillment,
-          destination: payload.destination,
+          destination: payload.fulfillment === 'DELIVERY' ? payload.destination : undefined,
           sponsorRequested: useSponsor,
           allowPartialFulfillment,
           allowGenericSubstitution,
           preferredPaymentMethod,
-          gapPaymentMethod
-        })
+          gapPaymentMethod,
+          metadata: {
+            sourceSurface: 'patient_careport_page',
+            destinationSource: payload.destination?.source ?? null,
+          },
+        }),
       });
+
       const js = await res.json().catch(() => ({}));
+
       if (!res.ok || !js?.ok) {
-        toast(js?.error || `Failed (HTTP ${res.status})`, 'error');
+        const message =
+          js?.error === 'ALLERGY_CONFLICT'
+            ? js?.message || 'CarePort blocked this order because of an allergy safety conflict.'
+            : js?.message || js?.error || `Failed to start CarePort order. HTTP ${res.status}`;
+
+        toast(message, 'error');
         return;
       }
 
-      const orderId = String(js.orderId || '').trim();
-      if (orderId) setMarketplaceOrderId(orderId);
+      const orderId = String(js.orderId || js?.order?.id || '').trim();
+
+      if (!orderId) {
+        toast('CarePort order was created, but no order ID was returned.', 'error');
+        return;
+      }
+
+      await broadcastOrder(orderId);
+
+      setOrder(normalizeOrder(js.order));
+      toast('CarePort marketplace started.', 'success');
 
       const redirectUrl = String(js.redirectUrl || '').trim();
-      if (redirectUrl) {
-        window.location.href = redirectUrl;
-        return;
-      }
-
-      if (orderId) {
-        window.location.href = `/careport/marketplace/${encodeURIComponent(orderId)}`;
-        return;
-      }
-
-      toast('Marketplace started, but no order was returned.', 'error');
-    } catch (e: any) {
-      toast(e?.message || 'Failed to start marketplace', 'error');
+      window.location.href = redirectUrl || `/careport/marketplace/${encodeURIComponent(orderId)}`;
+    } catch (err: any) {
+      toast(err?.message || 'Failed to start CarePort marketplace.', 'error');
     } finally {
       setStarting(false);
       setDestOpen(false);
     }
-  };
+  }
 
   const buildHref = (base: string) => (encId ? { pathname: base, query: { encId } } : base);
 
+  const fulfillmentLabel =
+    order?.fulfillment === 'PICKUP'
+      ? 'In-store collection'
+      : order?.fulfillment === 'DELIVERY'
+        ? 'Home delivery'
+        : 'Not selected';
+
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
-      <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">CarePort</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Patient-owned pharmacy marketplace. Start marketplace, choose pharmacy, confirm sponsor use, handle any payment gap, then track delivery or pickup.
-          </p>
-        </div>
+    <main className="min-h-screen bg-slate-50">
+      <div className="mx-auto max-w-6xl space-y-6 px-4 py-6">
+        <header className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+          <div className="bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 p-6 text-white md:p-8">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+              <div className="max-w-3xl">
+                <div className="mb-3 inline-flex rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-slate-100">
+                  CarePort pharmacy fulfilment
+                </div>
+                <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
+                  Choose delivery or collection before your prescription goes to pharmacies.
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-200">
+                  CarePort lets you send an eRx to the pharmacy marketplace, compare accepted offers, choose substitutions,
+                  confirm sponsor or card payment, then track delivery or pickup status.
+                </p>
+              </div>
 
-        <div className="flex flex-col items-end gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-full border bg-white shadow-sm overflow-hidden">
-              <span className="px-3 py-2 text-xs md:text-sm border-r bg-indigo-50 text-indigo-700">CarePort</span>
-
-              <Link href={buildHref('/careport/track')} className="px-3 py-2 text-xs md:text-sm border-r hover:bg-gray-50">
-                Track
-              </Link>
-
-              {marketplaceOrderId ? (
-                <Link
-                  href={`/careport/marketplace/${encodeURIComponent(marketplaceOrderId)}`}
-                  className="px-3 py-2 text-xs md:text-sm border-r hover:bg-gray-50"
-                >
-                  Marketplace
-                </Link>
-              ) : (
-                <span className="px-3 py-2 text-xs md:text-sm border-r text-gray-400">Marketplace</span>
-              )}
-
-              <Link href={buildHref('/careport/timeline')} className="px-3 py-2 text-xs md:text-sm border-r hover:bg-gray-50">
-                Timeline
-              </Link>
-              <Link href={buildHref('/careport/history')} className="px-3 py-2 text-xs md:text-sm hover:bg-gray-50">
-                History
-              </Link>
+              <LiveBadge connected={sseConnected} error={sseError} />
             </div>
+          </div>
 
-            <Link href="/orders" className="px-3 py-2 border rounded-full bg-white hover:bg-gray-50 text-xs md:text-sm">
-              Back to Orders
+          <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 bg-white p-4">
+            <Link href={buildHref('/careport/track')} className="rounded-full border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
+              Track
+            </Link>
+            {order?.id ? (
+              <Link
+                href={`/careport/marketplace/${encodeURIComponent(order.id)}`}
+                className="rounded-full border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50"
+              >
+                Marketplace
+              </Link>
+            ) : (
+              <span className="rounded-full border border-slate-200 px-3 py-2 text-sm text-slate-400">Marketplace</span>
+            )}
+            <Link href={order?.id ? `/careport/timeline?id=${encodeURIComponent(order.id)}` : buildHref('/careport/timeline')} className="rounded-full border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
+              Timeline
+            </Link>
+            <Link href={buildHref('/careport/history')} className="rounded-full border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
+              History
+            </Link>
+            <Link href="/orders" className="ml-auto rounded-full border border-slate-200 px-3 py-2 text-sm hover:bg-slate-50">
+              Back to orders
             </Link>
           </div>
+        </header>
 
-          <LiveBadge connected={sseConnected} error={sseError} />
-        </div>
-      </header>
-
-      <section className="p-4 bg-white border rounded-lg space-y-4">
-        <div>
-          <label className="text-xs text-gray-500">Select encounter</label>
-          <div className="mt-1 flex flex-col sm:flex-row sm:items-center gap-2">
-            <select
-              aria-label="Select encounter"
-              className="border rounded px-3 py-2 min-w-[260px]"
-              value={encId ?? ''}
-              onChange={(e) => setEncId(e.target.value || null)}
-            >
-              <option value="">— choose encounter —</option>
-              {encounters.map((ec) => (
-                <option key={ec.id} value={ec.id}>
-                  {ec.label}
-                </option>
-              ))}
-            </select>
-
-            {encId && (
-              <div className="text-sm text-gray-500">
-                Selected: <span className="font-medium">{encId}</span>
-              </div>
-            )}
+        <section className="grid gap-4 md:grid-cols-3">
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Selected fulfilment</div>
+            <div className="mt-2 text-lg font-semibold text-slate-900">{fulfillmentLabel}</div>
+            <p className="mt-2 text-sm text-slate-600">
+              Delivery requires a confirmed address and coordinates. Collection does not require a rider destination.
+            </p>
           </div>
-        </div>
 
-        {!encId ? (
-          <div className="mt-2 text-gray-500 text-sm">Please choose an encounter above.</div>
-        ) : loadingRx ? (
-          <div className="mt-3 animate-pulse p-3 border rounded bg-gray-50">Loading Rx…</div>
-        ) : !rx ? (
-          <div className="mt-2 text-gray-500 text-sm">No eRx available for this encounter.</div>
-        ) : (
-          <div className="p-3 border rounded bg-gray-50 mt-2 space-y-4">
-            <div>
-              <div className="text-xs text-gray-500 uppercase tracking-wide">Prescription</div>
-              <div className="text-sm mt-1 font-medium">{rx.drug}</div>
-              <div className="text-xs text-gray-600 mt-1">{rx.sig}</div>
-              <div className="mt-2 text-xs">
-                <span className={`inline-flex items-center px-2 py-1 rounded border ${scriptInactive ? 'bg-rose-50 text-rose-700 border-rose-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'}`}>
-                  {scriptInactive ? 'Script inactive' : 'Script active'}
-                </span>
-              </div>
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">CarePort order</div>
+            <div className="mt-2 flex items-center gap-2">
+              <StatusPill status={order?.status} />
+            </div>
+            <p className="mt-2 text-sm text-slate-600">
+              {order?.id ? `Order ${order.id}` : 'No CarePort order has been created for this encounter yet.'}
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Safety gate</div>
+            <div className="mt-2 text-lg font-semibold text-slate-900">
+              {rx ? (scriptInactive ? 'Script inactive' : 'Script active') : 'No eRx selected'}
+            </div>
+            <p className="mt-2 text-sm text-slate-600">
+              Gateway blocks CarePort push when the eRx contains a recorded allergy conflict.
+            </p>
+          </div>
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+            <div className="max-w-2xl">
+              <h2 className="text-xl font-semibold text-slate-900">Send prescription to CarePort</h2>
+              <p className="mt-1 text-sm text-slate-600">
+                Select an encounter, confirm the eRx, then choose home delivery or in-store collection.
+              </p>
             </div>
 
-            <div className="rounded-lg border bg-white p-3 space-y-3">
-              <div className="font-medium text-sm">Marketplace preferences</div>
+            <div className="flex flex-wrap items-center gap-2">
+              {order?.id ? (
+                <Link
+                  href={`/careport/marketplace/${encodeURIComponent(order.id)}`}
+                  className="rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+                >
+                  Open marketplace
+                </Link>
+              ) : null}
+              <button
+                type="button"
+                onClick={() => encId && (loadRx(encId), loadOrder(encId))}
+                disabled={!encId || loadingRx || loadingOrder}
+                className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Refresh
+              </button>
+            </div>
+          </div>
 
-              <label className="flex items-center gap-2 text-sm">
+          <div className="mt-5 grid gap-4 lg:grid-cols-[0.9fr_1.1fr]">
+            <div>
+              <label className="text-xs font-medium text-slate-600">Encounter</label>
+              <select
+                aria-label="Select encounter"
+                className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-slate-900/10"
+                value={encId ?? ''}
+                onChange={(e) => setEncId(e.target.value || null)}
+              >
+                <option value="">Choose encounter</option>
+                {encounters.map((ec) => (
+                  <option key={ec.id} value={ec.id}>
+                    {ec.label}
+                  </option>
+                ))}
+              </select>
+
+              {encId ? (
+                <div className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
+                  Selected encounter: <span className="font-medium text-slate-800">{encId}</span>
+                </div>
+              ) : (
+                <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  Select an encounter with an active pharmacy eRx to continue.
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              {loadingRx ? (
+                <div className="animate-pulse text-sm text-slate-600">Loading latest eRx...</div>
+              ) : rx ? (
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Prescription</div>
+                    <div className="mt-1 text-base font-semibold text-slate-900">{rx.drug}</div>
+                    <div className="mt-1 text-sm text-slate-600">{rx.sig}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <span className={cx('rounded-full border px-3 py-1 text-xs font-medium', scriptInactive ? 'border-rose-200 bg-rose-50 text-rose-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700')}>
+                      {scriptInactive ? 'Inactive / expired' : 'Active eRx'}
+                    </span>
+                    {rx.expiresAt ? (
+                      <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-600">
+                        Expires {formatWhen(rx.expiresAt)}
+                      </span>
+                    ) : null}
+                  </div>
+                </div>
+              ) : (
+                <div className="text-sm text-slate-600">
+                  {rxError || 'No active eRx is available for the selected encounter.'}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
+            <div className="text-sm font-semibold text-slate-900">Marketplace preferences</div>
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              <label className="flex items-start gap-2 rounded-2xl border border-slate-200 p-3 text-sm">
                 <input
                   type="checkbox"
+                  className="mt-1"
                   checked={useSponsor}
                   onChange={(e) => setUseSponsor(e.target.checked)}
                 />
-                Use sponsor / medical aid where available
+                <span>
+                  <span className="font-medium text-slate-900">Use sponsor / medical aid</span>
+                  <span className="mt-1 block text-xs text-slate-500">Coverage will be checked before checkout.</span>
+                </span>
               </label>
 
-              <label className="flex items-center gap-2 text-sm">
+              <label className="flex items-start gap-2 rounded-2xl border border-slate-200 p-3 text-sm">
                 <input
                   type="checkbox"
+                  className="mt-1"
                   checked={allowGenericSubstitution}
                   onChange={(e) => setAllowGenericSubstitution(e.target.checked)}
                 />
-                Allow generic substitution
+                <span>
+                  <span className="font-medium text-slate-900">Allow generic substitution</span>
+                  <span className="mt-1 block text-xs text-slate-500">Patient can still choose the final option.</span>
+                </span>
               </label>
 
-              <label className="flex items-center gap-2 text-sm">
+              <label className="flex items-start gap-2 rounded-2xl border border-slate-200 p-3 text-sm">
                 <input
                   type="checkbox"
+                  className="mt-1"
                   checked={allowPartialFulfillment}
                   onChange={(e) => setAllowPartialFulfillment(e.target.checked)}
                 />
-                Allow partial fulfilment if some items are unavailable
+                <span>
+                  <span className="font-medium text-slate-900">Allow partial fulfilment</span>
+                  <span className="mt-1 block text-xs text-slate-500">Useful when one item is unavailable.</span>
+                </span>
+              </label>
+            </div>
+
+            <div className="mt-4 grid gap-3 sm:grid-cols-2">
+              <label>
+                <div className="text-xs font-medium text-slate-600">Preferred patient payment method</div>
+                <select
+                  className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+                  value={preferredPaymentMethod}
+                  onChange={(e) => setPreferredPaymentMethod(e.target.value as 'CARD' | 'COD')}
+                >
+                  <option value="CARD">Card</option>
+                  <option value="COD">Cash on delivery / collection where allowed</option>
+                </select>
               </label>
 
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-gray-500">Preferred payment method</label>
-                  <select
-                    className="mt-1 w-full border rounded px-3 py-2 text-sm"
-                    value={preferredPaymentMethod}
-                    onChange={(e) => setPreferredPaymentMethod(e.target.value as 'CARD' | 'COD')}
-                  >
-                    <option value="CARD">Card</option>
-                    <option value="COD">Cash on Delivery</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="text-xs text-gray-500">Gap payment method if sponsor does not fully cover</label>
-                  <select
-                    className="mt-1 w-full border rounded px-3 py-2 text-sm"
-                    value={gapPaymentMethod}
-                    onChange={(e) => setGapPaymentMethod(e.target.value as 'CARD' | 'COD')}
-                  >
-                    <option value="CARD">Card</option>
-                    <option value="COD">Cash on Delivery</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="text-xs text-gray-600">
-                Sponsor coverage is checked separately for medication items and delivery. Any uncovered gap will be shown in checkout before you confirm payment.
-              </div>
-            </div>
-
-            <div className="mt-3 flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={startMarketplace}
-                disabled={!encId || starting || scriptInactive}
-                className="px-3 py-2 border rounded bg-black text-white hover:bg-gray-900 disabled:opacity-50 text-sm"
-              >
-                {starting ? 'Starting…' : 'Start CarePort Marketplace'}
-              </button>
-
-              {marketplaceOrderId ? (
-                <Link
-                  href={`/careport/marketplace/${encodeURIComponent(marketplaceOrderId)}`}
-                  className="px-3 py-2 border rounded bg-white hover:bg-gray-100 text-sm"
+              <label>
+                <div className="text-xs font-medium text-slate-600">Gap payment if sponsor does not fully cover</div>
+                <select
+                  className="mt-1 w-full rounded-2xl border border-slate-200 px-4 py-3 text-sm"
+                  value={gapPaymentMethod}
+                  onChange={(e) => setGapPaymentMethod(e.target.value as 'CARD' | 'COD')}
                 >
-                  View Marketplace →
-                </Link>
-              ) : null}
-
-              <StatusBadge status={status} />
-            </div>
-
-            <div className="text-xs text-gray-500">
-              Marketplace start does not dispatch immediately. You will still review pharmacy offers, sponsor coverage, and any outstanding payment before checkout is completed.
+                  <option value="CARD">Card</option>
+                  <option value="COD">Cash where allowed</option>
+                </select>
+              </label>
             </div>
           </div>
-        )}
-      </section>
 
-      <section className="p-4 bg-white border rounded-lg">
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-medium">Recent activity</h2>
-          <div className="text-xs text-gray-500">Live updates</div>
-        </div>
+          <div className="mt-5 flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={startMarketplace}
+              disabled={!canStart}
+              className="rounded-full bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+            >
+              {starting ? 'Starting CarePort...' : 'Send to CarePort'}
+            </button>
 
-        <ul className="mt-3 space-y-2 text-sm" aria-live="polite">
-          {activities.length === 0 ? (
-            <li className="text-gray-500 text-sm">No recent activity.</li>
-          ) : (
-            activities
-              .slice()
-              .reverse()
-              .slice(0, 8)
-              .map((a) => (
-                <li key={a.id} className="p-2 border rounded hover:bg-gray-50 transition">
-                  <div className="text-sm font-medium">{a.msg}</div>
-                  <div className="text-xs text-gray-500 mt-1">{new Date(a.t).toLocaleString()}</div>
-                </li>
+            {order?.id ? (
+              <Link
+                href={`/careport/marketplace/${encodeURIComponent(order.id)}`}
+                className="rounded-full border border-slate-200 bg-white px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                View pharmacy offers
+              </Link>
+            ) : null}
+
+            <StatusBadge status={order?.status || 'Not started'} />
+          </div>
+
+          <p className="mt-3 text-xs text-slate-500">
+            Sending to CarePort does not dispatch automatically. You still choose a pharmacy, review substitutions, confirm
+            coverage/payment, and then track delivery or pickup.
+          </p>
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Recent CarePort activity</h2>
+              <p className="mt-1 text-sm text-slate-600">Real order timeline events from the selected CarePort order.</p>
+            </div>
+            {order?.id ? <StatusPill status={order.status} /> : null}
+          </div>
+
+          <div className="mt-4 space-y-2" aria-live="polite">
+            {activities.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                No CarePort activity yet.
+              </div>
+            ) : (
+              activities.slice(0, 8).map((a) => (
+                <div key={a.id} className="rounded-2xl border border-slate-200 bg-white p-3">
+                  <div className="text-sm font-medium text-slate-900">{a.msg}</div>
+                  <div className="mt-1 text-xs text-slate-500">{formatWhen(a.t)}</div>
+                </div>
               ))
-          )}
-        </ul>
-      </section>
+            )}
+          </div>
+        </section>
 
-      <DeliveryDestinationSheet
-        open={destOpen}
-        onClose={() => setDestOpen(false)}
-        profileAddress={profile?.address}
-        defaultCountry="za"
-        onConfirm={doStartMarketplace}
-      />
+        <DeliveryDestinationSheet
+          open={destOpen}
+          onClose={() => setDestOpen(false)}
+          profileAddress={profile?.address}
+          defaultCountry="za"
+          onConfirm={doStartMarketplace}
+        />
+      </div>
     </main>
   );
 }

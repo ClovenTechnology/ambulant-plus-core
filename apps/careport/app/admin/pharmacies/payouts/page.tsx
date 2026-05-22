@@ -1,0 +1,83 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+
+function money(cents: number, currency = "ZAR") {
+  return `${currency} ${(Number(cents || 0) / 100).toFixed(2)}`;
+}
+
+export default function PharmacyPayoutsPage() {
+  const [payload, setPayload] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/careport/pharmacies/me/payouts", { cache: "no-store" });
+      const js = await res.json().catch(() => ({}));
+      if (!res.ok || !js?.ok) throw new Error(js?.error || `payouts_http_${res.status}`);
+      setPayload(js);
+    } catch (err: any) {
+      setError(err?.message || "Unable to load pharmacy payouts.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { void load(); }, []);
+
+  const currency = payload?.items?.[0]?.currency || payload?.orders?.[0]?.currency || "ZAR";
+
+  return (
+    <main className="space-y-6">
+      <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Pharmacy payouts</p>
+          <h1 className="text-2xl font-semibold text-slate-950">Settlement and earnings</h1>
+          <p className="mt-1 max-w-3xl text-sm text-slate-600">
+            View CarePort pharmacy payouts, deductions, monthly platform fees, and recent order activity.
+          </p>
+        </div>
+        <Link href="/pharmacy" className="rounded-xl border bg-white px-3 py-2 text-sm hover:bg-slate-50">Pharmacy home</Link>
+      </header>
+
+      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+
+      <section className="grid gap-4 md:grid-cols-3">
+        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Pending</div>
+          <div className="mt-2 text-xl font-semibold">{money(payload?.summary?.pendingCents || 0, currency)}</div>
+        </div>
+        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Paid</div>
+          <div className="mt-2 text-xl font-semibold">{money(payload?.summary?.paidCents || 0, currency)}</div>
+        </div>
+        <div className="rounded-3xl border bg-white p-5 shadow-sm">
+          <div className="text-xs uppercase tracking-wide text-slate-500">Orders shown</div>
+          <div className="mt-2 text-xl font-semibold">{payload?.orders?.length || 0}</div>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-slate-950">Payout history</h2>
+        <div className="mt-4 space-y-2">
+          {(payload?.items || []).map((item: any) => (
+            <div key={item.id} className="rounded-2xl border p-3 text-sm">
+              <div className="flex flex-wrap justify-between gap-3">
+                <div>
+                  <div className="font-semibold">{money(item.amountCents, item.currency)}</div>
+                  <div className="text-xs text-slate-500">{new Date(item.periodStart).toLocaleDateString()} – {new Date(item.periodEnd).toLocaleDateString()}</div>
+                </div>
+                <span className="rounded-full border px-2 py-1 text-xs">{item.status}</span>
+              </div>
+            </div>
+          ))}
+          {!loading && !(payload?.items || []).length && <div className="rounded-2xl border border-dashed p-4 text-sm text-slate-500">No payout batch has been generated yet.</div>}
+        </div>
+      </section>
+    </main>
+  );
+}

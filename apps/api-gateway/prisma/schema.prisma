@@ -1707,6 +1707,16 @@ model PharmacyPartner {
   acceptsStoreCard        Boolean                   @default(false)
   address                 String?
   bankAccountMasked       String?
+  commercialStatus       String                    @default("ACTIVE")
+  billingCycle           String                    @default("MONTHLY")
+  onboardingFeeCents     Int                       @default(0)
+  monthlyPlatformFeeCents Int                      @default(0)
+  inventoryHostingFeeCents Int                     @default(0)
+  subscriptionStatus     String                    @default("CURRENT")
+  nextBillingAt          DateTime?
+  arrearsCents           Int                       @default(0)
+  suspendedReason        String?
+  lastSettledAt          DateTime?
   city                    String?
   country                 String                    @default("ZA") @db.VarChar(2)
   currency                String                    @default("ZAR") @db.VarChar(3)
@@ -1726,12 +1736,15 @@ model PharmacyPartner {
   careportOrdersChosen    CarePortOrder[]           @relation("ChosenPharmacy")
   careportSkus            CarePortPharmacySku[]
   careportStaff           CarePortPharmacyStaff[]
+  subscriptionInvoices    CarePortSubscriptionInvoice[]
   CarePortRiderAssignment CarePortRiderAssignment[]
 
   @@index([active])
   @@index([name])
   @@index([city])
   @@index([country, currency])
+  @@index([commercialStatus, subscriptionStatus])
+  @@index([nextBillingAt])
 }
 
 model LabPartner {
@@ -2684,6 +2697,16 @@ model CarePortOrder {
   patientCopayMinor      Int?
   sponsorPricingSnapshot Json?
 
+  platformFeeMinor        Int    @default(0)
+  paymentProviderFeeMinor Int    @default(0)
+  pharmacyGrossMinor      Int    @default(0)
+  pharmacyNetMinor        Int    @default(0)
+  riderFeeMinor           Int    @default(0)
+  riderNetMinor           Int    @default(0)
+  refundMinor             Int    @default(0)
+  settlementStatus        String @default("UNSETTLED")
+  settlementSnapshot      Json?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -2694,6 +2717,7 @@ model CarePortOrder {
   selections CarePortSelection[]
   payments   CarePortPaymentIntent[]
   assignment CarePortRiderAssignment?
+  providerFeeLedgers CarePortProviderFeeLedger[]
 
   @@unique([erxOrderId, refillNo])
   @@index([orgId, createdAt])
@@ -2702,6 +2726,8 @@ model CarePortOrder {
   @@index([clientId, createdAt])
   @@index([clientMemberId, createdAt])
   @@index([coverageAuthorizationId])
+  @@index([settlementStatus, updatedAt])
+  @@index([chosenPharmacyId, settlementStatus])
 }
 
 model CarePortOrderItem {
@@ -2829,12 +2855,23 @@ model CarePortPaymentIntent {
   amountCents    Int
   currency       String                @default("ZAR")
   idempotencyKey String?
+  provider       String?
+  providerRef    String?
+  providerStatus String?
+  providerPayload Json?
+  metadata       Json?
+  paidAt         DateTime?
+  failedAt       DateTime?
+  failureReason  String?
   createdAt      DateTime              @default(now())
   updatedAt      DateTime              @updatedAt
   order          CarePortOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  providerFeeLedgers CarePortProviderFeeLedger[]
 
   @@index([orderId, status])
   @@index([orgId])
+  @@index([provider, providerRef])
+  @@index([providerStatus, updatedAt])
 }
 
 model CarePortRiderProfile {
@@ -2854,6 +2891,13 @@ model CarePortRiderProfile {
   kyiVerifiedAt     DateTime?
   kyiRejectedReason String?
   bankAccountMasked String?
+  accountStatus      String                    @default("AWAITING_ACTIVATION")
+  payoutCycle        String                    @default("WEEKLY")
+  payoutMethod       String?
+  suspensionReason   String?
+  lastPayoutAt       DateTime?
+  totalTrips         Int                       @default(0)
+  failedDeliveryCount Int                      @default(0)
   createdAt         DateTime                  @default(now())
   updatedAt         DateTime                  @updatedAt
   assignments       CarePortRiderAssignment[]
@@ -2861,7 +2905,144 @@ model CarePortRiderProfile {
   @@index([orgId])
   @@index([isActive, isOnJob])
   @@index([country, currency])
+  @@index([accountStatus, payoutCycle])
+  @@index([lastPayoutAt])
 }
+
+model CarePortSettlementBatch {
+  id                         String   @id @default(cuid())
+  orgId                      String   @default("org-default")
+  kind                       String   @default("CAREPORT")
+  periodStart                DateTime
+  periodEnd                  DateTime
+  currency                   String   @default("ZAR") @db.VarChar(3)
+  status                     String   @default("DRAFT")
+
+  totalGrossMinor            Int      @default(0)
+  pharmacyGrossMinor         Int      @default(0)
+  riderGrossMinor            Int      @default(0)
+  platformFeeMinor           Int      @default(0)
+  paymentProviderFeeMinor    Int      @default(0)
+  subscriptionFeeMinor       Int      @default(0)
+  inventoryHostingFeeMinor   Int      @default(0)
+  pharmacyNetPayableMinor    Int      @default(0)
+  riderNetPayableMinor       Int      @default(0)
+  lineCount                  Int      @default(0)
+
+  generatedByUserId          String?
+  approvedByUserId           String?
+  paidByUserId               String?
+  failedByUserId             String?
+  approvedAt                 DateTime?
+  paidAt                     DateTime?
+  failedAt                   DateTime?
+  failureReason              String?
+  remittanceRef              String?
+  metadata                   Json?
+
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  lines                      CarePortSettlementLine[]
+
+  @@index([orgId, status, periodStart, periodEnd])
+  @@index([periodStart, periodEnd])
+  @@index([createdAt])
+}
+
+model CarePortSettlementLine {
+  id                         String   @id @default(cuid())
+  orgId                      String   @default("org-default")
+  batchId                    String
+  recipientType              String
+  recipientId                String
+  recipientName              String?
+  orderIds                   String[] @default([])
+  tripCount                  Int      @default(0)
+  orderCount                 Int      @default(0)
+
+  grossMinor                 Int      @default(0)
+  platformFeeMinor           Int      @default(0)
+  paymentProviderFeeMinor    Int      @default(0)
+  subscriptionFeeMinor       Int      @default(0)
+  inventoryHostingFeeMinor   Int      @default(0)
+  riderFeeMinor              Int      @default(0)
+  refundMinor                Int      @default(0)
+  netPayableMinor            Int      @default(0)
+  currency                   String   @default("ZAR") @db.VarChar(3)
+  status                     String   @default("PENDING")
+
+  remittanceRef              String?
+  paidAt                     DateTime?
+  failedAt                   DateTime?
+  failureReason              String?
+  metadata                   Json?
+
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  batch                      CarePortSettlementBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+
+  @@unique([batchId, recipientType, recipientId])
+  @@index([orgId, recipientType, recipientId, status])
+  @@index([batchId])
+  @@index([status, createdAt])
+}
+
+model CarePortSubscriptionInvoice {
+  id                         String   @id @default(cuid())
+  orgId                      String   @default("org-default")
+  pharmacyId                 String
+  invoiceType                String   @default("MONTHLY_PLATFORM")
+  status                     String   @default("OPEN")
+  periodStart                DateTime?
+  periodEnd                  DateTime?
+  currency                   String   @default("ZAR") @db.VarChar(3)
+
+  onboardingFeeCents         Int      @default(0)
+  monthlyPlatformFeeCents    Int      @default(0)
+  inventoryHostingFeeCents   Int      @default(0)
+  otherFeeCents              Int      @default(0)
+  totalDueCents              Int      @default(0)
+  paidCents                  Int      @default(0)
+
+  dueAt                      DateTime?
+  paidAt                     DateTime?
+  failedAt                   DateTime?
+  externalRef                String?
+  metadata                   Json?
+
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+  pharmacy                   PharmacyPartner @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, pharmacyId, status])
+  @@index([periodStart, periodEnd])
+  @@index([dueAt])
+}
+
+model CarePortProviderFeeLedger {
+  id                         String   @id @default(cuid())
+  orgId                      String   @default("org-default")
+  orderId                    String?
+  paymentIntentId            String?
+  provider                   String
+  providerRef                String?
+  category                   String   @default("PAYMENT_PROCESSING")
+  amountMinor                Int
+  currency                   String   @default("ZAR") @db.VarChar(3)
+  status                     String   @default("RECORDED")
+  metadata                   Json?
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  order                      CarePortOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  paymentIntent              CarePortPaymentIntent? @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, provider, createdAt])
+  @@index([orderId])
+  @@index([paymentIntentId])
+  @@index([status])
+}
+
 
 model CarePortRiderAssignment {
   id                     String                   @id @default(cuid())
@@ -2881,6 +3062,18 @@ model CarePortRiderAssignment {
 
   @@index([pharmacyId, status])
   @@index([riderUserId, status])
+  @@index([orgId])
+}
+
+model CarePortOperationalSetting {
+  id        String   @id @default(cuid())
+  orgId     String   @default("org-default")
+  key       String
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([orgId, key])
   @@index([orgId])
 }
 

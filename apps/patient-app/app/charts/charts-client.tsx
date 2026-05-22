@@ -89,11 +89,11 @@ export default function ChartsClient() {
           <LineChart series={[{ name: 'HR', data: hr }]} yMin={40} yMax={160} />
         </Card>
 
-        <Card title="SpOâ‚‚ (%)" subtitle={fmtVal(last?.spo2, ' %')}>
+        <Card title="SpO2‚‚ (%)" subtitle={fmtVal(last?.spo2, ' %')}>
           <LineChart series={[{ name: 'SpO2', data: spo2 }]} yMin={85} yMax={100} />
         </Card>
 
-        <Card title="Temperature (Â°C)" subtitle={fmtVal(last?.tempC, ' Â°C')}>
+        <Card title="Temperature (°C)" subtitle={fmtVal(last?.tempC, ' °C')}>
           <LineChart series={[{ name: 'Temp', data: tempC }]} yMin={34} yMax={40} />
         </Card>
 

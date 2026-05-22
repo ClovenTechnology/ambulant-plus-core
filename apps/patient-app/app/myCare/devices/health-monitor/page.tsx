@@ -1,4 +1,5 @@
-﻿'use client';
+﻿//apps/patient-app/app/myCare/devices/health-monitor/page.tsx
+'use client';
 
 import React, {
   useCallback,

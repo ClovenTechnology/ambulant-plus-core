@@ -89,6 +89,165 @@ async function recordRefundPayment(appt: any, cents: number, key: string, reason
   });
 }
 
+
+async function emitCarePortRuntimeEvent(args: {
+  orgId: string;
+  kind: string;
+  orderId: string;
+  patientId?: string | null;
+  clinicianId?: string | null;
+  encounterId?: string | null;
+  payload?: Record<string, unknown>;
+}) {
+  try {
+    await (prisma as any).runtimeEvent?.create?.({
+      data: {
+        ts: BigInt(Date.now()),
+        kind: args.kind,
+        encounterId: args.encounterId ?? null,
+        patientId: args.patientId ?? null,
+        clinicianId: args.clinicianId ?? null,
+        payload: JSON.parse(JSON.stringify(args.payload ?? {})),
+        targetPatientId: args.patientId ?? null,
+        targetClinicianId: args.clinicianId ?? null,
+        targetAdmin: true,
+        orgId: args.orgId,
+      },
+    });
+  } catch {
+    // best-effort
+  }
+}
+
+async function clinicianIdForCarePortOrder(order: any) {
+  const orderAny = order as any;
+  if (orderAny.clinicianId) return String(orderAny.clinicianId);
+
+  if (orderAny.erxOrderId) {
+    const erx = await (prisma as any).erxOrder?.findUnique?.({
+      where: { id: String(orderAny.erxOrderId) },
+      select: { clinicianId: true },
+    });
+    if (erx?.clinicianId) return String(erx.clinicianId);
+  }
+
+  if (order?.encounterId) {
+    const encounter = await (prisma as any).encounter?.findUnique?.({
+      where: { id: String(order.encounterId) },
+      select: { clinicianId: true },
+    });
+    if (encounter?.clinicianId) return String(encounter.clinicianId);
+  }
+
+  return null;
+}
+
+/** ----- CarePort: reconcile provider payment intent + order state ----- */
+async function handleCarePortChargeSuccess(reference: string, data: any, rawEvent: any) {
+  if (!reference) return false;
+
+  const intent = await (prisma as any).carePortPaymentIntent?.findFirst?.({
+    where: {
+      OR: [
+        { providerRef: reference },
+        { idempotencyKey: reference },
+        { id: reference },
+      ],
+    },
+    include: {
+      order: true,
+    },
+  });
+
+  if (!intent?.order) return false;
+
+  const paidAt = data?.paid_at ? new Date(String(data.paid_at)) : new Date();
+  const amountCents = typeof data?.amount === 'number' ? Math.round(data.amount) : Number(data?.amount || intent.amountCents || 0);
+  const currency = String(data?.currency || intent.currency || 'ZAR').toUpperCase();
+
+  if (intent.amountCents != null && amountCents > 0 && Number(intent.amountCents) !== amountCents) {
+    throw new Error(`CarePort amount mismatch (paid ${amountCents} vs expected ${intent.amountCents})`);
+  }
+
+  if (currency && String(intent.currency || 'ZAR').toUpperCase() !== currency) {
+    throw new Error(`CarePort currency mismatch (paid ${currency} vs expected ${intent.currency})`);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await (tx as any).carePortPaymentIntent.update({
+      where: { id: intent.id },
+      data: {
+        status: 'SUCCEEDED',
+        providerStatus: 'SUCCEEDED',
+        providerRef: reference,
+        providerPayload: rawEvent,
+        paidAt,
+      },
+    });
+
+    if (intent.order.status !== 'PAID') {
+      await tx.carePortOrder.update({
+        where: { id: intent.order.id },
+        data: {
+          status: 'PAID',
+          settlementStatus: (intent.order as any).settlementStatus || 'UNSETTLED',
+        } as any,
+      });
+    }
+
+    await tx.auditEvent.create({
+      data: {
+        kind: 'careport_payment_reconciled',
+        actorId: null,
+        actorRole: 'system',
+        subjectId: intent.order.id,
+        meta: {
+          provider: 'paystack',
+          reference,
+          paymentIntentId: intent.id,
+          amountCents,
+          currency,
+        },
+        at: new Date(),
+      },
+    }).catch(() => {});
+  });
+
+  const refreshed = await prisma.carePortOrder.findUnique({
+    where: { id: intent.order.id },
+    include: { chosenPharmacy: true, items: true },
+  });
+
+  const clinicianId = refreshed ? await clinicianIdForCarePortOrder(refreshed) : null;
+  if (refreshed && clinicianId) {
+    await emitCarePortRuntimeEvent({
+      orgId: refreshed.orgId || 'org-default',
+      kind: 'careport_erx_purchased',
+      orderId: refreshed.id,
+      patientId: refreshed.patientId ?? null,
+      clinicianId,
+      encounterId: refreshed.encounterId ?? null,
+      payload: {
+        orderId: refreshed.id,
+        paymentIntentId: intent.id,
+        provider: 'paystack',
+        reference,
+        status: refreshed.status,
+        fulfillment: refreshed.fulfillment,
+        pharmacyId: refreshed.chosenPharmacyId ?? null,
+        pharmacyName: refreshed.chosenPharmacy?.name ?? null,
+        totalCents: refreshed.totalCents ?? 0,
+        currency: refreshed.currency ?? 'ZAR',
+        purchasedAt: paidAt.toISOString(),
+        source: 'paystack.webhook',
+      },
+    });
+  }
+
+  return true;
+}
+
+
 /** ----- Shop: mark order paid + decrement stock (idempotent) ----- */
 async function handleShopChargeSuccess(reference: string, data: any) {
   await prisma.$transaction(async (tx) => {
@@ -220,7 +379,18 @@ export async function POST(req: NextRequest) {
 
   // === Provider capture ===
   if (event === 'charge.success') {
-    // 1) Appointment payment success
+    // 1) CarePort payment success
+    if (reference) {
+      try {
+        const handledCarePort = await handleCarePortChargeSuccess(reference, data, body);
+        if (handledCarePort) return NextResponse.json({ ok: true, kind: 'careport' });
+      } catch (e: any) {
+        console.error('[paystack][careport] error', e);
+        return NextResponse.json({ ok: true, kind: 'careport_failed', error: e?.message || 'careport_failed' });
+      }
+    }
+
+    // 2) Appointment payment success
     if (appt) {
       if (appt.status !== 'confirmed') {
         await prisma.appointment.update({ where: { id: appt.id }, data: { status: 'confirmed' } });
@@ -239,7 +409,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, kind: 'appointment' });
     }
 
-    // 2) Shop order payment success (NEW)
+    // 3) Shop order payment success
     if (reference) {
       try {
         await handleShopChargeSuccess(reference, data);

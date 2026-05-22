@@ -4,14 +4,26 @@
 
 /* Global defaults must be inside a Tailwind layer in v4 */
 @layer base {
-  html, body {
+  html,
+  body {
     background-color: #f9fafb;
     color: #111827;
-    font-family: system-ui, sans-serif;
+    font-family:
+      system-ui,
+      -apple-system,
+      BlinkMacSystemFont,
+      "Segoe UI",
+      sans-serif;
     line-height: 1.5;
   }
 
   a {
-    @apply text-indigo-600 hover:text-indigo-700 underline underline-offset-2;
+    color: #4f46e5;
+    text-decoration-line: underline;
+    text-underline-offset: 2px;
+  }
+
+  a:hover {
+    color: #4338ca;
   }
 }

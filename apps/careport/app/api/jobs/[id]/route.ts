@@ -1,38 +1,40 @@
 // apps/careport/app/api/jobs/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { JOBS, CarePortStatus, appendTimeline } from '../data';
 
-export async function GET(
-  _req: NextRequest,
-  { params }: { params: { id: string } },
-) {
-  const job = JOBS.find((j) => j.id === params.id);
-  if (!job) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
-  return NextResponse.json({ job });
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function disabled(jobId: string) {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'legacy_demo_job_route_disabled',
+      jobId,
+      message:
+        'This legacy demo job endpoint has been retired. Use /api/careport/riders/me/jobs/[orderId] for rider jobs or /api/careport/pharmacies/me/orders/[orderId] for pharmacy fulfilment.',
+      replacements: {
+        riderJob: `/api/careport/riders/me/jobs/${encodeURIComponent(jobId)}`,
+        pharmacyOrder: `/api/careport/pharmacies/me/orders/${encodeURIComponent(jobId)}`,
+        adminOrders: '/api/careport/admin/orders',
+      },
+    },
+    {
+      status: 410,
+      headers: {
+        'Cache-Control': 'no-store',
+      },
+    },
+  );
 }
 
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { id: string } },
-) {
-  const body = (await req.json().catch(() => ({}))) as {
-    status?: CarePortStatus;
-  };
+export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+  return disabled(String(params.id || '').trim());
+}
 
-  const job = JOBS.find((j) => j.id === params.id);
-  if (!job) {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
-  }
+export async function PATCH(_req: NextRequest, { params }: { params: { id: string } }) {
+  return disabled(String(params.id || '').trim());
+}
 
-  if (body.status) {
-    job.status = body.status;
-
-    // simple mapping to human-readable timeline event
-    const msg = `Status updated: ${body.status}`;
-    appendTimeline(job.id, { msg });
-  }
-
-  return NextResponse.json({ job });
+export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
+  return disabled(String(params.id || '').trim());
 }

@@ -20,9 +20,7 @@ type TrendPoint = {
   spo2: number | null;
 };
 
-type ObjectLike = {
-  [key: string]: unknown;
-};
+type ObjectLike = Record<string, unknown>;
 
 function isObjectLike(value: unknown): value is ObjectLike {
   return value !== null && typeof value === 'object';
@@ -35,7 +33,6 @@ function readField(source: unknown, key: string): unknown {
 
 function toFiniteNumber(value: unknown): number | null {
   if (value === null || value === undefined || value === '') return null;
-
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
@@ -45,7 +42,6 @@ function readFirstNumber(source: unknown, keys: string[]): number | null {
     const value = toFiniteNumber(readField(source, key));
     if (value !== null) return value;
   }
-
   return null;
 }
 
@@ -53,7 +49,6 @@ function formatPointLabel(point: unknown, index: number): string {
   const raw =
     readField(point, 'date') ??
     readField(point, 'ts') ??
-    readField(point, 'time') ??
     readField(point, 'timestamp') ??
     readField(point, 'createdAt') ??
     readField(point, 'recordedAt') ??
@@ -61,14 +56,12 @@ function formatPointLabel(point: unknown, index: number): string {
 
   if (raw) {
     const date = new Date(raw as any);
-
     if (!Number.isNaN(date.getTime())) {
       return date.toLocaleDateString(undefined, {
         month: 'short',
         day: 'numeric',
       });
     }
-
     return String(raw);
   }
 
@@ -92,23 +85,18 @@ function buildTrendPoints(vitals: Vitals): TrendPoint[] {
         'heartRate',
         'heart_rate',
         'heartRateBpm',
-        'heart_rate_bpm',
       ]);
 
       const temp = readFirstNumber(point, [
         'temp',
-        'temp_c',
         'temperature',
         'temperatureC',
-        'temperature_c',
       ]);
 
       const spo2 = readFirstNumber(point, [
         'spo2',
         'SpO2',
-        'oxygen',
         'oxygenSaturation',
-        'oxygen_saturation',
       ]);
 
       return {
@@ -118,10 +106,7 @@ function buildTrendPoints(vitals: Vitals): TrendPoint[] {
         spo2,
       };
     })
-    .filter(
-      (point) =>
-        point.hr !== null || point.temp !== null || point.spo2 !== null,
-    );
+    .filter(p => p.hr !== null || p.temp !== null || p.spo2 !== null);
 
   if (points.length > 0) return points;
 
@@ -156,15 +141,25 @@ export default function VitalsTrendChart({ vitals }: VitalsTrendChartProps) {
   const tempValue = toFiniteNumber(readField(vitals, 'temp')) ?? 0;
   const spo2Value = toFiniteNumber(readField(vitals, 'spo2')) ?? 0;
 
-  const trendPoints = useMemo(() => buildTrendPoints(vitals), [vitals]);
+  // 🔥 CRITICAL FIX: stable primitive dependency (NOT whole object)
+  const trendPoints = useMemo(
+    () => buildTrendPoints(vitals),
+    [
+      vitals?.hr,
+      vitals?.temp,
+      vitals?.spo2,
+      vitals?.bp,
+      vitals?.bpSeries,
+    ]
+  );
 
   const data = useMemo<ChartData<'line', Array<number | null>, string>>(
     () => ({
-      labels: trendPoints.map((point) => point.label),
+      labels: trendPoints.map(p => p.label),
       datasets: [
         {
           label: 'HR (bpm)',
-          data: trendPoints.map((point) => point.hr),
+          data: trendPoints.map(p => p.hr),
           borderColor: '#6366F1',
           backgroundColor: '#6366F120',
           tension: 0.3,
@@ -172,7 +167,7 @@ export default function VitalsTrendChart({ vitals }: VitalsTrendChartProps) {
         },
         {
           label: 'Temp (°C)',
-          data: trendPoints.map((point) => point.temp),
+          data: trendPoints.map(p => p.temp),
           borderColor: '#F97316',
           backgroundColor: '#F9731620',
           tension: 0.3,
@@ -180,7 +175,7 @@ export default function VitalsTrendChart({ vitals }: VitalsTrendChartProps) {
         },
         {
           label: 'SpO₂ (%)',
-          data: trendPoints.map((point) => point.spo2),
+          data: trendPoints.map(p => p.spo2),
           borderColor: '#10B981',
           backgroundColor: '#10B98120',
           tension: 0.3,
@@ -188,30 +183,31 @@ export default function VitalsTrendChart({ vitals }: VitalsTrendChartProps) {
         },
       ],
     }),
-    [trendPoints],
+    [trendPoints]
   );
 
-  const options: ChartOptions<'line'> = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        position: 'top',
+  const options: ChartOptions<'line'> = useMemo(
+    () => ({
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'top' },
       },
-    },
-    scales: {
-      y: {
-        beginAtZero: false,
+      scales: {
+        y: { beginAtZero: false },
       },
-    },
-  };
+    }),
+    []
+  );
 
-  const isAlert = useMemo(() => hasCurrentAlert(vitals), [vitals]);
+  const isAlert = useMemo(() => hasCurrentAlert(vitals), [
+    vitals?.hr,
+    vitals?.temp,
+    vitals?.spo2,
+  ]);
 
   const pulseVariants: Variants = {
-    normal: {
-      boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-    },
+    normal: { boxShadow: '0 1px 3px rgba(0,0,0,0.1)' },
     alert: {
       boxShadow: [
         '0 0 15px 4px rgba(239,68,68,0.5)',
@@ -221,27 +217,24 @@ export default function VitalsTrendChart({ vitals }: VitalsTrendChartProps) {
       transition: {
         duration: 1.2,
         repeat: Infinity,
-        repeatType: 'loop',
       },
     },
   };
 
   const gradientVariants: Variants = {
-    hidden: {
-      opacity: 0,
-    },
+    hidden: { opacity: 0 },
     pulse: {
       opacity: [0, 0.6, 0],
       transition: {
         duration: 1.2,
         repeat: Infinity,
-        repeatType: 'loop',
       },
     },
   };
 
   return (
     <motion.div
+      key="vitals-trend-chart"
       className="relative space-y-4 rounded-xl p-2"
       animate={isAlert ? 'alert' : 'normal'}
       variants={pulseVariants}
@@ -268,7 +261,10 @@ export default function VitalsTrendChart({ vitals }: VitalsTrendChartProps) {
       <div className="relative z-10 rounded-xl bg-white p-2 shadow-sm">
         {trendPoints.length > 0 ? (
           <div className="h-[120px]">
-            <Line data={data} options={options} />
+            <Line
+              data={data}
+              options={options}
+            />
           </div>
         ) : (
           <div className="grid h-[120px] place-items-center rounded-lg border border-dashed bg-slate-50 text-xs text-slate-500">

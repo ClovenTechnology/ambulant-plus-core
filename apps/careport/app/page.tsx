@@ -1,57 +1,93 @@
-import { ArrowRightIcon, TruckIcon, BuildingStorefrontIcon } from "@heroicons/react/24/outline";
+// apps/careport/app/page.tsx
+import { ArrowRightIcon, BuildingStorefrontIcon, ShieldCheckIcon, TruckIcon } from '@heroicons/react/24/outline';
+
+const tiles = [
+  {
+    href: '/pharmacy',
+    title: 'Pharmacy workspace',
+    description: 'Review CarePort invitations, respond with availability, manage dispensing, and prepare pickup or delivery orders.',
+    icon: BuildingStorefrontIcon,
+    tone: 'text-teal-700 bg-teal-50 ring-teal-100',
+    cta: 'Open pharmacy workspace',
+  },
+  {
+    href: '/rider',
+    title: 'Rider console',
+    description: 'View assigned jobs, update delivery milestones, and keep patients informed with live delivery state.',
+    icon: TruckIcon,
+    tone: 'text-indigo-700 bg-indigo-50 ring-indigo-100',
+    cta: 'Open rider jobs',
+  },
+  {
+    href: '/pharmacy/offers',
+    title: 'Incoming pharmacy requests',
+    description: 'Respond to patient eRx requests only when stock coverage and fulfilment mode are clinically sensible.',
+    icon: ShieldCheckIcon,
+    tone: 'text-emerald-700 bg-emerald-50 ring-emerald-100',
+    cta: 'Review invitations',
+  },
+];
 
 export default function CarePortHome() {
   return (
-    <main className="max-w-4xl mx-auto px-4 py-8 space-y-6">
-      {/* Welcome Card */}
-      <section className="bg-white border rounded-xl p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-gray-900">Welcome to CarePort</h2>
-        <p className="text-sm text-gray-600 mt-2">
-          Pharmacy dispatch & rider operations. This app is for <strong>pharmacies and field couriers</strong>, not patients.
-        </p>
+    <main className="mx-auto max-w-6xl space-y-8 px-4 py-8">
+      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 text-white shadow-xl">
+        <div className="p-6 md:p-8">
+          <div className="inline-flex rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-teal-50">
+            CarePort Operations
+          </div>
+          <h1 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight md:text-4xl">
+            Pharmacy and last-mile fulfilment for contactless medicine.
+          </h1>
+          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-200">
+            This operational app is for pharmacies, riders, and CarePort operations teams. Patient order creation and marketplace choice happen in the patient app; this workspace handles verified pharmacy responses, stock availability, fulfilment, and dispatch.
+          </p>
+        </div>
       </section>
 
-      {/* Actions Grid */}
-      <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Rider Console */}
-        <a
-          href="/rider"
-          className="group bg-white border rounded-xl p-6 hover:shadow-md transition transform hover:-translate-y-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-          aria-label="Open rider console"
-        >
-          <div className="flex items-start gap-4">
-            <TruckIcon className="w-6 h-6 text-indigo-600 group-hover:text-indigo-700" />
-            <div>
-              <h3 className="text-md font-semibold text-gray-900">Rider Console</h3>
-              <p className="text-sm text-gray-600 mt-1">
-                View deliveries, update live status, and sync ETA & location with the tracker.
-              </p>
-            </div>
-          </div>
-          <div className="mt-4 flex items-center text-sm text-indigo-600 group-hover:text-indigo-700">
-            Open rider jobs <ArrowRightIcon className="w-4 h-4 ml-1" />
-          </div>
-        </a>
+      <section className="grid gap-4 md:grid-cols-3">
+        {tiles.map((tile) => {
+          const Icon = tile.icon;
+          return (
+            <a
+              key={tile.href}
+              href={tile.href}
+              className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
+            >
+              <div className={`inline-flex rounded-2xl p-3 ring-1 ${tile.tone}`}>
+                <Icon className="h-6 w-6" />
+              </div>
+              <h2 className="mt-4 text-base font-semibold text-slate-950">{tile.title}</h2>
+              <p className="mt-2 min-h-[72px] text-sm leading-6 text-slate-600">{tile.description}</p>
+              <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-teal-700">
+                {tile.cta}
+                <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-1" />
+              </div>
+            </a>
+          );
+        })}
+      </section>
 
-        {/* Pharmacy Workspace */}
-        <a
-          href="/pharmacy/demo-pharmacy-1"
-          className="group bg-white border rounded-xl p-6 hover:shadow-md transition transform hover:-translate-y-1 focus:outline-none focus:ring-2 focus:ring-teal-500"
-          aria-label="Open pharmacy workspace"
-        >
-          <div className="flex items-start gap-4">
-            <BuildingStorefrontIcon className="w-6 h-6 text-teal-600 group-hover:text-teal-700" />
-            <div>
-              <h3 className="text-md font-semibold text-gray-900">Pharmacy Workspace</h3>
-              <p className="text-sm text-gray-600 mt-1">
-                Accept eRx, update readiness, and track courier status for your pharmacy.
-              </p>
-            </div>
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Fulfilment policy</h2>
+        <div className="mt-4 grid gap-3 md:grid-cols-4">
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <div className="text-xl font-semibold text-slate-950">10 km</div>
+            <div className="mt-1 text-xs text-slate-500">Initial invitation radius</div>
           </div>
-          <div className="mt-4 flex items-center text-sm text-teal-600 group-hover:text-teal-700">
-            Open demo pharmacy <ArrowRightIcon className="w-4 h-4 ml-1" />
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <div className="text-xl font-semibold text-slate-950">3 min</div>
+            <div className="mt-1 text-xs text-slate-500">Expansion interval</div>
           </div>
-        </a>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <div className="text-xl font-semibold text-slate-950">60%+</div>
+            <div className="mt-1 text-xs text-slate-500">Minimum stock coverage</div>
+          </div>
+          <div className="rounded-2xl bg-slate-50 p-4">
+            <div className="text-xl font-semibold text-slate-950">Patient</div>
+            <div className="mt-1 text-xs text-slate-500">Makes final pharmacy choice</div>
+          </div>
+        </div>
       </section>
     </main>
   );

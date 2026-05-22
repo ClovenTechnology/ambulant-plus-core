@@ -104,6 +104,8 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
   const [data, setData] = useState<OffersResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [searchMoreBusy, setSearchMoreBusy] = useState(false);
+  const [broadcastMsg, setBroadcastMsg] = useState<string | null>(null);
 
   const [selectionsByOffer, setSelectionsByOffer] = useState<Record<string, Record<string, string>>>({});
   const [busy, setBusy] = useState(false);
@@ -139,29 +141,61 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
     return prep + travel;
   };
 
-  useEffect(() => {
-    let alive = true;
-    setLoading(true);
+  async function refreshOffers(showLoading = true) {
+    if (showLoading) setLoading(true);
     setErr(null);
 
-    fetch(`/api/careport/orders/${encodeURIComponent(orderId)}/offers`, { cache: "no-store" })
-      .then((r) => r.json().then((j) => ({ r, j })))
-      .then(({ r, j }) => {
-        if (!alive) return;
-        if (!r.ok || !j?.ok) {
-          setErr(j?.error || `HTTP ${r.status}`);
-          setData(null);
-          return;
-        }
-        setData(j);
-      })
-      .catch((e) => alive && setErr(e?.message || "Failed to load offers"))
-      .finally(() => alive && setLoading(false));
+    try {
+      const r = await fetch(`/api/careport/orders/${encodeURIComponent(orderId)}/offers`, { cache: "no-store" });
+      const j = await r.json().catch(() => ({}));
 
-    return () => {
-      alive = false;
-    };
+      if (!r.ok || !j?.ok) {
+        setErr(j?.error || `HTTP ${r.status}`);
+        setData(null);
+        return;
+      }
+
+      setData(j);
+    } catch (e: any) {
+      setErr(e?.message || "Failed to load offers");
+    } finally {
+      if (showLoading) setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void refreshOffers(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orderId]);
+
+  async function searchMorePharmacies() {
+    setSearchMoreBusy(true);
+    setBroadcastMsg(null);
+    setErr(null);
+
+    try {
+      const r = await fetch(`/api/careport/orders/${encodeURIComponent(orderId)}/broadcast`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ searchMore: true }),
+      });
+      const j = await r.json().catch(() => ({}));
+
+      if (!r.ok || !j?.ok) {
+        throw new Error(j?.error || `broadcast_http_${r.status}`);
+      }
+
+      const policy = j?.policy;
+      const radius = j?.radiusKm != null ? `${j.radiusKm} km` : "the next radius band";
+      const source = policy?.source === "database" ? "admin settings" : "default policy";
+      setBroadcastMsg(`Search expanded to ${radius}. Invited ${j.invitedCount ?? 0} eligible pharmacies using ${source}.`);
+      await refreshOffers(false);
+    } catch (e: any) {
+      setErr(e?.message || "Could not search more pharmacies.");
+    } finally {
+      setSearchMoreBusy(false);
+    }
+  }
 
   useEffect(() => {
     const order = data?.order;
@@ -188,6 +222,10 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
   const visibleOffers = useMemo(() => {
     let list = offers.slice();
 
+    const fulfillment = data?.order?.fulfillment ?? "DELIVERY";
+    if (fulfillment === "DELIVERY") list = list.filter((o) => o.pharmacy.supportsDelivery);
+    if (fulfillment === "PICKUP") list = list.filter((o) => o.pharmacy.supportsPickup);
+
     if (fullOnly) list = list.filter((o) => !o.isPartial);
     if (medicalAidOnly) list = list.filter((o) => o.pharmacy.acceptsMedicalAid);
     if (codOnly) list = list.filter((o) => o.pharmacy.acceptsCod);
@@ -208,7 +246,7 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
     });
 
     return list;
-  }, [offers, sortBy, fullOnly, medicalAidOnly, codOnly]);
+  }, [offers, data?.order?.fulfillment, sortBy, fullOnly, medicalAidOnly, codOnly]);
 
   const canBuyOffer = useMemo(() => {
     const byOffer: Record<string, boolean> = {};
@@ -410,10 +448,26 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
             ) : null}
           </div>
         </div>
-        <div className="text-xs text-gray-600">
-          Order: <span className="font-mono">{data.order.id}</span> · Status: <b>{data.order.status}</b>
+        <div className="flex flex-col items-start gap-2 md:items-end">
+          <div className="text-xs text-gray-600">
+            Order: <span className="font-mono">{data.order.id}</span> · Status: <b>{data.order.status}</b>
+          </div>
+          <button
+            type="button"
+            onClick={() => void searchMorePharmacies()}
+            disabled={searchMoreBusy}
+            className="rounded-xl border bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:opacity-50"
+          >
+            {searchMoreBusy ? "Searching…" : "Search more pharmacies"}
+          </button>
         </div>
       </div>
+
+      {broadcastMsg ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          {broadcastMsg}
+        </div>
+      ) : null}
 
       <div className="rounded-2xl border bg-white p-4 space-y-3">
         <div className="font-medium text-sm">Patient payment preferences</div>

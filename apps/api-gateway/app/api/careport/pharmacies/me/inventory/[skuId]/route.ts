@@ -1,0 +1,145 @@
+//apps/api-gateway/app/api/careport/pharmacies/me/inventory/[skuId]/route.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/db';
+import { readIdentity } from '@/src/lib/identity';
+import { orgIdFromHeaders, pharmacyIdForStaff, requireRole } from '@/src/lib/careport';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function clean(value: unknown, max = 500): string {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function asBool(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') return value;
+  const raw = clean(value, 20).toLowerCase();
+  if (['true', '1', 'yes', 'y', 'active'].includes(raw)) return true;
+  if (['false', '0', 'no', 'n', 'inactive'].includes(raw)) return false;
+  return fallback;
+}
+
+function asPriceCents(value: unknown): number | undefined {
+  if (value == null || value === '') return undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) return Math.max(0, Math.round(value));
+  const raw = clean(value, 40).replace(/[^0-9.\-]/g, '');
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return raw.includes('.') ? Math.max(0, Math.round(n * 100)) : Math.max(0, Math.round(n));
+}
+
+async function resolvePharmacyId(req: NextRequest, who: ReturnType<typeof readIdentity>) {
+  const orgId = orgIdFromHeaders(req.headers);
+  const explicit = clean(req.nextUrl.searchParams.get('pharmacyId'), 120);
+
+  if (who.role === 'admin' && explicit) return explicit;
+  if (who.role === 'pharmacy' && who.uid) return String(who.uid);
+
+  if (who.role === 'pharmacy_staff' && who.uid) {
+    const mapped = await pharmacyIdForStaff(orgId, who.uid);
+    return mapped ? String(mapped) : null;
+  }
+
+  return null;
+}
+
+function json(data: any, status = 200) {
+  return NextResponse.json(data, {
+    status,
+    headers: { 'Cache-Control': 'no-store', 'access-control-allow-origin': '*' },
+  });
+}
+
+export async function PATCH(req: NextRequest, { params }: { params: { skuId: string } }) {
+  const who = readIdentity(req.headers);
+  const orgId = orgIdFromHeaders(req.headers);
+
+  try {
+    requireRole(who, ['admin', 'pharmacy', 'pharmacy_staff']);
+
+    const skuId = clean(params.skuId, 120);
+    if (!skuId) return json({ ok: false, error: 'skuId_required' }, 400);
+
+    const pharmacyId = await resolvePharmacyId(req, who);
+    if (!pharmacyId) return json({ ok: false, error: 'pharmacyId_unresolved' }, 409);
+
+    const body = await req.json().catch(() => ({}));
+    const data: any = {};
+
+    if (body.name !== undefined) data.name = clean(body.name, 500);
+    if (body.drugCode !== undefined || body.code !== undefined) data.drugCode = clean(body.drugCode ?? body.code, 120) || null;
+
+    if (body.priceCents !== undefined || body.price !== undefined) {
+      const price = asPriceCents(body.priceCents ?? body.price);
+      if (price == null) return json({ ok: false, error: 'invalid_price' }, 400);
+      data.priceCents = price;
+    }
+
+    if (body.currency !== undefined) data.currency = clean(body.currency, 10).toUpperCase();
+    if (body.isGeneric !== undefined || body.generic !== undefined) data.isGeneric = asBool(body.isGeneric ?? body.generic, false);
+    if (body.isActive !== undefined || body.active !== undefined) data.isActive = asBool(body.isActive ?? body.active, true);
+
+    if (data.name !== undefined && !data.name) return json({ ok: false, error: 'name_required' }, 400);
+    if (Object.keys(data).length === 0) return json({ ok: false, error: 'no_update_fields' }, 400);
+
+    const existing = await (prisma as any).carePortPharmacySku.findFirst({ where: { id: skuId, orgId, pharmacyId } });
+    if (!existing) return json({ ok: false, error: 'sku_not_found' }, 404);
+
+    if (data.currency && data.currency !== existing.currency) {
+      const pharmacy = await (prisma as any).pharmacyPartner.findUnique({ where: { id: pharmacyId } });
+      if (pharmacy?.currency && data.currency !== pharmacy.currency) {
+        return json({ ok: false, error: 'currency_must_match_pharmacy_currency', pharmacyCurrency: pharmacy.currency }, 409);
+      }
+    }
+
+    const updated = await (prisma as any).carePortPharmacySku.update({ where: { id: skuId }, data });
+
+    await (prisma as any).auditEvent.create({
+      data: {
+        kind: 'careport_inventory_sku_updated',
+        actorId: who.uid ?? null,
+        actorRole: who.role ?? null,
+        subjectId: skuId,
+        meta: { orgId, pharmacyId, changed: Object.keys(data) },
+      },
+    }).catch(() => null);
+
+    return json({ ok: true, item: updated, sku: updated });
+  } catch (error: any) {
+    return json({ ok: false, error: error?.message || 'inventory_update_failed' }, error?.status || 500);
+  }
+}
+
+export async function DELETE(req: NextRequest, { params }: { params: { skuId: string } }) {
+  const who = readIdentity(req.headers);
+  const orgId = orgIdFromHeaders(req.headers);
+
+  try {
+    requireRole(who, ['admin', 'pharmacy', 'pharmacy_staff']);
+
+    const skuId = clean(params.skuId, 120);
+    if (!skuId) return json({ ok: false, error: 'skuId_required' }, 400);
+
+    const pharmacyId = await resolvePharmacyId(req, who);
+    if (!pharmacyId) return json({ ok: false, error: 'pharmacyId_unresolved' }, 409);
+
+    const existing = await (prisma as any).carePortPharmacySku.findFirst({ where: { id: skuId, orgId, pharmacyId } });
+    if (!existing) return json({ ok: false, error: 'sku_not_found' }, 404);
+
+    const updated = await (prisma as any).carePortPharmacySku.update({ where: { id: skuId }, data: { isActive: false } });
+
+    await (prisma as any).auditEvent.create({
+      data: {
+        kind: 'careport_inventory_sku_deactivated',
+        actorId: who.uid ?? null,
+        actorRole: who.role ?? null,
+        subjectId: skuId,
+        meta: { orgId, pharmacyId },
+      },
+    }).catch(() => null);
+
+    return json({ ok: true, item: updated, sku: updated });
+  } catch (error: any) {
+    return json({ ok: false, error: error?.message || 'inventory_delete_failed' }, error?.status || 500);
+  }
+}

@@ -3,14 +3,18 @@ import type { ReactNode } from 'react';
 import './globals.css';
 import './print.css';
 
+import { ensureChartRegistration } from '@/lib/chart';
+
 // Providers
 import { ToastProvider } from '../components/ToastProvider';
 import { ActiveEncounterProvider } from '../components/context/ActiveEncounterContext';
 import { PlanProvider } from '../components/context/PlanContext';
 import { PlanModalProvider } from '../components/plan/PlanModalProvider';
 
-// Client shell
 import AppShell from '../components/AppShell';
+
+// IMPORTANT: safe client-side registration trigger pattern
+ensureChartRegistration();
 
 export const metadata = {
   title: 'Ambulant+',

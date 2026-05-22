@@ -336,35 +336,10 @@ export async function POST(req: NextRequest) {
         skipDuplicates: true,
       });
 
-      await tx.auditEvent.create({
-        data: {
-          kind: "careport_order_pushed",
-          actorId: whoUid || null,
-          actorRole: who.role ?? null,
-          subjectId: created.id,
-          meta: {
-            correlationId,
-            orgId,
-            encId: encId || null,
-            erxOrderId: erx!.id,
-            refillNo,
-            encounterId: erx!.encounterId,
-            patientId: erx!.patientId,
-            fulfillment,
-            initiatedByRole,
-            initiatedByUserId,
-            sponsorRequested,
-            preferredPaymentMethod: preferredPaymentMethod || null,
-            gapPaymentMethod: gapPaymentMethod || null,
-            clientId,
-            clientMemberId,
-            coveragePlanId,
-            coverageAuthorizationId,
-          },
-        },
-      });
-
       return created;
+    }, {
+      maxWait: 15_000,
+      timeout: 30_000,
     });
 
     await auditEvent({
@@ -375,10 +350,21 @@ export async function POST(req: NextRequest) {
       meta: {
         correlationId,
         orgId,
+        encId: encId || null,
         erxOrderId: order.erxOrderId,
         refillNo,
+        encounterId: order.encounterId,
+        patientId: order.patientId,
+        fulfillment,
         initiatedByRole,
         initiatedByUserId,
+        sponsorRequested,
+        preferredPaymentMethod: preferredPaymentMethod || null,
+        gapPaymentMethod: gapPaymentMethod || null,
+        clientId,
+        clientMemberId,
+        coveragePlanId,
+        coverageAuthorizationId,
       },
     });
 
