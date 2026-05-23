@@ -149,6 +149,23 @@ type Fatherhood = {
   remindersEnabled: boolean;
 };
 
+
+type ProfileGender = 'male' | 'female' | 'other' | 'unknown';
+
+type ProfileGate = {
+  loaded: boolean;
+  gender: ProfileGender;
+  genderRaw: string | null;
+};
+
+function normalizeProfileGender(value: unknown): ProfileGender {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!raw) return 'unknown';
+  if (['male', 'man', 'm'].includes(raw)) return 'male';
+  if (['female', 'woman', 'f'].includes(raw)) return 'female';
+  return 'other';
+}
+
 type GentlemenHealthState = {
   // privacy
   discreet: boolean;
@@ -563,6 +580,41 @@ export default function GentlemenHealthPage() {
   const [triageOpen, setTriageOpen] = useState(false);
   const [labOpen, setLabOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+  const [profileGate, setProfileGate] = useState<ProfileGate>({
+    loaded: false,
+    gender: 'unknown',
+    genderRaw: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfileGate() {
+      try {
+        const res = await fetch('/api/profile', { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+
+        if (cancelled) return;
+
+        const genderRaw = data?.gender ?? data?.sexAtBirth ?? null;
+        setProfileGate({
+          loaded: true,
+          gender: normalizeProfileGender(genderRaw),
+          genderRaw: genderRaw ? String(genderRaw) : null,
+        });
+      } catch {
+        if (!cancelled) {
+          setProfileGate({ loaded: true, gender: 'unknown', genderRaw: null });
+        }
+      }
+    }
+
+    void loadProfileGate();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // State
   const [state, setState] = useState<GentlemenHealthState>(() => {
@@ -1019,6 +1071,61 @@ export default function GentlemenHealthPage() {
        but user can still reveal via Privacy controls.
   ----------------------------------*/
   const showSensitiveContent = !state.discreet && !state.sensitiveHidden;
+
+
+  if (!profileGate.loaded) {
+    return (
+      <div className="min-h-[calc(100vh-56px)] bg-slate-50 px-4 py-6 text-slate-900">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-slate-500">
+            Gentlemen’s Health
+          </div>
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-950">
+            Loading your verified profile
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            We are checking your profile gender before opening this module.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (profileGate.gender !== 'male') {
+    const missing = profileGate.gender === 'unknown';
+
+    return (
+      <div className="min-h-[calc(100vh-56px)] bg-slate-50 px-4 py-6 text-slate-900">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-amber-200 bg-amber-50/80 p-6 shadow-sm">
+          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-800">
+            {missing ? 'Profile completion required' : 'Module not available for this profile'}
+          </div>
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-950">
+            {missing ? 'Add verified gender before using Gentlemen’s Health' : 'Gentlemen’s Health requires a male profile'}
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            {missing
+              ? 'This module uses verified profile gender before enabling male-health workflows. Please complete your profile first.'
+              : 'Based on the current verified profile, this feature is not the right fit for this patient. You can continue using other Ambulant+ care modules.'}
+          </p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Link
+              href={missing ? '/profile' : '/'}
+              className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+            >
+              {missing ? 'Complete profile' : 'Back home'}
+            </Link>
+            <Link
+              href="/clinicians"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Browse clinicians
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   /* ---------------------------------
      Page shell (LIGHT)

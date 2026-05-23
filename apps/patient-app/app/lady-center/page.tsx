@@ -1606,7 +1606,17 @@ function LadyCenterPageContent() {
   }, [viewerProfile?.gender, profile?.sexAtBirth]);
 
   const blockLadyCenterForViewer =
-    viewerProfileLoaded && normalizedGender === "male";
+    viewerProfileLoaded && normalizedGender !== "female";
+
+  const ladyCenterBlockTitle =
+    normalizedGender === "unknown"
+      ? "Complete your profile to use Lady Center"
+      : "Lady Center requires a female profile";
+
+  const ladyCenterBlockBody =
+    normalizedGender === "unknown"
+      ? "Lady Center uses verified profile gender before enabling cycle, fertility, pregnancy, menopause, and reproductive-health workflows. Please complete your profile first."
+      : "Based on the current verified profile, this feature is not the right fit for this patient. Lady Center is intended for female reproductive-health journeys.";
 
   const screeningItems: ScreeningItem[] = useMemo(() => {
     const age = typeof viewerProfile?.age === "number" ? viewerProfile.age : null;
@@ -2161,12 +2171,10 @@ function LadyCenterPageContent() {
           <Card className="mt-6 border-sky-200 bg-sky-50/80 p-5">
             <div className="space-y-3">
               <div className="text-base font-semibold text-slate-900">
-                Lady Center is designed for female reproductive-health journeys
+                {ladyCenterBlockTitle}
               </div>
               <div className="text-sm text-slate-700">
-                Based on the current profile, this feature is not the right fit
-                for this patient. Lady Center is intended for cycle, fertility,
-                pregnancy, and menopause support.
+                {ladyCenterBlockBody}
               </div>
               <div className="text-sm text-slate-700">
                 You can still use the rest of Ambulant+ for general health,
@@ -2174,10 +2182,10 @@ function LadyCenterPageContent() {
               </div>
               <div className="flex flex-wrap gap-2 pt-1">
                 <Link
-                  href="/lobby"
+                  href={normalizedGender === "unknown" ? "/profile" : "/lobby"}
                   className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800"
                 >
-                  Back to Lobby
+                  {normalizedGender === "unknown" ? "Complete profile" : "Back to Lobby"}
                 </Link>
                 <Link
                   href="/clinicians"

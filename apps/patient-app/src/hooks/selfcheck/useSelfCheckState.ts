@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import useProfileBMI from '@/src/hooks/selfcheck/useProfileBMI';
 import useTriageAnalyzer from '@/src/hooks/selfcheck/useTriageAnalyzer';
@@ -9,7 +9,7 @@ import { computeCardioRisk, hypertensionIndex } from '@/src/analytics/cardio';
 import { computeStressIndex } from '@/src/analytics/stress';
 
 import type { SelfCheckStep } from '@/components/selfcheck/SelfCheckStepper';
-import type { BodyAreaKey, BodySide, BodyArea as BodyAreaBase } from '@/components/selfcheck/BodyMap2D';
+import type { BodyArea, BodyAreaKey, BodySide } from '@/components/selfcheck/BodyMap2D';
 
 export type Vital = {
   label: string;
@@ -48,6 +48,73 @@ type SafeAnalyzer = {
   runAnalyze?: (payload?: any) => Promise<any> | any;
   reset?: () => void;
   [key: string]: any;
+};
+
+
+type ProfileGender = 'female' | 'male' | 'other' | 'unknown';
+
+type SelfCheckProfileContext = {
+  loaded: boolean;
+  patientId?: string | null;
+  userId?: string | null;
+  gender: ProfileGender;
+  genderRaw?: string | null;
+  age?: number | null;
+  dob?: string | null;
+  bmi?: number | null;
+  heightCm?: number | null;
+  weightKg?: number | null;
+  chronicConditions: string[];
+  allergies: string[];
+  hasProfileGender: boolean;
+};
+
+function normalizeProfileGender(value: unknown): ProfileGender {
+  const raw = String(value ?? '').trim().toLowerCase();
+  if (!raw) return 'unknown';
+  if (['female', 'woman', 'f'].includes(raw)) return 'female';
+  if (['male', 'man', 'm'].includes(raw)) return 'male';
+  return 'other';
+}
+
+function cleanStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item ?? '').trim()).filter(Boolean);
+}
+
+function calculateAgeFromDob(value: unknown): number | null {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const dob = new Date(raw);
+  if (Number.isNaN(dob.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const monthDelta = now.getMonth() - dob.getMonth();
+  if (monthDelta < 0 || (monthDelta === 0 && now.getDate() < dob.getDate())) age -= 1;
+  return age >= 0 && age < 130 ? age : null;
+}
+
+function calculateBmi(heightCm?: number | null, weightKg?: number | null): number | null {
+  if (!heightCm || !weightKg || heightCm <= 0 || weightKg <= 0) return null;
+  const metres = heightCm / 100;
+  const bmi = weightKg / (metres * metres);
+  return Number.isFinite(bmi) ? Math.round(bmi * 10) / 10 : null;
+}
+
+const EMPTY_PROFILE_CONTEXT: SelfCheckProfileContext = {
+  loaded: false,
+  patientId: null,
+  userId: null,
+  gender: 'unknown',
+  genderRaw: null,
+  age: null,
+  dob: null,
+  bmi: null,
+  heightCm: null,
+  weightKg: null,
+  chronicConditions: [],
+  allergies: [],
+  hasProfileGender: false,
 };
 
 const DEFAULT_VITALS: Vital[] = [
@@ -107,8 +174,8 @@ const DEFAULT_VITALS: Vital[] = [
   },
 ];
 
-function legacyFromKeys(keys: BodyAreaKey[]): BodyAreaBase[] {
-  return keys.map((k) => String(k).split(':')[1] as BodyAreaBase);
+function legacyFromKeys(keys: BodyAreaKey[]): BodyArea[] {
+  return keys.map((k) => String(k).split(':')[1] as BodyArea);
 }
 
 function numberOrUndefined(value: unknown): number | undefined {
@@ -189,6 +256,8 @@ function buildTimeline(vitals: Vital[], selectedSymptoms: SymptomKey[], areas: B
 export function useSelfCheckState() {
   const bmi = useProfileBMI();
   const analyzer = useTriageAnalyzer() as SafeAnalyzer;
+  const [profileContextState, setProfileContextState] =
+    useState<SelfCheckProfileContext>(EMPTY_PROFILE_CONTEXT);
 
   const [step, setStep] = useState<SelfCheckStep>('symptoms' as SelfCheckStep);
   const [vitals, setVitals] = useState<Vital[]>(DEFAULT_VITALS);
@@ -199,13 +268,75 @@ export function useSelfCheckState() {
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
   const [lastAnalyzedAt, setLastAnalyzedAt] = useState<string | null>(null);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProfileContext() {
+      try {
+        const res = await fetch('/api/profile', { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+
+        if (cancelled) return;
+
+        if (!res.ok || data?.ok === false || !data) {
+          setProfileContextState({ ...EMPTY_PROFILE_CONTEXT, loaded: true });
+          return;
+        }
+
+        const genderRaw = data.gender ?? data.sexAtBirth ?? null;
+        const normalizedGender = normalizeProfileGender(genderRaw);
+        const dob = String(data.dob ?? data.dateOfBirth ?? '').trim() || null;
+        const age =
+          typeof data.age === 'number' && Number.isFinite(data.age)
+            ? data.age
+            : calculateAgeFromDob(dob);
+        const heightCm = numberOrUndefined(data.heightCm ?? data.height) ?? null;
+        const weightKg = numberOrUndefined(data.weightKg ?? data.weight) ?? null;
+        const bmiFromProfile = numberOrUndefined(data.bmi ?? data.bodyMassIndex) ?? calculateBmi(heightCm, weightKg);
+
+        const nextProfileContext: SelfCheckProfileContext = {
+          loaded: true,
+          patientId: data.patientId ?? data.id ?? null,
+          userId: data.userId ?? null,
+          gender: normalizedGender,
+          genderRaw: genderRaw ? String(genderRaw) : null,
+          age,
+          dob,
+          bmi: bmiFromProfile,
+          heightCm,
+          weightKg,
+          chronicConditions: cleanStringArray(data.chronicConditions),
+          allergies: cleanStringArray(data.allergies),
+          hasProfileGender: normalizedGender !== 'unknown',
+        };
+
+        setProfileContextState(nextProfileContext);
+
+        if (normalizedGender === 'male' || normalizedGender === 'female') {
+          setGender(normalizedGender);
+        }
+      } catch {
+        if (!cancelled) setProfileContextState({ ...EMPTY_PROFILE_CONTEXT, loaded: true });
+      }
+    }
+
+    void loadProfileContext();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const effectiveBmi = profileContextState.bmi ?? bmi ?? null;
+  const effectiveGender = profileContextState.hasProfileGender ? profileContextState.gender : gender;
+
   const selectedSymptoms = useMemo(
     () => SELF_CHECK_SYMPTOMS.filter((s) => symptoms[s.key]).map((s) => s.key),
     [symptoms],
   );
 
   const toggleArea = useCallback(
-    (area: BodyAreaKey | BodyAreaBase) => {
+    (area: BodyAreaKey | BodyArea) => {
       const raw = String(area);
       const key = (raw.includes(':') ? raw : `${view}:${raw}`) as BodyAreaKey;
 
@@ -250,7 +381,7 @@ export function useSelfCheckState() {
           diastolic: vitalValues.diastolic,
           heartRate: vitalValues.heartRate,
           spo2: vitalValues.spo2,
-          bmi,
+          bmi: effectiveBmi,
         }),
         hypertensionIndex: hypertensionIndexAny(vitalValues.systolic, vitalValues.diastolic),
       };
@@ -260,7 +391,7 @@ export function useSelfCheckState() {
         hypertensionIndex: null,
       };
     }
-  }, [bmi, vitalValues.diastolic, vitalValues.heartRate, vitalValues.spo2, vitalValues.systolic]);
+  }, [effectiveBmi, vitalValues.diastolic, vitalValues.heartRate, vitalValues.spo2, vitalValues.systolic]);
 
   const stressAnalytics = useMemo(() => {
     try {
@@ -286,10 +417,10 @@ export function useSelfCheckState() {
     const symptomScore = selectedSymptoms.length > 0 ? 35 : 0;
     const vitalScore = Math.min(40, enteredVitals * 8);
     const bodyScore = areas.length > 0 ? 15 : 0;
-    const bmiScore = bmi ? 10 : 0;
+    const bmiScore = effectiveBmi ? 10 : 0;
 
     return Math.min(100, symptomScore + vitalScore + bodyScore + bmiScore);
-  }, [analyzer.confidence, areas.length, bmi, selectedSymptoms.length, vitals]);
+  }, [analyzer.confidence, areas.length, effectiveBmi, selectedSymptoms.length, vitals]);
 
   const riskColor = useMemo(
     () => riskToColor(analyzer.riskLevel ?? analyzer.risk ?? analyzer.result?.riskLevel ?? analyzer.result?.risk),
@@ -298,12 +429,13 @@ export function useSelfCheckState() {
 
   const profileContext = useMemo(
     () => ({
-      bmi,
-      gender,
+      ...profileContextState,
+      bmi: effectiveBmi,
+      gender: effectiveGender,
       bodyAreas: areas,
       legacyBodyAreas: legacyFromKeys(areas),
     }),
-    [areas, bmi, gender],
+    [areas, effectiveBmi, effectiveGender, profileContextState],
   );
 
   const medicationContext = useMemo(
@@ -327,12 +459,12 @@ export function useSelfCheckState() {
 
   const runAnalyze = useCallback(async () => {
     const payload = {
-      bmi,
+      bmi: effectiveBmi,
       step,
       vitals,
       symptoms,
       selectedSymptoms,
-      gender,
+      gender: effectiveGender,
       view,
       areas,
       legacyAreas: legacyFromKeys(areas),
@@ -359,10 +491,10 @@ export function useSelfCheckState() {
     abnormal,
     analyzer,
     areas,
-    bmi,
+    effectiveBmi,
     cardioAnalytics,
     confidence,
-    gender,
+    effectiveGender,
     medicationContext,
     profileContext,
     selectedSymptoms,
@@ -393,7 +525,7 @@ export function useSelfCheckState() {
   }, []);
 
   return {
-    bmi,
+    bmi: effectiveBmi,
 
     step,
     setStep,
@@ -405,8 +537,13 @@ export function useSelfCheckState() {
     setSymptoms,
     selectedSymptoms,
 
-    gender,
-    setGender,
+    gender: effectiveGender,
+    profileGenderLocked: profileContextState.hasProfileGender,
+    profileContextLoaded: profileContextState.loaded,
+    setGender: (nextGender: Gender) => {
+      if (profileContextState.hasProfileGender) return;
+      setGender(nextGender);
+    },
     view,
     setView,
     areas,

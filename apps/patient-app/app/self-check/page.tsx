@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useMemo } from 'react';
+import Link from 'next/link';
 
 import SelfCheckStepper from '@/components/selfcheck/SelfCheckStepper';
 import type { SelfCheckStep } from '@/components/selfcheck/SelfCheckStepper';
@@ -577,6 +578,61 @@ export default function SelfCheckPage() {
   function onStep(step: SelfCheckStep) {
     if (step === 'results' && !sc.canOpenResults) return;
     sc.setStep(step);
+  }
+
+
+  const profileGenderReady = sc.profileContextLoaded;
+  const hasUsableProfileGender =
+    sc.profileContext?.gender === 'male' || sc.profileContext?.gender === 'female';
+
+  if (!profileGenderReady) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+        <div className="mx-auto max-w-3xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-700">
+            Self-check
+          </div>
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-950">
+            Loading your clinical profile
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            We are retrieving your verified demographic context before starting the assessment.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasUsableProfileGender) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+        <div className="mx-auto max-w-3xl rounded-[28px] border border-amber-200 bg-amber-50/80 p-6 shadow-sm">
+          <div className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-800">
+            Profile completion required
+          </div>
+          <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-950">
+            Add your verified gender before self-check
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            Self-check uses your profile gender, age, BMI, body metrics, and vitals to provide safer context. To avoid spoofed demographic data, gender is not changed inside this assessment when a profile exists.
+          </p>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <Link
+              href="/profile"
+              className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+            >
+              Complete profile
+            </Link>
+            <Link
+              href="/"
+              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+            >
+              Back home
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
