@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/api/televisit/token/route.ts
+// apps/patient-app/app/api/televisit/token/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { store, getJoinWindow, upsertTicket } from '@runtime/store';
 
@@ -36,7 +36,13 @@ export async function POST(req: NextRequest) {
     endsAt?: string;
   };
 
-  const visitId = String(body?.visitId || 'demo-visit');
+  const visitId = String(body?.visitId || '').trim();
+  if (!visitId) {
+    return NextResponse.json(
+      { ok: false, error: 'visit_id_required', message: 'Missing visitId' },
+      { status: 400, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
   const uid = req.headers.get('x-uid') || req.headers.get('X-Uid') || '';
   if (!uid) {
     return NextResponse.json(
@@ -48,8 +54,8 @@ export async function POST(req: NextRequest) {
   let visit = store.televisits.get(visitId) as any;
 
   if (!visit) {
-    const allowMock = envBool('TELEVISIT_ALLOW_MOCK_VISITS', true);
-    if (!allowMock) {
+    const allowCompatibilityVisitCreation = envBool('TELEVISIT_ALLOW_COMPATIBILITY_VISIT_CREATION', false);
+    if (!allowCompatibilityVisitCreation) {
       return NextResponse.json(
         { ok: false, error: 'visit_not_found', message: 'Visit not found' },
         { status: 404, headers: { 'Cache-Control': 'no-store' } },

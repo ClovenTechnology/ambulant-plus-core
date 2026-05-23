@@ -19,15 +19,15 @@ export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({} as any));
   const tx = String(body?.tx || '').trim();
   const clinicianId = String(body?.clinicianId || '').trim();
-  const patientId = String(body?.patientId || 'demo-patient').trim();
+  const patientId = String(body?.patientId || '').trim();
   const encounterId = String(body?.encounterId || '').trim();
   const caseId = String(body?.caseId || '').trim();
 
   const startsAt = new Date(body?.startsAt || '');
   const endsAt = new Date(body?.endsAt || '');
 
-  if (!tx || !clinicianId || !encounterId || !caseId) {
-    return NextResponse.json({ ok: false, error: 'Missing tx/clinicianId/encounterId/caseId.' }, { status: 400 });
+  if (!tx || !clinicianId || !patientId || !encounterId || !caseId) {
+    return NextResponse.json({ ok: false, error: 'Missing tx/clinicianId/patientId/encounterId/caseId.' }, { status: 400 });
   }
   if (!Number.isFinite(startsAt.getTime()) || !Number.isFinite(endsAt.getTime()) || endsAt <= startsAt) {
     return NextResponse.json({ ok: false, error: 'Invalid time range.' }, { status: 400 });

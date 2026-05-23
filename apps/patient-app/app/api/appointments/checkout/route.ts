@@ -9,7 +9,6 @@ export const dynamic = 'force-dynamic';
 function uidFromReq(req: NextRequest) {
   const h = String(req.headers.get('x-uid') || '').trim();
   if (h) return h;
-  if (process.env.NODE_ENV !== 'production') return 'demo-patient';
   return '';
 }
 
@@ -111,7 +110,7 @@ export async function POST(req: NextRequest) {
 
   // Wallet path
   if (paymentMethod !== 'wallet') {
-    return NextResponse.json({ ok: false, error: 'Only wallet checkout is wired in this demo path.' }, { status: 400 });
+    return NextResponse.json({ ok: false, error: 'Only wallet checkout is currently supported for this appointment checkout route.' }, { status: 400 });
   }
 
   const hold = await holdWallet({

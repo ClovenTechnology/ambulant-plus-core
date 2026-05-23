@@ -10,7 +10,7 @@ export function gatewayBase(): string {
       process.env.NEXT_PUBLIC_APIGW_BASE ??
       process.env.APIGW_ORIGIN ??
       process.env.API_GATEWAY_ORIGIN ??
-      'http://localhost:3010',
+      'https://ambulant-plus-core-api-gateway-kdon.vercel.app',
   );
 }
 

@@ -3,10 +3,11 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-const GATEWAY =
+const GATEWAY = (
   process.env.APIGW_BASE ??
   process.env.NEXT_PUBLIC_APIGW_BASE ??
-  'http://localhost:3010';
+  'https://ambulant-plus-core-api-gateway-kdon.vercel.app'
+).replace(/\/+$/, '');
 
 type PaymentMethod = 'card' | 'medical_aid' | 'voucher';
 
@@ -92,7 +93,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const hostUserId = req.headers.get('x-uid') || req.headers.get('X-Uid') || 'anon';
+  const hostUserId = String(req.headers.get('x-uid') || req.headers.get('X-Uid') || '').trim();
+
+  if (!hostUserId) {
+    return NextResponse.json(
+      { ok: false, error: 'Missing x-uid.' },
+      { status: 401, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
 
   const gwMedicalAid =
     medicalAid && (medicalAid.scheme || medicalAid.memberNumber)
@@ -153,7 +161,7 @@ export async function POST(req: NextRequest) {
     const appointmentId = raw.appointment_id || raw.id || null;
     const redirectUrl = typeof raw.redirect_url === 'string' ? raw.redirect_url : null;
 
-    // Dev convenience: seed televisit runtime store (if present)
+    // Compatibility: seed the in-process televisit runtime store only after a real gateway booking succeeds.
     try {
       const mod: any = await import('@runtime/store');
       const st = mod?.store;

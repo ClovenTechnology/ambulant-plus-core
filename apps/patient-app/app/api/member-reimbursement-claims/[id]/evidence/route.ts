@@ -11,7 +11,7 @@ function gatewayBase() {
   return (
     process.env.APIGW_BASE ||
     process.env.NEXT_PUBLIC_APIGW_BASE ||
-    'http://localhost:3010'
+    'https://ambulant-plus-core-api-gateway-kdon.vercel.app'
   ).replace(/\/+$/, '');
 }
 

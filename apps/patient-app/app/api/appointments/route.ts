@@ -15,13 +15,9 @@ function gatewayBase() {
     process.env.API_GATEWAY_URL ||
     process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
-    '';
+    'https://ambulant-plus-core-api-gateway-kdon.vercel.app';
 
-  if (configured) return trimSlash(configured);
-
-  if (process.env.NODE_ENV !== 'production') return 'http://localhost:3010';
-
-  return '';
+  return trimSlash(configured);
 }
 
 function noStore(body: unknown, status = 200) {
