@@ -282,30 +282,6 @@ export default function BloodPressure({
     </button>
   );
 
-  // Simulate with measuring delay so ring & latest stay in sync
-  async function simulateOnce() {
-    if (measuring) return;
-    setState('measuring');
-    setMsg('Generating reading…');
-    await new Promise((r) => setTimeout(r, 800 + Math.random() * 600)); // brief delay
-    const sys = 100 + Math.floor(Math.random() * 40);
-    const dia = 60 + Math.floor(Math.random() * 25);
-    const pulse = 55 + Math.floor(Math.random() * 40);
-    const rec: BPRecord = {
-      id: uid('bp-'),
-      timestamp: nowISO(),
-      systolic: sys,
-      diastolic: dia,
-      pulse,
-      unit: 'mmHg',
-      cuffStatus: 'locked',
-      raw: { source: 'manual_test' },
-    };
-    await pushRecord(rec);
-    setState('done'); // reveal now
-    setMsg(`Generated ${sys}/${dia} mmHg`);
-  }
-
   return (
     <div className="space-y-3">
       {/* Tabs (no Device tab) */}
@@ -328,16 +304,8 @@ export default function BloodPressure({
       {/* CAPTURE */}
       {tab === 'capture' && (
         <>
-          <div className="flex gap-3 items-center">
-            <button
-              className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50"
-              onClick={simulateOnce}
-              disabled={measuring}
-              aria-label="Simulate blood pressure"
-            >
-              Simulate
-            </button>
-            <div className="text-xs text-gray-500 ml-auto" aria-live="polite">
+          <div className="flex items-center justify-end">
+            <div className="text-xs text-gray-500" aria-live="polite">
               {msg}
             </div>
           </div>

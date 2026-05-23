@@ -11,7 +11,7 @@ export type Spo2Record = {
   pulse?: number;         // bpm
   perfIndex?: number;     // optional (if device provides)
   unit?: '%';
-  source?: 'ble' | 'sim';
+  source?: 'ble';
   raw?: any;
 };
 
@@ -211,17 +211,6 @@ export default function BloodOxygen({
     setState('idle'); setMsg('Stopped');
   }
 
-  async function simulateOnce() {
-    if (measuring) return;
-    setState('measuring'); setMsg('Generating reading…');
-    await new Promise(r => setTimeout(r, 600));
-    const spo2 = 94 + Math.floor(Math.random() * 5); // 94-98%
-    const pulse = 55 + Math.floor(Math.random() * 40);
-    const rec: Spo2Record = { id: uid('s-'), timestamp: nowISO(), spo2, pulse, unit:'%', source:'ble', raw:{ source:'manual_test' } };
-    await pushRecord(rec);
-    setState('done'); setMsg(`Generated SpO₂ ${spo2}% · HR ${pulse} bpm`);
-  }
-
   // Spinner-sync: only show latest after measuring stops
   const canShowLatest = !measuring && history.length > 0;
   const latest = canShowLatest ? history[0] : undefined;
@@ -266,7 +255,6 @@ export default function BloodOxygen({
           </div>
 
           <div className="flex gap-3 items-center">
-            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateOnce} disabled={measuring}>Test reading</button>
             <div className="text-xs text-gray-500 ml-auto" aria-live="polite">{msg}</div>
           </div>
 
@@ -329,7 +317,7 @@ export default function BloodOxygen({
                 </div>
                 <div className="text-xs text-gray-500">{new Date(h.timestamp).toLocaleString()}</div>
               </div>
-              <div className="text-xs text-gray-400">{h.source === 'sim' ? 'Sim' : 'Device'}</div>
+              <div className="text-xs text-gray-400">Device</div>
             </div>
           ))}
         </div>

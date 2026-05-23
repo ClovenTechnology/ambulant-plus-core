@@ -150,15 +150,6 @@ export default function Temperature({
     setState('idle'); setMsg('Stopped');
   }
 
-  async function simulateTemp() {
-    setState('measuring'); setMsg('Generating reading…'); await new Promise(r => setTimeout(r, 700));
-    const c = +(36 + Math.random() * 1.8).toFixed(1);
-    const rec: TempRecord = { id: uid('t-'), timestamp: nowISO(), celsius: c, fahrenheit: cToF(c), unit: 'C', raw:{ source:'manual_test' } };
-    await pushRecord(rec);
-    setState('done'); // display will unlock now
-    setMsg(`Generated ${rec.celsius}°C`);
-  }
-
   // Helpers to display in chosen unit
   const asUnit = (c?: number, f?: number) =>
     unit === 'C'
@@ -209,7 +200,6 @@ export default function Temperature({
           </div>
 
           <div className="flex gap-3 items-center">
-            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateTemp} disabled={measuring}>Test reading</button>
             <div className="text-xs text-gray-500 ml-auto" aria-live="polite">{msg}</div>
           </div>
 
@@ -249,7 +239,7 @@ export default function Temperature({
                   <div className="font-medium">{val != null ? `${val.toFixed(1)} ${unitSymbol}` : '—'}</div>
                   <div className="text-xs text-gray-500">{new Date(h.timestamp).toLocaleString()}</div>
                 </div>
-                <div className="text-xs text-gray-400">{h.raw?.source === 'manual_test' ? 'Test reading' : 'Device'}</div>
+                <div className="text-xs text-gray-400">Device</div>
               </div>
             );
           })}

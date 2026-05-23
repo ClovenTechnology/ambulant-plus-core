@@ -1583,7 +1583,7 @@ function TabbedVitals({
                   pulse: rec.pulse,
                   unit: 'mmHg',
                 },
-                meta: { cuffStatus: rec.cuffStatus, source: rec.raw?.simulated ? 'sim' : 'ble' },
+                meta: { cuffStatus: rec.cuffStatus, source: 'ble', algorithm: 'web_oscillometric_calibrated' },
               });
             }}
           />
@@ -1629,7 +1629,7 @@ function TabbedVitals({
                 recorded_at: rec.timestamp ?? new Date().toISOString(),
                 deviceId: 'duecare.health-monitor',
                 payload: { celsius: rec.celsius, fahrenheit: rec.fahrenheit, unit: 'C' },
-                meta: { source: rec.raw?.simulated ? 'sim' : 'ble' },
+                meta: { source: 'ble', algorithm: 'web_temperature_calibrated' },
               });
             }}
           />

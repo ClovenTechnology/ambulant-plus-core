@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Sparkline from '@/components/charts/Sparkline';
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Tooltip, Legend } from 'chart.js';
 import { Bar } from 'react-chartjs-2';
-import { connectBle, subscribe } from '@/src/devices/ble'; // <— listen for blood sample
+import { connectBle, subscribe } from '@/src/devices/ble';
 import { Collapse } from '@/components/Collapse';
 import { CollapseBtn } from '@/components/CollapseBtn';
 
@@ -323,44 +323,6 @@ export default function Glucose({
   }
 
   // Simulation (separate control)
-  async function doSimulateGlucose(stripCode = 'C19', tType = 'before_breakfast', isFasting = false) {
-    setPhase('reading');
-    setMsg('Generating reading…');
-    await new Promise((r) => setTimeout(r, 600));
-    const glucose =
-      unit === 'mmol_l'
-        ? +(4 + Math.random() * 3).toFixed(1)
-        : +(72 + Math.random() * 70).toFixed(0);
-
-    // de-dupe immediate duplicates
-    const sameRecent = history[0] && inCurrentUnit(history[0]) === glucose &&
-      Date.now() - new Date(history[0].timestamp).getTime() < 3000;
-    if (sameRecent) {
-      setPhase('done');
-      setMsg('Duplicate ignored');
-      return;
-    }
-
-    const rec: GlucoseRecord = {
-      id: uid('g-'),
-      timestamp: nowISO(),
-      glucose,
-      unit,
-      stripCode,
-      testType: isFasting ? 'fasting' : tType,
-      fasting: isFasting,
-      shared: false,
-      note: '',
-    };
-    setHistory((h) => [rec, ...h].slice(0, 3000));
-    try { await onSave?.(rec); } catch (e) { console.warn('save failed', e); }
-    setPhase('done');
-    setMsg(`Generated ${glucose} ${unit === 'mg_dl' ? 'mg/dL' : 'mmol/L'}`);
-
-    if (alertTimer.current) clearTimeout(alertTimer.current);
-    alertTimer.current = setTimeout(() => evaluateAlerts(), 250);
-  }
-
   // audit trail (best effort)
   function audit(event: any) {
     try {
@@ -743,15 +705,6 @@ export default function Glucose({
                 </button>
               </>
             )}
-
-            <button
-              className="ml-auto px-3 py-2 border rounded text-sm bg-white hover:bg-slate-50"
-              onClick={() => doSimulateGlucose(strip || 'C19', testType || 'before_breakfast', fasting)}
-              disabled={armed}
-              title={armed ? 'Simulation disabled while waiting for sample' : 'Generate a simulated reading'}
-            >
-              Simulate
-            </button>
           </div>
 
           <div className="text-xs text-gray-500">{msg || 'After you tap Apply Sample, insert strip and place a drop to auto-read.'}</div>

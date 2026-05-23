@@ -1,56 +1,64 @@
-﻿// apps/patient-app/app/api/iomt/stream/route.ts
+// apps/patient-app/app/api/iomt/stream/route.ts
 import { NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 export const runtime = 'nodejs';
 
+/**
+ * Health Monitor event stream.
+ *
+ * This endpoint used to emit generated vitals. It now only reports stream
+ * readiness. Real vitals must be written through /api/v1/patients/[id]/vitals
+ * by the Health Monitor session/bridge and read back through the vitals/report
+ * read models.
+ */
 export async function GET() {
   const encoder = new TextEncoder();
 
-  let timer: ReturnType<typeof setInterval> | null = null;
+  let heartbeat: ReturnType<typeof setInterval> | null = null;
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      const send = () => {
-        const payload = JSON.stringify({
-          ts: Date.now(),
-          hr: 60 + Math.floor(Math.random() * 30),
-          spo2: 95 + Math.floor(Math.random() * 4),
-          temp: 36 + Math.random(),
-          sourceMap: {
-            hr: 'Wearable',
-            spo2: 'Wearable',
-            temp: 'Wearable',
-          },
-        });
-
+      const send = (payload: unknown) => {
         try {
-          controller.enqueue(encoder.encode(`data: ${payload}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
         } catch {
-          if (timer) {
-            clearInterval(timer);
-            timer = null;
+          if (heartbeat) {
+            clearInterval(heartbeat);
+            heartbeat = null;
           }
-
           try {
             controller.close();
           } catch {
-            // Ignore already-closed stream.
+            // Already closed.
           }
         }
       };
 
       controller.enqueue(encoder.encode(': connected\n\n'));
-      send();
+      send({
+        ok: true,
+        ts: Date.now(),
+        status: 'ready',
+        source: 'health_monitor_session',
+        message: 'Awaiting persisted device readings.',
+      });
 
-      timer = setInterval(send, 2000);
+      heartbeat = setInterval(() => {
+        send({
+          ok: true,
+          ts: Date.now(),
+          status: 'ready',
+          source: 'health_monitor_session',
+        });
+      }, 15_000);
     },
 
     cancel() {
-      if (timer) {
-        clearInterval(timer);
-        timer = null;
+      if (heartbeat) {
+        clearInterval(heartbeat);
+        heartbeat = null;
       }
     },
   });

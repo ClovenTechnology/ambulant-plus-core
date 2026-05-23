@@ -282,7 +282,7 @@ export function useVitalsProvider() {
         lastSeenRef.current[key] = now;
       }
 
-      await emitVitalApi({
+      const result = await emitVitalApi({
         patientId,
         type,
         deviceId,
@@ -290,8 +290,12 @@ export function useVitalsProvider() {
         payload,
         meta,
       });
+
+      if (result?.ok !== false) {
+        await refreshOverview();
+      }
     },
-    [profile?.patientId],
+    [profile?.patientId, refreshOverview],
   );
 
   const value = useMemo<VitalsContextType>(() => {

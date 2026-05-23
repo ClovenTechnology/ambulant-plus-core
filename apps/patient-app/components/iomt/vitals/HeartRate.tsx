@@ -9,7 +9,7 @@ export type HrRecord = {
   timestamp: string;
   hr: number;
   unit?: 'bpm';
-  source?: 'ble' | 'sim';
+  source?: 'ble';
   raw?: any;
 };
 
@@ -130,16 +130,6 @@ export default function HeartRate({
   }
 
   // simulate with measuring delay to sync ring & latest
-  async function simulateOnce(){
-    if (measuring) return;
-    setState('measuring'); setMsg('Generating reading…');
-    await new Promise(r => setTimeout(r, 500 + Math.random()*500));
-    const hr = 55 + Math.floor(Math.random()*55);
-    const rec: HrRecord = { id: uid('hr-'), timestamp: nowISO(), hr, unit:'bpm', source:'ble', raw:{ source:'manual_test' } };
-    await pushRecord(rec);
-    setState('done'); setMsg(`Generated ${hr} bpm`);
-  }
-
   // Spinner-sync: only show latest after measuring stops
   const canShowLatest = !measuring && history.length > 0;
   const latest = canShowLatest ? history[0] : undefined;
@@ -179,7 +169,6 @@ export default function HeartRate({
           </div>
 
           <div className="flex gap-3 items-center">
-            <button className="px-3 py-1.5 border rounded-xl bg-white hover:bg-slate-50" onClick={simulateOnce} disabled={measuring}>Test reading</button>
             <div className="text-xs text-gray-500 ml-auto" aria-live="polite">{msg}</div>
           </div>
 
@@ -233,7 +222,7 @@ export default function HeartRate({
                 <div className="font-medium">{h.hr} bpm</div>
                 <div className="text-xs text-gray-500">{new Date(h.timestamp).toLocaleString()}</div>
               </div>
-              <div className="text-xs text-gray-400">{h.source === 'sim' ? 'Sim' : 'Device'}</div>
+              <div className="text-xs text-gray-400">Device</div>
             </div>
           ))}
         </div>
