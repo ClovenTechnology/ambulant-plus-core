@@ -913,7 +913,9 @@ export default function HMPane({
   onResult,
 }: HMPaneProps) {
   const resolvedRoomId = getSourceRoom(roomId);
-  const resolvedPatientId = getSourcePatient(patientId);
+  const directPatientId = getSourcePatient(patientId);
+  const [profilePatientId, setProfilePatientId] = useState('');
+  const resolvedPatientId = directPatientId || profilePatientId;
 
   const [selected, setSelected] = useState<VitalKind>('bp');
   const [sessionState, setSessionState] =
@@ -943,6 +945,39 @@ export default function HMPane({
       : selected === 'spo2' || selected === 'hr'
         ? livePpgSamples
         : [];
+
+  useEffect(() => {
+    if (directPatientId) {
+      setProfilePatientId('');
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadProfilePatientId() {
+      try {
+        const res = await fetch('/api/profile', { cache: 'no-store' });
+        const data = await res.json().catch(() => null);
+        if (cancelled || !res.ok || data?.ok === false) return;
+
+        const profile = data?.profile || data || {};
+        const nextPatientId = String(
+          profile.patientId || profile.id || profile.subjectPatientId || '',
+        ).trim();
+
+        if (!cancelled) setProfilePatientId(nextPatientId);
+      } catch {
+        if (!cancelled) setProfilePatientId('');
+      }
+    }
+
+    void loadProfilePatientId();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [directPatientId]);
+
 
   const latestForSelected = useMemo(() => {
     if (latest?.kind === selected) return latest;

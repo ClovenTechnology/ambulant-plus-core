@@ -935,11 +935,13 @@ function normalizeGender(value: unknown) {
 function buildProfileUpdateData(body: any, existing: any) {
   const data: Record<string, any> = {};
 
-  if ('name' in body) data.name = nullableString(body.name, 180);
-
-  if ('contactEmail' in body || 'email' in body) {
-    data.contactEmail = nullableString(body.contactEmail ?? body.email, 180);
-  }
+  /*
+   * Patient identity fields are intentionally not writable from /profile.
+   * Name and email come from the authenticated identity provider/session.
+   * DoB, gender, and ID/passport number must be verified through the proper
+   * identity/onboarding flow, not altered from this patient-facing form.
+   */
+  void existing;
 
   if ('phone' in body || 'mobile' in body) {
     data.phone = nullableString(body.phone ?? body.mobile, 80);
@@ -948,14 +950,6 @@ function buildProfileUpdateData(body: any, existing: any) {
   if ('primaryComm' in body) {
     data.primaryComm = nullableString(body.primaryComm, 80);
   }
-
-  if ('dob' in body) {
-    const dob = parseDateInput(body.dob);
-    if (dob !== undefined) data.dob = dob;
-  }
-
-  if ('gender' in body) data.gender = normalizeGender(body.gender);
-  if ('idNumber' in body) data.idNumber = nullableString(body.idNumber, 80);
 
   if ('photoUrl' in body || 'avatarUrl' in body) {
     data.photoUrl = nullableString(body.photoUrl ?? body.avatarUrl, 1000);

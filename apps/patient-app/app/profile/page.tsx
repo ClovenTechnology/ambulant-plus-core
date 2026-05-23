@@ -286,6 +286,36 @@ function displayBloodPressure(value: unknown) {
   return value;
 }
 
+function displayLockedValue(value: unknown) {
+  const text = String(value ?? "").trim();
+  return text || "Not yet verified";
+}
+
+function LockedProfileField({
+  label,
+  value,
+}: {
+  label: string;
+  value: unknown;
+}) {
+  return (
+    <div className="text-sm text-slate-500">
+      <div className="flex items-center justify-between gap-2">
+        <span>{label}</span>
+        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-700">
+          Verified
+        </span>
+      </div>
+      <div className="mt-1 min-h-[48px] rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 font-semibold text-slate-800">
+        {displayLockedValue(value)}
+      </div>
+      <p className="mt-1 text-xs text-slate-400">
+        This identity field is locked. Contact support if it needs correction.
+      </p>
+    </div>
+  );
+}
+
 function normalizeDeviceKind(value: unknown): DeviceCatalogItem["kind"] {
   const raw = String(value || "").trim().toLowerCase();
 
@@ -711,16 +741,9 @@ export default function Profile() {
         patientId: profile?.patientId || profile?.id || undefined,
         userId: profile?.userId || undefined,
 
-        name: form.name || null,
-        contactEmail: form.contactEmail || null,
-        email: form.contactEmail || null,
         phone: form.phone || form.mobile || null,
         mobile: form.phone || form.mobile || null,
         primaryComm: form.primaryComm || null,
-
-        dob: form.dob || null,
-        gender: form.gender || null,
-        idNumber: form.idNumber || null,
         photoUrl: form.photoUrl || null,
 
         heightCm:
@@ -1751,51 +1774,37 @@ export default function Profile() {
                         />
                       </label>
 
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <label className="text-sm text-slate-500">
-                          Full name
-                          <input
-                            value={form.name}
-                            onChange={(e) => setForm({ ...form, name: e.target.value })}
-                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
-                          />
-                        </label>
+                      <div className="rounded-3xl border border-emerald-100 bg-emerald-50/55 p-4">
+                        <div className="flex items-start gap-3">
+                          <Shield className="mt-0.5 h-5 w-5 text-emerald-700" />
+                          <div>
+                            <div className="text-sm font-bold text-slate-900">
+                              Verified identity fields
+                            </div>
+                            <p className="mt-1 text-sm text-slate-600">
+                              Name, email, date of birth, gender, and ID/passport
+                              details are locked on the patient profile to protect
+                              clinical eligibility, gender-gated modules, and account integrity.
+                            </p>
+                          </div>
+                        </div>
 
-                        <label className="text-sm text-slate-500">
-                          ID / Passport number
-                          <input
+                        <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          <LockedProfileField label="Full name" value={form.name} />
+                          <LockedProfileField
+                            label="Email"
+                            value={form.contactEmail}
+                          />
+                          <LockedProfileField
+                            label="ID / Passport number"
                             value={form.idNumber}
-                            onChange={(e) => setForm({ ...form, idNumber: e.target.value })}
-                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
                           />
-                        </label>
-                      </div>
-
-                      <div className="grid gap-3 md:grid-cols-2">
-                        <label className="text-sm text-slate-500">
-                          Date of birth
-                          <input
-                            type="date"
+                          <LockedProfileField
+                            label="Date of birth"
                             value={form.dob}
-                            onChange={(e) => setForm({ ...form, dob: e.target.value })}
-                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
                           />
-                        </label>
-
-                        <label className="text-sm text-slate-500">
-                          Gender
-                          <select
-                            value={form.gender}
-                            onChange={(e) => setForm({ ...form, gender: e.target.value })}
-                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
-                          >
-                            <option value="">Select…</option>
-                            <option value="female">Female</option>
-                            <option value="male">Male</option>
-                            <option value="intersex">Intersex</option>
-                            <option value="unknown">Prefer not to say</option>
-                          </select>
-                        </label>
+                          <LockedProfileField label="Gender" value={form.gender} />
+                        </div>
                       </div>
                     </div>
                   </div>

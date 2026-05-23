@@ -1,7 +1,7 @@
 // apps/patient-app/components/charts/useLiveVitals.ts
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 type Point = { t: number; v: number };
 type Series = Point[];
@@ -39,7 +39,8 @@ type DataShape = {
   sleep: {
     totalHours: number;
     stages: { light: number; deep: number; rem: number };
-    updatedAt: number;
+    sessions?: unknown[];
+    updatedAt: number | null;
   };
 };
 
@@ -55,224 +56,342 @@ type Flags = {
   GLU_HIGH?: boolean;
 };
 
-const clamp = (x: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, x));
-const rnd = (sd = 1) => (Math.random() - 0.5) * sd * 2;
-const round1 = (x: number) => Math.round(x * 10) / 10;
+type ReportsVitalsResponse = {
+  ok?: boolean;
+  latest?: {
+    ts?: string | null;
+    hr?: number | string | null;
+    spo2?: number | string | null;
+    temp_c?: number | string | null;
+    glucose?: number | string | null;
+    sys?: number | string | null;
+    dia?: number | string | null;
+  } | null;
+  trend?: Array<{
+    ts?: string | null;
+    hr?: number | string | null;
+    spo2?: number | string | null;
+    temp_c?: number | string | null;
+    temp?: number | string | null;
+    glucose?: number | string | null;
+    sys?: number | string | null;
+    dia?: number | string | null;
+    rr?: number | string | null;
+    steps?: number | string | null;
+    calories?: number | string | null;
+    distance?: number | string | null;
+  }>;
+};
 
-function mkPoint(v: number): Point {
-  return { t: Date.now(), v };
-}
+const EMPTY_DATA: DataShape = {
+  labels: [],
+  hr: [],
+  spo2: [],
+  sys: [],
+  dia: [],
+  map: [],
+  rr: [],
+  temp: [],
+  glucose: [],
+  steps: [],
+  calories: [],
+  distance: [],
+  latest: {
+    hr: 0,
+    spo2: 0,
+    sys: 0,
+    dia: 0,
+    map: 0,
+    rr: 0,
+    temp: 0,
+    glucose: 0,
+    steps: 0,
+    calories: 0,
+    distance: 0,
+  },
+  sleep: {
+    totalHours: 0,
+    stages: { light: 0, deep: 0, rem: 0 },
+    sessions: [],
+    updatedAt: null,
+  },
+};
 
-function broadcastVitals(latest: DataShape['latest']) {
-  const payload = {
-    type: 'vitals',
-    vitals: {
-      ts: Date.now(),
-      hr: latest.hr,
-      spo2: latest.spo2,
-      sys: latest.sys,
-      dia: latest.dia,
-      map: latest.map,
-      rr: latest.rr,
-      tempC: latest.temp,
-      glucose: latest.glucose,
-    },
-  };
-  try {
-    window.postMessage(payload, '*');
-  } catch {}
-  try {
-    window.top && window.top !== window && window.top.postMessage(payload, '*');
-  } catch {}
-  try {
-    window.parent && window.parent !== window && window.parent.postMessage(payload, '*');
-  } catch {}
-  try {
-    window.opener && window.opener.postMessage(payload, '*');
-  } catch {}
-  try {
-    const bc = new BroadcastChannel('ambulant-iomt');
-    bc.postMessage(payload);
-    setTimeout(() => bc.close(), 50);
-  } catch {}
-}
+function toNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
 
-function buildTimes(now: number, windowPoints: number, secondsPerPoint: number) {
-  const period = secondsPerPoint * 1000;
-  const times: number[] = [];
-  // oldest -> newest
-  for (let i = windowPoints; i > 0; i--) {
-    times.push(now - i * period);
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
   }
-  return times;
+
+  return null;
+}
+
+function toTimestamp(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Date.parse(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+
+  return null;
 }
 
 function fmtLabel(t: number) {
-  // keep it compact and consistent
-  return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  return new Date(t).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }
 
-export default function useLiveVitals(windowPoints = 120, secondsPerPoint = 1) {
-  const [live, setLive] = useState(true);
+function pushPoint(series: Series, t: number, value: unknown) {
+  const n = toNumber(value);
+  if (n === null) return;
+  series.push({ t, v: n });
+}
 
-  // pre-seed series
-  const [data, setData] = useState<DataShape>(() => {
-    const now = Date.now();
-    const times = buildTimes(now, windowPoints, secondsPerPoint);
-    const labels = times.map(fmtLabel);
+function bounded(series: Series, limit: number) {
+  return series
+    .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.v))
+    .sort((a, b) => a.t - b.t)
+    .slice(-limit);
+}
 
-    const seed = (fn: () => number): Series => times.map((t) => ({ t, v: fn() }));
+function latestValue(series: Series) {
+  return series.length ? series[series.length - 1]?.v ?? 0 : 0;
+}
 
-    // SA baselines (resting adult)
-    const hr = seed(() => round1(72 + rnd(2)));
-    const spo2 = seed(() => round1(97 + rnd(0.4)));
-    const sys = seed(() => round1(116 + rnd(4)));
-    const dia = seed(() => round1(74 + rnd(3)));
+function buildMapSeries(sys: Series, dia: Series) {
+  const diaByTime = new Map(dia.map((point) => [point.t, point.v]));
+  return sys
+    .map((s) => {
+      const d = diaByTime.get(s.t);
+      if (typeof d !== 'number') return null;
+      return { t: s.t, v: Math.round((s.v + 2 * d) / 3) };
+    })
+    .filter((point): point is Point => Boolean(point));
+}
 
-    // MAP should correspond point-by-point to SYS/DIA (not one constant)
-    const map = times.map((t, i) => ({
-      t,
-      v: Math.round(((sys[i]?.v ?? 116) + 2 * (dia[i]?.v ?? 74)) / 3),
-    }));
+function normalizeReportsVitals(payload: ReportsVitalsResponse | null, limit: number): DataShape {
+  if (!payload || payload.ok === false) return EMPTY_DATA;
 
-    const rr = seed(() => round1(16 + rnd(1)));
-    const temp = seed(() => round1(36.8 + rnd(0.1)));
-    const glucose = seed(() => Math.round(94 + rnd(3)));
+  const hr: Series = [];
+  const spo2: Series = [];
+  const sys: Series = [];
+  const dia: Series = [];
+  const rr: Series = [];
+  const temp: Series = [];
+  const glucose: Series = [];
+  const steps: Series = [];
+  const calories: Series = [];
+  const distance: Series = [];
 
-    const steps = seed(() => Math.max(0, Math.round(6000 + rnd(600))));
-    const calories = seed(() => Math.max(0, Math.round(1800 + rnd(150))));
-    const distance = seed(() => Math.max(0, round1(5.2 + rnd(0.6))));
+  for (const point of payload.trend ?? []) {
+    const t = toTimestamp(point?.ts);
+    if (t === null) continue;
 
-    const latest = {
-      hr: hr.at(-1)!.v,
-      spo2: spo2.at(-1)!.v,
-      sys: sys.at(-1)!.v,
-      dia: dia.at(-1)!.v,
-      map: map.at(-1)!.v,
-      rr: rr.at(-1)!.v,
-      temp: temp.at(-1)!.v,
-      glucose: glucose.at(-1)!.v,
-      steps: steps.at(-1)!.v,
-      calories: calories.at(-1)!.v,
-      distance: distance.at(-1)!.v,
-    };
+    pushPoint(hr, t, point.hr);
+    pushPoint(spo2, t, point.spo2);
+    pushPoint(sys, t, point.sys);
+    pushPoint(dia, t, point.dia);
+    pushPoint(rr, t, point.rr);
+    pushPoint(temp, t, point.temp_c ?? point.temp);
+    pushPoint(glucose, t, point.glucose);
+    pushPoint(steps, t, point.steps);
+    pushPoint(calories, t, point.calories);
+    pushPoint(distance, t, point.distance);
+  }
 
-    return {
-      labels,
-      hr,
-      spo2,
-      sys,
-      dia,
-      map,
-      rr,
-      temp,
-      glucose,
-      steps,
-      calories,
-      distance,
-      latest,
-      sleep: {
-        totalHours: 6.8,
-        stages: { light: 3.4, deep: 1.6, rem: 1.8 },
-        updatedAt: now,
-      },
-    };
+  const latestTs = toTimestamp(payload.latest?.ts);
+  if (latestTs !== null) {
+    pushPoint(hr, latestTs, payload.latest?.hr);
+    pushPoint(spo2, latestTs, payload.latest?.spo2);
+    pushPoint(sys, latestTs, payload.latest?.sys);
+    pushPoint(dia, latestTs, payload.latest?.dia);
+    pushPoint(temp, latestTs, payload.latest?.temp_c);
+    pushPoint(glucose, latestTs, payload.latest?.glucose);
+  }
+
+  const nextHr = bounded(hr, limit);
+  const nextSpo2 = bounded(spo2, limit);
+  const nextSys = bounded(sys, limit);
+  const nextDia = bounded(dia, limit);
+  const nextRr = bounded(rr, limit);
+  const nextTemp = bounded(temp, limit);
+  const nextGlucose = bounded(glucose, limit);
+  const nextSteps = bounded(steps, limit);
+  const nextCalories = bounded(calories, limit);
+  const nextDistance = bounded(distance, limit);
+  const nextMap = bounded(buildMapSeries(nextSys, nextDia), limit);
+
+  const timeline = Array.from(
+    new Set(
+      [
+        ...nextHr,
+        ...nextSpo2,
+        ...nextSys,
+        ...nextDia,
+        ...nextRr,
+        ...nextTemp,
+        ...nextGlucose,
+        ...nextSteps,
+        ...nextCalories,
+        ...nextDistance,
+      ].map((point) => point.t),
+    ),
+  )
+    .sort((a, b) => a - b)
+    .slice(-limit);
+
+  return {
+    labels: timeline.map(fmtLabel),
+    hr: nextHr,
+    spo2: nextSpo2,
+    sys: nextSys,
+    dia: nextDia,
+    map: nextMap,
+    rr: nextRr,
+    temp: nextTemp,
+    glucose: nextGlucose,
+    steps: nextSteps,
+    calories: nextCalories,
+    distance: nextDistance,
+    latest: {
+      hr: latestValue(nextHr),
+      spo2: latestValue(nextSpo2),
+      sys: latestValue(nextSys),
+      dia: latestValue(nextDia),
+      map: latestValue(nextMap),
+      rr: latestValue(nextRr),
+      temp: latestValue(nextTemp),
+      glucose: latestValue(nextGlucose),
+      steps: latestValue(nextSteps),
+      calories: latestValue(nextCalories),
+      distance: latestValue(nextDistance),
+    },
+    sleep: EMPTY_DATA.sleep,
+  };
+}
+
+function hasAnyVitals(data: DataShape) {
+  return (
+    data.hr.length > 0 ||
+    data.spo2.length > 0 ||
+    data.sys.length > 0 ||
+    data.dia.length > 0 ||
+    data.temp.length > 0 ||
+    data.glucose.length > 0 ||
+    data.rr.length > 0
+  );
+}
+
+function buildFlags(data: DataShape): Flags {
+  if (!hasAnyVitals(data)) return {};
+
+  const flags: Flags = {};
+  const v = data.latest;
+
+  if (data.hr.length > 0) {
+    flags.HR_LOW = v.hr < 50;
+    flags.HR_HIGH = v.hr > 120;
+  }
+
+  if (data.rr.length > 0) {
+    flags.RR_LOW = v.rr < 10;
+    flags.RR_HIGH = v.rr > 28;
+  }
+
+  if (data.temp.length > 0) {
+    flags.TEMP_LOW = v.temp < 35.5;
+    flags.TEMP_HIGH = v.temp > 38.5;
+  }
+
+  if (data.sys.length > 0 || data.dia.length > 0) {
+    flags.BP_HIGH = v.sys > 140 || v.dia > 90;
+  }
+
+  if (data.glucose.length > 0) {
+    flags.GLU_LOW = v.glucose < 70;
+    flags.GLU_HIGH = v.glucose > 160;
+  }
+
+  return flags;
+}
+
+async function fetchReportsVitals(signal: AbortSignal) {
+  const res = await fetch('/api/reports/vitals?range=30d', {
+    cache: 'no-store',
+    signal,
+    headers: { Accept: 'application/json' },
   });
 
-  // ring buffer push
-  const push = (series: Series, v: number) => {
-    const next = [...series, mkPoint(v)];
-    if (next.length > windowPoints) next.shift();
-    return next;
-  };
+  const data = (await res.json().catch(() => null)) as ReportsVitalsResponse | null;
 
-  // cadence timer
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  if (!res.ok || data?.ok === false) {
+    throw new Error(
+      String((data as any)?.message || (data as any)?.error || `Vitals request failed (${res.status})`),
+    );
+  }
+
+  return data;
+}
+
+export default function useLiveVitals(windowPoints = 120, secondsPerPoint = 15) {
+  const [enabled, setEnabled] = useState(true);
+  const [data, setData] = useState<DataShape>(EMPTY_DATA);
+  const [lastError, setLastError] = useState<string | null>(null);
+  const mountedRef = useRef(true);
+
+  const refresh = useCallback(async () => {
+    const ctrl = new AbortController();
+
+    try {
+      const payload = await fetchReportsVitals(ctrl.signal);
+      if (!mountedRef.current) return;
+      setData(normalizeReportsVitals(payload, windowPoints));
+      setLastError(null);
+    } catch (error) {
+      if (!mountedRef.current) return;
+      setData(EMPTY_DATA);
+      setLastError(error instanceof Error ? error.message : 'Vitals feed unavailable');
+    }
+
+    return () => ctrl.abort();
+  }, [windowPoints]);
 
   useEffect(() => {
-    if (!live) return;
+    mountedRef.current = true;
 
-    const period = secondsPerPoint * 1000;
-
-    timerRef.current = setInterval(() => {
-      setData((d) => {
-        const next = { ...d };
-
-        // random-walk targets
-        const hr = clamp(d.latest.hr + rnd(1.5), 58, 135);
-        const spo2 = clamp(d.latest.spo2 + rnd(0.25), 93, 100);
-        const sys = clamp(d.latest.sys + rnd(2.5), 90, 180);
-        const dia = clamp(d.latest.dia + rnd(1.8), 55, 110);
-        const mapv = Math.round((sys + 2 * dia) / 3);
-        const rr = clamp(d.latest.rr + rnd(0.8), 8, 32);
-        const temp = clamp(d.latest.temp + rnd(0.05), 35.0, 39.8);
-        const glu = clamp(d.latest.glucose + rnd(2.2), 60, 190);
-
-        const steps = Math.max(0, (d.latest.steps ?? 6000) + Math.round(rnd(50)));
-        const calories = Math.max(0, (d.latest.calories ?? 1800) + Math.round(rnd(10)));
-        const distance = Math.max(0, round1((d.latest.distance ?? 5.2) + rnd(0.03)));
-
-        next.hr = push(d.hr, round1(hr));
-        next.spo2 = push(d.spo2, round1(spo2));
-        next.sys = push(d.sys, round1(sys));
-        next.dia = push(d.dia, round1(dia));
-        next.map = push(d.map, round1(mapv));
-        next.rr = push(d.rr, round1(rr));
-        next.temp = push(d.temp, round1(temp));
-        next.glucose = push(d.glucose, Math.round(glu));
-
-        next.steps = push(d.steps, steps);
-        next.calories = push(d.calories, calories);
-        next.distance = push(d.distance, distance);
-
-        // labels MUST stay aligned to windowPoints
-        const t = Date.now();
-        const labels = [...d.labels, fmtLabel(t)];
-        if (labels.length > windowPoints) labels.shift();
-        next.labels = labels;
-
-        next.latest = {
-          hr: next.hr.at(-1)!.v,
-          spo2: next.spo2.at(-1)!.v,
-          sys: next.sys.at(-1)!.v,
-          dia: next.dia.at(-1)!.v,
-          map: next.map.at(-1)!.v,
-          rr: next.rr.at(-1)!.v,
-          temp: next.temp.at(-1)!.v,
-          glucose: next.glucose.at(-1)!.v,
-          steps: next.steps.at(-1)!.v,
-          calories: next.calories.at(-1)!.v,
-          distance: next.distance.at(-1)!.v,
-        };
-
-        broadcastVitals(next.latest);
-        return next;
-      });
-    }, period);
+    void refresh();
 
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-        timerRef.current = null;
-      }
+      mountedRef.current = false;
     };
-  }, [live, secondsPerPoint, windowPoints]);
+  }, [refresh]);
 
-  // flags
-  const flags: Flags = useMemo(() => {
-    const v = data.latest;
-    return {
-      HR_LOW: v.hr < 50,
-      HR_HIGH: v.hr > 120,
-      RR_LOW: v.rr < 10,
-      RR_HIGH: v.rr > 28,
-      TEMP_LOW: v.temp < 35.5,
-      TEMP_HIGH: v.temp > 38.5,
-      BP_HIGH: v.sys > 140 || v.dia > 90,
-      GLU_LOW: v.glucose < 70,
-      GLU_HIGH: v.glucose > 160,
-    };
-  }, [data.latest]);
+  useEffect(() => {
+    if (!enabled) return;
 
-  return { data, live, setLive, flags };
+    const period = Math.max(10, secondsPerPoint) * 1000;
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, period);
+
+    return () => window.clearInterval(timer);
+  }, [enabled, refresh, secondsPerPoint]);
+
+  const flags = useMemo(() => buildFlags(data), [data]);
+  const live = enabled && hasAnyVitals(data) && !lastError;
+
+  return {
+    data,
+    live,
+    setLive: setEnabled,
+    flags,
+    error: lastError,
+    refresh,
+  };
 }

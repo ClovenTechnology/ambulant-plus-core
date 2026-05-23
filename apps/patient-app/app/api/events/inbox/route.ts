@@ -1,50 +1,81 @@
 // apps/patient-app/app/api/events/inbox/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { API, BASE } from '@/src/lib/config';
+import { apigwBase } from '@/app/api/_apigw';
 
 export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs'; // enforce Node runtime
+export const runtime = 'nodejs';
 
-// DEBUG: log resolved bases once on cold start
-console.log('[patient-events proxy:init]', { API, BASE });
-
-function targetUrl(base: string, req: NextRequest) {
+function targetUrl(req: NextRequest) {
   const qs = req.nextUrl.searchParams.toString();
-  return `${base.replace(/\/$/, '')}/api/events/inbox${qs ? `?${qs}` : ''}`;
+  return `${apigwBase()}/api/events/inbox${qs ? `?${qs}` : ''}`;
+}
+
+function forwardHeaders(req: NextRequest) {
+  const headers = new Headers();
+
+  for (const key of [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-patient-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-patient-id',
+    'x-uid',
+    'x-role',
+    'x-email',
+    'x-name',
+    'x-display-name',
+    'x-org-id',
+    'x-correlation-id',
+    'x-request-id',
+  ]) {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
+  }
+
+  headers.set('accept', 'application/json');
+  if (!headers.has('x-role')) headers.set('x-role', 'patient');
+
+  return headers;
+}
+
+async function readUpstreamBody(res: Response) {
+  const text = await res.text().catch(() => '');
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
 }
 
 export async function GET(req: NextRequest) {
-  const headers = {
-    'x-role': req.headers.get('x-role') ?? 'patient',
-    'x-uid': req.headers.get('x-uid') ?? '',
-  };
+  try {
+    const res = await fetch(targetUrl(req), {
+      method: 'GET',
+      headers: forwardHeaders(req),
+      cache: 'no-store',
+    });
 
-  for (const base of [API, BASE]) {
-    const url = targetUrl(base, req);
-    console.log('[patient-events proxy:try]', url);
+    const payload = await readUpstreamBody(res);
 
-    try {
-      const r = await fetch(url, { method: 'GET', headers, cache: 'no-store' });
-      const body = await r.text();
-
-      console.log('[patient-events proxy:success]', { url, status: r.status });
-
-      return new NextResponse(body, {
-        status: r.status,
-        headers: { 'content-type': r.headers.get('content-type') ?? 'application/json' },
-      });
-    } catch (err: any) {
-      console.error('[patient-events proxy:error]', { url, err: err?.message });
-      // Loop continues if gateway fails, BASE is next
-      if (base === BASE) {
-        return NextResponse.json(
-          { error: 'events_inbox_failed', detail: err?.message, tried: [API, BASE] },
-          { status: 502 }
-        );
-      }
-    }
+    return NextResponse.json(payload ?? { ok: res.ok, items: [] }, {
+      status: res.status,
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'events_inbox_unavailable',
+        message: error instanceof Error ? error.message : 'Event gateway unavailable',
+        items: [],
+      },
+      { status: 502 },
+    );
   }
-
-  // Should never reach here
-  return NextResponse.json({ error: 'unreachable' }, { status: 502 });
 }

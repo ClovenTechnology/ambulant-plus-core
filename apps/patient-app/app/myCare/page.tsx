@@ -25,7 +25,7 @@ import {
   computeStats,
 } from '@/components/reminders/shared';
 
-/* ---------------------- Local types & mock data ---------------------- */
+/* ---------------------- Local types ---------------------- */
 
 type MedicationStatus = 'Active' | 'Completed' | 'On Hold';
 
@@ -51,9 +51,12 @@ type TodaysPill = {
   status: 'Pending' | 'Taken' | 'Missed';
 };
 
-const initialAllergies = [
-  { name: 'Penicillin', status: 'Confirmed', severity: 'High', note: 'Hives when exposed' },
-];
+type AllergyRecord = {
+  name: string;
+  status: string;
+  severity: string;
+  note: string;
+};
 
 
 /* ---------------------- Utility helpers ---------------------- */
@@ -62,17 +65,94 @@ function nicePercent(n: number) {
   return Math.round(n);
 }
 
+function hasNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
+}
+
+function formatSleepUpdated(value: number | null | undefined) {
+  if (!value) return 'No ring sleep data yet';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'No ring sleep data yet';
+  return `Updated ${date.toLocaleTimeString()}`;
+}
+
+function normalizeAllergyRecords(value: unknown): AllergyRecord[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item): AllergyRecord | null => {
+      if (typeof item === 'string') {
+        const name = item.trim();
+
+        if (!name) return null;
+
+        return {
+          name,
+          status: 'Recorded',
+          severity: 'Unspecified',
+          note: '',
+        };
+      }
+
+      if (!item || typeof item !== 'object') return null;
+
+      const row = item as Record<string, unknown>;
+      const name = String(
+        row.name ??
+          row.allergen ??
+          row.substance ??
+          row.title ??
+          row.label ??
+          '',
+      ).trim();
+
+      if (!name) return null;
+
+      const status = String(
+        row.status ??
+          row.state ??
+          row.reactionStatus ??
+          'Recorded',
+      ).trim();
+
+      const severity = String(
+        row.severity ??
+          row.grade ??
+          row.riskLevel ??
+          row.risk ??
+          'Unspecified',
+      ).trim();
+
+      const note = String(
+        row.note ??
+          row.notes ??
+          row.reaction ??
+          row.description ??
+          '',
+      ).trim();
+
+      return {
+        name,
+        status: status || 'Recorded',
+        severity: severity || 'Unspecified',
+        note,
+      };
+    })
+    .filter((item): item is AllergyRecord => item !== null);
+}
+
 /* ---------------------- Page ---------------------- */
 
 export default function MyCareHome() {
-  // primary live vitals generator (your component)
-  const { data: vitalsSeries, live, setLive, flags } = useLiveVitals(120, 1);
+  // Production-safe vitals feed backed by persisted patient readings.
+  const { data: vitalsSeries, live, setLive, flags } = useLiveVitals(120, 15);
 
   // small SSE hook usage (keeps parity if server yields other events)
   const { connected, on } = useSSE('/api/iomt/stream');
 
-  // allergies still mocked locally (can be wired to /api/profile later)
-  const [allergies, setAllergies] = useState(initialAllergies);
+  const [allergies, setAllergies] = useState<AllergyRecord[]>([]);
+  const [allergiesLoading, setAllergiesLoading] = useState(false);
+  const [allergiesError, setAllergiesError] = useState<string | null>(null);
 
   // Medications quick view
   const [meds, setMeds] = useState<Medication[]>([]);
@@ -134,7 +214,7 @@ export default function MyCareHome() {
               duration: 8000,
               action: {
                 label: 'Start eVisit',
-                onClick: () => window.alert('Simulated: start teleconsult flow'),
+                onClick: () => { window.location.href = '/appointments/new?intent=teleconsult'; },
               },
             } as any);
             break;
@@ -170,6 +250,32 @@ export default function MyCareHome() {
     });
     return () => unsub();
   }, [on]);
+
+  async function reloadAllergies() {
+    setAllergiesLoading(true);
+    setAllergiesError(null);
+
+    try {
+      const res = await fetch('/api/profile', { cache: 'no-store' });
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.message || data?.error || 'Could not load allergies.');
+      }
+
+      setAllergies(normalizeAllergyRecords(data?.allergies));
+    } catch (err: any) {
+      console.error('[myCare] Error loading allergies:', err);
+      setAllergiesError(err?.message || 'Could not load allergies.');
+      setAllergies([]);
+    } finally {
+      setAllergiesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void reloadAllergies();
+  }, []);
 
   /* ---------------------- Load Medications ---------------------- */
 
@@ -369,14 +475,19 @@ export default function MyCareHome() {
   /* ---------------------- quick gauges ---------------------- */
 
   const latest = vitalsSeries.latest ?? {};
-  const hr = latest.hr ?? 0;
-  const spo2 = latest.spo2 ?? 0;
-  const tempC = latest.temp ?? 0;
-  const sys = latest.sys ?? 0;
-  const dia = latest.dia ?? 0;
-  const glucoseVal = latest.glucose ?? 0;
+  const hasHr = hasNumber(latest.hr);
+  const hasSpo2 = hasNumber(latest.spo2);
+  const hasTemp = hasNumber(latest.temp);
+  const hasBp = hasNumber(latest.sys) && hasNumber(latest.dia);
+  const hasGlucose = hasNumber(latest.glucose);
 
-  /* ---------------------- goal / gamification (simple) ---------------------- */
+  const hr = hasHr ? latest.hr : 0;
+  const spo2 = hasSpo2 ? latest.spo2 : 0;
+  const tempC = hasTemp ? latest.temp : 0;
+  const sys = hasNumber(latest.sys) ? latest.sys : 0;
+  const dia = hasNumber(latest.dia) ? latest.dia : 0;
+  const glucoseVal = hasGlucose ? latest.glucose : 0;
+
   const goals = useMemo(
     () => [
       {
@@ -384,16 +495,13 @@ export default function MyCareHome() {
         current: Math.round(vitalsSeries.latest.steps ?? 0),
         target: 10000,
         unit: 'steps',
-        streak: 3,
       },
       {
         title: 'Sleep',
         current: Math.round(vitalsSeries.sleep.totalHours ?? 0),
         target: 8,
         unit: 'h',
-        streak: 2,
       },
-      { title: 'Hydration', current: 1.3, target: 2, unit: 'L', streak: 1 },
     ],
     [vitalsSeries]
   );
@@ -419,7 +527,7 @@ export default function MyCareHome() {
         <div>
           <h1 className="text-3xl font-bold">myCare — Personal Health Suite</h1>
           <div className="text-sm text-gray-500 mt-1">
-            Live IoMT feeds • Medications & reminders • Goals & insights
+            Persisted vitals • Medications & reminders • Care insights
           </div>
           <div className="mt-1 text-xs text-gray-400">
             {medsLoading
@@ -446,7 +554,7 @@ export default function MyCareHome() {
             onClick={() => setLive((s) => !s)}
             className="px-3 py-1 rounded bg-slate-800 text-white text-sm"
           >
-            {live ? 'Pause Live' : 'Resume Live'}
+            {live ? 'Pause refresh' : 'Resume refresh'}
           </button>
           <button onClick={onExportPdf} className="px-3 py-1 rounded border text-sm">
             Export summary
@@ -475,7 +583,7 @@ export default function MyCareHome() {
                 <div className="font-medium">AI Assistance</div>
               </div>
               <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-400">Updated live</div>
+                <div className="text-xs text-gray-400">Latest available</div>
                 <CollapseBtn open={insightsOpen} onClick={() => setInsightsOpen((s) => !s)} />
               </div>
             </div>
@@ -489,7 +597,7 @@ export default function MyCareHome() {
                 >
                   <div className="text-xs text-gray-600">Blood Pressure</div>
                   <div className="font-medium">
-                    {flags.BP_HIGH ? 'Action recommended' : `${sys}/${dia} mmHg`}
+                    {flags.BP_HIGH ? 'Action recommended' : hasBp ? `${sys}/${dia} mmHg` : 'No BP reading yet'}
                   </div>
                   {flags.BP_HIGH ? (
                     <div className="text-xs text-rose-600 mt-1">
@@ -504,21 +612,21 @@ export default function MyCareHome() {
                   }`}
                 >
                   <div className="text-xs text-gray-600">Heart Rate</div>
-                  <div className="font-medium">{hr} bpm</div>
+                  <div className="font-medium">{hasHr ? `${hr} bpm` : 'No HR reading yet'}</div>
                   {flags.HR_HIGH ? (
                     <div className="text-xs text-rose-600 mt-1">
                       High heart rate detected
                     </div>
                   ) : (
-                    <div className="text-xs text-gray-500 mt-1">Normal</div>
+                    <div className="text-xs text-gray-500 mt-1">{hasHr ? 'Within configured alert limits' : 'Complete a Health Monitor or NexRing reading'}</div>
                   )}
                 </div>
 
                 <div className="rounded-lg p-3 bg-white">
                   <div className="text-xs text-gray-600">Glucose</div>
-                  <div className="font-medium">{glucoseVal} mg/dL</div>
+                  <div className="font-medium">{hasGlucose ? `${glucoseVal} mg/dL` : 'No glucose reading yet'}</div>
                   <div className="text-xs text-gray-500 mt-1">
-                    {flags.GLU_HIGH ? 'Trend high — dietary review' : 'Stable'}
+                    {flags.GLU_HIGH ? 'Trend high — dietary review' : hasGlucose ? 'Within configured alert limits' : 'Connect a supported device to capture glucose'}
                   </div>
                 </div>
               </div>
@@ -529,11 +637,11 @@ export default function MyCareHome() {
           <div className="rounded-2xl border p-3 bg-white">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <div className="text-sm text-gray-500">Live Vitals</div>
-                <div className="font-medium">Real-time IoMT feeds</div>
+                <div className="text-sm text-gray-500">Vitals</div>
+                <div className="font-medium">Connected vitals feed</div>
               </div>
               <div className="flex items-center gap-2">
-                <div className="text-xs text-gray-400">Updated every sec</div>
+                <div className="text-xs text-gray-400">Refreshes from persisted readings</div>
                 <CollapseBtn open={vitalsOpen} onClick={() => setVitalsOpen((s) => !s)} />
               </div>
             </div>
@@ -640,16 +748,16 @@ export default function MyCareHome() {
                   </div>
                   <div className="mt-2 flex gap-2">
                     <button
-                      onClick={() => window.alert('Starting simulated eVisit...')}
+                      onClick={() => { window.location.href = '/appointments/new?intent=teleconsult'; }}
                       className="px-2 py-1 rounded bg-sky-600 text-white text-xs"
                     >
                       Start eVisit
                     </button>
                     <button
-                      onClick={() => window.alert('Share summary flow...')}
+                      onClick={() => onExportPdf()}
                       className="px-2 py-1 rounded border text-xs"
                     >
-                      Share
+                      Export
                     </button>
                   </div>
                 </div>
@@ -793,8 +901,7 @@ export default function MyCareHome() {
               </div>
               <div className="flex items-center gap-2">
                 <div className="text-xs text-slate-400">
-                  Updated{' '}
-                  {new Date(vitalsSeries.sleep.updatedAt).toLocaleTimeString()}
+{formatSleepUpdated(vitalsSeries.sleep.updatedAt)}
                 </div>
                 <CollapseBtn open={sleepOpen} onClick={() => setSleepOpen((s) => !s)} />
               </div>
@@ -846,10 +953,19 @@ export default function MyCareHome() {
             </div>
 
             <Collapse open={allergiesOpen}>
+              {allergiesLoading ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                  Loading allergy records...
+                </div>
+              ) : allergiesError ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                  {allergiesError}
+                </div>
+              ) : null}
               <AllergiesPanel
                 allergies={allergies}
-                onRefresh={() => toast('Refreshing allergies...')}
-                onExport={() => toast('Exporting allergies...')}
+                onRefresh={reloadAllergies}
+                onExport={() => toast(allergies.length ? 'Use the Allergies page to export the current allergy record.' : 'No allergies are recorded yet.')}
               />
             </Collapse>
           </div>

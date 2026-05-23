@@ -1,39 +1,106 @@
 ﻿// apps/patient-app/app/api/vitals/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type Vital = {
-  ts: string;             // ISO date
-  hr?: number;            // bpm
-  spo2?: number;          // %
-  temp_c?: number;        // °C
-  sys?: number; dia?: number; // BP
-  bmi?: number;
-  source?: 'manual' | 'iomt' | string;
+type PublicVital = {
+  ts: string;
+  hr?: number;
+  spo2?: number;
+  temp_c?: number;
+  sys?: number;
+  dia?: number;
+  glucose?: number;
+  source?: string;
 };
 
-// In-memory store for dev (resets on restart)
-let VITALS: Vital[] = [
-  { ts: new Date(Date.now()-3600*1000*24).toISOString(), hr: 74, spo2: 98, temp_c: 36.7, sys: 118, dia: 76, bmi: 24.2, source: 'Health Monitor' },
-  { ts: new Date(Date.now()-3600*1000*12).toISOString(), hr: 72, spo2: 99, temp_c: 36.6, sys: 116, dia: 74, bmi: 24.2, source: 'Health Monitor' },
-  { ts: new Date(Date.now()-3600*1000*12).toISOString(), hr: 42, spo2: 99, temp_c: 39.4, sys: 168, dia: 134, bmi: 24.2, source: 'Health Monitor' },
-  { ts: new Date(Date.now()-3600*1000*12).toISOString(), hr: 72, spo2: 89, temp_c: 39.2, sys: 146, dia: 124, bmi: 24.2, source: 'Health Monitor' },
-  { ts: new Date(Date.now()-3600*1000*2).toISOString(),  hr: 78, spo2: 98, temp_c: 36.8, sys: 120, dia: 78, bmi: 24.3, source: 'Health Monitor' }
-];
-
-export async function GET() {
-  return NextResponse.json(VITALS.slice().sort((a,b)=> (a.ts<b.ts?1:-1)));
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
 }
 
-export async function POST(req: Request) {
-  const body = (await req.json()) as Partial<Vital>;
-  const item: Vital = {
-    ts: new Date().toISOString(),
-    source: body.source ?? 'manual',
-    hr: body.hr, spo2: body.spo2, temp_c: body.temp_c, sys: body.sys, dia: body.dia, bmi: body.bmi
+function toNum(value: unknown) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function normalizeTrendPoint(point: any): PublicVital | null {
+  const rawTs = String(point?.ts || point?.recorded_at || point?.createdAt || '').trim();
+  const parsedTs = Date.parse(rawTs);
+  if (!Number.isFinite(parsedTs)) return null;
+
+  const item: PublicVital = {
+    ts: new Date(parsedTs).toISOString(),
   };
-  VITALS.push(item);
-  return NextResponse.json({ ok: true, item }, { status: 201 });
+
+  const hr = toNum(point?.hr);
+  const spo2 = toNum(point?.spo2);
+  const temp = toNum(point?.temp_c ?? point?.temp);
+  const sys = toNum(point?.sys);
+  const dia = toNum(point?.dia);
+  const glucose = toNum(point?.glucose);
+
+  if (hr !== undefined) item.hr = hr;
+  if (spo2 !== undefined) item.spo2 = spo2;
+  if (temp !== undefined) item.temp_c = temp;
+  if (sys !== undefined) item.sys = sys;
+  if (dia !== undefined) item.dia = dia;
+  if (glucose !== undefined) item.glucose = glucose;
+
+  if (typeof point?.source === 'string' && point.source.trim()) {
+    item.source = point.source.trim();
+  }
+
+  return Object.keys(item).length > 1 ? item : null;
+}
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+  const range = url.searchParams.get('range') || '30d';
+  const patientId = url.searchParams.get('patientId') || '';
+
+  const qs = new URLSearchParams({ range });
+  if (patientId) qs.set('patientId', patientId);
+
+  const res = await fetch(`${url.origin}/api/reports/vitals?${qs.toString()}`, {
+    cache: 'no-store',
+    headers: {
+      accept: 'application/json',
+      cookie: req.headers.get('cookie') || '',
+      authorization: req.headers.get('authorization') || '',
+    },
+  }).catch(() => null);
+
+  if (!res?.ok) {
+    return json([], 200);
+  }
+
+  const payload = await res.json().catch(() => null);
+  const trend = Array.isArray(payload?.trend) ? payload.trend : [];
+
+  const items = trend
+    .map((point: any) => normalizeTrendPoint(point))
+    .filter((point: PublicVital | null): point is PublicVital => Boolean(point))
+    .sort((a: PublicVital, b: PublicVital) => Date.parse(b.ts) - Date.parse(a.ts));
+
+  return json(items);
+}
+
+export async function POST() {
+  return json(
+    {
+      ok: false,
+      error: 'vitals_write_route_deprecated',
+      message:
+        'Vitals must be written through /api/v1/patients/[id]/vitals so they are persisted against the active patient record.',
+    },
+    410,
+  );
 }

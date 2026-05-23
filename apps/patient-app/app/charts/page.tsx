@@ -5,7 +5,7 @@
  * Big 4 (same contract as /vitals):
  * 1) Canonical range (URL source of truth): ?range=20|7d|30d|90d|1y|custom&start=YYYY-MM-DD&end=YYYY-MM-DD
  * 2) Safe tooltips: React tooltip (no innerHTML) + viewport clamping
- * 3) Null-gap rendering: null/undefined/non-finite => GAP (no fake zeros)
+ * 3) Null-gap rendering: null/undefined/non-finite => GAP (no synthetic zeros)
  * 4) Consistent privacy (same localStorage keys as /vitals):
  *    - vitals:discreet
  *    - vitals:hideSensitive
@@ -25,7 +25,6 @@ import { usePlan } from '@/components/context/PlanContext';
 import '../../lib/chartRegistry';
 
 import useLiveVitals from '../../components/charts/useLiveVitals';
-import { getSleepSeed } from '../../components/charts/sleepSeed';
 import { exportElementAsPdf, shareFile } from '@/components/charts/export';
 
 import { CollapseBtn } from '../../components/CollapseBtn';
@@ -320,13 +319,14 @@ function ChartsPageContent() {
     { revalidateOnFocus: false },
   );
 
-  const { data: liveData, live: liveOnline, flags } = useLiveVitals(120, 1);
+  const { data: liveData, live: liveOnline, flags } = useLiveVitals(120, 15);
 
-  const sleepFallback = useMemo(() => getSleepSeed(new Date()), []);
-  const sleepPayload =
-    (liveData as any)?.sleep?.sessions?.length || Array.isArray((liveData as any)?.sleep?.stages)
-      ? (liveData as any).sleep
-      : sleepFallback;
+  const sleepPayload = (liveData as any)?.sleep ?? {
+    totalHours: 0,
+    stages: { light: 0, deep: 0, rem: 0 },
+    sessions: [],
+    updatedAt: null,
+  };
 
   const effectiveSeries = useMemo(() => {
     const src = data?.series || {};
@@ -504,7 +504,7 @@ function ChartsPageContent() {
                     aria-live="polite"
                   >
                     <span className={liveOnline ? 'h-2 w-2 rounded-full bg-emerald-500' : 'h-2 w-2 rounded-full bg-rose-500'} />
-                    {liveOnline ? 'Live' : 'Offline'}
+                    {liveOnline ? 'Live data available' : 'No live feed'}
                   </span>
                 </div>
 
@@ -711,7 +711,7 @@ function ChartsPageContent() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-base font-semibold text-slate-900">Sleep</h2>
-              <p className="text-xs text-slate-500">Sleep sessions and stages (fallback seed if none yet).</p>
+              <p className="text-xs text-slate-500">Sleep sessions and stages from connected sleep-capable devices.</p>
             </div>
             <CollapseBtn
               open={panes.sleep}
