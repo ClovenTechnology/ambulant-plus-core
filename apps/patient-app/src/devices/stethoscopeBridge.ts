@@ -58,6 +58,29 @@ function pcm16Base64ToInt16(base64: string): Int16Array {
   return out;
 }
 
+
+function int16ToBase64(samples: Int16Array): string {
+  const bytes = new Uint8Array(samples.length * 2);
+  const dv = new DataView(bytes.buffer);
+  for (let i = 0; i < samples.length; i += 1) {
+    dv.setInt16(i * 2, samples[i], true);
+  }
+
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    const sub = bytes.subarray(i, i + chunkSize);
+    let part = '';
+    for (let j = 0; j < sub.length; j += 1) {
+      part += String.fromCharCode(sub[j]);
+    }
+    binary += part;
+  }
+
+  return btoa(binary);
+}
+
+
 function mapEchoMode(v?: number | null): StethEchoMode | null {
   if (v == null) return null;
   if (v === 1) return 'lung';
@@ -115,12 +138,7 @@ export class StethoscopeBridge {
         sampleRate: 8000,
         playToSpeaker: false,
         onChunk: (chunk: PcmChunk) => {
-          const bytes = new Uint8Array(chunk.samples.length * 2);
-          const dv = new DataView(bytes.buffer);
-          for (let i = 0; i < chunk.samples.length; i++) {
-            dv.setInt16(i * 2, chunk.samples[i], true);
-          }
-          const b64 = btoa(String.fromCharCode(...bytes));
+          const b64 = int16ToBase64(chunk.samples);
           this.handleEvent({
             type: 'audioFrame',
             pcm16Base64: b64,

@@ -69,6 +69,94 @@ export function buildWavMono16FromSamples(samples: Int16Array, sampleRate: numbe
   return new Blob([buf], { type: 'audio/wav' });
 }
 
+
+export type StethoscopeAudioProfile = {
+  /**
+   * 0.995 is a gentle DC-removal/high-pass profile suitable for an 8 kHz
+   * auscultation stream. It removes baseline drift without destroying
+   * low-frequency heart sounds.
+   */
+  hpAlpha?: number;
+  /**
+   * Conservative digital gain after DC removal. Keep <= 1 by default to avoid
+   * amplifying device noise or clipping before WAV export.
+   */
+  gain?: number;
+  /**
+   * Soft limiter threshold expressed as a Float32 absolute amplitude.
+   */
+  limit?: number;
+};
+
+function clampInt16(value: number): number {
+  if (!Number.isFinite(value)) return 0;
+  if (value > 32767) return 32767;
+  if (value < -32768) return -32768;
+  return Math.round(value);
+}
+
+/**
+ * Clean an auscultation PCM16 stream before waveform display / WAV export.
+ *
+ * The HC-21/DueCare stethoscope stream is declared as PCM16LE mono at 8 kHz.
+ * The most common audible artefacts in the web path are DC offset, packet-level
+ * baseline drift, over-gain, and hard clipping. This function keeps the signal
+ * in PCM16 form but applies:
+ *   1. gentle high-pass/DC removal;
+ *   2. conservative gain;
+ *   3. tanh soft limiting near full scale.
+ *
+ * It intentionally does not resample and does not invent missing packets.
+ */
+export function cleanStethoscopePcm16Samples(
+  samples: Int16Array,
+  profile: StethoscopeAudioProfile = {},
+): Int16Array {
+  if (!(samples instanceof Int16Array) || samples.length === 0) {
+    return new Int16Array();
+  }
+
+  const hpAlpha = Number.isFinite(profile.hpAlpha) ? Number(profile.hpAlpha) : 0.995;
+  const gainRaw = Number.isFinite(profile.gain) ? Number(profile.gain) : 0.85;
+  const gain = Math.max(0.05, Math.min(1.25, gainRaw));
+  const limitRaw = Number.isFinite(profile.limit) ? Number(profile.limit) : 0.92;
+  const limit = Math.max(0.5, Math.min(0.99, limitRaw));
+
+  const out = new Int16Array(samples.length);
+  let lastIn = 0;
+  let lastOut = 0;
+
+  for (let i = 0; i < samples.length; i += 1) {
+    const x = samples[i] / 32768;
+    const hp = hpAlpha * (lastOut + x - lastIn);
+    lastIn = x;
+    lastOut = hp;
+
+    let y = hp * gain;
+
+    if (Math.abs(y) > limit) {
+      const sign = y < 0 ? -1 : 1;
+      const excess = Math.abs(y) - limit;
+      y = sign * (limit + (1 - limit) * Math.tanh(excess / Math.max(1e-6, 1 - limit)));
+    }
+
+    out[i] = clampInt16(y * 32767);
+  }
+
+  return out;
+}
+
+export function cleanStethoscopePcmChunk(
+  chunk: PcmChunk,
+  profile?: StethoscopeAudioProfile,
+): PcmChunk {
+  return {
+    ...chunk,
+    samples: cleanStethoscopePcm16Samples(chunk.samples, profile),
+  };
+}
+
+
 /** Concatenate PCM16 chunks and emit 16-bit mono WAV Blob. */
 export function buildWavMono16(chunks: PcmChunk[], sampleRate: number): Blob {
   const samples = concatPcm16Chunks(chunks, sampleRate);

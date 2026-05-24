@@ -9,6 +9,7 @@
 
 import { API } from '@/src/lib/config';
 import type { PcmChunk } from './wav';
+import { cleanStethoscopePcmChunk } from './wav';
 import { pcm16ToFloat32 } from './audio';
 
 const NUS_SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -371,9 +372,10 @@ export class StethoscopeNUS {
     if (len <= 0) return;
 
     const samples = new Int16Array(len / 2);
+    const dv = new DataView(u8.buffer, u8.byteOffset, len);
 
     for (let i = 0; i < len; i += 2) {
-      samples[i >> 1] = u8[i] | (u8[i + 1] << 8);
+      samples[i >> 1] = dv.getInt16(i, true);
     }
 
     const ts = Date.now();
@@ -404,11 +406,17 @@ export class StethoscopeNUS {
 
     this.lastRxAt = ts;
 
-    const chunk: PcmChunk = {
+    const rawChunk: PcmChunk = {
       ts,
       sampleRate: this.opts.sampleRate,
       samples,
     };
+
+    const chunk = cleanStethoscopePcmChunk(rawChunk, {
+      hpAlpha: this.opts.hpAlpha,
+      gain: this.opts.gain,
+      limit: 0.92,
+    });
 
     try {
       this.opts.onChunk(chunk);
@@ -520,24 +528,14 @@ export class StethoscopeNUS {
 
   private handleChunkForPlaybackAndUI(chunk: PcmChunk): void {
     const float32 = pcm16ToFloat32(chunk.samples);
-    const hp = this.highpass(float32, this.opts.hpAlpha);
-
-    const gain = Math.min(1, Math.max(0, this.opts.gain));
-
-    if (gain !== 1) {
-      for (let i = 0; i < hp.length; i += 1) {
-        hp[i] *= gain;
-      }
-    }
-
-    const metrics = this.computeMetrics(hp, chunk.sampleRate);
+    const metrics = this.computeMetrics(float32, chunk.sampleRate);
 
     try {
       if (typeof window !== 'undefined') {
         window.dispatchEvent(
           new CustomEvent('stethoscope:chunk', {
             detail: {
-              float32: hp,
+              float32,
               ts: chunk.ts,
               sampleRate: chunk.sampleRate,
               metrics,
@@ -550,9 +548,11 @@ export class StethoscopeNUS {
     }
 
     if (this.opts.playToSpeaker) {
-      this.playChunk(hp);
+      this.playChunk(float32);
     }
   }
+
+  private playCursorSec = 0;
 
   private playChunk(float32: Float32Array): void {
     try {
@@ -571,7 +571,11 @@ export class StethoscopeNUS {
       const source = this.ac.createBufferSource();
       source.buffer = buffer;
       source.connect(this.ac.destination);
-      source.start();
+
+      const now = this.ac.currentTime;
+      const startAt = Math.max(now + 0.015, this.playCursorSec || 0);
+      source.start(startAt);
+      this.playCursorSec = startAt + buffer.duration;
     } catch (err) {
       console.warn('[StethoscopeNUS] playChunk error', err);
     }
@@ -627,6 +631,8 @@ export class StethoscopeNUS {
 
       this.ac = undefined;
     }
+
+    this.playCursorSec = 0;
 
     this.rx = undefined;
     this.tx = undefined;
