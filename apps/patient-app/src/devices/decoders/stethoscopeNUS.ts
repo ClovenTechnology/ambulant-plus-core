@@ -8,8 +8,8 @@
 // ============================================================================
 
 import { API } from '@/src/lib/config';
-import type { PcmChunk } from './wav';
-import { cleanStethoscopePcmChunk } from './wav';
+import type { PcmChunk, StethoscopeAudioMode } from './wav';
+import { createStethoscopePcm16Processor } from './wav';
 import { pcm16ToFloat32 } from './audio';
 
 const NUS_SVC = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
@@ -45,6 +45,7 @@ export type StethoscopeTelemetry = {
 
 type Options = {
   sampleRate?: number;
+  echoMode?: StethoscopeAudioMode;
   playToSpeaker?: boolean;
   roomId?: string;
   onChunk?: (chunk: PcmChunk) => void;
@@ -66,6 +67,7 @@ type Options = {
 
 type ResolvedOptions = {
   sampleRate: number;
+  echoMode: StethoscopeAudioMode;
   playToSpeaker: boolean;
   roomId?: string;
   onChunk: (chunk: PcmChunk) => void;
@@ -148,6 +150,7 @@ export class StethoscopeNUS {
   private lastRxAt = 0;
   private lastSign = 0;
   private telemetry: StethoscopeTelemetry = { updatedAt: Date.now() };
+  private pcmProcessor = createStethoscopePcm16Processor({ sampleRate: 8000, mode: 'heart' });
 
   private onDisconnectedBound = (): void => {
     try {
@@ -162,11 +165,12 @@ export class StethoscopeNUS {
   constructor(opts: Options = {}) {
     this.opts = {
       sampleRate: opts.sampleRate ?? 8000,
+      echoMode: opts.echoMode ?? 'heart',
       playToSpeaker: opts.playToSpeaker ?? true,
       roomId: opts.roomId,
       onChunk: opts.onChunk ?? (() => {}),
 
-      gain: opts.gain ?? 0.6,
+      gain: opts.gain ?? 1,
       hpAlpha: opts.hpAlpha ?? 0.995,
 
       gapWarnMs: opts.gapWarnMs ?? 250,
@@ -180,6 +184,35 @@ export class StethoscopeNUS {
       onDisconnected: opts.onDisconnected,
       onTelemetry: opts.onTelemetry,
     };
+
+    this.pcmProcessor = createStethoscopePcm16Processor({
+      sampleRate: this.opts.sampleRate,
+      mode: this.opts.echoMode,
+      gain: this.opts.gain,
+      limit: this.opts.echoMode === 'lung' ? 0.9 : 0.88,
+    });
+  }
+
+  setAudioProfile(profile: {
+    echoMode?: StethoscopeAudioMode;
+    gain?: number;
+  }): void {
+    if (profile.echoMode) {
+      this.opts.echoMode = profile.echoMode;
+    }
+
+    if (typeof profile.gain === 'number' && Number.isFinite(profile.gain)) {
+      this.opts.gain = profile.gain;
+    }
+
+    this.pcmProcessor.setProfile({
+      sampleRate: this.opts.sampleRate,
+      mode: this.opts.echoMode,
+      gain: this.opts.gain,
+      limit: this.opts.echoMode === 'lung' ? 0.9 : 0.88,
+    });
+
+    this.playCursorSec = 0;
   }
 
   async requestAndConnect(): Promise<void> {
@@ -212,6 +245,7 @@ export class StethoscopeNUS {
 
     this.lastRxAt = 0;
     this.lastSign = 0;
+    this.pcmProcessor.reset();
 
     try {
       await this.refreshTelemetry();
@@ -245,6 +279,7 @@ export class StethoscopeNUS {
 
     this.lastRxAt = 0;
     this.lastSign = 0;
+    this.pcmProcessor.reset();
 
     try {
       await this.refreshTelemetry();
@@ -406,17 +441,11 @@ export class StethoscopeNUS {
 
     this.lastRxAt = ts;
 
-    const rawChunk: PcmChunk = {
+    const chunk: PcmChunk = {
       ts,
       sampleRate: this.opts.sampleRate,
-      samples,
+      samples: this.pcmProcessor.process(samples),
     };
-
-    const chunk = cleanStethoscopePcmChunk(rawChunk, {
-      hpAlpha: this.opts.hpAlpha,
-      gain: this.opts.gain,
-      limit: 0.92,
-    });
 
     try {
       this.opts.onChunk(chunk);

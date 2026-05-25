@@ -119,6 +119,7 @@ export async function POST(req: Request) {
               userId: true,
               name: true,
               contactEmail: true,
+              mrn: true,
             },
           })
           .catch(() => null)
@@ -181,6 +182,8 @@ export async function POST(req: Request) {
       profile: patientProfile
         ? {
             patientId: patientProfile.id,
+            id: patientProfile.id,
+            mrn: patientProfile.mrn ?? null,
             userId: patientProfile.userId,
             name: patientProfile.name ?? null,
             email: patientProfile.contactEmail ?? email,

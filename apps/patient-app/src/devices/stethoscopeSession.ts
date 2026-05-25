@@ -1,6 +1,6 @@
 //apps/patient-app/src/devices/stethoscopeSession.ts
 import type { PcmChunk } from '@/src/devices/decoders/wav';
-import { cleanStethoscopePcm16Samples, WavRecorder } from '@/src/devices/decoders/wav';
+import { WavRecorder } from '@/src/devices/decoders/wav';
 import { StethoscopeBridge, type StethScanDevice } from '@/src/devices/stethoscopeBridge';
 import type {
   StethBodySite,
@@ -345,14 +345,9 @@ export class StethoscopeSession {
 
   private handleAudioFrame(evt: StethNativeAudioEvent, kind: StethStreamKind) {
     const decodedSamples = this.bridge.decodeAudioFrame(evt);
-    const samples =
-      kind === 'raw'
-        ? decodedSamples
-        : cleanStethoscopePcm16Samples(decodedSamples, {
-            hpAlpha: 0.995,
-            gain: this.echoMode === 'lung' ? 0.95 : 0.85,
-            limit: 0.92,
-          });
+    // The native plugin's filteredAudioFrame and the web StethoscopeNUS path
+    // already apply the auscultation profile. Avoid double-filtering here.
+    const samples = decodedSamples;
 
     if (!samples.length) return;
 

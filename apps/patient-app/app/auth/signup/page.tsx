@@ -1,4 +1,4 @@
-﻿// file: apps/patient-app/app/auth/signup/page.tsx
+// file: apps/patient-app/app/auth/signup/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -38,6 +38,13 @@ function PatientSignupPageContent() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [dob, setDob] = useState('');
+  const [gender, setGender] = useState('');
+  const [phone, setPhone] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+  const [addressLine2, setAddressLine2] = useState('');
+  const [city, setCity] = useState('');
+  const [postalCode, setPostalCode] = useState('');
 
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -50,6 +57,13 @@ function PatientSignupPageContent() {
     if (!em) return 'Email is required';
     if (!password) return 'Password is required';
     if (password.length < 8) return 'Password must be at least 8 characters';
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+      return 'Password must include uppercase, lowercase, a number, and a symbol';
+    }
+    if (!dob) return 'Date of birth is required';
+    if (!gender) return 'Gender is required';
+    if (!addressLine1.trim()) return 'Address line 1 is required';
+    if (!city.trim()) return 'City is required';
     return null;
   }
 
@@ -74,6 +88,14 @@ function PatientSignupPageContent() {
           name: fullName.trim().replace(/\s+/g, ' '),
           email: email.trim().toLowerCase(),
           password,
+          dob,
+          gender,
+          phone: phone.trim(),
+          addressLine1: addressLine1.trim(),
+          addressLine2: addressLine2.trim(),
+          city: city.trim(),
+          postalCode: postalCode.trim(),
+          redirectTo,
         }),
       });
 
@@ -105,7 +127,7 @@ function PatientSignupPageContent() {
     <main
       className={cx(
         'min-h-screen',
-        // Worldclass gradient (clean + â€œhealth-techâ€ glow, no image)
+        // Worldclass gradient (clean + “health-tech” glow, no image)
         'bg-slate-50',
         'bg-[radial-gradient(1000px_circle_at_18%_-12%,rgba(16,185,129,0.18),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(99,102,241,0.14),transparent_55%),radial-gradient(900px_circle_at_55%_105%,rgba(2,132,199,0.10),transparent_52%),linear-gradient(to_bottom,rgba(255,255,255,0.85),rgba(248,250,252,1))]',
       )}
@@ -116,7 +138,7 @@ function PatientSignupPageContent() {
           <section className="order-2 lg:order-1">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
               <Sparkles className="h-4 w-4 text-emerald-700" />
-              Ambulant+ Â· Patient Portal
+              Ambulant+ · Patient Portal
             </div>
 
             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
@@ -146,7 +168,7 @@ function PatientSignupPageContent() {
               <div className="rounded-3xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
                 <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
                   <ArrowRight className="h-4 w-4 text-indigo-700" />
-                  Quick 1-min sign up Â· No fees
+                  Quick 1-min sign up · No fees
                 </div>
                 <div className="mt-1 text-[12px] text-slate-600">
                   Create your account in under a minute and access a clinician/clinic instantly. Complete profile details later at your pace. You can access care, use your IoMTs and without mandatory subscription. 
@@ -166,7 +188,7 @@ function PatientSignupPageContent() {
           {/* Right: form */}
           <section className="order-1 lg:order-2">
             <div className="mx-auto w-full max-w-md">
-              <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-blaack/[0.06] backdrop-blur">
+              <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-black/[0.06] backdrop-blur">
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <div className="text-xs font-black text-slate-500">1 Minute Man - Quick Patient Sign up</div>
@@ -179,7 +201,7 @@ function PatientSignupPageContent() {
                   </div>
                 </div>
 
-                {/* âœ… Premium link patch */}
+                {/* ✅ Premium link patch */}
                 <Link
                   href={premiumHref}
                   className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-black text-slate-800 backdrop-blur hover:bg-white"
@@ -245,6 +267,152 @@ function PatientSignupPageContent() {
                     </div>
                   </label>
 
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <div className="text-xs font-black text-slate-700">Date of birth</div>
+                      <input
+                        value={dob}
+                        onChange={(e) => {
+                          setDob(e.target.value);
+                          if (err) setErr(null);
+                        }}
+                        type="date"
+                        autoComplete="bday"
+                        disabled={loading}
+                        className={cx(
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                        )}
+                        required
+                      />
+                    </label>
+
+                    <label className="block">
+                      <div className="text-xs font-black text-slate-700">Gender</div>
+                      <select
+                        value={gender}
+                        onChange={(e) => {
+                          setGender(e.target.value);
+                          if (err) setErr(null);
+                        }}
+                        disabled={loading}
+                        className={cx(
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                        )}
+                        required
+                      >
+                        <option value="">Select gender</option>
+                        <option value="female">Female</option>
+                        <option value="male">Male</option>
+                        <option value="other">Other</option>
+                        <option value="prefer_not_to_say">Prefer not to say</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="block">
+                    <div className="text-xs font-black text-slate-700">Mobile number</div>
+                    <input
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value);
+                        if (err) setErr(null);
+                      }}
+                      type="tel"
+                      autoComplete="tel"
+                      placeholder="e.g., +27 72 123 4567"
+                      disabled={loading}
+                      className={cx(
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                      )}
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="text-xs font-black text-slate-700">Address line 1</div>
+                    <input
+                      value={addressLine1}
+                      onChange={(e) => {
+                        setAddressLine1(e.target.value);
+                        if (err) setErr(null);
+                      }}
+                      autoComplete="address-line1"
+                      placeholder="Street address"
+                      disabled={loading}
+                      className={cx(
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                      )}
+                      required
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="text-xs font-black text-slate-700">Address line 2</div>
+                    <input
+                      value={addressLine2}
+                      onChange={(e) => {
+                        setAddressLine2(e.target.value);
+                        if (err) setErr(null);
+                      }}
+                      autoComplete="address-line2"
+                      placeholder="Apartment, building, suburb (optional)"
+                      disabled={loading}
+                      className={cx(
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                      )}
+                    />
+                  </label>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <div className="text-xs font-black text-slate-700">City</div>
+                      <input
+                        value={city}
+                        onChange={(e) => {
+                          setCity(e.target.value);
+                          if (err) setErr(null);
+                        }}
+                        autoComplete="address-level2"
+                        placeholder="City"
+                        disabled={loading}
+                        className={cx(
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                        )}
+                        required
+                      />
+                    </label>
+
+                    <label className="block">
+                      <div className="text-xs font-black text-slate-700">Postal code</div>
+                      <input
+                        value={postalCode}
+                        onChange={(e) => {
+                          setPostalCode(e.target.value);
+                          if (err) setErr(null);
+                        }}
+                        autoComplete="postal-code"
+                        placeholder="Postal code"
+                        disabled={loading}
+                        className={cx(
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                        )}
+                      />
+                    </label>
+                  </div>
+
                   <label className="block">
                     <div className="text-xs font-black text-slate-700">Password</div>
                     <div className="mt-1 relative">
@@ -268,7 +436,7 @@ function PatientSignupPageContent() {
                         required
                       />
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you donâ€™t reuse elsewhere.</div>
+                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you don’t reuse elsewhere.</div>
                   </label>
 
                   <button
@@ -281,7 +449,7 @@ function PatientSignupPageContent() {
                       'disabled:opacity-50 disabled:cursor-not-allowed',
                     )}
                   >
-                    {loading ? 'Creatingâ€¦' : 'Create account'}
+                    {loading ? 'Creating…' : 'Create account'}
                   </button>
 
                   <div className="flex items-center justify-between gap-3 text-xs">
@@ -295,7 +463,7 @@ function PatientSignupPageContent() {
                   </div>
 
                   <div className="pt-2 text-[11px] text-slate-500">
-                    After sign up youâ€™ll be redirected to your Main Dashboard. You can update your profile later.
+                    After sign up you’ll be redirected to your Main Dashboard. You can update your profile later.
                   </div>
                 </form>
               </div>

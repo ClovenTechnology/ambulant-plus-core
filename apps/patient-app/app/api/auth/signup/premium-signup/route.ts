@@ -29,6 +29,13 @@ export async function POST(req: NextRequest) {
   const name = String(body?.name || '').trim().replace(/\s+/g, ' ');
   const email = String(body?.email || '').trim().toLowerCase();
   const password = String(body?.password || '');
+  const dob = String(body?.dob || '').trim();
+  const gender = String(body?.gender || '').trim();
+  const phone = String(body?.phone || '').trim();
+  const addressLine1 = String(body?.addressLine1 || body?.address || '').trim();
+  const addressLine2 = String(body?.addressLine2 || '').trim();
+  const city = String(body?.city || '').trim();
+  const postalCode = String(body?.postalCode || '').trim();
   const offer = String(body?.offer || '') as PremiumOffer;
 
   const redirectTo = safeInternalPath(body?.redirectTo, '/');
@@ -38,6 +45,10 @@ export async function POST(req: NextRequest) {
   if (!email) return jsonError('Email is required');
   if (!password) return jsonError('Password is required');
   if (password.length < 8) return jsonError('Password must be at least 8 characters');
+  if (!dob) return jsonError('Date of birth is required');
+  if (!gender) return jsonError('Gender is required');
+  if (!addressLine1) return jsonError('Address line 1 is required');
+  if (!city) return jsonError('City is required');
 
   if (offer !== 'bundle_40_free_year' && offer !== 'annual_premium_raffle') {
     return jsonError('Invalid offer selection');
@@ -50,7 +61,19 @@ export async function POST(req: NextRequest) {
   const signupRes = await fetch(signupUrl, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name, email, password }),
+    body: JSON.stringify({
+      name,
+      email,
+      password,
+      dob,
+      gender,
+      phone,
+      addressLine1,
+      addressLine2,
+      city,
+      postalCode,
+      redirectTo,
+    }),
   });
 
   const signupData = (await signupRes.json().catch(() => ({} as SignupResponse))) as SignupResponse;

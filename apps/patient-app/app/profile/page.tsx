@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/profile/page.tsx
+// apps/patient-app/app/profile/page.tsx
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -144,6 +144,7 @@ type ProfileForm = {
   dob: string;
   gender: string;
   idNumber: string;
+  mrn: string;
   photoUrl: string;
 
   heightCm: number | "";
@@ -523,6 +524,7 @@ export default function Profile() {
     dob: "",
     gender: "",
     idNumber: "",
+    mrn: "",
     photoUrl: "",
 
     heightCm: "",
@@ -595,6 +597,7 @@ export default function Profile() {
           dob: safeProfile?.dob || "",
           gender: safeProfile?.gender || "",
           idNumber: safeProfile?.idNumber || "",
+          mrn: safeProfile?.mrn || "",
           photoUrl: safeProfile?.photoUrl || safeProfile?.avatarUrl || "",
 
           heightCm:
@@ -797,6 +800,7 @@ export default function Profile() {
         dob: saved.dob || prev.dob,
         gender: saved.gender || prev.gender,
         idNumber: saved.idNumber || prev.idNumber,
+        mrn: saved.mrn || prev.mrn,
         photoUrl: saved.photoUrl || saved.avatarUrl || prev.photoUrl,
 
         heightCm:
@@ -1782,7 +1786,7 @@ export default function Profile() {
                               Verified identity fields
                             </div>
                             <p className="mt-1 text-sm text-slate-600">
-                              Name, email, date of birth, gender, and ID/passport
+                              MRN, name, email, date of birth, gender, and ID/passport
                               details are locked on the patient profile to protect
                               clinical eligibility, gender-gated modules, and account integrity.
                             </p>
@@ -1790,6 +1794,7 @@ export default function Profile() {
                         </div>
 
                         <div className="mt-4 grid gap-3 md:grid-cols-2">
+                          <LockedProfileField label="MRN" value={form.mrn} />
                           <LockedProfileField label="Full name" value={form.name} />
                           <LockedProfileField
                             label="Email"

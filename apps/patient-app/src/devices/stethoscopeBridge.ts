@@ -136,11 +136,12 @@ export class StethoscopeBridge {
     if (!this.isNative) {
       this.webNus = new StethoscopeNUS({
         sampleRate: 8000,
+        echoMode: 'heart',
         playToSpeaker: false,
         onChunk: (chunk: PcmChunk) => {
           const b64 = int16ToBase64(chunk.samples);
           this.handleEvent({
-            type: 'audioFrame',
+            type: 'filteredAudioFrame',
             pcm16Base64: b64,
             sampleRate: chunk.sampleRate,
             channels: 1,
@@ -218,6 +219,10 @@ export class StethoscopeBridge {
 
   async startAuscultation(opts: StartAuscultationOptions = {}) {
     if (!this.isNative) {
+      this.webNus?.setAudioProfile({
+        echoMode: opts.echoMode ?? 'heart',
+        gain: opts.agcGain && opts.agcGain > 0 ? Math.min(1.4, Math.max(0.5, opts.agcGain)) : undefined,
+      });
       return { ok: true as const };
     }
 

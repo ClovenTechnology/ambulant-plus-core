@@ -26,3 +26,5 @@ packages/clinical-codes/sources/**/*.RRF
 .env.production
 .env.bridge
 *.local.backup
+.vercel
+.env*.local

@@ -1,12 +1,33 @@
 // ============================================================================
 // apps/patient-app/src/devices/decoders/wav.ts
 // Build WAV from PCM16 chunks (explicit little-endian, mono by default).
+// Also provides auscultation-specific PCM conditioning for HC-21/DueCare
+// stethoscope streams.
 // ============================================================================
 
 export type PcmChunk = {
   ts: number;
   sampleRate: number;
   samples: Int16Array;
+};
+
+export type StethoscopeAudioMode = 'heart' | 'lung';
+
+export type StethoscopeAudioProfile = {
+  /**
+   * Heart mode preserves low-frequency S1/S2 content.
+   * Lung mode keeps a wider/higher respiratory band.
+   */
+  mode?: StethoscopeAudioMode;
+  sampleRate?: number;
+  /**
+   * Conservative post-filter gain. Defaults are mode-aware.
+   */
+  gain?: number;
+  /**
+   * Soft limiter threshold expressed as absolute Float32 amplitude.
+   */
+  limit?: number;
 };
 
 function writeU32(view: DataView, off: number, v: number) {
@@ -69,25 +90,6 @@ export function buildWavMono16FromSamples(samples: Int16Array, sampleRate: numbe
   return new Blob([buf], { type: 'audio/wav' });
 }
 
-
-export type StethoscopeAudioProfile = {
-  /**
-   * 0.995 is a gentle DC-removal/high-pass profile suitable for an 8 kHz
-   * auscultation stream. It removes baseline drift without destroying
-   * low-frequency heart sounds.
-   */
-  hpAlpha?: number;
-  /**
-   * Conservative digital gain after DC removal. Keep <= 1 by default to avoid
-   * amplifying device noise or clipping before WAV export.
-   */
-  gain?: number;
-  /**
-   * Soft limiter threshold expressed as a Float32 absolute amplitude.
-   */
-  limit?: number;
-};
-
 function clampInt16(value: number): number {
   if (!Number.isFinite(value)) return 0;
   if (value > 32767) return 32767;
@@ -95,55 +97,178 @@ function clampInt16(value: number): number {
   return Math.round(value);
 }
 
+function clampFloat(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.max(min, Math.min(max, value));
+}
+
+type BiquadType = 'highpass' | 'lowpass';
+
+class Biquad {
+  private b0 = 1;
+  private b1 = 0;
+  private b2 = 0;
+  private a1 = 0;
+  private a2 = 0;
+  private z1 = 0;
+  private z2 = 0;
+
+  constructor(type: BiquadType, sampleRate: number, frequency: number, q = 0.707) {
+    const sr = Math.max(1000, sampleRate || 8000);
+    const f = clampFloat(frequency, 1, sr * 0.45);
+    const omega = (2 * Math.PI * f) / sr;
+    const sin = Math.sin(omega);
+    const cos = Math.cos(omega);
+    const alpha = sin / (2 * Math.max(0.1, q));
+
+    let b0: number;
+    let b1: number;
+    let b2: number;
+    const a0 = 1 + alpha;
+    let a1: number;
+    let a2: number;
+
+    if (type === 'highpass') {
+      b0 = (1 + cos) / 2;
+      b1 = -(1 + cos);
+      b2 = (1 + cos) / 2;
+      a1 = -2 * cos;
+      a2 = 1 - alpha;
+    } else {
+      b0 = (1 - cos) / 2;
+      b1 = 1 - cos;
+      b2 = (1 - cos) / 2;
+      a1 = -2 * cos;
+      a2 = 1 - alpha;
+    }
+
+    this.b0 = b0 / a0;
+    this.b1 = b1 / a0;
+    this.b2 = b2 / a0;
+    this.a1 = a1 / a0;
+    this.a2 = a2 / a0;
+  }
+
+  process(x: number): number {
+    const y = this.b0 * x + this.z1;
+    this.z1 = this.b1 * x - this.a1 * y + this.z2;
+    this.z2 = this.b2 * x - this.a2 * y;
+    return y;
+  }
+
+  reset() {
+    this.z1 = 0;
+    this.z2 = 0;
+  }
+}
+
+function defaultsForMode(mode: StethoscopeAudioMode) {
+  if (mode === 'lung') {
+    return {
+      highpassHz: 90,
+      lowpassHz: 1200,
+      gain: 0.9,
+      limit: 0.9,
+    };
+  }
+
+  return {
+    highpassHz: 25,
+    lowpassHz: 220,
+    gain: 1.05,
+    limit: 0.88,
+  };
+}
+
+function softLimit(value: number, limit: number): number {
+  const abs = Math.abs(value);
+  if (abs <= limit) return value;
+  const sign = value < 0 ? -1 : 1;
+  const headroom = Math.max(1e-6, 1 - limit);
+  return sign * (limit + headroom * Math.tanh((abs - limit) / headroom));
+}
+
+export class StethoscopePcm16Processor {
+  private readonly sampleRate: number;
+  private mode: StethoscopeAudioMode;
+  private gain: number;
+  private limit: number;
+  private highpass: Biquad;
+  private lowpass: Biquad;
+
+  constructor(profile: StethoscopeAudioProfile = {}) {
+    this.sampleRate = profile.sampleRate ?? 8000;
+    this.mode = profile.mode ?? 'heart';
+
+    const d = defaultsForMode(this.mode);
+    this.gain = clampFloat(profile.gain ?? d.gain, 0.05, 2);
+    this.limit = clampFloat(profile.limit ?? d.limit, 0.4, 0.98);
+
+    this.highpass = new Biquad('highpass', this.sampleRate, d.highpassHz, 0.707);
+    this.lowpass = new Biquad('lowpass', this.sampleRate, d.lowpassHz, 0.707);
+  }
+
+  setProfile(profile: StethoscopeAudioProfile = {}) {
+    const nextMode = profile.mode ?? this.mode;
+    const d = defaultsForMode(nextMode);
+
+    this.mode = nextMode;
+    this.gain = clampFloat(profile.gain ?? d.gain, 0.05, 2);
+    this.limit = clampFloat(profile.limit ?? d.limit, 0.4, 0.98);
+
+    this.highpass = new Biquad('highpass', this.sampleRate, d.highpassHz, 0.707);
+    this.lowpass = new Biquad('lowpass', this.sampleRate, d.lowpassHz, 0.707);
+  }
+
+  reset() {
+    this.highpass.reset();
+    this.lowpass.reset();
+  }
+
+  process(samples: Int16Array): Int16Array {
+    if (!(samples instanceof Int16Array) || samples.length === 0) {
+      return new Int16Array();
+    }
+
+    // Per-packet baseline removal catches packet-level DC drift before the
+    // stateful biquads run. This is deliberately conservative and does not
+    // resample or fabricate missing packets.
+    let mean = 0;
+    for (let i = 0; i < samples.length; i += 1) mean += samples[i];
+    mean /= Math.max(1, samples.length);
+
+    const out = new Int16Array(samples.length);
+
+    for (let i = 0; i < samples.length; i += 1) {
+      const centered = (samples[i] - mean) / 32768;
+      let y = this.highpass.process(centered);
+      y = this.lowpass.process(y);
+      y *= this.gain;
+      y = softLimit(y, this.limit);
+      out[i] = clampInt16(y * 32767);
+    }
+
+    return out;
+  }
+}
+
+export function createStethoscopePcm16Processor(
+  profile: StethoscopeAudioProfile = {},
+): StethoscopePcm16Processor {
+  return new StethoscopePcm16Processor(profile);
+}
+
 /**
- * Clean an auscultation PCM16 stream before waveform display / WAV export.
- *
- * The HC-21/DueCare stethoscope stream is declared as PCM16LE mono at 8 kHz.
- * The most common audible artefacts in the web path are DC offset, packet-level
- * baseline drift, over-gain, and hard clipping. This function keeps the signal
- * in PCM16 form but applies:
- *   1. gentle high-pass/DC removal;
- *   2. conservative gain;
- *   3. tanh soft limiting near full scale.
- *
- * It intentionally does not resample and does not invent missing packets.
+ * Clean a complete auscultation PCM16 stream before waveform display / WAV export.
+ * For continuous live streams, prefer createStethoscopePcm16Processor() so filter
+ * state is preserved across BLE packets.
  */
 export function cleanStethoscopePcm16Samples(
   samples: Int16Array,
   profile: StethoscopeAudioProfile = {},
 ): Int16Array {
-  if (!(samples instanceof Int16Array) || samples.length === 0) {
-    return new Int16Array();
-  }
-
-  const hpAlpha = Number.isFinite(profile.hpAlpha) ? Number(profile.hpAlpha) : 0.995;
-  const gainRaw = Number.isFinite(profile.gain) ? Number(profile.gain) : 0.85;
-  const gain = Math.max(0.05, Math.min(1.25, gainRaw));
-  const limitRaw = Number.isFinite(profile.limit) ? Number(profile.limit) : 0.92;
-  const limit = Math.max(0.5, Math.min(0.99, limitRaw));
-
-  const out = new Int16Array(samples.length);
-  let lastIn = 0;
-  let lastOut = 0;
-
-  for (let i = 0; i < samples.length; i += 1) {
-    const x = samples[i] / 32768;
-    const hp = hpAlpha * (lastOut + x - lastIn);
-    lastIn = x;
-    lastOut = hp;
-
-    let y = hp * gain;
-
-    if (Math.abs(y) > limit) {
-      const sign = y < 0 ? -1 : 1;
-      const excess = Math.abs(y) - limit;
-      y = sign * (limit + (1 - limit) * Math.tanh(excess / Math.max(1e-6, 1 - limit)));
-    }
-
-    out[i] = clampInt16(y * 32767);
-  }
-
-  return out;
+  const processor = createStethoscopePcm16Processor(profile);
+  return processor.process(samples);
 }
 
 export function cleanStethoscopePcmChunk(
@@ -152,10 +277,12 @@ export function cleanStethoscopePcmChunk(
 ): PcmChunk {
   return {
     ...chunk,
-    samples: cleanStethoscopePcm16Samples(chunk.samples, profile),
+    samples: cleanStethoscopePcm16Samples(chunk.samples, {
+      ...profile,
+      sampleRate: profile?.sampleRate ?? chunk.sampleRate,
+    }),
   };
 }
-
 
 /** Concatenate PCM16 chunks and emit 16-bit mono WAV Blob. */
 export function buildWavMono16(chunks: PcmChunk[], sampleRate: number): Blob {

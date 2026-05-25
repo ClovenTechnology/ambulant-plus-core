@@ -11,6 +11,8 @@ type GatewayPatient = {
   id?: string;
   patientId?: string;
   userId?: string;
+  mrn?: string | null;
+  medicalRecordNumber?: string | null;
   name?: string;
   email?: string | null;
   age?: number | null;
@@ -212,6 +214,26 @@ function toIso(value: unknown) {
 function dateOnlyIso(value: unknown) {
   const iso = toIso(value);
   return iso ? iso.slice(0, 10) : null;
+}
+
+function generateMrnCandidate(now = new Date()) {
+  const yy = String(now.getUTCFullYear()).slice(-2);
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const suffix = crypto.randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
+  return `AMB-${yy}${mm}-${suffix}`;
+}
+
+async function generateUniqueMrn() {
+  for (let i = 0; i < 12; i += 1) {
+    const mrn = generateMrnCandidate();
+    const existing = await prisma.patientProfile
+      .findUnique({ where: { mrn }, select: { id: true } })
+      .catch(() => null);
+
+    if (!existing) return mrn;
+  }
+
+  throw new Error('Unable to allocate a unique patient MRN. Please try again.');
 }
 
 function ageFromDob(value: unknown) {
@@ -635,6 +657,7 @@ function shapeLocalProfile(localPatient: any, sharingPreference: SharingPreferen
   return {
     id: localPatient.id,
     patientId: localPatient.id,
+    mrn: localPatient.mrn ?? null,
     userId: localPatient.userId ?? null,
 
     name: localPatient.name ?? null,
@@ -714,6 +737,7 @@ function shapeGatewayProfile(patient: GatewayPatient, data: any, userId: string)
   return {
     id: patientId || null,
     patientId: patientId || null,
+    mrn: patient.mrn || patient.medicalRecordNumber || null,
     userId: patient.userId || userId || null,
 
     name: patient.name || data?.displayName || null,

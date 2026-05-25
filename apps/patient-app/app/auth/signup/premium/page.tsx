@@ -1,4 +1,4 @@
-﻿// file: apps/patient-app/app/auth/signup/premium/page.tsx
+// file: apps/patient-app/app/auth/signup/premium/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -73,6 +73,13 @@ function PremiumPatientSignupPageContent() {
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [dob, setDob] = useState('');
+  const [gender, setGender] = useState('');
+  const [phone, setPhone] = useState('');
+  const [addressLine1, setAddressLine1] = useState('');
+  const [addressLine2, setAddressLine2] = useState('');
+  const [city, setCity] = useState('');
+  const [postalCode, setPostalCode] = useState('');
 
   const [agreeTerms, setAgreeTerms] = useState(false);
   const [agreePromoRules, setAgreePromoRules] = useState(false);
@@ -94,6 +101,13 @@ function PremiumPatientSignupPageContent() {
     if (!em) return 'Email is required';
     if (!password) return 'Password is required';
     if (password.length < 8) return 'Password must be at least 8 characters';
+    if (!/[A-Z]/.test(password) || !/[a-z]/.test(password) || !/[0-9]/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
+      return 'Password must include uppercase, lowercase, a number, and a symbol';
+    }
+    if (!dob) return 'Date of birth is required';
+    if (!gender) return 'Gender is required';
+    if (!addressLine1.trim()) return 'Address line 1 is required';
+    if (!city.trim()) return 'City is required';
     if (!agreeTerms) return 'Please accept Terms & Privacy to continue';
     if (!agreePromoRules) return 'Please accept the Promotion Rules to continue';
     return null;
@@ -121,6 +135,13 @@ function PremiumPatientSignupPageContent() {
           email: email.trim().toLowerCase(),
           password,
           offer,
+          dob,
+          gender,
+          phone: phone.trim(),
+          addressLine1: addressLine1.trim(),
+          addressLine2: addressLine2.trim(),
+          city: city.trim(),
+          postalCode: postalCode.trim(),
           redirectTo,
           marketingOk,
         }),
@@ -165,15 +186,15 @@ function PremiumPatientSignupPageContent() {
   const offerCopy = useMemo(() => {
     if (offer === 'bundle_40_free_year') {
       return {
-        pill: 'Bundle Deal Â· 40% OFF',
+        pill: 'Bundle Deal · 40% OFF',
         headline: 'Buy the DueCare IoMT Bundle',
-        sub: 'Get all 4 IoMTs + full consumable pack â€” and unlock 1 year Premium Plan access free.',
+        sub: 'Get all 4 IoMTs + full consumable pack — and unlock 1 year Premium Plan access free.',
         accent: 'from-emerald-700 to-indigo-700',
         icon: BadgePercent,
       };
     }
     return {
-      pill: 'Annual Premium Â· Prize Draw',
+      pill: 'Annual Premium · Prize Draw',
       headline: 'Pay Premium for 1 year',
       sub: 'Get full Premium access and stand a chance to win the IoMT bundle or branded Ambulant+ merch.',
       accent: 'from-indigo-700 to-emerald-700',
@@ -214,7 +235,7 @@ function PremiumPatientSignupPageContent() {
           <section className="order-2 lg:order-1">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
               <Sparkles className="h-4 w-4 text-emerald-700" />
-              Ambulant+ Â· Premium Patient Signup
+              Ambulant+ · Premium Patient Signup
             </div>
 
             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
@@ -273,14 +294,14 @@ function PremiumPatientSignupPageContent() {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-black text-slate-950">DueCare IoMT Bundle â€” 40% OFF</div>
+                        <div className="text-sm font-black text-slate-950">DueCare IoMT Bundle — 40% OFF</div>
                         <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white px-2 py-0.5 text-[11px] font-black text-emerald-800">
                           Best Value
                         </span>
                       </div>
                       <div className="mt-1 text-[12px] text-slate-600">
                         Health Monitor, Digital Stethoscope, HD Otoscope, NexRing + consumables (2 glucose strip packs +
-                        lancets, pill sorter, gloves) â€” plus FREE 1-year Premium access.
+                        lancets, pill sorter, gloves) — plus FREE 1-year Premium access.
                       </div>
                     </div>
                   </div>
@@ -302,7 +323,7 @@ function PremiumPatientSignupPageContent() {
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center justify-between gap-2">
-                        <div className="text-sm font-black text-slate-950">Annual Premium â€” Prize Draw</div>
+                        <div className="text-sm font-black text-slate-950">Annual Premium — Prize Draw</div>
                         <span className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-black text-indigo-800">
                           Win Big
                         </span>
@@ -322,7 +343,7 @@ function PremiumPatientSignupPageContent() {
                   <div>
                     <div className="font-black text-slate-900">Note for minors</div>
                     <div className="mt-1">
-                      If youâ€™re under 18, please ask a parent/guardian to complete payment and device purchase steps.
+                      If you’re under 18, please ask a parent/guardian to complete payment and device purchase steps.
                     </div>
                   </div>
                 </div>
@@ -332,7 +353,7 @@ function PremiumPatientSignupPageContent() {
             {/* Bundle contents quick list */}
             <div className="mt-6 max-w-xl rounded-[28px] border border-slate-200 bg-white/70 p-5 backdrop-blur">
               <div className="flex items-center justify-between gap-3">
-                <div className="text-sm font-black text-slate-950">Whatâ€™s included</div>
+                <div className="text-sm font-black text-slate-950">What’s included</div>
                 <span className="text-[11px] font-black text-slate-500">Offer depends on selection</span>
               </div>
 
@@ -394,8 +415,8 @@ function PremiumPatientSignupPageContent() {
                     <div className="font-black">Account created.</div>
                     <div className="mt-1">
                       {postSignup.checkoutUrl
-                        ? 'Redirecting you to secure checkoutâ€¦'
-                        : 'If checkout isnâ€™t enabled yet, youâ€™ll still land on your dashboard â€” and we can complete billing in the next step.'}
+                        ? 'Redirecting you to secure checkout…'
+                        : 'If checkout isn’t enabled yet, you’ll still land on your dashboard — and we can complete billing in the next step.'}
                     </div>
                   </div>
                 ) : null}
@@ -451,6 +472,152 @@ function PremiumPatientSignupPageContent() {
                     </div>
                   </label>
 
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <div className="text-xs font-black text-slate-700">Date of birth</div>
+                      <input
+                        value={dob}
+                        onChange={(e) => {
+                          setDob(e.target.value);
+                          if (err) setErr(null);
+                        }}
+                        type="date"
+                        autoComplete="bday"
+                        disabled={loading}
+                        className={cx(
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                        )}
+                        required
+                      />
+                    </label>
+
+                    <label className="block">
+                      <div className="text-xs font-black text-slate-700">Gender</div>
+                      <select
+                        value={gender}
+                        onChange={(e) => {
+                          setGender(e.target.value);
+                          if (err) setErr(null);
+                        }}
+                        disabled={loading}
+                        className={cx(
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                        )}
+                        required
+                      >
+                        <option value="">Select gender</option>
+                        <option value="female">Female</option>
+                        <option value="male">Male</option>
+                        <option value="other">Other</option>
+                        <option value="prefer_not_to_say">Prefer not to say</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <label className="block">
+                    <div className="text-xs font-black text-slate-700">Mobile number</div>
+                    <input
+                      value={phone}
+                      onChange={(e) => {
+                        setPhone(e.target.value);
+                        if (err) setErr(null);
+                      }}
+                      type="tel"
+                      autoComplete="tel"
+                      placeholder="e.g., +27 72 123 4567"
+                      disabled={loading}
+                      className={cx(
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                      )}
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="text-xs font-black text-slate-700">Address line 1</div>
+                    <input
+                      value={addressLine1}
+                      onChange={(e) => {
+                        setAddressLine1(e.target.value);
+                        if (err) setErr(null);
+                      }}
+                      autoComplete="address-line1"
+                      placeholder="Street address"
+                      disabled={loading}
+                      className={cx(
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                      )}
+                      required
+                    />
+                  </label>
+
+                  <label className="block">
+                    <div className="text-xs font-black text-slate-700">Address line 2</div>
+                    <input
+                      value={addressLine2}
+                      onChange={(e) => {
+                        setAddressLine2(e.target.value);
+                        if (err) setErr(null);
+                      }}
+                      autoComplete="address-line2"
+                      placeholder="Apartment, building, suburb (optional)"
+                      disabled={loading}
+                      className={cx(
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                      )}
+                    />
+                  </label>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label className="block">
+                      <div className="text-xs font-black text-slate-700">City</div>
+                      <input
+                        value={city}
+                        onChange={(e) => {
+                          setCity(e.target.value);
+                          if (err) setErr(null);
+                        }}
+                        autoComplete="address-level2"
+                        placeholder="City"
+                        disabled={loading}
+                        className={cx(
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                        )}
+                        required
+                      />
+                    </label>
+
+                    <label className="block">
+                      <div className="text-xs font-black text-slate-700">Postal code</div>
+                      <input
+                        value={postalCode}
+                        onChange={(e) => {
+                          setPostalCode(e.target.value);
+                          if (err) setErr(null);
+                        }}
+                        autoComplete="postal-code"
+                        placeholder="Postal code"
+                        disabled={loading}
+                        className={cx(
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
+                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                        )}
+                      />
+                    </label>
+                  </div>
+
                   <label className="block">
                     <div className="text-xs font-black text-slate-700">Password</div>
                     <div className="mt-1 relative">
@@ -474,7 +641,7 @@ function PremiumPatientSignupPageContent() {
                         required
                       />
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you donâ€™t reuse elsewhere.</div>
+                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you don’t reuse elsewhere.</div>
                   </label>
 
                   {/* Agreements */}
@@ -545,7 +712,7 @@ function PremiumPatientSignupPageContent() {
                       'disabled:opacity-50 disabled:cursor-not-allowed',
                     )}
                   >
-                    {loading ? 'Creatingâ€¦' : offer === 'bundle_40_free_year' ? 'Create account & go to Bundle Checkout' : 'Create account & go to Premium Checkout'}
+                    {loading ? 'Creating…' : offer === 'bundle_40_free_year' ? 'Create account & go to Bundle Checkout' : 'Create account & go to Premium Checkout'}
                     <ArrowRight className="ml-2 inline h-4 w-4" />
                   </button>
 
@@ -560,7 +727,7 @@ function PremiumPatientSignupPageContent() {
                   </div>
 
                   <div className="pt-2 text-[11px] text-slate-500">
-                    After sign up, youâ€™ll proceed to secure checkout (if enabled). Your post-signup landing is:{' '}
+                    After sign up, you’ll proceed to secure checkout (if enabled). Your post-signup landing is:{' '}
                     <span className="font-semibold text-slate-700">{redirectTo}</span>
                   </div>
                 </form>
@@ -576,7 +743,7 @@ function PremiumPatientSignupPageContent() {
         </div>
 
         <div className="mt-8 text-center text-[11px] text-slate-500">
-          <span className="font-semibold">Prize Draw note:</span> â€œStand a chance to winâ€ is subject to official Promotion
+          <span className="font-semibold">Prize Draw note:</span> “Stand a chance to win” is subject to official Promotion
           Rules, eligibility, and availability. No guarantee of winning.
         </div>
       </div>

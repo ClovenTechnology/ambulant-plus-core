@@ -436,6 +436,80 @@ function maskId(s?: string) {
   return `${s.slice(0, 2)}•••${s.slice(-2)}`;
 }
 
+function cleanProfileString(value: unknown, max = 240) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function pickProfilePatientId(profile: any) {
+  return cleanProfileString(
+    profile?.patientId ??
+      profile?.id ??
+      profile?.actorRefId ??
+      profile?.patient?.patientId ??
+      profile?.patient?.id ??
+      '',
+    160,
+  );
+}
+
+function pickProfileName(profile: any) {
+  return cleanProfileString(
+    profile?.name ??
+      profile?.fullName ??
+      profile?.displayName ??
+      profile?.patient?.name ??
+      profile?.patient?.fullName ??
+      profile?.patient?.displayName ??
+      '',
+    180,
+  );
+}
+
+function pickProfileMrn(profile: any) {
+  return cleanProfileString(
+    profile?.mrn ??
+      profile?.mrnId ??
+      profile?.patientMrn ??
+      profile?.medicalRecordNumber ??
+      profile?.patient?.mrn ??
+      profile?.patient?.medicalRecordNumber ??
+      '',
+    120,
+  );
+}
+
+function pickProfileGender(profile: any): BodySex | null {
+  const raw = cleanProfileString(
+    profile?.gender ?? profile?.sex ?? profile?.patient?.gender ?? profile?.patient?.sex ?? '',
+    40,
+  ).toLowerCase();
+
+  if (raw.startsWith('f') || raw === 'woman') return 'female';
+  if (raw.startsWith('m') || raw === 'man') return 'male';
+  return null;
+}
+
+function normalizeProfilePayload(payload: any) {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const profile =
+    payload.profile && typeof payload.profile === 'object'
+      ? payload.profile
+      : payload.patient && typeof payload.patient === 'object'
+        ? payload.patient
+        : payload;
+
+  const patientId = pickProfilePatientId(profile);
+  if (!patientId) return null;
+
+  return {
+    patientId,
+    name: pickProfileName(profile) || undefined,
+    mrn: pickProfileMrn(profile) || undefined,
+    gender: pickProfileGender(profile),
+  };
+}
+
 function StethoscopeConsoleContent() {
   const sp = useSearchParams();
   const queryParam = useCallback(
@@ -498,9 +572,10 @@ function StethoscopeConsoleContent() {
       : `${base}/thorax_back_731x1024.png`;
   }, [bodySex, overlayView]);
 
-  // Patient context (non-breaking):
-  // - Prefer URL params: ?patientId=&patientName=&mrn=
-  // - Fallback to demo id (until you wire real auth/session)
+  // Patient context:
+  // - Prefer explicit URL params when the console is opened from a visit/room.
+  // - Otherwise resolve the signed-in patient's verified profile from /api/profile.
+  // - Never fall back to demo/blank identity for uploads.
   const patientIdFromUrl = (queryParam('patientId') || queryParam('pid'));
   const patientNameFromUrl = (queryParam('patientName') || queryParam('name'));
   const mrnFromUrl = (queryParam('mrn') || queryParam('mrnId') || queryParam('patientMrn'));
@@ -510,6 +585,8 @@ function StethoscopeConsoleContent() {
     name: patientNameFromUrl || undefined,
     mrn: mrnFromUrl || undefined,
   }));
+  const [patientLoading, setPatientLoading] = useState<boolean>(() => !patientIdFromUrl);
+  const [patientLoadError, setPatientLoadError] = useState<string | null>(null);
 
   // Attach targets (optional)
   const [visitId, setVisitId] = useState<string>(() => queryParam('visitId'));
@@ -659,8 +736,11 @@ function StethoscopeConsoleContent() {
 
   // Load patient prefs (discreet/hideSensitive/autoUpload/autoReconnect)
   useEffect(() => {
+    const currentPatientId = patient.patientId.trim();
+    if (!currentPatientId) return;
+
     try {
-      const raw = localStorage.getItem(lsPrefsKey(patient.patientId));
+      const raw = localStorage.getItem(lsPrefsKey(currentPatientId));
       if (!raw) return;
       const p = JSON.parse(raw);
       if (typeof p?.discreet === 'boolean') setDiscreet(p.discreet);
@@ -672,8 +752,11 @@ function StethoscopeConsoleContent() {
   }, [patient.patientId]);
 
   useEffect(() => {
+    const currentPatientId = patient.patientId.trim();
+    if (!currentPatientId) return;
+
     try {
-      localStorage.setItem(lsPrefsKey(patient.patientId), JSON.stringify({ discreet, hideSensitive, autoUpload, autoReconnect }));
+      localStorage.setItem(lsPrefsKey(currentPatientId), JSON.stringify({ discreet, hideSensitive, autoUpload, autoReconnect }));
     } catch {}
   }, [patient.patientId, discreet, hideSensitive, autoUpload, autoReconnect]);
 
@@ -692,6 +775,77 @@ function StethoscopeConsoleContent() {
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [patientIdFromUrl, patientNameFromUrl, mrnFromUrl]);
+
+  // Resolve the signed-in patient when the page is opened without patientId in the URL.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolvePatientFromProfile() {
+      const urlPatientId = (patientIdFromUrl || '').trim();
+
+      if (urlPatientId) {
+        setPatientLoading(false);
+        setPatientLoadError(null);
+        return;
+      }
+
+      setPatientLoading(true);
+      setPatientLoadError(null);
+
+      try {
+        const res = await fetch('/api/profile', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: { accept: 'application/json' },
+        });
+
+        const data = await res.json().catch(() => null);
+        if (!res.ok || data?.ok === false) {
+          throw new Error(data?.error || `profile_http_${res.status}`);
+        }
+
+        const next = normalizeProfilePayload(data);
+        if (!next?.patientId) {
+          throw new Error('patient_profile_missing_identity');
+        }
+
+        if (cancelled) return;
+
+        setPatient((prev) => ({
+          patientId: prev.patientId || next.patientId,
+          name: prev.name || next.name,
+          mrn: prev.mrn || next.mrn,
+        }));
+
+        if (!sexFromUrl && next.gender) {
+          setBodySex(next.gender);
+        }
+
+        try {
+          localStorage.setItem('ambulant.patientId', next.patientId);
+          localStorage.setItem('ambulant_patient_id', next.patientId);
+          if (next.name) {
+            localStorage.setItem('ambulant.patientName', next.name);
+            localStorage.setItem('ambulant_patient_name', next.name);
+          }
+        } catch {}
+      } catch (err) {
+        if (cancelled) return;
+        const msg = shortErr(err);
+        setPatientLoadError(msg);
+        setWarn('Patient profile could not be resolved. Uploading is paused until the patient identity is available.');
+      } finally {
+        if (!cancelled) setPatientLoading(false);
+      }
+    }
+
+    void resolvePatientFromProfile();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [patientIdFromUrl, sexFromUrl]);
 
   const counts = useMemo(() => {
     const queued = history.filter((h) => h.status === 'queued').length;
@@ -713,6 +867,14 @@ function StethoscopeConsoleContent() {
 
   // Load history + sessions whenever patient changes
   useEffect(() => {
+    const currentPatientId = patient.patientId.trim();
+    if (!currentPatientId) {
+      setHistory([]);
+      historyRef.current = [];
+      setSessions([]);
+      return;
+    }
+
     try {
       setWarn(null);
       if (!supportsIdb) setWarn('IndexedDB is not available. Recordings will not persist after refresh on this browser.');
@@ -727,11 +889,11 @@ function StethoscopeConsoleContent() {
         urlCacheRef.current.clear();
       } catch {}
 
-      const list = loadMeta(patient.patientId);
+      const list = loadMeta(currentPatientId);
       setHistory(list);
       historyRef.current = list;
 
-      const sess = loadSessions(patient.patientId);
+      const sess = loadSessions(currentPatientId);
       setSessions(sess);
     } catch {}
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -739,12 +901,14 @@ function StethoscopeConsoleContent() {
 
   useEffect(() => {
     historyRef.current = history;
-    saveMeta(patient.patientId, history);
+    const currentPatientId = patient.patientId.trim();
+    if (currentPatientId) saveMeta(currentPatientId, history);
     setUploadingAny(history.some((h) => h.status === 'uploading'));
   }, [history, patient.patientId]);
 
   useEffect(() => {
-    saveSessions(patient.patientId, sessions);
+    const currentPatientId = patient.patientId.trim();
+    if (currentPatientId) saveSessions(currentPatientId, sessions);
   }, [sessions, patient.patientId]);
 
   // Consent inheritance check (ONLY if visitId/roomId present)
@@ -765,7 +929,7 @@ function StethoscopeConsoleContent() {
         const res = await fetch(`/api/televisit/consent?${qs.toString()}`, {
           method: 'GET',
           headers: {
-            'x-uid': patient.patientId, // dev-safe default; replace with real session UID when wired
+            'x-uid': patient.patientId,
             'x-role': 'patient',
           },
           cache: 'no-store',
@@ -1153,6 +1317,7 @@ function StethoscopeConsoleContent() {
 
       const st = new StethoscopeNUS({
         sampleRate: SAMPLE_RATE,
+        echoMode: inferTargetFromSite(site) === 'lungs' ? 'lung' : 'heart',
         playToSpeaker: false,
         onChunk: (c: PcmChunk) => {
           packetsRef.current += 1;
@@ -1243,6 +1408,11 @@ function StethoscopeConsoleContent() {
     setError(null);
     if (!connected) return;
 
+    if (!patient.patientId.trim()) {
+      setWarn('Patient profile is still being resolved. Please wait until the patient identity appears before recording.');
+      return;
+    }
+
     if (!effectiveConsent.recorded) {
       setWarn('Consent is not recorded yet. Toggle “Consent recorded” (or attach to a Televisit with consent).');
       return;
@@ -1259,7 +1429,15 @@ function StethoscopeConsoleContent() {
       lastSign: 0,
     };
 
+    const activeSite = (opts?.siteOverride ?? site) as SiteKey;
+    const activeEchoMode = inferTargetFromSite(activeSite) === 'lungs' ? 'lung' : 'heart';
+
     if (opts?.siteOverride) setSite(opts.siteOverride);
+
+    stethRef.current?.setAudioProfile?.({
+      echoMode: activeEchoMode,
+      gain: 1,
+    });
 
     recorderRef.current = new WavRecorder(SAMPLE_RATE);
     recordingRef.current = true;
@@ -1287,11 +1465,15 @@ function StethoscopeConsoleContent() {
     setRecordStartedAt(null);
 
     const stoppedAt = Date.now();
-    const durationMs = Math.max(0, stoppedAt - startedAt);
+    const wallClockDurationMs = Math.max(0, stoppedAt - startedAt);
 
     try {
-      const blob = recorderRef.current?.flush();
+      const recorder = recorderRef.current;
+      const audioDurationMs = recorder?.getDurationMs() ?? 0;
+      const blob = recorder?.flush();
       if (!blob) return;
+
+      const durationMs = audioDurationMs || wallClockDurationMs;
 
       if (opts?.interrupted && durationMs < 1000) return;
 
@@ -1317,9 +1499,15 @@ function StethoscopeConsoleContent() {
 
       const combinedNote = opts?.interrupted ? [baseNote, 'Interrupted capture'].filter(Boolean).join(' · ') : baseNote || undefined;
 
+      const currentPatientId = patient.patientId.trim();
+      if (!currentPatientId) {
+        setWarn('Recording was not saved because patient identity is unavailable. Refresh the page after completing your profile.');
+        return;
+      }
+
       const meta: RecordingMeta = {
         id,
-        patientId: patient.patientId,
+        patientId: currentPatientId,
         createdAt,
         durationMs,
         sizeBytes: blob.size ?? 0,
@@ -1595,7 +1783,12 @@ function StethoscopeConsoleContent() {
 
           if (!blob2) throw new Error('Local audio blob missing (cleared or storage unavailable).');
 
-          const resp = await uploadAuscultation(h.patientId, blob2, {
+          const uploadPatientId = String(h.patientId || patient.patientId || '').trim();
+          if (!uploadPatientId) {
+            throw new Error('Patient identity is required before uploading auscultation.');
+          }
+
+          const resp = await uploadAuscultation(uploadPatientId, blob2, {
             site: h.site,
             note: hideSensitive ? undefined : h.note,
             noteRedacted: hideSensitive ? true : undefined,
@@ -1942,15 +2135,15 @@ function StethoscopeConsoleContent() {
       return {
         name: 'Hidden',
         mrn: 'Hidden',
-        patientId: maskId(patient.patientId),
+        patientId: 'Hidden',
       };
     }
     return {
-      name: patient.name || '—',
-      mrn: patient.mrn || '—',
-      patientId: patient.patientId,
+      name: patient.name || (patientLoading ? 'Resolving profile…' : '—'),
+      mrn: patient.mrn || (patientLoading ? 'resolving…' : 'not issued'),
+      patientId: maskId(patient.patientId) || (patientLoading ? 'resolving…' : 'not resolved'),
     };
-  }, [discreet, patient]);
+  }, [discreet, patient, patientLoading]);
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -1969,10 +2162,10 @@ function StethoscopeConsoleContent() {
                   Recording for: <span className="font-semibold text-slate-900">{displayPatient.name}</span>
                 </span>
                 <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1">
-                  MRN/ID: <span className="font-semibold text-slate-900">{displayPatient.mrn}</span>
+                  MRN: <span className="font-semibold text-slate-900">{displayPatient.mrn}</span>
                 </span>
-                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1">
-                  Patient: <span className="font-mono text-xs">{displayPatient.patientId}</span>
+                <span className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-1 text-slate-500">
+                  Internal patient ID: <span className="font-mono text-xs">{displayPatient.patientId}</span>
                 </span>
               </div>
 
@@ -2076,7 +2269,7 @@ function StethoscopeConsoleContent() {
               <button
                 type="button"
                 onClick={primaryAction}
-                disabled={connecting}
+                disabled={connecting || (connected && !recording && !patient.patientId.trim())}
                 className={cx(
                   'inline-flex items-center justify-center gap-2 rounded-full px-4 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-slate-900/10',
                   !connected
@@ -2109,6 +2302,35 @@ function StethoscopeConsoleContent() {
                 <div>
                   <div className="font-semibold">Web Bluetooth not available</div>
                   <div className="mt-1 text-amber-800">Use Chrome/Edge on desktop or Android.</div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {patientLoadError ? (
+            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-900">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4" />
+                <div>
+                  <div className="font-semibold">Patient profile required</div>
+                  <div className="mt-1 text-rose-800">
+                    The stethoscope can capture locally, but uploads require a resolved patient profile. Open this page from the signed-in patient workspace or complete the profile first.
+                  </div>
+                  <div className="mt-1 text-xs text-rose-700">{patientLoadError}</div>
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {!patientLoadError && !patient.patientId.trim() ? (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <div className="flex items-start gap-2">
+                <Info className="mt-0.5 h-4 w-4" />
+                <div>
+                  <div className="font-semibold">Resolving patient profile</div>
+                  <div className="mt-1 text-amber-800">
+                    Please wait until the patient identity appears before recording or uploading auscultation clips.
+                  </div>
                 </div>
               </div>
             </div>
