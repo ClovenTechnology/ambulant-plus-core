@@ -1399,6 +1399,7 @@ model MedicalAidPolicy {
 
 model PatientProfile {
   id                             String                          @id @default(cuid())
+  mrn                            String?                         @unique
   userId                         String?                         @unique
   name                           String?
   contactEmail                   String?
