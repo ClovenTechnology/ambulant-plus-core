@@ -1503,7 +1503,7 @@ export default function HomePage() {
           <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-cyan-300/8 blur-3xl" />
           <div className="pointer-events-none absolute bottom-0 left-[20%] h-56 w-56 rounded-full bg-indigo-400/8 blur-3xl" />
 
-          <div className="relative z-10 grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-center">
+          <div className="relative z-10 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_420px] lg:items-center">
             <div className="relative z-10">
               <div className={cn('inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-sm', moodTheme.badge)}>
                 Ambulant+ Daily Health Brief
@@ -1611,8 +1611,8 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="relative z-10 flex items-center justify-center xl:justify-end">
-              <div className="relative w-full max-w-[420px] rounded-[40px] border border-white/72 bg-white/74 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-6">
+            <div className="relative z-10 flex items-center justify-center lg:justify-end">
+              <div className="relative w-full max-w-[360px] xl:max-w-[420px] rounded-[40px] border border-white/72 bg-white/74 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-6">
                 <div className="pointer-events-none absolute inset-0 rounded-[40px] bg-gradient-to-b from-transparent to-slate-100/35" />
                 <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent" />
 
