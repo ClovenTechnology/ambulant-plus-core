@@ -410,13 +410,18 @@ function normalizeAdherenceSummary(payload: unknown): {
 } {
   const root = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
 
+  const summary = root.summary && typeof root.summary === 'object' ? (root.summary as Record<string, unknown>) : {};
+
   const currentCandidate =
     root.adherencePct ??
     root.currentPct ??
     root.percentage ??
     root.percent ??
     root.score ??
-    root.current;
+    root.current ??
+    summary.weightedPct ??
+    summary.adherencePct ??
+    summary.currentPct;
 
   const currentNumber =
     typeof currentCandidate === 'number' && Number.isFinite(currentCandidate)
@@ -429,11 +434,13 @@ function normalizeAdherenceSummary(payload: unknown): {
     ? root.history
     : Array.isArray(root.trend)
       ? root.trend
-      : Array.isArray(root.series)
-        ? root.series
-        : Array.isArray(root.items)
-          ? root.items
-          : [];
+      : Array.isArray(root.dailyTrend)
+        ? root.dailyTrend
+        : Array.isArray(root.series)
+          ? root.series
+          : Array.isArray(root.items)
+            ? root.items
+            : [];
 
   const history = rawHistory
     .map((item, index): AdherencePoint | null => {
@@ -447,6 +454,7 @@ function normalizeAdherenceSummary(payload: unknown): {
       const valueRaw =
         record.value ??
         record.adherencePct ??
+        record.weightedPct ??
         record.percentage ??
         record.percent ??
         record.score ??
@@ -678,6 +686,88 @@ function resolveVitals(items: RawVitalRecord[]): LiveVitals {
   };
 }
 
+
+function resolveSummaryVitals(payload: unknown): LiveVitals | null {
+  if (!payload || typeof payload !== 'object') return null;
+
+  const root = payload as Record<string, any>;
+  if (root.ok === false) return null;
+
+  const bpNow = root.bpNow;
+  const bpFromObject =
+    bpNow && typeof bpNow === 'object'
+      ? `${bpNow.s ?? bpNow.sys ?? bpNow.systolic ?? '—'}/${bpNow.d ?? bpNow.dia ?? bpNow.diastolic ?? '—'}`
+      : null;
+
+  const bp =
+    typeof root.bp === 'string' && root.bp.trim()
+      ? root.bp.trim()
+      : typeof bpNow === 'string' && bpNow.trim()
+        ? bpNow.trim()
+        : bpFromObject && bpFromObject.includes('/')
+          ? bpFromObject
+          : '—';
+
+  const hr = toNumber(root.hr, root.hrNow, root.heartRate, root.pulse) ?? 0;
+  const spo2 = toNumber(root.spo2, root.spo2Now, root.oxygenSaturation) ?? 0;
+  const temp = toNumber(root.temp, root.tempNow, root.temperature, root.temperatureC) ?? 0;
+
+  const hr24 = Array.isArray(root.hr24) ? root.hr24 : [];
+  const spo224 = Array.isArray(root.spo224) ? root.spo224 : [];
+  const temp24 = Array.isArray(root.temp24) ? root.temp24 : [];
+  const bp24 = Array.isArray(root.bp24) ? root.bp24 : [];
+
+  const maxLen = Math.max(hr24.length, spo224.length, temp24.length, bp24.length);
+  const windowLen = Math.min(maxLen, 7);
+  const startIndex = Math.max(0, maxLen - windowLen);
+
+  const bpSeries = Array.from({ length: windowLen }).reduce<BpPoint[]>((acc, _, idx) => {
+  const sourceIndex = startIndex + idx;
+  const bpValue = bp24[sourceIndex];
+
+  const sys =
+    typeof bpValue === 'number'
+      ? bpValue
+      : toNumber(
+          (bpValue as any)?.sys,
+          (bpValue as any)?.s,
+          (bpValue as any)?.systolic,
+        );
+
+  const dia =
+    bpValue && typeof bpValue === 'object'
+      ? toNumber(
+          (bpValue as any)?.dia,
+          (bpValue as any)?.d,
+          (bpValue as any)?.diastolic,
+        )
+      : null;
+
+  if (typeof sys !== 'number') return acc;
+
+  acc.push({
+    ts: new Date(Date.now() - (windowLen - idx - 1) * 24 * 60 * 60 * 1000).toISOString(),
+    sys: Math.round(sys),
+    dia: Math.round(dia ?? 80),
+  });
+
+  return acc;
+}, []);
+
+  if (hr <= 0 && spo2 <= 0 && temp <= 0 && bp === '—' && bpSeries.length === 0) {
+    return null;
+  }
+
+  return {
+    hr: Math.round(hr),
+    spo2: Math.round(spo2),
+    temp: Number(temp.toFixed(1)),
+    bp,
+    bpSeries,
+    lastSync: root.lastSyncHuman || formatRelativeSync(root.lastSync || root.generatedAtISO || root.updatedAt),
+  };
+}
+
 function getUIMood(vitals: LiveVitals, alerts: InsightAlert[], score: number): UIMood {
   const systolic = parseInt(String(vitals.bp ?? '0/0').split('/')[0] ?? '0', 10);
 
@@ -758,7 +848,7 @@ function OrbitalRing({ score, mood }: { score: number; mood: UIMood }) {
         : 'border-emerald-200 bg-emerald-50 text-emerald-700';
 
   return (
-    <div className="relative flex h-[260px] w-[260px] items-center justify-center sm:h-[300px] sm:w-[300px] xl:h-[320px] xl:w-[320px]">
+    <div className="relative flex h-[230px] w-[230px] items-center justify-center sm:h-[260px] sm:w-[260px] xl:h-[275px] xl:w-[275px]">
       <motion.div
         className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-br from-cyan-400/16 via-indigo-400/12 to-fuchsia-400/16 blur-3xl"
         animate={{ scale: [1, 1.035, 1], opacity: [0.55, 0.85, 0.55] }}
@@ -1044,15 +1134,28 @@ export default function HomePage() {
 
     async function loadVitals() {
       try {
-        const res = await fetch(
-          `/api/v1/patients/${encodedPatientId}/vitals`,
-          { cache: 'no-store' },
-        );
-        const data = await res.json().catch(() => ({ items: [] }));
+        const [recordsRes, summaryRes] = await Promise.allSettled([
+          fetch(`/api/v1/patients/${encodedPatientId}/vitals`, { cache: 'no-store' }),
+          fetch('/api/vitals/summary', { cache: 'no-store' }),
+        ]);
+
         if (cancelled) return;
 
-        const items = Array.isArray(data?.items) ? (data.items as RawVitalRecord[]) : [];
-        setLiveVitals(resolveVitals(items));
+        const recordsData =
+          recordsRes.status === 'fulfilled'
+            ? await recordsRes.value.json().catch(() => ({ items: [] }))
+            : { items: [] };
+
+        const summaryData =
+          summaryRes.status === 'fulfilled'
+            ? await summaryRes.value.json().catch(() => null)
+            : null;
+
+        const items = Array.isArray(recordsData?.items) ? (recordsData.items as RawVitalRecord[]) : [];
+        const recordVitals = resolveVitals(items);
+        const summaryVitals = resolveSummaryVitals(summaryData);
+
+        setLiveVitals(hasLiveVitalData(recordVitals) ? recordVitals : summaryVitals ?? recordVitals);
       } catch {
         if (!cancelled) {
           setLiveVitals(EMPTY_VITALS);
@@ -1394,28 +1497,26 @@ export default function HomePage() {
       </div>
 
       <div className="relative z-0 mx-auto flex w-full max-w-[1600px] flex-col gap-5 md:gap-6">
-        <RecentActivityStrip patientId={profile?.patientId ?? null} />
-
         <motion.section {...sectionMotion} className={cn(SURFACE, 'bg-gradient-to-br p-5 md:p-8 xl:p-10', moodTheme.heroTint)}>
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.46),rgba(255,255,255,0.10))]" />
           <div className={cn('pointer-events-none absolute inset-0 opacity-70', moodTheme.heroRingGlow)} />
           <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-cyan-300/8 blur-3xl" />
           <div className="pointer-events-none absolute bottom-0 left-[20%] h-56 w-56 rounded-full bg-indigo-400/8 blur-3xl" />
 
-          <div className="relative z-10 grid gap-8 xl:grid-cols-[1.12fr_0.88fr] xl:items-center">
+          <div className="relative z-10 grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px] xl:items-center">
             <div className="relative z-10">
               <div className={cn('inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-sm', moodTheme.badge)}>
                 Ambulant+ Daily Health Brief
               </div>
 
-              <div className="mt-5 max-w-3xl">
+              <div className="mt-5 max-w-2xl">
                 <p className="text-sm font-medium uppercase tracking-[0.28em] text-slate-400">
                   {getDayPart()}
                 </p>
-                <h1 className="mt-3 max-w-[720px] text-[2.2rem] font-semibold leading-[0.98] tracking-[-0.04em] text-slate-900 sm:text-[2.75rem] md:text-[3.05rem] xl:text-[3.7rem]">
+                <h1 className="mt-3 max-w-[620px] text-[1.9rem] font-semibold leading-[1.05] tracking-[-0.035em] text-slate-900 sm:text-[2.25rem] md:text-[2.55rem] xl:text-[2.85rem]">
                   {patientName}, your care journey feels calm, connected, and under control today.
                 </h1>
-                <p className="mt-5 max-w-2xl text-[15px] leading-7 text-slate-500 md:text-lg">
+                <p className="mt-5 max-w-2xl text-[15px] leading-7 text-slate-500 md:text-base">
                   {heroNarrative}
                 </p>
               </div>
@@ -1511,7 +1612,7 @@ export default function HomePage() {
             </div>
 
             <div className="relative z-10 flex items-center justify-center xl:justify-end">
-              <div className="relative w-full max-w-[440px] rounded-[40px] border border-white/72 bg-white/74 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-6">
+              <div className="relative w-full max-w-[420px] rounded-[40px] border border-white/72 bg-white/74 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-6">
                 <div className="pointer-events-none absolute inset-0 rounded-[40px] bg-gradient-to-b from-transparent to-slate-100/35" />
                 <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent" />
 
@@ -1569,8 +1670,12 @@ export default function HomePage() {
           </div>
         </motion.section>
 
+        <motion.section {...sectionMotion} transition={{ duration: 0.42, delay: 0.03 }} className="relative z-10">
+          <RecentActivityStrip patientId={profile?.patientId ?? null} />
+        </motion.section>
+
         <motion.section {...sectionMotion} transition={{ duration: 0.42, delay: 0.05 }}>
-          <div className="relative z-10 grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className="relative z-10 grid gap-4">
             <div className={cn(SURFACE, 'p-5 md:p-6')}>
               <div className="relative z-10">
                 <div className="mb-5 flex items-center justify-between gap-4">
@@ -1587,7 +1692,7 @@ export default function HomePage() {
                   </Link>
                 </div>
 
-                <div className="grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
+                <div className="grid gap-4">
                   <motion.div
                     {...hoverLift}
                     className={cn(
@@ -1599,7 +1704,7 @@ export default function HomePage() {
                           : 'border-emerald-100 from-emerald-50/70 to-white',
                     )}
                   >
-                    <div className="grid min-h-[250px] gap-6 md:grid-cols-[minmax(0,1fr)_170px] md:items-center">
+                    <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_170px] md:items-center">
                       <div className="min-w-0">
                         <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                           <HeartPulse className="h-3.5 w-3.5" />
@@ -1631,7 +1736,7 @@ export default function HomePage() {
                     </div>
                   </motion.div>
 
-                  <div className="grid gap-4">
+                  <div className="grid gap-4 md:grid-cols-2">
                     {[
                       {
                         icon: TrendingUp,
@@ -2041,16 +2146,7 @@ export default function HomePage() {
                 <div className="mb-3 text-sm font-medium text-slate-900">
                   Allergies and risk notes
                 </div>
-                {allergies.length > 0 ? (
-                  <AllergiesBlockWrapper allergies={allergies} />
-                ) : (
-                  <EmptyState
-                    icon={Shield}
-                    title="Allergy profile ready"
-                    body="Add confirmed allergies and intolerance notes so every consultation starts with a safer clinical context."
-                    tone="indigo"
-                  />
-                )}
+                <AllergiesBlockWrapper allergies={allergies} />
               </div>
 
               <div className="rounded-[24px] border border-white/72 bg-white/82 p-4">
