@@ -146,6 +146,29 @@ function CollapsedHint({ text }: { text: string }) {
   );
 }
 
+function BrandMark({ collapsed }: { collapsed: boolean }) {
+  return (
+    <span
+      className={cx(
+        'relative inline-flex shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-cyan-100/90 bg-white shadow-[0_10px_28px_rgba(8,145,178,0.12)] ring-1 ring-white/80',
+        collapsed ? 'h-11 w-11' : 'h-12 w-12',
+      )}
+    >
+      <span className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_20%,rgba(34,211,238,0.18),transparent_45%),linear-gradient(135deg,rgba(255,255,255,0.95),rgba(240,253,250,0.72))]" />
+      <img
+        src="/brand/ambulant-mark@2x.png"
+        alt=""
+        aria-hidden="true"
+        className={cx(
+          'relative z-10 select-none object-contain opacity-100 brightness-110 contrast-125 saturate-150',
+          collapsed ? 'h-8 w-8' : 'h-9 w-9',
+        )}
+        draggable={false}
+      />
+    </span>
+  );
+}
+
 function NavRow({
   item,
   active,
@@ -178,10 +201,17 @@ function NavRow({
         <span
           className={cx(
             'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border transition',
-            active ? 'border-white/10 bg-white/10' : 'border-transparent group-hover:border-slate-200 group-hover:bg-white',
+            active
+              ? 'border-white/10 bg-white/10'
+              : 'border-transparent group-hover:border-slate-200 group-hover:bg-white',
           )}
         >
-          <Icon className={cx('h-4 w-4', active ? 'text-white' : 'text-slate-500 group-hover:text-slate-800')} />
+          <Icon
+            className={cx(
+              'h-4 w-4',
+              active ? 'text-white' : 'text-slate-500 group-hover:text-slate-800',
+            )}
+          />
         </span>
 
         {!collapsed ? (
@@ -228,6 +258,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     if (!pathname) return;
+
     for (const group of GROUPS) {
       if (group.items.some((item) => isMatch(pathname, item.href))) {
         setOpenGroups((prev) => ({ ...prev, [group.key]: true }));
@@ -235,13 +266,25 @@ export default function Sidebar() {
     }
   }, [pathname]);
 
-  const allItems = useMemo(() => [...CORE, ...GROUPS.flatMap((group) => group.items), { href: '/settings', label: 'Settings', icon: Settings }], []);
+  const allItems = useMemo(
+    () => [
+      ...CORE,
+      ...GROUPS.flatMap((group) => group.items),
+      { href: '/settings', label: 'Settings', icon: Settings },
+    ],
+    [],
+  );
 
   const searchResults = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return [];
+
     return allItems
-      .filter((item) => item.label.toLowerCase().includes(needle) || item.href.toLowerCase().includes(needle))
+      .filter(
+        (item) =>
+          item.label.toLowerCase().includes(needle) ||
+          item.href.toLowerCase().includes(needle),
+      )
       .slice(0, 9);
   }, [allItems, q]);
 
@@ -259,26 +302,49 @@ export default function Sidebar() {
 
       <div className="border-b border-slate-200/70 px-3 pb-2 pt-3">
         <div className="flex items-center justify-between gap-2">
-          <Link href="/" className="flex min-w-0 items-center gap-2">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white shadow-sm shadow-black/[0.04]">
-              <Sparkles className="h-5 w-5 text-emerald-700" />
-            </div>
+          <Link
+            href="/"
+            className={cx(
+              'group flex min-w-0 items-center rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25',
+              collapsed ? 'justify-center' : 'gap-3',
+            )}
+            aria-label="Ambulant+ home"
+          >
+            <BrandMark collapsed={collapsed} />
+
             {!collapsed ? (
-              <div className="min-w-0">
-                <div className="truncate text-sm font-black leading-tight text-slate-950">Ambulant+</div>
-                <div className="truncate text-[11px] font-semibold text-slate-500">Patient workspace</div>
-              </div>
-            ) : null}
+              <span className="min-w-0">
+                <span className="block truncate text-[15px] font-black tracking-tight text-slate-950">
+                  Ambulant<span className="text-cyan-600">+</span>
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] font-semibold leading-none text-slate-500">
+                  Patient workspace
+                </span>
+              </span>
+            ) : (
+              <CollapsedHint text="Ambulant+ home" />
+            )}
           </Link>
 
-          <button
-            type="button"
-            onClick={() => setCollapsed((value) => !value)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25"
-            aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-          >
-            {collapsed ? <ChevronRight className="h-5 w-5 text-slate-700" /> : <ChevronLeft className="h-5 w-5 text-slate-700" />}
-          </button>
+          {!collapsed ? (
+            <button
+              type="button"
+              onClick={() => setCollapsed(true)}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25"
+              aria-label="Collapse sidebar"
+            >
+              <ChevronLeft className="h-5 w-5 text-slate-700" />
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setCollapsed(false)}
+              className="absolute right-[-14px] top-4 z-20 inline-flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white shadow-sm transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25"
+              aria-label="Expand sidebar"
+            >
+              <ChevronRight className="h-4 w-4 text-slate-700" />
+            </button>
+          )}
         </div>
 
         {!collapsed ? (
@@ -319,7 +385,12 @@ export default function Sidebar() {
       <nav className="flex-1 overflow-y-auto px-2 py-3" aria-label="Patient navigation">
         <ul className="space-y-1">
           {CORE.map((item) => (
-            <NavRow key={item.href} item={item} collapsed={collapsed} active={isMatch(pathname, item.href)} />
+            <NavRow
+              key={item.href}
+              item={item}
+              collapsed={collapsed}
+              active={isMatch(pathname, item.href)}
+            />
           ))}
 
           {GROUPS.map((group) => {
@@ -330,23 +401,30 @@ export default function Sidebar() {
               <li key={group.key} className="pt-2">
                 <button
                   type="button"
-                  onClick={() => setOpenGroups((prev) => ({ ...prev, [group.key]: !open }))}
+                  onClick={() =>
+                    setOpenGroups((prev) => ({ ...prev, [group.key]: !open }))
+                  }
                   className="group relative flex w-full items-center gap-2 rounded-2xl px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25"
                 >
                   <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-transparent transition group-hover:border-slate-200 group-hover:bg-white">
                     <Icon className="h-4 w-4 text-slate-500 group-hover:text-slate-800" />
                   </span>
+
                   {!collapsed ? (
                     <>
-                      <span className="truncate font-black uppercase tracking-[0.08em] text-slate-500">{group.title}</span>
-                      <span className="ml-auto text-xs font-black text-slate-400">{open ? '▾' : '▸'}</span>
+                      <span className="truncate font-black uppercase tracking-[0.08em] text-slate-500">
+                        {group.title}
+                      </span>
+                      <span className="ml-auto text-xs font-black text-slate-400">
+                        {open ? '▾' : '▸'}
+                      </span>
                     </>
                   ) : (
                     <CollapsedHint text={group.title} />
                   )}
                 </button>
 
-                {(open || collapsed) ? (
+                {open || collapsed ? (
                   <ul className="mt-1 space-y-1">
                     {group.items.map((item) => (
                       <NavRow
@@ -367,7 +445,12 @@ export default function Sidebar() {
 
       <div className="border-t border-slate-200/70 p-2">
         <ul className="space-y-1">
-          <NavRow item={{ href: '/settings', label: 'Settings', icon: Settings }} collapsed={collapsed} active={isMatch(pathname, '/settings')} />
+          <NavRow
+            item={{ href: '/settings', label: 'Settings', icon: Settings }}
+            collapsed={collapsed}
+            active={isMatch(pathname, '/settings')}
+          />
+
           <li>
             <Link
               href="/auth/logout"
@@ -376,7 +459,11 @@ export default function Sidebar() {
               <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-transparent transition group-hover:border-rose-200 group-hover:bg-white">
                 <LogOut className="h-4 w-4 text-slate-500 group-hover:text-rose-700" />
               </span>
-              {!collapsed ? <span className="font-extrabold">Log out</span> : <CollapsedHint text="Log out" />}
+              {!collapsed ? (
+                <span className="font-extrabold">Log out</span>
+              ) : (
+                <CollapsedHint text="Log out" />
+              )}
             </Link>
           </li>
         </ul>

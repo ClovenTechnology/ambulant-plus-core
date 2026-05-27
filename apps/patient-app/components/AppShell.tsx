@@ -16,7 +16,7 @@ function isUnder(pathname: string, base: string) {
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname() || '/';
 
-  // Fullscreen experiences: no sidebar, no topbar.
+  // Fullscreen/public experiences: no sidebar, no topbar.
   const hideAllChrome =
     isUnder(pathname, '/app/auth') ||
     isUnder(pathname, '/auth') ||
@@ -34,13 +34,19 @@ export default function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="min-h-screen bg-slate-50">
       {showTopbar ? (
-        <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/70 backdrop-blur-xl">
+        <header className="sticky top-0 z-40 border-b border-slate-200/70 bg-white/76 backdrop-blur-xl">
           <div className="mx-auto flex h-14 max-w-7xl items-center gap-3 px-4">
             <Link
               href="/"
-              className="font-black tracking-tight text-slate-950 hover:opacity-90"
+              className="inline-flex min-w-0 items-center rounded-xl focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25"
+              aria-label="Ambulant+ home"
             >
-              Ambulant<span className="text-emerald-600">+</span>
+              <img
+                src="/brand/ambulant-logo-full@2x.png"
+                alt="Ambulant+"
+                className="h-7 w-auto select-none object-contain opacity-100"
+                draggable={false}
+              />
             </Link>
 
             <div className="ml-auto flex items-center gap-2">

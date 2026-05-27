@@ -898,7 +898,7 @@ function GlassPanel({
 }) {
   return (
     <div className={cn(SURFACE, 'p-5 md:p-6', className)}>
-      <div className="relative z-10">
+      <div className="relative z-10 min-w-0">
         <div className="mb-4 flex items-start justify-between gap-4">
           <div>
             {eyebrow ? (
@@ -1460,7 +1460,7 @@ export default function HomePage() {
   );
 
   const aiGuidancePanel = (
-    <div className="rounded-[24px] border border-indigo-100/80 bg-gradient-to-br from-indigo-50/70 via-white to-cyan-50/50 p-4 shadow-sm">
+    <div className="h-full rounded-[24px] border border-indigo-100/80 bg-gradient-to-br from-indigo-50/70 via-white to-cyan-50/50 p-4 shadow-sm">
       <div className="flex items-start gap-3">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-indigo-100 bg-white text-indigo-700 shadow-sm">
           <BrainCircuit className="h-4 w-4" />
@@ -1497,26 +1497,30 @@ export default function HomePage() {
       </div>
 
       <div className="relative z-0 mx-auto flex w-full max-w-[1600px] flex-col gap-5 md:gap-6">
+        <motion.section {...sectionMotion} transition={{ duration: 0.42, delay: 0.02 }} className="relative z-10">
+          <RecentActivityStrip patientId={profile?.patientId ?? null} />
+        </motion.section>
+
         <motion.section {...sectionMotion} className={cn(SURFACE, 'bg-gradient-to-br p-5 md:p-8 xl:p-10', moodTheme.heroTint)}>
           <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.46),rgba(255,255,255,0.10))]" />
           <div className={cn('pointer-events-none absolute inset-0 opacity-70', moodTheme.heroRingGlow)} />
           <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-cyan-300/8 blur-3xl" />
           <div className="pointer-events-none absolute bottom-0 left-[20%] h-56 w-56 rounded-full bg-indigo-400/8 blur-3xl" />
 
-          <div className="relative z-10 grid gap-6 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_420px] lg:items-center">
-            <div className="relative z-10">
+          <div className="relative z-10 grid gap-6 md:grid-cols-[minmax(0,1fr)_340px] lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_420px] md:items-center">
+            <div className="relative z-10 min-w-0">
               <div className={cn('inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-sm', moodTheme.badge)}>
                 Ambulant+ Daily Health Brief
               </div>
 
-              <div className="mt-5 max-w-2xl">
+              <div className="mt-5 max-w-xl">
                 <p className="text-sm font-medium uppercase tracking-[0.28em] text-slate-400">
                   {getDayPart()}
                 </p>
-                <h1 className="mt-3 max-w-[620px] text-[1.9rem] font-semibold leading-[1.05] tracking-[-0.035em] text-slate-900 sm:text-[2.25rem] md:text-[2.55rem] xl:text-[2.85rem]">
+                <h1 className="mt-3 max-w-[560px] text-[1.75rem] font-semibold leading-[1.06] tracking-[-0.035em] text-slate-900 sm:text-[2.05rem] md:text-[2.25rem] xl:text-[2.55rem]">
                   {patientName}, your care journey feels calm, connected, and under control today.
                 </h1>
-                <p className="mt-5 max-w-2xl text-[15px] leading-7 text-slate-500 md:text-base">
+                <p className="mt-4 max-w-xl text-[14px] leading-6 text-slate-500 md:text-[15px]">
                   {heroNarrative}
                 </p>
               </div>
@@ -1528,7 +1532,7 @@ export default function HomePage() {
                 <div className="text-sm text-slate-500">{moodTheme.signalBody}</div>
               </div>
 
-              <div className="mt-7 grid gap-3 sm:grid-cols-3">
+              <div className="mt-6 grid max-w-xl gap-3">
                 <motion.div
                   whileHover={{ y: -3 }}
                   transition={{ type: 'spring', stiffness: 220, damping: 18 }}
@@ -1611,8 +1615,8 @@ export default function HomePage() {
               </div>
             </div>
 
-            <div className="relative z-10 flex items-center justify-center lg:justify-end">
-              <div className="relative w-full max-w-[360px] xl:max-w-[420px] rounded-[40px] border border-white/72 bg-white/74 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-6">
+            <div className="relative z-10 flex items-center justify-center md:justify-end">
+              <div className="relative w-full max-w-[340px] lg:max-w-[360px] xl:max-w-[420px] rounded-[40px] border border-white/72 bg-white/74 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-6">
                 <div className="pointer-events-none absolute inset-0 rounded-[40px] bg-gradient-to-b from-transparent to-slate-100/35" />
                 <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent" />
 
@@ -1670,10 +1674,6 @@ export default function HomePage() {
           </div>
         </motion.section>
 
-        <motion.section {...sectionMotion} transition={{ duration: 0.42, delay: 0.03 }} className="relative z-10">
-          <RecentActivityStrip patientId={profile?.patientId ?? null} />
-        </motion.section>
-
         <motion.section {...sectionMotion} transition={{ duration: 0.42, delay: 0.05 }}>
           <div className="relative z-10 grid gap-4">
             <div className={cn(SURFACE, 'p-5 md:p-6')}>
@@ -1692,7 +1692,7 @@ export default function HomePage() {
                   </Link>
                 </div>
 
-                <div className="grid gap-4">
+                <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)] lg:items-stretch">
                   <motion.div
                     {...hoverLift}
                     className={cn(
@@ -1704,7 +1704,7 @@ export default function HomePage() {
                           : 'border-emerald-100 from-emerald-50/70 to-white',
                     )}
                   >
-                    <div className="grid gap-6 md:grid-cols-[minmax(0,1fr)_170px] md:items-center">
+                    <div className="grid h-full gap-6 md:grid-cols-[minmax(0,1fr)_170px] md:items-center">
                       <div className="min-w-0">
                         <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
                           <HeartPulse className="h-3.5 w-3.5" />
@@ -1736,7 +1736,7 @@ export default function HomePage() {
                     </div>
                   </motion.div>
 
-                  <div className="grid gap-4 md:grid-cols-2">
+                  <div className="grid gap-4">
                     {[
                       {
                         icon: TrendingUp,
@@ -1802,46 +1802,122 @@ export default function HomePage() {
                   </div>
                 </div>
 
-                <div
-                  className={cn(
-                    'rounded-[28px] border bg-gradient-to-br p-5 shadow-sm',
-                    toneClasses(priorityAction.tone),
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-medium text-slate-500">Recommended now</div>
-                      <div className="mt-2 text-2xl font-semibold text-slate-900">
-                        {priorityAction.title}
+                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.88fr)] xl:items-stretch">
+                  <div
+                    className={cn(
+                      'rounded-[28px] border bg-gradient-to-br p-5 shadow-sm',
+                      toneClasses(priorityAction.tone),
+                    )}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-medium text-slate-500">Recommended now</div>
+                        <div className="mt-2 text-2xl font-semibold text-slate-900">
+                          {priorityAction.title}
+                        </div>
+                        <div className="mt-3 max-w-lg text-sm leading-6 text-slate-600">
+                          {priorityAction.body}
+                        </div>
                       </div>
-                      <div className="mt-3 max-w-lg text-sm leading-6 text-slate-600">
-                        {priorityAction.body}
+                      <div className="rounded-2xl bg-white/88 p-3 shadow-sm">
+                        <Bell className="h-5 w-5 text-slate-900" />
                       </div>
                     </div>
-                    <div className="rounded-2xl bg-white/88 p-3 shadow-sm">
-                      <Bell className="h-5 w-5 text-slate-900" />
+
+                    <div className="mt-5 flex flex-wrap gap-3">
+                      <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
+                        <Link
+                          href={priorityAction.href}
+                          className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
+                        >
+                          Take action
+                          <ArrowRight className="h-4 w-4" />
+                        </Link>
+                      </motion.div>
+                      <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
+                        <Link
+                          href="/myCare"
+                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
+                        >
+                          Open myCare
+                          <ChevronRight className="h-4 w-4" />
+                        </Link>
+                      </motion.div>
                     </div>
                   </div>
 
-                  <div className="mt-5 flex flex-wrap gap-3">
-                    <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                      <Link
-                        href={priorityAction.href}
-                        className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
-                      >
-                        Take action
-                        <ArrowRight className="h-4 w-4" />
-                      </Link>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                      <Link
-                        href="/myCare"
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
-                      >
-                        Open myCare
-                        <ChevronRight className="h-4 w-4" />
-                      </Link>
-                    </motion.div>
+                  <div className="rounded-[28px] border border-white/72 bg-white/82 p-4 shadow-sm">
+                    <div className="mb-3 flex items-center justify-between gap-3">
+                      <div>
+                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                          InsightCore
+                        </div>
+                        <div className="mt-1 text-base font-semibold text-slate-900">Attention needed</div>
+                      </div>
+                      {alertsError ? <div className="text-xs text-rose-600">Refresh issue</div> : null}
+                    </div>
+
+                    <div className="space-y-3">
+                      {alertsLoading && alerts.length === 0 ? (
+                        <EmptyState
+                          icon={Waves}
+                          title="Refreshing care signals"
+                          body="InsightCore is checking your latest thresholds and care rules for this session."
+                          tone="cyan"
+                        />
+                      ) : alerts.length === 0 ? (
+                        <EmptyState
+                          icon={CheckCircle2}
+                          title="Care signals are clear"
+                          body="Your monitored thresholds are currently within expected ranges. Continue your routine and keep supported devices synced."
+                          tone="emerald"
+                        />
+                      ) : (
+                        alerts.map((alert) => (
+                          <motion.div
+                            key={alert.id}
+                            {...hoverLift}
+                            className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <div className="text-base font-semibold text-slate-900">
+                                    {alert.title}
+                                  </div>
+                                  <span
+                                    className={cn(
+                                      'rounded-full border px-2.5 py-1 text-[11px] font-medium',
+                                      severityChip(alert.severity),
+                                    )}
+                                  >
+                                    {severityLabel(alert.severity)}
+                                  </span>
+                                </div>
+                                <p className="mt-2 text-sm leading-6 text-slate-600">
+                                  {alert.message}
+                                </p>
+                                <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-slate-400">
+                                  <span className="inline-flex items-center gap-1.5">
+                                    <Clock3 className="h-3.5 w-3.5" />
+                                    {formatTimestamp(alert.ts)}
+                                  </span>
+                                  <span>Monitored by your care thresholds</span>
+                                </div>
+                              </div>
+                              <Link
+                                href="/insights"
+                                className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
+                              >
+                                Review
+                              </Link>
+                            </div>
+                          </motion.div>
+                        ))
+                      )}
+
+                      {alertsError ? <div className="text-sm text-rose-600">{alertsError}</div> : null}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1852,132 +1928,70 @@ export default function HomePage() {
         <motion.section
           {...sectionMotion}
           transition={{ duration: 0.42, delay: 0.1 }}
-          className="relative z-10 grid gap-4 xl:grid-cols-[1.2fr_0.8fr]"
+          className="relative z-10"
         >
-          <GlassPanel title="Attention needed" eyebrow="InsightCore">
-            <div className="space-y-3">
-              {alertsLoading && alerts.length === 0 ? (
-                <EmptyState
-                  icon={Waves}
-                  title="Refreshing care signals"
-                  body="InsightCore is checking your latest thresholds and care rules for this session."
-                  tone="cyan"
-                />
-              ) : alerts.length === 0 ? (
-                <EmptyState
-                  icon={CheckCircle2}
-                  title="Care signals are clear"
-                  body="Your monitored thresholds are currently within expected ranges. Continue your routine and keep supported devices synced."
-                  tone="emerald"
-                />
-              ) : (
-                alerts.map((alert) => (
-                  <motion.div
-                    key={alert.id}
-                    {...hoverLift}
-                    className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <div className="text-base font-semibold text-slate-900">
-                            {alert.title}
-                          </div>
-                          <span
-                            className={cn(
-                              'rounded-full border px-2.5 py-1 text-[11px] font-medium',
-                              severityChip(alert.severity),
-                            )}
-                          >
-                            {severityLabel(alert.severity)}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-sm leading-6 text-slate-600">
-                          {alert.message}
-                        </p>
-                        <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-slate-400">
-                          <span className="inline-flex items-center gap-1.5">
-                            <Clock3 className="h-3.5 w-3.5" />
-                            {formatTimestamp(alert.ts)}
-                          </span>
-                          <span>Monitored by your care thresholds</span>
-                        </div>
-                      </div>
-                      <Link
-                        href="/insights"
-                        className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-                      >
-                        Review
-                      </Link>
-                    </div>
-                  </motion.div>
-                ))
-              )}
-
-              {alertsError ? <div className="text-sm text-rose-600">{alertsError}</div> : null}
-            </div>
-          </GlassPanel>
-
           <GlassPanel title="Upcoming care" eyebrow="Continuity">
-            <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50/90 to-cyan-50/70 p-5 shadow-sm">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm font-medium text-slate-500">
-                    Scheduled consultation
+            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)] xl:items-stretch">
+              <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50/90 to-cyan-50/70 p-5 shadow-sm">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-500">
+                      Scheduled consultation
+                    </div>
+                    <div className="mt-2 text-2xl font-semibold leading-8 text-slate-900">
+                      {nextAppointment.when}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">{nextAppointment.with}</div>
                   </div>
-                  <div className="mt-2 text-2xl font-semibold leading-8 text-slate-900">
-                    {nextAppointment.when}
+                  <div className="rounded-2xl bg-white/88 p-3 shadow-sm">
+                    <CalendarDays className="h-5 w-5 text-indigo-600" />
                   </div>
-                  <div className="mt-1 text-sm text-slate-600">{nextAppointment.with}</div>
                 </div>
-                <div className="rounded-2xl bg-white/88 p-3 shadow-sm">
-                  <CalendarDays className="h-5 w-5 text-indigo-600" />
+                <div className="mt-4 text-sm leading-6 text-slate-600">
+                  {nextAppointment.status === 'Not scheduled'
+                    ? 'Choose a clinician or book a consultation when you are ready to continue your care pathway.'
+                    : 'Bring your latest symptoms, medication questions, and device readings to make this consultation even more useful.'}
+                </div>
+                <div className="mt-5 flex flex-wrap gap-3">
+                  <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
+                    <Link
+                      href="/appointments"
+                      className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
+                    >
+                      {nextAppointment.status === 'Not scheduled' ? 'Book appointment' : 'View appointment'}
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </motion.div>
+                  <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
+                    <Link
+                      href="/reports"
+                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
+                    >
+                      Open reports
+                      <ChevronRight className="h-4 w-4" />
+                    </Link>
+                  </motion.div>
                 </div>
               </div>
-              <div className="mt-4 text-sm leading-6 text-slate-600">
-                {nextAppointment.status === 'Not scheduled'
-                  ? 'Choose a clinician or book a consultation when you are ready to continue your care pathway.'
-                  : 'Bring your latest symptoms, medication questions, and device readings to make this consultation even more useful.'}
-              </div>
-              <div className="mt-5 flex flex-wrap gap-3">
-                <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                  <Link
-                    href="/appointments"
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
-                  >
-                    {nextAppointment.status === 'Not scheduled' ? 'Book appointment' : 'View appointment'}
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </motion.div>
-                <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                  <Link
-                    href="/reports"
-                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
-                  >
-                    Open reports
-                    <ChevronRight className="h-4 w-4" />
-                  </Link>
-                </motion.div>
-              </div>
-            </div>
 
-            <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <div className="rounded-2xl border border-white/72 bg-white/82 p-4">
-                <div className="text-sm font-medium text-slate-500">Connected devices</div>
-                <div className="mt-2 text-xl font-semibold text-slate-900">{deviceCount} active</div>
-                <div className="mt-1 text-sm text-slate-600">
-                  Your latest data is flowing into Ambulant+ and shaping insights in near
-                  real time.
+              <div className="grid gap-3">
+                <div className="rounded-2xl border border-white/72 bg-white/82 p-4">
+                  <div className="text-sm font-medium text-slate-500">Connected devices</div>
+                  <div className="mt-2 text-xl font-semibold text-slate-900">{deviceCount} active</div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Your latest data is flowing into Ambulant+ and shaping insights in near
+                    real time.
+                  </div>
                 </div>
-              </div>
-              <div className="rounded-2xl border border-white/72 bg-white/82 p-4">
-                <div className="text-sm font-medium text-slate-500">Care readiness</div>
-                <div className="mt-2 text-xl font-semibold text-slate-900">
-                  {nextAppointment.status === 'Not scheduled' ? 'Ready to plan' : 'Prepared'}
-                </div>
-                <div className="mt-1 text-sm text-slate-600">
-                  Appointments, reports, and medication history are organised for your next
-                  step.
+                <div className="rounded-2xl border border-white/72 bg-white/82 p-4">
+                  <div className="text-sm font-medium text-slate-500">Care readiness</div>
+                  <div className="mt-2 text-xl font-semibold text-slate-900">
+                    {nextAppointment.status === 'Not scheduled' ? 'Ready to plan' : 'Prepared'}
+                  </div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    Appointments, reports, and medication history are organised for your next
+                    step.
+                  </div>
                 </div>
               </div>
             </div>
@@ -1987,7 +2001,7 @@ export default function HomePage() {
         <motion.section
           {...sectionMotion}
           transition={{ duration: 0.42, delay: 0.15 }}
-          className="relative z-10 grid gap-4 2xl:grid-cols-[0.98fr_1.06fr_0.96fr] items-start"
+          className="relative z-10 grid gap-4 2xl:grid-cols-[1fr_1fr] items-start"
         >
           <GlassPanel
             title="Today’s vitals"
@@ -2002,7 +2016,7 @@ export default function HomePage() {
               </Link>
             }
           >
-            <div className="space-y-4">
+            <div className="grid gap-4">
               {hasLiveVitalData(liveVitals) ? (
                 <>
                   <div className="grid gap-4 sm:grid-cols-3">
@@ -2073,7 +2087,6 @@ export default function HomePage() {
               )}
 
               {vitalsSummaryPanel}
-
               {aiGuidancePanel}
             </div>
           </GlassPanel>
@@ -2092,9 +2105,9 @@ export default function HomePage() {
             }
           >
             <div className="grid gap-4">
-              <div className={cn('rounded-[28px] border bg-gradient-to-br p-4', uiMood === 'alert' ? 'border-rose-100 from-rose-50/55 to-white' : uiMood === 'watchful' ? 'border-amber-100 from-amber-50/55 to-white' : 'border-emerald-100 from-emerald-50/75 to-white')}>
+              <div className={cn('rounded-[28px] border bg-gradient-to-br p-5', uiMood === 'alert' ? 'border-rose-100 from-rose-50/55 to-white' : uiMood === 'watchful' ? 'border-amber-100 from-amber-50/55 to-white' : 'border-emerald-100 from-emerald-50/75 to-white')}>
                 <div className="text-sm font-medium text-slate-500">Adherence profile</div>
-                <div className="mt-3 flex items-center justify-center">
+                <div className="mt-4 flex items-center justify-center">
                   <MeterDonut
                     value={adherencePct}
                     max={100}
@@ -2103,45 +2116,45 @@ export default function HomePage() {
                     unit="%"
                   />
                 </div>
-                <div className="mt-3 text-sm leading-6 text-slate-600">
+                <div className="mt-4 text-sm leading-6 text-slate-600">
                   Staying on schedule is one of the fastest ways to keep your progress
                   steady and reduce avoidable escalations.
                 </div>
-                <div className="mt-4 rounded-2xl border border-white/72 bg-white/84 p-3">
-                  <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                    Trend
-                  </div>
-                  {hasAdherenceHistory ? (
-                    <div className="mt-3 space-y-2">
-                      {adherenceHistory.slice(-4).map((point) => (
-                        <div key={`${point.label}-${point.value}`} className="flex items-center justify-between gap-3 text-sm">
-                          <span className="text-slate-500">{point.label}</span>
-                          <span className="font-semibold text-slate-900">{point.value}%</span>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm leading-6 text-slate-600">
-                      Adherence trend will appear once enough medication history is available.
-                    </p>
-                  )}
-                </div>
               </div>
 
-              <div className="rounded-[28px] border border-white/72 bg-white/82 p-4">
+              <div className="rounded-[28px] border border-white/72 bg-white/82 p-5">
                 <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-900">
                   <Syringe className="h-4 w-4 text-emerald-600" />
                   Today’s medication schedule
                 </div>
 
                 <PillRemindersWrapper pills={todaysPills} />
+              </div>
 
+              <div className="rounded-[28px] border border-white/72 bg-white/84 p-5">
+                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
+                  Trend
+                </div>
+                {hasAdherenceHistory ? (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {adherenceHistory.slice(-4).map((point) => (
+                      <div key={`${point.label}-${point.value}`} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 px-4 py-3 text-sm">
+                        <span className="text-slate-500">{point.label}</span>
+                        <span className="font-semibold text-slate-900">{point.value}%</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-3 text-sm leading-6 text-slate-600">
+                    Adherence trend will appear once enough medication history is available.
+                  </p>
+                )}
               </div>
             </div>
           </GlassPanel>
 
-          <GlassPanel title="Longitudinal care" eyebrow="History & safety">
-            <div className="space-y-4">
+          <GlassPanel title="Longitudinal care" eyebrow="History & safety" className="2xl:col-span-2">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
               <div className="rounded-[24px] border border-white/72 bg-white/82 p-4">
                 <div className="mb-3 text-sm font-medium text-slate-900">
                   Allergies and risk notes
@@ -2164,145 +2177,150 @@ export default function HomePage() {
           transition={{ duration: 0.42, delay: 0.2 }}
           className="relative z-10"
         >
-          <div className="grid gap-4 xl:grid-cols-[1fr_0.9fr]">
-            <GlassPanel title="Recent encounters" eyebrow="Care continuity">
-              {recentCases.length === 0 ? (
-                <EmptyState
-                  icon={Activity}
-                  title="Encounter timeline ready"
-                  body="Completed consultations will appear here with timing, status, and follow-up direction as your care history grows."
-                  tone="indigo"
-                />
-              ) : (
-                <div className="space-y-3">
-                  {recentCases.map((item, index) => (
-                    <motion.div
-                      key={item.id ?? index}
-                      {...hoverLift}
-                      className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="text-base font-semibold text-slate-900">
-                            {item.title ?? `Encounter ${item.id ?? index + 1}`}
-                          </div>
-                          <div className="mt-2 text-sm text-slate-500">
-                            Updated {formatTimestamp(item.updatedAt)}
-                          </div>
-                          {item.latestEncounter?.start ? (
-                            <div className="mt-2 text-sm text-slate-600">
-                              Most recent interaction:{' '}
-                              {formatTimestamp(item.latestEncounter.start)}
+          <GlassPanel title="Connected care continuity" eyebrow="Care continuity & people around you">
+            <div className="grid gap-4">
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.92fr)] xl:items-start">
+                <div className="rounded-[28px] border border-white/72 bg-white/82 p-4">
+                <div className="mb-3 text-sm font-semibold text-slate-900">Recent encounters</div>
+                {recentCases.length === 0 ? (
+                  <EmptyState
+                    icon={Activity}
+                    title="Encounter timeline ready"
+                    body="Completed consultations will appear here with timing, status, and follow-up direction as your care history grows."
+                    tone="indigo"
+                  />
+                ) : (
+                  <div className="space-y-3">
+                    {recentCases.map((item, index) => (
+                      <motion.div
+                        key={item.id ?? index}
+                        {...hoverLift}
+                        className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
+                      >
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <div className="text-base font-semibold text-slate-900">
+                              {item.title ?? `Encounter ${item.id ?? index + 1}`}
                             </div>
-                          ) : null}
+                            <div className="mt-2 text-sm text-slate-500">
+                              Updated {formatTimestamp(item.updatedAt)}
+                            </div>
+                            {item.latestEncounter?.start ? (
+                              <div className="mt-2 text-sm text-slate-600">
+                                Most recent interaction:{' '}
+                                {formatTimestamp(item.latestEncounter.start)}
+                              </div>
+                            ) : null}
+                          </div>
+                          <span
+                            className={cn(
+                              'rounded-full px-3 py-1 text-xs font-medium',
+                              item.status === 'Open'
+                                ? 'bg-emerald-100 text-emerald-700'
+                                : item.status === 'Referred'
+                                  ? 'bg-amber-100 text-amber-700'
+                                  : 'bg-slate-100 text-slate-700',
+                            )}
+                          >
+                            {item.status ?? 'Updated'}
+                          </span>
                         </div>
-                        <span
-                          className={cn(
-                            'rounded-full px-3 py-1 text-xs font-medium',
-                            item.status === 'Open'
-                              ? 'bg-emerald-100 text-emerald-700'
-                              : item.status === 'Referred'
-                                ? 'bg-amber-100 text-amber-700'
-                                : 'bg-slate-100 text-slate-700',
-                          )}
-                        >
-                          {item.status ?? 'Updated'}
-                        </span>
-                      </div>
-                      <div className="mt-4">
+                        <div className="mt-4">
+                          <Link
+                            href="/encounters"
+                            className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600"
+                          >
+                            Open encounter details
+                            <ArrowRight className="h-4 w-4" />
+                          </Link>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+                <div className="rounded-[28px] border border-cyan-100 bg-gradient-to-br from-cyan-50/70 to-white p-4">
+                  <div className="mb-3 text-sm font-semibold text-slate-900">Your care network</div>
+                  {recentClinicians.length === 0 ? (
+                    <EmptyState
+                      icon={Stethoscope}
+                      title="Care network ready"
+                      body="Linked clinicians will appear here once your care relationships are connected and active."
+                      tone="cyan"
+                      action={
                         <Link
-                          href="/encounters"
-                          className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600"
+                          href="/find-doctor"
+                          className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
                         >
-                          Open encounter details
+                          Find a clinician
                           <ArrowRight className="h-4 w-4" />
                         </Link>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-            </GlassPanel>
-
-            <GlassPanel title="Your care network" eyebrow="People around you">
-              {recentClinicians.length === 0 ? (
-                <EmptyState
-                  icon={Stethoscope}
-                  title="Care network ready"
-                  body="Linked clinicians will appear here once your care relationships are connected and active."
-                  tone="cyan"
-                  action={
-                    <Link
-                      href="/find-doctor"
-                      className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
-                    >
-                      Find a clinician
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  }
-                />
-              ) : (
-                <div className="grid gap-3">
-                  {recentClinicians.map((clinician, index) => (
-                    <motion.div
-                      key={`${clinician.name}-${index}`}
-                      {...hoverLift}
-                      className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div>
-                          <div className="text-base font-semibold text-slate-900">
-                            {clinician.name}
+                      }
+                    />
+                  ) : (
+                    <div className="grid gap-3">
+                      {recentClinicians.map((clinician, index) => (
+                        <motion.div
+                          key={`${clinician.name}-${index}`}
+                          {...hoverLift}
+                          className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
+                        >
+                          <div className="flex items-start justify-between gap-4">
+                            <div>
+                              <div className="text-base font-semibold text-slate-900">
+                                {clinician.name}
+                              </div>
+                              <div className="mt-1 text-sm text-slate-500">
+                                {clinician.specialty}
+                              </div>
+                              <div className="mt-2 text-sm text-slate-600">
+                                {clinician.location}
+                              </div>
+                            </div>
+                            <div className="rounded-2xl bg-slate-100 p-3">
+                              <Activity className="h-5 w-5 text-slate-700" />
+                            </div>
                           </div>
-                          <div className="mt-1 text-sm text-slate-500">
-                            {clinician.specialty}
-                          </div>
-                          <div className="mt-2 text-sm text-slate-600">
-                            {clinician.location}
-                          </div>
-                        </div>
-                        <div className="rounded-2xl bg-slate-100 p-3">
-                          <Activity className="h-5 w-5 text-slate-700" />
-                        </div>
-                      </div>
-                    </motion.div>
-                  ))}
-                </div>
-              )}
-
-              <div className="mt-4 rounded-[24px] border border-cyan-100 bg-cyan-50/60 p-4">
-                <div className="text-sm font-medium text-slate-900">
-                  Care is easier when everything is connected
-                </div>
-                <div className="mt-2 text-sm leading-6 text-slate-600">
-                  Ambulant+ keeps your vitals, appointments, reports, alerts, and clinicians
-                  in one place so every next action feels clearer.
-                </div>
-                <div className="mt-4 flex flex-wrap gap-3">
-                  <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                    <Link
-                      href="/find-doctor"
-                      className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
-                    >
-                      Find care
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </motion.div>
-                  <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                    <Link
-                      href="/myCare/devices"
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
-                    >
-                      Manage devices
-                      <ChevronRight className="h-4 w-4" />
-                    </Link>
-                  </motion.div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
-            </GlassPanel>
-          </div>
-        </motion.section>
 
+              <div className="rounded-[28px] border border-cyan-100 bg-cyan-50/60 p-5">
+                  <div className="text-sm font-medium text-slate-900">
+                    Care is easier when everything is connected
+                  </div>
+                  <div className="mt-2 text-sm leading-6 text-slate-600">
+                    Ambulant+ keeps your vitals, appointments, reports, alerts, and clinicians
+                    in one place so every next action feels clearer.
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
+                      <Link
+                        href="/find-doctor"
+                        className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
+                      >
+                        Find care
+                        <ArrowRight className="h-4 w-4" />
+                      </Link>
+                    </motion.div>
+                    <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
+                      <Link
+                        href="/myCare/devices"
+                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
+                      >
+                        Manage devices
+                        <ChevronRight className="h-4 w-4" />
+                      </Link>
+                    </motion.div>
+                  </div>
+                </div>
+              </div>
+          </GlassPanel>
+        </motion.section>
         <motion.section
           {...sectionMotion}
           transition={{ duration: 0.42, delay: 0.25 }}
