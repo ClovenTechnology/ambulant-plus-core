@@ -1,14 +1,7 @@
 // apps/patient-app/middleware.ts
 import { NextRequest, NextResponse } from 'next/server';
 
-const SESSION_COOKIE_NAMES = [
-  'ambulant_session',
-  '__Host-ambulant_session',
-  'ambulant.session',
-  'auth_session',
-  'session',
-  'token',
-];
+const SESSION_COOKIE_NAME = 'ambulant_session';
 
 const PUBLIC_PATHS = new Set([
   '/favicon.ico',
@@ -23,7 +16,7 @@ const PUBLIC_PREFIXES = [
   '/auth',
   '/privacy',
   '/terms',
-  '/api',
+  '/api/auth',
   '/_next',
   '/brand',
   '/assets',
@@ -62,18 +55,24 @@ function sessionLooksActive(token: string) {
 
   const parts = raw.split('.');
 
-  if (parts.length !== 3) {
-    // Keep this tolerant so future opaque session-cookie providers do not
-    // accidentally lock authenticated users out.
-    return raw.length > 16;
-  }
+  // Patient app login issues a signed JWT. Do not accept opaque fallback cookies.
+  if (parts.length !== 3) return false;
 
   try {
-    const payload = JSON.parse(base64UrlDecode(parts[1])) as { exp?: unknown };
+    const payload = JSON.parse(base64UrlDecode(parts[1])) as {
+      exp?: unknown;
+      sub?: unknown;
+      uid?: unknown;
+      actorType?: unknown;
+    };
 
-    if (typeof payload.exp !== 'number') {
-      return true;
+    if (!payload.sub && !payload.uid) return false;
+
+    if (typeof payload.actorType === 'string' && payload.actorType !== 'PATIENT') {
+      return false;
     }
+
+    if (typeof payload.exp !== 'number') return false;
 
     return payload.exp > Math.floor(Date.now() / 1000);
   } catch {
@@ -81,15 +80,9 @@ function sessionLooksActive(token: string) {
   }
 }
 
-function readSession(req: NextRequest) {
-  for (const name of SESSION_COOKIE_NAMES) {
-    const value = req.cookies.get(name)?.value;
-    if (value && sessionLooksActive(value)) {
-      return value;
-    }
-  }
-
-  return '';
+function hasActivePatientSession(req: NextRequest) {
+  const token = req.cookies.get(SESSION_COOKIE_NAME)?.value;
+  return Boolean(token && sessionLooksActive(token));
 }
 
 export function middleware(req: NextRequest) {
@@ -99,9 +92,7 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const session = readSession(req);
-
-  if (session) {
+  if (hasActivePatientSession(req)) {
     return NextResponse.next();
   }
 

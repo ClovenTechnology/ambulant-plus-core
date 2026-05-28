@@ -1,10 +1,12 @@
-//apps/patient-app/app/api/auth/me/route.ts
+// apps/patient-app/app/api/auth/me/route.ts
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import crypto from 'node:crypto';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+const SESSION_COOKIE_NAME = 'ambulant_session';
 
 function json(status: number, body: any) {
   return NextResponse.json(body, {
@@ -28,7 +30,7 @@ function safeJsonParse(buf: Buffer) {
 }
 
 /**
- * Verify HS256 JWT (minimal, no deps)
+ * Verify HS256 JWT issued by the patient-app login route.
  * Returns payload if valid and not expired; otherwise null.
  */
 function verifyJwtHs256(token: string, secret: string): any | null {
@@ -49,7 +51,13 @@ function verifyJwtHs256(token: string, secret: string): any | null {
     if (!payload) return null;
 
     const now = Math.floor(Date.now() / 1000);
-    if (typeof payload.exp === 'number' && payload.exp <= now) return null;
+    if (typeof payload.exp !== 'number' || payload.exp <= now) return null;
+
+    if (!payload.sub && !payload.uid) return null;
+
+    if (typeof payload.actorType === 'string' && payload.actorType !== 'PATIENT') {
+      return null;
+    }
 
     return payload;
   } catch {
@@ -57,37 +65,24 @@ function verifyJwtHs256(token: string, secret: string): any | null {
   }
 }
 
-const COOKIE_CANDIDATES = [
-  '__Host-ambulant_session',
-  'ambulant_session',
-  'ambulant.session',
-  'auth_session',
-  'session',
-  'token',
-];
-
 export async function GET() {
   const secret = process.env.AUTH_SESSION_SECRET;
   if (!secret) return json(500, { ok: false, error: 'Missing AUTH_SESSION_SECRET.' });
 
-  const jar = cookies();
+  const token = cookies().get(SESSION_COOKIE_NAME)?.value;
 
-  let token = '';
-  for (const name of COOKIE_CANDIDATES) {
-    const v = jar.get(name)?.value;
-    if (v) {
-      token = v;
-      break;
-    }
+  if (!token) {
+    return json(401, { ok: false, error: 'Not signed in.' });
   }
 
-  if (!token) return json(401, { ok: false, error: 'Not signed in.' });
-
   const payload = verifyJwtHs256(token, secret);
-  if (!payload) return json(401, { ok: false, error: 'Invalid session.' });
+
+  if (!payload) {
+    return json(401, { ok: false, error: 'Invalid session.' });
+  }
 
   const userId = String(payload.sub || payload.userId || payload.uid || '');
-  const actorType = String(payload.actorType || payload.role || '');
+  const actorType = String(payload.actorType || '');
   const actorRefId = payload.actorRefId ? String(payload.actorRefId) : null;
 
   return json(200, {
