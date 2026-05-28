@@ -1,7 +1,7 @@
 export const site = {
   name: "Ambulant+",
   legalName: "Ambulant+ Contactless Medicine",
-  tagline: "Contactless medicine, connected care, and care-team intelligence.",
+  tagline: "The operating layer for contactless medicine.",
   url: process.env.NEXT_PUBLIC_SITE_URL || "https://ambulantplus.co.za",
   supportEmail: process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@ambulantplus.co.za",
   salesEmail: process.env.NEXT_PUBLIC_SALES_EMAIL || "hello@ambulantplus.co.za",
@@ -14,4 +14,4 @@ export const site = {
 };
 
 export const complianceNotice =
-  "Ambulant+ is designed to support privacy, security and clinical-governance workflows. Regulatory status depends on jurisdiction, device, module, intended use and formal approvals. Do not claim approval, certification or clearance unless verified by official documentation.";
+  "Ambulant+ is designed to support privacy, security, clinical-governance and operational-control workflows. Regulatory status depends on jurisdiction, device, module, intended use, operating entity and formal approvals. Do not claim approval, certification or clearance unless verified by official documentation.";

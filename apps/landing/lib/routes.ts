@@ -14,14 +14,14 @@ import {
 } from "lucide-react";
 
 export const navLinks = [
+  { label: "Platform", href: "/platform" },
   { label: "Patients", href: "/patients" },
   { label: "Clinicians", href: "/clinicians" },
-  { label: "CarePort", href: "/careport" },
   { label: "MedReach", href: "/medreach" },
-  { label: "Clients", href: "/clients" },
-  { label: "Devices", href: "/devices" },
-  { label: "Security", href: "/security" },
-  { label: "FAQ", href: "/faq" },
+  { label: "CarePort", href: "/careport" },
+  { label: "InsightCore", href: "/insightcore" },
+  { label: "Partnerships", href: "/partnerships" },
+  { label: "Contact", href: "/contact" },
 ];
 
 export const productRoutes = [
@@ -30,50 +30,88 @@ export const productRoutes = [
     href: "/patients",
     externalKey: "patientAppUrl",
     icon: UserRound,
-    summary: "A connected personal health command centre for vitals, medication, appointments and longitudinal care."
+    summary:
+      "A protected patient workspace for vitals, appointments, medication, reports, care-network actions and connected-device pathways.",
   },
   {
     title: "Clinician App",
     href: "/clinicians",
     externalKey: "clinicianAppUrl",
     icon: Stethoscope,
-    summary: "Remote clinical workflow, patient records, device-supported virtual consultations and care-team coordination."
-  },
-  {
-    title: "CarePort",
-    href: "/careport",
-    externalKey: "careportUrl",
-    icon: Truck,
-    summary: "Pharmacy and delivery-rider coordination for medicine fulfilment, dispatch, proof of delivery and patient handover."
+    summary:
+      "A governed clinical workspace for virtual consultation, connected-device review, care documentation, follow-up and escalation.",
   },
   {
     title: "MedReach",
     href: "/medreach",
     externalKey: "medreachUrl",
     icon: HeartPulse,
-    summary: "Eligibility, access and care-programme operations for outreach, payer workflows and population-health programmes."
+    summary:
+      "Diagnostics operations for home phlebotomy, specimen collection, laboratory coordination and result-routing workflows.",
+  },
+  {
+    title: "CarePort",
+    href: "/careport",
+    externalKey: "careportUrl",
+    icon: Truck,
+    summary:
+      "Pharmacy fulfilment and delivery-rider coordination for medicine dispatch, handover, tracking and proof-of-delivery.",
+  },
+  {
+    title: "InsightCore",
+    href: "/insightcore",
+    externalKey: "clientAppUrl",
+    icon: Activity,
+    summary:
+      "Governance-aware intelligence for programme visibility, operational reporting, service utilisation and workflow performance.",
   },
   {
     title: "Client App",
     href: "/clients",
     externalKey: "clientAppUrl",
     icon: Building2,
-    summary: "Employer, scheme and sponsor visibility across adherence, access, benefits and care-network performance."
+    summary:
+      "Employer, scheme and sponsor visibility across programme performance, engagement trends and care-network operations.",
   },
   {
     title: "Admin Console",
     href: "/contact",
     externalKey: "adminUrl",
     icon: BriefcaseBusiness,
-    summary: "Operational governance, onboarding, configuration, quality controls and platform-level administration."
-  }
+    summary:
+      "Operational governance, onboarding, configuration, quality controls and platform-level administration.",
+  },
 ];
 
 export const trustPillars = [
-  { title: "Privacy-led by design", icon: LockKeyhole, body: "Consent-aware sharing, role-based access, audit trails and data minimisation principles." },
-  { title: "Clinical governance", icon: ClipboardCheck, body: "Built around escalation, safety disclaimers, documented workflows and care-team review." },
-  { title: "Connected-care ready", icon: Activity, body: "Designed for supported health monitors, stethoscope, otoscope and ring-based monitoring workflows." },
-  { title: "Compliance-aware", icon: BadgeCheck, body: "Clear regulatory boundaries and careful wording across POPIA, GDPR, HIPAA-aware and device-governance contexts." },
-  { title: "Secure operations", icon: ShieldCheck, body: "Deployment-ready architecture for authentication, protected routes, logs and environment-based configuration." },
-  { title: "Human support", icon: CircleHelp, body: "Clear patient education, help pathways, escalation routes and operational support." }
+  {
+    title: "Privacy-led by design",
+    icon: LockKeyhole,
+    body: "Consent-aware sharing, role-based access, data minimisation, audit trails and careful handling of health-related information.",
+  },
+  {
+    title: "Clinical governance",
+    icon: ClipboardCheck,
+    body: "Built around escalation boundaries, clinical documentation, safety disclaimers, care-team review and professional judgement.",
+  },
+  {
+    title: "Defined device ecosystem",
+    icon: Activity,
+    body: "Focused on Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows rather than unsupported wearable sprawl.",
+  },
+  {
+    title: "Compliance-aware posture",
+    icon: BadgeCheck,
+    body: "Careful regulatory language across POPIA, GDPR, HIPAA-aware, medical-device and deployment-governance contexts.",
+  },
+  {
+    title: "Secure operations",
+    icon: ShieldCheck,
+    body: "Protected workspaces, authentication boundaries, deployment separation, operational logs and audit-friendly records.",
+  },
+  {
+    title: "Human-centred support",
+    icon: CircleHelp,
+    body: "Clear education, onboarding, help pathways, escalation routes and accountable operational support across care workflows.",
+  },
 ];

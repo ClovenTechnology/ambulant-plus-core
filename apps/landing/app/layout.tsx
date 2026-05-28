@@ -7,15 +7,15 @@ import { site } from "@/lib/site";
 export const metadata: Metadata = {
   metadataBase: new URL(site.url),
   title: {
-    default: "Ambulant+ | Contactless Medicine Platform",
+    default: "Ambulant+ | Contactless Medicine Infrastructure",
     template: "%s | Ambulant+",
   },
   description:
-    "Ambulant+ is a connected-care platform for contactless medicine, patient access, clinician workflows, pharmacy fulfilment and programme intelligence.",
+    "Ambulant+ is the operating layer for contactless medicine, connecting patients, clinicians, devices, home diagnostics, pharmacy fulfilment, care logistics and programme intelligence.",
   openGraph: {
-    title: "Ambulant+ Contactless Medicine",
+    title: "Ambulant+ Contactless Medicine Infrastructure",
     description:
-      "Connected-care infrastructure for patients, clinicians, pharmacies, delivery partners and healthcare programmes.",
+      "Governed digital health infrastructure for virtual care, connected clinical devices, home diagnostics, pharmacy fulfilment and care operations.",
     url: site.url,
     siteName: "Ambulant+",
     type: "website",

@@ -1,17 +1,36 @@
 import Link from "next/link";
 import Brand from "@/components/Brand";
-import { navLinks, productRoutes } from "@/lib/routes";
+import { productRoutes } from "@/lib/routes";
 import { site } from "@/lib/site";
+
+const companyLinks = [
+  { label: "Platform", href: "/platform" },
+  { label: "Use Cases", href: "/use-cases" },
+  { label: "Operations", href: "/operations" },
+  { label: "Partnerships", href: "/partnerships" },
+  { label: "Resources", href: "/resources" },
+  { label: "Contact", href: "/contact" },
+];
+
+const trustLinks = [
+  { label: "Security", href: "/security" },
+  { label: "Compliance", href: "/compliance" },
+  { label: "Clinical Disclaimer", href: "/clinical-disclaimer" },
+  { label: "Privacy Policy", href: "/privacy" },
+  { label: "Terms & Conditions", href: "/terms" },
+  { label: "FAQ", href: "/faq" },
+];
 
 export default function Footer() {
   return (
     <footer className="border-t border-slate-200/70 bg-white/78">
-      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 md:px-6 lg:grid-cols-[1.15fr_0.85fr_0.85fr_0.85fr]">
+      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 md:px-6 lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr]">
         <div>
           <Brand />
           <p className="mt-5 max-w-md text-sm leading-7 text-slate-600">
-            Ambulant+ is a connected-care platform for contactless medicine, patient access,
-            clinician workflows, programme operations and care-delivery coordination.
+            Ambulant+ is the operating layer for contactless medicine, connecting patients,
+            clinicians, devices, home diagnostics, pharmacy fulfilment, care logistics and
+            programme intelligence through governed digital infrastructure.
           </p>
           <p className="mt-4 text-xs leading-6 text-slate-500">
             Not an emergency service. In a medical emergency, contact local emergency services immediately.
@@ -21,7 +40,7 @@ export default function Footer() {
         <div>
           <h3 className="text-sm font-semibold text-slate-950">Platform</h3>
           <div className="mt-4 grid gap-3">
-            {productRoutes.slice(0, 5).map((item) => (
+            {productRoutes.slice(0, 6).map((item) => (
               <Link key={item.href} href={item.href} className="text-sm text-slate-600 hover:text-slate-950">
                 {item.title}
               </Link>
@@ -32,22 +51,22 @@ export default function Footer() {
         <div>
           <h3 className="text-sm font-semibold text-slate-950">Company</h3>
           <div className="mt-4 grid gap-3">
-            {navLinks.slice(5).map((item) => (
+            {companyLinks.map((item) => (
               <Link key={item.href} href={item.href} className="text-sm text-slate-600 hover:text-slate-950">
                 {item.label}
               </Link>
             ))}
-            <Link href="/contact" className="text-sm text-slate-600 hover:text-slate-950">Contact</Link>
           </div>
         </div>
 
         <div>
-          <h3 className="text-sm font-semibold text-slate-950">Legal</h3>
+          <h3 className="text-sm font-semibold text-slate-950">Trust</h3>
           <div className="mt-4 grid gap-3">
-            <Link href="/privacy" className="text-sm text-slate-600 hover:text-slate-950">Privacy Policy</Link>
-            <Link href="/terms" className="text-sm text-slate-600 hover:text-slate-950">Terms & Conditions</Link>
-            <Link href="/clinical-disclaimer" className="text-sm text-slate-600 hover:text-slate-950">Clinical Disclaimer</Link>
-            <Link href="/compliance" className="text-sm text-slate-600 hover:text-slate-950">Compliance Statement</Link>
+            {trustLinks.map((item) => (
+              <Link key={item.href} href={item.href} className="text-sm text-slate-600 hover:text-slate-950">
+                {item.label}
+              </Link>
+            ))}
           </div>
         </div>
       </div>
