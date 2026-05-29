@@ -1,65 +1,183 @@
+import Link from "next/link";
+import {
+  ArrowRight,
+  CheckCircle2,
+  ClipboardCheck,
+  GraduationCap,
+  ShieldCheck,
+  WalletCards,
+} from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import CTA from "@/components/CTA";
-import VisualHero from "@/components/VisualHero";
-import CommandDashboard from "@/components/CommandDashboard";
-import WorkflowTimeline from "@/components/WorkflowTimeline";
+import SectionShell from "@/components/SectionShell";
+import { site } from "@/lib/site";
+
+const workflow = [
+  "Clinician-led virtual consultation supported by structured patient context.",
+  "Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows where available.",
+  "eRx, CarePort medicine fulfilment, MedReach diagnostic requests and InsightCore intelligence.",
+  "Clinical documentation, follow-up planning, escalation boundaries and governance-aware review.",
+];
+
+const startSteps = [
+  "Create clinician account",
+  "Complete profile and KYC",
+  "Upload professional documents",
+  "Choose training slot",
+  "Make required payment",
+  "Attend platform training",
+  "Complete readiness checks",
+  "Start consulting and earning",
+];
+
+const clinicianCards: Array<{
+  title: string;
+  body: string;
+  icon: LucideIcon;
+}> = [
+  {
+    title: "Onboarding criteria",
+    body:
+      "Professional registration where applicable, identity/KYC, qualification evidence, platform training and privacy acknowledgement.",
+    icon: ClipboardCheck,
+  },
+  {
+    title: "Working rules",
+    body:
+      "Private consultation space, clear documentation, emergency escalation, confidentiality and practice within competence.",
+    icon: ShieldCheck,
+  },
+  {
+    title: "Training",
+    body:
+      "Clinicians select a training slot, complete compulsory platform training and learn device-supported workflows.",
+    icon: GraduationCap,
+  },
+  {
+    title: "Payouts and fees",
+    body:
+      "Training/onboarding fees and payout schedules are managed according to platform rules and accepted payment terms.",
+    icon: WalletCards,
+  },
+];
+
+const complianceNotes = [
+  "Professional registration/HPCSA or equivalent requirements must be respected where applicable.",
+  "Practice-number and medical-aid claiming rules depend on clinician and platform readiness.",
+  "Professional indemnity and PI cover must be understood before services are rendered.",
+];
 
 export const metadata = {
-  title: "Governed clinical workspace for contactless care.",
-  description: "Clinicians can coordinate virtual care, review connected-device signals, document encounters and escalate through governed Ambulant+ workflows.",
+  title: "Clinicians",
+  description:
+    "How clinicians join Ambulant+, understand Contactless Medicine, complete onboarding and work safely within the platform.",
 };
 
-export default function Page() {
+export default function CliniciansPage() {
   return (
     <main>
-      <VisualHero
-        eyebrow="Clinician app"
-        title="A governed clinical workspace for contactless care."
-        body="The Ambulant+ clinician workspace supports virtual consultation, connected-device review, care documentation, follow-up planning and escalation within a role-based clinical environment."
-        imageSrc="/visuals/clinicians/clinician-command-workspace.webp"
-        imageAlt="Clinician reviewing contactless medicine consultation data in an Ambulant+ command workspace"
-        primaryCta={{ label: "Request clinician access", href: "/contact" }}
-        secondaryCta={{ label: "View device pathways", href: "/devices" }}
-        overlayTitle="Clinical command layer"
-        overlayItems={[
-          { label: "Device-supported review", value: "Vitals, ECG, auscultation and otoscopy context." },
-          { label: "Clinical documentation", value: "Notes, follow-up actions and care-team visibility." },
-          { label: "Escalation pathway", value: "Clear boundaries for urgent and in-person care." },
-        ]}
-      />
+      <section className="mx-auto grid max-w-7xl gap-10 px-4 py-14 md:px-6 md:py-20 lg:grid-cols-[1fr_0.95fr] lg:items-center">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">
+            Clinician App
+          </div>
 
-      <CommandDashboard
-        eyebrow="Clinical governance"
-        title="Remote workflow without removing clinical responsibility."
-        body="Ambulant+ is designed to help clinicians operate with more context, stronger workflow visibility and clearer escalation boundaries — not to replace professional judgement."
-        metrics={[
-          { value: "Role", label: "Access aligned to authorisation and responsibility" },
-          { value: "Context", label: "Device signals reviewed with clinical judgement" },
-          { value: "Audit", label: "Documentation and workflow visibility" },
-        ]}
-        rows={[
-          { title: "Role-based patient access", body: "Patient information is surfaced according to authorisation, consent and clinical responsibility rather than open workspace visibility." },
-          { title: "Device-supported consultation context", body: "Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows provide structured signals for clinician review." },
-          { title: "Follow-up and escalation", body: "Consultations can be connected to care-team communication, documented follow-up plans and clear escalation language." },
-        ]}
-      />
+          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">
+            A governed clinical workspace for Contactless Medicine.
+          </h1>
 
-      <WorkflowTimeline
-        eyebrow="Consultation flow"
-        title="From patient context to accountable follow-up."
-        body="The clinician experience is structured around review, documentation and safe next steps."
-        steps={[
-          { title: "Review context", body: "Open the patient workspace with role-appropriate access to history, reports, risk notes and care activity." },
-          { title: "Assess signals", body: "Review supported device data and patient-provided information as clinical context, not as automated diagnosis." },
-          { title: "Consult", body: "Conduct the virtual or contactless-care encounter within a governed workflow." },
-          { title: "Document", body: "Record notes, decisions, safety-netting, follow-up requirements and escalation instructions." },
-          { title: "Coordinate", body: "Connect diagnostics, pharmacy fulfilment, care teams or programme workflows where appropriate." },
-          { title: "Escalate", body: "Direct patients to urgent, emergency or in-person care when remote care is unsuitable." },
-        ]}
-      />
+          <p className="mt-6 text-lg leading-9 text-slate-600">
+            Ambulant+ helps clinicians deliver remote care with objective device context,
+            structured documentation, MedReach diagnostics, CarePort fulfilment and InsightCore
+            intelligence — while preserving professional judgement, escalation boundaries and
+            clinical governance.
+          </p>
 
-      <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
-        <CTA />
+          <div className="mt-8 flex flex-wrap gap-3">
+            <a
+              href={site.clinicianSignupUrl}
+              className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow"
+            >
+              Start clinician signup <ArrowRight className="h-4 w-4" />
+            </a>
+
+            <Link
+              href="/clinicians/onboarding"
+              className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white/85 px-6 py-4 text-sm font-semibold text-cyan-800"
+            >
+              View onboarding guide <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+        </div>
+
+        <div className="glass-panel rounded-[38px] p-6">
+          <div className="rounded-[30px] border border-cyan-100 bg-slate-950 p-6 text-white">
+            <div className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-200">
+              Clinical command model
+            </div>
+
+            <div className="mt-6 grid gap-4">
+              {workflow.map((item) => (
+                <div
+                  key={item}
+                  className="flex gap-3 rounded-3xl border border-white/10 bg-white/10 p-4"
+                >
+                  <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-cyan-200" />
+                  <p className="text-sm leading-7 text-slate-200">{item}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </section>
+
+      <SectionShell
+        eyebrow="How clinicians start"
+        title="From signup to first consultation."
+        body="The clinician journey is structured so patients, clinicians and programme partners can trust the workflow."
+      >
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {startSteps.map((item, index) => (
+            <div key={item} className="glass-panel rounded-[30px] p-6">
+              <div className="grid h-10 w-10 place-items-center rounded-2xl bg-slate-950 text-sm font-bold text-white">
+                {index + 1}
+              </div>
+              <h3 className="mt-5 font-semibold text-slate-950">{item}</h3>
+            </div>
+          ))}
+        </div>
+      </SectionShell>
+
+      <section className="mx-auto grid max-w-7xl gap-4 px-4 py-12 md:grid-cols-2 md:px-6 lg:grid-cols-4">
+        {clinicianCards.map(({ title, body, icon: Icon }) => (
+          <div key={title} className="glass-panel rounded-[30px] p-6">
+            <Icon className="h-7 w-7 text-cyan-700" />
+            <h3 className="mt-5 text-xl font-semibold text-slate-950">{title}</h3>
+            <p className="mt-3 text-sm leading-7 text-slate-600">{body}</p>
+          </div>
+        ))}
+      </section>
+
+      <SectionShell
+        eyebrow="Compliance"
+        title="Clinician responsibility remains central."
+        body="Ambulant+ supports Contactless Medicine workflows; it does not remove professional responsibility, regulatory obligations, indemnity expectations, emergency boundaries or patient-safety duties."
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          {complianceNotes.map((item) => (
+            <div
+              key={item}
+              className="rounded-3xl border border-white/70 bg-white/78 p-5 text-sm leading-7 text-slate-600"
+            >
+              {item}
+            </div>
+          ))}
+        </div>
+      </SectionShell>
+
+      <div className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
+        <CTA />
+      </div>
     </main>
   );
 }

@@ -3,22 +3,27 @@ import Brand from "@/components/Brand";
 import { productRoutes } from "@/lib/routes";
 import { site } from "@/lib/site";
 
+const operationsLinks = [
+  { label: "MedReach", href: "/medreach" },
+  { label: "Labs", href: "/medreach/labs" },
+  { label: "Phlebotomists", href: "/medreach/phlebotomists" },
+  { label: "CarePort", href: "/careport" },
+  { label: "Pharmacies", href: "/careport/pharmacies" },
+  { label: "Riders", href: "/careport/riders" },
+  { label: "Bookings", href: "/bookings" },
+  { label: "Demos", href: "/demos" },
+];
+
 const companyLinks = [
   { label: "Platform", href: "/platform" },
   { label: "Innovation", href: "/innovation" },
   { label: "Research & Development", href: "/research-and-development" },
+  { label: "Ecosystem", href: "/ecosystem" },
   { label: "Use Cases", href: "/use-cases" },
   { label: "Operations", href: "/operations" },
   { label: "Partnerships", href: "/partnerships" },
   { label: "Resources", href: "/resources" },
   { label: "Contact", href: "/contact" },
-];
-
-const operationsLinks = [
-  { label: "MedReach", href: "/medreach" },
-  { label: "CarePort", href: "/careport" },
-  { label: "Bookings", href: "/bookings" },
-  { label: "Demos", href: "/demos" },
 ];
 
 const trustLinks = [
@@ -33,22 +38,17 @@ const trustLinks = [
 export default function Footer() {
   return (
     <footer className="border-t border-slate-200/70 bg-white/78">
-      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 md:px-6 lg:grid-cols-[1.25fr_0.75fr_0.75fr_0.8fr_0.8fr]">
+      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 md:px-6 lg:grid-cols-[1.25fr_0.7fr_0.85fr_0.85fr_0.75fr]">
         <div>
           <Brand />
           <p className="mt-5 max-w-md text-sm leading-7 text-slate-600">
-            Ambulant+ is the operating layer for contactless medicine, connecting patients,
-            clinicians, devices, home diagnostics, pharmacy fulfilment, care logistics and
-            programme intelligence through governed digital infrastructure.
+            Ambulant+ is the Contactless Medicine platform engineered by {site.parentCompany}, connecting patients,
+            clinicians, IoMT devices, home diagnostics, pharmacy fulfilment, care logistics and governance-aware intelligence.
           </p>
-          <div className="mt-5 grid gap-2 text-xs leading-6 text-slate-500">
-            <p>{site.parentCompany}</p>
-            <p>{site.address.short}</p>
-            <p>
-              <a href={site.phoneHref} className="hover:text-slate-950">
-                {site.phone}
-              </a>
-            </p>
+          <div className="mt-4 grid gap-1 text-xs leading-6 text-slate-500">
+            <span>{site.parentCompany}</span>
+            <span>{site.address.short}</span>
+            <a href={site.phoneHref} className="hover:text-slate-900">{site.phone}</a>
           </div>
           <p className="mt-4 text-xs leading-6 text-slate-500">
             Not an emergency service. In a medical emergency, contact local emergency services immediately.
@@ -102,8 +102,8 @@ export default function Footer() {
 
       <div className="border-t border-slate-200/70 px-4 py-5">
         <div className="mx-auto flex max-w-7xl flex-col gap-2 text-xs text-slate-500 md:flex-row md:items-center md:justify-between">
-          <span>© {new Date().getFullYear()} {site.parentCompany}. All rights reserved.</span>
-          <span>{site.legalName}. Built for privacy-aware, clinician-supervised connected care.</span>
+          <span>© {new Date().getFullYear()} {site.legalName}. All rights reserved. A {site.parentCompany} platform.</span>
+          <span>Built for precision care, predictive medicine and clinician-supervised connected care.</span>
         </div>
       </div>
     </footer>

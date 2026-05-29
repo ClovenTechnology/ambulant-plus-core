@@ -1,65 +1,9 @@
+import Link from "next/link";
+import { ArrowRight, BrainCircuit, CheckCircle2, HeartPulse, ShieldCheck, WalletCards } from "lucide-react";
 import CTA from "@/components/CTA";
-import VisualHero from "@/components/VisualHero";
-import CommandDashboard from "@/components/CommandDashboard";
-import ImageStoryBand from "@/components/ImageStoryBand";
-
-export const metadata = {
-  title: "Population health visibility without compromising patient trust.",
-  description: "Employers, schemes and sponsors can engage Ambulant+ care programmes through aggregated, permission-aware and governance-led workflows.",
-};
-
-export default function Page() {
-  return (
-    <main>
-      <VisualHero
-        eyebrow="Client and sponsor app"
-        title="Population health visibility without compromising patient trust."
-        body="Ambulant+ gives employers, schemes and sponsors governed visibility into care-programme performance, service utilisation and engagement trends — while protecting patient-level confidentiality through permission-aware access boundaries."
-        imageSrc="/visuals/clients/client-programme-dashboard.webp"
-        imageAlt="Healthcare programme leadership reviewing aggregated Ambulant+ programme dashboard"
-        primaryCta={{ label: "Speak to partnerships", href: "/contact" }}
-        secondaryCta={{ label: "Explore InsightCore", href: "/insightcore" }}
-        overlayTitle="Programme visibility"
-        overlayItems={[
-          { label: "Aggregated reporting", value: "Programme trends and utilisation patterns." },
-          { label: "Trust boundaries", value: "No inappropriate patient-level exposure." },
-          { label: "Actionable operations", value: "Engagement, access and pathway performance." },
-        ]}
-      />
-
-      <CommandDashboard
-        eyebrow="Client intelligence"
-        title="Benefits visibility must never become patient surveillance."
-        body="The client workspace is designed for programme stewardship: access trends, utilisation, service performance and engagement signals — with clear privacy and role boundaries."
-        metrics={[
-          { value: "Programme", label: "Visibility at population and service level" },
-          { value: "Governed", label: "Permission-aware reporting boundaries" },
-          { value: "Action", label: "Signals for improvement and access planning" },
-        ]}
-        rows={[
-          { title: "Employer programmes", body: "Support workplace health engagement, access monitoring and service utilisation review without exposing inappropriate clinical records." },
-          { title: "Medical scheme visibility", body: "Review care-access trends, service activity and programme performance within lawful and contracted boundaries." },
-          { title: "Sponsor and client reporting", body: "Understand programme health, operational performance and member engagement at the right level of aggregation." },
-        ]}
-      />
-
-      <ImageStoryBand
-        eyebrow="Trust-preserving reporting"
-        title="Useful insight, disciplined access."
-        body="Client and sponsor stakeholders need enough visibility to improve access and programme performance, but not uncontrolled access to individual clinical records."
-        imageSrc="/visuals/clients/client-programme-dashboard.webp"
-        imageAlt="Aggregated programme dashboard for Ambulant+ client and sponsor workflows"
-        points={[
-          "Aggregated programme reporting for engagement, utilisation and service performance.",
-          "Clear separation between clinical records and sponsor-facing programme intelligence.",
-          "Governance-aware workflows for employers, schemes and care-programme sponsors.",
-        ]}
-        reverse
-      />
-
-      <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
-        <CTA />
-      </section>
-    </main>
-  );
-}
+import SectionShell from "@/components/SectionShell";
+import { site } from "@/lib/site";
+export const metadata={title:"Clients and Sponsors",description:"Ambulant+ for medical aids, HMOs, employers, corporate sponsors and population-health programmes."};
+const clientCapabilities=["Fund consultations and care programmes.","Enable remote patient monitoring through supported wearables and device signals.","Receive governed session summaries for claims reconciliation where appropriate.","Monitor medication adherence trends and reward-programme participation.","Identify members who are regressing or likely to regress before deterioration becomes expensive.","Use InsightCore for programme visibility without inappropriate patient-level exposure."];
+const plans=["Access Programme","Remote Monitoring Programme","Medication Adherence Programme","Diagnostics Programme","Enterprise Contactless Medicine Programme"];
+export default function ClientsPage(){return <main><section className="mx-auto grid max-w-7xl gap-10 px-4 py-14 md:px-6 md:py-20 lg:grid-cols-[1fr_0.95fr] lg:items-center"><div><div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Clients, medical aids and sponsors</div><h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">Population-health visibility without compromising patient trust.</h1><p className="mt-6 text-lg leading-9 text-slate-600">Ambulant+ helps medical aids, HMOs, employers and corporate sponsors support earlier intervention, remote monitoring, medication adherence, claims reconciliation and reward programmes through governed Contactless Medicine infrastructure.</p><div className="mt-8 flex flex-wrap gap-3"><a href={site.clientAppUrl} className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">Open Client App <ArrowRight className="h-4 w-4" /></a><Link href="/demos" className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white/85 px-6 py-4 text-sm font-semibold text-cyan-800">Request enterprise demo <ArrowRight className="h-4 w-4" /></Link></div></div><div className="glass-panel rounded-[38px] p-6"><div className="rounded-[30px] border border-cyan-100 bg-slate-950 p-6 text-white"><div className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-200">InsightCore layer</div><div className="mt-6 grid gap-3">{clientCapabilities.map(i=><div key={i} className="flex gap-3 rounded-3xl border border-white/10 bg-white/10 p-4"><CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-cyan-200"/><p className="text-sm leading-7 text-slate-200">{i}</p></div>)}</div></div></div></section><SectionShell eyebrow="Programme packages" title="Packages for access, adherence, diagnostics and enterprise care." body="Plans should be configured according to sponsor goals, legal basis, privacy boundary, payment model and operational scope."><div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">{plans.map((p,i)=><div key={p} className="glass-panel rounded-[30px] p-6"><div className="grid h-10 w-10 place-items-center rounded-2xl bg-cyan-50 text-cyan-700">{i===0?<WalletCards className="h-5 w-5"/>:i===1?<HeartPulse className="h-5 w-5"/>:i===2?<CheckCircle2 className="h-5 w-5"/>:i===3?<ShieldCheck className="h-5 w-5"/>:<BrainCircuit className="h-5 w-5"/>}</div><h3 className="mt-5 text-lg font-semibold text-slate-950">{p}</h3><p className="mt-3 text-sm leading-7 text-slate-600">Includes governed programme setup, role-based visibility and optional CarePort, MedReach or InsightCore modules.</p></div>)}</div></SectionShell><SectionShell eyebrow="Trust boundary" title="Sponsor visibility must remain governed." body="Employers, sponsors and schemes should not receive inappropriate patient-level clinical detail. Ambulant+ should use role-based access, consent-aware sharing and purpose-specific reporting."/><div className="mx-auto max-w-7xl px-4 pb-16 md:px-6"><CTA /></div></main>}
