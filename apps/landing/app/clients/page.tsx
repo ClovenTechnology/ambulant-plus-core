@@ -1,41 +1,62 @@
-import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
 import CTA from "@/components/CTA";
-
-const bullets = ["Programme dashboards for care access, service utilisation, engagement trends and operational performance.", "Permission-aware workflow design to avoid inappropriate disclosure of patient-level data.", "Medical-aid, employer and sponsor engagement pathways with consent and governance boundaries.", "Operational reporting for programme performance, care-network coordination and accountable deployment review."];
+import VisualHero from "@/components/VisualHero";
+import CommandDashboard from "@/components/CommandDashboard";
+import ImageStoryBand from "@/components/ImageStoryBand";
 
 export const metadata = {
   title: "Population health visibility without compromising patient trust.",
-  description: "Population health visibility for employers, schemes and sponsors.",
+  description: "Employers, schemes and sponsors can engage Ambulant+ care programmes through aggregated, permission-aware and governance-led workflows.",
 };
 
 export default function Page() {
   return (
     <main>
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 py-14 md:px-6 md:py-20 lg:grid-cols-[1fr_0.9fr] lg:items-center">
-        <div>
-          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Client and sponsor app</div>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">Population health visibility without compromising patient trust.</h1>
-          <p className="mt-6 text-lg leading-9 text-slate-600">Ambulant+ gives employers, schemes and sponsors governed visibility into programme performance, service utilisation and engagement trends while protecting patient-level confidentiality through permission-aware access boundaries.</p>
-          <Link href="/contact" className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">
-            Speak to partnerships <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
+      <VisualHero
+        eyebrow="Client and sponsor app"
+        title="Population health visibility without compromising patient trust."
+        body="Ambulant+ gives employers, schemes and sponsors governed visibility into care-programme performance, service utilisation and engagement trends — while protecting patient-level confidentiality through permission-aware access boundaries."
+        imageSrc="/visuals/clients/client-programme-dashboard.webp"
+        imageAlt="Healthcare programme leadership reviewing aggregated Ambulant+ programme dashboard"
+        primaryCta={{ label: "Speak to partnerships", href: "/contact" }}
+        secondaryCta={{ label: "Explore InsightCore", href: "/insightcore" }}
+        overlayTitle="Programme visibility"
+        overlayItems={[
+          { label: "Aggregated reporting", value: "Programme trends and utilisation patterns." },
+          { label: "Trust boundaries", value: "No inappropriate patient-level exposure." },
+          { label: "Actionable operations", value: "Engagement, access and pathway performance." },
+        ]}
+      />
 
-        <div className="glass-panel rounded-[38px] p-6">
-          <div className="rounded-[30px] border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-slate-50 p-6">
-            <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Programme visibility</div>
-            <div className="mt-6 grid gap-4">
-              {bullets.map((item) => (
-                <div key={item} className="flex gap-3 rounded-3xl border border-white/80 bg-white/78 p-4">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                  <p className="text-sm leading-7 text-slate-600">{item}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
+      <CommandDashboard
+        eyebrow="Client intelligence"
+        title="Benefits visibility must never become patient surveillance."
+        body="The client workspace is designed for programme stewardship: access trends, utilisation, service performance and engagement signals — with clear privacy and role boundaries."
+        metrics={[
+          { value: "Programme", label: "Visibility at population and service level" },
+          { value: "Governed", label: "Permission-aware reporting boundaries" },
+          { value: "Action", label: "Signals for improvement and access planning" },
+        ]}
+        rows={[
+          { title: "Employer programmes", body: "Support workplace health engagement, access monitoring and service utilisation review without exposing inappropriate clinical records." },
+          { title: "Medical scheme visibility", body: "Review care-access trends, service activity and programme performance within lawful and contracted boundaries." },
+          { title: "Sponsor and client reporting", body: "Understand programme health, operational performance and member engagement at the right level of aggregation." },
+        ]}
+      />
+
+      <ImageStoryBand
+        eyebrow="Trust-preserving reporting"
+        title="Useful insight, disciplined access."
+        body="Client and sponsor stakeholders need enough visibility to improve access and programme performance, but not uncontrolled access to individual clinical records."
+        imageSrc="/visuals/clients/client-programme-dashboard.webp"
+        imageAlt="Aggregated programme dashboard for Ambulant+ client and sponsor workflows"
+        points={[
+          "Aggregated programme reporting for engagement, utilisation and service performance.",
+          "Clear separation between clinical records and sponsor-facing programme intelligence.",
+          "Governance-aware workflows for employers, schemes and care-programme sponsors.",
+        ]}
+        reverse
+      />
+
       <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
         <CTA />
       </section>

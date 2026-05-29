@@ -1,39 +1,59 @@
-import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
 import CTA from "@/components/CTA";
-
-const items = ["Patient app walkthrough for vitals, appointments, medication, reports and care-network actions.", "Clinician app walkthrough for virtual consultation, device-supported review and documentation.", "MedReach walkthrough for home phlebotomy, specimen collection and laboratory coordination.", "CarePort walkthrough for pharmacy fulfilment, dispatch, rider workflow and proof-of-delivery.", "InsightCore walkthrough for programme visibility, utilisation reporting and governance-aware analytics.", "Admin and governance walkthrough for onboarding, configuration, quality controls and operational oversight."];
+import VisualHero from "@/components/VisualHero";
+import WorkflowTimeline from "@/components/WorkflowTimeline";
+import ImageStoryBand from "@/components/ImageStoryBand";
 
 export const metadata = {
-  title: "Request a structured platform walkthrough.",
-  description: "Ambulant+ demos should be structured around real deployment needs: patient access, clinician workflow, MedReach diagnostics, CarePort fulfilment, InsightCore reporting and platform governance.",
+  title: "Request an Ambulant+ platform walkthrough.",
+  description: "Structured enterprise demos for Ambulant+ patient, clinician, MedReach, CarePort, InsightCore and admin workflows.",
 };
 
 export default function Page() {
   return (
     <main>
-      <section className="mx-auto max-w-7xl px-4 py-14 md:px-6 md:py-20">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Demos</div>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">Request a structured platform walkthrough.</h1>
-          <p className="mt-6 text-lg leading-9 text-slate-600">Ambulant+ demos should be structured around real deployment needs: patient access, clinician workflow, MedReach diagnostics, CarePort fulfilment, InsightCore reporting and platform governance.</p>
-          <Link href="/contact" className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">
-            Speak to Ambulant+ <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
+      <VisualHero
+        eyebrow="Demos"
+        title="Request a structured platform walkthrough."
+        body="Ambulant+ demos should be organised around the workflow you need to understand: patient access, clinician review, home diagnostics, pharmacy fulfilment, programme intelligence or governance administration."
+        imageSrc="/visuals/demos/platform-demo-suite.webp"
+        imageAlt="Ambulant+ enterprise platform demo suite"
+        primaryCta={{ label: "Request demo", href: "/contact" }}
+        secondaryCta={{ label: "Explore platform", href: "/platform" }}
+        overlayTitle="Demo suite"
+        overlayItems={[
+          { label: "Patient + clinician", value: "Connected care journey walkthrough." },
+          { label: "MedReach + CarePort", value: "Diagnostics and fulfilment operations." },
+          { label: "InsightCore + admin", value: "Programme intelligence and governance controls." },
+        ]}
+      />
 
-        <div className="mt-12 glass-panel rounded-[38px] p-6 md:p-8">
-          <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Demo pathways</div>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            {items.map((item) => (
-              <div key={item} className="flex gap-3 rounded-3xl border border-white/80 bg-white/78 p-5">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                <p className="text-sm leading-7 text-slate-600">{item}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <WorkflowTimeline
+        eyebrow="Demo structure"
+        title="Walk through the platform by role and outcome."
+        steps={[
+          { title: "Define audience", body: "Clarify whether the demo is for clinicians, pharmacies, laboratories, employers, schemes or internal programme teams." },
+          { title: "Select workflow", body: "Choose the modules and operational pathways that matter most for the session." },
+          { title: "Map use case", body: "Anchor the walkthrough in a real pathway such as virtual consultation, home diagnostics or medicine delivery." },
+          { title: "Review governance", body: "Show access boundaries, clinical disclaimers, reporting limits and operational controls." },
+          { title: "Discuss deployment", body: "Identify partner requirements, configuration needs and onboarding steps." },
+          { title: "Agree next steps", body: "Close with a focused action plan rather than an unfocused product tour." },
+        ]}
+      />
+
+      <ImageStoryBand
+        eyebrow="Enterprise walkthrough"
+        title="Product demos should feel like implementation planning."
+        body="The goal is not to click through screens casually. The goal is to help serious stakeholders understand how Ambulant+ would operate inside a governed healthcare environment."
+        imageSrc="/visuals/demos/platform-demo-suite.webp"
+        imageAlt="Ambulant+ product demo suite with multiple platform modules"
+        points={[
+          "Patient, clinician, MedReach, CarePort, InsightCore and admin workflows can be demonstrated separately or together.",
+          "Each walkthrough should include the relevant clinical, operational, security and governance boundaries.",
+          "Demo sessions can be tailored to partner type, use case and deployment maturity.",
+        ]}
+        reverse
+      />
+
       <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
         <CTA />
       </section>

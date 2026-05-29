@@ -1,41 +1,76 @@
-import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
 import CTA from "@/components/CTA";
+import ImageStoryBand from "@/components/ImageStoryBand";
+import VisualHero from "@/components/VisualHero";
+import WorkflowTimeline from "@/components/WorkflowTimeline";
+import { site } from "@/lib/site";
 
-const bullets = ["A unified health overview for vitals, medication, appointments, reports and care readiness.", "Connected-device pathways for Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows.", "Care continuity across allergies, risk notes, reports, follow-up plans and clinical interactions.", "Consent-aware sharing with clinicians, medical aid workflows and approved care partners."];
+const patientPathways = [
+  { title: "Vitals", body: "Patients can access supported vital-sign workflows and connected-device pathways where enabled." },
+  { title: "Bookings", body: "Consultation, home diagnostics and care-programme actions can be surfaced through one patient workspace." },
+  { title: "Medication", body: "Medication reminders and fulfilment visibility support continuity without replacing pharmacy or clinician advice." },
+  { title: "Reports", body: "Reports, lab status and care documents can be organised for clearer follow-up and review." },
+  { title: "Care network", body: "Consent-aware sharing supports appropriate clinician, partner and care-team access." },
+  { title: "Boundaries", body: "The patient app supports care coordination but does not replace emergency services or professional judgement." },
+];
 
 export const metadata = {
   title: "A protected health workspace for connected care.",
-  description: "Patient workspace for vitals, medication, appointments, reports and connected care.",
+  description: "Patients can access vitals, medication, appointments, reports, device-supported checks and care-network actions from one protected workspace.",
 };
 
 export default function Page() {
   return (
     <main>
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 py-14 md:px-6 md:py-20 lg:grid-cols-[1fr_0.9fr] lg:items-center">
-        <div>
-          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Patient app</div>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">A protected health workspace for connected care.</h1>
-          <p className="mt-6 text-lg leading-9 text-slate-600">The Ambulant+ patient app brings vitals, appointments, medication, reports, device-supported checks and care-network actions into one protected patient workspace.</p>
-          <Link href="/contact" className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">
-            Access Patient App <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-
-        <div className="glass-panel rounded-[38px] p-6">
-          <div className="rounded-[30px] border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-slate-50 p-6">
-            <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Patient workspace</div>
-            <div className="mt-6 grid gap-4">
-              {bullets.map((item) => (
-                <div key={item} className="flex gap-3 rounded-3xl border border-white/80 bg-white/78 p-4">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                  <p className="text-sm leading-7 text-slate-600">{item}</p>
-                </div>
-              ))}
-            </div>
+      <VisualHero
+        eyebrow="Patient app"
+        title="A protected health workspace for connected care."
+        body="The Ambulant+ patient app brings vitals, appointments, medication, reports, device-supported checks and care-network actions into one protected patient workspace."
+        imageSrc="/visuals/patients/ami-care-companion.webp"
+        imageAlt="Ami Ambulant+ care companion guiding a patient through connected care actions"
+        imagePosition="center"
+        actions={[
+          { label: "Access Patient App", href: site.patientAppUrl, external: true },
+          { label: "Explore bookings", href: "/bookings", variant: "secondary" },
+        ]}
+        statusItems={[
+          { label: "Ami", value: "A care companion for navigation, not a replacement for clinicians." },
+          { label: "Devices", value: "Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows." },
+          { label: "Continuity", value: "Appointments, reports, medication and care-network actions." },
+        ]}
+      >
+        <div className="rounded-[28px] border border-cyan-200/30 bg-slate-950/72 p-5 text-white shadow-2xl backdrop-blur-xl">
+          <div className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-200">Patient journey</div>
+          <div className="mt-4 grid gap-3 text-sm text-slate-100 sm:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Vitals check</div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Medication reminder</div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Lab status ready</div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Consultation booked</div>
           </div>
         </div>
-      </section>
+      </VisualHero>
+
+      <WorkflowTimeline
+        eyebrow="Patient experience"
+        title="A clear route through connected care."
+        body="The patient workspace should feel calm, guided and secure — helping patients understand their next action without turning the app into clinical automation."
+        steps={patientPathways}
+      />
+
+      <ImageStoryBand
+        eyebrow="Care companion"
+        title="Ami helps patients navigate the ecosystem."
+        body="Ami can support education, reminders and care-navigation prompts while preserving clear boundaries around clinical judgement, emergency care and professional review."
+        imageSrc="/visuals/patients/ami-care-companion.webp"
+        imageAlt="Ami Ambulant+ care companion in a futuristic patient workspace"
+        imageSide="right"
+        imagePosition="center"
+        points={[
+          "Guides patients through bookings, reports, medication reminders and device-supported actions.",
+          "Keeps sensitive health workflows inside protected, consent-aware platform boundaries.",
+          "Does not diagnose, prescribe or replace a qualified clinician.",
+        ]}
+      />
+
       <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
         <CTA />
       </section>

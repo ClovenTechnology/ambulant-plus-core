@@ -1,98 +1,62 @@
 import Link from "next/link";
-import { ArrowRight, CheckCircle2, Globe2, LockKeyhole, RadioTower, ShieldCheck } from "lucide-react";
+import { ArrowRight, Globe2, LockKeyhole, RadioTower, ShieldCheck } from "lucide-react";
 import CTA from "@/components/CTA";
 import ProductCard from "@/components/ProductCard";
 import SectionShell from "@/components/SectionShell";
 import ComplianceBadge from "@/components/ComplianceBadge";
+import ImageStoryBand from "@/components/ImageStoryBand";
+import VisualHero from "@/components/VisualHero";
 import { productRoutes, trustPillars } from "@/lib/routes";
 import { site } from "@/lib/site";
 
-const accessCards = [
-  ["Patients", "Protected access to vitals, appointments, medication, reports and connected-care actions."],
-  ["Clinicians", "Governed clinical workflows for virtual care, device-supported review and escalation."],
-  ["Care operations", "Diagnostics, pharmacy fulfilment, logistics and programme visibility in one ecosystem."],
+const heroStatus = [
+  { label: "Clinical", value: "Virtual consultation and device-supported review." },
+  { label: "Diagnostics", value: "Home phlebotomy and laboratory coordination." },
+  { label: "Operations", value: "Pharmacy fulfilment and care logistics visibility." },
 ];
 
-const ecosystem = [
-  ["Patient health workspace", "Vitals, medication, appointments, reports, care records and supported device pathways."],
-  ["Clinician care workspace", "Virtual consultation, device-supported review, documentation and follow-up planning."],
-  ["MedReach diagnostics operations", "Home phlebotomy, specimen collection, laboratory coordination and result-routing workflows."],
-  ["CarePort pharmacy fulfilment", "Medicine coordination, dispatch readiness, delivery-rider workflow and proof-of-delivery visibility."],
+const ecosystemSignals = [
+  ["Patient workspace", "Vitals, reports, medication, bookings and care actions."],
+  ["Clinician workspace", "Consultation, review, documentation and escalation."],
+  ["MedReach", "Home diagnostics, specimen custody and lab handover."],
+  ["CarePort", "Medicine fulfilment, rider workflow and delivery proof."],
 ];
 
 export default function HomePage() {
   return (
     <main>
-      <section className="relative isolate overflow-hidden px-4 py-14 md:px-6 md:py-20">
-        <div className="pointer-events-none absolute inset-0 -z-10">
-          <div className="absolute left-[8%] top-[8%] h-72 w-72 rounded-full bg-cyan-300/15 blur-3xl" />
-          <div className="absolute right-[8%] top-[18%] h-80 w-80 rounded-full bg-slate-300/20 blur-3xl" />
-        </div>
-
-        <div className="mx-auto grid max-w-7xl gap-10 lg:grid-cols-[1.02fr_0.98fr] lg:items-center">
-          <div>
-            <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-cyan-800">
-              <ShieldCheck className="h-4 w-4" />
-              Contactless medicine infrastructure
-            </div>
-            <h1 className="mt-6 max-w-4xl text-5xl font-semibold tracking-[-0.06em] text-slate-950 md:text-7xl">
-              The operating layer for contactless medicine.
-            </h1>
-            <p className="mt-6 max-w-2xl text-lg leading-9 text-slate-600">
-              Ambulant+ unifies virtual consultation, connected clinical devices, home diagnostics,
-              pharmacy fulfilment and care logistics into one governed digital health infrastructure.
-            </p>
-            <div className="mt-8 flex flex-wrap gap-3">
-              <a href={site.patientAppUrl} className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">
-                Access Patient App <ArrowRight className="h-4 w-4" />
-              </a>
-              <Link href="/platform" className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white/80 px-6 py-4 text-sm font-semibold text-cyan-800">
-                Explore the platform <ArrowRight className="h-4 w-4" />
-              </Link>
-            </div>
-
-            <div className="mt-8 grid max-w-3xl gap-3 sm:grid-cols-3">
-              {accessCards.map(([title, body]) => (
-                <div key={title} className="rounded-3xl border border-white/70 bg-white/72 p-4 shadow-sm">
-                  <CheckCircle2 className="h-5 w-5 text-emerald-600" />
-                  <div className="mt-3 text-sm font-semibold text-slate-950">{title}</div>
-                  <div className="mt-1 text-xs leading-5 text-slate-500">{body}</div>
-                </div>
-              ))}
-            </div>
+      <VisualHero
+        eyebrow="Contactless medicine infrastructure"
+        title="The operating layer for contactless medicine."
+        body="Ambulant+ unifies virtual consultation, connected clinical devices, home diagnostics, pharmacy fulfilment and care logistics into one governed digital health infrastructure."
+        imageSrc="/visuals/home/ambulant-ecosystem-command.webp"
+        imageAlt="Ambulant+ ecosystem command interface for contactless medicine"
+        actions={[
+          { label: "Access Patient App", href: site.patientAppUrl, external: true },
+          { label: "Explore the platform", href: "/platform", variant: "secondary" },
+        ]}
+        statusItems={heroStatus}
+      >
+        <div className="rounded-[28px] border border-white/20 bg-slate-950/70 p-5 text-white shadow-2xl backdrop-blur-xl">
+          <div className="flex items-center justify-between gap-4 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-200">
+            <span>Ambulant+ ecosystem</span>
+            <RadioTower className="h-4 w-4" />
           </div>
-
-          <div className="glass-panel rounded-[42px] p-5 md:p-8">
-            <div className="rounded-[34px] border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-slate-50 p-6">
-              <div className="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
-                <span>Ambulant+ ecosystem</span>
-                <RadioTower className="h-4 w-4 text-cyan-700" />
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {ecosystemSignals.map(([title, body]) => (
+              <div key={title} className="rounded-2xl border border-white/10 bg-white/10 p-4">
+                <div className="text-sm font-semibold">{title}</div>
+                <div className="mt-1 text-xs leading-5 text-slate-200">{body}</div>
               </div>
-              <div className="mt-8 grid gap-4">
-                {ecosystem.map(([title, body], index) => (
-                  <div key={title} className="rounded-3xl border border-white/80 bg-white/78 p-5 shadow-sm">
-                    <div className="flex items-start gap-4">
-                      <div className="grid h-10 w-10 place-items-center rounded-2xl bg-slate-950 text-sm font-bold text-white">{index + 1}</div>
-                      <div>
-                        <div className="font-semibold text-slate-950">{title}</div>
-                        <div className="mt-1 text-sm leading-6 text-slate-600">{body}</div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-6 rounded-3xl border border-emerald-200 bg-emerald-50 p-5 text-sm leading-7 text-emerald-900">
-                Public information remains separate from protected clinical and operational workspaces, keeping healthcare access clear, role-based and security-conscious.
-              </div>
-            </div>
+            ))}
           </div>
         </div>
-      </section>
+      </VisualHero>
 
       <SectionShell
         eyebrow="Platform routes"
         title="One ecosystem. Dedicated workspaces for every care pathway."
-        body="Ambulant+ gives each user group a focused environment while the public domain remains the trusted home for platform information, access and governance." 
+        body="Ambulant+ gives each user group a focused environment while the public domain remains the trusted home for platform information, access and governance."
       >
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {productRoutes.map((item) => (
@@ -100,6 +64,40 @@ export default function HomePage() {
           ))}
         </div>
       </SectionShell>
+
+      <ImageStoryBand
+        eyebrow="Diagnostics at home"
+        title="MedReach brings laboratory workflows closer to the patient."
+        body="Home phlebotomy, specimen collection, chain-of-custody and laboratory handover become part of one governed diagnostic journey."
+        imageSrc="/visuals/medreach/medreach-home-draw.webp"
+        imageAlt="MedReach phlebotomist performing a home blood draw"
+        imageSide="left"
+        imagePosition="center"
+        points={[
+          "Structured home blood draw and specimen-collection workflow.",
+          "Laboratory handover and result-routing visibility.",
+          "Consent, traceability and operational accountability across the diagnostic pathway.",
+        ]}
+        ctaLabel="Explore MedReach"
+        ctaHref="/medreach"
+      />
+
+      <ImageStoryBand
+        eyebrow="Medicine continuity"
+        title="CarePort connects pharmacy fulfilment to patient delivery."
+        body="Medication access becomes operationally visible from pharmacy preparation to rider handover, delivery progress and proof-of-delivery."
+        imageSrc="/visuals/careport/careport-erx-delivery.webp"
+        imageAlt="CarePort rider delivering medication to a patient at home"
+        imageSide="right"
+        imagePosition="center"
+        points={[
+          "Pharmacy order handling and dispatch readiness.",
+          "Delivery-rider workflow, patient updates and proof-of-delivery.",
+          "Fulfilment visibility for patients, clinicians and accountable care programmes.",
+        ]}
+        ctaLabel="Explore CarePort"
+        ctaHref="/careport"
+      />
 
       <SectionShell
         eyebrow="Trust architecture"

@@ -1,39 +1,59 @@
-import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
 import CTA from "@/components/CTA";
-
-const items = ["Clinician partners can support virtual care, connected-device review, documentation and follow-up pathways.", "Laboratory partners can connect with MedReach diagnostics workflows for home phlebotomy and specimen coordination.", "Pharmacy partners can participate in CarePort fulfilment, dispatch and medication continuity operations.", "Employers, schemes and sponsors can deploy governed care programmes with patient-trust boundaries preserved.", "Technology partners can support integrations, devices, communications, identity, payments and operational infrastructure.", "Community health partners can support access models for populations that benefit from distributed care delivery."];
+import VisualHero from "@/components/VisualHero";
+import ImageStoryBand from "@/components/ImageStoryBand";
+import WorkflowTimeline from "@/components/WorkflowTimeline";
 
 export const metadata = {
-  title: "Partner with the operating layer for contactless medicine.",
-  description: "Ambulant+ is built for healthcare organisations, clinicians, pharmacies, laboratories, employers, schemes and technology partners who need governed digital infrastructure for care delivery beyond facility walls.",
+  title: "Partner with Ambulant+.",
+  description: "Ambulant+ partnership pathways for clinicians, pharmacies, laboratories, employers, schemes, technology partners and community care programmes.",
 };
 
 export default function Page() {
   return (
     <main>
-      <section className="mx-auto max-w-7xl px-4 py-14 md:px-6 md:py-20">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Partnerships</div>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">Partner with the operating layer for contactless medicine.</h1>
-          <p className="mt-6 text-lg leading-9 text-slate-600">Ambulant+ is built for healthcare organisations, clinicians, pharmacies, laboratories, employers, schemes and technology partners who need governed digital infrastructure for care delivery beyond facility walls.</p>
-          <Link href="/contact" className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">
-            Speak to Ambulant+ <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
+      <VisualHero
+        eyebrow="Partnerships"
+        title="A partner ecosystem for governed contactless medicine."
+        body="Ambulant+ works across the care ecosystem: clinicians, pharmacies, laboratories, employers, medical schemes, technology partners and community care programmes."
+        imageSrc="/visuals/partnerships/partner-ecosystem.webp"
+        imageAlt="Ambulant+ healthcare partner ecosystem visual"
+        primaryCta={{ label: "Start partnership conversation", href: "/contact" }}
+        secondaryCta={{ label: "View operations", href: "/operations" }}
+        overlayTitle="Partner network"
+        overlayItems={[
+          { label: "Clinical partners", value: "Consultation, review and care coordination." },
+          { label: "Operational partners", value: "Diagnostics, pharmacy and fulfilment workflows." },
+          { label: "Programme partners", value: "Employer, scheme and sponsor deployments." },
+        ]}
+      />
 
-        <div className="mt-12 glass-panel rounded-[38px] p-6 md:p-8">
-          <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Partner pathways</div>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            {items.map((item) => (
-              <div key={item} className="flex gap-3 rounded-3xl border border-white/80 bg-white/78 p-5">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                <p className="text-sm leading-7 text-slate-600">{item}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <ImageStoryBand
+        eyebrow="Ecosystem model"
+        title="Partnerships are organised around responsibility, not generic access."
+        body="Ambulant+ partner pathways are designed around the work each partner is authorised and equipped to perform, with clear boundaries between clinical care, diagnostics, pharmacy fulfilment, logistics and programme reporting."
+        imageSrc="/visuals/partnerships/partner-ecosystem.webp"
+        imageAlt="Connected partner ecosystem across Ambulant+ modules"
+        points={[
+          "Clinician partners support governed consultation, documentation and escalation.",
+          "Laboratory and phlebotomy partners support MedReach diagnostic workflows.",
+          "Pharmacy and delivery partners support CarePort fulfilment and proof-of-delivery.",
+          "Employer, scheme and sponsor partners engage through governance-aware programme visibility.",
+        ]}
+      />
+
+      <WorkflowTimeline
+        eyebrow="Partner onboarding"
+        title="A structured path from interest to operational readiness."
+        steps={[
+          { title: "Identify pathway", body: "Clarify whether the partner belongs to clinical, diagnostic, pharmacy, programme, technology or community care workflows." },
+          { title: "Define responsibilities", body: "Map operational responsibilities, boundaries, data visibility and escalation obligations." },
+          { title: "Configure workspace", body: "Set up the appropriate Ambulant+ workspace, access rules and workflow permissions." },
+          { title: "Train teams", body: "Support onboarding, workflow training, quality expectations and support routes." },
+          { title: "Operate", body: "Run care pathways with visible status, accountable handoffs and documented activity." },
+          { title: "Review", body: "Use governance-aware reporting to improve service delivery and partner performance." },
+        ]}
+      />
+
       <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
         <CTA />
       </section>

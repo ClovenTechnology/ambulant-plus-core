@@ -1,41 +1,75 @@
-import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
 import CTA from "@/components/CTA";
+import ImageStoryBand from "@/components/ImageStoryBand";
+import VisualHero from "@/components/VisualHero";
+import WorkflowTimeline from "@/components/WorkflowTimeline";
 
-const bullets = ["Pharmacy order intake, fulfilment status, dispensing coordination and dispatch readiness.", "Delivery-rider workflows for handover, route progression, patient updates and proof-of-delivery.", "Medication continuity for patients, clinicians and sponsored care programmes.", "Operational traceability across pharmacy action, dispatch, delivery and completion."];
+const workflow = [
+  { title: "Prescription", body: "A medicine request or prescription-linked fulfilment action enters the CarePort pathway." },
+  { title: "Pharmacy", body: "The pharmacy prepares the order and confirms fulfilment readiness for dispatch." },
+  { title: "Handover", body: "The rider receives the package through a structured handover workflow." },
+  { title: "En route", body: "Delivery progress can be surfaced to the patient and operational teams." },
+  { title: "Delivery", body: "Patient handover and proof-of-delivery complete the fulfilment event." },
+  { title: "Audit", body: "Fulfilment records support accountability across pharmacy, rider and care-programme operations." },
+];
 
 export const metadata = {
   title: "The pharmacy fulfilment layer for contactless medicine.",
-  description: "Pharmacy fulfilment and delivery-rider coordination for medicine continuity.",
+  description: "CarePort coordinates pharmacy fulfilment, delivery-rider workflow, patient updates and proof-of-delivery visibility.",
 };
 
 export default function Page() {
   return (
     <main>
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 py-14 md:px-6 md:py-20 lg:grid-cols-[1fr_0.9fr] lg:items-center">
-        <div>
-          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">CarePort</div>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">The pharmacy fulfilment layer for contactless medicine.</h1>
-          <p className="mt-6 text-lg leading-9 text-slate-600">CarePort connects pharmacies, dispatch teams and delivery riders into a governed workflow for medicine fulfilment, handover, delivery tracking and proof-of-delivery.</p>
-          <Link href="/contact" className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">
-            Explore CarePort <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
-
-        <div className="glass-panel rounded-[38px] p-6">
-          <div className="rounded-[30px] border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-slate-50 p-6">
-            <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Fulfilment model</div>
-            <div className="mt-6 grid gap-4">
-              {bullets.map((item) => (
-                <div key={item} className="flex gap-3 rounded-3xl border border-white/80 bg-white/78 p-4">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                  <p className="text-sm leading-7 text-slate-600">{item}</p>
-                </div>
-              ))}
-            </div>
+      <VisualHero
+        eyebrow="CarePort"
+        title="The pharmacy fulfilment layer for contactless medicine."
+        body="CarePort connects pharmacies, dispatch teams and delivery riders into a governed workflow for medicine fulfilment, handover, delivery tracking and proof-of-delivery."
+        imageSrc="/visuals/careport/careport-erx-delivery.webp"
+        imageAlt="CarePort rider delivering medication to a patient at home"
+        imagePosition="center"
+        actions={[
+          { label: "Explore CarePort", href: "/contact" },
+          { label: "View use cases", href: "/use-cases", variant: "secondary" },
+        ]}
+        statusItems={[
+          { label: "Pharmacy", value: "Order handling, preparation and dispatch readiness." },
+          { label: "Rider", value: "Handover, route progress and delivery completion." },
+          { label: "Patient", value: "Medicine continuity with operational visibility." },
+        ]}
+      >
+        <div className="rounded-[28px] border border-cyan-200/30 bg-slate-950/72 p-5 text-white shadow-2xl backdrop-blur-xl">
+          <div className="text-xs font-bold uppercase tracking-[0.24em] text-cyan-200">Fulfilment status</div>
+          <div className="mt-4 grid gap-3 text-sm text-slate-100 sm:grid-cols-2">
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Prescription confirmed</div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Pharmacy prepared</div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Rider assigned</div>
+            <div className="rounded-2xl border border-white/10 bg-white/10 p-4">Proof-of-delivery captured</div>
           </div>
         </div>
-      </section>
+      </VisualHero>
+
+      <WorkflowTimeline
+        eyebrow="Fulfilment model"
+        title="Medicine continuity with operational proof."
+        body="CarePort is built around accountable fulfilment: pharmacy action, rider handover, patient delivery and traceable completion."
+        steps={workflow}
+      />
+
+      <ImageStoryBand
+        eyebrow="Pharmacy handover"
+        title="From pharmacy preparation to rider dispatch."
+        body="CarePort gives pharmacy and delivery operations a shared fulfilment language, so medicine movement is visible without turning clinical care into ordinary parcel logistics."
+        imageSrc="/visuals/careport/careport-pharmacy-pickup.webp"
+        imageAlt="CarePort rider receiving medication from Totli Pharmacy"
+        imageSide="left"
+        imagePosition="center"
+        points={[
+          "Pharmacy-focused order handling, preparation and dispatch readiness.",
+          "Delivery-rider workflows for handover, patient updates and route progression.",
+          "Proof-of-delivery and fulfilment visibility for accountable medicine continuity.",
+        ]}
+      />
+
       <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
         <CTA />
       </section>

@@ -1,39 +1,63 @@
-import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
 import CTA from "@/components/CTA";
-
-const items = ["Clinical operations for onboarding, training, consultation workflow and escalation boundaries.", "Diagnostics operations for phlebotomist assignment, home collection, specimen handover and laboratory status.", "Pharmacy operations for order handling, fulfilment readiness, dispatch and patient communication.", "Delivery coordination for rider assignment, handover, route progression and proof-of-delivery.", "Programme operations for employer, scheme, sponsor and community health deployments.", "Governance operations for quality controls, audit-friendly records, safety language and role-based oversight."];
+import VisualHero from "@/components/VisualHero";
+import CommandDashboard from "@/components/CommandDashboard";
+import WorkflowTimeline from "@/components/WorkflowTimeline";
 
 export const metadata = {
-  title: "Healthcare operations beyond software alone.",
-  description: "Ambulant+ is structured to coordinate the operational layer behind contactless medicine: clinical onboarding, diagnostics logistics, pharmacy fulfilment, delivery workflows, partner coordination and governance review.",
+  title: "Operational command for contactless medicine.",
+  description: "Ambulant+ coordinates clinical operations, diagnostics, pharmacy fulfilment, onboarding, support and governance workflows.",
 };
 
 export default function Page() {
   return (
     <main>
-      <section className="mx-auto max-w-7xl px-4 py-14 md:px-6 md:py-20">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Operations</div>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">Healthcare operations beyond software alone.</h1>
-          <p className="mt-6 text-lg leading-9 text-slate-600">Ambulant+ is structured to coordinate the operational layer behind contactless medicine: clinical onboarding, diagnostics logistics, pharmacy fulfilment, delivery workflows, partner coordination and governance review.</p>
-          <Link href="/contact" className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">
-            Speak to Ambulant+ <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
+      <VisualHero
+        eyebrow="Operations"
+        title="Operational command for care beyond the walls of the clinic."
+        body="Ambulant+ is designed to coordinate the real-world movement behind contactless medicine: clinical review, home diagnostics, pharmacy fulfilment, onboarding, support and governance escalation."
+        imageSrc="/visuals/operations/operations-command-centre.webp"
+        imageAlt="Ambulant+ healthcare operations command centre"
+        primaryCta={{ label: "Discuss operations", href: "/contact" }}
+        secondaryCta={{ label: "View partnerships", href: "/partnerships" }}
+        overlayTitle="Operations layer"
+        overlayItems={[
+          { label: "Clinical operations", value: "Consults, follow-up and escalation." },
+          { label: "Diagnostics operations", value: "Home phlebotomy and laboratory coordination." },
+          { label: "Fulfilment operations", value: "Pharmacy dispatch and proof-of-delivery." },
+        ]}
+      />
 
-        <div className="mt-12 glass-panel rounded-[38px] p-6 md:p-8">
-          <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Operating model</div>
-          <div className="mt-6 grid gap-4 md:grid-cols-2">
-            {items.map((item) => (
-              <div key={item} className="flex gap-3 rounded-3xl border border-white/80 bg-white/78 p-5">
-                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                <p className="text-sm leading-7 text-slate-600">{item}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <CommandDashboard
+        eyebrow="Command model"
+        title="Coordinated healthcare operations need governed visibility."
+        body="Ambulant+ gives programme and operational teams a structured way to understand work in motion without collapsing clinical, diagnostic, pharmacy and administrative responsibilities into one unsafe view."
+        metrics={[
+          { value: "Clinical", label: "Consultation, notes, follow-up and escalation" },
+          { value: "Diagnostic", label: "Collection, transport, laboratory handover and result routing" },
+          { value: "Fulfilment", label: "Prescription, pharmacy preparation, delivery and completion" },
+        ]}
+        rows={[
+          { title: "Clinical operations", body: "Support care access, virtual review, documentation, safety-netting and escalation pathways." },
+          { title: "Diagnostics operations", body: "Coordinate home phlebotomy, specimen traceability, laboratory handover and result workflow visibility." },
+          { title: "Pharmacy operations", body: "Coordinate dispensing readiness, rider handover, delivery progress and proof-of-delivery records." },
+          { title: "Training and onboarding", body: "Support structured onboarding for clinicians, partners and operational teams with clear workspace responsibilities." },
+        ]}
+      />
+
+      <WorkflowTimeline
+        eyebrow="Operating rhythm"
+        title="From request to resolved workflow."
+        body="Operational excellence comes from disciplined handoffs, visible status and clear accountability."
+        steps={[
+          { title: "Request", body: "The patient, clinician, partner or programme initiates a role-appropriate action." },
+          { title: "Route", body: "Ambulant+ directs the action into the correct protected workspace and operational lane." },
+          { title: "Assign", body: "Clinicians, phlebotomists, pharmacies, delivery teams or administrators receive the relevant task." },
+          { title: "Execute", body: "The workflow proceeds with status visibility, consent boundaries and operational traceability." },
+          { title: "Document", body: "Relevant notes, proof, reports, handovers or follow-up instructions are captured." },
+          { title: "Resolve", body: "The care pathway closes, escalates or transitions into a new governed action." },
+        ]}
+      />
+
       <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
         <CTA />
       </section>

@@ -1,41 +1,62 @@
-import Link from "next/link";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
 import CTA from "@/components/CTA";
-
-const bullets = ["Role-based patient access aligned with authorisation, consent and clinical responsibility.", "Device-supported consultation context for vitals, auscultation, otoscopy and longitudinal patient signals.", "Clinical notes, follow-up planning, care-team communication and workflow visibility.", "Clear triage boundaries, emergency escalation language and governance-aware consultation pathways."];
+import VisualHero from "@/components/VisualHero";
+import CommandDashboard from "@/components/CommandDashboard";
+import WorkflowTimeline from "@/components/WorkflowTimeline";
 
 export const metadata = {
-  title: "A governed clinical workspace for contactless care.",
-  description: "Governed clinical workspace for contactless care.",
+  title: "Governed clinical workspace for contactless care.",
+  description: "Clinicians can coordinate virtual care, review connected-device signals, document encounters and escalate through governed Ambulant+ workflows.",
 };
 
 export default function Page() {
   return (
     <main>
-      <section className="mx-auto grid max-w-7xl gap-8 px-4 py-14 md:px-6 md:py-20 lg:grid-cols-[1fr_0.9fr] lg:items-center">
-        <div>
-          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Clinician app</div>
-          <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">A governed clinical workspace for contactless care.</h1>
-          <p className="mt-6 text-lg leading-9 text-slate-600">The clinician workspace supports virtual consultation, connected-device review, care documentation, follow-up planning and escalation within a role-based clinical environment.</p>
-          <Link href="/contact" className="mt-8 inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow">
-            Request clinician access <ArrowRight className="h-4 w-4" />
-          </Link>
-        </div>
+      <VisualHero
+        eyebrow="Clinician app"
+        title="A governed clinical workspace for contactless care."
+        body="The Ambulant+ clinician workspace supports virtual consultation, connected-device review, care documentation, follow-up planning and escalation within a role-based clinical environment."
+        imageSrc="/visuals/clinicians/clinician-command-workspace.webp"
+        imageAlt="Clinician reviewing contactless medicine consultation data in an Ambulant+ command workspace"
+        primaryCta={{ label: "Request clinician access", href: "/contact" }}
+        secondaryCta={{ label: "View device pathways", href: "/devices" }}
+        overlayTitle="Clinical command layer"
+        overlayItems={[
+          { label: "Device-supported review", value: "Vitals, ECG, auscultation and otoscopy context." },
+          { label: "Clinical documentation", value: "Notes, follow-up actions and care-team visibility." },
+          { label: "Escalation pathway", value: "Clear boundaries for urgent and in-person care." },
+        ]}
+      />
 
-        <div className="glass-panel rounded-[38px] p-6">
-          <div className="rounded-[30px] border border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-slate-50 p-6">
-            <div className="text-xs font-bold uppercase tracking-[0.24em] text-slate-400">Clinical workflow</div>
-            <div className="mt-6 grid gap-4">
-              {bullets.map((item) => (
-                <div key={item} className="flex gap-3 rounded-3xl border border-white/80 bg-white/78 p-4">
-                  <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" />
-                  <p className="text-sm leading-7 text-slate-600">{item}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
+      <CommandDashboard
+        eyebrow="Clinical governance"
+        title="Remote workflow without removing clinical responsibility."
+        body="Ambulant+ is designed to help clinicians operate with more context, stronger workflow visibility and clearer escalation boundaries — not to replace professional judgement."
+        metrics={[
+          { value: "Role", label: "Access aligned to authorisation and responsibility" },
+          { value: "Context", label: "Device signals reviewed with clinical judgement" },
+          { value: "Audit", label: "Documentation and workflow visibility" },
+        ]}
+        rows={[
+          { title: "Role-based patient access", body: "Patient information is surfaced according to authorisation, consent and clinical responsibility rather than open workspace visibility." },
+          { title: "Device-supported consultation context", body: "Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows provide structured signals for clinician review." },
+          { title: "Follow-up and escalation", body: "Consultations can be connected to care-team communication, documented follow-up plans and clear escalation language." },
+        ]}
+      />
+
+      <WorkflowTimeline
+        eyebrow="Consultation flow"
+        title="From patient context to accountable follow-up."
+        body="The clinician experience is structured around review, documentation and safe next steps."
+        steps={[
+          { title: "Review context", body: "Open the patient workspace with role-appropriate access to history, reports, risk notes and care activity." },
+          { title: "Assess signals", body: "Review supported device data and patient-provided information as clinical context, not as automated diagnosis." },
+          { title: "Consult", body: "Conduct the virtual or contactless-care encounter within a governed workflow." },
+          { title: "Document", body: "Record notes, decisions, safety-netting, follow-up requirements and escalation instructions." },
+          { title: "Coordinate", body: "Connect diagnostics, pharmacy fulfilment, care teams or programme workflows where appropriate." },
+          { title: "Escalate", body: "Direct patients to urgent, emergency or in-person care when remote care is unsuitable." },
+        ]}
+      />
+
       <section className="mx-auto max-w-7xl px-4 pb-16 md:px-6">
         <CTA />
       </section>
