@@ -1,27 +1,195 @@
 import {
   Activity,
   BadgeCheck,
+  Baby,
+  BellRing,
   BriefcaseBusiness,
   Building2,
+  CalendarCheck,
   CircleHelp,
   ClipboardCheck,
+  FlaskConical,
   HeartPulse,
   LockKeyhole,
+  Moon,
+  Network,
   ShieldCheck,
+  Sparkles,
   Stethoscope,
   Truck,
   UserRound,
+  UsersRound,
+  WalletCards,
 } from "lucide-react";
 
 export const navLinks = [
   { label: "Platform", href: "/platform" },
+  { label: "Features", href: "/features" },
   { label: "Patients", href: "/patients" },
   { label: "Clinicians", href: "/clinicians" },
   { label: "MedReach", href: "/medreach" },
   { label: "CarePort", href: "/careport" },
   { label: "InsightCore", href: "/insightcore" },
-  { label: "Partnerships", href: "/partnerships" },
   { label: "Contact", href: "/contact" },
+];
+
+export const utilityLinks = [
+  { label: "For Patients", href: "/patients", icon: UserRound },
+  { label: "For Clinicians", href: "/clinicians", icon: Stethoscope },
+  { label: "For Partners", href: "/clients", icon: UsersRound },
+  { label: "Support", href: "/contact", icon: CircleHelp },
+  { label: "Resources", href: "/resources", icon: ClipboardCheck },
+];
+
+export const groupedNav = [
+  {
+    label: "Platform",
+    href: "/platform",
+    columns: [
+      {
+        title: "Overview",
+        links: [
+          { label: "Platform", href: "/platform", icon: Network },
+          { label: "Features", href: "/features", icon: Sparkles },
+          { label: "Devices", href: "/devices", icon: Activity },
+          { label: "InsightCore", href: "/insightcore", icon: Activity },
+        ],
+      },
+      {
+        title: "Strategy",
+        links: [
+          { label: "Innovation", href: "/innovation", icon: Sparkles },
+          { label: "Research & Development", href: "/research-and-development", icon: FlaskConical },
+          { label: "Ecosystem", href: "/ecosystem", icon: Building2 },
+          { label: "Use Cases", href: "/use-cases", icon: ClipboardCheck },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Solutions",
+    href: "/features",
+    columns: [
+      {
+        title: "For Individuals",
+        links: [
+          { label: "Patients", href: "/patients", icon: UserRound },
+          { label: "Clinicians", href: "/clinicians", icon: Stethoscope },
+          { label: "Devices", href: "/devices", icon: Activity },
+        ],
+      },
+      {
+        title: "Care Pathways",
+        links: [
+          { label: "Home IoMT Use", href: "/features#home-iomt", icon: Activity },
+          { label: "Ladies’ Health Centre", href: "/features#care-centres", icon: HeartPulse },
+          { label: "Paediatric Centre", href: "/features#care-centres", icon: Baby },
+          { label: "Antenatal Centre", href: "/features#care-centres", icon: HeartPulse },
+          { label: "Gentlemen’s Health", href: "/features#care-centres", icon: UserRound },
+        ],
+      },
+      {
+        title: "Daily Health",
+        links: [
+          { label: "Reminders", href: "/features#daily-health", icon: BellRing },
+          { label: "Self-Check", href: "/features#self-check", icon: ClipboardCheck },
+          { label: "Health Passport", href: "/features#health-passport", icon: WalletCards },
+          { label: "NexRing Sleep & Activity", href: "/features#daily-health", icon: Moon },
+        ],
+      },
+      {
+        title: "Services",
+        links: [
+          { label: "MedReach Diagnostics", href: "/medreach", icon: FlaskConical },
+          { label: "CarePort Fulfilment", href: "/careport", icon: Truck },
+          { label: "InsightCore Intelligence", href: "/insightcore", icon: Activity },
+          { label: "Bookings", href: "/bookings", icon: CalendarCheck },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Operations",
+    href: "/operations",
+    columns: [
+      {
+        title: "MedReach",
+        links: [
+          { label: "Diagnostics Operations", href: "/medreach", icon: FlaskConical },
+          { label: "Labs", href: "/medreach/labs", icon: Building2 },
+          { label: "Phlebotomists", href: "/medreach/phlebotomists", icon: HeartPulse },
+        ],
+      },
+      {
+        title: "CarePort",
+        links: [
+          { label: "Pharmacy Fulfilment", href: "/careport", icon: Truck },
+          { label: "Pharmacies", href: "/careport/pharmacies", icon: Building2 },
+          { label: "Riders", href: "/careport/riders", icon: Truck },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Partners",
+    href: "/partnerships",
+    columns: [
+      {
+        title: "Partner Programmes",
+        links: [
+          { label: "Clients & Sponsors", href: "/clients", icon: BriefcaseBusiness },
+          { label: "Partnerships", href: "/partnerships", icon: UsersRound },
+          { label: "Demos", href: "/demos", icon: CalendarCheck },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Trust",
+    href: "/security",
+    columns: [
+      {
+        title: "Governance",
+        links: [
+          { label: "Security", href: "/security", icon: LockKeyhole },
+          { label: "Compliance", href: "/compliance", icon: BadgeCheck },
+          { label: "Clinical Disclaimer", href: "/clinical-disclaimer", icon: ShieldCheck },
+          { label: "Privacy Policy", href: "/privacy", icon: LockKeyhole },
+          { label: "Terms & Conditions", href: "/terms", icon: ClipboardCheck },
+          { label: "FAQ", href: "/faq", icon: CircleHelp },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Resources",
+    href: "/resources",
+    columns: [
+      {
+        title: "Learn",
+        links: [
+          { label: "Resources", href: "/resources", icon: ClipboardCheck },
+          { label: "Bookings", href: "/bookings", icon: CalendarCheck },
+          { label: "Contact", href: "/contact", icon: CircleHelp },
+        ],
+      },
+    ],
+  },
+  {
+    label: "About",
+    href: "/ecosystem",
+    columns: [
+      {
+        title: "Cloven Technology Impilo",
+        links: [
+          { label: "Ecosystem", href: "/ecosystem", icon: Building2 },
+          { label: "Innovation", href: "/innovation", icon: Sparkles },
+          { label: "Research & Development", href: "/research-and-development", icon: FlaskConical },
+          { label: "Contact", href: "/contact", icon: CircleHelp },
+        ],
+      },
+    ],
+  },
 ];
 
 export const productRoutes = [

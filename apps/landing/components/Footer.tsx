@@ -16,6 +16,7 @@ const operationsLinks = [
 
 const companyLinks = [
   { label: "Platform", href: "/platform" },
+  { label: "Features", href: "/features" },
   { label: "Innovation", href: "/innovation" },
   { label: "Research & Development", href: "/research-and-development" },
   { label: "Ecosystem", href: "/ecosystem" },
@@ -58,6 +59,7 @@ export default function Footer() {
         <div>
           <h3 className="text-sm font-semibold text-slate-950">Platform</h3>
           <div className="mt-4 grid gap-3">
+            <Link href="/features" className="text-sm text-slate-600 hover:text-slate-950">Features</Link>
             {productRoutes.slice(0, 6).map((item) => (
               <Link key={item.href} href={item.href} className="text-sm text-slate-600 hover:text-slate-950">
                 {item.title}
