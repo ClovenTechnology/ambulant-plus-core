@@ -3,12 +3,22 @@ import { site } from "@/lib/site";
 
 const routes = [
   "",
+  "/platform",
+  "/innovation",
+  "/research-and-development",
   "/patients",
   "/clinicians",
   "/careport",
   "/medreach",
+  "/insightcore",
   "/clients",
   "/devices",
+  "/use-cases",
+  "/operations",
+  "/partnerships",
+  "/resources",
+  "/bookings",
+  "/demos",
   "/security",
   "/compliance",
   "/faq",
@@ -23,6 +33,6 @@ export default function sitemap(): MetadataRoute.Sitemap {
     url: `${site.url}${route}`,
     lastModified: new Date(),
     changeFrequency: route === "" ? "weekly" : "monthly",
-    priority: route === "" ? 1 : 0.7,
+    priority: route === "" ? 1 : route === "/platform" ? 0.9 : 0.7,
   }));
 }

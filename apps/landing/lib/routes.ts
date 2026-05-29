@@ -115,3 +115,18 @@ export const trustPillars = [
     body: "Clear education, onboarding, help pathways, escalation routes and accountable operational support across care workflows.",
   },
 ];
+
+export const strategicRoutes = [
+  {
+    label: "Innovation",
+    href: "/innovation",
+    summary:
+      "The Ambulant+ thesis for Contactless Medicine: device-supported care, home diagnostics, eRx adherence, medical-aid preflight and governed intelligence.",
+  },
+  {
+    label: "Research & Development",
+    href: "/research-and-development",
+    summary:
+      "Clinical workflow research, connected-device pathways, diagnostics operations, fulfilment logistics, patient navigation and governance design.",
+  },
+];
