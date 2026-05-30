@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { ChevronDown, ChevronRight, Mail, Menu, Phone, X } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Brand from "@/components/Brand";
 import { groupedNav, utilityLinks } from "@/lib/routes";
 import { site } from "@/lib/site";
@@ -10,6 +10,26 @@ import { site } from "@/lib/site";
 export default function Header() {
   const [open, setOpen] = useState(false);
   const [activeGroup, setActiveGroup] = useState<string | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function cancelClose() {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }
+
+  function openGroup(label: string) {
+    cancelClose();
+    setActiveGroup(label);
+  }
+
+  function scheduleClose() {
+    cancelClose();
+    closeTimerRef.current = setTimeout(() => {
+      setActiveGroup(null);
+    }, 160);
+  }
 
   return (
     <header className="sticky top-0 z-50 border-b border-cyan-100/70 bg-white/96 shadow-sm shadow-cyan-950/5 backdrop-blur-2xl">
@@ -29,15 +49,26 @@ export default function Header() {
           </div>
 
           <div className="flex shrink-0 items-center gap-5 text-slate-200">
-            <a href={site.phoneHref} className="inline-flex items-center gap-2 transition hover:text-white">
+            <a
+              href={site.phoneHref}
+              className="inline-flex items-center gap-2 transition hover:text-white"
+            >
               <Phone className="h-3.5 w-3.5" />
               {site.phone}
             </a>
-            <a href={`mailto:${site.supportEmail}`} className="hidden items-center gap-2 transition hover:text-white xl:inline-flex">
+
+            <a
+              href={`mailto:${site.supportEmail}`}
+              className="hidden items-center gap-2 transition hover:text-white xl:inline-flex"
+            >
               <Mail className="h-3.5 w-3.5" />
               {site.supportEmail}
             </a>
-            <a href={site.patientAppUrl} className="rounded-full bg-white px-4 py-1.5 text-slate-950 transition hover:bg-cyan-50">
+
+            <a
+              href={site.patientAppUrl}
+              className="rounded-full bg-white px-4 py-1.5 text-slate-950 transition hover:bg-cyan-50"
+            >
               Access Patient App
             </a>
           </div>
@@ -54,9 +85,9 @@ export default function Header() {
             <div
               key={group.label}
               className="relative"
-              onMouseEnter={() => setActiveGroup(group.label)}
-              onMouseLeave={() => setActiveGroup(null)}
-              onFocus={() => setActiveGroup(group.label)}
+              onMouseEnter={() => openGroup(group.label)}
+              onMouseLeave={scheduleClose}
+              onFocus={() => openGroup(group.label)}
             >
               <Link
                 href={group.href}
@@ -67,22 +98,40 @@ export default function Header() {
               </Link>
 
               {activeGroup === group.label && (
-                <div className="fixed left-1/2 top-[116px] z-[70] w-[min(1120px,calc(100vw-2rem))] -translate-x-1/2 pt-3">
-                  <div className="relative overflow-hidden rounded-[34px] border border-cyan-100 bg-gradient-to-br from-white via-cyan-50 to-indigo-50 p-5 shadow-2xl shadow-slate-950/20 ring-1 ring-white backdrop-blur-2xl">
-                    <div className="pointer-events-none absolute -left-24 top-0 h-56 w-56 rounded-full bg-cyan-300/28 blur-3xl" />
-                    <div className="pointer-events-none absolute -right-20 bottom-0 h-56 w-56 rounded-full bg-indigo-300/24 blur-3xl" />
-                    <div className="relative grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(group.columns.length, 4)}, minmax(0, 1fr))` }}>
+                <div
+                  className="fixed left-1/2 top-[116px] z-[80] w-[min(1120px,calc(100vw-2rem))] -translate-x-1/2 pt-4"
+                  onMouseEnter={() => openGroup(group.label)}
+                  onMouseLeave={scheduleClose}
+                >
+                  <div className="relative overflow-hidden rounded-[34px] border border-cyan-100 bg-gradient-to-br from-white via-cyan-50/95 to-indigo-50/95 p-5 shadow-2xl shadow-slate-950/24 ring-1 ring-cyan-100 backdrop-blur-2xl">
+                    <div className="pointer-events-none absolute -left-24 top-0 h-56 w-56 rounded-full bg-cyan-300/18 blur-3xl" />
+                    <div className="pointer-events-none absolute -right-20 bottom-0 h-56 w-56 rounded-full bg-indigo-300/18 blur-3xl" />
+
+                    <div
+                      className="relative grid gap-4"
+                      style={{
+                        gridTemplateColumns: `repeat(${Math.min(
+                          group.columns.length,
+                          4,
+                        )}, minmax(0, 1fr))`,
+                      }}
+                    >
                       {group.columns.map((column) => (
-                        <div key={column.title} className="rounded-[26px] border border-cyan-100/80 bg-white p-4 shadow-sm shadow-cyan-950/8">
+                        <div
+                          key={column.title}
+                          className="rounded-[26px] border border-cyan-100 bg-white/98 p-4 shadow-sm shadow-cyan-950/10"
+                        >
                           <div className="mb-4 text-xs font-bold uppercase tracking-[0.22em] text-cyan-800">
                             {column.title}
                           </div>
+
                           <div className="grid gap-2">
                             {column.links.map(({ label, href, icon: Icon }) => (
                               <Link
                                 key={`${column.title}-${href}-${label}`}
                                 href={href}
                                 className="group flex items-center gap-3 rounded-2xl px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-950 hover:text-white"
+                                onClick={() => setActiveGroup(null)}
                               >
                                 <span className="grid h-9 w-9 shrink-0 place-items-center rounded-2xl bg-cyan-50 text-cyan-700 transition group-hover:bg-white/10 group-hover:text-cyan-100">
                                   <Icon className="h-4 w-4" />
@@ -99,7 +148,11 @@ export default function Header() {
               )}
             </div>
           ))}
-          <Link href="/contact" className="focus-ring rounded-full px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-cyan-50 hover:text-slate-950">
+
+          <Link
+            href="/contact"
+            className="focus-ring rounded-full px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-cyan-50 hover:text-slate-950"
+          >
             Contact
           </Link>
         </nav>
@@ -111,6 +164,7 @@ export default function Header() {
           >
             Patient App
           </a>
+
           <a
             href={site.clinicianAppUrl}
             className="focus-ring rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800"
@@ -132,17 +186,25 @@ export default function Header() {
         <div className="max-h-[calc(100vh-5rem)] overflow-y-auto border-t border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-indigo-50 px-4 pb-5 lg:hidden">
           <div className="mx-auto grid max-w-7xl gap-3 pt-4">
             {groupedNav.map((group) => (
-              <details key={group.label} className="group rounded-3xl border border-cyan-100 bg-white/95 p-3 shadow-sm shadow-cyan-950/5">
+              <details
+                key={group.label}
+                className="group rounded-3xl border border-cyan-100 bg-white/98 p-3 shadow-sm shadow-cyan-950/5"
+              >
                 <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-2 py-2 text-sm font-bold text-slate-950">
                   <span>{group.label}</span>
                   <ChevronRight className="h-4 w-4 text-cyan-700 transition group-open:rotate-90" />
                 </summary>
+
                 <div className="grid gap-4 px-2 pb-2 pt-3 sm:grid-cols-2">
                   {group.columns.map((column) => (
-                    <div key={column.title} className="rounded-2xl border border-cyan-50 bg-white p-3 shadow-sm shadow-cyan-950/5">
+                    <div
+                      key={column.title}
+                      className="rounded-2xl border border-cyan-50 bg-white p-3 shadow-sm shadow-cyan-950/5"
+                    >
                       <div className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">
                         {column.title}
                       </div>
+
                       <div className="grid gap-1">
                         {column.links.map(({ label, href }) => (
                           <Link
@@ -162,15 +224,27 @@ export default function Header() {
               </details>
             ))}
 
-            <Link href="/contact" onClick={() => setOpen(false)} className="rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50">
-              Contact
+            <Link
+              href="/contact"
+              onClick={() => setOpen(false)}
+              className="flex items-center justify-between rounded-2xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              <span>Contact</span>
+              <ChevronRight className="h-4 w-4 text-cyan-700" />
             </Link>
 
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              <a href={site.patientAppUrl} className="rounded-2xl bg-cyan-50 px-4 py-3 text-center text-sm font-semibold text-cyan-800">
+              <a
+                href={site.patientAppUrl}
+                className="rounded-2xl bg-cyan-50 px-4 py-3 text-center text-sm font-semibold text-cyan-800"
+              >
                 Patient App
               </a>
-              <a href={site.clinicianAppUrl} className="rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-semibold text-white">
+
+              <a
+                href={site.clinicianAppUrl}
+                className="rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-semibold text-white"
+              >
                 Clinician Login
               </a>
             </div>

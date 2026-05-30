@@ -4,22 +4,38 @@ type BrandProps = {
 };
 
 export default function Brand({ compact = false, className = "" }: BrandProps) {
-  return (
-    <div className={`flex min-w-0 items-center gap-3 ${className}`}>
-      <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl border border-cyan-100 bg-gradient-to-br from-slate-950 via-slate-900 to-cyan-950 text-sm font-black tracking-tight text-cyan-100 shadow-sm">
-        A+
+  if (compact) {
+    return (
+      <div className={`flex min-w-0 items-center ${className}`}>
+        <img
+          src="/brand/ambulant-mark.png"
+          alt="Ambulant+"
+          className="h-11 w-11 shrink-0 rounded-2xl object-contain"
+          loading="eager"
+          decoding="async"
+        />
       </div>
+    );
+  }
 
-      {!compact && (
-        <div className="hidden min-w-0 leading-none sm:block">
-          <div className="whitespace-nowrap text-[1.35rem] font-black tracking-[-0.05em] text-slate-950">
-            Ambulant<span className="text-cyan-600">+</span>
-          </div>
-          <div className="mt-0.5 whitespace-nowrap text-[0.72rem] font-semibold tracking-[-0.02em] text-slate-600">
-            Contactless Medicine
-          </div>
-        </div>
-      )}
+  return (
+    <div className={`flex min-w-0 items-center ${className}`}>
+      <img
+        src="/brand/ambulant-mark.png"
+        alt=""
+        aria-hidden="true"
+        className="h-11 w-11 shrink-0 rounded-2xl object-contain sm:hidden"
+        loading="eager"
+        decoding="async"
+      />
+
+      <img
+        src="/brand/ambulant-logo-full.png"
+        alt="Ambulant+ Contactless Medicine"
+        className="hidden h-12 w-auto max-w-[220px] object-contain sm:block lg:max-w-[240px]"
+        loading="eager"
+        decoding="async"
+      />
     </div>
   );
 }
