@@ -2,38 +2,42 @@ import type { MetadataRoute } from "next";
 import { site } from "@/lib/site";
 
 const routes = [
-  "",
+  "/",
   "/platform",
   "/features",
-  "/innovation",
-  "/research-and-development",
+  "/devices",
   "/patients",
   "/patients/getting-started",
+  "/centres/ladies-health",
+  "/centres/paediatric",
+  "/centres/antenatal",
+  "/centres/gentlemens-health",
   "/clinicians",
   "/clinicians/onboarding",
-  "/careport",
-  "/careport/pharmacies",
-  "/careport/riders",
+  "/clients",
   "/medreach",
   "/medreach/labs",
   "/medreach/phlebotomists",
+  "/careport",
+  "/careport/pharmacies",
+  "/careport/riders",
   "/insightcore",
-  "/clients",
-  "/devices",
-  "/use-cases",
   "/operations",
   "/partnerships",
-  "/resources",
   "/bookings",
   "/demos",
+  "/resources",
+  "/innovation",
+  "/research-and-development",
   "/ecosystem",
+  "/use-cases",
   "/security",
   "/compliance",
-  "/faq",
-  "/contact",
+  "/clinical-disclaimer",
   "/privacy",
   "/terms",
-  "/clinical-disclaimer",
+  "/faq",
+  "/contact",
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
@@ -42,7 +46,14 @@ export default function sitemap(): MetadataRoute.Sitemap {
   return routes.map((route) => ({
     url: `${site.url}${route}`,
     lastModified: now,
-    changeFrequency: route === "" ? "weekly" : "monthly",
-    priority: route === "" ? 1 : route === "/features" ? 0.9 : 0.7,
+    changeFrequency: route === "/" ? "weekly" : "monthly",
+    priority:
+      route === "/"
+        ? 1
+        : ["/features", "/patients", "/clinicians", "/clients", "/devices"].includes(route)
+          ? 0.9
+          : route.startsWith("/centres")
+            ? 0.82
+            : 0.75,
   }));
 }

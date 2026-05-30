@@ -3,6 +3,13 @@ import Brand from "@/components/Brand";
 import { productRoutes } from "@/lib/routes";
 import { site } from "@/lib/site";
 
+const careCentreLinks = [
+  { label: "Ladies’ Health", href: "/centres/ladies-health" },
+  { label: "Paediatric", href: "/centres/paediatric" },
+  { label: "Antenatal", href: "/centres/antenatal" },
+  { label: "Gentlemen’s Health", href: "/centres/gentlemens-health" },
+];
+
 const operationsLinks = [
   { label: "MedReach", href: "/medreach" },
   { label: "Labs", href: "/medreach/labs" },
@@ -39,7 +46,7 @@ const trustLinks = [
 export default function Footer() {
   return (
     <footer className="border-t border-slate-200/70 bg-white/78">
-      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 md:px-6 lg:grid-cols-[1.3fr_0.7fr_0.85fr_0.85fr_0.75fr]">
+      <div className="mx-auto grid w-full max-w-7xl gap-10 px-4 py-12 md:px-6 lg:grid-cols-[1.25fr_0.7fr_0.75fr_0.85fr_0.85fr_0.75fr]">
         <div>
           <Brand />
           <p className="mt-5 max-w-md text-sm leading-7 text-slate-600">
@@ -76,6 +83,17 @@ export default function Footer() {
             {productRoutes.slice(0, 6).map((item) => (
               <Link key={item.href} href={item.href} className="text-sm text-slate-600 hover:text-slate-950">
                 {item.title}
+              </Link>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h3 className="text-sm font-semibold text-slate-950">Care Centres</h3>
+          <div className="mt-4 grid gap-3">
+            {careCentreLinks.map((item) => (
+              <Link key={item.href} href={item.href} className="text-sm text-slate-600 hover:text-slate-950">
+                {item.label}
               </Link>
             ))}
           </div>

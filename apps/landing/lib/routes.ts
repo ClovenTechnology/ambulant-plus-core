@@ -74,18 +74,18 @@ export const groupedNav = [
         title: "For Individuals",
         links: [
           { label: "Patients", href: "/patients", icon: UserRound },
+          { label: "Getting Started", href: "/patients/getting-started", icon: ClipboardCheck },
           { label: "Clinicians", href: "/clinicians", icon: Stethoscope },
           { label: "Devices", href: "/devices", icon: Activity },
         ],
       },
       {
-        title: "Care Pathways",
+        title: "Care Centres",
         links: [
-          { label: "Home IoMT Use", href: "/features#home-iomt", icon: Activity },
-          { label: "Ladies’ Health Centre", href: "/features#care-centres", icon: HeartPulse },
-          { label: "Paediatric Centre", href: "/features#care-centres", icon: Baby },
-          { label: "Antenatal Centre", href: "/features#care-centres", icon: HeartPulse },
-          { label: "Gentlemen’s Health", href: "/features#care-centres", icon: UserRound },
+          { label: "Ladies’ Health", href: "/centres/ladies-health", icon: HeartPulse },
+          { label: "Paediatric", href: "/centres/paediatric", icon: Baby },
+          { label: "Antenatal", href: "/centres/antenatal", icon: HeartPulse },
+          { label: "Gentlemen’s Health", href: "/centres/gentlemens-health", icon: UserRound },
         ],
       },
       {
