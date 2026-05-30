@@ -33,33 +33,46 @@ export default function Header() {
 
   return (
     <header className="sticky top-0 z-50 border-b border-cyan-100/70 bg-white/96 shadow-sm shadow-cyan-950/5 backdrop-blur-2xl">
-      <div className="hidden border-b border-white/10 bg-slate-950 text-white lg:block">
-        <div className="mx-auto flex h-10 max-w-7xl items-center justify-between px-6 text-xs font-semibold">
-          <div className="flex min-w-0 items-center gap-5">
-            {utilityLinks.map(({ label, href, icon: Icon }) => (
-              <Link
-                key={href}
-                href={href}
-                className="inline-flex items-center gap-2 whitespace-nowrap text-slate-200 transition hover:text-white"
-              >
-                <Icon className="h-3.5 w-3.5" />
-                {label}
-              </Link>
-            ))}
+      <div className="border-b border-white/10 bg-slate-950 text-white">
+        <div className="mx-auto flex h-9 max-w-7xl items-center justify-between gap-3 px-4 text-[11px] font-semibold md:px-6 lg:h-10 lg:text-xs">
+          <div className="flex min-w-0 items-center gap-3 overflow-x-auto whitespace-nowrap scrollbar-none lg:gap-5">
+            <Link href="/patients" className="inline-flex items-center gap-1.5 text-slate-200 transition hover:text-white">
+              Patients
+            </Link>
+            <Link href="/clinicians" className="inline-flex items-center gap-1.5 text-slate-200 transition hover:text-white">
+              Clinicians
+            </Link>
+            <Link href="/clients" className="inline-flex items-center gap-1.5 text-slate-200 transition hover:text-white">
+              Clients
+            </Link>
+
+            <div className="hidden items-center gap-5 lg:flex">
+              {utilityLinks.map(({ label, href, icon: Icon }) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className="inline-flex items-center gap-2 whitespace-nowrap text-slate-200 transition hover:text-white"
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {label}
+                </Link>
+              ))}
+            </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-5 text-slate-200">
+          <div className="flex shrink-0 items-center gap-3 text-slate-200 lg:gap-5">
             <a
               href={site.phoneHref}
-              className="inline-flex items-center gap-2 transition hover:text-white"
+              className="inline-flex items-center gap-1.5 transition hover:text-white lg:gap-2"
             >
               <Phone className="h-3.5 w-3.5" />
-              {site.phone}
+              <span className="hidden sm:inline">{site.phone}</span>
+              <span className="sm:hidden">Call</span>
             </a>
 
             <a
               href={`mailto:${site.supportEmail}`}
-              className="hidden items-center gap-2 transition hover:text-white xl:inline-flex"
+              className="hidden items-center gap-2 transition hover:text-white lg:inline-flex"
             >
               <Mail className="h-3.5 w-3.5" />
               {site.supportEmail}
@@ -67,7 +80,7 @@ export default function Header() {
 
             <a
               href={site.patientAppUrl}
-              className="rounded-full bg-white px-4 py-1.5 text-slate-950 transition hover:bg-cyan-50"
+              className="hidden rounded-full bg-white px-4 py-1.5 text-slate-950 transition hover:bg-cyan-50 lg:inline-flex"
             >
               Access Patient App
             </a>
@@ -183,7 +196,7 @@ export default function Header() {
       </div>
 
       {open && (
-        <div className="max-h-[calc(100vh-5rem)] overflow-y-auto border-t border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-indigo-50 px-4 pb-5 lg:hidden">
+        <div className="max-h-[calc(100vh-7.25rem)] overflow-y-auto border-t border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-indigo-50 px-4 pb-5 lg:hidden">
           <div className="mx-auto grid max-w-7xl gap-3 pt-4">
             {groupedNav.map((group) => (
               <details

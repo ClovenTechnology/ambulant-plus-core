@@ -6,10 +6,27 @@ export const site = {
 
   url: process.env.NEXT_PUBLIC_SITE_URL || "https://ambulantplus.co.za",
 
+  generalEmail:
+    process.env.NEXT_PUBLIC_GENERAL_EMAIL || "hello@ambulantplus.co.za",
   supportEmail:
-    process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@cloventechnology.com",
+    process.env.NEXT_PUBLIC_SUPPORT_EMAIL || "support@ambulantplus.co.za",
   salesEmail:
-    process.env.NEXT_PUBLIC_SALES_EMAIL || "hello@ambulantplus.co.za",
+    process.env.NEXT_PUBLIC_SALES_EMAIL || "partners@ambulantplus.co.za",
+  demoEmail:
+    process.env.NEXT_PUBLIC_DEMO_EMAIL || "demos@ambulantplus.co.za",
+  trainingEmail:
+    process.env.NEXT_PUBLIC_TRAINING_EMAIL || "training@ambulantplus.co.za",
+  careersEmail:
+    process.env.NEXT_PUBLIC_CAREERS_EMAIL || "careers@ambulantplus.co.za",
+
+  corporateEmail:
+    process.env.NEXT_PUBLIC_CORPORATE_EMAIL || "info@cloventechnology.com",
+  corporateCareersEmail:
+    process.env.NEXT_PUBLIC_CORPORATE_CAREERS_EMAIL ||
+    "careers@cloventechnology.com",
+  internshipEmail:
+    process.env.NEXT_PUBLIC_INTERNSHIP_EMAIL ||
+    "internship@cloventechnology.com",
 
   phone: process.env.NEXT_PUBLIC_CONTACT_PHONE || "+27 69 669 0899",
   phoneHref:

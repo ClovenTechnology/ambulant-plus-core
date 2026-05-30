@@ -1,16 +1,24 @@
-import { Building2, Mail, MapPin, MessageCircle, Phone } from "lucide-react";
+import { BriefcaseBusiness, Building2, GraduationCap, Mail, MapPin, MessageCircle, Phone, Presentation } from "lucide-react";
 import { site } from "@/lib/site";
 
 export const metadata = {
   title: "Contact",
-  description: "Contact Ambulant+ for clinical onboarding, partnerships, MedReach, CarePort and enterprise deployment enquiries.",
+  description:
+    "Contact Ambulant+ for clinical onboarding, partnerships, demos, training, MedReach, CarePort and enterprise deployment enquiries.",
 };
 
 const contactCards = [
   {
-    title: "General and partnerships",
-    body: "Enterprise deployments, partnerships, medical-scheme engagement, employer programmes and strategic enquiries.",
+    title: "General enquiries",
+    body: "General Ambulant+ enquiries, platform questions and routing to the appropriate team.",
     icon: Mail,
+    href: `mailto:${site.generalEmail}`,
+    label: site.generalEmail,
+  },
+  {
+    title: "Partnerships and enterprise",
+    body: "Enterprise deployments, medical-scheme engagement, employer programmes, strategic partnerships and commercial enquiries.",
+    icon: BriefcaseBusiness,
     href: `mailto:${site.salesEmail}`,
     label: site.salesEmail,
   },
@@ -20,6 +28,20 @@ const contactCards = [
     icon: MessageCircle,
     href: `mailto:${site.supportEmail}`,
     label: site.supportEmail,
+  },
+  {
+    title: "Demos",
+    body: "Structured walkthroughs for patient care, clinician workflows, MedReach diagnostics, CarePort fulfilment and programme intelligence.",
+    icon: Presentation,
+    href: `mailto:${site.demoEmail}`,
+    label: site.demoEmail,
+  },
+  {
+    title: "Training",
+    body: "Clinician onboarding, platform training, device-workflow readiness and operational enablement.",
+    icon: GraduationCap,
+    href: `mailto:${site.trainingEmail}`,
+    label: site.trainingEmail,
   },
   {
     title: "Phone",
@@ -41,8 +63,8 @@ export default function ContactPage() {
           </h1>
           <p className="mt-6 text-lg leading-9 text-slate-600">
             For clinical onboarding, care-programme deployment, pharmacy fulfilment, laboratory operations,
-            employer partnerships, medical-scheme engagement or platform enquiries, reach the Ambulant+ team
-            through the appropriate channel.
+            employer partnerships, medical-scheme engagement, demos, training or platform enquiries, reach the
+            Ambulant+ team through the appropriate channel.
           </p>
 
           <div className="mt-8 rounded-[34px] border border-cyan-100 bg-cyan-50/70 p-6">
@@ -59,6 +81,20 @@ export default function ContactPage() {
               </div>
             </div>
           </div>
+
+          <div className="mt-5 rounded-[34px] border border-slate-200 bg-white/80 p-6">
+            <h2 className="text-lg font-semibold text-slate-950">Careers and internships</h2>
+            <p className="mt-2 text-sm leading-7 text-slate-600">
+              Ambulant+ product-specific roles can be routed through the Ambulant+ careers inbox. Wider Cloven
+              Technology corporate roles, internships and graduate opportunities can also be routed through the
+              parent-company channels.
+            </p>
+            <div className="mt-4 grid gap-2 text-sm font-semibold text-cyan-800">
+              <a href={`mailto:${site.careersEmail}`}>{site.careersEmail}</a>
+              <a href={`mailto:${site.corporateCareersEmail}`}>{site.corporateCareersEmail}</a>
+              <a href={`mailto:${site.internshipEmail}`}>{site.internshipEmail}</a>
+            </div>
+          </div>
         </div>
 
         <div className="glass-panel rounded-[36px] p-6 md:p-8">
@@ -66,7 +102,11 @@ export default function ContactPage() {
             {contactCards.map((item) => {
               const Icon = item.icon;
               return (
-                <a key={item.title} href={item.href} className="rounded-3xl border border-white/80 bg-white/78 p-5 transition hover:-translate-y-0.5 hover:shadow-glow">
+                <a
+                  key={item.title}
+                  href={item.href}
+                  className="rounded-3xl border border-white/80 bg-white/78 p-5 transition hover:-translate-y-0.5 hover:shadow-glow"
+                >
                   <Icon className="h-5 w-5 text-cyan-700" />
                   <div className="mt-3 font-semibold text-slate-950">{item.title}</div>
                   <p className="mt-2 text-sm leading-7 text-slate-600">{item.body}</p>
