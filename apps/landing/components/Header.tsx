@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { ChevronDown, Mail, Menu, Phone, X } from "lucide-react";
+import { ChevronDown, ChevronRight, Mail, Menu, Phone, X } from "lucide-react";
 import { useState } from "react";
 import Brand from "@/components/Brand";
 import { groupedNav, utilityLinks } from "@/lib/routes";
@@ -68,12 +68,12 @@ export default function Header() {
 
               {activeGroup === group.label && (
                 <div className="fixed left-1/2 top-[116px] z-[70] w-[min(1120px,calc(100vw-2rem))] -translate-x-1/2 pt-3">
-                  <div className="relative overflow-hidden rounded-[34px] border border-cyan-100/90 bg-gradient-to-br from-white/98 via-cyan-50/97 to-indigo-50/96 p-5 shadow-2xl shadow-slate-950/18 ring-1 ring-white/80 backdrop-blur-2xl">
-                    <div className="pointer-events-none absolute -left-24 top-0 h-56 w-56 rounded-full bg-cyan-300/22 blur-3xl" />
-                    <div className="pointer-events-none absolute -right-20 bottom-0 h-56 w-56 rounded-full bg-indigo-300/18 blur-3xl" />
+                  <div className="relative overflow-hidden rounded-[34px] border border-cyan-100 bg-gradient-to-br from-white via-cyan-50 to-indigo-50 p-5 shadow-2xl shadow-slate-950/20 ring-1 ring-white backdrop-blur-2xl">
+                    <div className="pointer-events-none absolute -left-24 top-0 h-56 w-56 rounded-full bg-cyan-300/28 blur-3xl" />
+                    <div className="pointer-events-none absolute -right-20 bottom-0 h-56 w-56 rounded-full bg-indigo-300/24 blur-3xl" />
                     <div className="relative grid gap-4" style={{ gridTemplateColumns: `repeat(${Math.min(group.columns.length, 4)}, minmax(0, 1fr))` }}>
                       {group.columns.map((column) => (
-                        <div key={column.title} className="rounded-[26px] border border-white/80 bg-white/92 p-4 shadow-sm shadow-cyan-950/5">
+                        <div key={column.title} className="rounded-[26px] border border-cyan-100/80 bg-white p-4 shadow-sm shadow-cyan-950/8">
                           <div className="mb-4 text-xs font-bold uppercase tracking-[0.22em] text-cyan-800">
                             {column.title}
                           </div>
@@ -129,16 +129,17 @@ export default function Header() {
       </div>
 
       {open && (
-        <div className="max-h-[calc(100vh-5rem)] overflow-y-auto border-t border-cyan-100 bg-white/98 px-4 pb-5 lg:hidden">
+        <div className="max-h-[calc(100vh-5rem)] overflow-y-auto border-t border-cyan-100 bg-gradient-to-br from-cyan-50 via-white to-indigo-50 px-4 pb-5 lg:hidden">
           <div className="mx-auto grid max-w-7xl gap-3 pt-4">
             {groupedNav.map((group) => (
-              <details key={group.label} className="rounded-3xl border border-cyan-100 bg-gradient-to-br from-white via-cyan-50/85 to-indigo-50/70 p-3 shadow-sm">
-                <summary className="cursor-pointer list-none px-2 py-2 text-sm font-bold text-slate-950">
-                  {group.label}
+              <details key={group.label} className="group rounded-3xl border border-cyan-100 bg-white/95 p-3 shadow-sm shadow-cyan-950/5">
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-3 px-2 py-2 text-sm font-bold text-slate-950">
+                  <span>{group.label}</span>
+                  <ChevronRight className="h-4 w-4 text-cyan-700 transition group-open:rotate-90" />
                 </summary>
                 <div className="grid gap-4 px-2 pb-2 pt-3 sm:grid-cols-2">
                   {group.columns.map((column) => (
-                    <div key={column.title} className="rounded-2xl bg-white/80 p-3">
+                    <div key={column.title} className="rounded-2xl border border-cyan-50 bg-white p-3 shadow-sm shadow-cyan-950/5">
                       <div className="mb-2 text-xs font-bold uppercase tracking-[0.2em] text-cyan-700">
                         {column.title}
                       </div>
@@ -148,9 +149,10 @@ export default function Header() {
                             key={`${group.label}-${column.title}-${href}-${label}`}
                             href={href}
                             onClick={() => setOpen(false)}
-                            className="rounded-2xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-cyan-50"
+                            className="flex items-center justify-between rounded-2xl px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-cyan-50"
                           >
-                            {label}
+                            <span>{label}</span>
+                            <ChevronRight className="h-3.5 w-3.5 text-cyan-700" />
                           </Link>
                         ))}
                       </div>
