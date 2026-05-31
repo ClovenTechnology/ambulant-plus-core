@@ -5,19 +5,20 @@ import Script from "next/script";
 import {
   Activity,
   ArrowRight,
+  BookOpenText,
   BrainCircuit,
   Building2,
   CalendarCheck,
   CheckCircle2,
   ClipboardCheck,
-  HeartHandshake,
   HeartPulse,
   Pill,
   Plane,
-  RadioTower,
   ShieldCheck,
   Smartphone,
   Stethoscope,
+  TestTube2,
+  TrendingUp,
   Users,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -31,40 +32,65 @@ import { site } from "@/lib/site";
 
 export const metadata: Metadata = {
   title:
-    "Ambulant+ South Africa | Contactless Medicine, Remote Monitoring, Home Diagnostics and Pharmacy Fulfilment",
+    "Ambulant+ South Africa | Contactless Medicine Beyond Telemedicine, Remote Monitoring and Precision Care",
   description:
-    "Ambulant+ is a Contactless Medicine platform by Cloven Technology, combining clinician-led virtual care, connected medical devices, home diagnostics, pharmacy fulfilment, medical-aid programme visibility and governance-aware health intelligence.",
+    "Ambulant+ is a Contactless Medicine and Personal Health Management platform by Cloven Technology, combining clinician-led virtual care, connected medical devices, remote patient monitoring, continuous vitals, home diagnostics, pharmacy fulfilment, predictive care signals, precision medicine pathways, medical-aid programme visibility and governance-aware health intelligence.",
   keywords: [
     "Ambulant+",
+    "Ambulant Plus",
     "Contactless Medicine",
-    "contactless medicine South Africa",
+    "Contactless Medicine South Africa",
+    "contactless healthcare",
+    "zero contact care",
+    "beyond telemedicine",
     "telemedicine South Africa",
+    "telehealth South Africa",
     "virtual doctor consultation South Africa",
+    "online doctor South Africa",
+    "find a doctor online",
     "remote patient monitoring South Africa",
+    "continuous remote monitoring",
+    "remote monitoring",
+    "remote vitals monitoring",
+    "continuous vitals monitoring",
     "connected medical devices",
+    "integrated medical hardware",
     "IoMT healthcare",
+    "Internet of Medical Things",
     "home diagnostics",
     "home phlebotomy",
-    "pharmacy delivery South Africa",
-    "medical aid wellness platform",
-    "corporate wellness platform",
-    "preventive healthcare",
-    "chronic disease monitoring",
-    "fertility monitoring",
-    "digital health South Africa",
+    "digital stethoscope",
+    "digital auscultation",
+    "HD otoscope",
+    "Health Monitor",
     "NexRing",
+    "pharmacy delivery South Africa",
+    "medicine delivery",
     "CarePort",
     "MedReach",
     "InsightCore",
+    "medical aid wellness platform",
+    "medical aid preventive care",
+    "corporate wellness platform",
+    "preventive healthcare",
+    "predictive care",
+    "precision medicine",
+    "precision care",
+    "chronic disease monitoring",
+    "fertility monitoring",
+    "primary care",
+    "instant care",
+    "virtual care",
+    "digital health South Africa",
     "Cloven Technology",
   ],
   alternates: {
     canonical: "https://ambulantplus.co.za/",
   },
   openGraph: {
-    title: "Ambulant+ South Africa | Contactless Medicine Infrastructure",
+    title: "Ambulant+ South Africa | Contactless Medicine Beyond Telemedicine",
     description:
-      "Clinician-led virtual care, connected medical devices, home diagnostics, pharmacy fulfilment, care pods and payer-facing programme intelligence in one governed platform.",
+      "Clinician-led virtual care, connected medical devices, remote patient monitoring, continuous vitals, home diagnostics, pharmacy fulfilment, predictive care signals, care pods and payer-facing programme intelligence in one governed platform.",
     url: "https://ambulantplus.co.za/",
     siteName: "Ambulant+",
     images: [
@@ -80,9 +106,9 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: "summary_large_image",
-    title: "Ambulant+ South Africa | Contactless Medicine Infrastructure",
+    title: "Ambulant+ South Africa | Contactless Medicine Beyond Telemedicine",
     description:
-      "Device-supported virtual care, home diagnostics, pharmacy fulfilment, care pods and programme intelligence for patients, clinicians, partners and medical aids.",
+      "Device-supported virtual care, home diagnostics, pharmacy fulfilment, predictive care signals, care pods and programme intelligence for patients, clinicians, partners and medical aids.",
     images: ["https://ambulantplus.co.za/og/ambulant-og.webp"],
   },
 };
@@ -94,14 +120,14 @@ const heroValueCards = [
       "Ambulant+ adds clinical device context, diagnostics workflows, medicine fulfilment and structured care intelligence around virtual consultation.",
   },
   {
-    title: "Built for prevention",
+    title: "Predictive and prevention-focused",
     body:
-      "Designed to support earlier intervention, chronic-care continuity, adherence visibility and longitudinal health monitoring.",
+      "Longitudinal vitals, adherence trends, wearable signals and care-pathway data can support earlier intervention and preventive care.",
   },
   {
-    title: "Useful to medical aids",
+    title: "Precision-care pathways",
     body:
-      "Programme teams can support member visibility, benefit navigation, preventive-care engagement and claims-ready care events.",
+      "Care can be organised around each patient’s context, device readings, diagnostic needs, medication journey and authorised programme visibility.",
   },
   {
     title: "Governance-aware by design",
@@ -110,11 +136,38 @@ const heroValueCards = [
   },
 ];
 
+const telemedicineGaps = [
+  {
+    title: "Video alone cannot measure the patient",
+    body:
+      "Many remote consultations still depend on symptoms alone. Ambulant+ adds supported device pathways for vitals, auscultation, otoscopy and longitudinal monitoring where clinically appropriate.",
+    icon: Activity,
+  },
+  {
+    title: "Access without continuity is fragile",
+    body:
+      "A one-off call may not solve chronic-care gaps. Ambulant+ connects consultation, monitoring, diagnostics, medication fulfilment and follow-up visibility.",
+    icon: HeartPulse,
+  },
+  {
+    title: "Care fails when the last mile is missing",
+    body:
+      "Patients may still struggle with laboratory access, pharmacy collection, medication adherence or transport. MedReach and CarePort help close those operational gaps.",
+    icon: Pill,
+  },
+  {
+    title: "Payers need prevention, not just utilisation",
+    body:
+      "Medical aids, HMOs and sponsors need earlier risk signals, adherence visibility and programme intelligence before avoidable deterioration becomes expensive care.",
+    icon: TrendingUp,
+  },
+];
+
 const consultationModel = [
   "Health Monitor supports blood pressure, SpO₂, temperature, glucose, heart-rate and ECG workflows.",
   "Digital Stethoscope and HD Otoscope add auscultation and imaging context to clinician-led virtual review.",
   "NexRing supports longitudinal signals, readiness trends and fertility-relevant temperature variation against individual baselines.",
-  "InsightCore layers adherence trends, care-pathway visibility, regression-risk signals and programme intelligence around the care journey.",
+  "InsightCore layers adherence trends, care-pathway visibility, regression-risk signals, predictive care signals and programme intelligence around the care journey.",
 ];
 
 const pathwaySteps = [
@@ -169,6 +222,15 @@ const stakeholderCards: Array<{
   },
 ];
 
+const payerEconomics = [
+  "Earlier intervention before chronic disease deterioration becomes high-cost care.",
+  "Remote vitals, continuous monitoring and longitudinal trends for authorised care programmes.",
+  "Medication adherence signals, reminders, eRx continuity and pharmacy fulfilment visibility.",
+  "Home diagnostics and phlebotomy workflows that reduce missed testing and delayed review.",
+  "Member engagement pathways for preventive care, fertility support, family health and chronic treatment support.",
+  "Claims-ready care events and programme-level visibility where consent and scheme rules allow.",
+];
+
 const podRolloutLocations = [
   "O.R. Tambo International Airport",
   "Cape Town International Airport",
@@ -178,6 +240,33 @@ const podRolloutLocations = [
   "Fourways Mall",
   "Eastgate Mall",
   "V&A Waterfront",
+];
+
+const insightArticles = [
+  {
+    title: "What Is Contactless Medicine?",
+    body:
+      "The core definition of Contactless Medicine and how it moves beyond ordinary video-only telemedicine.",
+    href: "/blog/what-is-contactless-medicine",
+  },
+  {
+    title: "Contactless Medicine vs Telemedicine",
+    body:
+      "Why device-supported virtual care creates a stronger model than traditional telemedicine alone.",
+    href: "/blog/contactless-medicine-vs-telemedicine",
+  },
+  {
+    title: "Remote Monitoring for Medical Aids",
+    body:
+      "How medical aids, HMOs and sponsors can use remote monitoring to support preventive care.",
+    href: "/blog/remote-monitoring-for-medical-aids",
+  },
+  {
+    title: "Pandemic Resilience and Contactless Medicine",
+    body:
+      "Why Contactless Medicine matters when infectious threats require isolation without cutting off care.",
+    href: "/blog/contactless-medicine-pandemic-resilience",
+  },
 ];
 
 const finalTrustCards: Array<{
@@ -200,7 +289,7 @@ const finalTrustCards: Array<{
   {
     title: "Intelligence-led",
     body:
-      "InsightCore supports adherence trends, regression-risk signals and programme visibility with governance boundaries.",
+      "InsightCore supports adherence trends, regression-risk signals, predictive care signals, precision-care pathways and programme visibility with governance boundaries.",
     icon: BrainCircuit,
   },
 ];
@@ -247,7 +336,7 @@ const jsonLd = {
       operatingSystem: "Web, iOS, Android",
       url: "https://ambulantplus.co.za/",
       description:
-        "Ambulant+ is a Contactless Medicine platform combining clinician-led virtual care, connected medical devices, home diagnostics, pharmacy fulfilment, care pods and programme intelligence.",
+        "Ambulant+ is a Contactless Medicine platform combining clinician-led virtual care, connected medical devices, remote patient monitoring, continuous vitals, home diagnostics, pharmacy fulfilment, predictive care signals, care pods and programme intelligence.",
       publisher: {
         "@id": "https://ambulantplus.co.za/#organization",
       },
@@ -256,6 +345,22 @@ const jsonLd = {
         availability: "https://schema.org/OnlineOnly",
         category: "Digital health platform",
       },
+      featureList: [
+        "Clinician-led virtual consultation",
+        "Remote patient monitoring",
+        "Continuous vitals monitoring",
+        "Connected medical devices",
+        "Home diagnostics",
+        "Home phlebotomy",
+        "Digital auscultation",
+        "HD otoscopy",
+        "Pharmacy fulfilment",
+        "Medication adherence support",
+        "Predictive care signals",
+        "Precision-care pathways",
+        "Medical-aid programme visibility",
+        "Governance-aware health intelligence",
+      ],
     },
     {
       "@type": "MedicalBusiness",
@@ -263,7 +368,7 @@ const jsonLd = {
       name: "Ambulant+ Contactless Medicine",
       url: "https://ambulantplus.co.za/",
       description:
-        "Contactless Medicine infrastructure for clinician-led virtual care, connected devices, home diagnostics, medication fulfilment, care pods and preventive-care programme visibility.",
+        "Contactless Medicine infrastructure for clinician-led virtual care, connected devices, remote monitoring, home diagnostics, medication fulfilment, care pods, predictive care signals, precision-care pathways and preventive-care programme visibility.",
       medicalSpecialty: [
         "PrimaryCare",
         "Cardiovascular",
@@ -286,7 +391,7 @@ const jsonLd = {
           acceptedAnswer: {
             "@type": "Answer",
             text:
-              "Ambulant+ is a Contactless Medicine platform by Cloven Technology. It combines clinician-led virtual consultation, connected medical devices, home diagnostics, pharmacy fulfilment, care pods and programme intelligence in one governed ecosystem.",
+              "Ambulant+ is a Contactless Medicine and Personal Health Management platform by Cloven Technology. It combines clinician-led virtual consultation, connected medical devices, remote patient monitoring, home diagnostics, pharmacy fulfilment, care pods, predictive care signals and programme intelligence in one governed ecosystem.",
           },
         },
         {
@@ -295,7 +400,16 @@ const jsonLd = {
           acceptedAnswer: {
             "@type": "Answer",
             text:
-              "Ordinary telemedicine is often video-first. Ambulant+ is built around device-supported clinical context, home diagnostics, medication fulfilment, care-pathway visibility and governance-aware intelligence.",
+              "Ordinary telemedicine is often video-first. Ambulant+ is built around device-supported clinical context, remote monitoring, continuous vitals, home diagnostics, medication fulfilment, care-pathway visibility and governance-aware intelligence.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Does Ambulant+ support predictive care and precision medicine?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text:
+              "Ambulant+ supports predictive care signals and precision-care pathways by organising longitudinal vitals, adherence trends, wearable context, diagnostic workflows and clinician-led review around each patient. These insights support care decisions but do not replace clinician judgement.",
           },
         },
         {
@@ -341,18 +455,20 @@ export default function HomePage() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-cyan-800">
               <ShieldCheck className="h-4 w-4" />
-              Contactless Medicine Infrastructure
+              Welcome to Ambulant+ South Africa
             </div>
 
             <h1 className="mt-6 max-w-4xl text-4xl font-semibold tracking-[-0.055em] text-slate-950 md:text-5xl lg:text-[4rem] lg:leading-[0.96]">
-              The care platform beyond ordinary telemedicine.
+              Contactless Medicine beyond ordinary telemedicine.
             </h1>
 
             <p className="mt-6 max-w-3xl text-lg leading-9 text-slate-600">
               Ambulant+ is a Contactless Medicine and Personal Health Management
               platform by Cloven Technology, combining clinician-led virtual care,
-              connected medical devices, home diagnostics, pharmacy fulfilment,
-              medical-aid programme visibility and governance-aware health intelligence.
+              connected medical devices, remote patient monitoring, continuous vitals,
+              home diagnostics, pharmacy fulfilment, predictive care signals,
+              precision-care pathways, medical-aid programme visibility and
+              governance-aware health intelligence.
             </p>
 
             <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">
@@ -412,6 +528,24 @@ export default function HomePage() {
       </section>
 
       <SectionShell
+        eyebrow="Why this matters now"
+        title="Telemedicine solved distance. It did not fully solve clinical context."
+        body="Ambulant+ is built around the next problem: how to deliver remote care with useful observations, diagnostics, medicine continuity, preventive intelligence and governance boundaries."
+      >
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {telemedicineGaps.map(({ title, body, icon: Icon }) => (
+            <div key={title} className="glass-panel rounded-[34px] p-6">
+              <Icon className="h-7 w-7 text-cyan-700" />
+              <h3 className="mt-5 text-lg font-semibold text-slate-950">
+                {title}
+              </h3>
+              <p className="mt-3 text-sm leading-7 text-slate-600">{body}</p>
+            </div>
+          ))}
+        </div>
+      </SectionShell>
+
+      <SectionShell
         eyebrow="Platform routes"
         title="One ecosystem. Dedicated workspaces for every care pathway."
         body="Ambulant+ gives each user group a focused environment while the public domain remains the trusted home for platform information, access and governance."
@@ -436,10 +570,7 @@ export default function HomePage() {
       >
         <div className="grid gap-4 md:grid-cols-3">
           {pathwaySteps.map((step) => (
-            <div
-              key={step.letter}
-              className="glass-panel rounded-[34px] p-6"
-            >
+            <div key={step.letter} className="glass-panel rounded-[34px] p-6">
               <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-950 text-lg font-bold text-white">
                 {step.letter}
               </div>
@@ -481,8 +612,8 @@ export default function HomePage() {
               <p className="mt-5 max-w-2xl text-base leading-8 text-slate-300">
                 Ambulant+ is structured so that a virtual review can connect to
                 device-supported observations, home diagnostic workflows, eRx-aware
-                pharmacy fulfilment, adherence reminders, care summaries and programme
-                intelligence where authorised.
+                pharmacy fulfilment, adherence reminders, care summaries, predictive
+                care signals and programme intelligence where authorised.
               </p>
 
               <div className="mt-8 grid gap-3 sm:grid-cols-2">
@@ -546,6 +677,42 @@ export default function HomePage() {
       />
 
       <SectionShell
+        eyebrow="Medical aids, HMOs and sponsors"
+        title="For payers, prevention is not a slogan. It is risk control."
+        body="Ambulant+ helps payer and sponsor programmes move from passive coverage to earlier intervention, remote monitoring, adherence support and authorised programme visibility."
+      >
+        <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
+          <div className="glass-panel rounded-[34px] p-6">
+            <Building2 className="h-8 w-8 text-cyan-700" />
+            <h3 className="mt-5 text-2xl font-semibold tracking-tight text-slate-950">
+              Avoidable complications are where costs become difficult to recover.
+            </h3>
+            <p className="mt-4 text-sm leading-8 text-slate-600">
+              When chronic-care deterioration is detected late, payers often face high-cost
+              claims from preventable or delay-sensitive complications. Ambulant+ supports
+              preventive-care programmes with remote monitoring, medication continuity,
+              home diagnostics and care-pathway intelligence.
+            </p>
+            <Link
+              href="/clients"
+              className="mt-6 inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+            >
+              Explore payer programmes <ArrowRight className="h-4 w-4" />
+            </Link>
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2">
+            {payerEconomics.map((item) => (
+              <div key={item} className="rounded-3xl border border-cyan-100 bg-cyan-50/70 p-5">
+                <CheckCircle2 className="h-5 w-5 text-cyan-700" />
+                <p className="mt-3 text-sm leading-7 text-slate-700">{item}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </SectionShell>
+
+      <SectionShell
         eyebrow="Who Ambulant+ serves"
         title="Built for patients, clinicians, payers and care operators."
         body="The platform is designed to keep each stakeholder inside the right workspace, with the right level of visibility, rather than collapsing everyone into one unsafe interface."
@@ -568,16 +735,16 @@ export default function HomePage() {
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50 px-4 py-2 text-xs font-bold uppercase tracking-[0.22em] text-cyan-800">
               <Building2 className="h-4 w-4" />
-              Contactless care access points
+              Future access infrastructure
             </div>
             <h2 className="mt-6 max-w-3xl text-3xl font-semibold tracking-[-0.05em] text-slate-950 md:text-5xl">
-              Care pods will extend Ambulant+ into high-traffic public and partner sites.
+              The future of care access will not be limited to clinics.
             </h2>
             <p className="mt-5 max-w-3xl text-base leading-8 text-slate-600">
-              From August 2026, Ambulant+ plans to roll out selected contactless care
-              pods across strategic airports and shopping malls, creating privacy-aware
-              access points for guided virtual care, supported device use and structured
-              patient routing.
+              From August 2026, Ambulant+ plans selected contactless care-pod
+              deployments across strategic airports and shopping malls, creating
+              privacy-aware access points for guided virtual care, supported device use,
+              structured patient routing and partner-enabled healthcare access.
             </p>
 
             <div className="mt-8 grid gap-3 sm:grid-cols-2">
@@ -611,6 +778,33 @@ export default function HomePage() {
           </div>
         </div>
       </section>
+
+      <SectionShell
+        eyebrow="Contactless Medicine insights"
+        title="A category-defining platform needs a serious knowledge base."
+        body="Read Ambulant+ perspectives on Contactless Medicine, remote patient monitoring, medical-aid prevention, pandemic resilience and the movement beyond ordinary telemedicine."
+      >
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          {insightArticles.map((article) => (
+            <Link
+              key={article.href}
+              href={article.href}
+              className="group rounded-[30px] border border-white/80 bg-white/85 p-6 shadow-sm transition hover:-translate-y-1 hover:shadow-glow"
+            >
+              <BookOpenText className="h-6 w-6 text-cyan-700" />
+              <h3 className="mt-5 text-lg font-semibold text-slate-950">
+                {article.title}
+              </h3>
+              <p className="mt-3 text-sm leading-7 text-slate-600">
+                {article.body}
+              </p>
+              <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700">
+                Read insight <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </SectionShell>
 
       <SectionShell
         eyebrow="Trust architecture"
@@ -651,7 +845,7 @@ export default function HomePage() {
               {[
                 "Ambulant+ supports clinician-led care; it does not replace the treating clinician's judgement.",
                 "Connected device data supports care context; it does not remove the need for in-person assessment when clinically required.",
-                "InsightCore supports visibility and structured intelligence; it should not be presented as autonomous diagnosis.",
+                "InsightCore supports visibility, predictive care signals and structured intelligence; it should not be presented as autonomous diagnosis.",
                 "Ambulant+ is not an emergency service. In a medical emergency, users should contact local emergency services immediately.",
               ].map((item) => (
                 <div key={item} className="rounded-3xl bg-slate-50 p-5">
