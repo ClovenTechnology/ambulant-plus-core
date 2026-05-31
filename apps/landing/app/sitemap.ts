@@ -13,6 +13,7 @@ const blogRoutes = [
   "/blog/contactless-medicine-cost-savings",
   "/blog/remote-care-saves-time",
   "/blog/contactless-medicine-infection-exposure",
+  "/blog/contactless-medicine-pandemic-resilience",
   "/blog/remote-patient-monitoring-chronic-treatment-outcomes",
   "/blog/clinicians-contactless-medicine-safer-practice",
 ];
