@@ -1,4 +1,6 @@
+import type { Metadata } from "next";
 import Link from "next/link";
+import Script from "next/script";
 import {
   ArrowRight,
   BrainCircuit,
@@ -16,45 +18,103 @@ import ImageStoryBand from "@/components/ImageStoryBand";
 import { productRoutes, trustPillars } from "@/lib/routes";
 import { site } from "@/lib/site";
 
+export const metadata: Metadata = {
+  title:
+    "Ambulant+ South Africa | Contactless Medicine, Remote Monitoring, Home Diagnostics and Pharmacy Fulfilment",
+  description:
+    "Ambulant+ is a Contactless Medicine platform by Cloven Technology, combining clinician-led virtual care, connected medical devices, home diagnostics, pharmacy fulfilment, medical-aid programme visibility and governance-aware health intelligence.",
+  keywords: [
+    "Ambulant+",
+    "Contactless Medicine",
+    "telemedicine South Africa",
+    "remote patient monitoring South Africa",
+    "connected medical devices",
+    "IoMT healthcare",
+    "home diagnostics",
+    "home phlebotomy",
+    "virtual consultation",
+    "medical aid wellness platform",
+    "pharmacy delivery",
+    "digital health South Africa",
+    "preventive healthcare",
+    "chronic disease monitoring",
+    "fertility monitoring",
+    "NexRing",
+    "CarePort",
+    "MedReach",
+    "InsightCore",
+    "Cloven Technology",
+  ],
+  alternates: {
+    canonical: "https://ambulantplus.co.za/",
+  },
+  openGraph: {
+    title:
+      "Ambulant+ South Africa | Contactless Medicine Infrastructure",
+    description:
+      "Clinician-led virtual care, connected medical devices, home diagnostics, pharmacy fulfilment and payer-facing programme intelligence in one governed platform.",
+    url: "https://ambulantplus.co.za/",
+    siteName: "Ambulant+",
+    images: [
+      {
+        url: "https://ambulantplus.co.za/og/ambulant-og.webp",
+        width: 1200,
+        height: 630,
+        alt: "Ambulant+ Contactless Medicine platform",
+      },
+    ],
+    locale: "en_ZA",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title:
+      "Ambulant+ South Africa | Contactless Medicine Infrastructure",
+    description:
+      "Device-supported virtual care, home diagnostics, pharmacy fulfilment and programme intelligence for patients, clinicians, partners and medical aids.",
+    images: ["https://ambulantplus.co.za/og/ambulant-og.webp"],
+  },
+};
+
 const heroPanes = [
   {
     title: "Clinical",
-    body: "Virtual consultation and device-supported review.",
+    body: "Clinician-led virtual consultation supported by structured patient context and device pathways.",
   },
   {
     title: "Diagnostics",
-    body: "Home phlebotomy and laboratory coordination.",
+    body: "Home phlebotomy, specimen handling and laboratory coordination through MedReach.",
   },
   {
-    title: "Operations",
-    body: "Pharmacy fulfilment and care logistics visibility.",
+    title: "Fulfilment",
+    body: "eRx-aware pharmacy fulfilment, rider coordination and proof-of-delivery through CarePort.",
   },
   {
     title: "Intelligence",
-    body: "InsightCore adherence, risk, programme and governance intelligence.",
+    body: "InsightCore visibility across adherence, risk signals, programme activity and governance controls.",
   },
 ];
 
 const heroValueCards = [
   {
-    title: "Precision treatment",
+    title: "Beyond ordinary telemedicine",
     body:
-      "Care decisions supported by clinician review, objective device signals and structured patient context.",
+      "Ambulant+ adds clinical device context, diagnostics workflows, medicine fulfilment and structured care intelligence around virtual consultation.",
   },
   {
-    title: "Predictive medicine",
+    title: "Built for prevention",
     body:
-      "InsightCore helps surface adherence trends, regression risk and care-pathway visibility.",
+      "The platform is designed to support earlier intervention, chronic-care continuity, adherence visibility and longitudinal health monitoring.",
   },
   {
-    title: "Cost reduction",
+    title: "Useful to medical aids",
     body:
-      "Earlier intervention, remote monitoring and fulfilment visibility can reduce avoidable care friction.",
+      "Programme teams can use Ambulant+ to support member visibility, benefit navigation, preventive-care engagement and claims-ready care events.",
   },
   {
-    title: "Access expansion",
+    title: "Governance-aware by design",
     body:
-      "Patients, clinicians, diagnostics, medicine and care programmes connect in one governed ecosystem.",
+      "Role boundaries, consent-aware data sharing, auditability and careful clinical language are built into the public and protected experience.",
   },
 ];
 
@@ -62,7 +122,7 @@ const consultationModel = [
   "Health Monitor supports blood pressure, SpO₂, temperature, glucose, heart-rate and ECG workflows.",
   "Digital Stethoscope and HD Otoscope add auscultation and imaging context to clinician-led virtual review.",
   "NexRing supports longitudinal signals, readiness trends and fertility-relevant temperature variation against individual baselines.",
-  "InsightCore layers adherence trends, care-pathway visibility, regression-risk signals and governance-aware intelligence around the care journey.",
+  "InsightCore layers adherence trends, care-pathway visibility, regression-risk signals and programme intelligence around the care journey.",
 ];
 
 const finalTrustCards: Array<{
@@ -90,9 +150,132 @@ const finalTrustCards: Array<{
   },
 ];
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://ambulantplus.co.za/#organization",
+      name: "Ambulant+",
+      legalName: "Cloven Technology Impilo",
+      url: "https://ambulantplus.co.za/",
+      logo: "https://ambulantplus.co.za/brand/ambulant-logo-full.png",
+      brand: {
+        "@type": "Brand",
+        name: "Ambulant+",
+        slogan: "Contactless Medicine",
+      },
+      parentOrganization: {
+        "@type": "Organization",
+        name: "Cloven Technology",
+        url: "https://cloventechnology.com/",
+      },
+      contactPoint: [
+        {
+          "@type": "ContactPoint",
+          telephone: "+27 69 669 0899",
+          contactType: "customer support",
+          areaServed: "ZA",
+          availableLanguage: ["English"],
+        },
+      ],
+      sameAs: [
+        "https://ambulantplus.co.za/",
+        "https://cloventechnology.com/",
+      ],
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": "https://ambulantplus.co.za/#software",
+      name: "Ambulant+",
+      applicationCategory: "HealthApplication",
+      operatingSystem: "Web, iOS, Android",
+      url: "https://ambulantplus.co.za/",
+      description:
+        "Ambulant+ is a Contactless Medicine platform combining clinician-led virtual care, connected medical devices, home diagnostics, pharmacy fulfilment and programme intelligence.",
+      publisher: {
+        "@id": "https://ambulantplus.co.za/#organization",
+      },
+      offers: {
+        "@type": "Offer",
+        availability: "https://schema.org/OnlineOnly",
+        category: "Digital health platform",
+      },
+    },
+    {
+      "@type": "MedicalBusiness",
+      "@id": "https://ambulantplus.co.za/#medicalbusiness",
+      name: "Ambulant+ Contactless Medicine",
+      url: "https://ambulantplus.co.za/",
+      description:
+        "Contactless Medicine infrastructure for clinician-led virtual care, connected devices, home diagnostics, medication fulfilment and preventive-care programme visibility.",
+      medicalSpecialty: [
+        "PrimaryCare",
+        "Cardiovascular",
+        "Endocrine",
+        "Obstetric",
+        "Pediatric",
+      ],
+      areaServed: {
+        "@type": "Country",
+        name: "South Africa",
+      },
+    },
+    {
+      "@type": "FAQPage",
+      "@id": "https://ambulantplus.co.za/#homepage-faq",
+      mainEntity: [
+        {
+          "@type": "Question",
+          name: "What is Ambulant+?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text:
+              "Ambulant+ is a Contactless Medicine platform by Cloven Technology. It combines clinician-led virtual consultation, connected medical devices, home diagnostics, pharmacy fulfilment and programme intelligence in one governed ecosystem.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "How is Ambulant+ different from ordinary telemedicine?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text:
+              "Ordinary telemedicine is often video-first. Ambulant+ is built around device-supported clinical context, home diagnostics, medication fulfilment, care-pathway visibility and governance-aware intelligence.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Who is Ambulant+ built for?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text:
+              "Ambulant+ is built for patients, clinicians, pharmacies, diagnostic teams, medical aids, corporate sponsors, care programmes and administrators who need governed digital health workflows.",
+          },
+        },
+        {
+          "@type": "Question",
+          name: "Does Ambulant+ replace emergency services?",
+          acceptedAnswer: {
+            "@type": "Answer",
+            text:
+              "No. Ambulant+ is not an emergency service and does not replace emergency medical care, in-person clinical assessment where required, or clinician judgement.",
+          },
+        },
+      ],
+    },
+  ],
+};
+
 export default function HomePage() {
   return (
     <main>
+      <Script
+        id="ambulant-home-jsonld"
+        type="application/ld+json"
+        strategy="afterInteractive"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
       <section className="relative isolate overflow-hidden px-4 py-14 md:px-6 md:py-20">
         <div className="pointer-events-none absolute inset-0 -z-10">
           <div className="absolute left-[8%] top-[8%] h-72 w-72 rounded-full bg-cyan-300/20 blur-3xl" />
@@ -106,14 +289,23 @@ export default function HomePage() {
               Contactless Medicine Infrastructure
             </div>
 
-            <h1 className="mt-6 max-w-4xl text-5xl font-semibold tracking-[-0.06em] text-slate-950 md:text-7xl">
+            <h1 className="mt-6 max-w-4xl text-4xl font-semibold tracking-[-0.055em] text-slate-950 md:text-6xl">
               Welcome to Ambulant+ South Africa.
             </h1>
 
             <p className="mt-6 max-w-3xl text-lg leading-9 text-slate-600">
-              Ambulant+ is the world&apos;s first fully Contactless Medicine platform,
-              engineered by Cloven Technology to advance precision treatment, predictive
-              medicine, lower-cost care and wider access to clinician-supervised healthcare.
+              Ambulant+ is a Contactless Medicine platform by Cloven Technology,
+              combining clinician-led virtual care, connected medical devices, home
+              diagnostics, pharmacy fulfilment, medical-aid programme visibility and
+              governance-aware health intelligence.
+            </p>
+
+            <p className="mt-4 max-w-3xl text-base leading-8 text-slate-600">
+              It is built to go beyond ordinary telemedicine by giving remote care teams
+              access to structured patient context, device-supported observations,
+              diagnostic workflows, adherence visibility and operational follow-through —
+              without replacing emergency care, in-person examination where required or
+              professional clinical judgement.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
@@ -125,10 +317,10 @@ export default function HomePage() {
               </a>
 
               <Link
-                href="/platform"
+                href="/demos"
                 className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white/80 px-6 py-4 text-sm font-semibold text-cyan-800"
               >
-                Explore the platform <ArrowRight className="h-4 w-4" />
+                Book a walkthrough <ArrowRight className="h-4 w-4" />
               </Link>
             </div>
 
@@ -172,9 +364,9 @@ export default function HomePage() {
               </div>
 
               <div className="mt-6 rounded-3xl border border-emerald-300/30 bg-emerald-300/10 p-5 text-sm leading-7 text-emerald-50">
-                Ambulant+ is designed to virtually approximate important elements of physical
-                consultation through connected clinical devices, diagnostics, fulfilment and
-                intelligence — without replacing emergency services or clinician judgement.
+                Ambulant+ is designed to make remote care more complete by connecting
+                clinical review, device-supported signals, diagnostics, medicine fulfilment
+                and care-pathway intelligence inside one governed ecosystem.
               </div>
             </div>
           </div>
