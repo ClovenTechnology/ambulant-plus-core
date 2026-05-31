@@ -24,6 +24,30 @@ export const metadata = {
   title: "Getting Started as a Patient",
   description:
     "A practical patient guide for creating an Ambulant+ account, completing profile information, adding medical aid, connecting devices, booking clinicians, funding wallet and using CarePort or MedReach.",
+  keywords: [
+    "Ambulant+ patient setup",
+    "how to use Ambulant+",
+    "create patient account",
+    "connect health devices",
+    "connect IoMT devices",
+    "link medical hardware",
+    "book virtual doctor",
+    "book online doctor",
+    "find a doctor",
+    "doctor booking",
+    "patient onboarding",
+    "medical aid setup",
+    "wallet setup",
+    "device setup",
+    "Health Monitor setup",
+    "Digital Stethoscope setup",
+    "HD Otoscope setup",
+    "NexRing setup",
+    "remote vitals setup",
+    "home monitoring setup",
+    "CarePort setup",
+    "MedReach setup",
+  ],
 };
 
 const setupSteps = [

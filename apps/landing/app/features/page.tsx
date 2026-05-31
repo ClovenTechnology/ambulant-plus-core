@@ -30,6 +30,33 @@ export const metadata = {
   title: "Ambulant+ Features",
   description:
     "Explore Ambulant+ Contactless Medicine features: connected devices, patient centres, self-check, Health Passport, medication reminders, camera verification, MedReach, CarePort and InsightCore.",
+  keywords: [
+    "remote patient monitoring features",
+    "continuous remote monitoring",
+    "continuous vitals",
+    "remote vitals",
+    "connected care features",
+    "contactless medicine features",
+    "IoMT features",
+    "iomt features",
+    "integrated medical hardware",
+    "home IoMT use",
+    "clinical data platform",
+    "health passport",
+    "daily health score",
+    "self-check health app",
+    "medication reminders",
+    "camera verification medication",
+    "virtual care with devices",
+    "digital auscultation",
+    "digital stethoscope consultation",
+    "home diagnostics",
+    "pharmacy fulfilment",
+    "preventive care",
+    "holistic care",
+    "precision medicine",
+    "InsightCore intelligence",
+  ],
 };
 
 const platformFeatures: Array<{
