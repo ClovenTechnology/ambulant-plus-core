@@ -10,11 +10,12 @@ import {
   ClipboardCheck,
   FlaskConical,
   HeartPulse,
+  Lightbulb,
   LockKeyhole,
   Moon,
   Network,
+  Newspaper,
   ShieldCheck,
-  Sparkles,
   Stethoscope,
   Truck,
   UserRound,
@@ -30,6 +31,7 @@ export const navLinks = [
   { label: "MedReach", href: "/medreach" },
   { label: "CarePort", href: "/careport" },
   { label: "InsightCore", href: "/insightcore" },
+  { label: "Blog", href: "/blog" },
   { label: "Contact", href: "/contact" },
 ];
 
@@ -50,7 +52,7 @@ export const groupedNav = [
         title: "Overview",
         links: [
           { label: "Platform", href: "/platform", icon: Network },
-          { label: "Features", href: "/features", icon: Sparkles },
+          { label: "Features", href: "/features", icon: Activity },
           { label: "Devices", href: "/devices", icon: Activity },
           { label: "InsightCore", href: "/insightcore", icon: Activity },
         ],
@@ -58,8 +60,12 @@ export const groupedNav = [
       {
         title: "Strategy",
         links: [
-          { label: "Innovation", href: "/innovation", icon: Sparkles },
-          { label: "Research & Development", href: "/research-and-development", icon: FlaskConical },
+          { label: "Innovation", href: "/innovation", icon: Lightbulb },
+          {
+            label: "Research & Development",
+            href: "/research-and-development",
+            icon: FlaskConical,
+          },
           { label: "Ecosystem", href: "/ecosystem", icon: Building2 },
           { label: "Use Cases", href: "/use-cases", icon: ClipboardCheck },
         ],
@@ -74,7 +80,11 @@ export const groupedNav = [
         title: "For Individuals",
         links: [
           { label: "Patients", href: "/patients", icon: UserRound },
-          { label: "Getting Started", href: "/patients/getting-started", icon: ClipboardCheck },
+          {
+            label: "Getting Started",
+            href: "/patients/getting-started",
+            icon: ClipboardCheck,
+          },
           { label: "Clinicians", href: "/clinicians", icon: Stethoscope },
           { label: "Devices", href: "/devices", icon: Activity },
         ],
@@ -82,10 +92,18 @@ export const groupedNav = [
       {
         title: "Care Centres",
         links: [
-          { label: "Ladies’ Health", href: "/centres/ladies-health", icon: HeartPulse },
+          {
+            label: "Ladies’ Health",
+            href: "/centres/ladies-health",
+            icon: HeartPulse,
+          },
           { label: "Paediatric", href: "/centres/paediatric", icon: Baby },
           { label: "Antenatal", href: "/centres/antenatal", icon: HeartPulse },
-          { label: "Gentlemen’s Health", href: "/centres/gentlemens-health", icon: UserRound },
+          {
+            label: "Gentlemen’s Health",
+            href: "/centres/gentlemens-health",
+            icon: UserRound,
+          },
         ],
       },
       {
@@ -93,8 +111,16 @@ export const groupedNav = [
         links: [
           { label: "Reminders", href: "/features#daily-health", icon: BellRing },
           { label: "Self-Check", href: "/features#self-check", icon: ClipboardCheck },
-          { label: "Health Passport", href: "/features#health-passport", icon: WalletCards },
-          { label: "NexRing Sleep & Activity", href: "/features#daily-health", icon: Moon },
+          {
+            label: "Health Passport",
+            href: "/features#health-passport",
+            icon: WalletCards,
+          },
+          {
+            label: "NexRing Sleep & Activity",
+            href: "/features#daily-health",
+            icon: Moon,
+          },
         ],
       },
       {
@@ -102,7 +128,11 @@ export const groupedNav = [
         links: [
           { label: "MedReach Diagnostics", href: "/medreach", icon: FlaskConical },
           { label: "CarePort Fulfilment", href: "/careport", icon: Truck },
-          { label: "InsightCore Intelligence", href: "/insightcore", icon: Activity },
+          {
+            label: "InsightCore Intelligence",
+            href: "/insightcore",
+            icon: Activity,
+          },
           { label: "Bookings", href: "/bookings", icon: CalendarCheck },
         ],
       },
@@ -117,7 +147,11 @@ export const groupedNav = [
         links: [
           { label: "Diagnostics Operations", href: "/medreach", icon: FlaskConical },
           { label: "Labs", href: "/medreach/labs", icon: Building2 },
-          { label: "Phlebotomists", href: "/medreach/phlebotomists", icon: HeartPulse },
+          {
+            label: "Phlebotomists",
+            href: "/medreach/phlebotomists",
+            icon: HeartPulse,
+          },
         ],
       },
       {
@@ -153,9 +187,17 @@ export const groupedNav = [
         links: [
           { label: "Security", href: "/security", icon: LockKeyhole },
           { label: "Compliance", href: "/compliance", icon: BadgeCheck },
-          { label: "Clinical Disclaimer", href: "/clinical-disclaimer", icon: ShieldCheck },
+          {
+            label: "Clinical Disclaimer",
+            href: "/clinical-disclaimer",
+            icon: ShieldCheck,
+          },
           { label: "Privacy Policy", href: "/privacy", icon: LockKeyhole },
-          { label: "Terms & Conditions", href: "/terms", icon: ClipboardCheck },
+          {
+            label: "Terms & Conditions",
+            href: "/terms",
+            icon: ClipboardCheck,
+          },
           { label: "FAQ", href: "/faq", icon: CircleHelp },
         ],
       },
@@ -168,6 +210,7 @@ export const groupedNav = [
       {
         title: "Learn",
         links: [
+          { label: "Blog", href: "/blog", icon: Newspaper },
           { label: "Resources", href: "/resources", icon: ClipboardCheck },
           { label: "Bookings", href: "/bookings", icon: CalendarCheck },
           { label: "Contact", href: "/contact", icon: CircleHelp },
@@ -183,8 +226,12 @@ export const groupedNav = [
         title: "Cloven Technology Impilo",
         links: [
           { label: "Ecosystem", href: "/ecosystem", icon: Building2 },
-          { label: "Innovation", href: "/innovation", icon: Sparkles },
-          { label: "Research & Development", href: "/research-and-development", icon: FlaskConical },
+          { label: "Innovation", href: "/innovation", icon: Lightbulb },
+          {
+            label: "Research & Development",
+            href: "/research-and-development",
+            icon: FlaskConical,
+          },
           { label: "Contact", href: "/contact", icon: CircleHelp },
         ],
       },
@@ -255,32 +302,38 @@ export const trustPillars = [
   {
     title: "Privacy-led by design",
     icon: LockKeyhole,
-    body: "Consent-aware sharing, role-based access, data minimisation, audit trails and careful handling of health-related information.",
+    body:
+      "Consent-aware sharing, role-based access, data minimisation, audit trails and careful handling of health-related information.",
   },
   {
     title: "Clinical governance",
     icon: ClipboardCheck,
-    body: "Built around escalation boundaries, clinical documentation, safety disclaimers, care-team review and professional judgement.",
+    body:
+      "Built around escalation boundaries, clinical documentation, safety disclaimers, care-team review and professional judgement.",
   },
   {
     title: "Defined device ecosystem",
     icon: Activity,
-    body: "Focused on Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows rather than unsupported wearable sprawl.",
+    body:
+      "Focused on Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows rather than unsupported wearable sprawl.",
   },
   {
     title: "Compliance-aware posture",
     icon: BadgeCheck,
-    body: "Careful regulatory language across POPIA, GDPR, HIPAA-aware, medical-device and deployment-governance contexts.",
+    body:
+      "Careful regulatory language across POPIA, GDPR, HIPAA-aware, medical-device and deployment-governance contexts.",
   },
   {
     title: "Secure operations",
     icon: ShieldCheck,
-    body: "Protected workspaces, authentication boundaries, deployment separation, operational logs and audit-friendly records.",
+    body:
+      "Protected workspaces, authentication boundaries, deployment separation, operational logs and audit-friendly records.",
   },
   {
     title: "Human-centred support",
     icon: CircleHelp,
-    body: "Clear education, onboarding, help pathways, escalation routes and accountable operational support across care workflows.",
+    body:
+      "Clear education, onboarding, help pathways, escalation routes and accountable operational support across care workflows.",
   },
 ];
 
