@@ -16,6 +16,11 @@ const blogRoutes = [
   "/blog/contactless-medicine-pandemic-resilience",
   "/blog/remote-patient-monitoring-chronic-treatment-outcomes",
   "/blog/clinicians-contactless-medicine-safer-practice",
+  "/blog/telemedicine-alone-not-enough-chronic-care",
+  "/blog/remote-monitoring-hypertension-beyond-blood-pressure",
+  "/blog/reducing-avoidable-claims-through-early-intervention",
+  "/blog/medication-adherence-hidden-cost-driver",
+  "/blog/corporate-wellness-clinical-prevention",
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
