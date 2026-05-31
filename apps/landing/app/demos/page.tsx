@@ -4,8 +4,10 @@ import {
   BadgeCheck,
   BarChart3,
   Building2,
+  CalendarDays,
   CheckCircle2,
   ClipboardCheck,
+  Clock3,
   FlaskConical,
   HeartPulse,
   MonitorPlay,
@@ -33,6 +35,7 @@ const demoAudiences: Array<{
   body: string;
   icon: LucideIcon;
   href: string;
+  enquiryHref: string;
 }> = [
   {
     title: "Medical aids, HMOs and sponsors",
@@ -40,6 +43,7 @@ const demoAudiences: Array<{
       "Review member eligibility, coverage preflight, consultation funding, claims, wallet, rewards, adherence, monitoring and InsightCore programme intelligence.",
     icon: Building2,
     href: "/clients",
+    enquiryHref: "/contact?type=client_programme",
   },
   {
     title: "Clinicians and clinical teams",
@@ -47,6 +51,7 @@ const demoAudiences: Array<{
       "Walk through clinician onboarding, patient review, device-supported consultation, notes, escalation, MedReach, CarePort and follow-up workflows.",
     icon: Stethoscope,
     href: "/clinicians",
+    enquiryHref: "/contact?type=clinician_onboarding",
   },
   {
     title: "Patients and care navigators",
@@ -54,6 +59,7 @@ const demoAudiences: Array<{
       "Understand account setup, profile readiness, medical aid, wallet, device pairing, booking, reminders, diagnostics and medicine fulfilment.",
     icon: HeartPulse,
     href: "/patients",
+    enquiryHref: "/contact?type=patient_support",
   },
   {
     title: "Laboratories",
@@ -61,6 +67,7 @@ const demoAudiences: Array<{
       "Review MedReach lab onboarding, test catalogue, specimen acceptance, processing status, result readiness and result-routing workflows.",
     icon: FlaskConical,
     href: "/medreach/labs",
+    enquiryHref: "/contact?type=medreach_labs",
   },
   {
     title: "Pharmacies",
@@ -68,6 +75,7 @@ const demoAudiences: Array<{
       "Review CarePort pharmacy onboarding, catalogue/SKU readiness, eRx fulfilment, handover, proof-of-delivery and payout visibility.",
     icon: Store,
     href: "/careport/pharmacies",
+    enquiryHref: "/contact?type=careport_pharmacies",
   },
   {
     title: "Riders and field operations",
@@ -75,6 +83,7 @@ const demoAudiences: Array<{
       "Walk through rider verification, dispatch handover, route progression, patient-update boundaries, proof-of-delivery and earnings visibility.",
     icon: Truck,
     href: "/careport/riders",
+    enquiryHref: "/contact?type=careport_riders",
   },
 ];
 
@@ -177,6 +186,57 @@ const demoScenarios = [
   },
 ];
 
+const demoSessions = [
+  {
+    date: "Thursday, 30 July 2026",
+    time: "11:00 SAST",
+    title: "Medical Aids, HMOs & Corporate Sponsors",
+    body:
+      "For teams evaluating chronic-care monitoring, preventive programmes, claims visibility, coverage preflight, rewards, member engagement and payer-facing InsightCore intelligence.",
+    href: "/contact?type=demo&session=medical-aids-hmos-corporate-sponsors",
+  },
+  {
+    date: "Thursday, 30 July 2026",
+    time: "15:00 SAST",
+    title: "Clinicians & Clinical Teams",
+    body:
+      "For doctors and clinical teams reviewing onboarding, device-supported consultation, documentation, escalation, MedReach, CarePort and professional-governance boundaries.",
+    href: "/contact?type=demo&session=clinicians-clinical-teams",
+  },
+  {
+    date: "Tuesday, 4 August 2026",
+    time: "11:00 SAST",
+    title: "Laboratories & MedReach Diagnostics",
+    body:
+      "For labs and diagnostic partners evaluating home phlebotomy, specimen chain-of-custody, catalogue readiness, laboratory handover and result-routing workflows.",
+    href: "/contact?type=demo&session=laboratories-medreach-diagnostics",
+  },
+  {
+    date: "Tuesday, 4 August 2026",
+    time: "15:00 SAST",
+    title: "Pharmacies, Riders & CarePort Fulfilment",
+    body:
+      "For pharmacies and delivery teams reviewing eRx fulfilment, SKU readiness, dispatch handover, rider workflow, proof-of-delivery and medication-continuity visibility.",
+    href: "/contact?type=demo&session=pharmacies-riders-careport",
+  },
+  {
+    date: "Thursday, 6 August 2026",
+    time: "11:00 SAST",
+    title: "Patient App, Devices & Care Centres",
+    body:
+      "For patient-facing teams reviewing onboarding, medical-aid readiness, wallet, device setup, reminders, care centres, fertility pathways and supported home monitoring.",
+    href: "/contact?type=demo&session=patient-app-devices-care-centres",
+  },
+  {
+    date: "Thursday, 6 August 2026",
+    time: "15:00 SAST",
+    title: "Full Enterprise Contactless Medicine Walkthrough",
+    body:
+      "A full ecosystem session covering patients, clinicians, MedReach, CarePort, InsightCore, admin, governance, commercial pathways and deployment planning.",
+    href: "/contact?type=demo&session=full-enterprise-contactless-medicine",
+  },
+];
+
 const preparationChecklist = [
   "Who should attend: clinical, claims, managed-care, innovation, IT, compliance, operations or executive teams.",
   "Which workflow matters most: patient, clinician, payer, diagnostics, pharmacy, rider, admin or intelligence.",
@@ -226,14 +286,14 @@ export default function DemosPage() {
             </h1>
 
             <p className="mt-6 text-lg leading-9 text-slate-600">
-              Ambulant+ demos are designed for serious stakeholders evaluating Contactless Medicine:
-              medical aids, HMOs, employers, clinicians, laboratories, pharmacies, riders,
-              programme teams and enterprise partners.
+              Ambulant+ demos are designed for serious stakeholders evaluating Contactless
+              Medicine: medical aids, HMOs, employers, clinicians, laboratories, pharmacies,
+              riders, programme teams and enterprise partners.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
               <Link
-                href="/contact"
+                href="/contact?type=demo"
                 className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow"
               >
                 Request demo <ArrowRight className="h-4 w-4" />
@@ -260,8 +320,9 @@ export default function DemosPage() {
                   Demo suite
                 </div>
                 <p className="mt-3 text-sm leading-7 text-slate-600">
-                  Patient, clinician, MedReach, CarePort, InsightCore, claims, coverage, payment,
-                  governance and admin workflows can be demonstrated by role and outcome.
+                  Patient, clinician, MedReach, CarePort, InsightCore, claims, coverage,
+                  payment, governance and admin workflows can be demonstrated by role and
+                  outcome.
                 </p>
               </div>
             </div>
@@ -270,21 +331,72 @@ export default function DemosPage() {
       </section>
 
       <SectionShell
+        eyebrow="Scheduled walkthroughs"
+        title="Book a focused demo session from late July."
+        body="These initial sessions are designed to help each stakeholder group see the workflows, economics and governance boundaries most relevant to them."
+      >
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {demoSessions.map((session) => (
+            <Link
+              key={`${session.date}-${session.time}-${session.title}`}
+              href={session.href}
+              className="glass-panel flex h-full flex-col rounded-[30px] p-6 transition hover:-translate-y-1"
+            >
+              <div className="flex flex-wrap gap-3 text-xs font-bold uppercase tracking-[0.18em] text-cyan-700">
+                <span className="inline-flex items-center gap-2">
+                  <CalendarDays className="h-4 w-4" />
+                  {session.date}
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <Clock3 className="h-4 w-4" />
+                  {session.time}
+                </span>
+              </div>
+
+              <h3 className="mt-5 text-xl font-semibold text-slate-950">
+                {session.title}
+              </h3>
+
+              <p className="mt-3 flex-1 text-sm leading-7 text-slate-600">
+                {session.body}
+              </p>
+
+              <div className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-cyan-800">
+                Request this session <ArrowRight className="h-4 w-4" />
+              </div>
+            </Link>
+          ))}
+        </div>
+      </SectionShell>
+
+      <SectionShell
         eyebrow="Who should request a demo"
         title="Different stakeholders need different walkthroughs."
         body="A good demo should not be a generic product tour. It should be shaped around the stakeholder’s operating model, commercial priorities and clinical-governance needs."
       >
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {demoAudiences.map(({ title, body, icon: Icon, href }) => (
-            <Link
-              key={title}
-              href={href}
-              className="glass-panel rounded-[30px] p-6 transition hover:-translate-y-1"
-            >
+          {demoAudiences.map(({ title, body, icon: Icon, href, enquiryHref }) => (
+            <div key={title} className="glass-panel rounded-[30px] p-6">
               <Icon className="h-7 w-7 text-cyan-700" />
               <h3 className="mt-5 text-xl font-semibold text-slate-950">{title}</h3>
               <p className="mt-3 text-sm leading-7 text-slate-600">{body}</p>
-            </Link>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link
+                  href={href}
+                  className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white/80 px-4 py-2 text-xs font-semibold text-cyan-800"
+                >
+                  Learn more <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+
+                <Link
+                  href={enquiryHref}
+                  className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-xs font-semibold text-white"
+                >
+                  Request demo <ArrowRight className="h-3.5 w-3.5" />
+                </Link>
+              </div>
+            </div>
           ))}
         </div>
       </SectionShell>
@@ -462,7 +574,7 @@ export default function DemosPage() {
 
             <div className="grid gap-3 sm:grid-cols-2">
               <Link
-                href="/contact"
+                href="/contact?type=demo"
                 className="inline-flex items-center justify-center gap-2 rounded-full bg-white px-6 py-4 text-sm font-semibold text-slate-950 transition hover:bg-cyan-50"
               >
                 Request demo <ArrowRight className="h-4 w-4" />
