@@ -1,4 +1,14 @@
-import { BriefcaseBusiness, Building2, GraduationCap, Mail, MapPin, MessageCircle, Phone, Presentation } from "lucide-react";
+import {
+  BriefcaseBusiness,
+  Building2,
+  GraduationCap,
+  Mail,
+  MapPin,
+  MessageCircle,
+  Phone,
+  Presentation,
+} from "lucide-react";
+import EnquiryForm from "@/components/EnquiryForm";
 import { site } from "@/lib/site";
 
 export const metadata = {
@@ -57,14 +67,19 @@ export default function ContactPage() {
     <main className="mx-auto max-w-7xl px-4 py-14 md:px-6 md:py-20">
       <section className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr] lg:items-start">
         <div>
-          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Contact</div>
+          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">
+            Contact
+          </div>
+
           <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">
             Speak with the Ambulant+ team.
           </h1>
+
           <p className="mt-6 text-lg leading-9 text-slate-600">
-            For clinical onboarding, care-programme deployment, pharmacy fulfilment, laboratory operations,
-            employer partnerships, medical-scheme engagement, demos, training or platform enquiries, reach the
-            Ambulant+ team through the appropriate channel.
+            For clinical onboarding, care-programme deployment, pharmacy fulfilment, laboratory
+            operations, employer partnerships, medical-scheme engagement, demos, training,
+            international expansion or platform enquiries, send a structured enquiry and we will
+            route it to the appropriate team.
           </p>
 
           <div className="mt-8 rounded-[34px] border border-cyan-100 bg-cyan-50/70 p-6">
@@ -85,43 +100,58 @@ export default function ContactPage() {
           <div className="mt-5 rounded-[34px] border border-slate-200 bg-white/80 p-6">
             <h2 className="text-lg font-semibold text-slate-950">Careers and internships</h2>
             <p className="mt-2 text-sm leading-7 text-slate-600">
-              Ambulant+ product-specific roles can be routed through the Ambulant+ careers inbox. Wider Cloven
-              Technology corporate roles, internships and graduate opportunities can also be routed through the
-              parent-company channels.
+              Ambulant+ product-specific roles can be routed through the Ambulant+ careers inbox.
+              Wider Cloven Technology corporate roles, internships and graduate opportunities can
+              also be routed through the parent-company channels.
             </p>
             <div className="mt-4 grid gap-2 text-sm font-semibold text-cyan-800">
               <a href={`mailto:${site.careersEmail}`}>{site.careersEmail}</a>
-              <a href={`mailto:${site.corporateCareersEmail}`}>{site.corporateCareersEmail}</a>
+              <a href={`mailto:${site.corporateCareersEmail}`}>
+                {site.corporateCareersEmail}
+              </a>
               <a href={`mailto:${site.internshipEmail}`}>{site.internshipEmail}</a>
             </div>
           </div>
+
+          <div className="mt-5 rounded-[34px] border border-slate-200 bg-white/80 p-6">
+            <h2 className="text-lg font-semibold text-slate-950">
+              International expansion and franchise enquiries
+            </h2>
+            <p className="mt-2 text-sm leading-7 text-slate-600">
+              Ambulant+ is built from South Africa for global Contactless Medicine deployment.
+              International expansion enquiries can be submitted through the structured enquiry
+              form using the franchise / international expansion option.
+            </p>
+          </div>
         </div>
 
-        <div className="glass-panel rounded-[36px] p-6 md:p-8">
-          <div className="grid gap-4">
-            {contactCards.map((item) => {
-              const Icon = item.icon;
-              return (
-                <a
-                  key={item.title}
-                  href={item.href}
-                  className="rounded-3xl border border-white/80 bg-white/78 p-5 transition hover:-translate-y-0.5 hover:shadow-glow"
-                >
-                  <Icon className="h-5 w-5 text-cyan-700" />
-                  <div className="mt-3 font-semibold text-slate-950">{item.title}</div>
-                  <p className="mt-2 text-sm leading-7 text-slate-600">{item.body}</p>
-                  <div className="mt-3 text-sm font-semibold text-cyan-800">{item.label}</div>
-                </a>
-              );
-            })}
+        <EnquiryForm />
+      </section>
 
-            <div className="rounded-3xl border border-white/80 bg-white/78 p-5">
-              <MapPin className="h-5 w-5 text-cyan-700" />
-              <div className="mt-3 font-semibold text-slate-950">Operating market</div>
-              <div className="mt-1 text-sm leading-7 text-slate-600">
-                South Africa, with future supported markets subject to regulatory, clinical and partner readiness.
-              </div>
-            </div>
+      <section className="mt-12 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {contactCards.map((item) => {
+          const Icon = item.icon;
+
+          return (
+            <a
+              key={item.title}
+              href={item.href}
+              className="rounded-3xl border border-white/80 bg-white/78 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-glow"
+            >
+              <Icon className="h-5 w-5 text-cyan-700" />
+              <div className="mt-3 font-semibold text-slate-950">{item.title}</div>
+              <p className="mt-2 text-sm leading-7 text-slate-600">{item.body}</p>
+              <div className="mt-3 text-sm font-semibold text-cyan-800">{item.label}</div>
+            </a>
+          );
+        })}
+
+        <div className="rounded-3xl border border-white/80 bg-white/78 p-5 shadow-sm">
+          <MapPin className="h-5 w-5 text-cyan-700" />
+          <div className="mt-3 font-semibold text-slate-950">Operating market</div>
+          <div className="mt-1 text-sm leading-7 text-slate-600">
+            South Africa, with future supported markets subject to regulatory, clinical,
+            operational and partner readiness. Franchise opportunities already open for the United Kindgom, the United States, the Netherlands, Canada, Australia, New Zealand UAE, Qatar, Saudi Arabia, Singapore, Malaysia, and Brazil. For rest of Europe, Asia, Middle and Africa, contact franchise@ambulantplus.com or franchise@cloventechnology.com 
           </div>
         </div>
       </section>
