@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/auth/login/page.tsx
+// apps/patient-app/app/auth/login/page.tsx
 'use client';
 
 import Link from 'next/link';
@@ -6,13 +6,14 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import {
   ShieldCheck,
-  Sparkles,
   Lock,
   Mail,
   ArrowRight,
   Eye,
   EyeOff,
   Loader2,
+  HeartPulse,
+  UserRoundCheck,
 } from 'lucide-react';
 
 function cx(...xs: Array<string | false | null | undefined>) {
@@ -21,7 +22,6 @@ function cx(...xs: Array<string | false | null | undefined>) {
 
 type LoginResponse = {
   ok?: boolean;
-  // Optional: token-based sessions (you may also be cookie-only)
   token?: string;
   profile?: any;
   actorType?: string;
@@ -34,7 +34,6 @@ type LoginResponse = {
 function safeInternalPath(p: string | null | undefined, fallback: string) {
   const v = String(p || '').trim();
   if (!v) return fallback;
-  // Prevent open-redirects: only allow internal paths.
   if (v.startsWith('/') && !v.startsWith('//')) return v;
   return fallback;
 }
@@ -54,9 +53,7 @@ function PatientLoginPageContent() {
   const [err, setErr] = useState<string | null>(null);
 
   const redirectTo = useMemo(() => {
-    // Default patient landing route
-    const fallback = '/';
-    return safeInternalPath(nextParam, fallback);
+    return safeInternalPath(nextParam, '/');
   }, [nextParam]);
 
   useEffect(() => {
@@ -90,14 +87,12 @@ function PatientLoginPageContent() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        // Important if your /api/auth/login sets httpOnly cookies
         credentials: 'include',
         body: JSON.stringify({ email: eNorm, password }),
       });
 
       const data = (await res.json().catch(() => ({} as LoginResponse))) as LoginResponse;
 
-      // Normalize messaging (avoid leaking extra details)
       if (!res.ok || data?.ok === false) {
         if (res.status === 401 || res.status === 403) {
           throw new Error('Invalid email or password.');
@@ -105,11 +100,9 @@ function PatientLoginPageContent() {
         throw new Error(data?.error || data?.message || 'Login failed. Please try again.');
       }
 
-      // Optional token support (if your API returns it)
       if (data?.token) localStorage.setItem('ambulant.token', data.token);
       if (data?.profile) localStorage.setItem('ambulant.profile', JSON.stringify(data.profile));
 
-      // Server may optionally supply redirectTo
       const safeServerRedirect = safeInternalPath(data?.redirectTo, '');
       router.replace(safeServerRedirect || redirectTo);
       router.refresh();
@@ -121,89 +114,97 @@ function PatientLoginPageContent() {
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(1200px_circle_at_20%_-10%,rgba(16,185,129,0.14),transparent_55%),radial-gradient(900px_circle_at_100%_0%,rgba(99,102,241,0.12),transparent_50%)]">
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-          {/* Left: brand / message */}
+    <main className="min-h-screen overflow-hidden bg-slate-50 bg-[radial-gradient(1100px_circle_at_18%_-15%,rgba(20,184,166,0.18),transparent_58%),radial-gradient(900px_circle_at_100%_5%,rgba(59,130,246,0.12),transparent_50%),linear-gradient(to_bottom,rgba(255,255,255,0.92),rgba(240,253,250,0.45),rgba(248,250,252,1))]">
+      <div className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-10">
+        <div className="grid w-full gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
           <section className="order-2 lg:order-1">
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
-              <Sparkles className="h-4 w-4 text-emerald-700" />
-              Ambulant+ Â· Patient
+            <div className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-white/80 px-3 py-1 text-xs font-black text-slate-700 shadow-sm backdrop-blur">
+              <ShieldCheck className="h-4 w-4 text-teal-700" />
+              Ambulant+ - Patient
             </div>
 
-            <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
-              Sign in to your
-              <span className="block bg-gradient-to-r from-emerald-700 to-indigo-700 bg-clip-text text-transparent">
+            <h1 className="mt-5 max-w-xl text-4xl font-black tracking-tight text-slate-950 md:text-5xl">
+              Secure access to your
+              <span className="block bg-gradient-to-r from-teal-700 to-sky-700 bg-clip-text text-transparent">
                 health dashboard
               </span>
             </h1>
 
-            <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600">
-              Access vitals, appointments, CarePort eRx, MedReach labs, reminders, and your Lady Center insights â€” all in
-              one place.
+            <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
+              View appointments, vitals, medical records, prescriptions, diagnostics,
+              reminders and care updates from one protected patient workspace.
             </p>
 
-            <div className="mt-6 grid max-w-xl gap-3 sm:grid-cols-2">
-              <div className="rounded-3xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
-                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
-                  <ShieldCheck className="h-4 w-4 text-emerald-700" />
+            <div className="mt-7 grid max-w-xl gap-3 sm:grid-cols-2">
+              <div className="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-sm backdrop-blur">
+                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-950">
+                  <Lock className="h-4 w-4 text-teal-700" />
                   Secure session
                 </div>
-                <div className="mt-1 text-[12px] text-slate-600">
-                  Privacy-first care workflows with clean clinical handoff.
+                <div className="mt-2 text-sm leading-6 text-slate-600">
+                  Privacy-first access with protected clinical handoff.
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
-                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
-                  <ArrowRight className="h-4 w-4 text-indigo-700" />
-                  Fast access
+              <div className="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-sm backdrop-blur">
+                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-950">
+                  <ArrowRight className="h-4 w-4 text-sky-700" />
+                  Fast return
                 </div>
-                <div className="mt-1 text-[12px] text-slate-600">
-                  Jump straight back to where you left off after signing in.
+                <div className="mt-2 text-sm leading-6 text-slate-600">
+                  Continue appointments, device setup, records and care tasks.
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 text-xs text-slate-500">
+            <div className="mt-7 rounded-[28px] border border-teal-100 bg-teal-50/70 p-5 text-sm leading-7 text-slate-700">
+              <div className="flex items-start gap-3">
+                <HeartPulse className="mt-1 h-5 w-5 shrink-0 text-teal-700" />
+                <div>
+                  <span className="font-extrabold text-slate-950">Not an emergency service.</span>{' '}
+                  In a medical emergency, contact local emergency services immediately.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 text-sm text-slate-600">
               Clinician portal?{' '}
-              <span className="text-slate-600">
-                Use the Clinician app domain (recommended).
+              <span className="font-semibold text-slate-800">
+                Use the Clinician app domain for clinician workspace access.
               </span>
             </div>
           </section>
 
-          {/* Right: form */}
           <section className="order-1 lg:order-2">
             <div className="mx-auto w-full max-w-md">
-              <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-black/[0.06] backdrop-blur">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-black text-slate-500">Patient Sign in</div>
-                    <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">Welcome back</div>
-                    <div className="mt-1 text-sm text-slate-600">Use your email + password.</div>
+              <div className="rounded-[36px] border border-white/80 bg-white/88 p-7 shadow-xl shadow-teal-900/[0.08] backdrop-blur">
+                <div className="text-center">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[24px] border border-teal-100 bg-teal-50 text-teal-700 shadow-sm">
+                    {loading ? <Loader2 className="h-7 w-7 animate-spin" /> : <UserRoundCheck className="h-7 w-7" />}
                   </div>
 
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white">
-                    {loading ? (
-                      <Loader2 className="h-5 w-5 animate-spin text-emerald-700" />
-                    ) : (
-                      <Lock className="h-5 w-5 text-emerald-700" />
-                    )}
+                  <div className="mt-5 text-xs font-black uppercase tracking-[0.2em] text-teal-700">
+                    Patient sign in
                   </div>
+                  <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+                    Welcome back
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Sign in with your email and password.
+                  </p>
                 </div>
 
                 {err ? (
-                  <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                  <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
                     {err}
                   </div>
                 ) : null}
 
-                <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+                <form onSubmit={handleSubmit} className="mt-6 space-y-4">
                   <label className="block">
                     <div className="text-xs font-black text-slate-700">Email</div>
-                    <div className="mt-1 relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <div className="relative mt-1">
+                      <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-teal-600" />
                       <input
                         value={email}
                         onChange={(e) => {
@@ -215,8 +216,8 @@ function PatientLoginPageContent() {
                         inputMode="email"
                         placeholder="name@example.com"
                         className={cx(
-                          'w-full rounded-2xl border border-slate-200 bg-white px-10 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'w-full rounded-2xl border border-slate-200 bg-white px-11 py-3 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
                         )}
                         required
                       />
@@ -225,8 +226,8 @@ function PatientLoginPageContent() {
 
                   <label className="block">
                     <div className="text-xs font-black text-slate-700">Password</div>
-                    <div className="mt-1 relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <div className="relative mt-1">
+                      <Lock className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-teal-600" />
                       <input
                         value={password}
                         onChange={(e) => {
@@ -235,10 +236,10 @@ function PatientLoginPageContent() {
                         }}
                         type={showPw ? 'text' : 'password'}
                         autoComplete="current-password"
-                        placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                        placeholder="Password"
                         className={cx(
-                          'w-full rounded-2xl border border-slate-200 bg-white px-10 pr-12 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          'w-full rounded-2xl border border-slate-200 bg-white px-11 py-3 pr-12 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
                         )}
                         required
                       />
@@ -247,8 +248,7 @@ function PatientLoginPageContent() {
                         onClick={() => setShowPw((s) => !s)}
                         aria-label={showPw ? 'Hide password' : 'Show password'}
                         className={cx(
-                          'absolute right-3 top-1/2 -translate-y-1/2 rounded-lg p-1.5 text-slate-500 hover:text-slate-700',
-                          'hover:bg-slate-100',
+                          'absolute right-3 top-1/2 -translate-y-1/2 rounded-xl p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-700',
                           loading && 'pointer-events-none opacity-60',
                         )}
                       >
@@ -262,16 +262,16 @@ function PatientLoginPageContent() {
                     type="submit"
                     aria-busy={loading}
                     className={cx(
-                      'w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white',
-                      'hover:bg-emerald-700 transition',
-                      'disabled:opacity-50 disabled:cursor-not-allowed',
+                      'w-full rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-500 px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-teal-900/10',
+                      'transition hover:from-teal-700 hover:to-cyan-600',
+                      'disabled:cursor-not-allowed disabled:opacity-50',
                     )}
                   >
                     <span className="inline-flex items-center justify-center gap-2">
                       {loading ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          Signing inâ€¦
+                          Signing in...
                         </>
                       ) : (
                         <>Sign in</>
@@ -279,27 +279,23 @@ function PatientLoginPageContent() {
                     </span>
                   </button>
 
-                  <div className="flex items-center justify-between gap-3 text-xs">
-                    <Link href="/auth/signup" className="font-bold text-slate-800 hover:underline">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <Link href="/auth/signup" className="font-bold text-teal-700 hover:underline">
                       Create account
                     </Link>
 
                     <Link
                       href="/auth/forgot"
-                      className="font-semibold text-slate-500 hover:text-slate-700 hover:underline"
+                      className="font-semibold text-slate-500 hover:text-slate-800 hover:underline"
                     >
                       Forgot password?
                     </Link>
                   </div>
-
-                  <div className="pt-2 text-[11px] text-slate-500">
-                    Redirect after sign in: <span className="font-semibold text-slate-700">{redirectTo}</span>
-                  </div>
                 </form>
               </div>
 
-              <div className="mt-4 text-center text-[11px] text-slate-500">
-                By signing in you agree to Ambulant+'s terms and privacy policy.
+              <div className="mt-5 text-center text-xs leading-6 text-slate-500">
+                By signing in, you agree to Ambulant+ terms and privacy policy.
               </div>
             </div>
           </section>
@@ -316,4 +312,3 @@ export default function PatientLoginPage() {
     </Suspense>
   );
 }
-

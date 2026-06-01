@@ -4,7 +4,16 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useMemo, useState, Suspense } from 'react';
-import { Sparkles, UserPlus, Mail, Lock, User, ArrowRight, ShieldCheck, Crown } from 'lucide-react';
+import {
+  UserPlus,
+  Mail,
+  Lock,
+  User,
+  ArrowRight,
+  ShieldCheck,
+  BadgePercent,
+  HeartPulse,
+} from 'lucide-react';
 
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
@@ -105,7 +114,6 @@ function PatientSignupPageContent() {
         throw new Error(data?.error || data?.message || 'Sign up failed');
       }
 
-      // Mirror login storage
       if (data?.token) localStorage.setItem('ambulant.token', data.token);
       if (data?.profile) localStorage.setItem('ambulant.profile', JSON.stringify(data.profile));
 
@@ -126,115 +134,124 @@ function PatientSignupPageContent() {
   return (
     <main
       className={cx(
-        'min-h-screen',
-        // Worldclass gradient (clean + “health-tech” glow, no image)
-        'bg-slate-50',
-        'bg-[radial-gradient(1000px_circle_at_18%_-12%,rgba(16,185,129,0.18),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(99,102,241,0.14),transparent_55%),radial-gradient(900px_circle_at_55%_105%,rgba(2,132,199,0.10),transparent_52%),linear-gradient(to_bottom,rgba(255,255,255,0.85),rgba(248,250,252,1))]',
+        'min-h-screen overflow-hidden bg-slate-50',
+        'bg-[radial-gradient(1000px_circle_at_18%_-12%,rgba(20,184,166,0.18),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(59,130,246,0.12),transparent_55%),linear-gradient(to_bottom,rgba(255,255,255,0.92),rgba(248,250,252,1))]',
       )}
     >
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-          {/* Left */}
-          <section className="order-2 lg:order-1">
-            <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
-              <Sparkles className="h-4 w-4 text-emerald-700" />
-              Ambulant+ · Patient Portal
+      <div className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-10">
+        <div className="grid w-full gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
+          <section className="order-2 lg:order-1 lg:pt-8">
+            <div className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-white/80 px-3 py-1 text-xs font-black text-slate-700 shadow-sm backdrop-blur">
+              <ShieldCheck className="h-4 w-4 text-teal-700" />
+              Ambulant+ - Patient
             </div>
 
-            <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
+            <h1 className="mt-5 max-w-xl text-4xl font-black tracking-tight text-slate-950 md:text-5xl">
               Create your
-              <span className="block bg-gradient-to-r from-emerald-700 to-indigo-700 bg-clip-text text-transparent">
-                Ambulant+ account
+              <span className="block bg-gradient-to-r from-teal-700 to-sky-700 bg-clip-text text-transparent">
+                patient account
               </span>
             </h1>
 
-            <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600">
-              Track & stream live vitals (integrated IoMTs) during virtual consultations, manage medications (smart
-              scheduler/reminder with eRx sync), book visits (electronic appointment booking), and keep your medical
-              history organized, with privacy-first EHR and care workflows for yourself and loved ones (spouse/children/aged relatives). Best part? Zero monthly platform fees.
+            <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
+              Create a secure Ambulant+ patient profile to book clinicians, manage
+              appointments, connect supported devices, view care records, receive reminders
+              and continue care through MedReach and CarePort where available.
             </p>
 
-            <div className="mt-6 grid max-w-xl gap-3 sm:grid-cols-2">
-              <div className="rounded-3xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
-                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
-                  <ShieldCheck className="h-4 w-4 text-emerald-700" />
-                  Bank-grade data security
+            <div className="mt-7 grid max-w-xl gap-3 sm:grid-cols-2">
+              <div className="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-sm backdrop-blur">
+                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-950">
+                  <ShieldCheck className="h-4 w-4 text-teal-700" />
+                  Privacy-first records
                 </div>
-                <div className="mt-1 text-[12px] text-slate-600">
-                  With blockchain-backed built-in EHR, Ambulant+ is designed to support secure, reliable clinical reconciliation and uninterupted continuity of care. Major medical aids accepted.
+                <div className="mt-2 text-sm leading-6 text-slate-600">
+                  Secure care history designed for continuity across supported workflows.
                 </div>
               </div>
 
-              <div className="rounded-3xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
-                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
-                  <ArrowRight className="h-4 w-4 text-indigo-700" />
-                  Quick 1-min sign up · No fees
+              <div className="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-sm backdrop-blur">
+                <div className="flex items-center gap-2 text-sm font-extrabold text-slate-950">
+                  <HeartPulse className="h-4 w-4 text-sky-700" />
+                  Start free
                 </div>
-                <div className="mt-1 text-[12px] text-slate-600">
-                  Create your account in under a minute and access a clinician/clinic instantly. Complete profile details later at your pace. You can access care, use your IoMTs and without mandatory subscription. 
+                <div className="mt-2 text-sm leading-6 text-slate-600">
+                  Start with free patient access. Premium and family features are optional.
                 </div>
               </div>
             </div>
 
-            <div className="mt-6 text-xs text-slate-500">
+            <div className="mt-7 rounded-[28px] border border-teal-100 bg-teal-50/70 p-5 text-sm leading-7 text-slate-700">
+              <div className="flex items-start gap-3">
+                <HeartPulse className="mt-1 h-5 w-5 shrink-0 text-teal-700" />
+                <div>
+                  <span className="font-extrabold text-slate-950">Not an emergency service.</span>{' '}
+                  In a medical emergency, contact local emergency services immediately.
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 text-sm text-slate-600">
               Already have an account?{' '}
-              <Link href="/app/auth/login" className="font-bold text-slate-800 hover:underline">
+              <Link href="/auth/login" className="font-bold text-teal-700 hover:underline">
                 Sign in
               </Link>
               .
             </div>
           </section>
 
-          {/* Right: form */}
           <section className="order-1 lg:order-2">
             <div className="mx-auto w-full max-w-md">
-              <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-black/[0.06] backdrop-blur">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-xs font-black text-slate-500">1 Minute Man - Quick Patient Sign up</div>
-                    <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">Ambulant+</div>
-                    <div className="mt-1 text-sm text-slate-600">... secure health wallet in your pocket - contactless</div>
+              <div className="rounded-[36px] border border-white/80 bg-white/88 p-7 shadow-xl shadow-teal-900/[0.08] backdrop-blur">
+                <div className="text-center">
+                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[24px] border border-teal-100 bg-teal-50 text-teal-700 shadow-sm">
+                    <UserPlus className="h-7 w-7" />
                   </div>
 
-                  <div className="h-12 w-12 rounded-2xl border border-slate-200 bg-white flex items-center justify-center">
-                    <UserPlus className="h-5 w-5 text-emerald-700" />
+                  <div className="mt-5 text-xs font-black uppercase tracking-[0.2em] text-teal-700">
+                    Patient profile
                   </div>
+                  <h2 className="mt-2 text-3xl font-black tracking-tight text-slate-950">
+                    Create account
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">
+                    Complete the required details to activate your patient workspace.
+                  </p>
                 </div>
 
-                {/* ✅ Premium link patch */}
                 <Link
                   href={premiumHref}
-                  className="mt-4 inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white/70 px-3 py-2 text-xs font-black text-slate-800 backdrop-blur hover:bg-white"
+                  className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-teal-100 bg-teal-50/70 px-4 py-3 text-sm font-black text-teal-800 hover:bg-teal-50"
                 >
-                  <Crown className="mr-2 h-4 w-4 text-indigo-700" />
-                  Upgrade: Premium signup + IoMT bundle offers
+                  <BadgePercent className="h-4 w-4" />
+                  View Premium and device bundle options
                 </Link>
 
                 {err ? (
-                  <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-800">
+                  <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
                     {err}
                   </div>
                 ) : null}
 
-                <form onSubmit={handleSubmit} className="mt-5 space-y-4">
+                <form onSubmit={handleSubmit} className="mt-6 space-y-4">
                   <label className="block">
                     <div className="text-xs font-black text-slate-700">Full name</div>
-                    <div className="mt-1 relative">
-                      <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <div className="relative mt-1">
+                      <User className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-teal-600" />
                       <input
                         value={fullName}
                         onChange={(e) => {
                           setFullName(e.target.value);
                           if (err) setErr(null);
                         }}
-                        placeholder="e.g., Lerato Toto"
+                        placeholder="e.g. Lerato Mokoena"
                         autoComplete="name"
                         autoCapitalize="words"
                         disabled={loading}
                         className={cx(
-                          'w-full rounded-2xl border border-slate-200 bg-white px-10 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                          'w-full rounded-2xl border border-slate-200 bg-white px-11 py-3 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                          'disabled:cursor-not-allowed disabled:opacity-60',
                         )}
                         required
                       />
@@ -243,8 +260,8 @@ function PatientSignupPageContent() {
 
                   <label className="block">
                     <div className="text-xs font-black text-slate-700">Email</div>
-                    <div className="mt-1 relative">
-                      <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <div className="relative mt-1">
+                      <Mail className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-teal-600" />
                       <input
                         value={email}
                         onChange={(e) => {
@@ -258,9 +275,9 @@ function PatientSignupPageContent() {
                         placeholder="name@example.com"
                         disabled={loading}
                         className={cx(
-                          'w-full rounded-2xl border border-slate-200 bg-white px-10 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                          'w-full rounded-2xl border border-slate-200 bg-white px-11 py-3 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                          'disabled:cursor-not-allowed disabled:opacity-60',
                         )}
                         required
                       />
@@ -280,9 +297,9 @@ function PatientSignupPageContent() {
                         autoComplete="bday"
                         disabled={loading}
                         className={cx(
-                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                          'disabled:cursor-not-allowed disabled:opacity-60',
                         )}
                         required
                       />
@@ -298,9 +315,9 @@ function PatientSignupPageContent() {
                         }}
                         disabled={loading}
                         className={cx(
-                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                          'disabled:cursor-not-allowed disabled:opacity-60',
                         )}
                         required
                       >
@@ -323,12 +340,12 @@ function PatientSignupPageContent() {
                       }}
                       type="tel"
                       autoComplete="tel"
-                      placeholder="e.g., +27 72 123 4567"
+                      placeholder="e.g. +27 72 123 4567"
                       disabled={loading}
                       className={cx(
-                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
-                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm',
+                        'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                        'disabled:cursor-not-allowed disabled:opacity-60',
                       )}
                     />
                   </label>
@@ -345,9 +362,9 @@ function PatientSignupPageContent() {
                       placeholder="Street address"
                       disabled={loading}
                       className={cx(
-                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
-                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm',
+                        'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                        'disabled:cursor-not-allowed disabled:opacity-60',
                       )}
                       required
                     />
@@ -365,9 +382,9 @@ function PatientSignupPageContent() {
                       placeholder="Apartment, building, suburb (optional)"
                       disabled={loading}
                       className={cx(
-                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
-                        'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                        'disabled:opacity-60 disabled:cursor-not-allowed',
+                        'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm',
+                        'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                        'disabled:cursor-not-allowed disabled:opacity-60',
                       )}
                     />
                   </label>
@@ -385,9 +402,9 @@ function PatientSignupPageContent() {
                         placeholder="City"
                         disabled={loading}
                         className={cx(
-                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                          'disabled:cursor-not-allowed disabled:opacity-60',
                         )}
                         required
                       />
@@ -405,9 +422,9 @@ function PatientSignupPageContent() {
                         placeholder="Postal code"
                         disabled={loading}
                         className={cx(
-                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                          'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                          'disabled:cursor-not-allowed disabled:opacity-60',
                         )}
                       />
                     </label>
@@ -415,8 +432,8 @@ function PatientSignupPageContent() {
 
                   <label className="block">
                     <div className="text-xs font-black text-slate-700">Password</div>
-                    <div className="mt-1 relative">
-                      <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <div className="relative mt-1">
+                      <Lock className="absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-teal-600" />
                       <input
                         value={password}
                         onChange={(e) => {
@@ -429,14 +446,16 @@ function PatientSignupPageContent() {
                         placeholder="At least 8 characters"
                         disabled={loading}
                         className={cx(
-                          'w-full rounded-2xl border border-slate-200 bg-white px-10 py-3 text-sm',
-                          'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
-                          'disabled:opacity-60 disabled:cursor-not-allowed',
+                          'w-full rounded-2xl border border-slate-200 bg-white px-11 py-3 text-sm shadow-sm',
+                          'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                          'disabled:cursor-not-allowed disabled:opacity-60',
                         )}
                         required
                       />
                     </div>
-                    <div className="mt-1 text-[11px] text-slate-500">Use a strong password you don’t reuse elsewhere.</div>
+                    <div className="mt-2 text-xs leading-5 text-slate-500">
+                      Use a strong password with uppercase, lowercase, a number and a symbol.
+                    </div>
                   </label>
 
                   <button
@@ -444,33 +463,35 @@ function PatientSignupPageContent() {
                     type="submit"
                     aria-busy={loading}
                     className={cx(
-                      'w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white',
-                      'hover:bg-emerald-700 transition',
-                      'disabled:opacity-50 disabled:cursor-not-allowed',
+                      'w-full rounded-2xl bg-gradient-to-r from-teal-600 to-cyan-500 px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-teal-900/10',
+                      'transition hover:from-teal-700 hover:to-cyan-600',
+                      'disabled:cursor-not-allowed disabled:opacity-50',
                     )}
                   >
-                    {loading ? 'Creating…' : 'Create account'}
+                    <span className="inline-flex items-center justify-center gap-2">
+                      {loading ? 'Creating account...' : 'Create account'}
+                      {!loading ? <ArrowRight className="h-4 w-4" /> : null}
+                    </span>
                   </button>
 
-                  <div className="flex items-center justify-between gap-3 text-xs">
-                    <Link href="/auth/login" className="font-bold text-slate-800 hover:underline">
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <Link href="/auth/login" className="font-bold text-teal-700 hover:underline">
                       I already have an account
                     </Link>
 
-                    <Link href="/privacy" className="font-semibold text-slate-500 hover:text-slate-700 hover:underline">
+                    <Link href="/privacy" className="font-semibold text-slate-500 hover:text-slate-800 hover:underline">
                       Privacy
                     </Link>
                   </div>
 
-                  <div className="pt-2 text-[11px] text-slate-500">
-                    After sign up you’ll be redirected to your Main Dashboard. You can update your profile later.
+                  <div className="pt-2 text-xs leading-5 text-slate-500">
+                    After sign up, you can complete or update your profile from your dashboard.
                   </div>
                 </form>
               </div>
 
-              <div className="mt-4 text-center text-[11px] text-slate-500">
-                By creating an account you agree to Ambulant+&apos;s Terms and Privacy Policy. Ambulant+ and related
-                modules (e.g., MedReach, CarePort, DueCare, InsightCore) are products of Cloven Technology group entities.
+              <div className="mt-5 text-center text-xs leading-6 text-slate-500">
+                By creating an account, you agree to Ambulant+ terms and privacy policy.
               </div>
             </div>
           </section>
@@ -487,4 +508,3 @@ export default function PatientSignupPage() {
     </Suspense>
   );
 }
-
