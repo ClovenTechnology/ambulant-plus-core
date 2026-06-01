@@ -8,6 +8,7 @@ import {
   CalendarCheck,
   CircleHelp,
   ClipboardCheck,
+  Ear,
   FlaskConical,
   HeartPulse,
   Lightbulb,
@@ -223,6 +224,11 @@ export const groupedNav = [
             icon: Stethoscope,
           },
           {
+            label: "HD Otoscope Workflow",
+            href: "/resources/hd-otoscope-workflow",
+            icon: Ear,
+          },
+          {
             label: "NexRing Setup",
             href: "/resources/nexring-setup",
             icon: Activity,
@@ -232,7 +238,7 @@ export const groupedNav = [
             href: "/resources/medical-aid-deployment-guide",
             icon: Building2,
           },
-          { label: "Find a Doctor / Book", href: "/bookings", icon: CalendarCheck },
+          { label: "Find a Doctor / Book", href: "/resources/find-a-doctor-and-book-appointment", icon: CalendarCheck },
           { label: "Contact", href: "/contact", icon: CircleHelp },
         ],
       },
@@ -256,6 +262,51 @@ export const groupedNav = [
         ],
       },
     ],
+  },
+];
+
+export const resourceRoutes = [
+  {
+    title: "Health Monitor setup",
+    href: "/resources/health-monitor-setup",
+    summary:
+      "Setup guidance for supported remote vitals workflows including temperature, SpO₂, heart rate, blood pressure, blood glucose and ECG capture.",
+    icon: HeartPulse,
+  },
+  {
+    title: "Digital Stethoscope workflow",
+    href: "/resources/digital-stethoscope-workflow",
+    summary:
+      "Workflow guidance for live remote auscultation, audio capture, playback, notes and follow-up comparison.",
+    icon: Stethoscope,
+  },
+  {
+    title: "HD Otoscope workflow",
+    href: "/resources/hd-otoscope-workflow",
+    summary:
+      "Safe HD Otoscope workflow guidance for remote ear, nose, throat and skin image review.",
+    icon: Ear,
+  },
+  {
+    title: "NexRing setup",
+    href: "/resources/nexring-setup",
+    summary:
+      "Setup and wearing guidance for supported wearable health context including sleep, activity and temperature-variation signals.",
+    icon: Activity,
+  },
+  {
+    title: "Medical Aid Deployment Guide",
+    href: "/resources/medical-aid-deployment-guide",
+    summary:
+      "Deployment guidance for preventive care, remote monitoring, adherence, rewards, claims visibility and programme intelligence.",
+    icon: Building2,
+  },
+  {
+    title: "Find a doctor and book appointment",
+    href: "/resources/find-a-doctor-and-book-appointment",
+    summary:
+      "Patient guide for finding a clinician, booking an appointment and preparing for virtual care.",
+    icon: CalendarCheck,
   },
 ];
 

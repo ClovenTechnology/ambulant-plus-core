@@ -5,9 +5,11 @@ import {
   BookOpen,
   BriefcaseMedical,
   Building2,
+  CalendarCheck,
   CheckCircle2,
   ClipboardCheck,
   Download,
+  Ear,
   FileText,
   GraduationCap,
   HeartPulse,
@@ -18,7 +20,6 @@ import {
   TestTube2,
   Truck,
   Users,
-  Video,
   Watch,
   Waves,
 } from "lucide-react";
@@ -61,6 +62,13 @@ const resourceCollections: Array<{
       "Account setup, profile completion, medical-aid readiness, device setup, doctor booking, wallet, reminders, family access, MedReach diagnostics and CarePort medicine delivery guidance.",
     icon: HeartPulse,
     href: "/patients/getting-started",
+  },
+  {
+    title: "Find a doctor and book appointment",
+    body:
+      "Learn how patients can search for a suitable clinician, choose an appointment time, prepare care context and join a Contactless Medicine consultation.",
+    icon: CalendarCheck,
+    href: "/resources/find-a-doctor-and-book-appointment",
   },
   {
     title: "Clinician resources",
@@ -191,15 +199,15 @@ const deviceSetupGuides: Array<{
     title: "HD Otoscope workflow guide",
     eyebrow: "Remote imaging",
     body:
-      "The HD Otoscope supports visual capture for ear, nose, throat and selected skin-adjacent review workflows where image or video context can support remote assessment.",
+      "Learn how to use the HD Otoscope safely for clinician-led remote ear, nose, throat and skin image review, with clear escalation boundaries.",
     bullets: [
       "Use only when the patient or trained assistant can safely position the device.",
       "Capture clear images or video clips for review and documentation.",
       "Do not force insertion or use where pain, bleeding, foreign body risk or emergency symptoms are present.",
       "Escalate to in-person assessment when image quality, symptoms or safety concerns require it.",
     ],
-    icon: Video,
-    href: "/devices",
+    icon: Ear,
+    href: "/resources/hd-otoscope-workflow",
   },
   {
     title: "NexRing wearing and sizing guide",
@@ -298,16 +306,26 @@ const governanceNotes = [
   "Emergency symptoms should always be directed to appropriate urgent or emergency services.",
 ];
 
-const proofPoints = [
-  "Remote patient monitoring and continuous vitals context",
-  "Device-supported virtual consultation workflows",
-  "Digital auscultation with saved heart and lung recordings",
-  "Health Monitor spot-checks for blood pressure, SpO₂, temperature, glucose, ECG and pulse",
-  "NexRing wearable context for sleep, activity and temperature variation",
-  "MedReach home diagnostics and phlebotomy coordination",
-  "CarePort prescription fulfilment, reminders and medicine delivery support",
-  "Medical-aid, HMO, employer and sponsor programme visibility",
-  "Governance-aware InsightCore intelligence and reporting pathways",
+const proofPoints: Array<{
+  title: string;
+  href?: string;
+}> = [
+  { title: "Remote patient monitoring and continuous vitals context" },
+  { title: "Device-supported virtual consultation workflows" },
+  { title: "Digital auscultation with saved heart and lung recordings" },
+  {
+    title:
+      "Health Monitor spot-checks for blood pressure, SpO₂, temperature, glucose, ECG and pulse",
+  },
+  { title: "NexRing wearable context for sleep, activity and temperature variation" },
+  { title: "MedReach home diagnostics and phlebotomy coordination" },
+  { title: "CarePort prescription fulfilment, reminders and medicine delivery support" },
+  { title: "Medical-aid, HMO, employer and sponsor programme visibility" },
+  { title: "Governance-aware InsightCore intelligence and reporting pathways" },
+  {
+    title: "How do I find a doctor online?",
+    href: "/resources/find-a-doctor-and-book-appointment",
+  },
 ];
 
 export default function ResourcesPage() {
@@ -638,12 +656,35 @@ export default function ResourcesPage() {
         body="Ambulant+ must be discoverable by people searching for telemedicine, online doctors, remote patient monitoring, IoMT devices, digital stethoscopes, home diagnostics, medication adherence, medical-aid preventive care and connected clinical workflows."
       >
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {proofPoints.map((item) => (
-            <div key={item} className="flex gap-3 rounded-3xl border border-cyan-100 bg-cyan-50/70 p-5">
-              <Waves className="mt-1 h-5 w-5 shrink-0 text-cyan-700" />
-              <p className="text-sm leading-7 text-slate-700">{item}</p>
-            </div>
-          ))}
+          {proofPoints.map((item) => {
+            const content = (
+              <>
+                <Waves className="mt-1 h-5 w-5 shrink-0 text-cyan-700" />
+                <p className="text-sm leading-7 text-slate-700">{item.title}</p>
+              </>
+            );
+
+            if (item.href) {
+              return (
+                <Link
+                  key={item.title}
+                  href={item.href}
+                  className="flex gap-3 rounded-3xl border border-cyan-100 bg-cyan-50/70 p-5 transition hover:-translate-y-1 hover:shadow-glow"
+                >
+                  {content}
+                </Link>
+              );
+            }
+
+            return (
+              <div
+                key={item.title}
+                className="flex gap-3 rounded-3xl border border-cyan-100 bg-cyan-50/70 p-5"
+              >
+                {content}
+              </div>
+            );
+          })}
         </div>
       </SectionShell>
 
