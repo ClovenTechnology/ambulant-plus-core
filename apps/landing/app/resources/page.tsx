@@ -170,7 +170,7 @@ const deviceSetupGuides: Array<{
       "Use captured readings as structured clinical context, not as a replacement for clinician judgement.",
     ],
     icon: HeartPulse,
-    href: "/devices",
+    href: "/resources/health-monitor-setup",
   },
   {
     title: "Digital Stethoscope workflow guide",
@@ -185,7 +185,7 @@ const deviceSetupGuides: Array<{
       "Share recordings, add patient notes and compare saved clips across follow-up visits.",
     ],
     icon: Stethoscope,
-    href: "/devices",
+    href: "/resources/digital-stethoscope-workflow",
   },
   {
     title: "HD Otoscope workflow guide",
@@ -214,7 +214,7 @@ const deviceSetupGuides: Array<{
       "Align the sensor to the palm-side of the finger and allow up to 24 hours for fuller data population.",
     ],
     icon: Watch,
-    href: "/devices",
+    href: "/resources/nexring-setup",
   },
 ];
 

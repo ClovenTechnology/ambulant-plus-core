@@ -31,6 +31,10 @@ const companyLinks = [
   { label: "Operations", href: "/operations" },
   { label: "Partnerships", href: "/partnerships" },
   { label: "Resources", href: "/resources" },
+  { label: "Health Monitor Setup", href: "/resources/health-monitor-setup" },
+  { label: "Digital Stethoscope Workflow", href: "/resources/digital-stethoscope-workflow" },
+  { label: "NexRing Setup", href: "/resources/nexring-setup" },
+  { label: "Medical Aid Deployment Guide", href: "/resources/medical-aid-deployment-guide" },
   { label: "Blog", href: "/blog" },
   { label: "Contact", href: "/contact" },
 ];

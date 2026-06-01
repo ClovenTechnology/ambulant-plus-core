@@ -487,6 +487,13 @@ export default function HomePage() {
               </a>
 
               <Link
+                href="/bookings"
+                className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white/80 px-6 py-4 text-sm font-semibold text-cyan-800"
+              >
+                Find a doctor <ArrowRight className="h-4 w-4" />
+              </Link>
+
+              <Link
                 href="/demos"
                 className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white/80 px-6 py-4 text-sm font-semibold text-cyan-800"
               >

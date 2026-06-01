@@ -212,7 +212,27 @@ export const groupedNav = [
         links: [
           { label: "Blog", href: "/blog", icon: Newspaper },
           { label: "Resources", href: "/resources", icon: ClipboardCheck },
-          { label: "Bookings", href: "/bookings", icon: CalendarCheck },
+          {
+            label: "Health Monitor Setup",
+            href: "/resources/health-monitor-setup",
+            icon: HeartPulse,
+          },
+          {
+            label: "Digital Stethoscope Workflow",
+            href: "/resources/digital-stethoscope-workflow",
+            icon: Stethoscope,
+          },
+          {
+            label: "NexRing Setup",
+            href: "/resources/nexring-setup",
+            icon: Activity,
+          },
+          {
+            label: "Medical Aid Deployment Guide",
+            href: "/resources/medical-aid-deployment-guide",
+            icon: Building2,
+          },
+          { label: "Find a Doctor / Book", href: "/bookings", icon: CalendarCheck },
           { label: "Contact", href: "/contact", icon: CircleHelp },
         ],
       },
