@@ -1,4 +1,6 @@
+import Image from "next/image";
 import Link from "next/link";
+import Script from "next/script";
 import {
   ArrowRight,
   BadgeCheck,
@@ -13,12 +15,15 @@ import {
   FileText,
   GraduationCap,
   HeartPulse,
+  LockKeyhole,
+  Mail,
   Pill,
   ShieldCheck,
   Stethoscope,
   Store,
   TestTube2,
   Truck,
+  UserRoundCheck,
   Users,
   Watch,
   Waves,
@@ -26,6 +31,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import CTA from "@/components/CTA";
 import SectionShell from "@/components/SectionShell";
+import { absoluteUrl } from "@/lib/seo";
 import { site } from "@/lib/site";
 
 export const metadata = {
@@ -60,7 +66,7 @@ const resourceCollections: Array<{
     title: "Patient guides",
     body:
       "Account setup, profile completion, medical-aid readiness, device setup, doctor booking, wallet, reminders, family access, MedReach diagnostics and CarePort medicine delivery guidance.",
-    icon: HeartPulse,
+    icon: UserRoundCheck,
     href: "/patients/getting-started",
   },
   {
@@ -164,6 +170,8 @@ const deviceSetupGuides: Array<{
   bullets: string[];
   icon: LucideIcon;
   href: string;
+  image: string;
+  imageAlt: string;
 }> = [
   {
     title: "Health Monitor setup guide",
@@ -179,6 +187,8 @@ const deviceSetupGuides: Array<{
     ],
     icon: HeartPulse,
     href: "/resources/health-monitor-setup",
+    image: "/visuals/devices/health-monitor-card.webp",
+    imageAlt: "Ambulant+ Health Monitor device for remote vitals monitoring",
   },
   {
     title: "Digital Stethoscope workflow guide",
@@ -194,6 +204,8 @@ const deviceSetupGuides: Array<{
     ],
     icon: Stethoscope,
     href: "/resources/digital-stethoscope-workflow",
+    image: "/visuals/devices/digital-stethoscope-card.webp",
+    imageAlt: "Ambulant+ Digital Stethoscope for live remote auscultation",
   },
   {
     title: "HD Otoscope workflow guide",
@@ -208,6 +220,8 @@ const deviceSetupGuides: Array<{
     ],
     icon: Ear,
     href: "/resources/hd-otoscope-workflow",
+    image: "/visuals/devices/hd-otoscope-card.webp",
+    imageAlt: "Ambulant+ HD Otoscope for remote ear nose throat and skin image review",
   },
   {
     title: "NexRing wearing and sizing guide",
@@ -223,6 +237,105 @@ const deviceSetupGuides: Array<{
     ],
     icon: Watch,
     href: "/resources/nexring-setup",
+    image: "/visuals/devices/nexring-card.webp",
+    imageAlt: "NexRing wearable smart ring for continuous wellness and remote monitoring context",
+  },
+];
+
+
+const mostUsedGuides: Array<{
+  title: string;
+  body: string;
+  href: string;
+  icon: LucideIcon;
+  badge: string;
+}> = [
+  {
+    title: "Find a doctor and book appointment",
+    body:
+      "Patient guide for finding a suitable clinician, choosing a consultation time, preparing care context and joining an Ambulant+ appointment.",
+    href: "/resources/find-a-doctor-and-book-appointment",
+    icon: CalendarCheck,
+    badge: "Patient access",
+  },
+  {
+    title: "Health Monitor setup",
+    body:
+      "Prepare the supported Health Monitor for temperature, SpO₂, heart rate, blood pressure, blood glucose and ECG capture.",
+    href: "/resources/health-monitor-setup",
+    icon: HeartPulse,
+    badge: "Remote vitals",
+  },
+  {
+    title: "Digital Stethoscope workflow",
+    body:
+      "Use live heart and lung auscultation, recording, playback and follow-up comparison during device-supported virtual care.",
+    href: "/resources/digital-stethoscope-workflow",
+    icon: Stethoscope,
+    badge: "Auscultation",
+  },
+  {
+    title: "NexRing setup",
+    body:
+      "Set up the NexRing, select the right size, optimise wearing position and understand wearable trend context.",
+    href: "/resources/nexring-setup",
+    icon: Watch,
+    badge: "Wearable context",
+  },
+  {
+    title: "HD Otoscope workflow",
+    body:
+      "Use remote image capture carefully for clinician-led ear, nose, throat and skin review with clear escalation boundaries.",
+    href: "/resources/hd-otoscope-workflow",
+    icon: Ear,
+    badge: "Remote imaging",
+  },
+  {
+    title: "Medical Aid Deployment Guide",
+    body:
+      "Plan medical-aid, HMO, employer or sponsor programmes around consent, monitoring, adherence, claims and preventive-care visibility.",
+    href: "/resources/medical-aid-deployment-guide",
+    icon: Building2,
+    badge: "Payer deployment",
+  },
+];
+
+const resourceFilters = [
+  {
+    label: "For patients",
+    href: "/patients",
+    description: "Doctor booking, profile setup, device readiness and care continuity.",
+    icon: Users,
+  },
+  {
+    label: "For clinicians",
+    href: "/clinicians",
+    description: "Onboarding, consultation discipline, device-supported review and escalation.",
+    icon: Stethoscope,
+  },
+  {
+    label: "For medical aids",
+    href: "/clients",
+    description: "Preventive-care programmes, claims visibility, adherence and member monitoring.",
+    icon: Building2,
+  },
+  {
+    label: "For labs",
+    href: "/medreach/labs",
+    description: "Catalogue setup, specimen acceptance, result routing and MedReach operations.",
+    icon: TestTube2,
+  },
+  {
+    label: "For pharmacies",
+    href: "/careport/pharmacies",
+    description: "Prescription fulfilment, SKU readiness, proof-of-delivery and CarePort workflow.",
+    icon: Store,
+  },
+  {
+    label: "For riders",
+    href: "/careport/riders",
+    description: "Delivery rules, route progression, patient updates and proof-of-delivery.",
+    icon: Truck,
   },
 ];
 
@@ -264,36 +377,67 @@ const contentRoadmap = [
   "Enterprise demo preparation checklist",
 ];
 
-const downloadablePacks = [
+const downloadablePacks: Array<{
+  title: string;
+  body: string;
+  gate: string;
+  cta: string;
+  href: string;
+  icon: LucideIcon;
+}> = [
   {
     title: "Patient Quick-Start Pack",
     body:
       "Profile completion, supported devices, doctor booking, reminders, reports, MedReach diagnostics and CarePort delivery readiness.",
+    gate: "Patient workspace signup or login",
+    cta: "Access patient workspace",
+    href: site.patientAppUrl,
+    icon: Users,
   },
   {
     title: "Clinician Onboarding Pack",
     body:
       "Contactless Medicine standards, consultation readiness, device-supported review, documentation and escalation boundaries.",
+    gate: "Clinician onboarding required",
+    cta: "Start clinician onboarding",
+    href: "/clinicians/onboarding",
+    icon: BriefcaseMedical,
   },
   {
     title: "Device Setup Sheets",
     body:
       "Health Monitor, Digital Stethoscope, HD Otoscope and NexRing setup notes prepared for patients, clinicians and support teams.",
+    gate: "Newsletter or training enquiry",
+    cta: "Request device setup pack",
+    href: "/contact?type=device-resource-pack",
+    icon: Download,
   },
   {
     title: "Medical Aid Deployment Guide",
     body:
       "Programme eligibility, member onboarding, consent, remote monitoring, adherence visibility, rewards and preventive-care reporting.",
+    gate: "Client demo or programme enquiry",
+    cta: "Request deployment pack",
+    href: "/demos?type=medical-aid",
+    icon: Building2,
   },
   {
     title: "Operations Playbooks",
     body:
       "MedReach diagnostics, CarePort fulfilment, pharmacy handover, rider proof-of-delivery and laboratory result routing.",
+    gate: "Role-specific workspace or partner enquiry",
+    cta: "Request operations pack",
+    href: "/contact?type=operations-playbook",
+    icon: ClipboardCheck,
   },
   {
     title: "Training and Demo Packs",
     body:
       "Demo preparation, CPD pathways, webinar topics, implementation walkthroughs and stakeholder-specific training modules.",
+    gate: "Training enquiry or verified programme interest",
+    cta: "Ask about training",
+    href: "/demos",
+    icon: GraduationCap,
   },
 ];
 
@@ -328,9 +472,133 @@ const proofPoints: Array<{
   },
 ];
 
+
+const resourcesJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "CollectionPage",
+  name: "Ambulant+ Resources",
+  headline: "Knowledge infrastructure for Contactless Medicine",
+  description: metadata.description,
+  url: absoluteUrl("/resources"),
+  inLanguage: "en-ZA",
+  publisher: {
+    "@type": "Organization",
+    name: "Ambulant+",
+    url: site.url,
+  },
+  about: [
+    "Contactless Medicine",
+    "remote patient monitoring",
+    "remote monitoring",
+    "continuous remote monitoring",
+    "remote vitals",
+    "IoMT",
+    "Internet of Medical Things",
+    "digital auscultation",
+    "digital stethoscope",
+    "HD otoscope",
+    "NexRing",
+    "medical aid preventive care",
+    "CarePort",
+    "MedReach",
+    "doctor booking",
+    "online doctor",
+    "virtual consultation",
+  ],
+  mainEntity: {
+    "@type": "ItemList",
+    itemListElement: mostUsedGuides.map((item, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: item.title,
+      url: absoluteUrl(item.href),
+    })),
+  },
+};
+
+const resourcesFaqJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  mainEntity: [
+    {
+      "@type": "Question",
+      name: "Are Ambulant+ resources free to read?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text:
+          "Public Ambulant+ resource guides are open for education and search visibility. Downloadable handbooks, implementation packs and operational playbooks may require newsletter signup, workspace registration or programme enquiry.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "Why are some resource downloads gated?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text:
+          "Some resources are role-specific and should be delivered to the correct user group, such as patients, clinicians, medical aids, laboratories, pharmacies or riders. Gating helps ensure users receive the appropriate version and follow the right onboarding pathway.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "Do device setup guides replace clinical judgement?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text:
+          "No. Ambulant+ device setup guides support safe preparation and structured care context. Device readings, recordings and images should be interpreted by an appropriate clinician in context.",
+      },
+    },
+    {
+      "@type": "Question",
+      name: "Can patients use Ambulant+ resources to find a doctor?",
+      acceptedAnswer: {
+        "@type": "Answer",
+        text:
+          "Yes. Ambulant+ provides patient guidance for finding a clinician, preparing care context, booking a virtual appointment and using supported devices where appropriate.",
+      },
+    },
+  ],
+};
+
+const breadcrumbJsonLd = {
+  "@context": "https://schema.org",
+  "@type": "BreadcrumbList",
+  itemListElement: [
+    {
+      "@type": "ListItem",
+      position: 1,
+      name: "Home",
+      item: absoluteUrl("/"),
+    },
+    {
+      "@type": "ListItem",
+      position: 2,
+      name: "Resources",
+      item: absoluteUrl("/resources"),
+    },
+  ],
+};
+
 export default function ResourcesPage() {
   return (
     <main>
+      <Script
+        id="resources-collection-jsonld"
+        type="application/ld+json"
+        strategy="afterInteractive"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(resourcesJsonLd) }}
+      />
+      <Script
+        id="resources-faq-jsonld"
+        type="application/ld+json"
+        strategy="afterInteractive"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(resourcesFaqJsonLd) }}
+      />
+      <Script
+        id="resources-breadcrumb-jsonld"
+        type="application/ld+json"
+        strategy="afterInteractive"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }}
+      />
       <section className="relative isolate overflow-hidden px-4 py-14 md:px-6 md:py-20">
         <div className="pointer-events-none absolute inset-0 -z-10">
           <div className="absolute left-[8%] top-[10%] h-72 w-72 rounded-full bg-cyan-300/20 blur-3xl" />
@@ -422,6 +690,77 @@ export default function ResourcesPage() {
         </div>
       </section>
 
+
+      <SectionShell
+        eyebrow="Most used guides"
+        title="Start with the resources people need first."
+        body="These are the highest-intent resource paths for patients, clinicians, medical aids and device-supported Contactless Medicine workflows."
+      >
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {mostUsedGuides.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.title}
+                href={item.href}
+                className="group glass-panel rounded-[30px] p-6 transition hover:-translate-y-1 hover:shadow-glow"
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="rounded-full border border-cyan-200 bg-cyan-50 px-3 py-1 text-xs font-bold uppercase tracking-[0.16em] text-cyan-800">
+                    {item.badge}
+                  </div>
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-slate-950 text-cyan-200">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                </div>
+
+                <h3 className="mt-5 text-xl font-semibold tracking-tight text-slate-950">
+                  {item.title}
+                </h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600">{item.body}</p>
+
+                <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700">
+                  Open guide <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </SectionShell>
+
+
+      <SectionShell
+        eyebrow="Find resources by role"
+        title="Choose the pathway that matches your work."
+        body="Ambulant+ resources are organised around real users and operational responsibilities, not generic downloads."
+      >
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {resourceFilters.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <Link
+                key={item.label}
+                href={item.href}
+                className="group rounded-[28px] border border-cyan-100 bg-cyan-50/70 p-5 transition hover:-translate-y-1 hover:bg-white hover:shadow-glow"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-cyan-700">
+                    <Icon className="h-5 w-5" />
+                  </div>
+                  <h3 className="text-lg font-semibold text-slate-950">{item.label}</h3>
+                </div>
+                <p className="mt-4 text-sm leading-7 text-slate-600">{item.description}</p>
+                <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700">
+                  View pathway <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      </SectionShell>
+
       <SectionShell
         eyebrow="Resource collections"
         title="Guidance organised by workflow."
@@ -464,35 +803,49 @@ export default function ResourcesPage() {
               <Link
                 key={item.title}
                 href={item.href}
-                className="group glass-panel rounded-[34px] p-6 transition hover:-translate-y-1 hover:shadow-glow"
+                className="group glass-panel overflow-hidden rounded-[34px] transition hover:-translate-y-1 hover:shadow-glow"
               >
-                <div className="flex flex-wrap items-start justify-between gap-4">
-                  <div>
-                    <div className="text-xs font-bold uppercase tracking-[0.22em] text-cyan-700">
-                      {item.eyebrow}
-                    </div>
-                    <h3 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
-                      {item.title}
-                    </h3>
+                <div className="grid gap-0 md:grid-cols-[0.74fr_1.26fr]">
+                  <div className="relative min-h-[220px] bg-gradient-to-br from-cyan-50 to-white">
+                    <Image
+                      src={item.image}
+                      alt={item.imageAlt}
+                      fill
+                      sizes="(max-width: 768px) 100vw, 360px"
+                      className="object-contain p-6 transition duration-500 group-hover:scale-105"
+                    />
                   </div>
-                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700">
-                    <Icon className="h-6 w-6" />
-                  </div>
-                </div>
 
-                <p className="mt-4 text-sm leading-8 text-slate-600">{item.body}</p>
-
-                <div className="mt-5 grid gap-3">
-                  {item.bullets.map((bullet) => (
-                    <div key={bullet} className="flex gap-3 text-sm leading-7 text-slate-600">
-                      <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-emerald-600" />
-                      <span>{bullet}</span>
+                  <div className="p-6">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <div className="text-xs font-bold uppercase tracking-[0.22em] text-cyan-700">
+                          {item.eyebrow}
+                        </div>
+                        <h3 className="mt-3 text-2xl font-semibold tracking-tight text-slate-950">
+                          {item.title}
+                        </h3>
+                      </div>
+                      <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700">
+                        <Icon className="h-6 w-6" />
+                      </div>
                     </div>
-                  ))}
-                </div>
 
-                <div className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700">
-                  View device hub <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                    <p className="mt-4 text-sm leading-8 text-slate-600">{item.body}</p>
+
+                    <div className="mt-5 grid gap-3">
+                      {item.bullets.map((bullet) => (
+                        <div key={bullet} className="flex gap-3 text-sm leading-7 text-slate-600">
+                          <CheckCircle2 className="mt-1 h-5 w-5 shrink-0 text-emerald-600" />
+                          <span>{bullet}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="mt-6 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700">
+                      View setup guide <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                    </div>
+                  </div>
                 </div>
               </Link>
             );
@@ -585,20 +938,79 @@ export default function ResourcesPage() {
 
       <SectionShell
         eyebrow="Downloadable library"
-        title="Next, turn the resource library into usable implementation packs."
-        body="The public resource hub should prepare users, while downloadable packs can support deeper onboarding, enterprise procurement, clinical governance and implementation planning."
+        title="High-value packs should go to the right users."
+        body="Public guides remain open for education and search visibility. Downloadable handbooks, implementation packs and operational playbooks may require newsletter signup, workspace registration or programme enquiry so that users receive the correct, role-appropriate version."
       >
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {downloadablePacks.map((item) => (
-            <div key={item.title} className="glass-panel rounded-[30px] p-6">
-              <Download className="h-6 w-6 text-cyan-700" />
-              <h3 className="mt-5 text-lg font-semibold text-slate-950">{item.title}</h3>
-              <p className="mt-3 text-sm leading-7 text-slate-600">{item.body}</p>
-              <div className="mt-5 inline-flex items-center gap-2 text-xs font-bold uppercase tracking-[0.18em] text-slate-500">
-                Coming next
+        <div className="mb-6 rounded-[30px] border border-cyan-100 bg-cyan-50/70 p-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-xs font-bold uppercase tracking-[0.18em] text-cyan-800">
+                <LockKeyhole className="h-4 w-4" />
+                Gated downloads
               </div>
+              <h3 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">
+                Open knowledge, controlled implementation assets.
+              </h3>
+              <p className="mt-3 max-w-4xl text-sm leading-8 text-slate-600">
+                General education should be easy to access. Role-specific handbooks and deployment
+                packs should route users into the right Ambulant+ workspace or enquiry path before
+                download, so patients, clinicians, labs, pharmacies, riders and medical-aid teams
+                receive the correct guidance.
+              </p>
             </div>
-          ))}
+            <a
+              href={`mailto:${site.supportEmail}`}
+              className="inline-flex shrink-0 items-center gap-2 rounded-full bg-slate-950 px-6 py-4 text-sm font-semibold text-white shadow-glow"
+            >
+              Request resource access <Mail className="h-4 w-4" />
+            </a>
+          </div>
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {downloadablePacks.map((item) => {
+            const Icon = item.icon;
+            const isExternal = item.href.startsWith("http");
+
+            const card = (
+              <div className="glass-panel h-full rounded-[30px] p-6 transition hover:-translate-y-1 hover:shadow-glow">
+                <div className="flex items-start justify-between gap-4">
+                  <Icon className="h-6 w-6 text-cyan-700" />
+                  <span className="rounded-full border border-cyan-100 bg-cyan-50 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-cyan-800">
+                    Controlled access
+                  </span>
+                </div>
+
+                <h3 className="mt-5 text-lg font-semibold text-slate-950">{item.title}</h3>
+                <p className="mt-3 text-sm leading-7 text-slate-600">{item.body}</p>
+
+                <div className="mt-5 rounded-2xl bg-white/80 p-4">
+                  <div className="text-xs font-bold uppercase tracking-[0.16em] text-slate-500">
+                    Access route
+                  </div>
+                  <p className="mt-2 text-sm font-semibold text-slate-800">{item.gate}</p>
+                </div>
+
+                <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700">
+                  {item.cta} <ArrowRight className="h-4 w-4" />
+                </div>
+              </div>
+            );
+
+            if (isExternal) {
+              return (
+                <a key={item.title} href={item.href} target="_blank" rel="noreferrer">
+                  {card}
+                </a>
+              );
+            }
+
+            return (
+              <Link key={item.title} href={item.href}>
+                {card}
+              </Link>
+            );
+          })}
         </div>
       </SectionShell>
 
