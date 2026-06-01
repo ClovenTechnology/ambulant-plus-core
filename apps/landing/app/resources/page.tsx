@@ -26,7 +26,6 @@ import {
   UserRoundCheck,
   Users,
   Watch,
-  Waves,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import CTA from "@/components/CTA";
@@ -179,11 +178,9 @@ const deviceSetupGuides: Array<{
     body:
       "The Health Monitor is a supported IoMT device controlled through a mobile phone, tablet or computer during consultation and remote review workflows.",
     bullets: [
-      "Charge fully before first use.",
-      "Supports temperature, SpO₂, heart rate, blood pressure, blood glucose and ECG capture.",
-      "Use the app or platform surface to select the measurement mode before capture.",
-      "Keep the device steady and follow the measurement-specific positioning instructions.",
-      "Use captured readings as structured clinical context, not as a replacement for clinician judgement.",
+      "Charge before first use and confirm the device is ready.",
+      "Use correct positioning for each measurement workflow.",
+      "Share readings only in clinician-led care context.",
     ],
     icon: HeartPulse,
     href: "/resources/health-monitor-setup",
@@ -196,11 +193,9 @@ const deviceSetupGuides: Array<{
     body:
       "The Digital Stethoscope supports live heart and lung listening, audio capture, playback and follow-up comparison during device-supported virtual consultations.",
     bullets: [
-      "Charge before use and connect through the supported app or consultation workflow.",
       "Select heart or lung mode before auscultation.",
-      "Use compatible earphones for live listening where required.",
-      "Tap record to save the audio file while listening.",
-      "Share recordings, add patient notes and compare saved clips across follow-up visits.",
+      "Record and save audio where follow-up comparison is needed.",
+      "Use recordings as clinical context, not standalone diagnosis.",
     ],
     icon: Stethoscope,
     href: "/resources/digital-stethoscope-workflow",
@@ -213,10 +208,9 @@ const deviceSetupGuides: Array<{
     body:
       "Learn how to use the HD Otoscope safely for clinician-led remote ear, nose, throat and skin image review, with clear escalation boundaries.",
     bullets: [
-      "Use only when the patient or trained assistant can safely position the device.",
-      "Capture clear images or video clips for review and documentation.",
-      "Do not force insertion or use where pain, bleeding, foreign body risk or emergency symptoms are present.",
-      "Escalate to in-person assessment when image quality, symptoms or safety concerns require it.",
+      "Use careful positioning and adequate lighting.",
+      "Capture images only where the workflow supports remote review.",
+      "Escalate pain, trauma, bleeding or severe symptoms urgently.",
     ],
     icon: Ear,
     href: "/resources/hd-otoscope-workflow",
@@ -229,11 +223,9 @@ const deviceSetupGuides: Array<{
     body:
       "NexRing provides wearable context such as heart-rate trends, sleep-related insights, activity patterns and temperature-variation signals that can support preventive care discussions.",
     bullets: [
-      "Use the sizing kit before unboxing the final ring where applicable.",
-      "Wear on the index finger of the less-dominant hand for optimal signal and reduced wear.",
-      "Charge to 100% before first setup.",
-      "Keep the ring on the charger during initial pairing.",
-      "Align the sensor to the palm-side of the finger and allow up to 24 hours for fuller data population.",
+      "Use the sizing kit before unboxing the device.",
+      "Wear on the less-dominant index finger where possible.",
+      "Allow time for trends to populate before interpreting patterns.",
     ],
     icon: Watch,
     href: "/resources/nexring-setup",
@@ -336,6 +328,155 @@ const resourceFilters = [
     href: "/careport/riders",
     description: "Delivery rules, route progression, patient updates and proof-of-delivery.",
     icon: Truck,
+  },
+];
+
+const resourceTrustPrinciples: Array<{
+  title: string;
+  body: string;
+  icon: LucideIcon;
+}> = [
+  {
+    title: "Open public education",
+    body:
+      "Core explainers, setup guidance and safety boundaries remain publicly accessible so patients, clinicians and partners can understand Contactless Medicine before they commit.",
+    icon: BookOpen,
+  },
+  {
+    title: "Controlled implementation assets",
+    body:
+      "Downloadable handbooks, onboarding packs and operational playbooks may require newsletter signup, workspace registration or programme enquiry so users receive the correct version.",
+    icon: LockKeyhole,
+  },
+  {
+    title: "Clinician-led care workflows",
+    body:
+      "Device data, diagnostic requests, pharmacy fulfilment, programme analytics and AI-assisted insights remain governed by consent, role permissions and clinical judgement.",
+    icon: ShieldCheck,
+  },
+];
+
+const publishingRoadmap: Array<{
+  title: string;
+  body: string;
+  href: string;
+  cta: string;
+  icon: LucideIcon;
+}> = [
+  {
+    title: "Patient handbook",
+    body:
+      "A practical guide to profile setup, doctor booking, device readiness, records, CarePort fulfilment, MedReach diagnostics and safe remote-care expectations.",
+    href: "/patients/getting-started",
+    cta: "View patient guide",
+    icon: Users,
+  },
+  {
+    title: "Clinician handbook",
+    body:
+      "Onboarding, consultation standards, device-supported review, documentation discipline, escalation boundaries and Contactless Medicine practice expectations.",
+    href: "/clinicians/onboarding",
+    cta: "Start onboarding",
+    icon: BriefcaseMedical,
+  },
+  {
+    title: "Medical-aid deployment PDF",
+    body:
+      "Programme design, consent, eligibility, member streaming, adherence visibility, claims workflows, reporting, rewards and preventive-care intelligence.",
+    href: "/resources/medical-aid-deployment-guide",
+    cta: "Open guide",
+    icon: Building2,
+  },
+  {
+    title: "Device quick sheets",
+    body:
+      "One-page setup sheets for Health Monitor, Digital Stethoscope, HD Otoscope and NexRing, prepared for patients, clinicians and support teams.",
+    href: "/contact?type=device-resource-pack",
+    cta: "Request pack",
+    icon: Download,
+  },
+  {
+    title: "CarePort pharmacy playbook",
+    body:
+      "Pharmacy onboarding, SKU readiness, eRx fulfilment, rider handover, proof-of-delivery, adherence support and promotional placement guidance.",
+    href: "/careport/pharmacies",
+    cta: "View pharmacy path",
+    icon: Pill,
+  },
+  {
+    title: "MedReach lab onboarding pack",
+    body:
+      "Lab catalogue setup, specimen acceptance, phlebotomy coordination, chain-of-custody visibility, result routing and programme reporting.",
+    href: "/medreach/labs",
+    cta: "View lab path",
+    icon: TestTube2,
+  },
+];
+
+const searchAnswerQuestions: Array<{
+  question: string;
+  answer: string;
+  href: string;
+}> = [
+  {
+    question: "What is Contactless Medicine?",
+    answer:
+      "Contactless Medicine is clinician-led remote care supported by connected medical devices, structured patient context, diagnostics, medicine fulfilment, adherence workflows and governance-aware intelligence.",
+    href: "/blog/what-is-contactless-medicine",
+  },
+  {
+    question: "How is Contactless Medicine different from telemedicine?",
+    answer:
+      "Telemedicine usually connects a patient and clinician by video or phone. Contactless Medicine connects the wider care workflow, including vitals, devices, diagnostics, prescriptions, adherence, records and programme visibility.",
+    href: "/blog/contactless-medicine-vs-telemedicine",
+  },
+  {
+    question: "How do I find a doctor online?",
+    answer:
+      "Patients can use Ambulant+ to access a protected patient workspace, search available clinicians, choose appointment times, prepare care context and join a virtual consultation.",
+    href: "/resources/find-a-doctor-and-book-appointment",
+  },
+  {
+    question: "How do I prepare for a virtual consultation?",
+    answer:
+      "Prepare symptoms, medication history, allergies, previous reports, a private space, stable internet and any supported devices requested for the consultation.",
+    href: "/patients/getting-started",
+  },
+  {
+    question: "What devices does Ambulant+ support?",
+    answer:
+      "Ambulant+ focuses on Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows for remote vitals, auscultation, selected imaging and wearable health context.",
+    href: "/devices",
+  },
+  {
+    question: "Can I use a Digital Stethoscope during remote consultation?",
+    answer:
+      "Yes, where supported and clinically appropriate. The Digital Stethoscope can support live heart and lung auscultation, recording, playback and follow-up comparison under clinician-led review.",
+    href: "/resources/digital-stethoscope-workflow",
+  },
+  {
+    question: "Can medical aids use Ambulant+ for remote patient monitoring?",
+    answer:
+      "Yes. Medical aids, HMOs, employers and sponsors can use Ambulant+ for member monitoring, adherence visibility, preventive-care workflows, programme analytics, claims readiness and InsightCore intelligence.",
+    href: "/resources/medical-aid-deployment-guide",
+  },
+  {
+    question: "How does CarePort support medicine delivery?",
+    answer:
+      "CarePort supports eRx fulfilment, pharmacy readiness, patient updates, rider dispatch, proof-of-delivery and medication-continuity workflows.",
+    href: "/careport",
+  },
+  {
+    question: "How does MedReach support home diagnostics?",
+    answer:
+      "MedReach supports home phlebotomy, specimen collection, laboratory handover, chain-of-custody visibility and result-routing workflows.",
+    href: "/medreach",
+  },
+  {
+    question: "Do Ambulant+ devices replace a clinician?",
+    answer:
+      "No. Supported devices provide clinical context. Readings, recordings and images must be interpreted by an appropriate clinician and do not replace emergency care or professional judgement.",
+    href: "/clinical-disclaimer",
   },
 ];
 
@@ -450,27 +591,6 @@ const governanceNotes = [
   "Emergency symptoms should always be directed to appropriate urgent or emergency services.",
 ];
 
-const proofPoints: Array<{
-  title: string;
-  href?: string;
-}> = [
-  { title: "Remote patient monitoring and continuous vitals context" },
-  { title: "Device-supported virtual consultation workflows" },
-  { title: "Digital auscultation with saved heart and lung recordings" },
-  {
-    title:
-      "Health Monitor spot-checks for blood pressure, SpO₂, temperature, glucose, ECG and pulse",
-  },
-  { title: "NexRing wearable context for sleep, activity and temperature variation" },
-  { title: "MedReach home diagnostics and phlebotomy coordination" },
-  { title: "CarePort prescription fulfilment, reminders and medicine delivery support" },
-  { title: "Medical-aid, HMO, employer and sponsor programme visibility" },
-  { title: "Governance-aware InsightCore intelligence and reporting pathways" },
-  {
-    title: "How do I find a doctor online?",
-    href: "/resources/find-a-doctor-and-book-appointment",
-  },
-];
 
 
 const resourcesJsonLd = {
@@ -519,44 +639,14 @@ const resourcesJsonLd = {
 const resourcesFaqJsonLd = {
   "@context": "https://schema.org",
   "@type": "FAQPage",
-  mainEntity: [
-    {
-      "@type": "Question",
-      name: "Are Ambulant+ resources free to read?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text:
-          "Public Ambulant+ resource guides are open for education and search visibility. Downloadable handbooks, implementation packs and operational playbooks may require newsletter signup, workspace registration or programme enquiry.",
-      },
+  mainEntity: searchAnswerQuestions.map((item) => ({
+    "@type": "Question",
+    name: item.question,
+    acceptedAnswer: {
+      "@type": "Answer",
+      text: item.answer,
     },
-    {
-      "@type": "Question",
-      name: "Why are some resource downloads gated?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text:
-          "Some resources are role-specific and should be delivered to the correct user group, such as patients, clinicians, medical aids, laboratories, pharmacies or riders. Gating helps ensure users receive the appropriate version and follow the right onboarding pathway.",
-      },
-    },
-    {
-      "@type": "Question",
-      name: "Do device setup guides replace clinical judgement?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text:
-          "No. Ambulant+ device setup guides support safe preparation and structured care context. Device readings, recordings and images should be interpreted by an appropriate clinician in context.",
-      },
-    },
-    {
-      "@type": "Question",
-      name: "Can patients use Ambulant+ resources to find a doctor?",
-      acceptedAnswer: {
-        "@type": "Answer",
-        text:
-          "Yes. Ambulant+ provides patient guidance for finding a clinician, preparing care context, booking a virtual appointment and using supported devices where appropriate.",
-      },
-    },
-  ],
+  })),
 };
 
 const breadcrumbJsonLd = {
@@ -690,11 +780,38 @@ export default function ResourcesPage() {
         </div>
       </section>
 
+      <SectionShell
+        eyebrow="Resource philosophy"
+        title="Open guidance. Controlled implementation. Safer onboarding."
+        body="The Ambulant+ resource library is designed to educate openly while routing role-specific downloads and implementation materials into the right workspace, enquiry or onboarding pathway."
+      >
+        <div className="grid gap-4 md:grid-cols-3">
+          {resourceTrustPrinciples.map((item) => {
+            const Icon = item.icon;
+
+            return (
+              <div key={item.title} className="glass-panel rounded-[30px] p-6">
+                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-cyan-50 text-cyan-700">
+                  <Icon className="h-6 w-6" />
+                </div>
+
+                <h3 className="mt-5 text-xl font-semibold tracking-tight text-slate-950">
+                  {item.title}
+                </h3>
+
+                <p className="mt-3 text-sm leading-8 text-slate-600">
+                  {item.body}
+                </p>
+              </div>
+            );
+          })}
+        </div>
+      </SectionShell>
 
       <SectionShell
         eyebrow="Most used guides"
-        title="Start with the resources people need first."
-        body="These are the highest-intent resource paths for patients, clinicians, medical aids and device-supported Contactless Medicine workflows."
+        title="Start with the most requested Ambulant+ guides."
+        body="Quick access to the guides patients, clinicians, medical aids and device-supported care teams are most likely to need first."
       >
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {mostUsedGuides.map((item) => {
@@ -733,7 +850,7 @@ export default function ResourcesPage() {
       <SectionShell
         eyebrow="Find resources by role"
         title="Choose the pathway that matches your work."
-        body="Ambulant+ resources are organised around real users and operational responsibilities, not generic downloads."
+        body="Patients, clinicians, labs, pharmacies, riders, medical aids and enterprise partners need different guidance. Start with the role that matches your next task."
       >
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {resourceFilters.map((item) => {
@@ -764,7 +881,7 @@ export default function ResourcesPage() {
       <SectionShell
         eyebrow="Resource collections"
         title="Guidance organised by workflow."
-        body="Each resource collection supports a specific adoption pathway for Ambulant+ patient care, clinician practice, device diagnostics, pharmacy fulfilment, payer governance and operational delivery."
+        body="Each resource collection supports a practical Ambulant+ workflow: patient access, clinician practice, connected devices, diagnostics, pharmacy fulfilment, payer programmes and governance."
       >
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {resourceCollections.map((item) => {
@@ -791,9 +908,9 @@ export default function ResourcesPage() {
       </SectionShell>
 
       <SectionShell
-        eyebrow="Device setup library"
-        title="Supported devices need clear, safe setup guidance."
-        body="Ambulant+ device resources should help users prepare correctly before a consultation, capture usable clinical context and understand when clinician review or escalation is required."
+        eyebrow="Device setup"
+        title="Set up supported devices with confidence."
+        body="Use the official Ambulant+ setup and workflow guides for Health Monitor, Digital Stethoscope, HD Otoscope and NexRing before using connected devices in care workflows."
       >
         <div className="grid gap-5 lg:grid-cols-2">
           {deviceSetupGuides.map((item) => {
@@ -891,9 +1008,9 @@ export default function ResourcesPage() {
                 Training should make the platform safer, not just easier to use.
               </h2>
               <p className="mt-5 text-sm leading-8 text-slate-300">
-                Ambulant+ resources should help every user understand not only what the
-                platform can do, but also when to use remote care, when to escalate, how to
-                document decisions and how to preserve clinical accountability.
+                Ambulant+ training resources are designed to support safer workflows, clearer
+                escalation, better device use, cleaner documentation and more consistent
+                role-specific onboarding.
               </p>
 
               <div className="mt-6 flex flex-wrap gap-2">
@@ -923,8 +1040,8 @@ export default function ResourcesPage() {
 
       <SectionShell
         eyebrow="Publishing roadmap"
-        title="The resource library should grow into a serious knowledge base."
-        body="These resource categories can be expanded into downloadable guides, onboarding packs, training modules, videos, implementation checklists and operational playbooks."
+        title="A growing knowledge base for Contactless Medicine."
+        body="Ambulant+ resources will expand into downloadable guides, onboarding packs, training modules, videos, operational playbooks and partner implementation material."
       >
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           {contentRoadmap.map((item) => (
@@ -934,12 +1051,55 @@ export default function ResourcesPage() {
             </div>
           ))}
         </div>
+
+        <div className="mt-8 rounded-[34px] border border-cyan-100 bg-cyan-50/70 p-6 md:p-8">
+          <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">
+            Publishing next
+          </div>
+
+          <h3 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">
+            The next resource releases should support real-world onboarding.
+          </h3>
+
+          <p className="mt-4 max-w-4xl text-sm leading-8 text-slate-600 md:text-base">
+            These planned resources will help patients, clinicians, medical aids, laboratories,
+            pharmacies and operations teams move from interest to safe, role-appropriate use.
+          </p>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            {publishingRoadmap.map((item) => {
+              const Icon = item.icon;
+
+              return (
+                <Link
+                  key={item.title}
+                  href={item.href}
+                  className="group rounded-[26px] bg-white/85 p-5 shadow-sm transition hover:-translate-y-1 hover:shadow-glow"
+                >
+                  <Icon className="h-6 w-6 text-cyan-700" />
+
+                  <h4 className="mt-4 text-lg font-semibold text-slate-950">
+                    {item.title}
+                  </h4>
+
+                  <p className="mt-3 text-sm leading-7 text-slate-600">
+                    {item.body}
+                  </p>
+
+                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700">
+                    {item.cta} <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
       </SectionShell>
 
       <SectionShell
         eyebrow="Downloadable library"
-        title="High-value packs should go to the right users."
-        body="Public guides remain open for education and search visibility. Downloadable handbooks, implementation packs and operational playbooks may require newsletter signup, workspace registration or programme enquiry so that users receive the correct, role-appropriate version."
+        title="Downloadable packs for verified users and programme partners."
+        body="Public guides remain open. Downloadable handbooks, training packs and implementation playbooks may require newsletter signup, workspace registration or programme enquiry so each user receives the correct role-specific guidance."
       >
         <div className="mb-6 rounded-[30px] border border-cyan-100 bg-cyan-50/70 p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -949,7 +1109,7 @@ export default function ResourcesPage() {
                 Gated downloads
               </div>
               <h3 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">
-                Open knowledge, controlled implementation assets.
+                Open knowledge. Controlled implementation. Role-appropriate delivery.
               </h3>
               <p className="mt-3 max-w-4xl text-sm leading-8 text-slate-600">
                 General education should be easy to access. Role-specific handbooks and deployment
@@ -1064,39 +1224,29 @@ export default function ResourcesPage() {
 
       <SectionShell
         eyebrow="Search visibility"
-        title="This resource hub should also answer how people search."
-        body="Ambulant+ must be discoverable by people searching for telemedicine, online doctors, remote patient monitoring, IoMT devices, digital stethoscopes, home diagnostics, medication adherence, medical-aid preventive care and connected clinical workflows."
+        title="Answers built for patients, partners and AI search."
+        body="These questions help users and search engines understand how Ambulant+ supports remote care, doctor booking, connected devices, medical aids, pharmacy fulfilment and diagnostics."
       >
-        <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-          {proofPoints.map((item) => {
-            const content = (
-              <>
-                <Waves className="mt-1 h-5 w-5 shrink-0 text-cyan-700" />
-                <p className="text-sm leading-7 text-slate-700">{item.title}</p>
-              </>
-            );
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {searchAnswerQuestions.map((item) => (
+            <Link
+              key={item.question}
+              href={item.href}
+              className="group rounded-[28px] border border-cyan-100 bg-cyan-50/70 p-5 transition hover:-translate-y-1 hover:bg-white hover:shadow-glow"
+            >
+              <h3 className="text-lg font-semibold tracking-tight text-slate-950">
+                {item.question}
+              </h3>
 
-            if (item.href) {
-              return (
-                <Link
-                  key={item.title}
-                  href={item.href}
-                  className="flex gap-3 rounded-3xl border border-cyan-100 bg-cyan-50/70 p-5 transition hover:-translate-y-1 hover:shadow-glow"
-                >
-                  {content}
-                </Link>
-              );
-            }
+              <p className="mt-3 text-sm leading-7 text-slate-600">
+                {item.answer}
+              </p>
 
-            return (
-              <div
-                key={item.title}
-                className="flex gap-3 rounded-3xl border border-cyan-100 bg-cyan-50/70 p-5"
-              >
-                {content}
+              <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-cyan-700">
+                Read answer <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
               </div>
-            );
-          })}
+            </Link>
+          ))}
         </div>
       </SectionShell>
 
