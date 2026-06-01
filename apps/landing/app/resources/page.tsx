@@ -356,7 +356,7 @@ const resourceTrustPrinciples: Array<{
   },
 ];
 
-const publishingRoadmap: Array<{
+const implementationPathways: Array<{
   title: string;
   body: string;
   href: string;
@@ -366,7 +366,7 @@ const publishingRoadmap: Array<{
   {
     title: "Patient handbook",
     body:
-      "A practical guide to profile setup, doctor booking, device readiness, records, CarePort fulfilment, MedReach diagnostics and safe remote-care expectations.",
+      "Profile setup, doctor booking, device readiness, records, CarePort fulfilment, MedReach diagnostics and safe remote-care expectations.",
     href: "/patients/getting-started",
     cta: "View patient guide",
     icon: Users,
@@ -380,7 +380,7 @@ const publishingRoadmap: Array<{
     icon: BriefcaseMedical,
   },
   {
-    title: "Medical-aid deployment PDF",
+    title: "Medical-aid deployment guide",
     body:
       "Programme design, consent, eligibility, member streaming, adherence visibility, claims workflows, reporting, rewards and preventive-care intelligence.",
     href: "/resources/medical-aid-deployment-guide",
@@ -388,15 +388,15 @@ const publishingRoadmap: Array<{
     icon: Building2,
   },
   {
-    title: "Device quick sheets",
+    title: "Device setup access",
     body:
-      "One-page setup sheets for Health Monitor, Digital Stethoscope, HD Otoscope and NexRing, prepared for patients, clinicians and support teams.",
+      "Role-appropriate setup guidance for Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows.",
     href: "/contact?type=device-resource-pack",
-    cta: "Request pack",
+    cta: "Request access",
     icon: Download,
   },
   {
-    title: "CarePort pharmacy playbook",
+    title: "CarePort pharmacy pathway",
     body:
       "Pharmacy onboarding, SKU readiness, eRx fulfilment, rider handover, proof-of-delivery, adherence support and promotional placement guidance.",
     href: "/careport/pharmacies",
@@ -404,7 +404,7 @@ const publishingRoadmap: Array<{
     icon: Pill,
   },
   {
-    title: "MedReach lab onboarding pack",
+    title: "MedReach lab pathway",
     body:
       "Lab catalogue setup, specimen acceptance, phlebotomy coordination, chain-of-custody visibility, result routing and programme reporting.",
     href: "/medreach/labs",
@@ -549,7 +549,7 @@ const downloadablePacks: Array<{
     body:
       "Health Monitor, Digital Stethoscope, HD Otoscope and NexRing setup notes prepared for patients, clinicians and support teams.",
     gate: "Newsletter or training enquiry",
-    cta: "Request device setup pack",
+    cta: "Request access",
     href: "/contact?type=device-resource-pack",
     icon: Download,
   },
@@ -567,7 +567,7 @@ const downloadablePacks: Array<{
     body:
       "MedReach diagnostics, CarePort fulfilment, pharmacy handover, rider proof-of-delivery and laboratory result routing.",
     gate: "Role-specific workspace or partner enquiry",
-    cta: "Request operations pack",
+    cta: "Request access",
     href: "/contact?type=operations-playbook",
     icon: ClipboardCheck,
   },
@@ -1039,9 +1039,9 @@ export default function ResourcesPage() {
       </section>
 
       <SectionShell
-        eyebrow="Publishing roadmap"
-        title="A growing knowledge base for Contactless Medicine."
-        body="Ambulant+ resources will expand into downloadable guides, onboarding packs, training modules, videos, operational playbooks and partner implementation material."
+        eyebrow="Resource library"
+        title="A practical knowledge base for Contactless Medicine."
+        body="Ambulant+ resources are organised to help patients, clinicians, medical aids, laboratories, pharmacies, riders and operations teams understand the correct next step."
       >
         <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
           {contentRoadmap.map((item) => (
@@ -1054,20 +1054,20 @@ export default function ResourcesPage() {
 
         <div className="mt-8 rounded-[34px] border border-cyan-100 bg-cyan-50/70 p-6 md:p-8">
           <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">
-            Publishing next
+            Implementation pathways
           </div>
 
           <h3 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950">
-            The next resource releases should support real-world onboarding.
+            Role-specific routes for safer onboarding.
           </h3>
 
           <p className="mt-4 max-w-4xl text-sm leading-8 text-slate-600 md:text-base">
-            These planned resources will help patients, clinicians, medical aids, laboratories,
-            pharmacies and operations teams move from interest to safe, role-appropriate use.
+            Use these pathways to move from public guidance into the correct Ambulant+ workspace,
+            onboarding route, demo request or partner enquiry.
           </p>
 
           <div className="mt-6 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {publishingRoadmap.map((item) => {
+            {implementationPathways.map((item) => {
               const Icon = item.icon;
 
               return (
@@ -1097,9 +1097,9 @@ export default function ResourcesPage() {
       </SectionShell>
 
       <SectionShell
-        eyebrow="Downloadable library"
-        title="Downloadable packs for verified users and programme partners."
-        body="Public guides remain open. Downloadable handbooks, training packs and implementation playbooks may require newsletter signup, workspace registration or programme enquiry so each user receives the correct role-specific guidance."
+        eyebrow="Controlled access resources"
+        title="Role-specific resources for verified users and programme partners."
+        body="Public guides remain open. Some handbooks, training materials and implementation playbooks are routed through the correct workspace, onboarding flow or programme enquiry so each user receives the right guidance for their role."
       >
         <div className="mb-6 rounded-[30px] border border-cyan-100 bg-cyan-50/70 p-6">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
@@ -1109,13 +1109,13 @@ export default function ResourcesPage() {
                 Gated downloads
               </div>
               <h3 className="mt-4 text-2xl font-semibold tracking-tight text-slate-950">
-                Open knowledge. Controlled implementation. Role-appropriate delivery.
+                Open education. Verified access. Role-appropriate delivery.
               </h3>
               <p className="mt-3 max-w-4xl text-sm leading-8 text-slate-600">
-                General education should be easy to access. Role-specific handbooks and deployment
-                packs should route users into the right Ambulant+ workspace or enquiry path before
-                download, so patients, clinicians, labs, pharmacies, riders and medical-aid teams
-                receive the correct guidance.
+                General education should be easy to access. Role-specific resources should route users
+                into the correct Ambulant+ workspace or enquiry path so patients, clinicians, labs,
+                pharmacies, riders and medical-aid teams receive guidance that matches their
+                responsibilities.
               </p>
             </div>
             <a
