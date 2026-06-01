@@ -499,6 +499,13 @@ export default function HomePage() {
               >
                 Book a walkthrough <ArrowRight className="h-4 w-4" />
               </Link>
+
+              <Link
+                href="/pricing"
+                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/80 px-6 py-4 text-sm font-semibold text-slate-800"
+              >
+                View pricing <ArrowRight className="h-4 w-4" />
+              </Link>
             </div>
 
             <div className="mt-8 grid max-w-3xl gap-3 sm:grid-cols-2">
@@ -700,12 +707,21 @@ export default function HomePage() {
               preventive-care programmes with remote monitoring, medication continuity,
               home diagnostics and care-pathway intelligence.
             </p>
-            <Link
-              href="/clients"
-              className="mt-6 inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
-            >
-              Explore payer programmes <ArrowRight className="h-4 w-4" />
-            </Link>
+            <div className="mt-6 flex flex-wrap gap-3">
+              <Link
+                href="/clients"
+                className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-semibold text-white"
+              >
+                Explore payer programmes <ArrowRight className="h-4 w-4" />
+              </Link>
+
+              <Link
+                href="/pricing"
+                className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-white px-5 py-3 text-sm font-semibold text-cyan-800"
+              >
+                View pricing architecture <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
           </div>
 
           <div className="grid gap-3 sm:grid-cols-2">

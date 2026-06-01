@@ -325,6 +325,7 @@ export const blogPosts: BlogPost[] = [
       },
     ],
     relatedLinks: [
+      { label: "Explore medical-aid pricing architecture", href: "/pricing" },
       { label: "Medical aids and sponsors", href: "/clients" },
       { label: "InsightCore intelligence", href: "/insightcore" },
       { label: "Request enterprise demo", href: "/contact?type=partnerships" },
@@ -1856,6 +1857,7 @@ export const blogPosts: BlogPost[] = [
       },
     ],
     relatedLinks: [
+      { label: "Explore Contactless Medicine pricing", href: "/pricing" },
       { label: "Contactless Medicine vs Telemedicine", href: "/blog/contactless-medicine-vs-telemedicine" },
       { label: "Remote monitoring for medical aids", href: "/blog/remote-monitoring-for-medical-aids" },
       { label: "Explore Ambulant+ features", href: "/features" },
@@ -2095,6 +2097,7 @@ export const blogPosts: BlogPost[] = [
       },
     ],
     relatedLinks: [
+      { label: "Understand payer pricing architecture", href: "/pricing" },
       { label: "Medical aids and sponsors", href: "/clients" },
       { label: "Remote monitoring for medical aids", href: "/blog/remote-monitoring-for-medical-aids" },
       { label: "InsightCore intelligence", href: "/insightcore" },
@@ -2210,6 +2213,7 @@ export const blogPosts: BlogPost[] = [
       },
     ],
     relatedLinks: [
+      { label: "View CarePort and MedReach pricing model", href: "/pricing" },
       { label: "CarePort pharmacy fulfilment", href: "/careport" },
       { label: "Medicine delivery and prescription adherence", href: "/blog/medicine-delivery-and-prescription-adherence" },
       { label: "CarePort pharmacies", href: "/careport/pharmacies" },
@@ -2325,6 +2329,7 @@ export const blogPosts: BlogPost[] = [
       },
     ],
     relatedLinks: [
+      { label: "View corporate and sponsor pricing", href: "/pricing" },
       { label: "Medical aids and corporate sponsors", href: "/clients" },
       { label: "Ambulant+ features", href: "/features" },
       { label: "Request a demo", href: "/demos" },
