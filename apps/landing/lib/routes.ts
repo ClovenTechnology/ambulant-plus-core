@@ -36,6 +36,7 @@ export const navLinks = [
   { label: "InsightCore", href: "/insightcore" },
   { label: "Blog", href: "/blog" },
   { label: "Pricing", href: "/pricing" },
+  { label: "Media", href: "/media" },
   { label: "Contact", href: "/contact" },
 ];
 
@@ -218,6 +219,7 @@ export const groupedNav = [
         links: [
           { label: "Blog", href: "/blog", icon: Newspaper },
           { label: "Resources", href: "/resources", icon: ClipboardCheck },
+          { label: "Media & Press", href: "/media", icon: Newspaper },
           {
             label: "Health Monitor Setup",
             href: "/resources/health-monitor-setup",

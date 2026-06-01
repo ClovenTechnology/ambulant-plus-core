@@ -32,6 +32,7 @@ const companyLinks = [
   { label: "Partnerships", href: "/partnerships" },
   { label: "Pricing", href: "/pricing" },
   { label: "Resources", href: "/resources" },
+  { label: "Media & Press", href: "/media" },
   { label: "Find a Doctor", href: "/resources/find-a-doctor-and-book-appointment" },
   { label: "Health Monitor Setup", href: "/resources/health-monitor-setup" },
   { label: "Digital Stethoscope Workflow", href: "/resources/digital-stethoscope-workflow" },

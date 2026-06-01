@@ -1068,6 +1068,33 @@ export const seoRoutes: SeoRoute[] = [
     changeFrequency: "monthly",
   },
   {
+    path: "/media",
+    title: "Media & Press | Ambulant+ Contactless Medicine",
+    description:
+      "Official Ambulant+ media and press page with company boilerplate, Contactless Medicine definition, product modules, approved positioning, media contacts, logos, resources and story angles for journalists, partners and publishers.",
+    keywords: [
+      "Ambulant+ media",
+      "Ambulant+ press",
+      "Ambulant+ media kit",
+      "Contactless Medicine press",
+      "Contactless Medicine media kit",
+      "Cloven Technology Ambulant+",
+      "South Africa digital health startup",
+      "South Africa MedTech",
+      "remote patient monitoring media",
+      "telemedicine South Africa press",
+      "IoMT healthcare South Africa",
+      "NexRing press",
+      "CarePort press",
+      "MedReach press",
+      "InsightCore press",
+      "digital health media kit",
+      "healthtech press South Africa",
+    ],
+    priority: 0.82,
+    changeFrequency: "monthly",
+  },
+  {
     path: "/contact",
     title: "Contact | Speak to Ambulant+",
     description:
