@@ -30,6 +30,7 @@ const companyLinks = [
   { label: "Use Cases", href: "/use-cases" },
   { label: "Operations", href: "/operations" },
   { label: "Partnerships", href: "/partnerships" },
+  { label: "Pricing", href: "/pricing" },
   { label: "Resources", href: "/resources" },
   { label: "Find a Doctor", href: "/resources/find-a-doctor-and-book-appointment" },
   { label: "Health Monitor Setup", href: "/resources/health-monitor-setup" },

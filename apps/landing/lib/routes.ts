@@ -8,8 +8,10 @@ import {
   CalendarCheck,
   CircleHelp,
   ClipboardCheck,
+  CreditCard,
   Ear,
   FlaskConical,
+  HandCoins,
   HeartPulse,
   Lightbulb,
   LockKeyhole,
@@ -33,6 +35,7 @@ export const navLinks = [
   { label: "CarePort", href: "/careport" },
   { label: "InsightCore", href: "/insightcore" },
   { label: "Blog", href: "/blog" },
+  { label: "Pricing", href: "/pricing" },
   { label: "Contact", href: "/contact" },
 ];
 
@@ -56,6 +59,7 @@ export const groupedNav = [
           { label: "Features", href: "/features", icon: Activity },
           { label: "Devices", href: "/devices", icon: Activity },
           { label: "InsightCore", href: "/insightcore", icon: Activity },
+          { label: "Pricing", href: "/pricing", icon: HandCoins },
         ],
       },
       {
@@ -174,6 +178,7 @@ export const groupedNav = [
         links: [
           { label: "Clients & Sponsors", href: "/clients", icon: BriefcaseBusiness },
           { label: "Partnerships", href: "/partnerships", icon: UsersRound },
+          { label: "Pricing", href: "/pricing", icon: CreditCard },
           { label: "Demos", href: "/demos", icon: CalendarCheck },
         ],
       },

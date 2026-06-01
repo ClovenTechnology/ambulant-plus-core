@@ -539,6 +539,38 @@ export const seoRoutes: SeoRoute[] = [
     changeFrequency: "monthly",
   },
   {
+    path: "/pricing",
+    title: "Pricing | Ambulant+ Contactless Medicine Plans and Commercial Model",
+    description:
+      "Explore Ambulant+ pricing architecture for patients, clinicians, medical aids, HMOs, employers, MedReach labs, phlebotomists, CarePort pharmacies, riders, enterprise partners and Contactless Medicine programme deployments.",
+    keywords: [
+      "Ambulant+ pricing",
+      "Contactless Medicine pricing",
+      "telemedicine pricing South Africa",
+      "remote patient monitoring pricing",
+      "medical aid remote monitoring pricing",
+      "patient app subscription",
+      "clinician app subscription",
+      "clinician onboarding fee",
+      "clinician starter kit",
+      "IoMT starter kit",
+      "medical aid streaming fee",
+      "InsightCore pricing",
+      "CarePort pharmacy pricing",
+      "MedReach lab pricing",
+      "pharmacy success fee",
+      "lab test script fee",
+      "rider payout model",
+      "phlebotomist payout model",
+      "healthcare SaaS pricing",
+      "digital health pricing South Africa",
+      "enterprise healthcare pricing",
+    ],
+    priority: 0.88,
+    changeFrequency: "monthly",
+  },
+
+  {
     path: "/medreach",
     title: "MedReach | Home Diagnostics and Laboratory Operations",
     description:
