@@ -1,11 +1,11 @@
 // file: apps/patient-app/app/auth/signup/page.tsx
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useMemo, useState, Suspense } from 'react';
 import {
-  UserPlus,
   Mail,
   Lock,
   User,
@@ -142,8 +142,14 @@ function PatientSignupPageContent() {
         <div className="grid w-full gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-start">
           <section className="order-2 lg:order-1 lg:pt-8">
             <div className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-white/80 px-3 py-1 text-xs font-black text-slate-700 shadow-sm backdrop-blur">
-              <ShieldCheck className="h-4 w-4 text-teal-700" />
-              Ambulant+ - Patient
+              <Image
+                src="/brand/ambulant-mark.webp"
+                alt=""
+                width={18}
+                height={18}
+                className="h-4 w-4 object-contain"
+              />
+              Ambulant+ Patient
             </div>
 
             <h1 className="mt-5 max-w-xl text-4xl font-black tracking-tight text-slate-950 md:text-5xl">
@@ -156,7 +162,7 @@ function PatientSignupPageContent() {
             <p className="mt-4 max-w-xl text-base leading-8 text-slate-600">
               Create a secure Ambulant+ patient profile to book clinicians, manage
               appointments, connect supported devices, view care records, receive reminders
-              and continue care through MedReach and CarePort where available.
+              and continue care through MedReach and CarePort where applicable.
             </p>
 
             <div className="mt-7 grid max-w-xl gap-3 sm:grid-cols-2">
@@ -204,8 +210,15 @@ function PatientSignupPageContent() {
             <div className="mx-auto w-full max-w-md">
               <div className="rounded-[36px] border border-white/80 bg-white/88 p-7 shadow-xl shadow-teal-900/[0.08] backdrop-blur">
                 <div className="text-center">
-                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[24px] border border-teal-100 bg-teal-50 text-teal-700 shadow-sm">
-                    <UserPlus className="h-7 w-7" />
+                  <div className="mx-auto flex justify-center">
+                    <Image
+                      src="/brand/ambulant-logo-full.webp"
+                      alt="Ambulant+ Contactless Medicine"
+                      width={220}
+                      height={74}
+                      priority
+                      className="h-auto w-[190px] object-contain"
+                    />
                   </div>
 
                   <div className="mt-5 text-xs font-black uppercase tracking-[0.2em] text-teal-700">
@@ -476,7 +489,7 @@ function PatientSignupPageContent() {
 
                   <div className="flex items-center justify-between gap-3 text-sm">
                     <Link href="/auth/login" className="font-bold text-teal-700 hover:underline">
-                      I already have an account
+                      Already have an account? Login
                     </Link>
 
                     <Link href="/privacy" className="font-semibold text-slate-500 hover:text-slate-800 hover:underline">

@@ -796,6 +796,26 @@ model PasswordResetToken {
   @@index([orgId, createdAt])
 }
 
+model AuthOtpChallenge {
+  id            String    @id @default(cuid())
+  identifier    String    @db.VarChar(320)
+  channel       String    @default("email") @db.VarChar(24)
+  codeHash      String    @db.VarChar(128)
+  purpose       String    @default("login") @db.VarChar(40)
+  attempts      Int       @default(0)
+  maxAttempts   Int       @default(5)
+  consumedAt    DateTime?
+  expiresAt     DateTime
+  createdAt     DateTime  @default(now())
+  requestedByIp String?
+  requestedByUa String?
+  meta          Json?
+
+  @@index([identifier, purpose, expiresAt])
+  @@index([expiresAt])
+  @@index([createdAt])
+}
+
 model PresenceSession {
   id         String            @id @default(cuid())
   userId     String

@@ -1,11 +1,11 @@
 // apps/patient-app/app/auth/login/page.tsx
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import {
-  ShieldCheck,
   Lock,
   Mail,
   ArrowRight,
@@ -13,7 +13,8 @@ import {
   EyeOff,
   Loader2,
   HeartPulse,
-  UserRoundCheck,
+  MessageSquareText,
+  RotateCcw,
 } from 'lucide-react';
 
 function cx(...xs: Array<string | false | null | undefined>) {
@@ -30,6 +31,8 @@ type LoginResponse = {
   message?: string;
   redirectTo?: string;
 };
+
+type OtpStage = 'idle' | 'code_sent';
 
 function safeInternalPath(p: string | null | undefined, fallback: string) {
   const v = String(p || '').trim();
@@ -52,6 +55,11 @@ function PatientLoginPageContent() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [otpStage, setOtpStage] = useState<OtpStage>('idle');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpInfo, setOtpInfo] = useState<string | null>(null);
+
   const redirectTo = useMemo(() => {
     return safeInternalPath(nextParam, '/');
   }, [nextParam]);
@@ -65,6 +73,23 @@ function PatientLoginPageContent() {
   const canSubmit = useMemo(() => {
     return !loading && email.trim().length > 0 && password.length > 0;
   }, [loading, email, password]);
+
+  const canRequestOtp = useMemo(() => {
+    return !otpBusy && email.trim().length > 0;
+  }, [otpBusy, email]);
+
+  const canVerifyOtp = useMemo(() => {
+    return !otpBusy && email.trim().length > 0 && otpCode.replace(/\D/g, '').length === 6;
+  }, [otpBusy, email, otpCode]);
+
+  async function completeLoginFromResponse(data: LoginResponse) {
+    if (data?.token) localStorage.setItem('ambulant.token', data.token);
+    if (data?.profile) localStorage.setItem('ambulant.profile', JSON.stringify(data.profile));
+
+    const safeServerRedirect = safeInternalPath(data?.redirectTo, '');
+    router.replace(safeServerRedirect || redirectTo);
+    router.refresh();
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -81,6 +106,7 @@ function PatientLoginPageContent() {
     }
 
     setErr(null);
+    setOtpInfo(null);
     setLoading(true);
 
     try {
@@ -100,16 +126,89 @@ function PatientLoginPageContent() {
         throw new Error(data?.error || data?.message || 'Login failed. Please try again.');
       }
 
-      if (data?.token) localStorage.setItem('ambulant.token', data.token);
-      if (data?.profile) localStorage.setItem('ambulant.profile', JSON.stringify(data.profile));
-
-      const safeServerRedirect = safeInternalPath(data?.redirectTo, '');
-      router.replace(safeServerRedirect || redirectTo);
-      router.refresh();
+      await completeLoginFromResponse(data);
     } catch (er: any) {
       setErr(er?.message || 'Login failed.');
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function requestOtp() {
+    if (otpBusy) return;
+
+    const eNorm = email.trim().toLowerCase();
+    if (!eNorm) {
+      setErr('Please enter your email before requesting a code.');
+      return;
+    }
+
+    setErr(null);
+    setOtpInfo(null);
+    setOtpBusy(true);
+
+    try {
+      const res = await fetch('/api/auth/otp/request', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: eNorm }),
+      });
+
+      const data = await res.json().catch(() => ({} as any));
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Could not send sign-in code. Please try again.');
+      }
+
+      setOtpStage('code_sent');
+      setOtpCode('');
+      setOtpInfo('If an account exists for this email, a 6-digit code has been sent.');
+    } catch (er: any) {
+      setErr(er?.message || 'Could not send sign-in code.');
+    } finally {
+      setOtpBusy(false);
+    }
+  }
+
+  async function verifyOtp(e?: React.FormEvent) {
+    e?.preventDefault?.();
+    if (otpBusy) return;
+
+    const eNorm = email.trim().toLowerCase();
+    const code = otpCode.replace(/\D/g, '').slice(0, 6);
+
+    if (!eNorm) {
+      setErr('Please enter your email.');
+      return;
+    }
+    if (code.length !== 6) {
+      setErr('Enter the 6-digit sign-in code.');
+      return;
+    }
+
+    setErr(null);
+    setOtpInfo(null);
+    setOtpBusy(true);
+
+    try {
+      const res = await fetch('/api/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: eNorm, code }),
+      });
+
+      const data = (await res.json().catch(() => ({} as LoginResponse))) as LoginResponse;
+
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Code is invalid or expired.');
+      }
+
+      await completeLoginFromResponse(data);
+    } catch (er: any) {
+      setErr(er?.message || 'Could not verify code.');
+    } finally {
+      setOtpBusy(false);
     }
   }
 
@@ -119,8 +218,14 @@ function PatientLoginPageContent() {
         <div className="grid w-full gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
           <section className="order-2 lg:order-1">
             <div className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-white/80 px-3 py-1 text-xs font-black text-slate-700 shadow-sm backdrop-blur">
-              <ShieldCheck className="h-4 w-4 text-teal-700" />
-              Ambulant+ - Patient
+              <Image
+                src="/brand/ambulant-mark.webp"
+                alt=""
+                width={18}
+                height={18}
+                className="h-4 w-4 object-contain"
+              />
+              Ambulant+ Patient
             </div>
 
             <h1 className="mt-5 max-w-xl text-4xl font-black tracking-tight text-slate-950 md:text-5xl">
@@ -148,11 +253,11 @@ function PatientLoginPageContent() {
 
               <div className="rounded-[28px] border border-white/80 bg-white/75 p-5 shadow-sm backdrop-blur">
                 <div className="flex items-center gap-2 text-sm font-extrabold text-slate-950">
-                  <ArrowRight className="h-4 w-4 text-sky-700" />
-                  Fast return
+                  <MessageSquareText className="h-4 w-4 text-sky-700" />
+                  OTP access
                 </div>
                 <div className="mt-2 text-sm leading-6 text-slate-600">
-                  Continue appointments, device setup, records and care tasks.
+                  Use your password or a one-time email code where supported.
                 </div>
               </div>
             </div>
@@ -179,8 +284,15 @@ function PatientLoginPageContent() {
             <div className="mx-auto w-full max-w-md">
               <div className="rounded-[36px] border border-white/80 bg-white/88 p-7 shadow-xl shadow-teal-900/[0.08] backdrop-blur">
                 <div className="text-center">
-                  <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-[24px] border border-teal-100 bg-teal-50 text-teal-700 shadow-sm">
-                    {loading ? <Loader2 className="h-7 w-7 animate-spin" /> : <UserRoundCheck className="h-7 w-7" />}
+                  <div className="mx-auto flex justify-center">
+                    <Image
+                      src="/brand/ambulant-logo-full.webp"
+                      alt="Ambulant+ Contactless Medicine"
+                      width={220}
+                      height={74}
+                      priority
+                      className="h-auto w-[190px] object-contain"
+                    />
                   </div>
 
                   <div className="mt-5 text-xs font-black uppercase tracking-[0.2em] text-teal-700">
@@ -190,13 +302,19 @@ function PatientLoginPageContent() {
                     Welcome back
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Sign in with your email and password.
+                    Sign in with your password or a one-time email code.
                   </p>
                 </div>
 
                 {err ? (
                   <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-800">
                     {err}
+                  </div>
+                ) : null}
+
+                {otpInfo ? (
+                  <div className="mt-5 rounded-2xl border border-teal-200 bg-teal-50 px-4 py-3 text-sm text-teal-900">
+                    {otpInfo}
                   </div>
                 ) : null}
 
@@ -210,6 +328,7 @@ function PatientLoginPageContent() {
                         onChange={(e) => {
                           setEmail(e.target.value);
                           if (err) setErr(null);
+                          if (otpInfo) setOtpInfo(null);
                         }}
                         type="email"
                         autoComplete="email"
@@ -241,7 +360,6 @@ function PatientLoginPageContent() {
                           'w-full rounded-2xl border border-slate-200 bg-white px-11 py-3 pr-12 text-sm shadow-sm',
                           'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
                         )}
-                        required
                       />
                       <button
                         type="button"
@@ -278,20 +396,87 @@ function PatientLoginPageContent() {
                       )}
                     </span>
                   </button>
-
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <Link href="/auth/signup" className="font-bold text-teal-700 hover:underline">
-                      Create account
-                    </Link>
-
-                    <Link
-                      href="/auth/forgot"
-                      className="font-semibold text-slate-500 hover:text-slate-800 hover:underline"
-                    >
-                      Forgot password?
-                    </Link>
-                  </div>
                 </form>
+
+                <div className="my-5 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <div className="text-xs font-semibold text-slate-400">or</div>
+                  <div className="h-px flex-1 bg-slate-200" />
+                </div>
+
+                <div className="space-y-3">
+                  {otpStage === 'code_sent' ? (
+                    <form onSubmit={verifyOtp} className="space-y-3">
+                      <label className="block">
+                        <div className="text-xs font-black text-slate-700">One-time code</div>
+                        <input
+                          value={otpCode}
+                          onChange={(e) => {
+                            setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                            if (err) setErr(null);
+                          }}
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          placeholder="6-digit code"
+                          className={cx(
+                            'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-lg font-black tracking-[0.28em] shadow-sm',
+                            'focus:border-teal-300 focus:outline-none focus:ring-2 focus:ring-teal-500/20',
+                          )}
+                        />
+                      </label>
+
+                      <button
+                        disabled={!canVerifyOtp}
+                        type="submit"
+                        aria-busy={otpBusy}
+                        className={cx(
+                          'w-full rounded-2xl border border-teal-200 bg-white px-4 py-3 text-sm font-extrabold text-teal-800 shadow-sm',
+                          'transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50',
+                        )}
+                      >
+                        {otpBusy ? 'Verifying...' : 'Verify code and sign in'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={requestOtp}
+                        disabled={!canRequestOtp}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl px-4 py-2 text-sm font-bold text-slate-500 hover:text-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Resend code
+                      </button>
+                    </form>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={requestOtp}
+                      disabled={!canRequestOtp}
+                      className={cx(
+                        'w-full rounded-2xl border border-teal-200 bg-white px-4 py-3 text-sm font-extrabold text-teal-800 shadow-sm',
+                        'transition hover:bg-teal-50 disabled:cursor-not-allowed disabled:opacity-50',
+                      )}
+                    >
+                      <span className="inline-flex items-center justify-center gap-2">
+                        <MessageSquareText className="h-4 w-4" />
+                        Continue with email OTP
+                      </span>
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-5 flex items-center justify-between gap-3 text-sm">
+                  <Link href="/auth/signup" className="font-bold text-teal-700 hover:underline">
+                    New to Ambulant+? Create account
+                  </Link>
+
+                  <Link
+                    href="/auth/forgot"
+                    className="font-semibold text-slate-500 hover:text-slate-800 hover:underline"
+                  >
+                    Forgot password?
+                  </Link>
+                </div>
               </div>
 
               <div className="mt-5 text-center text-xs leading-6 text-slate-500">
