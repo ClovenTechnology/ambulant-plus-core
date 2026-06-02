@@ -1,62 +1,46 @@
-// apps/clinician-app/app/api/me/route.ts
+﻿// apps/clinician-app/app/api/me/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
+import {
+  authErrorResponse,
+  requireClinicianAuth,
+} from '@/src/lib/clinician-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function json(data: any, status = 200) {
-  return NextResponse.json(data, { status });
-}
-
-function normaliseEmail(value: string | null) {
-  return String(value || '').trim().toLowerCase();
+  return NextResponse.json(data, {
+    status,
+    headers: { 'cache-control': 'no-store, max-age=0' },
+  });
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const email =
-      normaliseEmail(req.headers.get('x-clinician-email')) ||
-      normaliseEmail(req.headers.get('x-user-email'));
-
-    const clinicianId =
-      req.headers.get('x-clinician-id') ||
-      req.headers.get('x-user-id') ||
-      '';
-
-    if (!email && !clinicianId) {
-      return json(
-        {
-          ok: false,
-          error:
-            'Unauthenticated clinician request. Missing clinician identity.',
-        },
-        401
-      );
-    }
-
-    const clinician = await prisma.clinicianProfile.findFirst({
-      where: clinicianId
-        ? { id: clinicianId }
-        : {
-            OR: [{ userId: email }, { email }],
-          } as any,
+    const auth = await requireClinicianAuth(req, {
+      allowAdmin: true,
+      allowAdminStaff: true,
     });
 
-    if (!clinician) {
-      return json(
-        {
-          ok: false,
-          error: 'Clinician profile not found.',
-        },
-        404
-      );
+    if (!auth.ok) {
+      return authErrorResponse(auth);
     }
+
+    const clinician = auth.clinician as any;
+    const status = String(clinician.status || 'pending').toLowerCase();
+    const canPractice =
+      auth.role === 'admin' ||
+      auth.role === 'admin_staff' ||
+      status === 'active';
 
     return json({
       ok: true,
-      clinicianId: clinician.id,
-      name: clinician.displayName ?? 'Clinician',
+      role: auth.role,
+      clinicianId: auth.clinicianId,
+      name: clinician.displayName ?? auth.session.name ?? 'Clinician',
+      status,
+      canPractice,
+      visibleToPatients: status === 'active',
       clinician,
     });
   } catch (err: any) {
@@ -67,7 +51,7 @@ export async function GET(req: NextRequest) {
         ok: false,
         error: err?.message || 'Unable to resolve clinician profile.',
       },
-      500
+      500,
     );
   }
 }
