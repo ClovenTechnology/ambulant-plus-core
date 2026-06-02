@@ -246,6 +246,12 @@ export const groupedNav = [
             icon: Building2,
           },
           { label: "Find a Doctor / Book", href: "/resources/find-a-doctor-and-book-appointment", icon: CalendarCheck },
+
+          { label: "Prepare for Appointment", href: "/resources/prepare-for-your-appointment", icon: CalendarCheck },
+          { label: "After Consultation", href: "/resources/after-your-consultation", icon: ClipboardCheck },
+          { label: "Personal Health Management", href: "/resources/personal-health-management", icon: HeartPulse },
+          { label: "CarePort Patient Guide", href: "/resources/careport-patient-guide", icon: Truck },
+          { label: "MedReach Patient Guide", href: "/resources/medreach-patient-guide", icon: FlaskConical },
           { label: "Contact", href: "/contact", icon: CircleHelp },
         ],
       },
@@ -273,6 +279,41 @@ export const groupedNav = [
 ];
 
 export const resourceRoutes = [
+  {
+    title: "Prepare for your appointment",
+    href: "/resources/prepare-for-your-appointment",
+    summary:
+      "Symptom description, triage quality, lobby vitals, device charging, connection checks and virtual consultation readiness.",
+    icon: CalendarCheck,
+  },
+  {
+    title: "After your consultation",
+    href: "/resources/after-your-consultation",
+    summary:
+      "Treatment plans, CarePort eRx, MedReach lab orders, reminders, adherence and follow-up booking guidance.",
+    icon: ClipboardCheck,
+  },
+  {
+    title: "Personal health management",
+    href: "/resources/personal-health-management",
+    summary:
+      "Health Passport, reminders, self-checks, home vitals, family care and longitudinal trend guidance.",
+    icon: HeartPulse,
+  },
+  {
+    title: "CarePort patient guide",
+    href: "/resources/careport-patient-guide",
+    summary:
+      "Prescription fulfilment, medicine delivery, pharmacy updates, proof-of-delivery and medication continuity.",
+    icon: Truck,
+  },
+  {
+    title: "MedReach patient guide",
+    href: "/resources/medreach-patient-guide",
+    summary:
+      "Lab orders, home blood draws, phlebotomist visits, specimen handling and result routing.",
+    icon: FlaskConical,
+  },
   {
     title: "Health Monitor setup",
     href: "/resources/health-monitor-setup",

@@ -13,6 +13,7 @@ import {
   Download,
   Ear,
   FileText,
+  Fingerprint,
   GraduationCap,
   HeartPulse,
   LockKeyhole,
@@ -68,6 +69,50 @@ const resourceCollections: Array<{
     icon: UserRoundCheck,
     href: "/patients/getting-started",
   },
+  {
+    title: "Patient account access",
+    body:
+      "Standard signup, Premium signup, email/password login, email OTP, passkey setup, password recovery and safe account-access guidance for patients.",
+    icon: Fingerprint,
+    href: "/resources/patient-account-access",
+  },
+
+  {
+    title: "Prepare for your appointment",
+    body:
+      "Symptom descriptions, triage quality, lobby vitals, supported device preparation, connection checks and safe consultation readiness.",
+    icon: CalendarCheck,
+    href: "/resources/prepare-for-your-appointment",
+  },
+  {
+    title: "After your consultation",
+    body:
+      "Treatment plans, session summaries, reminders, CarePort eRx fulfilment, MedReach lab orders and follow-up booking guidance.",
+    icon: ClipboardCheck,
+    href: "/resources/after-your-consultation",
+  },
+  {
+    title: "Personal health management",
+    body:
+      "Health Passport, reminders, self-checks, home vitals, family care and longitudinal trend guidance for ongoing care.",
+    icon: HeartPulse,
+    href: "/resources/personal-health-management",
+  },
+  {
+    title: "CarePort patient guide",
+    body:
+      "Prescription fulfilment, pharmacy preparation, delivery tracking, proof-of-delivery and medication-continuity guidance.",
+    icon: Pill,
+    href: "/resources/careport-patient-guide",
+  },
+  {
+    title: "MedReach patient guide",
+    body:
+      "Lab orders, home blood draws, phlebotomist visits, specimen handling, laboratory handover and result-routing guidance.",
+    icon: TestTube2,
+    href: "/resources/medreach-patient-guide",
+  },
+
   {
     title: "Find a doctor and book appointment",
     body:
@@ -243,6 +288,14 @@ const mostUsedGuides: Array<{
   badge: string;
 }> = [
   {
+    title: "Patient account access",
+    body:
+      "Create a standard or Premium account, sign in with password or email OTP, add passkeys and recover access safely.",
+    href: "/resources/patient-account-access",
+    icon: Fingerprint,
+    badge: "Secure access",
+  },
+  {
     title: "Find a doctor and book appointment",
     body:
       "Patient guide for finding a suitable clinician, choosing a consultation time, preparing care context and joining an Ambulant+ appointment.",
@@ -372,6 +425,14 @@ const implementationPathways: Array<{
     icon: Users,
   },
   {
+    title: "Patient account access guide",
+    body:
+      "Standard and Premium signup, email/password, email OTP, passkey setup, privacy wording and recovery guidance for secure patient access.",
+    href: "/resources/patient-account-access",
+    cta: "Open access guide",
+    icon: Fingerprint,
+  },
+  {
     title: "Clinician handbook",
     body:
       "Onboarding, consultation standards, device-supported review, documentation discipline, escalation boundaries and Contactless Medicine practice expectations.",
@@ -443,6 +504,18 @@ const searchAnswerQuestions: Array<{
     href: "/patients/getting-started",
   },
   {
+    question: "How do I create and access my Ambulant+ patient account?",
+    answer:
+      "Patients can create a standard or Premium account, then sign in with email and password, email OTP or passkey after a passkey has been added from Security settings.",
+    href: "/resources/patient-account-access",
+  },
+  {
+    question: "Does Ambulant+ store my fingerprint or face scan for passkey login?",
+    answer:
+      "No. Ambulant+ does not store fingerprint, face scan or device PIN data. The device confirms the patient locally and Ambulant+ stores the public credential reference needed for secure sign-in.",
+    href: "/resources/patient-account-access",
+  },
+  {
     question: "What devices does Ambulant+ support?",
     answer:
       "Ambulant+ focuses on Health Monitor, Digital Stethoscope, HD Otoscope and NexRing workflows for remote vitals, auscultation, selected imaging and wearable health context.",
@@ -505,6 +578,7 @@ const learningTracks = [
 
 const contentRoadmap = [
   "Patient quick-start guide",
+  "Patient account access and passkey guide",
   "Clinician onboarding guide",
   "Contactless Medicine compliance training overview",
   "Health Monitor setup guide",
