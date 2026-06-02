@@ -816,6 +816,37 @@ model AuthOtpChallenge {
   @@index([createdAt])
 }
 
+model UserPasskeyCredential {
+  id                 String   @id @default(cuid())
+  userId             String
+  credentialId       String   @unique
+  publicKey          String
+  counter            BigInt   @default(0)
+  transports         Json?
+  deviceLabel        String?
+  backedUp           Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  lastUsedAt         DateTime?
+  disabledAt         DateTime?
+
+  @@index([userId])
+}
+
+model WebAuthnChallenge {
+  id          String   @id @default(cuid())
+  userId      String?
+  identifier  String?
+  challenge   String   @unique
+  type        String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  @@index([userId, type])
+  @@index([identifier, type])
+  @@index([expiresAt])
+}
+
 model PresenceSession {
   id         String            @id @default(cuid())
   userId     String

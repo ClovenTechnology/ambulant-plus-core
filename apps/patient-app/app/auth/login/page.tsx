@@ -5,6 +5,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { useEffect, useMemo, useState, Suspense } from 'react';
+import { startAuthentication } from '@simplewebauthn/browser';
 import {
   Lock,
   Mail,
@@ -15,6 +16,7 @@ import {
   HeartPulse,
   MessageSquareText,
   RotateCcw,
+  Fingerprint,
 } from 'lucide-react';
 
 function cx(...xs: Array<string | false | null | undefined>) {
@@ -59,6 +61,7 @@ function PatientLoginPageContent() {
   const [otpCode, setOtpCode] = useState('');
   const [otpBusy, setOtpBusy] = useState(false);
   const [otpInfo, setOtpInfo] = useState<string | null>(null);
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
 
   const redirectTo = useMemo(() => {
     return safeInternalPath(nextParam, '/');
@@ -212,6 +215,59 @@ function PatientLoginPageContent() {
     }
   }
 
+
+  async function signInWithPasskey() {
+    if (passkeyBusy) return;
+
+    setErr(null);
+    setOtpInfo(null);
+    setPasskeyBusy(true);
+
+    try {
+      if (typeof window === 'undefined' || !window.PublicKeyCredential) {
+        throw new Error('Passkeys are not supported on this browser or device.');
+      }
+
+      const optionsRes = await fetch('/api/auth/passkey/login/options', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({}),
+      });
+
+      const optionsData = await optionsRes.json().catch(() => ({} as any));
+      if (!optionsRes.ok || optionsData?.ok === false || !optionsData?.options) {
+        throw new Error(optionsData?.error || 'Could not start passkey sign-in.');
+      }
+
+      const authResponse = await startAuthentication(optionsData.options);
+
+      const verifyRes = await fetch('/api/auth/passkey/login/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ response: authResponse }),
+      });
+
+      const verifyData = (await verifyRes.json().catch(() => ({} as LoginResponse))) as LoginResponse;
+
+      if (!verifyRes.ok || verifyData?.ok === false) {
+        throw new Error(verifyData?.error || 'Could not verify passkey.');
+      }
+
+      await completeLoginFromResponse(verifyData);
+    } catch (er: any) {
+      const message = String(er?.message || er || 'Passkey sign-in failed.');
+      if (message.toLowerCase().includes('abort')) {
+        setErr('Passkey sign-in was cancelled.');
+      } else {
+        setErr(message);
+      }
+    } finally {
+      setPasskeyBusy(false);
+    }
+  }
+
   return (
     <main className="min-h-screen overflow-hidden bg-slate-50 bg-[radial-gradient(1100px_circle_at_18%_-15%,rgba(20,184,166,0.18),transparent_58%),radial-gradient(900px_circle_at_100%_5%,rgba(59,130,246,0.12),transparent_50%),linear-gradient(to_bottom,rgba(255,255,255,0.92),rgba(240,253,250,0.45),rgba(248,250,252,1))]">
       <div className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-10">
@@ -302,7 +358,7 @@ function PatientLoginPageContent() {
                     Welcome back
                   </h2>
                   <p className="mt-2 text-sm leading-6 text-slate-600">
-                    Sign in with your password or a one-time email code.
+                    Sign in with your password, email OTP, or passkey where supported.
                   </p>
                 </div>
 
@@ -405,6 +461,36 @@ function PatientLoginPageContent() {
                 </div>
 
                 <div className="space-y-3">
+
+                  <button
+                    type="button"
+                    onClick={signInWithPasskey}
+                    disabled={passkeyBusy || loading || otpBusy}
+                    className={cx(
+                      'w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-extrabold text-white shadow-lg shadow-slate-900/10',
+                      'transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50',
+                    )}
+                  >
+                    <span className="inline-flex items-center justify-center gap-2">
+                      {passkeyBusy ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Checking passkey...
+                        </>
+                      ) : (
+                        <>
+                          <Fingerprint className="h-4 w-4" />
+                          Sign in with passkey
+                        </>
+                      )}
+                    </span>
+                  </button>
+
+                  <div className="text-center text-xs leading-5 text-slate-500">
+                    Use Face ID, fingerprint, Windows Hello, Android device lock,
+                    or your device screen lock where supported.
+                  </div>
+
                   {otpStage === 'code_sent' ? (
                     <form onSubmit={verifyOtp} className="space-y-3">
                       <label className="block">
