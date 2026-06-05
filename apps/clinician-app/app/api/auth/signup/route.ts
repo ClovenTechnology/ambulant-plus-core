@@ -1,4 +1,4 @@
-// apps/clinician-app/app/api/auth/signup/route.ts
+﻿// apps/clinician-app/app/api/auth/signup/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { sendEmail, sendSms } from '@/src/lib/mailer';
@@ -35,6 +35,159 @@ function feeZarToCents(v: any) {
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.round(n * 100));
 }
+
+function digitsOnly(v: any) {
+  return String(v ?? '').replace(/\D/g, '');
+}
+
+function normalizeSpaces(v: any) {
+  return String(v ?? '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizePhone(v: any) {
+  const s = String(v ?? '').trim();
+  if (!s) return '';
+  if (s.startsWith('+')) return `+${digitsOnly(s)}`;
+  return digitsOnly(s);
+}
+
+function emailLooksValid(v: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normEmail(v));
+}
+
+function passwordLooksStrong(v: string) {
+  return String(v || '').length >= 8 && /[A-Za-z]/.test(v) && /\d/.test(v);
+}
+
+function phoneLooksValid(value: string) {
+  const normalized = normalizePhone(value);
+  if (!/^\+[1-9]\d{7,14}$/.test(normalized)) return false;
+  if (normalized.startsWith('+27')) return /^\+27\d{9}$/.test(normalized);
+  return true;
+}
+
+function parseDateInput(value: any) {
+  const v = String(value ?? '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return null;
+  const d = new Date(`${v}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function ageOnToday(value: any) {
+  const d = parseDateInput(value);
+  if (!d) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - d.getFullYear();
+  const monthDiff = today.getMonth() - d.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d.getDate())) age -= 1;
+  return age;
+}
+
+function isFutureDate(value: any) {
+  const d = parseDateInput(value);
+  if (!d) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() > today.getTime();
+}
+
+function isTodayOrFuture(value: any) {
+  const d = parseDateInput(value);
+  if (!d) return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() >= today.getTime();
+}
+
+function qualificationYearLooksValid(year: any) {
+  const y = Number(year);
+  const currentYear = new Date().getFullYear();
+  return Number.isInteger(y) && y >= 1940 && y <= currentYear - 1;
+}
+
+function hpcsaRegistrationLooksValid(value: any) {
+  const v = safeStr(value).toUpperCase().replace(/\s+/g, '');
+  return /^MP\d{6,8}$/.test(v);
+}
+
+function practiceNumberLooksValid(value: any) {
+  return /^\d{7}$/.test(digitsOnly(value));
+}
+
+function passportNumberLooksValid(value: any) {
+  return /^[A-Z0-9]{5,20}$/i.test(safeStr(value).replace(/\s+/g, ''));
+}
+
+function luhnLooksValid(value: any) {
+  const digits = digitsOnly(value);
+  let sum = 0;
+  let shouldDouble = false;
+
+  for (let i = digits.length - 1; i >= 0; i -= 1) {
+    let n = Number(digits[i]);
+    if (shouldDouble) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    shouldDouble = !shouldDouble;
+  }
+
+  return sum % 10 === 0;
+}
+
+function validateSaIdDetailed(id: any, dob: any, gender: any) {
+  const v = digitsOnly(id);
+  if (!/^\d{13}$/.test(v)) return 'SA ID number must contain exactly 13 digits.';
+
+  const dobDate = parseDateInput(dob);
+  if (!dobDate) return 'Date of birth is required before SA ID can be verified.';
+
+  const yyMMdd = `${String(dobDate.getFullYear()).slice(-2)}${String(dobDate.getMonth() + 1).padStart(2, '0')}${String(
+    dobDate.getDate(),
+  ).padStart(2, '0')}`;
+
+  if (v.slice(0, 6) !== yyMMdd) {
+    return 'SA ID first 6 digits must match the selected date of birth.';
+  }
+
+  const serial = Number(v.slice(6, 10));
+  const g = safeStr(gender).toLowerCase();
+
+  if (g === 'female' && serial >= 5000) return 'SA ID gender block indicates male, but Female was selected.';
+  if (g === 'male' && serial < 5000) return 'SA ID gender block indicates female, but Male was selected.';
+
+  const citizenshipDigit = v[10];
+  if (!['0', '1'].includes(citizenshipDigit)) return 'SA ID citizenship digit must be 0 or 1.';
+
+  if (!luhnLooksValid(v)) return 'SA ID checksum failed. Please check the number.';
+  return null;
+}
+
+function primaryQualificationFrom(profile: any) {
+  const direct = {
+    degree: safeStr(profile?.qualification),
+    institution: safeStr(profile?.qualificationInstitution),
+    yearOfCompletion: safeStr(profile?.qualificationYear),
+  };
+
+  if (direct.degree || direct.institution || direct.yearOfCompletion) return direct;
+
+  const first = Array.isArray(profile?.qualifications) ? profile.qualifications[0] : null;
+  return {
+    degree: safeStr(first?.degree),
+    institution: safeStr(first?.institution),
+    yearOfCompletion: safeStr(first?.yearOfCompletion),
+  };
+}
+
+function badRequest(error: string, field?: string) {
+  return json({ ok: false, error, field }, 400);
+}
+
 
 function getBaseUrl(req: NextRequest) {
   const envBase = process.env.NEXT_PUBLIC_BASE_URL;
@@ -169,18 +322,100 @@ export async function POST(req: NextRequest) {
       profileRaw = JSON.stringify(body?.profile ?? {});
     }
 
-    if (!name) return json({ ok: false, error: 'Full name required' }, 400);
-    if (!email) return json({ ok: false, error: 'Email required' }, 400);
-    if (!password || password.length < 8)
-      return json({ ok: false, error: 'Password must be at least 8 characters' }, 400);
-    if (!specialty) return json({ ok: false, error: 'Specialty required' }, 400);
-
     let profile: any = {};
     try {
       profile = JSON.parse(profileRaw || '{}');
     } catch {
       profile = {};
     }
+
+    const normalizedPhone = normalizePhone(phone || profile?.phone);
+    const dob = safeStr(profile?.dob || profile?.dateOfBirth);
+    const gender = safeStr(profile?.gender).toLowerCase();
+    const citizenship = safeStr(profile?.citizenship);
+    const idNumber = digitsOnly(profile?.idNumber || profile?.saIdNumber);
+    const citizenshipCountry = normalizeSpaces(profile?.citizenshipCountry);
+    const passportNumber = safeStr(profile?.passportNumber).toUpperCase().replace(/\s+/g, '');
+    const passportIssuingAuthority = normalizeSpaces(profile?.passportIssuingAuthority);
+    const passportExpiry = safeStr(profile?.passportExpiry);
+    const hpcsaRegistrationNumber = safeStr(
+      license || profile?.hpcsaRegistrationNumber || profile?.regulatorRegistration || profile?.registrationNumber,
+    )
+      .toUpperCase()
+      .replace(/\s+/g, '');
+    const practiceNumber = digitsOnly(profile?.practiceNumber || profile?.hpcsaPracticeNumber);
+    const hpcsaNextRenewalDate = safeStr(profile?.hpcsaNextRenewalDate || profile?.nextRenewalDate);
+    const primaryQualification = primaryQualificationFrom(profile);
+    const qualificationYear = Number(primaryQualification.yearOfCompletion);
+    const onboarding = profile?.onboarding || {};
+    const training = onboarding?.training || {};
+    const shipping = onboarding?.shipping || {};
+    const shippingPhone = normalizePhone(shipping?.phone);
+    const hasInsurance = profile?.hasInsurance;
+    const platformCoverEnabled = profile?.platformCoverEnabled === true;
+    const declarations = profile?.declarations || {};
+
+    if (!name) return badRequest('Full name required', 'name');
+    if (!emailLooksValid(email)) return badRequest('Valid email required', 'email');
+    if (!passwordLooksStrong(password)) {
+      return badRequest('Password must be at least 8 characters and include at least one letter and one number', 'password');
+    }
+    if (!phoneLooksValid(normalizedPhone)) return badRequest('Valid mobile number with country code required', 'phone');
+    if (!specialty) return badRequest('Specialty required', 'specialty');
+
+    if (!dob || (ageOnToday(dob) ?? 0) < 18) return badRequest('Clinician must be at least 18 years old', 'dob');
+    if (!['male', 'female', 'other'].includes(gender)) return badRequest('Gender required', 'gender');
+
+    if (!primaryQualification.degree) return badRequest('Primary qualification degree required', 'qualification');
+    if (!primaryQualification.institution) return badRequest('Primary qualification institution required', 'qualificationInstitution');
+    if (!qualificationYearLooksValid(qualificationYear)) {
+      return badRequest('Qualification year must be complete and at least 1 year ago', 'qualificationYear');
+    }
+
+    if (!hpcsaRegistrationLooksValid(hpcsaRegistrationNumber)) {
+      return badRequest('HPCSA registration number must look like MP1111111', 'hpcsaRegistrationNumber');
+    }
+
+    if (!practiceNumberLooksValid(practiceNumber)) {
+      return badRequest('Practice number must be exactly 7 digits', 'practiceNumber');
+    }
+
+    if (hpcsaNextRenewalDate && !isFutureDate(hpcsaNextRenewalDate)) {
+      return badRequest('Next HPCSA renewal date must be in the future', 'hpcsaNextRenewalDate');
+    }
+
+    if (citizenship === 'south_african') {
+      const idError = validateSaIdDetailed(idNumber, dob, gender);
+      if (idError) return badRequest(idError, 'saIdNumber');
+    } else if (citizenship === 'non_south_african') {
+      if (!passportNumberLooksValid(passportNumber)) return badRequest('Passport number must be 5â€“20 letters/numbers', 'passportNumber');
+      if (!citizenshipCountry) return badRequest('Country of citizenship required', 'citizenshipCountry');
+      if (!passportIssuingAuthority) return badRequest('Passport issuing authority required', 'passportIssuingAuthority');
+      if (!isFutureDate(passportExpiry)) return badRequest('Passport expiry must be in the future', 'passportExpiry');
+    } else {
+      return badRequest('Citizenship status required', 'citizenship');
+    }
+
+    if (!platformCoverEnabled && typeof hasInsurance !== 'boolean') {
+      return badRequest('Professional indemnity cover answer required', 'hasInsurance');
+    }
+
+    if (!platformCoverEnabled && hasInsurance === true) {
+      if (!safeStr(profile?.insurerName)) return badRequest('Insurer name required', 'insurerName');
+      if (!safeStr(profile?.insuranceType)) return badRequest('Insurance type required', 'insuranceType');
+      if (typeof profile?.insuranceCoversVirtual !== 'boolean') {
+        return badRequest('Virtual consultation cover answer required', 'insuranceCoversVirtual');
+      }
+    }
+
+    if (declarations?.termsAccepted !== true) return badRequest('Terms and privacy consent required', 'declarations.termsAccepted');
+
+    if (!isTodayOrFuture(training?.preferredDate)) return badRequest('Training preferred date must be today or a future date', 'training.preferredDate');
+    if (!normalizeSpaces(shipping?.recipientName)) return badRequest('Shipping recipient name required', 'shipping.recipientName');
+    if (!phoneLooksValid(shippingPhone)) return badRequest('Valid shipping phone with country code required', 'shipping.phone');
+    if (!normalizeSpaces(shipping?.addressLine1)) return badRequest('Shipping address line 1 required', 'shipping.addressLine1');
+    if (!normalizeSpaces(shipping?.city)) return badRequest('Shipping city required', 'shipping.city');
+
 
     // Optional HPCSA upload
     let hpcsaS3Key: string | null = null;
@@ -221,15 +456,22 @@ export async function POST(req: NextRequest) {
     const mergedProfile = {
       ...profile,
       email,
-      phone,
-      license: license || undefined,
+      phone: normalizedPhone,
+      license: hpcsaRegistrationNumber,
+      idNumber: citizenship === 'south_african' ? idNumber : undefined,
+      qualification: primaryQualification.degree,
+      qualificationInstitution: primaryQualification.institution,
+      qualificationYear,
+      practiceNumber,
+      regulatorBody: 'HPCSA',
+      regulatorRegistration: hpcsaRegistrationNumber,
       auth0UserId: auth0UserId || undefined,
       submittedAt,
     };
 
-    // Map core regulator fields (best-effort; no guessing beyond what's provided)
-    const regulatorBody = safeStr(profile?.regulatorBody) || safeStr(profile?.regulator) || (license ? 'HPCSA' : '');
-    const regulatorRegistration = license || safeStr(profile?.regulatorRegistration) || safeStr(profile?.registrationNumber);
+    // Map core regulator fields
+    const regulatorBody = 'HPCSA';
+    const regulatorRegistration = hpcsaRegistrationNumber;
 
     // Optional price fields (if UI passed them)
     const currency = safeCurrency(profile?.currency || 'ZAR');
@@ -245,11 +487,40 @@ export async function POST(req: NextRequest) {
             displayName: name,
             specialty,
             email,
-            phone: phone || null,
+            phone: normalizedPhone || null,
+            gender: gender || null,
 
-            // best-effort mapping (won’t break if empty)
+            idNumber: citizenship === 'south_african' ? idNumber : passportNumber || null,
+            idIssuingCountry: citizenship === 'south_african' ? 'ZA' : citizenshipCountry || null,
+            idExpiry: citizenship === 'non_south_african' && passportExpiry ? new Date(`${passportExpiry}T00:00:00`) : null,
+
+            qualification: primaryQualification.degree || null,
+            qualificationYear: Number.isFinite(qualificationYear) ? qualificationYear : null,
+            qualificationInstitution: primaryQualification.institution || null,
+            otherQualifications: Array.isArray(profile?.otherQualifications)
+              ? JSON.stringify(profile.otherQualifications)
+              : null,
+
+            addressLine1: normalizeSpaces(shipping?.addressLine1 || profile?.address || '') || null,
+            addressLine2: normalizeSpaces(shipping?.addressLine2 || '') || null,
+            city: normalizeSpaces(shipping?.city || '') || null,
+            postalCode: normalizeSpaces(shipping?.postalCode || '') || null,
+            country: normalizeSpaces(shipping?.country || (citizenship === 'south_african' ? 'South Africa' : citizenshipCountry)) || null,
+
+            practiceNumber: practiceNumber || null,
             regulatorBody: regulatorBody || null,
             regulatorRegistration: regulatorRegistration || null,
+
+            piInsuranceProvider: !platformCoverEnabled && hasInsurance === true ? normalizeSpaces(profile?.insurerName) || null : null,
+            piInsurancePolicyName: !platformCoverEnabled && hasInsurance === true ? normalizeSpaces(profile?.insuranceType) || null : null,
+            piInsuranceCoverType:
+              !platformCoverEnabled && hasInsurance === true
+                ? profile?.insuranceCoversVirtual === true
+                  ? 'virtual_and_in_person'
+                  : 'in_person_only'
+                : null,
+
+            trainingScheduledAt: training?.preferredDate ? new Date(`${training.preferredDate}T09:00:00`) : null,
 
             // optional legacy fee fields
             feeCents: feeCents || 0,
@@ -329,7 +600,7 @@ export async function POST(req: NextRequest) {
 
     // Email + SMS: clearly explain the workflow (training -> payment -> ship -> certify)
     if (email) {
-      const subject = 'Ambulant+ Clinician Application Received — Next Steps';
+      const subject = 'Ambulant+ Clinician Application Received â€” Next Steps';
       const html = `
         <p>Hi ${name || 'Clinician'},</p>
         <p>Your Ambulant+ clinician application has been received.</p>
@@ -338,10 +609,10 @@ export async function POST(req: NextRequest) {
         <ol>
           <li><strong>Training scheduling + payment</strong> (required)</li>
           <li><strong>Starter kit dispatch</strong> after payment confirmation</li>
-          <li><strong>Admin certification</strong> — only then your profile becomes visible to patients</li>
+          <li><strong>Admin certification</strong> â€” only then your profile becomes visible to patients</li>
         </ol>
 
-        <p><a href="${onboardingLink}">👉 Sign in to continue onboarding</a></p>
+        <p><a href="${onboardingLink}">ðŸ‘‰ Sign in to continue onboarding</a></p>
 
         <p style="margin-top:12px;"><strong>Starter kit contents</strong> (sent after payment):</p>
         <ul>
@@ -353,17 +624,17 @@ export async function POST(req: NextRequest) {
 
         <p>When the admin assigns courier + tracking, you will receive tracking details by email and SMS.</p>
 
-        <p style="margin-top:12px;">If you didn’t request this, you can ignore this email.</p>
-        <p>— Ambulant+ Team</p>
+        <p style="margin-top:12px;">If you didnâ€™t request this, you can ignore this email.</p>
+        <p>â€” Ambulant+ Team</p>
       `;
       sendEmail(email, subject, html).catch(console.error);
     }
 
-    if (phone) {
+    if (normalizedPhone) {
       const sms =
         `Ambulant+ application received. Training is mandatory. Sign in to schedule & pay: ${onboardingLink} ` +
         `After payment, starter kit ships & tracking will be sent.`;
-      sendSms(phone, sms).catch(console.error);
+      sendSms(normalizedPhone, sms).catch(console.error);
     }
 
     return json(
@@ -381,6 +652,7 @@ export async function POST(req: NextRequest) {
     );
   } catch (err: any) {
     console.error('signup POST error', err);
-    return json({ ok: false, error: err?.message || String(err) }, 500);
+    return json({ ok: false, error: 'Unable to process your clinician application right now. Please try again shortly.' }, 500);
   }
 }
+

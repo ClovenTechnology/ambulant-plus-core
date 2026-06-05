@@ -49,9 +49,10 @@ export async function GET(req: NextRequest) {
     return json(
       {
         ok: false,
-        error: err?.message || 'Unable to resolve clinician profile.',
+        error: 'Unable to load your clinician profile right now. Please try again shortly.',
       },
       500,
     );
   }
 }
+

@@ -64,6 +64,11 @@ type SignupResponse = {
   trainingLink?: string;
 };
 
+type ValidationFailure = {
+  step: 0 | 1 | 2 | 3;
+  message: string;
+};
+
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
 }
@@ -83,6 +88,191 @@ const TRAINING_SLOTS: Array<{ label: string; value: TrainingPref['preferredSlot'
   { label: 'Evening', value: 'evening' },
 ];
 
+const PHONE_COUNTRY_CODES = [
+  { code: '+27', label: 'South Africa +27' },
+  { code: '+234', label: 'Nigeria +234' },
+  { code: '+44', label: 'United Kingdom +44' },
+  { code: '+1', label: 'US/Canada +1' },
+  { code: '+91', label: 'India +91' },
+  { code: '+263', label: 'Zimbabwe +263' },
+  { code: '+266', label: 'Lesotho +266' },
+  { code: '+268', label: 'Eswatini +268' },
+  { code: '+264', label: 'Namibia +264' },
+  { code: '+267', label: 'Botswana +267' },
+] as const;
+
+const CURRENT_YEAR = new Date().getFullYear();
+
+function digitsOnly(v: string) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+function normalizeSpaces(v: string) {
+  return String(v || '').trim().replace(/\s+/g, ' ');
+}
+
+function normalizeEmail(v: string) {
+  return String(v || '').trim().toLowerCase();
+}
+
+function emailLooksValid(v: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeEmail(v));
+}
+
+function passwordLooksStrong(v: string) {
+  return v.length >= 8 && /[A-Za-z]/.test(v) && /\d/.test(v);
+}
+
+function composePhone(countryCode: string, local: string) {
+  const cc = String(countryCode || '+27').trim();
+  const raw = String(local || '').trim();
+
+  if (raw.startsWith('+')) return `+${digitsOnly(raw)}`;
+
+  const localDigits = digitsOnly(raw).replace(/^0+/, '');
+  if (!localDigits) return '';
+
+  return `${cc}${localDigits}`;
+}
+
+function phoneLooksValid(value: string) {
+  const normalized = String(value || '').trim();
+  if (!/^\+[1-9]\d{7,14}$/.test(normalized)) return false;
+
+  // South Africa: +27 followed by 9 national digits.
+  if (normalized.startsWith('+27')) {
+    return /^\+27\d{9}$/.test(normalized);
+  }
+
+  return true;
+}
+
+function parseDateInput(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return null;
+  const d = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return null;
+  return d;
+}
+
+function ageOnToday(value: string) {
+  const d = parseDateInput(value);
+  if (!d) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - d.getFullYear();
+  const monthDiff = today.getMonth() - d.getMonth();
+
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < d.getDate())) {
+    age -= 1;
+  }
+
+  return age;
+}
+
+function isPastOrToday(value: string) {
+  const d = parseDateInput(value);
+  if (!d) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() <= today.getTime();
+}
+
+function isTodayOrFuture(value: string) {
+  const d = parseDateInput(value);
+  if (!d) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() >= today.getTime();
+}
+
+function isFutureDate(value: string) {
+  const d = parseDateInput(value);
+  if (!d) return false;
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return d.getTime() > today.getTime();
+}
+
+function qualificationYearLooksValid(year: string) {
+  const y = Number(String(year || '').trim());
+  return Number.isInteger(y) && y >= 1940 && y <= CURRENT_YEAR - 1;
+}
+
+function hpcsaRegistrationLooksValid(value: string) {
+  const v = String(value || '').trim().toUpperCase().replace(/\s+/g, '');
+  return /^MP\d{6,8}$/.test(v);
+}
+
+function practiceNumberLooksValid(value: string) {
+  return /^\d{7}$/.test(digitsOnly(value));
+}
+
+function passportNumberLooksValid(value: string) {
+  return /^[A-Z0-9]{5,20}$/i.test(String(value || '').trim().replace(/\s+/g, ''));
+}
+
+function luhnLooksValid(value: string) {
+  const digits = digitsOnly(value);
+  let sum = 0;
+  let shouldDouble = false;
+
+  for (let i = digits.length - 1; i >= 0; i -= 1) {
+    let n = Number(digits[i]);
+
+    if (shouldDouble) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+
+    sum += n;
+    shouldDouble = !shouldDouble;
+  }
+
+  return sum % 10 === 0;
+}
+
+function validateSaIdDetailed(id: string, dob: string, gender: string): string | null {
+  const v = digitsOnly(id);
+
+  if (!/^\d{13}$/.test(v)) return 'SA ID number must contain exactly 13 digits.';
+
+  const dobDate = parseDateInput(dob);
+  if (!dobDate) return 'Date of birth is required before SA ID can be verified.';
+
+  const yyMMdd = `${String(dobDate.getFullYear()).slice(-2)}${String(dobDate.getMonth() + 1).padStart(2, '0')}${String(
+    dobDate.getDate(),
+  ).padStart(2, '0')}`;
+
+  if (v.slice(0, 6) !== yyMMdd) {
+    return 'SA ID first 6 digits must match the selected date of birth.';
+  }
+
+  const serial = Number(v.slice(6, 10));
+
+  if (gender === 'female' && serial >= 5000) {
+    return 'SA ID gender block indicates male, but Female was selected.';
+  }
+
+  if (gender === 'male' && serial < 5000) {
+    return 'SA ID gender block indicates female, but Male was selected.';
+  }
+
+  const citizenshipDigit = v[10];
+  if (!['0', '1'].includes(citizenshipDigit)) {
+    return 'SA ID citizenship digit must be 0 or 1.';
+  }
+
+  if (!luhnLooksValid(v)) {
+    return 'SA ID checksum failed. Please check the number.';
+  }
+
+  return null;
+}
+
+
 export default function ClinicianSignupPage() {
   const router = useRouter();
 
@@ -92,6 +282,7 @@ export default function ClinicianSignupPage() {
   const [pw, setPw] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [phone, setPhone] = useState('');
+  const [phoneCountryCode, setPhoneCountryCode] = useState('+27');
 
   // Professional
   const [specialty, setSpecialty] = useState('');
@@ -116,7 +307,7 @@ export default function ClinicianSignupPage() {
   const [passportExpiry, setPassportExpiry] = useState('');
 
   // HPCSA
-  const [hpcsaPracticeNumber, setHpcsaPracticeNumber] = useState('');
+  const [practiceNumber, setPracticeNumber] = useState('');
   const [hpcsaDocFile, setHpcsaDocFile] = useState<File | null>(null);
   const [nextRenewalDate, setNextRenewalDate] = useState('');
 
@@ -153,6 +344,7 @@ export default function ClinicianSignupPage() {
     postalCode: '',
     country: 'South Africa',
   });
+  const [shippingPhoneCountryCode, setShippingPhoneCountryCode] = useState('+27');
 
   // UX state
   const [consent, setConsent] = useState(false);
@@ -182,7 +374,22 @@ export default function ClinicianSignupPage() {
     setPreferredCommunication((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
   };
 
-  const validateSaId = (id: string) => /^\d{13}$/.test(String(id || '').replace(/\s+/g, ''));
+  const normalizedPhone = useMemo(() => composePhone(phoneCountryCode, phone), [phoneCountryCode, phone]);
+  const normalizedShippingPhone = useMemo(
+    () => composePhone(shippingPhoneCountryCode, shipping.phone),
+    [shippingPhoneCountryCode, shipping.phone],
+  );
+
+  const primaryQualification = useMemo(() => {
+    return qualifications.find((q) => q.degree.trim() || q.institution.trim() || String(q.yearOfCompletion || '').trim()) || qualifications[0];
+  }, [qualifications]);
+
+  const saIdValidationMessage = useMemo(() => {
+    if (citizenship !== 'south_african' || !saIdNumber.trim()) return null;
+    return validateSaIdDetailed(saIdNumber, dob, gender);
+  }, [citizenship, saIdNumber, dob, gender]);
+
+  const qualificationYear = String(primaryQualification?.yearOfCompletion || '').trim();
 
   const stepLabel = useMemo(() => {
     return ['Account', 'Professional', 'Compliance', 'Training & Starter Kit'][step];
@@ -190,37 +397,144 @@ export default function ClinicianSignupPage() {
 
   const canGoNext = useMemo(() => {
     if (step === 0) {
-      return !!name.trim() && !!email.trim() && pw.length >= 8;
+      return (
+        !!normalizeSpaces(name) &&
+        emailLooksValid(email) &&
+        passwordLooksStrong(pw) &&
+        phoneLooksValid(normalizedPhone)
+      );
     }
-    if (step === 1) {
-      return !!specialty.trim();
-    }
-    if (step === 2) {
-      if (citizenship === 'south_african' && !validateSaId(saIdNumber)) return false;
-      if (citizenship === 'non_south_african' && !passportNumber.trim()) return false;
-      // Consent is enforced on final submit, but we can block next too.
-      return true;
-    }
-    return true;
-  }, [step, name, email, pw, specialty, citizenship, saIdNumber, passportNumber]);
 
-  function validateFinal(): string | null {
-    if (!name.trim()) return 'Full name is required.';
-    if (!email.trim()) return 'Email is required.';
-    if (pw.length < 8) return 'Password must be at least 8 characters.';
-    if (!specialty.trim()) return 'Specialty is required.';
-    if (citizenship === 'south_african' && !validateSaId(saIdNumber)) return 'SA ID number must be 13 digits.';
-    if (citizenship === 'non_south_african' && !passportNumber.trim()) return 'Passport number is required.';
-    if (!platformCover) {
-      if (hasInsurance === true && !insurerName.trim()) return 'Insurer name is required (or enable platform-wide cover).';
+    if (step === 1) {
+      return (
+        !!specialty.trim() &&
+        !!dob &&
+        isPastOrToday(dob) &&
+        (ageOnToday(dob) ?? 0) >= 18 &&
+        !!gender &&
+        !!primaryQualification?.degree?.trim() &&
+        !!primaryQualification?.institution?.trim() &&
+        qualificationYearLooksValid(qualificationYear) &&
+        hpcsaRegistrationLooksValid(license)
+      );
     }
-    if (!consent) return 'You must agree to terms and privacy policy.';
-    // training required (capture at least a date preference)
-    if (!training.preferredDate) return 'Please select a preferred training date.';
-    // shipping required (for starter kit post-payment)
-    if (!shipping.recipientName.trim()) return 'Shipping recipient name is required.';
-    if (!shipping.phone.trim()) return 'Shipping phone is required.';
-    if (!shipping.addressLine1.trim() || !shipping.city.trim()) return 'Shipping address (line 1 + city) is required.';
+
+    if (step === 2) {
+      if (!citizenship) return false;
+      if (citizenship === 'south_african' && validateSaIdDetailed(saIdNumber, dob, gender)) return false;
+      if (
+        citizenship === 'non_south_african' &&
+        (!passportNumberLooksValid(passportNumber) ||
+          !citizenshipCountry.trim() ||
+          !passportIssuingAuthority.trim() ||
+          !isFutureDate(passportExpiry))
+      ) {
+        return false;
+      }
+      if (!practiceNumberLooksValid(practiceNumber)) return false;
+      if (nextRenewalDate && !isFutureDate(nextRenewalDate)) return false;
+      if (!platformCover && hasInsurance === null) return false;
+      if (!platformCover && hasInsurance === true && (!insurerName.trim() || !insuranceType.trim() || !insuranceCoversVirtual)) {
+        return false;
+      }
+      return consent;
+    }
+
+    return (
+      !!training.preferredDate &&
+      isTodayOrFuture(training.preferredDate) &&
+      !!shipping.recipientName.trim() &&
+      phoneLooksValid(normalizedShippingPhone) &&
+      !!shipping.addressLine1.trim() &&
+      !!shipping.city.trim()
+    );
+  }, [
+    step,
+    name,
+    email,
+    pw,
+    phone,
+    phoneCountryCode,
+    normalizedPhone,
+    specialty,
+    dob,
+    gender,
+    primaryQualification,
+    qualificationYear,
+    license,
+    citizenship,
+    saIdNumber,
+    passportNumber,
+    citizenshipCountry,
+    passportIssuingAuthority,
+    passportExpiry,
+    practiceNumber,
+    nextRenewalDate,
+    platformCover,
+    hasInsurance,
+    insurerName,
+    insuranceType,
+    insuranceCoversVirtual,
+    consent,
+    training.preferredDate,
+    shipping.recipientName,
+    shipping.phone,
+    shippingPhoneCountryCode,
+    normalizedShippingPhone,
+    shipping.addressLine1,
+    shipping.city,
+  ]);
+
+  function fail(stepNo: 0 | 1 | 2 | 3, message: string): ValidationFailure {
+    return { step: stepNo, message };
+  }
+
+  function validateFinal(): ValidationFailure | null {
+    if (!normalizeSpaces(name)) return fail(0, 'Full name is required.');
+    if (!emailLooksValid(email)) return fail(0, 'Enter a valid email address.');
+    if (!passwordLooksStrong(pw)) return fail(0, 'Password must be at least 8 characters and include at least one letter and one number.');
+    if (!phoneLooksValid(normalizedPhone)) return fail(0, 'Enter a valid mobile number with country code, for example +27821234567.');
+
+    if (!specialty.trim()) return fail(1, 'Specialty is required.');
+    if (!dob || !isPastOrToday(dob)) return fail(1, 'Enter a valid date of birth.');
+    if ((ageOnToday(dob) ?? 0) < 18) return fail(1, 'Clinician must be at least 18 years old.');
+    if (!gender) return fail(1, 'Gender is required for identity checks.');
+    if (!primaryQualification?.degree?.trim()) return fail(1, 'Primary qualification degree is required.');
+    if (!primaryQualification?.institution?.trim()) return fail(1, 'Primary qualification institution is required.');
+    if (!qualificationYearLooksValid(qualificationYear)) {
+      return fail(1, `Qualification year must be between 1940 and ${CURRENT_YEAR - 1}.`);
+    }
+    if (!hpcsaRegistrationLooksValid(license)) return fail(1, 'HPCSA registration must look like MP1111111.');
+
+    if (!citizenship) return fail(2, 'Citizenship status is required.');
+    if (citizenship === 'south_african') {
+      const idErr = validateSaIdDetailed(saIdNumber, dob, gender);
+      if (idErr) return fail(2, idErr);
+    }
+    if (citizenship === 'non_south_african') {
+      if (!passportNumberLooksValid(passportNumber)) return fail(2, 'Passport number must be 5–20 letters/numbers.');
+      if (!citizenshipCountry.trim()) return fail(2, 'Country of citizenship is required.');
+      if (!passportIssuingAuthority.trim()) return fail(2, 'Passport issuing authority is required.');
+      if (!isFutureDate(passportExpiry)) return fail(2, 'Passport expiry must be a future date.');
+    }
+    if (!practiceNumberLooksValid(practiceNumber)) return fail(2, 'Practice number must be exactly 7 digits.');
+    if (nextRenewalDate && !isFutureDate(nextRenewalDate)) return fail(2, 'Next HPCSA renewal date must be in the future.');
+    if (!platformCover && hasInsurance === null) return fail(2, 'Please confirm whether you have professional indemnity cover.');
+    if (!platformCover && hasInsurance === true && !insurerName.trim()) return fail(2, 'Insurer name is required.');
+    if (!platformCover && hasInsurance === true && !insuranceType.trim()) return fail(2, 'Insurance type is required.');
+    if (!platformCover && hasInsurance === true && !insuranceCoversVirtual) {
+      return fail(2, 'Please confirm whether your cover includes virtual consultations.');
+    }
+    if (!consent) return fail(2, 'You must agree to the terms and privacy policy.');
+
+    if (!training.preferredDate || !isTodayOrFuture(training.preferredDate)) {
+      return fail(3, 'Please select today or a future date for training.');
+    }
+    if (!shipping.recipientName.trim()) return fail(3, 'Shipping recipient name is required.');
+    if (!phoneLooksValid(normalizedShippingPhone)) return fail(3, 'Enter a valid shipping phone number with country code.');
+    if (!shipping.addressLine1.trim()) return fail(3, 'Shipping address line 1 is required.');
+    if (!shipping.city.trim()) return fail(3, 'Shipping city is required.');
+
     return null;
   }
 
@@ -244,67 +558,107 @@ export default function ClinicianSignupPage() {
     setMsg(null);
     const err = validateFinal();
     if (err) {
-      setMsg(`Error: ${err}`);
-      setStep(3);
+      setMsg(`Error: ${err.message}`);
+      setStep(err.step);
       return;
     }
 
     setLoading(true);
     try {
-      const emailNorm = email.trim().toLowerCase();
+      const emailNorm = normalizeEmail(email);
+      const primary = {
+        degree: normalizeSpaces(primaryQualification?.degree || ''),
+        institution: normalizeSpaces(primaryQualification?.institution || ''),
+        yearOfCompletion: String(primaryQualification?.yearOfCompletion || '').trim(),
+      };
+
+      const normalizedHpcsaRegistration = String(license || '').trim().toUpperCase().replace(/\s+/g, '');
+      const normalizedPracticeNumber = digitsOnly(practiceNumber);
+      const normalizedSaId = digitsOnly(saIdNumber);
 
       // Build a single “profile” blob (stored server-side in metadata.rawProfileJson)
       const profile = {
         dob: dob || undefined,
+        dateOfBirth: dob || undefined,
         gender: gender || undefined,
         address: address || undefined,
+
+        phone: normalizedPhone,
+        phoneCountryCode,
+
+        qualification: primary.degree,
+        qualificationInstitution: primary.institution,
+        qualificationYear: Number(primary.yearOfCompletion),
 
         qualifications: qualifications
           .filter((q) => q.degree || q.institution)
           .map((q) => ({
-            degree: q.degree.trim(),
-            institution: q.institution.trim(),
-            yearOfCompletion: q.yearOfCompletion || undefined,
+            degree: normalizeSpaces(q.degree),
+            institution: normalizeSpaces(q.institution),
+            yearOfCompletion: String(q.yearOfCompletion || '').trim() || undefined,
           })),
         otherQualifications: otherQualifications
           .filter((q) => q.award || q.institution)
           .map((q) => ({
-            award: q.award.trim(),
-            institution: q.institution.trim(),
-            yearOfCompletion: q.yearOfCompletion || undefined,
+            award: normalizeSpaces(q.award),
+            institution: normalizeSpaces(q.institution),
+            yearOfCompletion: String(q.yearOfCompletion || '').trim() || undefined,
           })),
 
         citizenship: citizenship || undefined,
-        saIdNumber: citizenship === 'south_african' ? saIdNumber.replace(/\s+/g, '') : undefined,
-        citizenshipCountry: citizenship === 'non_south_african' ? citizenshipCountry.trim() : undefined,
-        passportNumber: citizenship === 'non_south_african' ? passportNumber.trim() : undefined,
-        passportIssuingAuthority: citizenship === 'non_south_african' ? passportIssuingAuthority.trim() : undefined,
+        idNumber: citizenship === 'south_african' ? normalizedSaId : undefined,
+        saIdNumber: citizenship === 'south_african' ? normalizedSaId : undefined,
+        citizenshipCountry: citizenship === 'non_south_african' ? normalizeSpaces(citizenshipCountry) : undefined,
+        passportNumber: citizenship === 'non_south_african' ? normalizeSpaces(passportNumber).toUpperCase() : undefined,
+        passportIssuingAuthority: citizenship === 'non_south_african' ? normalizeSpaces(passportIssuingAuthority) : undefined,
         passportExpiry: citizenship === 'non_south_african' ? passportExpiry || undefined : undefined,
 
-        hpcsaPracticeNumber: hpcsaPracticeNumber.trim() || undefined,
+        regulatorBody: 'HPCSA',
+        regulatorRegistration: normalizedHpcsaRegistration,
+        hpcsaRegistrationNumber: normalizedHpcsaRegistration,
+        practiceNumber: normalizedPracticeNumber,
+        hpcsaPracticeNumber: normalizedPracticeNumber,
         hpcsaNextRenewalDate: nextRenewalDate || undefined,
 
         // Insurance: if platform cover enabled, capture nothing here
+        platformCoverEnabled: platformCover,
         hasInsurance: platformCover ? undefined : typeof hasInsurance === 'boolean' ? hasInsurance : undefined,
-        insurerName: platformCover ? undefined : hasInsurance ? insurerName.trim() : undefined,
-        insuranceType: platformCover ? undefined : hasInsurance ? insuranceType.trim() : undefined,
+        insurerName: platformCover ? undefined : hasInsurance ? normalizeSpaces(insurerName) : undefined,
+        insuranceType: platformCover ? undefined : hasInsurance ? normalizeSpaces(insuranceType) : undefined,
         insuranceCoversVirtual: platformCover ? undefined : hasInsurance ? insuranceCoversVirtual === 'yes' : undefined,
 
         preferredCommunication,
-        primaryLanguage: primaryLanguage.trim() || undefined,
+        primaryLanguage: normalizeSpaces(primaryLanguage) || undefined,
         otherLanguages: otherLanguages
           .split(',')
-          .map((s) => s.trim())
+          .map((s) => normalizeSpaces(s))
           .filter(Boolean),
         hasTelemedicineExperience: typeof hasTelemedicineExperience === 'boolean' ? hasTelemedicineExperience : undefined,
+
+        declarations: {
+          termsAccepted: consent,
+          clinicianConfirmsInformationAccurate: consent,
+          trainingRequiredAcknowledged: true,
+          patientVisibilityRequiresCertification: true,
+        },
 
         // Onboarding (mandatory)
         onboarding: {
           training: {
             ...training,
+            city: normalizeSpaces(training.city || ''),
           },
           shipping: {
             ...shipping,
+            recipientName: normalizeSpaces(shipping.recipientName),
+            phone: normalizedShippingPhone,
+            phoneCountryCode: shippingPhoneCountryCode,
+            addressLine1: normalizeSpaces(shipping.addressLine1),
+            addressLine2: normalizeSpaces(shipping.addressLine2 || ''),
+            city: normalizeSpaces(shipping.city),
+            province: normalizeSpaces(shipping.province || ''),
+            postalCode: normalizeSpaces(shipping.postalCode || ''),
+            country: normalizeSpaces(shipping.country || 'South Africa'),
           },
           // NOTE: actual payment + shipping tracking is handled later by admin tools.
           payment: { status: 'pending' as const },
@@ -318,9 +672,9 @@ export default function ClinicianSignupPage() {
       fd.set('name', name.trim());
       fd.set('email', emailNorm);
       fd.set('password', pw);
-      fd.set('phone', phone.trim());
+      fd.set('phone', normalizedPhone);
       fd.set('specialty', specialty.trim());
-      if (license.trim()) fd.set('license', license.trim());
+      if (normalizedHpcsaRegistration) fd.set('license', normalizedHpcsaRegistration);
       fd.set('profile', JSON.stringify(profile));
 
       if (hpcsaDocFile) {
@@ -523,14 +877,31 @@ export default function ClinicianSignupPage() {
                         />
                       </Field>
 
-                      <Field label="Phone" icon={<Phone className="h-4 w-4" />}>
-                        <input
-                          value={phone}
-                          onChange={(e) => setPhone(e.target.value)}
-                          className={inputCls}
-                          placeholder="+27..."
-                          type="tel"
-                        />
+                      <Field label="Mobile number *" icon={<Phone className="h-4 w-4" />}>
+                        <div className="flex gap-2">
+                          <select
+                            value={phoneCountryCode}
+                            onChange={(e) => setPhoneCountryCode(e.target.value)}
+                            className="w-32 rounded-2xl border border-slate-200 bg-white px-2 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300"
+                            aria-label="Phone country code"
+                          >
+                            {PHONE_COUNTRY_CODES.map((c) => (
+                              <option key={c.code} value={c.code}>
+                                {c.code}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            value={phone}
+                            onChange={(e) => setPhone(e.target.value)}
+                            className={inputCls}
+                            placeholder="82 123 4567"
+                            type="tel"
+                            inputMode="tel"
+                            required
+                          />
+                        </div>
+                        <div className="mt-1 text-[11px] text-slate-500">Use a reachable mobile number. Example: +27821234567.</div>
                       </Field>
                     </div>
                   ) : null}
@@ -548,21 +919,24 @@ export default function ClinicianSignupPage() {
                           />
                         </Field>
 
-                        <Field label="License / Reg. number (optional)" icon={<BadgeCheck className="h-4 w-4" />}>
+                        <Field label="HPCSA registration number *" icon={<BadgeCheck className="h-4 w-4" />}>
                           <input
                             value={license}
-                            onChange={(e) => setLicense(e.target.value)}
+                            onChange={(e) => setLicense(e.target.value.toUpperCase())}
                             className={inputCls}
-                            placeholder="HPCSA / Council reg."
+                            placeholder="MP1111111"
+                            required
                           />
+                          <div className="mt-1 text-[11px] text-slate-500">Format: MP followed by 6–8 digits.</div>
                         </Field>
 
-                        <Field label="Date of birth" icon={<CalendarDays className="h-4 w-4" />}>
-                          <input value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} type="date" />
+                        <Field label="Date of birth *" icon={<CalendarDays className="h-4 w-4" />}>
+                          <input value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} type="date" required />
+                          <div className="mt-1 text-[11px] text-slate-500">Clinician must be at least 18 years old.</div>
                         </Field>
 
-                        <Field label="Gender" icon={<User className="h-4 w-4" />}>
-                          <select value={gender} onChange={(e) => setGender(e.target.value as any)} className={selectCls}>
+                        <Field label="Gender *" icon={<User className="h-4 w-4" />}>
+                          <select value={gender} onChange={(e) => setGender(e.target.value as any)} className={selectCls} required>
                             <option value="">Select</option>
                             <option value="female">Female</option>
                             <option value="male">Male</option>
@@ -724,8 +1098,18 @@ export default function ClinicianSignupPage() {
 
                         {citizenship === 'south_african' ? (
                           <div className="mt-4">
-                            <MiniField label="SA ID number (13 digits)">
-                              <input value={saIdNumber} onChange={(e) => setSaIdNumber(e.target.value)} className={inputCls} placeholder="#########...." />
+                            <MiniField label="SA ID number *">
+                              <input
+                                value={saIdNumber}
+                                onChange={(e) => setSaIdNumber(digitsOnly(e.target.value).slice(0, 13))}
+                                className={inputCls}
+                                placeholder="YYMMDD#######"
+                                inputMode="numeric"
+                                maxLength={13}
+                              />
+                              <div className={cx('mt-1 text-[11px]', saIdValidationMessage ? 'text-rose-700' : 'text-slate-500')}>
+                                {saIdValidationMessage || 'Must be 13 digits, match DOB, match gender block, and pass checksum.'}
+                              </div>
                             </MiniField>
                           </div>
                         ) : null}
@@ -750,8 +1134,16 @@ export default function ClinicianSignupPage() {
 
                       <Section title="HPCSA Registration">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <MiniField label="HPCSA practice number">
-                            <input value={hpcsaPracticeNumber} onChange={(e) => setHpcsaPracticeNumber(e.target.value)} className={inputCls} />
+                          <MiniField label="Practice number *">
+                            <input
+                              value={practiceNumber}
+                              onChange={(e) => setPracticeNumber(digitsOnly(e.target.value).slice(0, 7))}
+                              className={inputCls}
+                              placeholder="1234567"
+                              inputMode="numeric"
+                              maxLength={7}
+                            />
+                            <div className="mt-1 text-[11px] text-slate-500">Use the 7-digit South African practice/BHF number.</div>
                           </MiniField>
 
                           <MiniField label="Next renewal date">
@@ -903,13 +1295,29 @@ export default function ClinicianSignupPage() {
                             />
                           </MiniField>
                           <MiniField label="Phone *">
-                            <input
-                              value={shipping.phone}
-                              onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))}
-                              className={inputCls}
-                              placeholder="+27..."
-                              required
-                            />
+                            <div className="flex gap-2">
+                              <select
+                                value={shippingPhoneCountryCode}
+                                onChange={(e) => setShippingPhoneCountryCode(e.target.value)}
+                                className="w-32 rounded-2xl border border-slate-200 bg-white px-2 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300"
+                                aria-label="Shipping phone country code"
+                              >
+                                {PHONE_COUNTRY_CODES.map((c) => (
+                                  <option key={c.code} value={c.code}>
+                                    {c.code}
+                                  </option>
+                                ))}
+                              </select>
+                              <input
+                                value={shipping.phone}
+                                onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))}
+                                className={inputCls}
+                                placeholder="82 123 4567"
+                                type="tel"
+                                inputMode="tel"
+                                required
+                              />
+                            </div>
                           </MiniField>
 
                           <MiniField label="Address line 1 *" className="sm:col-span-2">

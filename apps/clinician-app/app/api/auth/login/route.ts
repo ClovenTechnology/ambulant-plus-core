@@ -248,9 +248,10 @@ export async function POST(req: NextRequest) {
     return json(
       {
         ok: false,
-        error: err?.message || 'Login failed',
+        error: 'Unable to sign you in right now. Please try again shortly.',
       },
       500,
     );
   }
 }
+

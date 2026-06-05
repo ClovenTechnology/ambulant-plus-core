@@ -1,10 +1,22 @@
-// apps/clinician-app/app/auth/login/page.tsx
+﻿// apps/clinician-app/app/auth/login/page.tsx
 'use client';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
-import { Sparkles, ShieldCheck, Lock, Mail, ArrowRight, Loader2, Eye, EyeOff, Stethoscope } from 'lucide-react';
+import {
+  Sparkles,
+  ShieldCheck,
+  Lock,
+  Mail,
+  ArrowRight,
+  Loader2,
+  Eye,
+  EyeOff,
+  Stethoscope,
+  MessageSquareText,
+  RotateCcw,
+} from 'lucide-react';
 
 type LoginResponse = {
   ok?: boolean;
@@ -14,6 +26,8 @@ type LoginResponse = {
   message?: string;
   redirectTo?: string;
 };
+
+type OtpStage = 'idle' | 'code_sent';
 
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
@@ -41,6 +55,11 @@ function ClinicianLoginPageContent() {
   const [err, setErr] = useState<string | null>(null);
   const [banner, setBanner] = useState<string | null>(null);
 
+  const [otpStage, setOtpStage] = useState<OtpStage>('idle');
+  const [otpCode, setOtpCode] = useState('');
+  const [otpBusy, setOtpBusy] = useState(false);
+  const [otpInfo, setOtpInfo] = useState<string | null>(null);
+
   const redirectTo = useMemo(() => safeInternalPath(nextParam, '/'), [nextParam]);
 
   useEffect(() => {
@@ -56,11 +75,48 @@ function ClinicianLoginPageContent() {
     return !loading && email.trim().length > 0 && password.length > 0;
   }, [loading, email, password]);
 
+  const canRequestOtp = useMemo(() => {
+    return !otpBusy && email.trim().length > 0;
+  }, [otpBusy, email]);
+
+  const canVerifyOtp = useMemo(() => {
+    return !otpBusy && email.trim().length > 0 && otpCode.replace(/\D/g, '').length === 6;
+  }, [otpBusy, email, otpCode]);
+
+  async function completeLoginFromResponse(data: LoginResponse) {
+    if (data?.token) {
+      localStorage.setItem('ambulant.token', data.token);
+      localStorage.setItem('ambulant.clinician.token', data.token);
+    }
+
+    if (data?.profile) {
+      localStorage.setItem('ambulant.profile', JSON.stringify(data.profile));
+      localStorage.setItem('ambulant.clinician.profile', JSON.stringify(data.profile));
+    }
+
+    const safeServerRedirect = safeInternalPath(data?.redirectTo, '');
+    router.replace(safeServerRedirect || redirectTo);
+    router.refresh();
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (loading) return;
 
+    const eNorm = email.trim().toLowerCase();
+
+    if (!eNorm) {
+      setErr('Please enter your email.');
+      return;
+    }
+
+    if (!password) {
+      setErr('Please enter your password.');
+      return;
+    }
+
     setErr(null);
+    setOtpInfo(null);
     setLoading(true);
 
     try {
@@ -68,30 +124,17 @@ function ClinicianLoginPageContent() {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ email: email.trim().toLowerCase(), password }),
+        body: JSON.stringify({ email: eNorm, password }),
       });
 
       const data = (await res.json().catch(() => ({} as LoginResponse))) as LoginResponse;
 
       if (!res.ok || data?.ok === false) {
         const msg = data?.error || data?.message || 'Login failed';
-        // avoid over-specific auth errors
         throw new Error(res.status === 401 || res.status === 403 ? 'Invalid email or password.' : msg);
       }
 
-      // Store token/profile (keep legacy keys + clinician namespace)
-      if (data?.token) {
-        localStorage.setItem('ambulant.token', data.token);
-        localStorage.setItem('ambulant.clinician.token', data.token);
-      }
-      if (data?.profile) {
-        localStorage.setItem('ambulant.profile', JSON.stringify(data.profile));
-        localStorage.setItem('ambulant.clinician.profile', JSON.stringify(data.profile));
-      }
-
-      const safeServerRedirect = safeInternalPath(data?.redirectTo, '');
-      router.replace(safeServerRedirect || redirectTo);
-      router.refresh();
+      await completeLoginFromResponse(data);
     } catch (er: any) {
       setErr(er?.message || 'Login failed');
     } finally {
@@ -99,11 +142,91 @@ function ClinicianLoginPageContent() {
     }
   }
 
+  async function requestOtp() {
+    if (otpBusy) return;
+
+    const eNorm = email.trim().toLowerCase();
+
+    if (!eNorm) {
+      setErr('Please enter your email before requesting a code.');
+      return;
+    }
+
+    setErr(null);
+    setOtpInfo(null);
+    setOtpBusy(true);
+
+    try {
+      const res = await fetch('/api/auth/otp/request', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: eNorm }),
+      });
+
+      const data = await res.json().catch(() => ({} as any));
+
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Could not send sign-in code. Please try again.');
+      }
+
+      setOtpStage('code_sent');
+      setOtpCode('');
+      setOtpInfo('If a clinician account exists for this email, a 6-digit code has been sent.');
+    } catch (er: any) {
+      setErr(er?.message || 'Could not send sign-in code.');
+    } finally {
+      setOtpBusy(false);
+    }
+  }
+
+  async function verifyOtp(e?: React.FormEvent) {
+    e?.preventDefault?.();
+    if (otpBusy) return;
+
+    const eNorm = email.trim().toLowerCase();
+    const code = otpCode.replace(/\D/g, '').slice(0, 6);
+
+    if (!eNorm) {
+      setErr('Please enter your email.');
+      return;
+    }
+
+    if (code.length !== 6) {
+      setErr('Enter the 6-digit sign-in code.');
+      return;
+    }
+
+    setErr(null);
+    setOtpInfo(null);
+    setOtpBusy(true);
+
+    try {
+      const res = await fetch('/api/auth/otp/verify', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email: eNorm, code }),
+      });
+
+      const data = (await res.json().catch(() => ({} as LoginResponse))) as LoginResponse;
+
+      if (!res.ok || data?.ok === false) {
+        throw new Error(data?.error || 'Code is invalid or expired.');
+      }
+
+      await completeLoginFromResponse(data);
+    } catch (er: any) {
+      setErr(er?.message || 'Could not verify code.');
+    } finally {
+      setOtpBusy(false);
+    }
+  }
+
   return (
     <main className="min-h-screen bg-[radial-gradient(1200px_circle_at_20%_-10%,rgba(99,102,241,0.18),transparent_55%),radial-gradient(900px_circle_at_100%_0%,rgba(16,185,129,0.12),transparent_50%)]">
       <div className="mx-auto max-w-6xl px-6 py-10">
         <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
-          {/* Left */}
           <section className="order-2 lg:order-1">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
               <Sparkles className="h-4 w-4 text-indigo-700" />
@@ -134,11 +257,11 @@ function ClinicianLoginPageContent() {
 
               <div className="rounded-3xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
                 <div className="flex items-center gap-2 text-sm font-extrabold text-slate-900">
-                  <ArrowRight className="h-4 w-4 text-emerald-700" />
-                  Fast return
+                  <MessageSquareText className="h-4 w-4 text-emerald-700" />
+                  OTP access
                 </div>
                 <div className="mt-1 text-[12px] text-slate-600">
-                  Jump back to your last workflow after sign in.
+                  Sign in with password or a one-time email code.
                 </div>
               </div>
             </div>
@@ -152,7 +275,6 @@ function ClinicianLoginPageContent() {
             </div>
           </section>
 
-          {/* Right */}
           <section className="order-1 lg:order-2">
             <div className="mx-auto w-full max-w-md">
               <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-black/[0.06] backdrop-blur">
@@ -160,11 +282,15 @@ function ClinicianLoginPageContent() {
                   <div>
                     <div className="text-xs font-black text-slate-500">Clinician Sign in</div>
                     <div className="mt-1 text-2xl font-black tracking-tight text-slate-950">Welcome back</div>
-                    <div className="mt-1 text-sm text-slate-600">Use your email + password.</div>
+                    <div className="mt-1 text-sm text-slate-600">Use your password or email OTP.</div>
                   </div>
 
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white">
-                    {loading ? <Loader2 className="h-5 w-5 animate-spin text-indigo-700" /> : <Stethoscope className="h-5 w-5 text-indigo-700" />}
+                    {loading || otpBusy ? (
+                      <Loader2 className="h-5 w-5 animate-spin text-indigo-700" />
+                    ) : (
+                      <Stethoscope className="h-5 w-5 text-indigo-700" />
+                    )}
                   </div>
                 </div>
 
@@ -180,6 +306,12 @@ function ClinicianLoginPageContent() {
                   </div>
                 ) : null}
 
+                {otpInfo ? (
+                  <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                    {otpInfo}
+                  </div>
+                ) : null}
+
                 <form onSubmit={handleSubmit} className="mt-5 space-y-4">
                   <label className="block">
                     <div className="text-xs font-black text-slate-700">Email</div>
@@ -190,6 +322,7 @@ function ClinicianLoginPageContent() {
                         onChange={(e) => {
                           setEmail(e.target.value);
                           if (err) setErr(null);
+                          if (otpInfo) setOtpInfo(null);
                         }}
                         type="email"
                         autoComplete="email"
@@ -215,7 +348,7 @@ function ClinicianLoginPageContent() {
                         }}
                         type={showPw ? 'text' : 'password'}
                         autoComplete="current-password"
-                        placeholder="••••••••"
+                        placeholder="Password"
                         className={cx(
                           'w-full rounded-2xl border border-slate-200 bg-white px-10 pr-12 py-3 text-sm',
                           'focus:outline-none focus:ring-2 focus:ring-indigo-500/25 focus:border-indigo-300',
@@ -254,25 +387,108 @@ function ClinicianLoginPageContent() {
                           Signing in…
                         </>
                       ) : (
-                        <>Sign in</>
+                        <>Sign in with password</>
                       )}
                     </span>
                   </button>
-
-                  <div className="flex items-center justify-between gap-3 text-xs">
-                    <Link href="/auth/signup" className="font-bold text-slate-800 hover:underline">
-                      Apply
-                    </Link>
-
-                    <Link href="/auth/forgot" className="font-semibold text-slate-500 hover:text-slate-700 hover:underline">
-                      Forgot password?
-                    </Link>
-                  </div>
-
-                  <div className="pt-2 text-[11px] text-slate-500">
-                    Redirect after sign in: <span className="font-semibold text-slate-700">{redirectTo}</span>
-                  </div>
                 </form>
+
+                <div className="my-5 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-slate-200" />
+                  <div className="text-xs font-semibold text-slate-400">or</div>
+                  <div className="h-px flex-1 bg-slate-200" />
+                </div>
+
+                <div className="space-y-3">
+                  {otpStage === 'code_sent' ? (
+                    <form onSubmit={verifyOtp} className="space-y-3">
+                      <label className="block">
+                        <div className="text-xs font-black text-slate-700">6-digit email code</div>
+                        <input
+                          value={otpCode}
+                          onChange={(e) => {
+                            setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 6));
+                            if (err) setErr(null);
+                          }}
+                          inputMode="numeric"
+                          autoComplete="one-time-code"
+                          placeholder="123456"
+                          className={cx(
+                            'mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-center text-lg font-black tracking-[0.25em]',
+                            'focus:outline-none focus:ring-2 focus:ring-emerald-500/25 focus:border-emerald-300',
+                          )}
+                        />
+                      </label>
+
+                      <button
+                        type="submit"
+                        disabled={!canVerifyOtp}
+                        className={cx(
+                          'w-full rounded-2xl bg-emerald-600 px-4 py-3 text-sm font-extrabold text-white',
+                          'hover:bg-emerald-700 transition',
+                          'disabled:opacity-50 disabled:cursor-not-allowed',
+                        )}
+                      >
+                        <span className="inline-flex items-center justify-center gap-2">
+                          {otpBusy ? (
+                            <>
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              Verifying…
+                            </>
+                          ) : (
+                            <>
+                              Verify code
+                              <ArrowRight className="h-4 w-4" />
+                            </>
+                          )}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={requestOtp}
+                        disabled={!canRequestOtp}
+                        className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Resend code
+                      </button>
+                    </form>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={requestOtp}
+                      disabled={!canRequestOtp}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm font-extrabold text-indigo-900 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {otpBusy ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Sending code…
+                        </>
+                      ) : (
+                        <>
+                          <MessageSquareText className="h-4 w-4" />
+                          Email me a sign-in code
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                <div className="mt-5 flex items-center justify-between gap-3 text-xs">
+                  <Link href="/auth/signup" className="font-bold text-slate-800 hover:underline">
+                    Apply
+                  </Link>
+
+                  <Link href="/auth/forgot" className="font-semibold text-slate-500 hover:text-slate-700 hover:underline">
+                    Forgot password?
+                  </Link>
+                </div>
+
+                <div className="pt-4 text-[11px] text-slate-500">
+                  Redirect after sign in: <span className="font-semibold text-slate-700">{redirectTo}</span>
+                </div>
               </div>
 
               <div className="mt-4 text-center text-[11px] text-slate-500">
