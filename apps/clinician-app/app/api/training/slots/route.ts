@@ -1,60 +1,119 @@
-//apps/clinician-app/app/api/training/slots/route.ts
+// apps/clinician-app/app/api/training/slots/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function json(data: any, status = 200) {
-  return NextResponse.json(data, { status });
+  return NextResponse.json(data, {
+    status,
+    headers: { 'cache-control': 'no-store' },
+  });
 }
 
-function isWeekend(d: Date) {
-  const day = d.getDay();
-  return day === 0 || day === 6;
+function trimSlash(s: string) {
+  return String(s || '').replace(/\/+$/, '');
 }
 
-function addMinutes(d: Date, mins: number) {
-  return new Date(d.getTime() + mins * 60_000);
+function gatewayBase() {
+  return trimSlash(
+    process.env.APIGW_BASE ||
+      process.env.GATEWAY_URL ||
+      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      process.env.NEXT_PUBLIC_GATEWAY_BASE ||
+      process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+      '',
+  );
+}
+
+function forwardHeaders(req: NextRequest) {
+  const h = new Headers();
+
+  [
+    'cookie',
+    'authorization',
+    'x-role',
+    'x-uid',
+    'x-user-id',
+    'x-org-id',
+    'x-ambulant-identity',
+    'user-agent',
+  ].forEach((k) => {
+    const v = req.headers.get(k);
+    if (v) h.set(k, v);
+  });
+
+  h.set('accept', 'application/json');
+  return h;
+}
+
+async function localTrainingSlots() {
+  const now = new Date();
+
+  const slots = await prisma.clinicianTrainingSlot.findMany({
+    where: {
+      startsAt: { gte: now },
+    },
+    orderBy: { startsAt: 'asc' },
+    take: 50,
+  });
+
+  return json({
+    ok: true,
+    slots: slots
+      .filter((slot) => Math.max(0, Number(slot.capacity || 0) - Number(slot.usedCount || 0)) > 0)
+      .map((slot) => ({
+        id: slot.id,
+        startAt: slot.startsAt.toISOString(),
+        endAt: slot.endsAt.toISOString(),
+        seatsLeft: Math.max(0, Number(slot.capacity || 0) - Number(slot.usedCount || 0)),
+        mode: slot.mode ?? 'virtual',
+      })),
+  });
 }
 
 export async function GET(req: NextRequest) {
+  const incoming = new URL(req.url);
+  const clinicianId = String(incoming.searchParams.get('clinicianId') || '').trim();
+
   try {
-    // clinicianId is not used yet, but kept for future personalization/rules.
-    const clinicianId = req.nextUrl.searchParams.get('clinicianId') || '';
-    if (!clinicianId) return json({ ok: false, error: 'clinicianId_required' }, 400);
+    const gw = gatewayBase();
 
-    // Generate slots for next 14 days, Mon–Fri, 3 sessions/day.
-    const now = new Date();
-    const slots: { id: string; startAt: string; endAt: string; seatsLeft: number }[] = [];
+    if (gw) {
+      const gwUrl = new URL(`${gw}/api/clinicians/me/training/slots`);
 
-    const sessionHours = [10, 14, 18]; // local server time
-    let days = 0;
-    let cursor = new Date(now);
-
-    while (days < 14) {
-      cursor = addMinutes(cursor, 24 * 60);
-      if (isWeekend(cursor)) continue;
-
-      for (const h of sessionHours) {
-        const start = new Date(cursor);
-        start.setHours(h, 0, 0, 0);
-        const end = addMinutes(start, 60);
-
-        const startIso = start.toISOString();
-        slots.push({
-          id: `slot-${start.getTime()}`,
-          startAt: startIso,
-          endAt: end.toISOString(),
-          seatsLeft: 6,
-        });
+      for (const [k, v] of incoming.searchParams.entries()) {
+        gwUrl.searchParams.set(k, v);
       }
 
-      days += 1;
+      const upstream = await fetch(gwUrl.toString(), {
+        method: 'GET',
+        headers: forwardHeaders(req),
+        cache: 'no-store',
+      });
+
+      const text = await upstream.text();
+
+      if (upstream.ok || !clinicianId || ![401, 403].includes(upstream.status)) {
+        return new NextResponse(text, {
+          status: upstream.status,
+          headers: {
+            'content-type': upstream.headers.get('content-type') || 'application/json',
+            'cache-control': 'no-store',
+          },
+        });
+      }
     }
 
-    return json({ ok: true, slots });
-  } catch (e: any) {
-    console.error('GET /api/training/slots error', e);
-    return json({ ok: false, error: e?.message || 'server_error' }, 500);
+    if (!clinicianId) {
+      return json({ ok: false, error: 'clinicianId_required' }, 400);
+    }
+
+    // Signup-success onboarding flow: limited public-by-clinicianId slot lookup.
+    return localTrainingSlots();
+  } catch (err: any) {
+    console.error('[clinician-app][training/slots][GET] error', err);
+    return json({ ok: false, error: String(err?.message || 'training_slots_failed') }, 502);
   }
 }
