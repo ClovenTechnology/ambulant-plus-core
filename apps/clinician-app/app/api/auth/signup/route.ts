@@ -1,4 +1,4 @@
-﻿// apps/clinician-app/app/api/auth/signup/route.ts
+// apps/clinician-app/app/api/auth/signup/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { sendEmail, sendSms } from '@/src/lib/mailer';
@@ -56,7 +56,14 @@ function emailLooksValid(v: string) {
 }
 
 function passwordLooksStrong(v: string) {
-  return String(v || '').length >= 8 && /[A-Za-z]/.test(v) && /\d/.test(v);
+  const value = String(v || '');
+  return (
+    value.length >= 10 &&
+    /[a-z]/.test(value) &&
+    /[A-Z]/.test(value) &&
+    /\d/.test(value) &&
+    /[^A-Za-z0-9]/.test(value)
+  );
 }
 
 function phoneLooksValid(value: string) {
@@ -114,7 +121,7 @@ function hpcsaRegistrationLooksValid(value: any) {
 }
 
 function practiceNumberLooksValid(value: any) {
-  return /^\d{7}$/.test(digitsOnly(value));
+  return /^\d{13}$/.test(digitsOnly(value));
 }
 
 function passportNumberLooksValid(value: any) {
@@ -286,6 +293,15 @@ async function uploadToS3(file: File, key: string) {
   return { ok: true as const };
 }
 
+function uploadedFileLooksUsable(file: File | null) {
+  if (!file) return false;
+  const size = Number((file as any).size || 0);
+  if (!Number.isFinite(size) || size <= 0) return false;
+  // 10 MB launch limit: enough for PDF/JPG/PNG registration certificate scans.
+  if (size > 10 * 1024 * 1024) return false;
+  return true;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const ct = req.headers.get('content-type') || '';
@@ -329,6 +345,14 @@ export async function POST(req: NextRequest) {
       profile = {};
     }
 
+    const firstName = normalizeSpaces(profile?.firstName);
+    const middleName = normalizeSpaces(profile?.middleName);
+    const lastName = normalizeSpaces(profile?.lastName || profile?.surname);
+
+    if (!name) {
+      name = [firstName, middleName, lastName].filter(Boolean).join(' ');
+    }
+
     const normalizedPhone = normalizePhone(phone || profile?.phone);
     const dob = safeStr(profile?.dob || profile?.dateOfBirth);
     const gender = safeStr(profile?.gender).toLowerCase();
@@ -343,7 +367,11 @@ export async function POST(req: NextRequest) {
     )
       .toUpperCase()
       .replace(/\s+/g, '');
-    const practiceNumber = digitsOnly(profile?.practiceNumber || profile?.hpcsaPracticeNumber);
+    const specialtyKey = safeStr(profile?.specialtyKey || profile?.workspaceKey);
+    const practiceNumber = digitsOnly(profile?.practiceNumber || profile?.bhfPracticeNumber || profile?.pcnsPracticeNumber);
+    const practiceNumberRenewalDate = safeStr(
+      profile?.practiceNumberRenewalDate || profile?.bhfNextRenewalDate || profile?.pcnsNextRenewalDate,
+    );
     const hpcsaNextRenewalDate = safeStr(profile?.hpcsaNextRenewalDate || profile?.nextRenewalDate);
     const primaryQualification = primaryQualificationFrom(profile);
     const qualificationYear = Number(primaryQualification.yearOfCompletion);
@@ -355,13 +383,15 @@ export async function POST(req: NextRequest) {
     const platformCoverEnabled = profile?.platformCoverEnabled === true;
     const declarations = profile?.declarations || {};
 
+    if (!firstName) return badRequest('First name is required', 'firstName');
+    if (!lastName) return badRequest('Last name / surname is required', 'lastName');
     if (!name) return badRequest('Full name required', 'name');
     if (!emailLooksValid(email)) return badRequest('Valid email required', 'email');
     if (!passwordLooksStrong(password)) {
-      return badRequest('Password must be at least 8 characters and include at least one letter and one number', 'password');
+      return badRequest('Password must be at least 10 characters and include uppercase, lowercase, number, and special character', 'password');
     }
     if (!phoneLooksValid(normalizedPhone)) return badRequest('Valid mobile number with country code required', 'phone');
-    if (!specialty) return badRequest('Specialty required', 'specialty');
+    if (!specialty) return badRequest('Select your clinical specialty/workspace', 'specialty');
 
     if (!dob || (ageOnToday(dob) ?? 0) < 18) return badRequest('Clinician must be at least 18 years old', 'dob');
     if (!['male', 'female', 'other'].includes(gender)) return badRequest('Gender required', 'gender');
@@ -376,12 +406,16 @@ export async function POST(req: NextRequest) {
       return badRequest('HPCSA registration number must look like MP1111111', 'hpcsaRegistrationNumber');
     }
 
-    if (!practiceNumberLooksValid(practiceNumber)) {
-      return badRequest('Practice number must be exactly 7 digits', 'practiceNumber');
+    if (!hpcsaNextRenewalDate || !isTodayOrFuture(hpcsaNextRenewalDate)) {
+      return badRequest('HPCSA next renewal date is required and must not be expired', 'hpcsaNextRenewalDate');
     }
 
-    if (hpcsaNextRenewalDate && !isFutureDate(hpcsaNextRenewalDate)) {
-      return badRequest('Next HPCSA renewal date must be in the future', 'hpcsaNextRenewalDate');
+    if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) {
+      return badRequest('BHF/PCNS practice number must contain exactly 13 digits', 'practiceNumber');
+    }
+
+    if (practiceNumber && (!practiceNumberRenewalDate || !isTodayOrFuture(practiceNumberRenewalDate))) {
+      return badRequest('BHF/PCNS next renewal date is required when a practice number is entered', 'practiceNumberRenewalDate');
     }
 
     if (citizenship === 'south_african') {
@@ -417,7 +451,11 @@ export async function POST(req: NextRequest) {
     if (!normalizeSpaces(shipping?.city)) return badRequest('Shipping city required', 'shipping.city');
 
 
-    // Optional HPCSA upload
+    if (!uploadedFileLooksUsable(hpcsaFile)) {
+      return badRequest('Upload a valid HPCSA registration document or certificate. Maximum file size is 10 MB.', 'hpcsaDoc');
+    }
+
+    // Mandatory HPCSA upload
     let hpcsaS3Key: string | null = null;
     let hpcsaFileMeta: any = null;
 
@@ -435,14 +473,10 @@ export async function POST(req: NextRequest) {
           s3Key: key,
         };
       } else {
-        // keep non-fatal: allow signup even if S3 not configured
-        hpcsaFileMeta = {
-          filename: hpcsaFile.name,
-          size: Number(hpcsaFile.size || 0),
-          mime: hpcsaFile.type || 'application/octet-stream',
-          upload: 'skipped',
-          reason: up.error,
-        };
+        return badRequest(
+          'Secure HPCSA document upload is not configured right now. Please contact Ambulant+ support before submitting.',
+          'hpcsaDoc',
+        );
       }
     }
 
@@ -455,6 +489,10 @@ export async function POST(req: NextRequest) {
     const submittedAt = new Date().toISOString();
     const mergedProfile = {
       ...profile,
+      firstName,
+      middleName: middleName || undefined,
+      lastName,
+      surname: lastName,
       email,
       phone: normalizedPhone,
       license: hpcsaRegistrationNumber,
@@ -462,7 +500,11 @@ export async function POST(req: NextRequest) {
       qualification: primaryQualification.degree,
       qualificationInstitution: primaryQualification.institution,
       qualificationYear,
-      practiceNumber,
+      practiceNumber: practiceNumber || undefined,
+      practiceNumberType: practiceNumber ? 'BHF_PCNS' : undefined,
+      practiceNumberRenewalDate: practiceNumber ? practiceNumberRenewalDate : undefined,
+      hpcsaNextRenewalDate,
+      specialtyKey: specialtyKey || undefined,
       regulatorBody: 'HPCSA',
       regulatorRegistration: hpcsaRegistrationNumber,
       auth0UserId: auth0UserId || undefined,
@@ -501,11 +543,20 @@ export async function POST(req: NextRequest) {
               ? JSON.stringify(profile.otherQualifications)
               : null,
 
-            addressLine1: normalizeSpaces(shipping?.addressLine1 || profile?.address || '') || null,
-            addressLine2: normalizeSpaces(shipping?.addressLine2 || '') || null,
-            city: normalizeSpaces(shipping?.city || '') || null,
-            postalCode: normalizeSpaces(shipping?.postalCode || '') || null,
-            country: normalizeSpaces(shipping?.country || (citizenship === 'south_african' ? 'South Africa' : citizenshipCountry)) || null,
+            addressLine1:
+              normalizeSpaces(profile?.practiceAddress?.line1 || profile?.billingAddress?.line1 || shipping?.addressLine1 || profile?.address || '') ||
+              null,
+            addressLine2: normalizeSpaces(profile?.practiceAddress?.line2 || profile?.billingAddress?.line2 || shipping?.addressLine2 || '') || null,
+            city: normalizeSpaces(profile?.practiceAddress?.city || profile?.billingAddress?.city || shipping?.city || '') || null,
+            postalCode:
+              normalizeSpaces(profile?.practiceAddress?.postalCode || profile?.billingAddress?.postalCode || shipping?.postalCode || '') || null,
+            country:
+              normalizeSpaces(
+                profile?.practiceAddress?.country ||
+                  profile?.billingAddress?.country ||
+                  shipping?.country ||
+                  (citizenship === 'south_african' ? 'South Africa' : citizenshipCountry),
+              ) || null,
 
             practiceNumber: practiceNumber || null,
             regulatorBody: regulatorBody || null,
@@ -542,8 +593,11 @@ export async function POST(req: NextRequest) {
               },
               compliance: {
                 regulator: {
-                  status: regulatorBody && regulatorRegistration ? 'submitted' : 'missing',
+                  status: regulatorBody && regulatorRegistration && hpcsaFileMeta ? 'submitted' : 'missing',
                   submittedAt,
+                  hpcsaNextRenewalDate,
+                  practiceNumber: practiceNumber || null,
+                  practiceNumberRenewalDate: practiceNumber ? practiceNumberRenewalDate : null,
                 },
                 insurance: {
                   status: mergedProfile?.piInsuranceNumber || mergedProfile?.insurerName ? 'submitted' : 'missing',

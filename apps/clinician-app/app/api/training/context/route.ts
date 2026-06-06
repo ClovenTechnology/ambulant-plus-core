@@ -55,6 +55,37 @@ function safeMeta(value: unknown): JsonObj {
   return value as JsonObj;
 }
 
+function humanTrainingError(value: unknown, fallback = 'Unable to load your training details right now. Please try again or contact Ambulant+ support.') {
+  if (!value) return fallback;
+
+  if (typeof value === 'string') {
+    const v = value.trim();
+    if (!v) return fallback;
+    if (v === 'clinicianId_required') return 'We could not identify your clinician profile. Please use the training link from your signup email or sign in again.';
+    if (v === 'clinician_not_found') return 'We could not find this clinician application. Please check your training link or contact Ambulant+ support.';
+    if (v.includes('DATABASE_URL') || v.toLowerCase().includes('prisma')) {
+      return 'Training details are temporarily unavailable while the database connection is being restored. Please try again shortly.';
+    }
+    if (v.length > 180) return fallback;
+    return v.replace(/_/g, ' ');
+  }
+
+  if (typeof value === 'object') {
+    const obj = value as Record<string, any>;
+    return humanTrainingError(obj.error || obj.message || obj.reason, fallback);
+  }
+
+  return fallback;
+}
+
+function jsonFromText(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 
 function normaliseProvider(value: unknown): 'mock' | 'stripe' | 'paystack' | 'ozow' | 'unknown' {
   const p = String(value || process.env.CARD_PAYMENT_PROVIDER || process.env.PAYMENT_PROVIDER || 'paystack').toLowerCase();
@@ -192,44 +223,76 @@ export async function GET(req: NextRequest) {
   const incoming = new URL(req.url);
   const clinicianId = String(incoming.searchParams.get('clinicianId') || '').trim();
 
-  try {
-    const gw = gatewayBase();
-
-    if (gw) {
-      const gwUrl = new URL(`${gw}/api/clinicians/me/training/context`);
-
-      for (const [k, v] of incoming.searchParams.entries()) {
-        gwUrl.searchParams.set(k, v);
-      }
-
-      const upstream = await fetch(gwUrl.toString(), {
-        method: 'GET',
-        headers: forwardHeaders(req),
-        cache: 'no-store',
-      });
-
-      const text = await upstream.text();
-
-      if (upstream.ok || !clinicianId || ![401, 403].includes(upstream.status)) {
-        return new NextResponse(text, {
-          status: upstream.status,
-          headers: {
-            'content-type': upstream.headers.get('content-type') || 'application/json',
-            'cache-control': 'no-store',
-          },
-        });
-      }
-    }
-
+  const fallbackLocal = async () => {
     if (!clinicianId) {
-      return json({ ok: false, error: 'clinicianId_required' }, 400);
+      return json(
+        {
+          ok: false,
+          error: 'We could not identify your clinician profile. Please use the training link from your signup email or sign in again.',
+        },
+        400,
+      );
     }
 
     // Signup-success onboarding flow: allow limited training context by clinicianId
     // without granting access to the rest of the clinician console.
     return localTrainingContext(clinicianId);
+  };
+
+  try {
+    const gw = gatewayBase();
+
+    if (gw) {
+      try {
+        const gwUrl = new URL(`${gw}/api/clinicians/me/training/context`);
+
+        for (const [k, v] of incoming.searchParams.entries()) {
+          gwUrl.searchParams.set(k, v);
+        }
+
+        const upstream = await fetch(gwUrl.toString(), {
+          method: 'GET',
+          headers: forwardHeaders(req),
+          cache: 'no-store',
+        });
+
+        const text = await upstream.text();
+
+        if (upstream.ok) {
+          return new NextResponse(text, {
+            status: upstream.status,
+            headers: {
+              'content-type': upstream.headers.get('content-type') || 'application/json',
+              'cache-control': 'no-store',
+            },
+          });
+        }
+
+        // Launch-safe behaviour: if the gateway is unavailable/misconfigured but
+        // we have clinicianId, fall back to the clinician app DB context.
+        if (clinicianId) {
+          console.warn('[clinician-app][training/context] gateway failed; falling back locally', {
+            status: upstream.status,
+            error: humanTrainingError(jsonFromText(text) || text),
+          });
+          return fallbackLocal();
+        }
+
+        const body = jsonFromText(text);
+        return json({ ok: false, error: humanTrainingError(body || text) }, upstream.status || 502);
+      } catch (gatewayErr: any) {
+        if (clinicianId) {
+          console.warn('[clinician-app][training/context] gateway unreachable; falling back locally', gatewayErr);
+          return fallbackLocal();
+        }
+
+        return json({ ok: false, error: humanTrainingError(gatewayErr) }, 502);
+      }
+    }
+
+    return fallbackLocal();
   } catch (err: any) {
     console.error('[clinician-app][training/context][GET] error', err);
-    return json({ ok: false, error: String(err?.message || 'training_context_failed') }, 502);
+    return json({ ok: false, error: humanTrainingError(err) }, 502);
   }
 }

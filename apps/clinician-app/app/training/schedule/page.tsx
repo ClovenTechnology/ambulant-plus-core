@@ -1,4 +1,4 @@
-﻿//apps/clinician-app/app/training/schedule/page.tsx
+//apps/clinician-app/app/training/schedule/page.tsx
 'use client';
 
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
@@ -83,8 +83,37 @@ type TrainingContext = {
   };
   bankInstructions?: Record<string, any> | null;
   starterKitItems?: string[];
-  error?: string;
+  error?: unknown;
 };
+
+function errorToMessage(value: unknown, fallback = 'Something went wrong. Please try again or contact Ambulant+ support.') {
+  if (!value) return fallback;
+
+  if (typeof value === 'string') {
+    const v = value.trim();
+    if (!v) return fallback;
+    if (v === '[object Object]') return fallback;
+    if (v === 'clinicianId_required') return 'We could not identify your clinician profile. Please use the training link from your signup email or sign in again.';
+    if (v === 'clinician_not_found') return 'We could not find this clinician application. Please check your training link or contact Ambulant+ support.';
+    if (v.includes('DATABASE_URL') || v.toLowerCase().includes('prisma')) {
+      return 'This service is temporarily unable to reach the database. Please try again shortly.';
+    }
+    return v.length > 220 ? fallback : v.replace(/_/g, ' ');
+  }
+
+  if (value instanceof Error) return errorToMessage(value.message, fallback);
+
+  if (typeof value === 'object') {
+    const obj = value as Record<string, any>;
+    return errorToMessage(obj.error || obj.message || obj.reason || obj.detail, fallback);
+  }
+
+  return fallback;
+}
+
+function apiError(body: unknown, fallback: string) {
+  return errorToMessage(body, fallback);
+}
 
 function money(cents: number, currency: string) {
   const n = (cents || 0) / 100;
@@ -240,8 +269,8 @@ function TrainingSchedulePageContent() {
       const c = (await cRes.json().catch(() => null)) as TrainingContext | null;
       const s = (await sRes.json().catch(() => null)) as { ok: boolean; slots: TrainingSlot[]; error?: string } | null;
 
-      if (!cRes.ok || !c?.ok) throw new Error(c?.error || `Failed to load training context`);
-      if (!sRes.ok || !s?.ok) throw new Error(s?.error || `Failed to load training slots`);
+      if (!cRes.ok || !c?.ok) throw new Error(apiError(c, 'Unable to load your training details right now.'));
+      if (!sRes.ok || !s?.ok) throw new Error(apiError(s, 'Unable to load available training slots right now.'));
 
       setCtx(c);
       setSlots(s.slots || []);
@@ -261,7 +290,7 @@ function TrainingSchedulePageContent() {
         if (pre) setSlotId(pre.id);
       }
     } catch (e: any) {
-      setErr(e?.message || 'Failed to load');
+      setErr(errorToMessage(e, 'Unable to load your training details right now.'));
     }
   }
 
@@ -317,12 +346,12 @@ function TrainingSchedulePageContent() {
       });
 
       const js = await res.json().catch(() => null);
-      if (!res.ok || !js?.ok) throw new Error(js?.error || 'Payment initialisation failed');
-      if (!js.redirectUrl) throw new Error('Payment checkout URL was not returned');
+      if (!res.ok || !js?.ok) throw new Error(apiError(js, 'Payment initialisation failed.'));
+      if (!js.redirectUrl) throw new Error('Payment checkout URL was not returned. Please contact Ambulant+ support.');
 
       window.location.href = js.redirectUrl;
     } catch (e: any) {
-      setErr(e?.message || 'Payment initialisation failed');
+      setErr(errorToMessage(e, 'Payment initialisation failed.'));
       setBusy(false);
     }
   }
@@ -342,12 +371,12 @@ function TrainingSchedulePageContent() {
         }),
       });
       const js = await res.json().catch(() => null);
-      if (!res.ok || !js?.ok) throw new Error(js?.error || 'Payment verification failed');
+      if (!res.ok || !js?.ok) throw new Error(apiError(js, 'Payment verification failed.'));
       await load();
       setStep('done');
       setPaymentNotice('Payment confirmed. Your training booking is now scheduled.');
     } catch (e: any) {
-      setErr(e?.message || 'Payment verification failed');
+      setErr(errorToMessage(e, 'Payment verification failed.'));
       setPaymentNotice(null);
     } finally {
       setBusy(false);
@@ -379,12 +408,12 @@ function TrainingSchedulePageContent() {
         }),
       });
       const js = await res.json().catch(() => null);
-      if (!res.ok || !js?.ok) throw new Error(js?.error || 'Authorisation failed');
+      if (!res.ok || !js?.ok) throw new Error(apiError(js, 'Authorisation failed.'));
       await load();
       setStep('done');
       setPaymentNotice('Authorisation accepted. Your training booking is now scheduled.');
     } catch (e: any) {
-      setErr(e?.message || 'Authorisation failed');
+      setErr(errorToMessage(e, 'Authorisation failed.'));
     } finally {
       setBusy(false);
     }
