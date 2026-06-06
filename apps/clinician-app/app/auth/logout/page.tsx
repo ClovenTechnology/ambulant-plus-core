@@ -1,236 +1,130 @@
-// apps/clinician-app/app/auth/logout/page.tsx
-'use client';
+﻿'use client';
 
-import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, Loader2, LogIn, ShieldCheck, LogOut } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Loader2, LogOut } from 'lucide-react';
+
+const LOGIN_URL = '/auth/login?reason=signed_out';
+
+const STORAGE_KEYS = [
+  'ambulant.token',
+  'ambulant.profile',
+  'token',
+  'ambulant.clinician.token',
+  'ambulant.clinician.profile',
+  'clinician_session',
+  'ambulant_identity',
+  'ambulant_uid',
+];
+
+const COOKIE_NAMES = [
+  'ambulant.token',
+  'ambulant_token',
+  'ambulant_session',
+  '__Host-ambulant_session',
+  'ambulant.session',
+  'ambulant_identity',
+  'ambulant_uid',
+  'token',
+  'access_token',
+  'refresh_token',
+  'session',
+  'auth_session',
+  'clinician_session',
+  'ambulant_clinician_session',
+  '__Host-ambulant_clinician_session',
+  'ambulant.clinician.token',
+  'next-auth.session-token',
+  '__Secure-next-auth.session-token',
+];
 
 function clearCookieBestEffort(name: string) {
-  // Best-effort client-side cookie clearing (won't touch HttpOnly cookies).
   const expires = 'Thu, 01 Jan 1970 00:00:00 GMT';
-  document.cookie = `${name}=; expires=${expires}; path=/`;
-  document.cookie = `${name}=; expires=${expires}; path=/; samesite=lax`;
+
+  document.cookie = `${name}=; expires=${expires}; max-age=0; path=/`;
+  document.cookie = `${name}=; expires=${expires}; max-age=0; path=/; SameSite=Lax`;
+  document.cookie = `${name}=; expires=${expires}; max-age=0; path=/; Secure; SameSite=Lax`;
 }
 
-type Phase = 'clearing' | 'done';
-
 export default function ClinicianLogoutPage() {
-  const [phase, setPhase] = useState<Phase>('clearing');
-  const [detail, setDetail] = useState<string>('Clearing your session…');
-  const [serverNotified, setServerNotified] = useState<boolean | null>(null);
-
-  const nextSteps = useMemo(
-    () => [
-      {
-        href: '/auth/login',
-        label: 'Sign in again',
-        icon: LogIn,
-        primary: true,
-      },
-    ],
-    [],
-  );
+  const [detail, setDetail] = useState('Clearing your clinician session…');
 
   useEffect(() => {
-    let cancelled = false;
+    let redirected = false;
 
-    (async () => {
-      // 1) Local cleanup FIRST (so any client guards stop thinking you're logged in)
+    const goLogin = () => {
+      if (redirected) return;
+      redirected = true;
+      window.location.replace(LOGIN_URL);
+    };
+
+    const run = async () => {
       try {
         setDetail('Clearing local session…');
 
-        // Legacy + shared keys
-        localStorage.removeItem('ambulant.token');
-        localStorage.removeItem('ambulant.profile');
-        localStorage.removeItem('token');
+        for (const key of STORAGE_KEYS) {
+          localStorage.removeItem(key);
+        }
 
-        // Clinician namespaced keys
-        localStorage.removeItem('ambulant.clinician.token');
-        localStorage.removeItem('ambulant.clinician.profile');
-        localStorage.removeItem('clinician_session');
-        localStorage.removeItem('ambulant_identity');
-        localStorage.removeItem('ambulant_uid');
-
-        // Any session storage (guards / transient auth state)
         sessionStorage.clear();
       } catch {
-        // best-effort
+        // Best effort only.
       }
 
-      // 2) Best-effort cookie cleanup (non-HttpOnly only)
       try {
         setDetail('Clearing browser cookies…');
 
-        const commonCookies = [
-          // common
-          'ambulant.token',
-          'ambulant_token',
-          'ambulant_session',
-          'ambulant_identity',
-          'ambulant_uid',
-          'token',
-          'access_token',
-          'refresh_token',
-
-          // clinician-ish
-          'clinician_session',
-          'ambulant_clinician_session',
-          'ambulant.clinician.token',
-
-          // if you ever used next-auth (harmless to clear)
-          'next-auth.session-token',
-          '__Secure-next-auth.session-token',
-        ];
-
-        for (const c of commonCookies) clearCookieBestEffort(c);
+        for (const cookie of COOKIE_NAMES) {
+          clearCookieBestEffort(cookie);
+        }
       } catch {
-        // best-effort
+        // Best effort only.
       }
 
-      // 3) Tell server to clear HttpOnly cookies (best effort; do NOT block UX)
       try {
-        setDetail('Notifying server to close session…');
+        setDetail('Closing server session…');
 
-        const ctrl = new AbortController();
-        const t = window.setTimeout(() => ctrl.abort(), 1200);
-
-        const res = await fetch('/api/auth/logout', {
+        await fetch('/api/auth/logout', {
           method: 'POST',
           cache: 'no-store',
           credentials: 'include',
-          signal: ctrl.signal,
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ reason: 'clinician_logout' }),
-        }).catch(() => null);
-
-        window.clearTimeout(t);
-
-        if (!cancelled) {
-          setServerNotified(Boolean(res && 'ok' in res ? res.ok : false));
-        }
+        });
       } catch {
-        if (!cancelled) setServerNotified(false);
+        // Do not trap user on logout page.
       }
 
-      if (cancelled) return;
-      setDetail('Done.');
-      setPhase('done');
-    })();
-
-    return () => {
-      cancelled = true;
+      setDetail('Redirecting to sign in…');
+      window.setTimeout(goLogin, 250);
     };
+
+    run();
+
+    const fallback = window.setTimeout(goLogin, 2500);
+
+    return () => window.clearTimeout(fallback);
   }, []);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(900px_circle_at_18%_-10%,rgba(15,23,42,0.08),transparent_58%),radial-gradient(850px_circle_at_100%_0%,rgba(99,102,241,0.12),transparent_55%),linear-gradient(to_bottom,rgba(255,255,255,0.9),rgba(248,250,252,1))]">
-      <div className="mx-auto max-w-2xl px-6 py-12">
-        <div className="mx-auto w-full max-w-md">
-          <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-black/[0.06] backdrop-blur">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-xs font-black text-slate-500">Ambulant+</div>
-
-                {phase === 'clearing' ? (
-                  <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
-                    Signing you out…
-                  </h1>
-                ) : (
-                  <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950">
-                    You’re signed out
-                  </h1>
-                )}
-
-                <p className="mt-2 text-sm text-slate-600">
-                  {phase === 'clearing'
-                    ? 'We’re clearing your clinician session on this device.'
-                    : 'Your clinician session has been cleared on this device.'}
-                </p>
-              </div>
-
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white">
-                {phase === 'clearing' ? (
-                  <Loader2 className="h-5 w-5 text-slate-700 animate-spin" />
-                ) : (
-                  <CheckCircle2 className="h-5 w-5 text-emerald-700" />
-                )}
-              </div>
-            </div>
-
-            {/* Status line */}
-            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-              <div className="flex items-center gap-2">
-                {phase === 'clearing' ? (
-                  <LogOut className="h-4 w-4 text-slate-600" />
-                ) : (
-                  <ShieldCheck className="h-4 w-4 text-slate-600" />
-                )}
-                <div className="text-xs font-bold text-slate-800">
-                  {phase === 'clearing' ? 'Signing out in progress' : 'Signed out successfully'}
-                </div>
-              </div>
-
-              <div className="mt-1 text-xs text-slate-600">{detail}</div>
-
-              {phase === 'done' ? (
-                <div className="mt-2 text-[11px] text-slate-500">
-                  Server session close:{' '}
-                  {serverNotified === null ? (
-                    <span className="font-semibold text-slate-700">unknown</span>
-                  ) : serverNotified ? (
-                    <span className="font-semibold text-emerald-700">confirmed</span>
-                  ) : (
-                    <span className="font-semibold text-amber-700">
-                      best-effort (may already be expired)
-                    </span>
-                  )}
-                </div>
-              ) : null}
-            </div>
-
-            {/* Actions */}
-            <div className="mt-6 space-y-3">
-              {nextSteps.map((a) => {
-                const Icon = a.icon;
-                const base =
-                  'w-full flex items-center justify-center gap-2 rounded-2xl px-4 py-3 text-sm font-extrabold transition';
-                return (
-                  <Link
-                    key={a.href}
-                    href={a.href}
-                    className={cx(
-                      base,
-                      'bg-slate-900 text-white hover:bg-slate-800',
-                      phase === 'clearing' && 'pointer-events-none opacity-60',
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {a.label}
-                  </Link>
-                );
-              })}
-            </div>
-
-            {/* Footer helper */}
-            <div className="mt-5 text-center text-[11px] text-slate-500">
-              Tip: on a shared device, closing the browser after signing out adds another layer of safety.
-              <div className="mt-2">
-                <Link href="/privacy" className="font-semibold text-slate-600 hover:underline">
-                  Privacy
-                </Link>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-4 text-center text-[11px] text-slate-500">
-            This page does not auto-redirect — you stay in control.
-          </div>
+    <main className="flex min-h-screen items-center justify-center bg-[radial-gradient(900px_circle_at_18%_-10%,rgba(15,23,42,0.08),transparent_58%),radial-gradient(850px_circle_at_100%_0%,rgba(99,102,241,0.12),transparent_55%),linear-gradient(to_bottom,rgba(255,255,255,0.9),rgba(248,250,252,1))] px-6">
+      <section className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white/85 p-6 text-center shadow-sm shadow-black/[0.06] backdrop-blur">
+        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white">
+          <LogOut className="h-5 w-5 text-slate-700" />
         </div>
-      </div>
+
+        <h1 className="mt-5 text-2xl font-black tracking-tight text-slate-950">
+          Signing you out…
+        </h1>
+
+        <p className="mt-2 text-sm text-slate-600">
+          Please wait while we close your clinician session securely.
+        </p>
+
+        <div className="mt-5 flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          {detail}
+        </div>
+      </section>
     </main>
   );
-}
-
-function cx(...xs: Array<string | false | null | undefined>) {
-  return xs.filter(Boolean).join(' ');
 }
