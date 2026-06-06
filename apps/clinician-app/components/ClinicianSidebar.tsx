@@ -1,4 +1,4 @@
-// apps/clinician-app/components/ClinicianSidebar.tsx
+﻿// apps/clinician-app/components/ClinicianSidebar.tsx
 'use client';
 
 import Link from 'next/link';
@@ -101,7 +101,7 @@ export default function ClinicianSidebar() {
               { href: '/calendar', label: 'Calendar', icon: Calendar },
               { href: '/patients', label: 'Patients', icon: Users },
 
-              // ✅ requested additions
+              // âœ… requested additions
               { href: '/practice', label: 'Teams & Practices', icon: Building2 },
               { href: '/workspaces', label: 'Specialist Workspaces', icon: LayoutGrid },
               { href: '/analytics/me', label: 'Analytics', icon: BarChart3 },
@@ -298,7 +298,7 @@ export default function ClinicianSidebar() {
       {/* Footer */}
       <div className="border-t border-slate-200 p-2 space-y-1">
         <Link
-          href="/signout"
+          href="/auth/logout"
           title={collapsed ? 'Sign Out' : undefined}
           className={cx(
             'flex items-center rounded-lg text-xs transition-colors',
@@ -319,3 +319,4 @@ export default function ClinicianSidebar() {
     </aside>
   );
 }
+
