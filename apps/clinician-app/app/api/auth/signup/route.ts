@@ -1,5 +1,7 @@
-// apps/clinician-app/app/api/auth/signup/route.ts
+﻿// apps/clinician-app/app/api/auth/signup/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import crypto from 'node:crypto';
+import { PresenceActorType } from '@prisma/client';
 import { prisma } from '@/src/lib/prisma';
 import { sendEmail, sendSms } from '@/src/lib/mailer';
 
@@ -200,6 +202,191 @@ function getBaseUrl(req: NextRequest) {
   const envBase = process.env.NEXT_PUBLIC_BASE_URL;
   if (envBase && envBase.trim()) return envBase.trim().replace(/\/+$/, '');
   return req.nextUrl.origin;
+}
+
+
+function bufferToBase64url(buf: Buffer) {
+  return buf
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+async function hashPasswordScrypt(password: string) {
+  const salt = crypto.randomBytes(16);
+  const N = 16384;
+  const r = 8;
+  const p = 1;
+  const keyLen = 64;
+
+  const hash = await new Promise<Buffer>((resolve, reject) => {
+    crypto.scrypt(password, salt, keyLen, { N, r, p }, (err, derivedKey) => {
+      if (err) reject(err);
+      else resolve(derivedKey as Buffer);
+    });
+  });
+
+  return `scrypt${N}${r}${p}${bufferToBase64url(salt)}${bufferToBase64url(hash)}`;
+}
+
+function generatePatientMrnCandidate(now = new Date()) {
+  const yy = String(now.getUTCFullYear()).slice(-2);
+  const mm = String(now.getUTCMonth() + 1).padStart(2, '0');
+  const suffix = crypto.randomBytes(4).toString('hex').slice(0, 6).toUpperCase();
+  return `AMB-${yy}${mm}-${suffix}`;
+}
+
+async function generateUniquePatientMrn(tx: any) {
+  for (let i = 0; i < 12; i += 1) {
+    const mrn = generatePatientMrnCandidate();
+    const existing = await tx.patientProfile
+      .findUnique({ where: { mrn }, select: { id: true } })
+      .catch(() => null);
+
+    if (!existing) return mrn;
+  }
+
+  throw new Error('Unable to allocate a unique patient MRN.');
+}
+
+function dateStringToUtcDate(value: any) {
+  const raw = safeStr(value);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+
+  const d = new Date(`${raw}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) return null;
+
+  return d;
+}
+
+function normalizePatientGender(value: any) {
+  const raw = safeStr(value).toLowerCase();
+  if (['male', 'female', 'other'].includes(raw)) return raw;
+  return raw || null;
+}
+
+function patientAddressFromClinicianProfile(profile: any, shipping: any) {
+  const home = profile?.homeAddress || {};
+  const billing = profile?.billingAddress || {};
+  const practice = profile?.practiceAddress || {};
+
+  const addressLine1 =
+    normalizeSpaces(home.line1 || billing.line1 || shipping?.addressLine1 || practice.line1 || profile?.address || '') ||
+    'Address pending confirmation';
+
+  const addressLine2 =
+    normalizeSpaces(home.line2 || billing.line2 || shipping?.addressLine2 || practice.line2 || '') || null;
+
+  const city =
+    normalizeSpaces(home.city || billing.city || shipping?.city || practice.city || '') ||
+    'City pending confirmation';
+
+  const postalCode =
+    normalizeSpaces(home.postalCode || billing.postalCode || shipping?.postalCode || practice.postalCode || '') || null;
+
+  return { addressLine1, addressLine2, city, postalCode };
+}
+
+async function ensurePatientAccountForClinician(
+  tx: any,
+  args: {
+    email: string;
+    password: string;
+    name: string;
+    phone?: string;
+    dob?: string;
+    gender?: string;
+    idNumber?: string;
+    profile?: any;
+    shipping?: any;
+    submittedAt?: string;
+  },
+) {
+  const email = normEmail(args.email);
+  if (!email) return { linked: false, reason: 'missing_email' };
+
+  const orgId = process.env.DEFAULT_ORG_ID || 'org-default';
+
+  let cred = await tx.authCredential
+    .findUnique({
+      where: { email },
+      select: { id: true, email: true, actorType: true, disabled: true, orgId: true },
+    })
+    .catch(() => null);
+
+  if (cred && cred.actorType !== PresenceActorType.PATIENT) {
+    return {
+      linked: false,
+      reason: 'email_reserved_by_non_patient_credential',
+      userId: cred.id,
+    };
+  }
+
+  if (!cred) {
+    const passwordHash = await hashPasswordScrypt(args.password);
+
+    cred = await tx.authCredential.create({
+      data: {
+        email,
+        passwordHash,
+        actorType: PresenceActorType.PATIENT,
+        disabled: false,
+        orgId,
+      },
+      select: { id: true, email: true, actorType: true, disabled: true, orgId: true },
+    });
+  }
+
+  const existingProfile = await tx.patientProfile
+    .findFirst({
+      where: {
+        OR: [{ userId: cred.id }, { contactEmail: email }],
+      },
+      select: { id: true, userId: true, mrn: true },
+    })
+    .catch(() => null);
+
+  if (existingProfile) {
+    return {
+      linked: true,
+      created: false,
+      userId: cred.id,
+      patientId: existingProfile.id,
+      mrn: existingProfile.mrn,
+    };
+  }
+
+  const mrn = await generateUniquePatientMrn(tx);
+  const address = patientAddressFromClinicianProfile(args.profile || {}, args.shipping || {});
+  const dobDate = dateStringToUtcDate(args.dob);
+
+  const patientProfile = await tx.patientProfile.create({
+    data: {
+      userId: cred.id,
+      mrn,
+      name: args.name || email,
+      contactEmail: email,
+      phone: args.phone || undefined,
+      dob: dobDate || undefined,
+      gender: normalizePatientGender(args.gender) || undefined,
+      idNumber: args.idNumber || undefined,
+      addressLine1: address.addressLine1,
+      addressLine2: address.addressLine2 || undefined,
+      city: address.city,
+      postalCode: address.postalCode || undefined,
+      allergies: undefined,
+    },
+    select: { id: true, userId: true, mrn: true },
+  });
+
+  return {
+    linked: true,
+    created: true,
+    userId: cred.id,
+    patientId: patientProfile.id,
+    mrn: patientProfile.mrn,
+  };
 }
 
 /** ---------------- Auth0 (Mgmt) helper ----------------
@@ -422,7 +609,7 @@ export async function POST(req: NextRequest) {
       const idError = validateSaIdDetailed(idNumber, dob, gender);
       if (idError) return badRequest(idError, 'saIdNumber');
     } else if (citizenship === 'non_south_african') {
-      if (!passportNumberLooksValid(passportNumber)) return badRequest('Passport number must be 5â€“20 letters/numbers', 'passportNumber');
+      if (!passportNumberLooksValid(passportNumber)) return badRequest('Passport number must be 5Ã¢â‚¬â€œ20 letters/numbers', 'passportNumber');
       if (!citizenshipCountry) return badRequest('Country of citizenship required', 'citizenshipCountry');
       if (!passportIssuingAuthority) return badRequest('Passport issuing authority required', 'passportIssuingAuthority');
       if (!isFutureDate(passportExpiry)) return badRequest('Passport expiry must be in the future', 'passportExpiry');
@@ -635,7 +822,20 @@ export async function POST(req: NextRequest) {
           },
         });
 
-        return created;
+        const patientAccount = await ensurePatientAccountForClinician(tx, {
+          email,
+          password,
+          name,
+          phone: normalizedPhone,
+          dob,
+          gender,
+          idNumber: citizenship === 'south_african' ? idNumber : undefined,
+          profile: mergedProfile,
+          shipping,
+          submittedAt,
+        });
+
+        return { ...created, patientAccount };
       });
     } catch (e: any) {
       // Prisma unique constraint (userId/email already exists)
@@ -654,7 +854,7 @@ export async function POST(req: NextRequest) {
 
     // Email + SMS: clearly explain the workflow (training -> payment -> ship -> certify)
     if (email) {
-      const subject = 'Ambulant+ Clinician Application Received â€” Next Steps';
+      const subject = 'Ambulant+ Clinician Application Received Ã¢â‚¬â€ Next Steps';
       const html = `
         <p>Hi ${name || 'Clinician'},</p>
         <p>Your Ambulant+ clinician application has been received.</p>
@@ -663,10 +863,10 @@ export async function POST(req: NextRequest) {
         <ol>
           <li><strong>Training scheduling + payment</strong> (required)</li>
           <li><strong>Starter kit dispatch</strong> after payment confirmation</li>
-          <li><strong>Admin certification</strong> â€” only then your profile becomes visible to patients</li>
+          <li><strong>Admin certification</strong> Ã¢â‚¬â€ only then your profile becomes visible to patients</li>
         </ol>
 
-        <p><a href="${onboardingLink}">ðŸ‘‰ Sign in to continue onboarding</a></p>
+        <p><a href="${onboardingLink}">Ã°Å¸â€˜â€° Sign in to continue onboarding</a></p>
 
         <p style="margin-top:12px;"><strong>Starter kit contents</strong> (sent after payment):</p>
         <ul>
@@ -678,8 +878,8 @@ export async function POST(req: NextRequest) {
 
         <p>When the admin assigns courier + tracking, you will receive tracking details by email and SMS.</p>
 
-        <p style="margin-top:12px;">If you didnâ€™t request this, you can ignore this email.</p>
-        <p>â€” Ambulant+ Team</p>
+        <p style="margin-top:12px;">If you didnÃ¢â‚¬â„¢t request this, you can ignore this email.</p>
+        <p>Ã¢â‚¬â€ Ambulant+ Team</p>
       `;
       sendEmail(email, subject, html).catch(console.error);
     }
@@ -699,6 +899,7 @@ export async function POST(req: NextRequest) {
           status: clinician.status,
           userId: clinician.userId,
           specialty: clinician.specialty,
+          patientAccount: clinician.patientAccount ?? null,
         },
         redirectTo: '/auth/login?reason=signup_success',
       },
@@ -709,4 +910,5 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: 'Unable to process your clinician application right now. Please try again shortly.' }, 500);
   }
 }
+
 
