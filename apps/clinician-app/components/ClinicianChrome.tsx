@@ -1,32 +1,169 @@
-// apps/clinician-app/components/ClinicianChrome.tsx
+﻿// apps/clinician-app/components/ClinicianChrome.tsx
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { Loader2, ShieldAlert } from 'lucide-react';
 
 import InboxBell from '@/components/InboxBell';
 import ClinicianSidebar from '@/components/ClinicianSidebar';
 
-const SIDEBAR_EXCLUDED_PREFIXES = [
+const CHROME_EXCLUDED_PREFIXES = [
   '/auth/login',
   '/auth/signup',
   '/auth/forgot',
   '/auth/reset',
   '/auth/logout',
+  '/logout',
+  '/sign-out',
+  '/training',
 ];
+
+function isExcludedPath(pathname?: string | null) {
+  const p = pathname || '';
+  return CHROME_EXCLUDED_PREFIXES.some(
+    (prefix) => p === prefix || p.startsWith(prefix + '/'),
+  );
+}
+
+function safeNext(pathname?: string | null) {
+  const p = pathname || '/';
+  return p.startsWith('/') && !p.startsWith('//') ? p : '/';
+}
+
+function trainingUrl(params: {
+  clinicianId?: string | null;
+  next?: string | null;
+}) {
+  const qs = new URLSearchParams();
+  if (params.clinicianId) qs.set('clinicianId', params.clinicianId);
+  qs.set('reason', 'training_required');
+  qs.set('next', safeNext(params.next));
+  return `/training/schedule?${qs.toString()}`;
+}
+
+function loginUrl(next?: string | null) {
+  const qs = new URLSearchParams();
+  qs.set('next', safeNext(next));
+  return `/auth/login?${qs.toString()}`;
+}
+
+type GateState =
+  | { status: 'checking' }
+  | { status: 'allowed' }
+  | { status: 'redirecting'; message: string }
+  | { status: 'error'; message: string };
 
 export default function ClinicianChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const hideChrome = useMemo(() => isExcludedPath(pathname), [pathname]);
+  const [gate, setGate] = useState<GateState>({ status: 'checking' });
 
-  const hideChrome = useMemo(() => {
-    const p = pathname || '';
-    return SIDEBAR_EXCLUDED_PREFIXES.some(
-      (prefix) => p === prefix || p.startsWith(prefix + '/'),
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkAccess() {
+      if (hideChrome) {
+        setGate({ status: 'allowed' });
+        return;
+      }
+
+      setGate({ status: 'checking' });
+
+      try {
+        const res = await fetch('/api/me', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'include',
+          headers: { accept: 'application/json' },
+        });
+
+        const data = await res.json().catch(() => null);
+
+        if (cancelled) return;
+
+        if (res.status === 401 || res.status === 403 || !data?.ok) {
+          setGate({ status: 'redirecting', message: 'Redirecting to sign in…' });
+          window.location.replace(loginUrl(pathname));
+          return;
+        }
+
+        const role = String(data?.role || '').toLowerCase();
+        const canPractice =
+          data?.canPractice === true ||
+          role === 'admin' ||
+          role === 'admin_staff';
+
+        if (!canPractice) {
+          const clinicianId =
+            data?.clinicianId ||
+            data?.clinician?.id ||
+            data?.clinician?.clinicianId ||
+            null;
+
+          setGate({
+            status: 'redirecting',
+            message: 'Training is required before workspace access…',
+          });
+
+          window.location.replace(
+            trainingUrl({
+              clinicianId: clinicianId ? String(clinicianId) : null,
+              next: pathname,
+            }),
+          );
+          return;
+        }
+
+        setGate({ status: 'allowed' });
+      } catch {
+        if (cancelled) return;
+
+        setGate({
+          status: 'error',
+          message: 'Unable to verify your clinician access. Please sign in again.',
+        });
+
+        window.setTimeout(() => {
+          window.location.replace(loginUrl(pathname));
+        }, 900);
+      }
+    }
+
+    checkAccess();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [hideChrome, pathname]);
+
+  if (gate.status !== 'allowed') {
+    return (
+      <main className="flex min-h-screen items-center justify-center bg-slate-50 px-6">
+        <section className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 text-center shadow-sm">
+          <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl border border-slate-200 bg-white">
+            {gate.status === 'error' ? (
+              <ShieldAlert className="h-5 w-5 text-amber-700" />
+            ) : (
+              <Loader2 className="h-5 w-5 animate-spin text-slate-700" />
+            )}
+          </div>
+
+          <h1 className="mt-5 text-xl font-black tracking-tight text-slate-950">
+            Checking clinician access…
+          </h1>
+
+          <p className="mt-2 text-sm text-slate-600">
+            {gate.status === 'checking'
+              ? 'Please wait while we verify your training and workspace eligibility.'
+              : gate.message}
+          </p>
+        </section>
+      </main>
     );
-  }, [pathname]);
+  }
 
-  // ✅ Auth pages: no header, no sidebar
   if (hideChrome) {
     return (
       <div className="min-h-[calc(100vh-56px)]">
@@ -35,7 +172,6 @@ export default function ClinicianChrome({ children }: { children: React.ReactNod
     );
   }
 
-  // ✅ App pages: header + sidebar + main
   return (
     <>
       <header className="h-14 border-b bg-white/70 backdrop-blur">
