@@ -532,9 +532,25 @@ export async function POST(req: NextRequest) {
       profile = {};
     }
 
-    const firstName = normalizeSpaces(profile?.firstName);
-    const middleName = normalizeSpaces(profile?.middleName);
-    const lastName = normalizeSpaces(profile?.lastName || profile?.surname);
+    const submittedFullName = normalizeSpaces(
+      profile?.fullName || profile?.name || profile?.displayName || name,
+    );
+    const submittedNameParts = submittedFullName.split(' ').filter(Boolean);
+
+    const firstName = normalizeSpaces(profile?.firstName || submittedNameParts[0] || '');
+
+    const middleName = normalizeSpaces(
+      profile?.middleName ||
+        (submittedNameParts.length > 2
+          ? submittedNameParts.slice(1, submittedNameParts.length - 1).join(' ')
+          : ''),
+    );
+
+    const lastName = normalizeSpaces(
+      profile?.lastName ||
+        profile?.surname ||
+        (submittedNameParts.length > 1 ? submittedNameParts[submittedNameParts.length - 1] : ''),
+    );
 
     if (!name) {
       name = [firstName, middleName, lastName].filter(Boolean).join(' ');
@@ -910,5 +926,6 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: 'Unable to process your clinician application right now. Please try again shortly.' }, 500);
   }
 }
+
 
 
