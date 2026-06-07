@@ -1,4 +1,4 @@
-// apps/clinician-app/app/api/training/slots/route.ts
+﻿// apps/clinician-app/app/api/training/slots/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 
@@ -48,6 +48,27 @@ function forwardHeaders(req: NextRequest) {
   return h;
 }
 
+function humanSlotsError(value: unknown) {
+  const raw =
+    typeof value === 'string'
+      ? value
+      : value && typeof value === 'object'
+        ? String((value as any).error || (value as any).message || '')
+        : '';
+
+  if (raw === 'clinicianId_required') {
+    return 'We could not identify your clinician profile. Please sign in again or use the training link from your signup email.';
+  }
+
+  if (raw.includes('DATABASE_URL') || raw.toLowerCase().includes('prisma')) {
+    return 'Training slots are temporarily unavailable while the database connection is being restored. Please try again shortly.';
+  }
+
+  return raw && raw.length < 180
+    ? raw.replace(/_/g, ' ')
+    : 'Unable to load available training slots right now.';
+}
+
 async function localTrainingSlots() {
   const now = new Date();
 
@@ -73,47 +94,69 @@ async function localTrainingSlots() {
   });
 }
 
+function parseJson(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: NextRequest) {
   const incoming = new URL(req.url);
   const clinicianId = String(incoming.searchParams.get('clinicianId') || '').trim();
+
+  if (!clinicianId) {
+    return json({ ok: false, error: 'clinicianId_required' }, 400);
+  }
 
   try {
     const gw = gatewayBase();
 
     if (gw) {
-      const gwUrl = new URL(`${gw}/api/clinicians/me/training/slots`);
+      try {
+        const gwUrl = new URL(`${gw}/api/clinicians/me/training/slots`);
 
-      for (const [k, v] of incoming.searchParams.entries()) {
-        gwUrl.searchParams.set(k, v);
-      }
+        for (const [k, v] of incoming.searchParams.entries()) {
+          gwUrl.searchParams.set(k, v);
+        }
 
-      const upstream = await fetch(gwUrl.toString(), {
-        method: 'GET',
-        headers: forwardHeaders(req),
-        cache: 'no-store',
-      });
-
-      const text = await upstream.text();
-
-      if (upstream.ok || !clinicianId || ![401, 403].includes(upstream.status)) {
-        return new NextResponse(text, {
-          status: upstream.status,
-          headers: {
-            'content-type': upstream.headers.get('content-type') || 'application/json',
-            'cache-control': 'no-store',
-          },
+        const upstream = await fetch(gwUrl.toString(), {
+          method: 'GET',
+          headers: forwardHeaders(req),
+          cache: 'no-store',
         });
+
+        const text = await upstream.text();
+
+        if (upstream.ok) {
+          return new NextResponse(text, {
+            status: upstream.status,
+            headers: {
+              'content-type': upstream.headers.get('content-type') || 'application/json',
+              'cache-control': 'no-store',
+            },
+          });
+        }
+
+        // Launch-safe behaviour:
+        // If gateway route is missing/misconfigured, do NOT show 404 to clinicians.
+        // Fall back to clinician-app DB slots.
+        console.warn('[clinician-app][training/slots] gateway failed; falling back locally', {
+          status: upstream.status,
+          error: humanSlotsError(parseJson(text) || text),
+        });
+
+        return localTrainingSlots();
+      } catch (gatewayErr: any) {
+        console.warn('[clinician-app][training/slots] gateway unreachable; falling back locally', gatewayErr);
+        return localTrainingSlots();
       }
     }
 
-    if (!clinicianId) {
-      return json({ ok: false, error: 'clinicianId_required' }, 400);
-    }
-
-    // Signup-success onboarding flow: limited public-by-clinicianId slot lookup.
     return localTrainingSlots();
   } catch (err: any) {
     console.error('[clinician-app][training/slots][GET] error', err);
-    return json({ ok: false, error: String(err?.message || 'training_slots_failed') }, 502);
+    return json({ ok: false, error: humanSlotsError(err) }, 502);
   }
 }
