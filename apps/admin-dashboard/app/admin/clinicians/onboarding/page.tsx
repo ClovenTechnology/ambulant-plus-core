@@ -1,9 +1,10 @@
-// apps/admin-dashboard/app/admin/clinicians/onboarding/page.tsx
+﻿// apps/admin-dashboard/app/admin/clinicians/onboarding/page.tsx
 import React from 'react';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { verifyAdminToken } from '@/src/lib/auth';
 import OnboardingDispatchBoard from './OnboardingDispatchBoard';
+import OnboardingSettingsPanel from './OnboardingSettingsPanel';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -100,7 +101,7 @@ export default async function AdminClinicianOnboardingPage() {
   if (!v.ok) {
     return (
       <main className="mx-auto max-w-4xl p-6">
-        <h1 className="text-2xl font-bold">Admin — Clinician Onboarding</h1>
+        <h1 className="text-2xl font-bold">Admin â€” Clinician Onboarding</h1>
         <div className="mt-4 text-sm text-rose-600">
           Access denied: {v.error}
         </div>
@@ -119,7 +120,7 @@ export default async function AdminClinicianOnboardingPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">
-            Clinicians — Onboarding &amp; Dispatch
+            Clinicians â€” Onboarding &amp; Dispatch
           </h1>
           <p className="mt-1 text-sm text-gray-600">
             End-to-end view of clinician onboarding, mandatory training and
@@ -150,6 +151,8 @@ export default async function AdminClinicianOnboardingPage() {
         </div>
       </header>
 
+      <OnboardingSettingsPanel />
+
       {!board.ok && (
         <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           Couldn&apos;t load onboarding board. Check{' '}
@@ -164,3 +167,4 @@ export default async function AdminClinicianOnboardingPage() {
     </main>
   );
 }
+
