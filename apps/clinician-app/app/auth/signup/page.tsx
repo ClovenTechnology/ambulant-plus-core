@@ -120,7 +120,7 @@ function emailLooksValid(v: string) {
 }
 
 function passwordLooksStrong(v: string) {
-  return v.length >= 8 && /[A-Za-z]/.test(v) && /\d/.test(v);
+  return v.length >= 10 && /[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v) && /[^A-Za-z0-9]/.test(v);
 }
 
 function composePhone(countryCode: string, local: string) {
@@ -207,7 +207,7 @@ function hpcsaRegistrationLooksValid(value: string) {
 }
 
 function practiceNumberLooksValid(value: string) {
-  return /^\d{7}$/.test(digitsOnly(value));
+  return /^\d{13}$/.test(digitsOnly(value));
 }
 
 function passportNumberLooksValid(value: string) {
@@ -431,8 +431,8 @@ export default function ClinicianSignupPage() {
       ) {
         return false;
       }
-      if (!practiceNumberLooksValid(practiceNumber)) return false;
-      if (nextRenewalDate && !isFutureDate(nextRenewalDate)) return false;
+      if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return false;
+      if (!nextRenewalDate || !isTodayOrFuture(nextRenewalDate)) return false;
       if (!platformCover && hasInsurance === null) return false;
       if (!platformCover && hasInsurance === true && (!insurerName.trim() || !insuranceType.trim() || !insuranceCoversVirtual)) {
         return false;
@@ -490,9 +490,10 @@ export default function ClinicianSignupPage() {
   }
 
   function validateFinal(): ValidationFailure | null {
-    if (!normalizeSpaces(name)) return fail(0, 'Full name is required.');
+    const finalNameParts = normalizeSpaces(name).split(' ').filter(Boolean);
+    if (finalNameParts.length < 2) return fail(0, 'Enter both first name and last name / surname.');
     if (!emailLooksValid(email)) return fail(0, 'Enter a valid email address.');
-    if (!passwordLooksStrong(pw)) return fail(0, 'Password must be at least 8 characters and include at least one letter and one number.');
+    if (!passwordLooksStrong(pw)) return fail(0, 'Password must be at least 10 characters and include uppercase, lowercase, number, and special character.');
     if (!phoneLooksValid(normalizedPhone)) return fail(0, 'Enter a valid mobile number with country code, for example +27821234567.');
 
     if (!specialty.trim()) return fail(1, 'Specialty is required.');
@@ -517,8 +518,8 @@ export default function ClinicianSignupPage() {
       if (!passportIssuingAuthority.trim()) return fail(2, 'Passport issuing authority is required.');
       if (!isFutureDate(passportExpiry)) return fail(2, 'Passport expiry must be a future date.');
     }
-    if (!practiceNumberLooksValid(practiceNumber)) return fail(2, 'Practice number must be exactly 7 digits.');
-    if (nextRenewalDate && !isFutureDate(nextRenewalDate)) return fail(2, 'Next HPCSA renewal date must be in the future.');
+    if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return fail(2, 'BHF/PCNS practice number must contain exactly 13 digits.');
+    if (!nextRenewalDate || !isTodayOrFuture(nextRenewalDate)) return fail(2, 'HPCSA next renewal date is required and must not be expired.');
     if (!platformCover && hasInsurance === null) return fail(2, 'Please confirm whether you have professional indemnity cover.');
     if (!platformCover && hasInsurance === true && !insurerName.trim()) return fail(2, 'Insurer name is required.');
     if (!platformCover && hasInsurance === true && !insuranceType.trim()) return fail(2, 'Insurance type is required.');
@@ -575,9 +576,19 @@ export default function ClinicianSignupPage() {
       const normalizedHpcsaRegistration = String(license || '').trim().toUpperCase().replace(/\s+/g, '');
       const normalizedPracticeNumber = digitsOnly(practiceNumber);
       const normalizedSaId = digitsOnly(saIdNumber);
+      const submittedFullName = normalizeSpaces(name);
+      const submittedNameParts = submittedFullName.split(' ').filter(Boolean);
+      const firstName = submittedNameParts[0] || '';
+      const lastName = submittedNameParts.length > 1 ? submittedNameParts[submittedNameParts.length - 1] : '';
+      const middleName = submittedNameParts.length > 2 ? submittedNameParts.slice(1, -1).join(' ') : '';
 
       // Build a single “profile” blob (stored server-side in metadata.rawProfileJson)
       const profile = {
+        firstName,
+        middleName: middleName || undefined,
+        lastName,
+        surname: lastName,
+
         dob: dob || undefined,
         dateOfBirth: dob || undefined,
         gender: gender || undefined,
@@ -616,9 +627,13 @@ export default function ClinicianSignupPage() {
         regulatorBody: 'HPCSA',
         regulatorRegistration: normalizedHpcsaRegistration,
         hpcsaRegistrationNumber: normalizedHpcsaRegistration,
-        practiceNumber: normalizedPracticeNumber,
-        hpcsaPracticeNumber: normalizedPracticeNumber,
         hpcsaNextRenewalDate: nextRenewalDate || undefined,
+
+        practiceNumber: normalizedPracticeNumber || undefined,
+        bhfPracticeNumber: normalizedPracticeNumber || undefined,
+        pcnsPracticeNumber: normalizedPracticeNumber || undefined,
+        practiceNumberType: normalizedPracticeNumber ? 'BHF_PCNS' : undefined,
+        practiceNumberRenewalDate: normalizedPracticeNumber ? nextRenewalDate || undefined : undefined,
 
         // Insurance: if platform cover enabled, capture nothing here
         platformCoverEnabled: platformCover,
@@ -669,7 +684,7 @@ export default function ClinicianSignupPage() {
       // Prefer multipart (supports file upload)
       const fd = new FormData();
       fd.set('role', 'clinician');
-      fd.set('name', name.trim());
+      fd.set('name', submittedFullName);
       fd.set('email', emailNorm);
       fd.set('password', pw);
       fd.set('phone', normalizedPhone);
@@ -1132,21 +1147,21 @@ export default function ClinicianSignupPage() {
                         ) : null}
                       </Section>
 
-                      <Section title="HPCSA Registration">
+                      <Section title="Regulatory registration">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <MiniField label="Practice number *">
+                          <MiniField label="BHF / PCNS practice number (optional)">
                             <input
                               value={practiceNumber}
-                              onChange={(e) => setPracticeNumber(digitsOnly(e.target.value).slice(0, 7))}
+                              onChange={(e) => setPracticeNumber(digitsOnly(e.target.value).slice(0, 13))}
                               className={inputCls}
-                              placeholder="1234567"
+                              placeholder="13-digit BHF/PCNS number"
                               inputMode="numeric"
-                              maxLength={7}
+                              maxLength={13}
                             />
-                            <div className="mt-1 text-[11px] text-slate-500">Use the 7-digit South African practice/BHF number.</div>
+                            <div className="mt-1 text-[11px] text-slate-500">Optional. If entered, use exactly 13 digits. This is separate from your HPCSA MP registration number.</div>
                           </MiniField>
 
-                          <MiniField label="Next renewal date">
+                          <MiniField label="HPCSA next renewal date *">
                             <input value={nextRenewalDate} onChange={(e) => setNextRenewalDate(e.target.value)} className={inputCls} type="date" />
                           </MiniField>
                         </div>
