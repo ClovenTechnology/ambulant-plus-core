@@ -654,11 +654,11 @@ export async function POST(req: NextRequest) {
     if (!normalizeSpaces(shipping?.city)) return badRequest('Shipping city required', 'shipping.city');
 
 
-    if (!uploadedFileLooksUsable(hpcsaFile)) {
-      return badRequest('Upload a valid HPCSA registration document or certificate. Maximum file size is 10 MB.', 'hpcsaDoc');
+    if (hpcsaFile && !uploadedFileLooksUsable(hpcsaFile)) {
+      return badRequest('If uploaded, the HPCSA registration document/certificate must be a valid file up to 10 MB.', 'hpcsaDoc');
     }
 
-    // Mandatory HPCSA upload
+    // Optional HPCSA upload
     let hpcsaS3Key: string | null = null;
     let hpcsaFileMeta: any = null;
 
@@ -676,10 +676,13 @@ export async function POST(req: NextRequest) {
           s3Key: key,
         };
       } else {
-        return badRequest(
-          'Secure HPCSA document upload is not configured right now. Please contact Ambulant+ support before submitting.',
-          'hpcsaDoc',
-        );
+        hpcsaFileMeta = {
+          filename: hpcsaFile.name,
+          size: Number(hpcsaFile.size || 0),
+          mime: hpcsaFile.type || 'application/octet-stream',
+          upload: 'skipped',
+          reason: up.error,
+        };
       }
     }
 
