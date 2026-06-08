@@ -1,10 +1,9 @@
 ﻿// apps/admin-dashboard/app/admin/clinicians/onboarding/page.tsx
 import React from 'react';
 import Link from 'next/link';
-import { headers } from 'next/headers';
-import { verifyAdminToken } from '@/src/lib/auth';
 import OnboardingDispatchBoard from './OnboardingDispatchBoard';
 import OnboardingSettingsPanel from './OnboardingSettingsPanel';
+import { getSessionFromGateway } from '@/src/lib/session';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -54,33 +53,45 @@ type BoardResponse = {
   error?: string;
 };
 
-async function fetchOnboardingBoard(): Promise<BoardResponse> {
-  const h = headers();
-  const gateway =
-    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-    process.env.NEXT_PUBLIC_PATIENT_BASE ??
-    'http://localhost:3010';
+function gatewayBase() {
+  return (
+    process.env.APIGW_BASE ||
+    process.env.APIGW_BASE_URL ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_PATIENT_BASE ||
+    'http://localhost:3010'
+  ).replace(/\/+$/, '');
+}
 
+async function fetchOnboardingBoard(): Promise<BoardResponse> {
+  const gateway = gatewayBase();
   const url = `${gateway}/api/admin/clinicians/onboarding-board`;
   const adminKey = process.env.ADMIN_API_KEY ?? '';
 
   try {
     const res = await fetch(url, {
       headers: {
-        'content-type': 'application/json',
+        accept: 'application/json',
         'x-admin-key': adminKey,
       },
       cache: 'no-store',
     });
+
     const js = (await res.json().catch(() => ({}))) as BoardResponse;
+
     if (!res.ok || js.ok === false) {
       return {
         ok: false,
         rows: [],
-        error:
-          js.error || `HTTP ${res.status} loading onboarding board (${url})`,
+        error: js.error || `HTTP ${res.status} loading onboarding board (${url})`,
       };
     }
+
     return { ok: true, rows: js.rows || [] };
   } catch (e: any) {
     console.error('fetchOnboardingBoard error', e);
@@ -93,22 +104,24 @@ async function fetchOnboardingBoard(): Promise<BoardResponse> {
 }
 
 export default async function AdminClinicianOnboardingPage() {
-  const h = headers();
-  const authHeader =
-    h.get('authorization') || h.get('Authorization') || undefined;
-  const v = await verifyAdminToken(authHeader);
+  const session = await getSessionFromGateway();
 
-  if (!v.ok) {
+  if (!session?.authenticated) {
     return (
       <main className="mx-auto max-w-4xl p-6">
-        <h1 className="text-2xl font-bold">Admin â€” Clinician Onboarding</h1>
+        <h1 className="text-2xl font-bold">Admin - Clinician Onboarding</h1>
         <div className="mt-4 text-sm text-rose-600">
-          Access denied: {v.error}
+          Access denied: admin session required.
         </div>
         <div className="mt-3 text-sm">
-          Sign in with an admin account and include a valid Access Token with
-          the required admin scope/role.
+          Please sign in with your Admin Dashboard account.
         </div>
+        <Link
+          href="/auth/signin?next=/admin/clinicians/onboarding"
+          className="mt-4 inline-flex rounded-lg border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
+        >
+          Sign in
+        </Link>
       </main>
     );
   }
@@ -120,11 +133,11 @@ export default async function AdminClinicianOnboardingPage() {
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold">
-            Clinicians â€” Onboarding &amp; Dispatch
+            Clinicians - Onboarding &amp; Dispatch
           </h1>
           <p className="mt-1 text-sm text-gray-600">
-            End-to-end view of clinician onboarding, mandatory training and
-            Ambulant+ starter kit dispatch.
+            End-to-end view of clinician onboarding, mandatory training payment,
+            authorisation codes and Ambulant+ starter kit dispatch.
           </p>
         </div>
 
@@ -132,19 +145,16 @@ export default async function AdminClinicianOnboardingPage() {
           <Link
             href="/admin/calendar"
             className="rounded border bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
-            title="Open calendar view (training schedule)"
+            title="Open calendar view"
           >
             Calendar
           </Link>
 
           <div className="text-right text-xs text-gray-500">
-            Signed in as admin
+            Signed in as {session.user?.email || 'admin'}
             <div>
               <span className="font-mono text-[11px]">
-                Gateway:{' '}
-                {process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-                  process.env.NEXT_PUBLIC_PATIENT_BASE ??
-                  'http://localhost:3010'}
+                Gateway: {gatewayBase()}
               </span>
             </div>
           </div>
@@ -167,4 +177,3 @@ export default async function AdminClinicianOnboardingPage() {
     </main>
   );
 }
-
