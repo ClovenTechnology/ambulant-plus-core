@@ -454,13 +454,17 @@ export default function AdminSignupPage() {
       });
 
       if (requestedRoleNames.length) {
-        await RoleReqApi.create({
-          email: email.trim(),
-          name: name.trim(),
-          departmentId,
-          designationId,
-          roleNames: requestedRoleNames,
-        });
+        try {
+          await RoleReqApi.create({
+            email: email.trim(),
+            name: name.trim(),
+            departmentId,
+            designationId,
+            roleNames: requestedRoleNames,
+          });
+        } catch (roleErr) {
+          console.warn('[admin signup] account created, but optional role request failed', roleErr);
+        }
       }
 
       window.location.href = next || '/';
