@@ -1,4 +1,3 @@
-﻿// apps/clinician-app/app/api/rtc/token/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -8,11 +7,20 @@ function trimSlash(s: string) {
   return String(s || '').replace(/\/+$/, '');
 }
 
+function envFirst(names: string[]) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value && value.trim()) return value.trim();
+  }
+  return '';
+}
+
 function pickBase() {
   return (
     process.env.APIGW_BASE_URL ||
     process.env.APIGW_BASE ||
     process.env.API_GATEWAY_URL ||
+    process.env.API_GATEWAY_BASE_URL ||
     process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
     ''
@@ -87,7 +95,98 @@ function bodyFromQuery(req: NextRequest) {
   };
 }
 
-async function proxyToGateway(req: NextRequest, bodyText: string) {
+function normaliseWsUrl(value: string) {
+  const v = String(value || '').trim();
+  if (!v) return '';
+  if (v.startsWith('wss://') || v.startsWith('ws://')) return v;
+  if (v.startsWith('https://')) return `wss://${v.slice('https://'.length)}`;
+  if (v.startsWith('http://')) return `ws://${v.slice('http://'.length)}`;
+  return v;
+}
+
+function isTrainingRoom(body: any) {
+  const roomId = String(body?.roomId || body?.room || '').trim();
+  const uid = String(body?.uid || body?.identity || body?.user || '').trim();
+
+  return (
+    roomId.startsWith('training-') &&
+    (uid.startsWith('training-clinician-') || uid.startsWith('training-room-'))
+  );
+}
+
+async function mintTrainingToken(body: any) {
+  const roomId = String(body?.roomId || body?.room || '').trim();
+  const uid = String(body?.uid || body?.identity || body?.user || '').trim();
+  const role = String(body?.role || 'clinician').trim() || 'clinician';
+
+  if (!roomId || !uid) {
+    return safeJson(400, {
+      ok: false,
+      error: 'training_room_or_uid_missing',
+    });
+  }
+
+  const livekitKey = envFirst(['LIVEKIT_API_KEY', 'LK_API_KEY']);
+  const livekitSecret = envFirst(['LIVEKIT_API_SECRET', 'LK_API_SECRET']);
+  const livekitUrl = normaliseWsUrl(
+    envFirst([
+      'LIVEKIT_WS_URL',
+      'LIVEKIT_URL',
+      'NEXT_PUBLIC_LIVEKIT_WS_URL',
+      'NEXT_PUBLIC_LIVEKIT_URL',
+      'LK_WS_URL',
+      'LK_URL',
+    ]),
+  );
+
+  if (!livekitKey || !livekitSecret || !livekitUrl) {
+    return safeJson(500, {
+      ok: false,
+      error: 'server_misconfig_missing_livekit_credentials',
+      message: 'Missing LIVEKIT_API_KEY, LIVEKIT_API_SECRET, and LIVEKIT_URL/LIVEKIT_WS_URL on clinician-app.',
+    });
+  }
+
+  const { AccessToken } = await import('livekit-server-sdk');
+
+  const at = new AccessToken(livekitKey, livekitSecret, {
+    identity: uid,
+    name: uid,
+  });
+
+  at.addGrant({
+    room: roomId,
+    roomJoin: true,
+    canPublish: role !== 'observer',
+    canPublishData: role !== 'observer',
+    canSubscribe: true,
+  });
+
+  const token = at.toJwt();
+
+  return safeJson(200, {
+    ok: true,
+    provider: 'livekit',
+    mode: 'training_room_direct',
+    wsUrl: livekitUrl,
+    token,
+    roomId,
+    identity: uid,
+    role,
+  });
+}
+
+async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
+  const joinToken =
+    req.headers.get('x-join-token') ||
+    req.nextUrl.searchParams.get('joinToken') ||
+    req.nextUrl.searchParams.get('jt') ||
+    '';
+
+  if (!joinToken && isTrainingRoom(body)) {
+    return mintTrainingToken(body);
+  }
+
   const base = pickBase();
 
   if (!base) {
@@ -118,7 +217,8 @@ async function proxyToGateway(req: NextRequest, bodyText: string) {
 export async function POST(req: NextRequest) {
   try {
     const bodyText = await req.text().catch(() => '{}');
-    return proxyToGateway(req, bodyText || '{}');
+    const body = JSON.parse(bodyText || '{}');
+    return proxyToGateway(req, bodyText || '{}', body);
   } catch (err) {
     console.error('[clinician-app][rtc/token][POST] failed', err);
     return safeJson(502, {
@@ -130,7 +230,8 @@ export async function POST(req: NextRequest) {
 
 export async function GET(req: NextRequest) {
   try {
-    return proxyToGateway(req, JSON.stringify(bodyFromQuery(req)));
+    const body = bodyFromQuery(req);
+    return proxyToGateway(req, JSON.stringify(body), body);
   } catch (err) {
     console.error('[clinician-app][rtc/token][GET] failed', err);
     return safeJson(502, {

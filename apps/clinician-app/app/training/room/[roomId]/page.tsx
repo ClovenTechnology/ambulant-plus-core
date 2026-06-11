@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -648,7 +648,7 @@ function TrainingRoomPageContent() {
       roomId={roomId}
       role="clinician"
       uid={uid}
-      tokenEndpoint="/api/rtc/token"
+      tokenEndpoint={typeof window !== 'undefined' ? `${window.location.origin}/api/rtc/token` : '/api/rtc/token'}
       autoConnect={false}
     >
       <TrainingRoomInner
