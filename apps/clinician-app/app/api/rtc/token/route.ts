@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -162,7 +162,7 @@ async function mintTrainingToken(body: any) {
     canSubscribe: true,
   });
 
-  const token = at.toJwt();
+  const token = await at.toJwt();
 
   return safeJson(200, {
     ok: true,
@@ -240,3 +240,4 @@ export async function GET(req: NextRequest) {
     });
   }
 }
+
