@@ -466,11 +466,23 @@ function TrainingSchedulePageContent() {
     'Smart ID + card holder + lanyard',
   ];
 
+  const trainingSlotIdForRoom =
+    slotId ||
+    (ctx?.training as any)?.trainingSlotId ||
+    (ctx?.training as any)?.slotId ||
+    ctx?.training?.startAt ||
+    '';
+
+  const trainingRoomId = trainingSlotIdForRoom
+    ? `training-slot-${trainingSlotIdForRoom}`
+    : '';
+
   const trainingRoomHref =
-    ctx?.training?.mode === 'virtual' && ctx?.training?.status === 'scheduled' && ctx?.training?.startAt
-      ? `/training/room/${encodeURIComponent(
-          `training-${ctx.clinician?.id || 'clinician'}-${ctx.training.startAt}`,
-        )}?trainingSlotId=${encodeURIComponent(slotId || ctx.training.startAt)}`
+    ctx?.training?.mode === 'virtual' &&
+    ctx?.training?.status === 'scheduled' &&
+    ctx?.training?.startAt &&
+    trainingRoomId
+      ? `/training/room/${encodeURIComponent(trainingRoomId)}?trainingSlotId=${encodeURIComponent(trainingSlotIdForRoom)}`
       : null;
 
   return (
