@@ -3,18 +3,18 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3010",
-    "build": "prisma generate && next build",
-    "start": "next start -p 3010",
-    "postinstall": "prisma generate",
-    "db:gen": "prisma generate",
-    "db:mig": "prisma migrate dev --name init",
-    "db:deploy": "prisma migrate deploy",
-    "db:seed": "prisma db seed",
-    "seed:medical-aid-demo": "ts-node prisma/seed-medical-aid-demo.ts",
-    "db:seed:careport": "ts-node prisma/seed-careport.ts",
-    "typecheck": "tsc --noEmit"
-  },
+  "dev": "next dev -p 3010",
+  "build": "prisma generate && next build",
+  "start": "next start -p 3010",
+  "postinstall": "prisma generate",
+  "db:gen": "prisma generate",
+  "db:mig": "prisma migrate dev --name init",
+  "db:deploy": "prisma migrate deploy",
+  "db:seed": "prisma db seed",
+  "seed:medical-aid-demo": "ts-node prisma/seed-medical-aid-demo.ts",
+  "db:seed:careport": "ts-node prisma/seed-careport.ts",
+  "typecheck": "tsc --noEmit"
+},
   "prisma": {
     "seed": "node prisma/seed.js"
   },
@@ -31,8 +31,7 @@
     "next": "14.1.0",
     "react": "18.2.0",
     "react-dom": "18.2.0",
-    "zod": "^3.24.1",
-    "livekit-server-sdk": "^2.15.4"
+    "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^20.19.13",
