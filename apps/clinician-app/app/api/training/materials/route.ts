@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -51,12 +51,12 @@ function starterMaterials() {
     {
       id: 'cm-starter-03',
       trainingSlotId: null,
-      title: '3. IoMT starter kit: DueCare, NexRing, digital stethoscope, and HD otoscope',
+      title: '3. IoMT starter kit: 6-in-1 Health Monitor, NexRing, digital stethoscope, and HD otoscope',
       kind: 'module',
       url: null,
       fileKey: null,
       notes:
-        'Practical orientation to device-supported observations, remote examination workflow, limitations, artefacts, and clinical interpretation boundaries.',
+        'Practical orientation to device-supported observations, 6-in-1 health monitoring, remote examination workflow, limitations, artefacts, and clinical interpretation boundaries.',
       uploadedAt,
     },
     {
@@ -188,3 +188,4 @@ export async function GET(req: NextRequest) {
     return materialResponse('starter_fallback_error', fallback);
   }
 }
+
