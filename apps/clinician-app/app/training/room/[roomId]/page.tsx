@@ -106,10 +106,14 @@ function TrainingRoomInner({
   roomId,
   trainingSlotId,
   clinicianId,
+  participantRole,
+  participantUid,
 }: {
   roomId: string;
   trainingSlotId: string;
   clinicianId: string;
+  participantRole: 'clinician' | 'admin' | 'trainer';
+  participantUid: string;
 }) {
   const {
     room,
@@ -126,6 +130,8 @@ function TrainingRoomInner({
   const [materials, setMaterials] = useState<TrainingMaterial[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [recordingConsentAccepted, setRecordingConsentAccepted] = useState(false);
+  const [showRecordingConsent, setShowRecordingConsent] = useState(false);
 
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
@@ -147,28 +153,28 @@ function TrainingRoomInner({
           ? 'Connection issue'
           : 'Not connected';
 
-  async function loadRoomData() {
-    if (!clinicianId) {
-      setErr('Unable to identify your clinician profile. Please return to the training schedule from your signed-in account.');
-      return;
-    }
+  const isStaffJoin = participantRole === 'admin' || participantRole === 'trainer';
+  const participantLabel =
+    participantRole === 'trainer'
+      ? 'Training trainer'
+      : participantRole === 'admin'
+        ? 'Training administrator'
+        : 'Training participant';
 
+  async function loadRoomData() {
     setErr(null);
 
     try {
-      const contextUrl = `/api/training/context?clinicianId=${encodeURIComponent(clinicianId)}`;
+      const matRes = await fetch('/api/training/materials', {
+        cache: 'no-store',
+        credentials: 'include',
+      });
 
-      const [ctxRes, matRes] = await Promise.all([
-        fetch(contextUrl, { cache: 'no-store', credentials: 'include' }),
-        fetch('/api/training/materials', { cache: 'no-store', credentials: 'include' }),
-      ]);
-
-      const c = (await ctxRes.json().catch(() => null)) as TrainingContext | null;
-      const m = (await matRes.json().catch(() => null)) as { ok: boolean; items?: TrainingMaterial[]; materials?: TrainingMaterial[] } | null;
-
-      if (!ctxRes.ok || !c?.ok) {
-        throw new Error('Unable to load your training context right now.');
-      }
+      const m = (await matRes.json().catch(() => null)) as {
+        ok: boolean;
+        items?: TrainingMaterial[];
+        materials?: TrainingMaterial[];
+      } | null;
 
       if (!matRes.ok || !m?.ok) {
         throw new Error('Unable to load training materials right now.');
@@ -180,7 +186,52 @@ function TrainingRoomInner({
           ? m.materials
           : [];
 
-      setCtx(c);
+      let nextCtx: TrainingContext | null = null;
+
+      if (clinicianId) {
+        const contextUrl = `/api/training/context?clinicianId=${encodeURIComponent(clinicianId)}`;
+        const ctxRes = await fetch(contextUrl, {
+          cache: 'no-store',
+          credentials: 'include',
+        });
+
+        const c = (await ctxRes.json().catch(() => null)) as TrainingContext | null;
+
+        if (!ctxRes.ok || !c?.ok) {
+          throw new Error('Unable to load your training context right now.');
+        }
+
+        nextCtx = c;
+      } else if (isStaffJoin) {
+        nextCtx = {
+          ok: true,
+          clinician: {
+            id: participantUid || participantRole,
+            name: participantLabel,
+            email: null,
+            specialty: 'Contactless Medicine training',
+            status: 'trainer_join',
+          },
+          onboarding: {
+            stage: participantRole === 'trainer' ? 'trainer_join' : 'admin_join',
+            notes: null,
+          },
+          training: {
+            status: 'training_scheduled',
+            startAt: null,
+            endAt: null,
+            mode: 'virtual',
+            joinUrl: null,
+            certificateAvailable: false,
+            certificateUrl: null,
+          },
+        };
+      } else {
+        setErr('Unable to identify your clinician profile. Please return to the training schedule from your signed-in account.');
+        return;
+      }
+
+      setCtx(nextCtx);
       setMaterials(
         list.filter((x) => !x.trainingSlotId || !trainingSlotId || x.trainingSlotId === trainingSlotId),
       );
@@ -214,7 +265,7 @@ function TrainingRoomInner({
       }
     };
 
-    if (status === 'connected') {
+    if (status === 'connected' && clinicianId) {
       postAttendance('join');
       const id = window.setInterval(() => postAttendance('heartbeat'), 60_000);
 
@@ -225,7 +276,7 @@ function TrainingRoomInner({
     }
   }, [status, roomId, trainingSlotId, clinicianId]);
 
-  async function handleConnect() {
+  async function joinLiveRoom() {
     setErr(null);
     setNotice(null);
 
@@ -235,6 +286,21 @@ function TrainingRoomInner({
     } catch {
       setErr('Unable to join the training room. Please check your connection and try again.');
     }
+  }
+
+  function handleConnect() {
+    if (!recordingConsentAccepted) {
+      setShowRecordingConsent(true);
+      return;
+    }
+
+    void joinLiveRoom();
+  }
+
+  async function acceptRecordingConsentAndJoin() {
+    setRecordingConsentAccepted(true);
+    setShowRecordingConsent(false);
+    await joinLiveRoom();
   }
 
   async function handleDisconnect() {
@@ -379,6 +445,41 @@ function TrainingRoomInner({
             </div>
           ) : null}
         </header>
+
+        {showRecordingConsent ? (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
+            <div className="w-full max-w-xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl">
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-extrabold text-amber-900">
+                Recording notice
+              </div>
+
+              <h2 className="mt-4 text-xl font-black text-slate-950">
+                Training session recording notice
+              </h2>
+
+              <p className="mt-3 text-sm leading-relaxed text-slate-700">
+                This training session may be recorded for onboarding, attendance, quality assurance, audit, and certification purposes. By joining, you confirm that you understand the session may be recorded. The recording will be stored securely and accessed only by authorised Ambulant+ administrators.
+              </p>
+
+              <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
+                <Link
+                  href="/training/schedule"
+                  className="inline-flex justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                >
+                  Back to training
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={acceptRecordingConsentAndJoin}
+                  className="inline-flex justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-700"
+                >
+                  I understand and join
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <section className="grid gap-5 xl:grid-cols-[1.45fr_0.75fr]">
           <div className="space-y-4">
@@ -627,6 +728,13 @@ function TrainingRoomPageContent() {
   const roomId = String(params?.roomId || '');
   const trainingSlotId = search.get('trainingSlotId') || '';
   const clinicianIdFromQuery = search.get('clinicianId') || '';
+  const uidFromQuery = search.get('uid') || search.get('identity') || '';
+  const roleFromQuery = String(search.get('role') || '').toLowerCase();
+  const participantRole =
+    roleFromQuery === 'admin' || roleFromQuery === 'trainer'
+      ? roleFromQuery
+      : 'clinician';
+
   const [clinicianId, setClinicianId] = useState(clinicianIdFromQuery);
 
   useEffect(() => {
@@ -639,14 +747,16 @@ function TrainingRoomPageContent() {
     if (localId) setClinicianId(localId);
   }, [clinicianIdFromQuery]);
 
-  const uid = clinicianId
-    ? `training-clinician-${clinicianId}`
-    : `training-room-${roomId || 'unknown'}`;
+  const uid = uidFromQuery || (
+    clinicianId
+      ? `training-clinician-${clinicianId}`
+      : `training-${participantRole}-${roomId || 'unknown'}`
+  );
 
   return (
     <SFUClientProvider
       roomId={roomId}
-      role="clinician"
+      role={participantRole === 'trainer' ? 'admin' : participantRole}
       uid={uid}
       tokenEndpoint={typeof window !== 'undefined' ? `${window.location.origin}/api/rtc/token` : '/api/rtc/token'}
       autoConnect={false}
@@ -655,6 +765,8 @@ function TrainingRoomPageContent() {
         roomId={roomId}
         trainingSlotId={trainingSlotId}
         clinicianId={clinicianId}
+        participantRole={participantRole}
+        participantUid={uid}
       />
     </SFUClientProvider>
   );
