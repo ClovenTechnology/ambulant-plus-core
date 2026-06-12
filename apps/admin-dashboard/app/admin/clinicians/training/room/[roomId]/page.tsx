@@ -1,9 +1,15 @@
 import Link from 'next/link';
+import RecordingControls from './RecordingControls';
 
 export const dynamic = 'force-dynamic';
 
 function trimSlash(v: string) {
   return String(v || '').replace(/\/+$/, '');
+}
+
+function firstParam(v: string | string[] | undefined, fallback = '') {
+  if (Array.isArray(v)) return String(v[0] || fallback);
+  return String(v || fallback);
 }
 
 function clinicianBase() {
@@ -22,9 +28,9 @@ export default function AdminTrainingRoomPage({
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
   const roomId = decodeURIComponent(String(params?.roomId || ''));
-  const trainingSlotId = String(searchParams?.trainingSlotId || roomId || '');
-  const role = String(searchParams?.role || 'admin') === 'trainer' ? 'trainer' : 'admin';
-  const uid = String(searchParams?.uid || `training-${role}-admin-dashboard`);
+  const trainingSlotId = firstParam(searchParams?.trainingSlotId, roomId);
+  const role = firstParam(searchParams?.role, 'admin') === 'trainer' ? 'trainer' : 'admin';
+  const uid = firstParam(searchParams?.uid, `training-${role}-admin-dashboard`);
 
   const url = new URL(`/training/room/${encodeURIComponent(roomId)}`, clinicianBase());
   url.searchParams.set('trainingSlotId', trainingSlotId);
@@ -33,7 +39,7 @@ export default function AdminTrainingRoomPage({
 
   return (
     <main className="min-h-screen bg-slate-50 p-6">
-      <section className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+      <section className="mx-auto max-w-5xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <p className="text-xs font-bold uppercase tracking-[0.2em] text-indigo-700">
           Ambulant+ Admin Training
         </p>
@@ -43,7 +49,7 @@ export default function AdminTrainingRoomPage({
         </h1>
 
         <p className="mt-2 text-sm leading-relaxed text-slate-600">
-          This opens the same LiveKit cohort room used by clinicians. Use this path for trainer-led orientation, attendance observation, and future recording controls.
+          This controls the same LiveKit cohort room used by clinicians. Use this path for trainer-led orientation, attendance observation, recording control, and certification evidence review.
         </p>
 
         <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">
@@ -55,6 +61,8 @@ export default function AdminTrainingRoomPage({
         <div className="mt-6 flex flex-wrap gap-3">
           <a
             href={url.toString()}
+            target="_blank"
+            rel="noreferrer"
             className="inline-flex rounded-xl bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-700"
           >
             Open live training room
@@ -67,6 +75,12 @@ export default function AdminTrainingRoomPage({
             Back to training admin
           </Link>
         </div>
+
+        <RecordingControls
+          roomId={roomId}
+          trainingSlotId={trainingSlotId}
+          liveRoomUrl={url.toString()}
+        />
       </section>
     </main>
   );
