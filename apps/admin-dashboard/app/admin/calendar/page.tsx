@@ -1,8 +1,7 @@
-//apps/admin-dashboard/app/admin/calendar/page.tsx
+﻿//apps/admin-dashboard/app/admin/calendar/page.tsx
 import React from 'react';
 import Link from 'next/link';
-import { headers } from 'next/headers';
-import { verifyAdminToken } from '@/src/lib/auth';
+import { getSessionFromGateway } from '@/src/lib/session';
 import TrainingCalendarClient from './training/TrainingCalendarClient';
 
 export const dynamic = 'force-dynamic';
@@ -53,30 +52,53 @@ type BoardResponse = {
   error?: string;
 };
 
-async function fetchOnboardingBoard(): Promise<BoardResponse> {
-  const gateway =
-    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-    process.env.NEXT_PUBLIC_PATIENT_BASE ??
-    'http://localhost:3010';
+function gatewayBase() {
+  return (
+    process.env.APIGW_BASE ||
+    process.env.APIGW_BASE_URL ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_PATIENT_BASE ||
+    'http://localhost:3010'
+  ).replace(/\/+$/, '');
+}
 
+async function fetchOnboardingBoard(): Promise<BoardResponse> {
+  const gateway = gatewayBase();
   const url = `${gateway}/api/admin/clinicians/onboarding-board`;
   const adminKey = process.env.ADMIN_API_KEY ?? '';
 
   try {
     const res = await fetch(url, {
       headers: {
-        'content-type': 'application/json',
+        accept: 'application/json',
         'x-admin-key': adminKey,
       },
       cache: 'no-store',
     });
+
     const js = (await res.json().catch(() => ({}))) as BoardResponse;
+
     if (!res.ok || js.ok === false) {
-      return { ok: false, rows: [], error: js.error || `HTTP ${res.status}` };
+      return {
+        ok: false,
+        rows: [],
+        error: js.error || `HTTP ${res.status} loading onboarding board (${url})`,
+      };
     }
+
     return { ok: true, rows: js.rows || [] };
   } catch (e: any) {
-    return { ok: false, rows: [], error: e?.message || 'fetch_failed' };
+    console.error('fetchOnboardingBoard error', e);
+    return {
+      ok: false,
+      rows: [],
+      error: e?.message || 'fetch_failed',
+    };
   }
 }
 
@@ -85,15 +107,24 @@ export default async function AdminCalendarPage({
 }: {
   searchParams?: Record<string, string | string[] | undefined>;
 }) {
-  const h = headers();
-  const authHeader = h.get('authorization') || h.get('Authorization') || undefined;
-  const v = await verifyAdminToken(authHeader);
+  const session = await getSessionFromGateway();
 
-  if (!v.ok) {
+  if (!session?.authenticated) {
     return (
       <main className="mx-auto max-w-4xl p-6">
         <h1 className="text-2xl font-bold">Admin — Calendar</h1>
-        <div className="mt-4 text-sm text-rose-600">Access denied: {v.error}</div>
+        <div className="mt-4 text-sm text-rose-600">
+          Access denied: admin session required.
+        </div>
+        <div className="mt-3 text-sm">
+          Please sign in with your Admin Dashboard account.
+        </div>
+        <Link
+          href="/auth/signin?next=/admin/calendar"
+          className="mt-4 inline-flex rounded-lg border bg-white px-3 py-2 text-sm font-medium hover:bg-gray-50"
+        >
+          Sign in
+        </Link>
       </main>
     );
   }
@@ -122,12 +153,9 @@ export default async function AdminCalendarPage({
         </div>
 
         <div className="text-right text-xs text-gray-500">
-          Signed in as admin
+          Signed in as {session.user?.email || 'admin'}
           <div className="mt-1 font-mono text-[11px]">
-            Gateway:{' '}
-            {process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-              process.env.NEXT_PUBLIC_PATIENT_BASE ??
-              'http://localhost:3010'}
+            Gateway: {gatewayBase()}
           </div>
         </div>
       </header>
