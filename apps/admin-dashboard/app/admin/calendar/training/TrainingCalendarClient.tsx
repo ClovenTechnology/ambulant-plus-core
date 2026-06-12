@@ -33,6 +33,8 @@ type EventItem = {
   mode: 'virtual' | 'in_person';
   status: 'scheduled' | 'completed' | 'canceled';
   joinUrl?: string | null;
+  participantCount?: number;
+  participantLabels?: string[];
 };
 
 function safeDate(s?: string | null) {
@@ -58,6 +60,18 @@ function localInputToIso(v: string) {
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
+}
+
+function trainingRoomIdForSlot(slotId?: string | null) {
+  const clean = String(slotId || '').trim();
+  if (!clean) return '';
+  return clean.startsWith('training-slot-') ? clean : `training-slot-${clean}`;
+}
+
+function adminTrainingRoomPath(slotId?: string | null, role: 'admin' | 'trainer' | 'observer' = 'admin') {
+  const roomId = trainingRoomIdForSlot(slotId);
+  if (!roomId || !slotId) return '#';
+  return `/admin/clinicians/training/room/${encodeURIComponent(roomId)}?trainingSlotId=${encodeURIComponent(slotId)}&role=${encodeURIComponent(role)}`;
 }
 
 /* ---------- Modal ---------- */
@@ -148,6 +162,7 @@ export default function TrainingCalendarClient({
   const [schedEndLocal, setSchedEndLocal] = useState('');
   const [schedDurationMin, setSchedDurationMin] = useState(60);
   const [schedJoinUrl, setSchedJoinUrl] = useState('');
+  const [schedSelectedClinicianIds, setSchedSelectedClinicianIds] = useState<string[]>([]);
 
   // event detail modal
   const [evOpen, setEvOpen] = useState(false);
@@ -175,24 +190,44 @@ export default function TrainingCalendarClient({
   }, [focusClinicianId, rows]);
 
   const events = useMemo<EventItem[]>(() => {
-    return rows
-      .filter((r) => !!r.trainingSlot)
-      .map((r) => {
-        const t = r.trainingSlot!;
-        return {
-          key: `ts:${t.id}`,
-          clinicianId: r.clinicianId,
-          onboardingId: r.onboarding.id,
-          trainingSlotId: t.id,
-          title: `${r.displayName}${r.specialty ? ` — ${r.specialty}` : ''}`,
-          startAt: t.startAt,
-          endAt: t.endAt,
-          mode: t.mode,
-          status: t.status,
-          joinUrl: t.joinUrl ?? null,
-        };
-      })
-      .filter((e) => !!safeDate(e.startAt) && !!safeDate(e.endAt));
+    const bySlot = new Map<string, EventItem>();
+
+    for (const r of rows) {
+      if (!r.trainingSlot) continue;
+
+      const t = r.trainingSlot;
+      const key = `ts:${t.id}`;
+      const label = `${r.displayName}${r.specialty ? ` — ${r.specialty}` : ''}`;
+
+      const existing = bySlot.get(key);
+      if (existing) {
+        existing.participantCount = (existing.participantCount || 1) + 1;
+        existing.participantLabels = [...(existing.participantLabels || []), label];
+        existing.title =
+          existing.participantCount > 1
+            ? `Cohort training — ${existing.participantCount} clinicians`
+            : existing.title;
+        if (!existing.joinUrl && t.joinUrl) existing.joinUrl = t.joinUrl;
+        continue;
+      }
+
+      bySlot.set(key, {
+        key,
+        clinicianId: r.clinicianId,
+        onboardingId: r.onboarding.id,
+        trainingSlotId: t.id,
+        title: label,
+        startAt: t.startAt,
+        endAt: t.endAt,
+        mode: t.mode,
+        status: t.status,
+        joinUrl: t.joinUrl ?? null,
+        participantCount: 1,
+        participantLabels: [label],
+      });
+    }
+
+    return Array.from(bySlot.values()).filter((e) => !!safeDate(e.startAt) && !!safeDate(e.endAt));
   }, [rows]);
 
   const eventsByDay = useMemo(() => {
@@ -258,21 +293,26 @@ export default function TrainingCalendarClient({
       setSchedJoinUrl('');
 
       // If clinician not selected yet, pick first as default (safe)
-      if (!schedClinicianId && cliniciansOptions[0]) {
+      if (!schedSelectedClinicianIds.length && cliniciansOptions[0]) {
+        setSchedSelectedClinicianIds([cliniciansOptions[0].clinicianId]);
         setSchedClinicianId(cliniciansOptions[0].clinicianId);
         setSchedOnboardingId(cliniciansOptions[0].onboardingId);
       }
 
       setSchedOpen(true);
     },
-    [cliniciansOptions, schedClinicianId]
+    [cliniciansOptions, schedSelectedClinicianIds.length]
   );
 
   const saveSchedule = useCallback(async () => {
     setNotice(null);
 
-    if (!schedClinicianId || !schedOnboardingId) {
-      setNotice({ tone: 'err', text: 'Select a clinician.' });
+    const selectedClinicians = cliniciansOptions.filter((x) =>
+      schedSelectedClinicianIds.includes(x.clinicianId),
+    );
+
+    if (!selectedClinicians.length) {
+      setNotice({ tone: 'err', text: 'Select at least one clinician.' });
       return;
     }
 
@@ -296,8 +336,12 @@ export default function TrainingCalendarClient({
     }
 try {
       await post('/api/admin/clinicians/onboarding/schedule-training', {
-        clinicianId: schedClinicianId,
-        onboardingId: schedOnboardingId,
+        clinicians: selectedClinicians.map((x) => ({
+          clinicianId: x.clinicianId,
+          onboardingId: x.onboardingId,
+        })),
+        clinicianId: selectedClinicians[0]?.clinicianId,
+        onboardingId: selectedClinicians[0]?.onboardingId,
         startAt: startIso,
         endAt: endIso,
         mode: schedMode,
@@ -310,8 +354,8 @@ try {
       setNotice({ tone: 'err', text: e?.message || 'Failed to schedule training.' });
     }
   }, [
-    schedClinicianId,
-    schedOnboardingId,
+    cliniciansOptions,
+    schedSelectedClinicianIds,
     schedDurationMin,
     schedEndLocal,
     schedJoinUrl,
@@ -557,27 +601,41 @@ try {
         }
       >
         <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="Clinician">
-            <select
-              value={schedClinicianId}
-              onChange={(e) => {
-                const id = e.target.value;
-                const opt = cliniciansOptions.find((x) => x.clinicianId === id);
-                setSchedClinicianId(id);
-                setSchedOnboardingId(opt?.onboardingId ?? '');
-              }}
-              className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-            >
-              <option value="" disabled>
-                Select…
-              </option>
-              {cliniciansOptions.map((o) => (
-                <option key={o.clinicianId} value={o.clinicianId}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </Field>
+          <div className="sm:col-span-2">
+            <div className="text-[11px] font-semibold text-gray-700">Clinicians</div>
+            <div className="mt-1 max-h-56 space-y-1 overflow-auto rounded-xl border bg-white p-2">
+              {cliniciansOptions.map((o) => {
+                const checked = schedSelectedClinicianIds.includes(o.clinicianId);
+                return (
+                  <label
+                    key={o.clinicianId}
+                    className="flex cursor-pointer items-start gap-2 rounded-lg px-2 py-1.5 text-xs hover:bg-gray-50"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        const next = e.target.checked
+                          ? Array.from(new Set([...schedSelectedClinicianIds, o.clinicianId]))
+                          : schedSelectedClinicianIds.filter((id) => id !== o.clinicianId);
+
+                        setSchedSelectedClinicianIds(next);
+
+                        const first = cliniciansOptions.find((x) => x.clinicianId === next[0]);
+                        setSchedClinicianId(first?.clinicianId ?? '');
+                        setSchedOnboardingId(first?.onboardingId ?? '');
+                      }}
+                      className="mt-0.5"
+                    />
+                    <span>{o.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <div className="mt-1 text-[11px] text-gray-500">
+              Selected: {schedSelectedClinicianIds.length}. All selected clinicians will share one training room.
+            </div>
+          </div>
 
           <Field label="Mode">
             <select
@@ -676,8 +734,42 @@ try {
 
             {activeEv.joinUrl ? (
               <div className="rounded-lg border bg-white p-3">
-                <div className="text-xs text-gray-600">Join URL</div>
+                <div className="text-xs text-gray-600">Clinician Join URL</div>
                 <div className="mt-1 break-all text-sm text-blue-700">{activeEv.joinUrl}</div>
+              </div>
+            ) : null}
+
+            {activeEv.trainingSlotId ? (
+              <div className="rounded-lg border bg-white p-3">
+                <div className="text-xs font-semibold text-gray-700">Admin room access</div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <a
+                    href={adminTrainingRoomPath(activeEv.trainingSlotId, 'admin')}
+                    className="rounded-lg bg-black px-3 py-1.5 text-xs font-semibold text-white hover:bg-black/90"
+                  >
+                    Open as admin/trainer
+                  </a>
+                  <a
+                    href={adminTrainingRoomPath(activeEv.trainingSlotId, 'observer')}
+                    className="rounded-lg border px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                  >
+                    Open as observer
+                  </a>
+                </div>
+                <div className="mt-2 text-[11px] text-gray-500">
+                  Observers may join for supervision/audit and are not counted as trainee completion.
+                </div>
+              </div>
+            ) : null}
+
+            {activeEv.participantLabels?.length ? (
+              <div className="rounded-lg border bg-white p-3">
+                <div className="text-xs font-semibold text-gray-700">Participants</div>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-gray-600">
+                  {activeEv.participantLabels.map((x) => (
+                    <li key={x}>{x}</li>
+                  ))}
+                </ul>
               </div>
             ) : null}
 

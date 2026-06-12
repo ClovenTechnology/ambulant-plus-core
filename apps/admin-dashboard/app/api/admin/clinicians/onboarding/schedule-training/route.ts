@@ -7,6 +7,15 @@ export const runtime = 'edge';
 export async function POST(req: NextRequest) {
   const body = await readJson(req);
 
+  const clinicians = Array.isArray(body?.clinicians)
+    ? body.clinicians
+        .map((x: any) => ({
+          clinicianId: x?.clinicianId ? String(x.clinicianId) : '',
+          onboardingId: x?.onboardingId ? String(x.onboardingId) : '',
+        }))
+        .filter((x: any) => x.clinicianId && x.onboardingId)
+    : [];
+
   const clinicianId = body?.clinicianId ? String(body.clinicianId) : '';
   const onboardingId = body?.onboardingId ? String(body.onboardingId) : '';
   const startAt = body?.startAt ? String(body.startAt) : '';
@@ -15,13 +24,14 @@ export async function POST(req: NextRequest) {
   const joinUrl = body?.joinUrl ? String(body.joinUrl) : null;
   const trainerName = body?.trainerName ? String(body.trainerName) : null;
 
-  if (!clinicianId || !onboardingId || !startAt || !endAt) {
-    return new Response('clinicianId, onboardingId, startAt, endAt required', { status: 400 });
+  if ((!clinicians.length && (!clinicianId || !onboardingId)) || !startAt || !endAt) {
+    return new Response('clinicians, startAt, endAt required', { status: 400 });
   }
 
   return forwardToGateway(req, '/api/admin/clinicians/onboarding/schedule-training', {
-    clinicianId,
-    onboardingId,
+    clinicians: clinicians.length ? clinicians : undefined,
+    clinicianId: clinicians.length ? undefined : clinicianId,
+    onboardingId: clinicians.length ? undefined : onboardingId,
     startAt,
     endAt,
     mode,
