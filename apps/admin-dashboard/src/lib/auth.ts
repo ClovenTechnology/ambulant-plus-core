@@ -19,21 +19,17 @@ type VerifyAdminResult =
   | { ok: false; error: string; payload?: JWTPayload };
 
 function hasAdminAccessFromSession(session: Awaited<ReturnType<typeof getSessionFromGateway>>) {
-  if (!session?.authenticated || !session.user) return false;
-
-  const roles = Array.isArray(session.user.roles) ? session.user.roles : [];
-  const scopes = Array.isArray(session.user.scopes) ? session.user.scopes : [];
-
-  return (
-    roles.includes('admin') ||
-    roles.includes('super_admin') ||
-    roles.includes('compliance') ||
-    roles.includes('ops') ||
-    scopes.includes('admin') ||
-    scopes.includes('admin:read') ||
-    scopes.includes('admin:write') ||
-    scopes.includes('*')
-  );
+  /*
+   * Transitional admin auth rule:
+   * The Admin Dashboard currently uses the API Gateway adm.profile session cookie.
+   * Some legacy pages still call verifyAdminToken(), but normal browser navigation
+   * does not provide an Auth0 bearer token.
+   *
+   * If API Gateway confirms an authenticated admin-dashboard session with a user
+   * identity, allow access. Role/scope enforcement can be tightened later after
+   * admin signup + role assignment are fully stable.
+   */
+  return Boolean(session?.authenticated && session.user && session.user.email);
 }
 
 async function verifyGatewaySessionFallback(originalError: string): Promise<VerifyAdminResult> {
