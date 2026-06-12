@@ -307,7 +307,7 @@ export default function TrainingCalendarClient({
         startAt: startIso,
         endAt: endIso,
         mode: schedMode,
-        joinUrl: schedJoinUrl.trim() ? schedJoinUrl.trim() : null,
+        joinUrl: null,
       });
 
       // reflect immediately in UI by reloading (simple + reliable)
@@ -626,14 +626,9 @@ export default function TrainingCalendarClient({
           </Field>
 
           <div className="sm:col-span-2">
-            <Field label="Join URL (required for virtual)">
-              <input
-                value={schedJoinUrl}
-                onChange={(e) => setSchedJoinUrl(e.target.value)}
-                placeholder="https://…"
-                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
-              />
-            </Field>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+              Virtual training links are generated automatically when you save. No manual Join URL is required.
+            </div>
           </div>
         </div>
       </Modal>

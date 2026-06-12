@@ -13,12 +13,10 @@ export async function POST(req: NextRequest) {
   const endAt = body?.endAt ? String(body.endAt) : '';
   const mode = body?.mode === 'in_person' ? 'in_person' : 'virtual';
   const joinUrl = body?.joinUrl ? String(body.joinUrl) : null;
+  const trainerName = body?.trainerName ? String(body.trainerName) : null;
 
   if (!clinicianId || !onboardingId || !startAt || !endAt) {
     return new Response('clinicianId, onboardingId, startAt, endAt required', { status: 400 });
-  }
-  if (mode === 'virtual' && !joinUrl) {
-    return new Response('joinUrl required for virtual', { status: 400 });
   }
 
   return forwardToGateway(req, '/api/admin/clinicians/onboarding/schedule-training', {
@@ -28,5 +26,6 @@ export async function POST(req: NextRequest) {
     endAt,
     mode,
     joinUrl,
+    trainerName,
   });
 }

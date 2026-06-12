@@ -48,6 +48,27 @@ function mergeRawProfileTraining(raw: any, patch: Record<string, any>) {
   };
 }
 
+function clinicianTrainingBaseUrl() {
+  return String(
+    process.env.CLINICIAN_APP_URL ||
+      process.env.NEXT_PUBLIC_CLINICIAN_APP_URL ||
+      process.env.CLINICIAN_APP_ORIGIN ||
+      'https://clinician.ambulantplus.co.za',
+  ).replace(/\/+$/, '');
+}
+
+function trainingRoomIdForSlot(slotId: string) {
+  const clean = String(slotId || '').trim();
+  return clean.startsWith('training-slot-') ? clean : `training-slot-${clean}`;
+}
+
+function buildTrainingJoinUrl(slotId: string) {
+  const roomId = trainingRoomIdForSlot(slotId);
+  const url = new URL(`/training/room/${encodeURIComponent(roomId)}`, clinicianTrainingBaseUrl());
+  url.searchParams.set('trainingSlotId', slotId);
+  return url.toString();
+}
+
 async function persistRawProfileJson(db: any, clinicianId: string, clinician: any, profileJson: any) {
   const rawProfileJson = JSON.stringify(profileJson);
 
@@ -108,7 +129,7 @@ export async function POST(req: NextRequest) {
     const startAt = parseIso(body.startAt);
     const endAt = parseIso(body.endAt);
     const mode = normaliseMode(body.mode);
-    const joinUrl = cleanStr(body.joinUrl, 1000);
+    const requestedJoinUrl = cleanStr(body.joinUrl, 1000);
     const trainerName = cleanStr(body.trainerName, 240);
 
     if (!clinicianId || !onboardingId || !startAt || !endAt) {
@@ -124,15 +145,7 @@ export async function POST(req: NextRequest) {
         { status: 400 },
       );
     }
-
-    if (mode === 'virtual' && !joinUrl) {
-      return NextResponse.json(
-        { ok: false, error: 'joinUrl required for virtual' },
-        { status: 400 },
-      );
-    }
-
-    const db: any = prisma;
+const db: any = prisma;
 
     const clinician = await db.clinicianProfile.findUnique({
       where: { id: clinicianId },
@@ -182,7 +195,7 @@ export async function POST(req: NextRequest) {
             startsAt: startAt,
             endsAt: endAt,
             mode,
-            meetingUrl: mode === 'virtual' ? joinUrl : null,
+            meetingUrl: null,
             trainerName: trainerName || existing.trainerName || null,
           },
         });
@@ -197,9 +210,20 @@ export async function POST(req: NextRequest) {
           capacity: 1,
           usedCount: 1,
           mode,
-          meetingUrl: mode === 'virtual' ? joinUrl : null,
+          meetingUrl: null,
           trainerName: trainerName || null,
         },
+      });
+    }
+    const autoJoinUrl =
+      mode === 'virtual'
+        ? requestedJoinUrl || buildTrainingJoinUrl(String(slot.id))
+        : null;
+
+    if (mode === 'virtual' && autoJoinUrl && String(slot?.meetingUrl || '') !== autoJoinUrl) {
+      slot = await db.clinicianTrainingSlot.update({
+        where: { id: slot.id },
+        data: { meetingUrl: autoJoinUrl },
       });
     }
 
@@ -227,7 +251,7 @@ export async function POST(req: NextRequest) {
       startAt: slot.startsAt.toISOString(),
       endAt: slot.endsAt.toISOString(),
       mode,
-      joinUrl: mode === 'virtual' ? joinUrl : null,
+      joinUrl: autoJoinUrl,
       trainerName: trainerName || null,
       bookedAt: new Date().toISOString(),
     });
@@ -249,7 +273,7 @@ export async function POST(req: NextRequest) {
           endAt: slot.endsAt.toISOString(),
           mode,
           status: 'scheduled',
-          joinUrl: mode === 'virtual' ? joinUrl : null,
+          joinUrl: autoJoinUrl,
         },
       },
       {
