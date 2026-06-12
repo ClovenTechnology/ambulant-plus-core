@@ -1,4 +1,4 @@
-// apps/api-gateway/app/api/auth/signup/route.ts
+﻿// apps/api-gateway/app/api/auth/signup/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
@@ -20,6 +20,83 @@ function cleanStr(value: unknown): string | null {
   return s ? s : null;
 }
 
+async function resolveAdminOrgRefs(body: any): Promise<{
+  departmentId: string | null;
+  designationId: string | null;
+  warnings: string[];
+}> {
+  const requestedDepartmentId = cleanStr(body?.departmentId);
+  const requestedDesignationId = cleanStr(body?.designationId);
+  const warnings: string[] = [];
+
+  let departmentId: string | null = null;
+  let designationId: string | null = null;
+
+  if (requestedDepartmentId) {
+    const department = await prisma.department.findUnique({
+      where: { id: requestedDepartmentId },
+      select: { id: true },
+    });
+
+    if (department?.id) {
+      departmentId = department.id;
+    } else {
+      warnings.push('department_not_found_or_not_seeded');
+    }
+  }
+
+  if (requestedDesignationId) {
+    const designation = await prisma.designation.findFirst({
+      where: {
+        id: requestedDesignationId,
+        ...(departmentId ? { departmentId } : {}),
+      },
+      select: {
+        id: true,
+        departmentId: true,
+      },
+    });
+
+    if (designation?.id) {
+      designationId = designation.id;
+      if (!departmentId && designation.departmentId) {
+        departmentId = designation.departmentId;
+      }
+    } else {
+      warnings.push('designation_not_found_or_not_seeded');
+    }
+  }
+
+  return { departmentId, designationId, warnings };
+}
+
+function setAdminProfileCookie(admin: {
+  userId: string;
+  email: string;
+  name?: string | null;
+  departmentId?: string | null;
+  designationId?: string | null;
+}) {
+  cookies().set(
+    'adm.profile',
+    encodeURIComponent(
+      JSON.stringify({
+        userId: admin.userId,
+        email: admin.email,
+        name: admin.name ?? undefined,
+        departmentId: admin.departmentId ?? undefined,
+        designationId: admin.designationId ?? undefined,
+      }),
+    ),
+    {
+      httpOnly: true,
+      sameSite: 'lax',
+      path: '/',
+      maxAge: 60 * 60 * 24 * 7,
+    },
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
@@ -28,65 +105,48 @@ export async function POST(req: NextRequest) {
     if (kind === 'admin') {
       const email = cleanEmail(body?.email);
       const name = cleanStr(body?.name);
-      const departmentId = cleanStr(body?.departmentId);
-      const designationId = cleanStr(body?.designationId);
 
       if (!email) {
         return NextResponse.json({ error: 'email required' }, { status: 400 });
       }
 
       const userId = email;
+      const orgRefs = await resolveAdminOrgRefs(body);
+
+      const updateData: any = {
+        name: name ?? undefined,
+      };
 
       /*
-       * AdminUserProfile in the current Prisma schema does not expose:
-       * - phone
-       * - department relation
-       * - designation relation
-       *
-       * Keep this route aligned to the generated client:
-       * id, userId, email, name, departmentId, designationId.
+       * Only overwrite org refs when the client supplied org refs.
+       * If submitted refs are stale/unseeded, write null instead of throwing
+       * AdminUserProfile_departmentId_fkey / designation FK errors.
        */
+      if (cleanStr(body?.departmentId) || cleanStr(body?.designationId)) {
+        updateData.departmentId = orgRefs.departmentId;
+        updateData.designationId = orgRefs.designationId;
+      }
+
       const admin = await prisma.adminUserProfile.upsert({
         where: { email: userId },
-        update: {
-          name: name ?? undefined,
-          departmentId: departmentId ?? undefined,
-          designationId: designationId ?? undefined,
-        },
+        update: updateData,
         create: {
           userId,
           email: userId,
           name: name ?? null,
-          departmentId: departmentId ?? null,
-          designationId: designationId ?? null,
+          departmentId: orgRefs.departmentId,
+          designationId: orgRefs.designationId,
         },
       });
 
       const token = `dev-token:${userId}:${Date.now()}`;
-
-      cookies().set(
-        'adm.profile',
-        encodeURIComponent(
-          JSON.stringify({
-            userId: admin.userId,
-            email: admin.email,
-            name: admin.name ?? undefined,
-            departmentId: admin.departmentId ?? undefined,
-            designationId: admin.designationId ?? undefined,
-          }),
-        ),
-        {
-          httpOnly: true,
-          sameSite: 'lax',
-          path: '/',
-          maxAge: 60 * 60 * 24 * 7,
-        },
-      );
+      setAdminProfileCookie(admin);
 
       return NextResponse.json(
         {
           ok: true,
           token,
+          warnings: orgRefs.warnings,
           admin: {
             id: admin.id,
             userId: admin.userId,
