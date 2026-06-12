@@ -340,13 +340,7 @@ export default function OnboardingDispatchBoard({
       const endD = new Date(startD.getTime() + Math.max(5, schedDurationMin) * 60_000);
       endIso = endD.toISOString();
     }
-
-    if (schedMode === 'virtual' && !schedJoinUrl.trim()) {
-      setNotice({ tone: 'err', text: 'Join URL is required for virtual training.' });
-      return;
-    }
-
-    setBusyId(schedRow.clinicianId);
+setBusyId(schedRow.clinicianId);
     try {
       const ok = await postAction('/api/admin/clinicians/onboarding/schedule-training', {
         clinicianId: schedRow.clinicianId,

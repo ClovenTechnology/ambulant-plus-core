@@ -294,13 +294,7 @@ export default function TrainingCalendarClient({
       const endD = new Date(startD.getTime() + Math.max(5, schedDurationMin) * 60_000);
       endIso = endD.toISOString();
     }
-
-    if (schedMode === 'virtual' && !schedJoinUrl.trim()) {
-      setNotice({ tone: 'err', text: 'Join URL is required for virtual training.' });
-      return;
-    }
-
-    try {
+try {
       await post('/api/admin/clinicians/onboarding/schedule-training', {
         clinicianId: schedClinicianId,
         onboardingId: schedOnboardingId,
