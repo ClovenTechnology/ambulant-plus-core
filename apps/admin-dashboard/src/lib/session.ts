@@ -1,8 +1,6 @@
-//apps/admin-dashboard/src/lib/session.ts
-// Server-only helper to read the current admin session from the Gateway
-// via /api/auth/me, forwarding the user's cookies.
-//
-// Usage (server component): const session = await getSessionFromGateway()
+// apps/admin-dashboard/src/lib/session.ts
+// Server-only helper to read the current admin session from the API Gateway,
+// forwarding the user's admin-dashboard cookies.
 
 import { cookies } from 'next/headers';
 
@@ -21,14 +19,24 @@ export type GatewaySession = {
 };
 
 const APIGW =
-  process.env.NEXT_PUBLIC_APIGW_BASE ||
+  process.env.API_GATEWAY_URL ||
+  process.env.API_GATEWAY_BASE_URL ||
+  process.env.APIGW_BASE_URL ||
   process.env.APIGW_BASE ||
+  process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+  process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+  process.env.NEXT_PUBLIC_APIGW_BASE ||
+  process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
   'http://localhost:3010';
+
+function gatewayBase() {
+  return String(APIGW || '').replace(/\/+$/, '');
+}
 
 function serializeRequestCookies(): string {
   try {
     const jar = cookies().getAll();
-    return jar.map((c) => `${c.name}=${encodeURIComponent(c.value)}`).join('; ');
+    return jar.map((c) => c.name + '=' + encodeURIComponent(c.value)).join('; ');
   } catch {
     return '';
   }
@@ -38,17 +46,16 @@ export async function getSessionFromGateway(): Promise<GatewaySession> {
   const cookieHeader = serializeRequestCookies();
 
   try {
-    const res = await fetch(`${APIGW}/api/auth/me`, {
-      // ensure we do not cache session
+    const res = await fetch(gatewayBase() + '/api/auth/me', {
       cache: 'no-store',
-      // forward cookies to Gateway so it can read adm.profile etc.
       headers: cookieHeader ? { cookie: cookieHeader } : undefined,
     });
 
     if (!res.ok) {
       return { authenticated: false };
     }
-    const json = (await res.json()) as GatewaySession;
+
+    const json = (await res.json().catch(() => null)) as GatewaySession | null;
     return json ?? { authenticated: false };
   } catch {
     return { authenticated: false };
