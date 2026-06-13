@@ -79,10 +79,38 @@ function toLocalInputValue(iso?: string | null) {
 }
 
 function localInputToIso(v: string) {
-  // datetime-local is interpreted in local tz by JS Date ctor
   const d = new Date(v);
   if (Number.isNaN(d.getTime())) return null;
   return d.toISOString();
+}
+
+function trainingRoomIdForSlot(slotId?: string | null) {
+  const clean = String(slotId || '').trim();
+  if (!clean) return '';
+  return clean.startsWith('training-slot-') ? clean : `training-slot-${clean}`;
+}
+
+function clinicianTrainingJoinUrl(row: OnboardingBoardRow) {
+  const slot = row.trainingSlot;
+  if (!slot || slot.mode !== 'virtual') return '';
+  if (slot.joinUrl) return slot.joinUrl;
+
+  const roomId = trainingRoomIdForSlot(slot.id);
+  if (!roomId) return '';
+
+  const url = new URL(
+    `/training/room/${encodeURIComponent(roomId)}`,
+    'https://clinician.ambulantplus.co.za',
+  );
+  url.searchParams.set('trainingSlotId', slot.id);
+  return url.toString();
+}
+
+function adminTrainingRoomPath(slotId?: string | null, role: 'admin' | 'trainer' | 'observer' = 'admin') {
+  const roomId = trainingRoomIdForSlot(slotId);
+  if (!roomId || !slotId) return '#';
+
+  return `/admin/clinicians/training/room/${encodeURIComponent(roomId)}?trainingSlotId=${encodeURIComponent(slotId)}&role=${encodeURIComponent(role)}`;
 }
 
 function computeReadiness(row: OnboardingBoardRow): Readiness {
@@ -308,6 +336,21 @@ export default function OnboardingDispatchBoard({
     },
     [router]
   );
+  const copyTrainingJoinUrl = async (row: OnboardingBoardRow) => {
+    const url = clinicianTrainingJoinUrl(row);
+
+    if (!url) {
+      setNotice({ tone: 'err', text: 'No clinician training link is available for this slot yet.' });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setNotice({ tone: 'ok', text: 'Clinician training link copied.' });
+    } catch {
+      setNotice({ tone: 'err', text: 'Could not copy link. Open the slot and copy it manually.' });
+    }
+  };
 
   const openSchedule = (row: OnboardingBoardRow) => {
     setSchedRow(row);
@@ -665,6 +708,31 @@ setBusyId(schedRow.clinicianId);
                     >
                       Open in calendar
                     </a>
+
+                    {training ? (
+                      <>
+                        <a
+                          href={adminTrainingRoomPath(training.id, 'admin')}
+                          className="rounded bg-black px-3 py-1 text-[11px] font-medium text-white hover:bg-black/90"
+                        >
+                          Open room
+                        </a>
+                        <a
+                          href={adminTrainingRoomPath(training.id, 'observer')}
+                          className="rounded border bg-white px-3 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50"
+                        >
+                          Open as observer
+                        </a>
+                        <button
+                          type="button"
+                          disabled={isBusy || !clinicianTrainingJoinUrl(row)}
+                          onClick={() => copyTrainingJoinUrl(row)}
+                          className="rounded border bg-white px-3 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                        >
+                          Copy clinician URL
+                        </button>
+                      </>
+                    ) : null}
                   </div>
                 </div>
 
