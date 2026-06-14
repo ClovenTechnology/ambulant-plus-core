@@ -11,7 +11,6 @@ import {
   renderToStream,
 } from '@react-pdf/renderer';
 
-import { prisma } from '@/src/lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -35,6 +34,28 @@ const FRAMEWORK_SUPPORT =
   'Executive College, SA';
 
 const E = React.createElement;
+
+function gatewayBase() {
+  return String(
+    process.env.API_GATEWAY_URL ||
+      process.env.API_GATEWAY_BASE_URL ||
+      process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+      process.env.APIGW_BASE ||
+      process.env.GATEWAY_URL ||
+      'https://api-gateway.ambulantplus.co.za',
+  ).replace(/\/+$/, '');
+}
+
+function apiHeaders(req: NextRequest) {
+  const cookie = req.headers.get('cookie') || '';
+  const headers: Record<string, string> = {
+    accept: 'application/json',
+  };
+
+  if (cookie) headers.cookie = cookie;
+
+  return headers;
+}
 
 function cleanStr(v: unknown, max = 500): string {
   const s = String(v ?? '').trim();
@@ -534,7 +555,7 @@ const styles = StyleSheet.create({
   },
 });
 
-async function resolveClinician(req: NextRequest) {
+async function resolveCertificateContext(req: NextRequest) {
   const clinicianId = cleanStr(req.nextUrl.searchParams.get('clinicianId'), 120);
 
   if (!clinicianId) {
@@ -546,43 +567,60 @@ async function resolveClinician(req: NextRequest) {
     };
   }
 
-  const clinician = await prisma.clinicianProfile.findUnique({
-    where: { id: clinicianId },
+  const url = new URL('/api/clinicians/me/training/context', gatewayBase());
+  url.searchParams.set('clinicianId', clinicianId);
+
+  const upstream = await fetch(url.toString(), {
+    method: 'GET',
+    headers: apiHeaders(req),
+    cache: 'no-store',
   });
 
-  if (!clinician) {
+  const text = await upstream.text();
+  let data: any = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = null;
+  }
+
+  if (!upstream.ok || !data || data?.ok === false) {
     return {
       error: NextResponse.json(
-        { ok: false, error: 'clinician_not_found' },
-        { status: 404 },
+        {
+          ok: false,
+          error: data?.error || upstream.statusText || 'certificate_context_unavailable',
+          upstreamStatus: upstream.status,
+        },
+        { status: upstream.ok ? 502 : upstream.status },
       ),
     };
   }
 
-  return { clinician };
+  return {
+    clinicianId,
+    context: data,
+  };
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const resolved = await resolveClinician(req);
+    const resolved = await resolveCertificateContext(req);
 
     if ('error' in resolved) return resolved.error;
 
-    const clinician: any = resolved.clinician;
+    const ctx: any = resolved.context;
+    const clinicianId = cleanStr(resolved.clinicianId);
+    const onboarding = ctx?.onboarding || {};
+    const training = ctx?.training || {};
 
-    const onboarding = await prisma.clinicianOnboarding.findUnique({
-      where: { clinicianId: clinician.id },
-    });
-
-    const trainingSlot = onboarding?.trainingSlotId
-      ? await prisma.clinicianTrainingSlot.findUnique({
-          where: { id: onboarding.trainingSlotId },
-        })
-      : null;
-
-    const meta = safeObject((clinician as any).meta ?? (clinician as any).metadata);
-    const rawProfile = safeObject(meta.rawProfile ?? meta.rawProfileJson);
-    const cert = extractCertificate(rawProfile, clinician);
+    const cert = {
+      certificateNumber: cleanStr(training?.certificateNumber),
+      completedAt: cleanStr(training?.certificateCompletedAt),
+      institution: cleanStr(training?.certificateInstitution) || CERTIFICATE_INSTITUTION,
+      trainingSlotId: cleanStr(training?.trainingSlotId || training?.slotId || onboarding?.trainingSlotId),
+    };
 
     if (!cert.certificateNumber || !cert.completedAt) {
       return NextResponse.json(
@@ -591,26 +629,32 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    const trainingSlotId = cert.trainingSlotId || onboarding?.trainingSlotId || trainingSlot?.id || '';
+    const trainingSlotId = cert.trainingSlotId || cleanStr(onboarding?.trainingSlotId) || '';
     const data = {
-      clinicianName: cleanStr(clinician.displayName) || cleanStr(clinician.email) || 'Clinician',
-      clinicianId: cleanStr(clinician.id),
+      clinicianName:
+        cleanStr(ctx?.clinician?.displayName) ||
+        cleanStr(ctx?.clinicianName) ||
+        cleanStr(ctx?.name) ||
+        cleanStr(ctx?.profile?.displayName) ||
+        'Clinician',
+      clinicianId,
       hpcsa:
-        cleanStr((clinician as any).hpcsaNumber) ||
-        cleanStr(rawProfile?.hpcsaNumber) ||
-        cleanStr(rawProfile?.hpcsa?.number) ||
+        cleanStr(ctx?.clinician?.hpcsaNumber) ||
+        cleanStr(ctx?.profile?.hpcsaNumber) ||
+        cleanStr(ctx?.hpcsaNumber) ||
         'Not supplied',
       certificateNumber: cert.certificateNumber,
       completedDate: formatDate(cert.completedAt),
       institution: CERTIFICATE_INSTITUTION,
-      trainingMode: trainingSlot?.mode
-        ? String(trainingSlot.mode) === 'in_person'
+      trainingMode:
+        String(training?.mode || '').toLowerCase() === 'in_person'
           ? 'In-person'
-          : 'Virtual'
-        : 'Virtual / In-person',
+          : String(training?.mode || '').toLowerCase() === 'virtual'
+            ? 'Virtual'
+            : 'Virtual / In-person',
       trainingSlotId,
       trainingRoomId: trainingRoomIdForSlot(trainingSlotId),
-      cohortDates: formatDateRange(trainingSlot?.startsAt, trainingSlot?.endsAt),
+      cohortDates: formatDateRange(training?.startAt, training?.endAt),
       verifyUrl: certificateVerifyUrl(req, cert.certificateNumber),
     };
 
