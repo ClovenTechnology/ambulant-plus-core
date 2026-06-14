@@ -82,8 +82,10 @@ function extractTrainingCertificate(profileJson: any) {
 
 export async function GET(req: NextRequest) {
   try {
+    const requestedClinicianId = cleanStr(req.nextUrl.searchParams.get('clinicianId'), 120);
     const who = readIdentity(req.headers);
-    if (!who?.uid) {
+
+    if (!who?.uid && !requestedClinicianId) {
       return NextResponse.json(
         { ok: false, error: 'unauthorized' },
         { status: 401 },
@@ -91,12 +93,16 @@ export async function GET(req: NextRequest) {
     }
 
     const db: any = prisma;
-    const clinician = await db.clinicianProfile.findFirst({
-      where: {
-        OR: [{ userId: who.uid }, { id: who.uid }],
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const clinician = requestedClinicianId
+      ? await db.clinicianProfile.findUnique({
+          where: { id: requestedClinicianId },
+        })
+      : await db.clinicianProfile.findFirst({
+          where: {
+            OR: [{ userId: who!.uid }, { id: who!.uid }],
+          },
+          orderBy: { createdAt: 'desc' },
+        });
 
     if (!clinician) {
       return NextResponse.json(
