@@ -1,16 +1,4 @@
-﻿// apps/clinician-app/app/api/training/certificate/route.ts
-import React from 'react';
-import { NextRequest, NextResponse } from 'next/server';
-import { Readable } from 'stream';
-import {
-  Document,
-  Page,
-  Text,
-  View,
-  StyleSheet,
-  renderToStream,
-} from '@react-pdf/renderer';
-
+﻿import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,44 +6,16 @@ export const dynamic = 'force-dynamic';
 type JsonObj = Record<string, any>;
 
 const CERTIFICATE_ISSUER =
-  process.env.CERTIFICATE_ISSUER ||
-  'Cloven Technology Impilo';
+  process.env.CERTIFICATE_ISSUER || 'Cloven Technology Impilo';
 
 const CERTIFICATE_PROGRAMME =
-  process.env.CERTIFICATE_PROGRAMME ||
-  'Ambulant+ Contactless Medicine - Clinician Onboarding & Practice Readiness Programme';
+  process.env.CERTIFICATE_PROGRAMME || 'Ambulant+ Contactless Medicine';
 
 const CERTIFICATE_INSTITUTION =
-  process.env.CERTIFICATE_INSTITUTION ||
-  'Cloven Technology Impilo';
+  process.env.CERTIFICATE_INSTITUTION || 'Cloven Technology Impilo';
 
 const FRAMEWORK_SUPPORT =
-  process.env.CERTIFICATE_FRAMEWORK_SUPPORT ||
-  'Executive College, SA';
-
-const E = React.createElement;
-
-function gatewayBase() {
-  return String(
-    process.env.API_GATEWAY_URL ||
-      process.env.API_GATEWAY_BASE_URL ||
-      process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
-      process.env.APIGW_BASE ||
-      process.env.GATEWAY_URL ||
-      'https://api-gateway.ambulantplus.co.za',
-  ).replace(/\/+$/, '');
-}
-
-function apiHeaders(req: NextRequest) {
-  const cookie = req.headers.get('cookie') || '';
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-  };
-
-  if (cookie) headers.cookie = cookie;
-
-  return headers;
-}
+  process.env.CERTIFICATE_FRAMEWORK_SUPPORT || 'Executive College, SA';
 
 function cleanStr(v: unknown, max = 500): string {
   const s = String(v ?? '').trim();
@@ -63,16 +23,16 @@ function cleanStr(v: unknown, max = 500): string {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-function safeObject(value: unknown): JsonObj {
-  if (!value) return {};
-  if (typeof value === 'object' && !Array.isArray(value)) return value as JsonObj;
-
-  try {
-    const parsed = JSON.parse(String(value));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    return {};
-  }
+function safePdfText(value: unknown): string {
+  return cleanStr(value, 2000)
+    .replace(/[–—]/g, '-')
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/→/g, '->')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
 }
 
 function formatDate(value?: unknown) {
@@ -118,442 +78,27 @@ function certificateVerifyUrl(req: NextRequest, certificateNumber: string) {
   return `${baseUrl(req)}/certificates/verify/${encodeURIComponent(certificateNumber)}`;
 }
 
-function extractCertificate(rawProfile: JsonObj, clinician: any) {
-  const training = safeObject(rawProfile.training);
-  const trainingCertificate = safeObject(rawProfile.trainingCertificate);
+function gatewayBase() {
+  return String(
+    process.env.API_GATEWAY_URL ||
+      process.env.API_GATEWAY_BASE_URL ||
+      process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+      process.env.APIGW_BASE ||
+      process.env.GATEWAY_URL ||
+      'https://api-gateway.ambulantplus.co.za',
+  ).replace(/\/+$/, '');
+}
 
-  const additionalQualifications = Array.isArray(rawProfile.additionalQualifications)
-    ? rawProfile.additionalQualifications
-    : [];
-
-  const qualification =
-    additionalQualifications.find(
-      (q: any) =>
-        cleanStr(q?.degree) === 'Ambulant+ Mandatory Clinician Training',
-    ) || {};
-
-  const certificateNumber =
-    cleanStr(training.certificateNumber) ||
-    cleanStr(trainingCertificate.certificateNumber) ||
-    cleanStr(qualification.certificateNumber) ||
-    cleanStr(clinician?.boardCertificateNumber) ||
-    '';
-
-  const completedAt =
-    cleanStr(training.completedAt) ||
-    cleanStr(trainingCertificate.completedAt) ||
-    cleanStr(trainingCertificate.issuedAt) ||
-    cleanStr(qualification.completedAt) ||
-    '';
-
-  const institution =
-    cleanStr(trainingCertificate.institution) ||
-    CERTIFICATE_INSTITUTION;
-
-  const trainingSlotId =
-    cleanStr(training.trainingSlotId) ||
-    cleanStr(trainingCertificate.trainingSlotId) ||
-    '';
-
-  return {
-    certificateNumber,
-    completedAt,
-    institution,
-    trainingSlotId,
+function apiHeaders(req: NextRequest) {
+  const cookie = req.headers.get('cookie') || '';
+  const headers: Record<string, string> = {
+    accept: 'application/json',
   };
+
+  if (cookie) headers.cookie = cookie;
+
+  return headers;
 }
-
-function drawDataRow(label: string, value: string) {
-  return E(
-    View,
-    { style: styles.dataRow },
-    E(Text, { style: styles.dataLabel }, label),
-    E(Text, { style: styles.dataValue }, value || '-'),
-  );
-}
-
-function createCertificatePdf(data: any) {
-  const verifyUrl = data.verifyUrl || '-';
-
-  return E(
-    Document,
-    {
-      title: `Ambulant+ Certificate - ${data.certificateNumber || data.clinicianName}`,
-      author: CERTIFICATE_ISSUER,
-      subject: CERTIFICATE_PROGRAMME,
-      keywords: 'Ambulant+, Contactless Medicine, Telehealth, IoMT, Clinician Training',
-      creator: 'Ambulant+',
-      producer: 'Ambulant+ Certificate Service',
-    },
-    E(
-      Page,
-      { size: 'A4', orientation: 'landscape', style: styles.page },
-      E(
-        View,
-        { style: styles.outerBorder },
-        E(View, { style: styles.topLine }),
-        E(
-          View,
-          { style: styles.header },
-          E(
-            View,
-            { style: styles.brandBlock },
-            E(Text, { style: styles.brandText }, 'AMBULANT+'),
-            E(Text, { style: styles.brandSubtext }, 'CONTACTLESS MEDICINE'),
-          ),
-          E(
-            View,
-            { style: styles.titleBlock },
-            E(Text, { style: styles.title }, 'CERTIFICATE OF COMPLETION'),
-            E(Text, { style: styles.subtitle }, 'Ambulant+ Contactless Medicine'),
-            E(Text, { style: styles.kicker }, 'CLINICIAN ONBOARDING & PRACTICE READINESS PROGRAMME'),
-          ),
-          E(
-            View,
-            { style: styles.verifyBox },
-            E(Text, { style: styles.verifySquare }, 'VERIFY'),
-            E(Text, { style: styles.verifyCaption }, 'Certificate verification'),
-          ),
-        ),
-        E(View, { style: styles.goldRule }),
-        E(Text, { style: styles.certifies }, 'This certifies that'),
-        E(Text, { style: styles.name }, data.clinicianName || 'Clinician'),
-        E(
-          Text,
-          { style: styles.body },
-          'has successfully completed the Ambulant+ Contactless Medicine Clinician Onboarding & Practice Readiness Programme, a structured training pathway in telehealth, IoMT-assisted remote assessment, remote patient monitoring, documentation, medication adherence considerations, escalation, privacy, patient rights, claims-aware coordination, InsightCore AI-assisted workflow governance, and voice-to-text clinical dictation review.',
-        ),
-        E(
-          Text,
-          { style: styles.bodySmall },
-          'This certificate recognises Contactless Medicine practice-readiness training and safe platform-supported workflow competence. It does not replace statutory professional registration, employer credentialing, specialist qualification, or independent clinical competency assessment.',
-        ),
-        E(
-          Text,
-          { style: styles.bodySmall },
-          'The clinician has been trained in the safe, ethical, clinician-supervised use of AI-assisted workflow tools as supportive aids only. Voice-to-text clinical dictation requires mandatory clinician review, correction, and sign-off before saving or submission.',
-        ),
-        E(
-          View,
-          { style: styles.domainBand },
-          E(
-            Text,
-            { style: styles.domainText },
-            'Training domains: Contactless Medicine framework - IoMT-assisted assessment - Remote monitoring - Documentation - Escalation - Privacy - Claims-aware coordination - InsightCore AI assist - Dictation review',
-          ),
-        ),
-        E(
-          View,
-          { style: styles.infoPanel },
-          E(
-            View,
-            { style: styles.infoColumn },
-            drawDataRow('CLINICIAN ID', data.clinicianId),
-            drawDataRow('PROGRAMME', 'Onboarding & Practice Readiness'),
-            drawDataRow('COHORT / SESSION', data.trainingSlotId || data.trainingRoomId),
-            drawDataRow('STATUS', 'Completed / Certified by Admin'),
-          ),
-          E(
-            View,
-            { style: styles.infoColumn },
-            drawDataRow('HPCSA', data.hpcsa || 'Not supplied'),
-            drawDataRow('TRAINING MODE', data.trainingMode || 'Virtual / In-person'),
-            drawDataRow('COMPLETION DATE', data.completedDate),
-            drawDataRow('CERTIFICATE ID', data.certificateNumber),
-          ),
-        ),
-        E(
-          View,
-          { style: styles.partnerBand },
-          E(Text, { style: styles.partnerText }, `Issued by: ${CERTIFICATE_ISSUER}. Programme: Ambulant+ Contactless Medicine.`),
-          FRAMEWORK_SUPPORT
-            ? E(Text, { style: styles.partnerText }, `Training framework development and support: ${FRAMEWORK_SUPPORT}.`)
-            : null,
-        ),
-        E(
-          View,
-          { style: styles.signatureRow },
-          E(
-            View,
-            { style: styles.signatureBlock },
-            E(View, { style: styles.signatureLine }),
-            E(Text, { style: styles.signatureName }, process.env.CERTIFICATE_TRAINING_LEAD_NAME || 'Training Lead'),
-            E(Text, { style: styles.signatureTitle }, process.env.CERTIFICATE_TRAINING_LEAD_TITLE || 'Ambulant+ Contactless Medicine'),
-          ),
-          E(
-            View,
-            { style: styles.seal },
-            E(Text, { style: styles.sealText }, 'AMBULANT+'),
-            E(Text, { style: styles.sealText }, 'ONBOARDING'),
-            E(Text, { style: styles.sealSmall }, 'READY'),
-          ),
-          E(
-            View,
-            { style: styles.signatureBlock },
-            E(View, { style: styles.signatureLine }),
-            E(Text, { style: styles.signatureName }, process.env.CERTIFICATE_AUTHORISED_OFFICER_NAME || 'Ambulant+ Authorised Officer'),
-            E(Text, { style: styles.signatureTitle }, process.env.CERTIFICATE_AUTHORISED_OFFICER_ORG || CERTIFICATE_ISSUER),
-          ),
-        ),
-        E(
-          View,
-          { style: styles.footer },
-          E(Text, { style: styles.footerText }, `Certificate ID: ${data.certificateNumber || '-'}`),
-          E(Text, { style: styles.footerText }, `Verify: ${verifyUrl}`),
-          E(
-            Text,
-            { style: styles.disclaimer },
-            'Disclaimer: This certificate confirms completion of Ambulant+ Contactless Medicine onboarding and practice-readiness training. It does not replace statutory professional registration, employer credentialing, specialist qualification, or independent clinical competency assessment.',
-          ),
-        ),
-        E(View, { style: styles.bottomLine }),
-      ),
-    ),
-  );
-}
-
-const styles = StyleSheet.create({
-  page: {
-    padding: 28,
-    backgroundColor: '#fbfaf6',
-    color: '#102033',
-    fontFamily: 'Helvetica',
-  },
-  outerBorder: {
-    flex: 1,
-    borderWidth: 1.2,
-    borderColor: '#9a7b36',
-    borderRadius: 8,
-    padding: 18,
-    position: 'relative',
-  },
-  topLine: {
-    height: 3,
-    backgroundColor: '#08aeb8',
-    marginBottom: 8,
-  },
-  bottomLine: {
-    position: 'absolute',
-    left: 18,
-    right: 18,
-    bottom: 14,
-    height: 3,
-    backgroundColor: '#08aeb8',
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-  },
-  brandBlock: {
-    width: 140,
-    paddingTop: 6,
-  },
-  brandText: {
-    fontSize: 15,
-    fontWeight: 700,
-    color: '#0b9ea7',
-  },
-  brandSubtext: {
-    marginTop: 2,
-    fontSize: 6,
-    letterSpacing: 1.4,
-    color: '#0b9ea7',
-  },
-  titleBlock: {
-    flex: 1,
-    alignItems: 'center',
-    paddingTop: 30,
-  },
-  title: {
-    fontSize: 25,
-    fontWeight: 800,
-    letterSpacing: 1.5,
-    color: '#102033',
-  },
-  subtitle: {
-    marginTop: 7,
-    fontSize: 14,
-    color: '#1b2b3c',
-  },
-  kicker: {
-    marginTop: 6,
-    fontSize: 8,
-    letterSpacing: 1.7,
-    fontWeight: 700,
-    color: '#08aeb8',
-  },
-  verifyBox: {
-    width: 130,
-    alignItems: 'center',
-    paddingTop: 6,
-  },
-  verifySquare: {
-    width: 64,
-    height: 64,
-    borderWidth: 1,
-    borderColor: '#102033',
-    textAlign: 'center',
-    paddingTop: 25,
-    fontSize: 8,
-    color: '#102033',
-  },
-  verifyCaption: {
-    marginTop: 5,
-    fontSize: 6,
-    color: '#5b6675',
-  },
-  goldRule: {
-    width: 310,
-    height: 1,
-    backgroundColor: '#9a7b36',
-    alignSelf: 'center',
-    marginTop: 10,
-    marginBottom: 12,
-  },
-  certifies: {
-    textAlign: 'center',
-    fontSize: 9,
-    color: '#5b6675',
-  },
-  name: {
-    textAlign: 'center',
-    marginTop: 8,
-    fontSize: 26,
-    fontWeight: 800,
-    color: '#102033',
-  },
-  body: {
-    marginTop: 17,
-    marginHorizontal: 100,
-    textAlign: 'center',
-    fontSize: 8.4,
-    lineHeight: 1.35,
-    color: '#1d2733',
-  },
-  bodySmall: {
-    marginTop: 6,
-    marginHorizontal: 110,
-    textAlign: 'center',
-    fontSize: 6.7,
-    lineHeight: 1.25,
-    color: '#1d2733',
-  },
-  domainBand: {
-    marginTop: 14,
-    marginHorizontal: 42,
-    borderWidth: 1,
-    borderColor: '#b9ecf0',
-    backgroundColor: '#e2fbfd',
-    borderRadius: 6,
-    paddingVertical: 8,
-    paddingHorizontal: 10,
-  },
-  domainText: {
-    textAlign: 'center',
-    fontSize: 7,
-    fontWeight: 700,
-    color: '#102033',
-  },
-  infoPanel: {
-    marginTop: 12,
-    marginHorizontal: 25,
-    borderWidth: 0.8,
-    borderColor: '#d9e1e8',
-    backgroundColor: '#ffffff',
-    borderRadius: 6,
-    padding: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  infoColumn: {
-    width: '47%',
-  },
-  dataRow: {
-    marginBottom: 4,
-  },
-  dataLabel: {
-    fontSize: 7,
-    fontWeight: 800,
-    color: '#069da8',
-    letterSpacing: 0.5,
-  },
-  dataValue: {
-    marginTop: 1,
-    fontSize: 8,
-    color: '#172638',
-  },
-  partnerBand: {
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  partnerText: {
-    fontSize: 6.3,
-    color: '#526070',
-  },
-  signatureRow: {
-    marginTop: 14,
-    marginHorizontal: 70,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  signatureBlock: {
-    width: 170,
-  },
-  signatureLine: {
-    height: 1,
-    backgroundColor: '#102033',
-    marginBottom: 8,
-  },
-  signatureName: {
-    fontSize: 8,
-    fontWeight: 700,
-    color: '#102033',
-  },
-  signatureTitle: {
-    marginTop: 2,
-    fontSize: 7,
-    color: '#5b6675',
-  },
-  seal: {
-    width: 62,
-    height: 62,
-    borderRadius: 31,
-    borderWidth: 2,
-    borderColor: '#9a7b36',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#f2feff',
-  },
-  sealText: {
-    fontSize: 7,
-    fontWeight: 800,
-    color: '#08aeb8',
-  },
-  sealSmall: {
-    marginTop: 2,
-    fontSize: 6,
-    color: '#5b6675',
-  },
-  footer: {
-    position: 'absolute',
-    left: 45,
-    right: 45,
-    bottom: 22,
-  },
-  footerText: {
-    fontSize: 6.5,
-    color: '#172638',
-    marginBottom: 2,
-  },
-  disclaimer: {
-    marginTop: 4,
-    textAlign: 'center',
-    fontSize: 5.5,
-    color: '#172638',
-  },
-});
 
 async function resolveCertificateContext(req: NextRequest) {
   const clinicianId = cleanStr(req.nextUrl.searchParams.get('clinicianId'), 120);
@@ -598,10 +143,212 @@ async function resolveCertificateContext(req: NextRequest) {
     };
   }
 
-  return {
-    clinicianId,
-    context: data,
+  return { clinicianId, context: data };
+}
+
+function approxTextWidth(text: string, fontSize: number) {
+  return safePdfText(text).length * fontSize * 0.5;
+}
+
+function pdfText(
+  text: string,
+  x: number,
+  y: number,
+  size: number,
+  font: 'F1' | 'F2' = 'F1',
+  align: 'left' | 'center' | 'right' = 'left',
+) {
+  let px = x;
+  if (align === 'center') px = x - approxTextWidth(text, size) / 2;
+  if (align === 'right') px = x - approxTextWidth(text, size);
+
+  return `BT /${font} ${size} Tf ${px.toFixed(2)} ${y.toFixed(2)} Td (${safePdfText(text)}) Tj ET\n`;
+}
+
+function pdfLine(x1: number, y1: number, x2: number, y2: number, width = 1) {
+  return `${width} w ${x1} ${y1} m ${x2} ${y2} l S\n`;
+}
+
+function pdfRect(x: number, y: number, w: number, h: number, stroke = true, fill = false) {
+  if (stroke && fill) return `${x} ${y} ${w} ${h} re B\n`;
+  if (fill) return `${x} ${y} ${w} ${h} re f\n`;
+  return `${x} ${y} ${w} ${h} re S\n`;
+}
+
+function wrapText(text: string, maxChars: number) {
+  const words = cleanStr(text, 5000).split(/\s+/).filter(Boolean);
+  const lines: string[] = [];
+  let line = '';
+
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (next.length > maxChars && line) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = next;
+    }
+  }
+
+  if (line) lines.push(line);
+  return lines;
+}
+
+function pdfWrappedText(
+  text: string,
+  x: number,
+  y: number,
+  size: number,
+  maxChars: number,
+  lineGap = 10,
+  font: 'F1' | 'F2' = 'F1',
+  align: 'left' | 'center' = 'center',
+) {
+  let out = '';
+  let yy = y;
+
+  for (const line of wrapText(text, maxChars)) {
+    out += pdfText(line, x, yy, size, font, align);
+    yy -= lineGap;
+  }
+
+  return out;
+}
+
+function renderCertificatePdfBuffer(data: any) {
+  const W = 842;
+  const H = 595;
+  let c = '';
+
+  c += '0.98 0.97 0.94 rg\n';
+  c += pdfRect(0, 0, W, H, false, true);
+
+  c += '0.06 0.12 0.20 RG\n';
+  c += pdfRect(24, 24, W - 48, H - 48, true, false);
+
+  c += '0.60 0.43 0.12 RG\n';
+  c += pdfRect(31, 31, W - 62, H - 62, true, false);
+
+  c += '0.00 0.67 0.72 RG\n';
+  c += pdfLine(50, H - 52, W - 50, H - 52, 2);
+  c += pdfLine(50, 43, W - 50, 43, 2);
+
+  c += pdfText('AMBULANT+', 95, H - 86, 13, 'F2', 'left');
+  c += pdfText('CONTACTLESS MEDICINE', 95, H - 99, 6, 'F1', 'left');
+
+  c += pdfRect(W - 150, H - 125, 72, 72, true, false);
+  c += pdfText('VERIFY', W - 114, H - 88, 10, 'F2', 'center');
+  c += pdfText('Certificate verification', W - 114, H - 136, 6, 'F1', 'center');
+
+  c += pdfText('CERTIFICATE OF COMPLETION', W / 2, H - 98, 24, 'F2', 'center');
+  c += pdfText('Ambulant+ Contactless Medicine', W / 2, H - 120, 14, 'F1', 'center');
+  c += pdfText('CLINICIAN ONBOARDING & PRACTICE READINESS PROGRAMME', W / 2, H - 138, 8, 'F2', 'center');
+
+  c += '0.60 0.43 0.12 RG\n';
+  c += pdfLine(W / 2 - 155, H - 158, W / 2 + 155, H - 158, 1);
+
+  c += pdfText('This certifies that', W / 2, H - 180, 9, 'F1', 'center');
+  c += pdfText(data.clinicianName || 'Clinician', W / 2, H - 210, 25, 'F2', 'center');
+
+  const mainBody =
+    'has successfully completed the Ambulant+ Contactless Medicine Clinician Onboarding and Practice Readiness Programme, a structured training pathway in telehealth, IoMT-assisted remote assessment, remote patient monitoring, documentation, medication adherence considerations, escalation, privacy, patient rights, claims-aware coordination, InsightCore AI-assisted workflow governance, and voice-to-text clinical dictation review.';
+
+  c += pdfWrappedText(mainBody, W / 2, H - 238, 7.5, 125, 9, 'F1', 'center');
+
+  const safeBody =
+    'This certificate recognises Contactless Medicine practice-readiness training and safe platform-supported workflow competence. It does not replace statutory professional registration, employer credentialing, specialist qualification, or independent clinical competency assessment.';
+
+  c += pdfWrappedText(safeBody, W / 2, H - 292, 6.5, 135, 8, 'F1', 'center');
+
+  c += '0.86 0.98 0.99 rg\n';
+  c += '0.65 0.90 0.92 RG\n';
+  c += pdfRect(90, 262, W - 180, 35, true, true);
+  c += pdfWrappedText(
+    'Training domains: Contactless Medicine framework - IoMT-assisted assessment - Remote monitoring - Documentation - Escalation - Privacy - Claims-aware coordination - InsightCore AI assist - Dictation review',
+    W / 2,
+    283,
+    7,
+    130,
+    8,
+    'F2',
+    'center',
+  );
+
+  c += '1 1 1 rg\n';
+  c += '0.82 0.86 0.90 RG\n';
+  c += pdfRect(72, 150, W - 144, 92, true, true);
+
+  const leftX = 88;
+  const rightX = 458;
+  let y = 222;
+
+  const row = (label: string, value: string, x: number, yy: number) => {
+    let out = '';
+    out += pdfText(label, x, yy, 7, 'F2', 'left');
+    out += pdfText(value || '-', x, yy - 10, 8, 'F1', 'left');
+    return out;
   };
+
+  c += row('CLINICIAN ID', data.clinicianId, leftX, y);
+  c += row('PROGRAMME', 'Onboarding & Practice Readiness', leftX, y - 28);
+  c += row('COHORT / SESSION', data.trainingSlotId || data.trainingRoomId || '-', leftX, y - 56);
+
+  c += row('HPCSA', data.hpcsa || 'Not supplied', rightX, y);
+  c += row('TRAINING MODE', data.trainingMode || 'Virtual / In-person', rightX, y - 28);
+  c += row('COMPLETION DATE', data.completedDate || '-', rightX, y - 56);
+  c += row('CERTIFICATE ID', data.certificateNumber || '-', rightX, y - 84);
+
+  c += pdfText(`Issued by: ${CERTIFICATE_ISSUER}`, W / 2, 132, 6.5, 'F1', 'center');
+  c += pdfText(`Programme: ${CERTIFICATE_PROGRAMME}`, W / 2, 121, 6.5, 'F1', 'center');
+  c += pdfText(`Training framework development and support: ${FRAMEWORK_SUPPORT}`, W / 2, 110, 6.5, 'F1', 'center');
+
+  c += '0.06 0.12 0.20 RG\n';
+  c += pdfLine(150, 88, 305, 88, 1);
+  c += pdfLine(W - 305, 88, W - 150, 88, 1);
+
+  c += pdfText(process.env.CERTIFICATE_TRAINING_LEAD_NAME || 'Training Lead', 150, 75, 8, 'F2', 'left');
+  c += pdfText(process.env.CERTIFICATE_TRAINING_LEAD_TITLE || 'Ambulant+ Contactless Medicine', 150, 64, 7, 'F1', 'left');
+
+  c += pdfText(process.env.CERTIFICATE_AUTHORISED_OFFICER_NAME || 'Ambulant+ Authorised Officer', W - 305, 75, 8, 'F2', 'left');
+  c += pdfText(process.env.CERTIFICATE_AUTHORISED_OFFICER_ORG || CERTIFICATE_ISSUER, W - 305, 64, 7, 'F1', 'left');
+
+  c += '0.00 0.67 0.72 RG\n';
+  c += pdfRect(W / 2 - 31, 52, 62, 62, true, false);
+  c += pdfText('AMBULANT+', W / 2, 88, 7, 'F2', 'center');
+  c += pdfText('ONBOARDING', W / 2, 78, 7, 'F2', 'center');
+  c += pdfText('READY', W / 2, 67, 6, 'F1', 'center');
+
+  c += pdfText(`Certificate ID: ${data.certificateNumber || '-'}`, 50, 72, 6.5, 'F1', 'left');
+  c += pdfText(`Verify: ${data.verifyUrl || '-'}`, 50, 60, 6.2, 'F1', 'left');
+
+  const objects: string[] = [];
+
+  objects.push('<< /Type /Catalog /Pages 2 0 R >>');
+  objects.push('<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
+  objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`);
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+  objects.push(`<< /Length ${Buffer.byteLength(c, 'latin1')} >>\nstream\n${c}endstream`);
+
+  let pdf = '%PDF-1.4\n';
+  const offsets: number[] = [0];
+
+  for (let i = 0; i < objects.length; i++) {
+    offsets.push(Buffer.byteLength(pdf, 'latin1'));
+    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  }
+
+  const xrefOffset = Buffer.byteLength(pdf, 'latin1');
+  pdf += `xref\n0 ${objects.length + 1}\n`;
+  pdf += '0000000000 65535 f \n';
+
+  for (let i = 1; i < offsets.length; i++) {
+    pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  }
+
+  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+
+  return Buffer.from(pdf, 'latin1');
 }
 
 export async function GET(req: NextRequest) {
@@ -632,6 +379,7 @@ export async function GET(req: NextRequest) {
     const trainingSlotId = cert.trainingSlotId || cleanStr(onboarding?.trainingSlotId) || '';
     const data = {
       clinicianName:
+        cleanStr(ctx?.clinician?.name) ||
         cleanStr(ctx?.clinician?.displayName) ||
         cleanStr(ctx?.clinicianName) ||
         cleanStr(ctx?.name) ||
@@ -658,16 +406,15 @@ export async function GET(req: NextRequest) {
       verifyUrl: certificateVerifyUrl(req, cert.certificateNumber),
     };
 
-    const pdfStream = await renderToStream(createCertificatePdf(data) as any);
-    const webStream = Readable.toWeb(pdfStream as any) as any;
-
+    const pdfBuffer = renderCertificatePdfBuffer(data);
     const filename = `Ambulant-Certificate-${data.certificateNumber}.pdf`;
 
-    return new NextResponse(webStream, {
+    return new NextResponse(new Uint8Array(pdfBuffer), {
       status: 200,
       headers: {
         'content-type': 'application/pdf',
         'content-disposition': `attachment; filename="${filename}"`,
+        'content-length': String(pdfBuffer.length),
         'cache-control': 'private, no-store, max-age=0',
       },
     });
@@ -683,6 +430,3 @@ export async function GET(req: NextRequest) {
     );
   }
 }
-
-
-
