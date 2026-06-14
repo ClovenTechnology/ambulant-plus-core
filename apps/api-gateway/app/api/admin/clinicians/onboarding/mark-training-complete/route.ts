@@ -194,6 +194,14 @@ export async function POST(req: NextRequest) {
 
     const merged = {
       ...rawBase,
+      trainingCertificate: {
+        certificateNumber,
+        completedAt: issueDateIso,
+        issuedAt: issueDateIso,
+        institution: 'Ambulant+ / Cloven Technology',
+        trainingSlotId,
+        certificateUrl: '/api/training/certificate',
+      },
       onboarding: {
         ...(rawBase?.onboarding || {}),
         stage: 'training_completed',

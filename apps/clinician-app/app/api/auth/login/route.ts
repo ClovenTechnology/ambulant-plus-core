@@ -191,8 +191,32 @@ export async function POST(req: NextRequest) {
     const profileJson = parseObject(meta.rawProfile ?? meta.rawProfileJson ?? null);
 
     const status = String(clinician.status || 'pending').toLowerCase();
+
+    const onboardingStage = String(profileJson?.onboarding?.stage || '').toLowerCase();
+    const trainingStatus = String(profileJson?.training?.status || '').toLowerCase();
+    const trainingCertificate = parseObject(profileJson?.trainingCertificate ?? meta?.trainingCertificate ?? null);
+
+    const additionalQualifications = Array.isArray(profileJson?.additionalQualifications)
+      ? profileJson.additionalQualifications
+      : [];
+
+    const hasTrainingQualification = additionalQualifications.some(
+      (q: any) =>
+        String(q?.degree || '').trim() === 'Ambulant+ Mandatory Clinician Training' &&
+        Boolean(q?.certificateNumber || q?.completedAt),
+    );
+
+    const trainingCompleted =
+      clinicianAny.trainingCompleted === true ||
+      onboardingStage === 'training_completed' ||
+      trainingStatus === 'completed' ||
+      Boolean(profileJson?.training?.certificateNumber && profileJson?.training?.completedAt) ||
+      Boolean(trainingCertificate?.certificateNumber && (trainingCertificate?.completedAt || trainingCertificate?.issuedAt)) ||
+      hasTrainingQualification;
+
     const visibleToPatients = status === 'active';
-    const canPractice = status === 'active';
+    const simulationMode = trainingCompleted && !visibleToPatients;
+    const canPractice = visibleToPatients || simulationMode;
 
     const token = auth0.token || `dev-${clinician.id}-${Date.now()}`;
 
@@ -205,6 +229,8 @@ export async function POST(req: NextRequest) {
       specialty: clinician.specialty,
       canPractice,
       visibleToPatients,
+      trainingCompleted,
+      simulationMode,
       onboarding: profileJson?.onboarding ?? null,
       hpcsaPracticeNumber: profileJson?.hpcsaPracticeNumber ?? null,
       hpcsaNextRenewalDate: profileJson?.hpcsaNextRenewalDate ?? null,
@@ -222,6 +248,8 @@ export async function POST(req: NextRequest) {
       status,
       canPractice,
       visibleToPatients,
+      trainingCompleted,
+      simulationMode,
       issuedAt: now,
       expiresAt: now + SESSION_MAX_AGE_SECONDS * 1000,
     };

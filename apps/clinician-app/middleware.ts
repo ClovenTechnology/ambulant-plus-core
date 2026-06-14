@@ -79,6 +79,9 @@ function readClinicianSession(req: NextRequest): Record<string, any> | null {
 function canUseFullWorkspace(session: Record<string, any>) {
   if (session.role === 'admin' || session.role === 'admin_staff') return true;
   if (session.canPractice === true) return true;
+  if (session.trainingCompleted === true) return true;
+  if (session.simulationMode === true) return true;
+  if (String(session.onboardingStage || '').toLowerCase() === 'training_completed') return true;
   if (String(session.status || '').toLowerCase() === 'active') return true;
 
   return false;

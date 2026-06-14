@@ -130,11 +130,21 @@ export async function GET(req: NextRequest) {
 
     const trainingCert = extractTrainingCertificate(rawProfile);
 
+    const trainingCompleted =
+      clinician?.trainingCompleted === true ||
+      String(onboarding?.status || '').toLowerCase() === 'training_completed' ||
+      String(rawProfile?.onboarding?.stage || '').toLowerCase() === 'training_completed' ||
+      String(rawProfile?.training?.status || '').toLowerCase() === 'completed' ||
+      Boolean(trainingCert.certificateNumber && trainingCert.completedAt);
+
+    const certificateAvailable = Boolean(trainingCert.certificateNumber && trainingCert.completedAt);
+    const certificateUrl = certificateAvailable ? '/api/clinicians/me/training/certificate' : null;
+
     const starterKitItems =
       Array.isArray(rawProfile?.starterKitItems)
         ? rawProfile.starterKitItems.map(String)
         : [
-            'DueCare 6-in-1 Health Monitor (IoMT)',
+            '6-in-1 Health Monitor (IoMT)',
             'NexRing (IoMT)',
             'Digital Stethoscope (IoMT)',
             'HD Otoscope (IoMT)',
@@ -174,13 +184,13 @@ export async function GET(req: NextRequest) {
         },
         onboarding: onboarding
           ? {
-              stage: outwardStage(onboarding.status),
+              stage: trainingCompleted ? 'training_completed' : outwardStage(onboarding.status),
               notes: cleanStr(onboarding.trainingNotes, 2000),
             }
           : null,
         training: trainingSlot
           ? {
-              status: outwardTrainingStatus(trainingSlot.status),
+              status: trainingCompleted ? 'completed' : outwardTrainingStatus(trainingSlot.status),
               startAt: asIso(trainingSlot.startsAt),
               endAt: asIso(trainingSlot.endsAt),
               mode:
@@ -194,15 +204,11 @@ export async function GET(req: NextRequest) {
               certificateNumber: trainingCert.certificateNumber,
               certificateCompletedAt: trainingCert.completedAt,
               certificateInstitution: trainingCert.institution,
-              certificateAvailable:
-                !!trainingCert.certificateNumber && !!trainingCert.completedAt,
-              certificateUrl:
-                !!trainingCert.certificateNumber && !!trainingCert.completedAt
-                  ? '/api/clinicians/me/training/certificate'
-                  : null,
+              certificateAvailable,
+              certificateUrl,
             }
           : {
-              status: null,
+              status: trainingCompleted ? 'completed' : null,
               startAt: null,
               endAt: null,
               mode: null,
@@ -213,12 +219,8 @@ export async function GET(req: NextRequest) {
               certificateNumber: trainingCert.certificateNumber,
               certificateCompletedAt: trainingCert.completedAt,
               certificateInstitution: trainingCert.institution,
-              certificateAvailable:
-                !!trainingCert.certificateNumber && !!trainingCert.completedAt,
-              certificateUrl:
-                !!trainingCert.certificateNumber && !!trainingCert.completedAt
-                  ? '/api/clinicians/me/training/certificate'
-                  : null,
+              certificateAvailable,
+              certificateUrl,
             },
         dispatch: dispatch
           ? {

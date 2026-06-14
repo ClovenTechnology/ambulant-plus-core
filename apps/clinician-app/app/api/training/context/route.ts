@@ -20,7 +20,10 @@ function trimSlash(s: string) {
 
 function gatewayBase() {
   return trimSlash(
-    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_URL ||
+      process.env.API_GATEWAY_BASE_URL ||
+      process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+      process.env.APIGW_BASE ||
       process.env.GATEWAY_URL ||
       process.env.NEXT_PUBLIC_APIGW_BASE ||
       process.env.NEXT_PUBLIC_GATEWAY_BASE ||
@@ -53,6 +56,66 @@ function forwardHeaders(req: NextRequest) {
 function safeMeta(value: unknown): JsonObj {
   if (!value || typeof value !== 'object') return {};
   return value as JsonObj;
+}
+
+function safeParseJsonObject(value: unknown): JsonObj {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value as JsonObj;
+
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function firstObject(...values: unknown[]): JsonObj {
+  for (const value of values) {
+    const parsed = safeParseJsonObject(value);
+    if (Object.keys(parsed).length) return parsed;
+  }
+  return {};
+}
+
+function extractTrainingCertificate(rawProfile: JsonObj, meta: JsonObj, clinician: any) {
+  const training = safeMeta(rawProfile?.training);
+  const trainingCertificate = safeMeta(rawProfile?.trainingCertificate ?? meta?.trainingCertificate);
+  const additionalQualifications = Array.isArray(rawProfile?.additionalQualifications)
+    ? rawProfile.additionalQualifications
+    : [];
+
+  const qualification =
+    additionalQualifications.find(
+      (q: any) =>
+        String(q?.degree || '').trim() === 'Ambulant+ Mandatory Clinician Training',
+    ) || {};
+
+  const certificateNumber =
+    training?.certificateNumber ||
+    trainingCertificate?.certificateNumber ||
+    qualification?.certificateNumber ||
+    clinician?.boardCertificateNumber ||
+    null;
+
+  const completedAt =
+    training?.completedAt ||
+    trainingCertificate?.completedAt ||
+    trainingCertificate?.issuedAt ||
+    qualification?.completedAt ||
+    null;
+
+  const institution =
+    trainingCertificate?.institution ||
+    qualification?.institution ||
+    'Ambulant+ / Cloven Technology';
+
+  return {
+    certificateNumber,
+    completedAt,
+    institution,
+    certificateUrl: certificateNumber && completedAt ? '/api/training/certificate' : null,
+  };
 }
 
 function humanTrainingError(value: unknown, fallback = 'Unable to load your training details right now. Please try again or contact Ambulant+ support.') {
@@ -94,7 +157,7 @@ function normaliseProvider(value: unknown): 'mock' | 'stripe' | 'paystack' | 'oz
 }
 
 const DEFAULT_STARTER_KIT_ITEMS = [
-  'DueCare 6-in-1 Health Monitor (IoMT)',
+  '6-in-1 Health Monitor (IoMT)',
   'NexRing (IoMT)',
   'Digital Stethoscope (IoMT)',
   'HD Otoscope (IoMT)',
@@ -154,11 +217,18 @@ async function localTrainingContext(clinicianId: string) {
     orderBy: { updatedAt: 'desc' },
   });
 
-  const meta = safeMeta(clinician.meta);
-  const rawProfile = safeMeta(meta.rawProfile);
-  const certificate = safeMeta(rawProfile.trainingCertificate ?? meta.trainingCertificate);
+  const meta = safeMeta((clinician as any).meta ?? (clinician as any).metadata);
+  const rawProfile = firstObject(meta.rawProfile, meta.rawProfileJson);
+  const certificate = extractTrainingCertificate(rawProfile, meta, clinician);
 
-  const completed = clinician.trainingCompleted === true;
+  const onboardingStage = String(onboarding?.status || rawProfile?.onboarding?.stage || '').toLowerCase();
+  const trainingStatus = String(rawProfile?.training?.status || '').toLowerCase();
+
+  const completed =
+    clinician.trainingCompleted === true ||
+    onboardingStage === 'training_completed' ||
+    trainingStatus === 'completed' ||
+    Boolean(certificate.certificateNumber && certificate.completedAt);
   const scheduled = !!trainingSlot;
   const settings = await localOnboardingSettings();
 
@@ -174,11 +244,11 @@ async function localTrainingContext(clinicianId: string) {
     },
     onboarding: onboarding
       ? {
-          stage: onboarding.status ?? null,
+          stage: completed ? 'training_completed' : (onboarding.status ?? null),
           notes: onboarding.trainingNotes ?? null,
         }
       : {
-          stage: clinician.status ?? 'pending',
+          stage: completed ? 'training_completed' : (clinician.status ?? 'pending'),
           notes: null,
         },
     training: {
@@ -190,10 +260,10 @@ async function localTrainingContext(clinicianId: string) {
       paid: onboarding?.depositPaid === true,
       currency: settings.currency,
       feeCents: settings.trainingFeeCents,
-      certificateNumber: certificate.certificateNumber ?? clinician.boardCertificateNumber ?? null,
+      certificateNumber: certificate.certificateNumber ?? null,
       certificateCompletedAt: certificate.completedAt ?? null,
       certificateInstitution: certificate.institution ?? 'Ambulant+ / Cloven Technology',
-      certificateAvailable: Boolean(certificate.certificateUrl || completed),
+      certificateAvailable: Boolean(certificate.certificateNumber && certificate.completedAt),
       certificateUrl: certificate.certificateUrl ?? null,
     },
     dispatch: dispatch
