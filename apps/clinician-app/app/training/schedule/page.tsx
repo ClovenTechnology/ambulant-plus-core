@@ -201,11 +201,9 @@ function makeICS({
   return lines.join('\\r\\n');
 }
 
-function certificateHref(rawUrl: string | null | undefined, clinicianId: string) {
-  if (!rawUrl) return null;
-
-  const sep = rawUrl.includes('?') ? '&' : '?';
-  return `${rawUrl}${sep}clinicianId=${encodeURIComponent(clinicianId)}&download=1`;
+function certificateHref(_rawUrl: string | null | undefined, clinicianId: string) {
+  if (!clinicianId) return null;
+  return `/api/training/certificate?clinicianId=${encodeURIComponent(clinicianId)}&download=1`;
 }
 
 function StepPill({
