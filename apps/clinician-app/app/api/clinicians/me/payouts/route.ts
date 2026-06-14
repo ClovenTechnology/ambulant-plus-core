@@ -4,11 +4,15 @@ import { prisma } from '@/src/lib/prisma';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+type PayoutSchedule = 'fortnightly' | 'monthly';
 type PlanTierId = 'solo' | 'starter' | 'team' | 'group';
-type SmartIdDispatchOption = 'collect' | 'courier';
-type BillingCycle = 'monthly' | 'annual';
 
-const ALLOWED_PLAN_IDS: PlanTierId[] = ['solo', 'starter', 'team', 'group'];
+const PLAN_SHARE: Record<PlanTierId, number> = {
+  solo: 80,
+  starter: 82,
+  team: 84,
+  group: 86,
+};
 
 function json(data: any, status = 200) {
   return NextResponse.json(data, { status });
@@ -35,22 +39,6 @@ function parseObject(value: unknown): Record<string, any> {
   return {};
 }
 
-function normalizePlanId(raw: unknown): PlanTierId {
-  if (typeof raw === 'string' && ALLOWED_PLAN_IDS.includes(raw as PlanTierId)) {
-    return raw as PlanTierId;
-  }
-
-  return 'solo';
-}
-
-function normalizeBillingCycle(raw: unknown): BillingCycle {
-  return raw === 'annual' ? 'annual' : 'monthly';
-}
-
-function normalizeDispatch(raw: unknown): SmartIdDispatchOption {
-  return raw === 'courier' ? 'courier' : 'collect';
-}
-
 function getProfileJson(clinician: any): Record<string, any> {
   const meta = parseObject(clinician?.meta);
 
@@ -63,6 +51,16 @@ function getProfileJson(clinician: any): Record<string, any> {
   }
 
   return meta;
+}
+
+function normalizePlanId(raw: unknown): PlanTierId {
+  return raw === 'starter' || raw === 'team' || raw === 'group' || raw === 'solo'
+    ? raw
+    : 'solo';
+}
+
+function normalizeSchedule(raw: unknown): PayoutSchedule {
+  return raw === 'monthly' ? 'monthly' : 'fortnightly';
 }
 
 async function getClinician(req: NextRequest) {
@@ -80,31 +78,57 @@ async function getClinician(req: NextRequest) {
   });
 }
 
-function buildResponse(clinician: any, profileJson: Record<string, any>) {
-  const payout = parseObject(profileJson.payoutSettings);
+function dateRange(req: NextRequest) {
+  const url = new URL(req.url);
+  const today = new Date();
+  const thirtyDaysAgo = new Date(today.getTime() - 30 * 86400000);
 
-  const currentPlanId = normalizePlanId(payout.planTierId);
-  const billingCycle = normalizeBillingCycle(payout.billingCycle);
-  const smartIdDispatch = normalizeDispatch(payout.smartIdDispatch);
+  const from = url.searchParams.get('from') || thirtyDaysAgo.toISOString().slice(0, 10);
+  const to = url.searchParams.get('to') || today.toISOString().slice(0, 10);
 
-  const maxAdminStaffSlots =
-    typeof payout.maxAdminStaffSlotsOverride === 'number'
-      ? payout.maxAdminStaffSlotsOverride
-      : null;
+  return { from, to };
+}
 
-  const activeAdminStaffSlots =
-    typeof payout.activeAdminStaffSlots === 'number'
-      ? payout.activeAdminStaffSlots
-      : 0;
+function buildEmptySummary(clinician: any, profileJson: Record<string, any>, req: NextRequest) {
+  const payoutSettings = parseObject(profileJson.payoutSettings);
+  const currentPlanId = normalizePlanId(payoutSettings.planTierId);
+  const clinicianPct = PLAN_SHARE[currentPlanId];
+  const platformPct = 100 - clinicianPct;
+  const { from, to } = dateRange(req);
 
   return {
     ok: true,
     clinicianId: clinician.id,
-    currentPlanId,
-    smartIdDispatch,
-    billingCycle,
-    maxAdminStaffSlots,
-    activeAdminStaffSlots,
+    currency: 'ZAR',
+    splitPercent: {
+      clinician: clinicianPct,
+      platform: platformPct,
+    },
+    range: { from, to },
+    earnings: {
+      grossCents: 0,
+      netToClinicianCents: 0,
+      platformShareCents: 0,
+      thisWeekNetCents: 0,
+      avgMonthlyNetCents: 0,
+    },
+    lastPayout: {
+      amountCents: 0,
+      at: null,
+    },
+    nextPayout: {
+      amountCents: 0,
+      at: null,
+    },
+    payoutSettings: {
+      schedule: normalizeSchedule(payoutSettings.schedule),
+    },
+    demographics: {
+      byGender: {},
+      byCity: [],
+      byProvince: [],
+    },
+    rows: [],
   };
 }
 
@@ -118,12 +142,12 @@ export async function GET(req: NextRequest) {
 
     const profileJson = getProfileJson(clinician);
 
-    return json(buildResponse(clinician, profileJson));
+    return json(buildEmptySummary(clinician, profileJson, req));
   } catch (err: any) {
-    console.error('GET /api/clinicians/me/payout-settings error', err);
+    console.error('GET /api/clinicians/me/payouts error', err);
 
     return json(
-      { ok: false, error: err?.message || 'failed_to_load_payout_settings' },
+      { ok: false, error: err?.message || 'failed_to_load_payouts' },
       500
     );
   }
@@ -138,10 +162,7 @@ export async function PUT(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => ({} as any));
-
-    const planTierId = normalizePlanId(body.planTierId);
-    const billingCycle = normalizeBillingCycle(body.billingCycle);
-    const smartIdDispatch = normalizeDispatch(body.smartIdDispatch);
+    const schedule = normalizeSchedule(body.schedule);
 
     const clinicianAny = clinician as any;
     const existingMeta = parseObject(clinicianAny.meta);
@@ -152,9 +173,7 @@ export async function PUT(req: NextRequest) {
       ...profileJson,
       payoutSettings: {
         ...prevPayout,
-        planTierId,
-        billingCycle,
-        smartIdDispatch,
+        schedule,
       },
     };
 
@@ -173,12 +192,12 @@ export async function PUT(req: NextRequest) {
 
     const updatedProfileJson = getProfileJson(updated);
 
-    return json(buildResponse(updated, updatedProfileJson));
+    return json(buildEmptySummary(updated, updatedProfileJson, req));
   } catch (err: any) {
-    console.error('PUT /api/clinicians/me/payout-settings error', err);
+    console.error('PUT /api/clinicians/me/payouts error', err);
 
     return json(
-      { ok: false, error: err?.message || 'failed_to_update_payout_settings' },
+      { ok: false, error: err?.message || 'failed_to_update_payout_schedule' },
       500
     );
   }

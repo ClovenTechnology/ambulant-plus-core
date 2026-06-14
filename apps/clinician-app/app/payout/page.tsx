@@ -6,7 +6,15 @@ import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? '';
+function clinicianIdFromUrl() {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('clinicianId') || '';
+}
+
+function sameOrigin(path: string, params?: URLSearchParams) {
+  const query = params ? params.toString() : '';
+  return query ? `${path}?${query}` : path;
+}
 
 type DemGender = { [k: string]: { count: number; netCents: number } };
 type DemCity = { city: string; count: number; netCents: number }[];
@@ -160,26 +168,23 @@ export default function ClinicianPayoutPage() {
   const [province, setProvince] = useState('');
 
   async function load() {
-    if (!GATEWAY) {
-      setError('Missing NEXT_PUBLIC_GATEWAY_ORIGIN');
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
+setLoading(true);
     setError(null);
     try {
       const params = new URLSearchParams();
+      const clinicianId = clinicianIdFromUrl();
+
+      if (clinicianId) params.set('clinicianId', clinicianId);
       if (from) params.set('from', from);
       if (to) params.set('to', to);
       if (gender) params.set('gender', gender);
       if (city) params.set('city', city);
       if (province) params.set('province', province);
 
-      const res = await fetch(`${GATEWAY}/api/clinicians/me/payouts?${params.toString()}`, {
+      const res = await fetch(sameOrigin('/api/clinicians/me/payouts', params), {
         cache: 'no-store',
         headers: {
-          'x-uid': 'clinician-local-001',
-          'x-role': 'clinician',
+          accept: 'application/json',
         },
       });
       const json = await res.json();
@@ -218,12 +223,15 @@ export default function ClinicianPayoutPage() {
     if (!summary) return;
     setSavingSchedule(true);
     try {
-      const res = await fetch(`${GATEWAY}/api/clinicians/me/payouts`, {
+      const params = new URLSearchParams();
+      const clinicianId = clinicianIdFromUrl();
+      if (clinicianId) params.set('clinicianId', clinicianId);
+
+      const res = await fetch(sameOrigin('/api/clinicians/me/payouts', params), {
         method: 'PUT',
         headers: {
           'content-type': 'application/json',
-          'x-uid': 'clinician-local-001',
-          'x-role': 'clinician',
+          accept: 'application/json',
         },
         body: JSON.stringify({ schedule: next }),
       });
@@ -261,7 +269,7 @@ export default function ClinicianPayoutPage() {
       )}
 
       {loading && !summary && (
-        <div className="text-sm text-gray-600">Loading payouts…</div>
+        <div className="text-sm text-gray-600">Loading payoutsâ€¦</div>
       )}
     </main>
   );
@@ -352,7 +360,7 @@ function ClinicianPlanSection() {
           disabled={saving}
           className="px-3 py-1.5 rounded bg-black text-white text-xs"
         >
-          {saving ? 'Saving…' : 'Save settings'}
+          {saving ? 'Savingâ€¦' : 'Save settings'}
         </button>
 
         <button
