@@ -1,47 +1,87 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from 'next/server';
 
-function isoFromNow({ hours = 0, minutes = 0 }) {
-  const d = new Date();
-  d.setSeconds(0, 0);
-  d.setHours(d.getHours() + hours, minutes, 0, 0);
-  return d.toISOString();
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function gatewayBase() {
+  return (
+    process.env.API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    ''
+  ).replace(/\/$/, '');
 }
 
-export async function GET() {
-  const items = [
-    {
-      id: "appt_001",
-      start: isoFromNow({ hours: 0, minutes: 15 }),
-      end: isoFromNow({ hours: 0, minutes: 45 }),
-      reason: "Follow-up: Hypertension meds titration",
-      visitType: "Video",
-      status: "waiting",
-      roomName: "room-001",
-      patient: { id: "pt_101", name: "Grace Ndlovu" },
-      clinician: { id: "cln_001", name: "Dr A." },
-    },
-    {
-      id: "appt_002",
-      start: isoFromNow({ hours: 1, minutes: 0 }),
-      end: isoFromNow({ hours: 1, minutes: 30 }),
-      reason: "Lab review: Lipid panel",
-      visitType: "Video",
-      status: "checked_in",
-      roomName: "room-002",
-      patient: { id: "pt_102", name: "Sipho Dlamini" },
-      clinician: { id: "cln_001", name: "Dr A." },
-    },
-    {
-      id: "appt_003",
-      start: isoFromNow({ hours: 2, minutes: 0 }),
-      end: isoFromNow({ hours: 2, minutes: 20 }),
-      reason: "Acute: Cough & fever",
-      visitType: "Video",
-      status: "waiting",
-      roomName: "room-003",
-      patient: { id: "pt_103", name: "Nokuthula Maseko" },
-      clinician: { id: "cln_001", name: "Dr A." },
-    },
-  ];
-  return NextResponse.json(items);
+function asList(payload: any): any[] {
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload?.appointments)) return payload.appointments;
+  if (Array.isArray(payload?.items)) return payload.items;
+  return [];
+}
+
+function startsAtOf(item: any): string | null {
+  return item?.startsAt || item?.start || item?.startISO || null;
+}
+
+function isToday(value: string | null) {
+  if (!value) return false;
+
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return false;
+
+  const now = new Date();
+
+  return (
+    d.getFullYear() === now.getFullYear() &&
+    d.getMonth() === now.getMonth() &&
+    d.getDate() === now.getDate()
+  );
+}
+
+export async function GET(req: NextRequest) {
+  const gateway = gatewayBase();
+
+  if (!gateway) {
+    return NextResponse.json(
+      { ok: false, error: 'api_gateway_url_missing' },
+      { status: 500 }
+    );
+  }
+
+  try {
+    const urlIn = new URL(req.url);
+    const clinicianId = urlIn.searchParams.get('clinicianId') || '';
+
+    const upstream = new URL('/api/appointments', gateway);
+    if (clinicianId) upstream.searchParams.set('clinicianId', clinicianId);
+
+    const r = await fetch(upstream.toString(), {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+    });
+
+    const text = await r.text();
+
+    if (!r.ok) {
+      return new NextResponse(text, {
+        status: r.status,
+        headers: {
+          'content-type': r.headers.get('content-type') || 'application/json',
+          'cache-control': 'no-store',
+        },
+      });
+    }
+
+    const payload = text ? JSON.parse(text) : {};
+    const today = asList(payload).filter((item) => isToday(startsAtOf(item)));
+
+    return NextResponse.json(today, {
+      headers: { 'cache-control': 'no-store' },
+    });
+  } catch (e: any) {
+    return NextResponse.json(
+      { ok: false, error: 'appointments_today_upstream_failed', detail: String(e?.message || e) },
+      { status: 502 }
+    );
+  }
 }
