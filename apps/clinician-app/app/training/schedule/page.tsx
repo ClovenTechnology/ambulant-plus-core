@@ -198,7 +198,14 @@ function makeICS({
     'END:VCALENDAR',
   ].filter(Boolean);
 
-  return lines.join('\r\n');
+  return lines.join('\\r\\n');
+}
+
+function certificateHref(rawUrl: string | null | undefined, clinicianId: string) {
+  if (!rawUrl) return null;
+
+  const sep = rawUrl.includes('?') ? '&' : '?';
+  return `${rawUrl}${sep}clinicianId=${encodeURIComponent(clinicianId)}&download=1`;
 }
 
 function StepPill({
@@ -452,8 +459,10 @@ function TrainingSchedulePageContent() {
     return URL.createObjectURL(blob);
   }, [ctx]);
 
+  const certificateDownloadHref = certificateHref(ctx?.training?.certificateUrl, clinicianId);
+
   const starterKit = ctx?.starterKitItems || [
-    'DueCare 6-in-1 Health Monitor (IoMT)',
+    '6-in-1 Health Monitor (IoMT)',
     'NexRing (IoMT)',
     'Digital Stethoscope (IoMT)',
     'HD Otoscope (IoMT)',
@@ -642,9 +651,9 @@ function TrainingSchedulePageContent() {
                   </a>
                 ) : null}
 
-                {ctx.training?.certificateAvailable && ctx.training?.certificateUrl ? (
+                {ctx.training?.certificateAvailable && certificateDownloadHref ? (
                   <a
-                    href={`${ctx.training.certificateUrl}?download=1`}
+                    href={`${certificateDownloadHref || '#'}`}
                     className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
                   >
                     <Download className="h-4 w-4" />
@@ -692,9 +701,9 @@ function TrainingSchedulePageContent() {
                     </div>
                   </div>
 
-                  {ctx.training?.certificateUrl ? (
+                  {certificateDownloadHref ? (
                     <a
-                      href={`${ctx.training.certificateUrl}?download=1`}
+                      href={`${certificateDownloadHref || '#'}`}
                       className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-medium text-emerald-900 ring-1 ring-emerald-200 hover:bg-emerald-100"
                     >
                       <Download className="h-4 w-4" />
@@ -986,9 +995,9 @@ function TrainingSchedulePageContent() {
                     Open training room
                   </a>
                 ) : null}
-                {ctx.training?.certificateAvailable && ctx.training?.certificateUrl ? (
+                {ctx.training?.certificateAvailable && certificateDownloadHref ? (
                   <a
-                    href={`${ctx.training.certificateUrl}?download=1`}
+                    href={`${certificateDownloadHref || '#'}`}
                     className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
                   >
                     <Download className="h-4 w-4" />
@@ -1025,9 +1034,9 @@ function TrainingSchedulePageContent() {
                     </div>
                   </div>
 
-                  {ctx.training?.certificateUrl ? (
+                  {certificateDownloadHref ? (
                     <a
-                      href={`${ctx.training.certificateUrl}?download=1`}
+                      href={`${certificateDownloadHref || '#'}`}
                       className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-medium text-emerald-900 ring-1 ring-emerald-200 hover:bg-emerald-100"
                     >
                       <Download className="h-4 w-4" />
