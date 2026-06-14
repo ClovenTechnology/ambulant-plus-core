@@ -172,7 +172,7 @@ function drawDataRow(label: string, value: string) {
   );
 }
 
-function CertificatePdf({ data }: { data: any }) {
+function createCertificatePdf(data: any) {
   const verifyUrl = data.verifyUrl || '-';
 
   return E(
@@ -658,7 +658,7 @@ export async function GET(req: NextRequest) {
       verifyUrl: certificateVerifyUrl(req, cert.certificateNumber),
     };
 
-    const pdfStream = await renderToStream(E(CertificatePdf, { data }) as any);
+    const pdfStream = await renderToStream(createCertificatePdf(data) as any);
     const webStream = Readable.toWeb(pdfStream as any) as any;
 
     const filename = `Ambulant-Certificate-${data.certificateNumber}.pdf`;
@@ -683,5 +683,6 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
 
 
