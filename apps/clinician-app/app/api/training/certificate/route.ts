@@ -1,9 +1,9 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
+import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-type JsonObj = Record<string, any>;
 
 const CERTIFICATE_ISSUER =
   process.env.CERTIFICATE_ISSUER || 'Cloven Technology Impilo';
@@ -17,22 +17,36 @@ const CERTIFICATE_INSTITUTION =
 const FRAMEWORK_SUPPORT =
   process.env.CERTIFICATE_FRAMEWORK_SUPPORT || 'Executive College, SA';
 
+const CERTIFICATE_BUCKET =
+  process.env.CERTIFICATE_ASSETS_S3_BUCKET ||
+  process.env.TRAINING_RECORDINGS_S3_BUCKET ||
+  'ambulantplus-training-recordings-prod-316006212460-eu-west-1-an';
+
+const CERTIFICATE_REGION =
+  process.env.CERTIFICATE_ASSETS_S3_REGION ||
+  process.env.AWS_REGION ||
+  process.env.AWS_DEFAULT_REGION ||
+  'eu-west-1';
+
+const CERTIFICATE_PREFIX =
+  (process.env.CERTIFICATE_ASSETS_S3_PREFIX || 'certificate-assets').replace(/^\/+|\/+$/g, '');
+
+const TEMPLATE_KEY =
+  process.env.CERTIFICATE_TEMPLATE_KEY ||
+  `${CERTIFICATE_PREFIX}/templates/clinician-onboarding-certificate-bg.png`;
+
+const TRAINING_LEAD_SIGNATURE_KEY =
+  process.env.CERTIFICATE_TRAINING_LEAD_SIGNATURE_KEY ||
+  `${CERTIFICATE_PREFIX}/signatures/training-lead-signature.png`;
+
+const AUTHORISED_OFFICER_SIGNATURE_KEY =
+  process.env.CERTIFICATE_AUTHORISED_OFFICER_SIGNATURE_KEY ||
+  `${CERTIFICATE_PREFIX}/signatures/authorised-officer-signature.png`;
+
 function cleanStr(v: unknown, max = 500): string {
   const s = String(v ?? '').trim();
   if (!s) return '';
   return s.length > max ? s.slice(0, max) : s;
-}
-
-function safePdfText(value: unknown): string {
-  return cleanStr(value, 2000)
-    .replace(/[–—]/g, '-')
-    .replace(/[“”]/g, '"')
-    .replace(/[‘’]/g, "'")
-    .replace(/→/g, '->')
-    .replace(/[^\x20-\x7E]/g, '')
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)');
 }
 
 function formatDate(value?: unknown) {
@@ -47,15 +61,6 @@ function formatDate(value?: unknown) {
     year: 'numeric',
     timeZone: 'UTC',
   }).format(d);
-}
-
-function formatDateRange(start?: unknown, end?: unknown) {
-  const a = formatDate(start);
-  const b = formatDate(end);
-
-  if (a === '-' && b === '-') return '-';
-  if (a === b || b === '-') return a;
-  return `${a} - ${b}`;
 }
 
 function trainingRoomIdForSlot(slotId?: string | null) {
@@ -91,12 +96,8 @@ function gatewayBase() {
 
 function apiHeaders(req: NextRequest) {
   const cookie = req.headers.get('cookie') || '';
-  const headers: Record<string, string> = {
-    accept: 'application/json',
-  };
-
+  const headers: Record<string, string> = { accept: 'application/json' };
   if (cookie) headers.cookie = cookie;
-
   return headers;
 }
 
@@ -146,37 +147,92 @@ async function resolveCertificateContext(req: NextRequest) {
   return { clinicianId, context: data };
 }
 
-function approxTextWidth(text: string, fontSize: number) {
-  return safePdfText(text).length * fontSize * 0.5;
+function s3Client() {
+  return new S3Client({
+    region: CERTIFICATE_REGION,
+  });
 }
 
-function pdfText(
+async function streamToBuffer(body: any): Promise<Buffer> {
+  if (!body) throw new Error('empty_s3_body');
+
+  const chunks: Buffer[] = [];
+
+  for await (const chunk of body as AsyncIterable<Uint8Array>) {
+    chunks.push(Buffer.from(chunk));
+  }
+
+  return Buffer.concat(chunks);
+}
+
+async function getS3ObjectBuffer(key: string): Promise<Buffer | null> {
+  try {
+    const res = await s3Client().send(
+      new GetObjectCommand({
+        Bucket: CERTIFICATE_BUCKET,
+        Key: key,
+      }),
+    );
+
+    return await streamToBuffer(res.Body);
+  } catch (err) {
+    console.warn(`[certificate] Could not load S3 object ${key}`, err);
+    return null;
+  }
+}
+
+function drawCenteredText(
+  page: any,
   text: string,
   x: number,
   y: number,
   size: number,
-  font: 'F1' | 'F2' = 'F1',
-  align: 'left' | 'center' | 'right' = 'left',
+  font: any,
+  color = rgb(0.06, 0.12, 0.2),
 ) {
-  let px = x;
-  if (align === 'center') px = x - approxTextWidth(text, size) / 2;
-  if (align === 'right') px = x - approxTextWidth(text, size);
-
-  return `BT /${font} ${size} Tf ${px.toFixed(2)} ${y.toFixed(2)} Td (${safePdfText(text)}) Tj ET\n`;
+  const safe = cleanStr(text, 1000);
+  const width = font.widthOfTextAtSize(safe, size);
+  page.drawText(safe, {
+    x: x - width / 2,
+    y,
+    size,
+    font,
+    color,
+  });
 }
 
-function pdfLine(x1: number, y1: number, x2: number, y2: number, width = 1) {
-  return `${width} w ${x1} ${y1} m ${x2} ${y2} l S\n`;
+function drawRightText(
+  page: any,
+  text: string,
+  x: number,
+  y: number,
+  size: number,
+  font: any,
+  color = rgb(0.06, 0.12, 0.2),
+) {
+  const safe = cleanStr(text, 1000);
+  const width = font.widthOfTextAtSize(safe, size);
+  page.drawText(safe, {
+    x: x - width,
+    y,
+    size,
+    font,
+    color,
+  });
 }
 
-function pdfRect(x: number, y: number, w: number, h: number, stroke = true, fill = false) {
-  if (stroke && fill) return `${x} ${y} ${w} ${h} re B\n`;
-  if (fill) return `${x} ${y} ${w} ${h} re f\n`;
-  return `${x} ${y} ${w} ${h} re S\n`;
-}
-
-function wrapText(text: string, maxChars: number) {
-  const words = cleanStr(text, 5000).split(/\s+/).filter(Boolean);
+function drawWrappedCentered(
+  page: any,
+  text: string,
+  centerX: number,
+  startY: number,
+  maxChars: number,
+  size: number,
+  lineGap: number,
+  font: any,
+  color = rgb(0.06, 0.12, 0.2),
+) {
+  const words = cleanStr(text, 3000).split(/\s+/).filter(Boolean);
   const lines: string[] = [];
   let line = '';
 
@@ -191,164 +247,205 @@ function wrapText(text: string, maxChars: number) {
   }
 
   if (line) lines.push(line);
-  return lines;
+
+  let y = startY;
+  for (const ln of lines) {
+    drawCenteredText(page, ln, centerX, y, size, font, color);
+    y -= lineGap;
+  }
 }
 
-function pdfWrappedText(
-  text: string,
-  x: number,
-  y: number,
-  size: number,
-  maxChars: number,
-  lineGap = 10,
-  font: 'F1' | 'F2' = 'F1',
-  align: 'left' | 'center' = 'center',
-) {
-  let out = '';
-  let yy = y;
+async function renderCertificatePdfBuffer(data: any) {
+  const pdfDoc = await PDFDocument.create();
 
-  for (const line of wrapText(text, maxChars)) {
-    out += pdfText(line, x, yy, size, font, align);
-    yy -= lineGap;
+  const page = pdfDoc.addPage([842, 595]);
+  const { width: W, height: H } = page.getSize();
+
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  const bold = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+
+  const bgBytes = await getS3ObjectBuffer(TEMPLATE_KEY);
+
+  if (bgBytes) {
+    const bg = await pdfDoc.embedPng(bgBytes);
+    page.drawImage(bg, {
+      x: 0,
+      y: 0,
+      width: W,
+      height: H,
+    });
+  } else {
+    page.drawRectangle({
+      x: 0,
+      y: 0,
+      width: W,
+      height: H,
+      color: rgb(0.98, 0.97, 0.94),
+    });
   }
 
-  return out;
-}
+  const dark = rgb(0.06, 0.12, 0.2);
+  const teal = rgb(0.0, 0.62, 0.66);
+  const grey = rgb(0.28, 0.34, 0.42);
 
-function renderCertificatePdfBuffer(data: any) {
-  const W = 842;
-  const H = 595;
-  let c = '';
-
-  c += '0.98 0.97 0.94 rg\n';
-  c += pdfRect(0, 0, W, H, false, true);
-
-  c += '0.06 0.12 0.20 RG\n';
-  c += pdfRect(24, 24, W - 48, H - 48, true, false);
-
-  c += '0.60 0.43 0.12 RG\n';
-  c += pdfRect(31, 31, W - 62, H - 62, true, false);
-
-  c += '0.00 0.67 0.72 RG\n';
-  c += pdfLine(50, H - 52, W - 50, H - 52, 2);
-  c += pdfLine(50, 43, W - 50, 43, 2);
-
-  c += pdfText('AMBULANT+', 95, H - 86, 13, 'F2', 'left');
-  c += pdfText('CONTACTLESS MEDICINE', 95, H - 99, 6, 'F1', 'left');
-
-  c += pdfRect(W - 150, H - 125, 72, 72, true, false);
-  c += pdfText('VERIFY', W - 114, H - 88, 10, 'F2', 'center');
-  c += pdfText('Certificate verification', W - 114, H - 136, 6, 'F1', 'center');
-
-  c += pdfText('CERTIFICATE OF COMPLETION', W / 2, H - 98, 24, 'F2', 'center');
-  c += pdfText('Ambulant+ Contactless Medicine', W / 2, H - 120, 14, 'F1', 'center');
-  c += pdfText('CLINICIAN ONBOARDING & PRACTICE READINESS PROGRAMME', W / 2, H - 138, 8, 'F2', 'center');
-
-  c += '0.60 0.43 0.12 RG\n';
-  c += pdfLine(W / 2 - 155, H - 158, W / 2 + 155, H - 158, 1);
-
-  c += pdfText('This certifies that', W / 2, H - 180, 9, 'F1', 'center');
-  c += pdfText(data.clinicianName || 'Clinician', W / 2, H - 210, 25, 'F2', 'center');
-
-  const mainBody =
-    'has successfully completed the Ambulant+ Contactless Medicine Clinician Onboarding and Practice Readiness Programme, a structured training pathway in telehealth, IoMT-assisted remote assessment, remote patient monitoring, documentation, medication adherence considerations, escalation, privacy, patient rights, claims-aware coordination, InsightCore AI-assisted workflow governance, and voice-to-text clinical dictation review.';
-
-  c += pdfWrappedText(mainBody, W / 2, H - 238, 7.5, 125, 9, 'F1', 'center');
-
-  const safeBody =
-    'This certificate recognises Contactless Medicine practice-readiness training and safe platform-supported workflow competence. It does not replace statutory professional registration, employer credentialing, specialist qualification, or independent clinical competency assessment.';
-
-  c += pdfWrappedText(safeBody, W / 2, H - 292, 6.5, 135, 8, 'F1', 'center');
-
-  c += '0.86 0.98 0.99 rg\n';
-  c += '0.65 0.90 0.92 RG\n';
-  c += pdfRect(90, 262, W - 180, 35, true, true);
-  c += pdfWrappedText(
-    'Training domains: Contactless Medicine framework - IoMT-assisted assessment - Remote monitoring - Documentation - Escalation - Privacy - Claims-aware coordination - InsightCore AI assist - Dictation review',
+  drawCenteredText(page, 'CERTIFICATE OF COMPLETION', W / 2, H - 105, 24, bold, dark);
+  drawCenteredText(page, 'Ambulant+ Contactless Medicine', W / 2, H - 128, 14, font, dark);
+  drawCenteredText(
+    page,
+    'CLINICIAN ONBOARDING & PRACTICE READINESS PROGRAMME',
     W / 2,
-    283,
-    7,
-    130,
+    H - 146,
     8,
-    'F2',
-    'center',
+    bold,
+    teal,
   );
 
-  c += '1 1 1 rg\n';
-  c += '0.82 0.86 0.90 RG\n';
-  c += pdfRect(72, 150, W - 144, 92, true, true);
+  drawCenteredText(page, 'This certifies that', W / 2, H - 182, 9, font, grey);
+  drawCenteredText(page, data.clinicianName || 'Clinician', W / 2, H - 215, 27, bold, dark);
+
+  drawWrappedCentered(
+    page,
+    'has successfully completed the Ambulant+ Contactless Medicine Clinician Onboarding and Practice Readiness Programme, a structured training pathway in telehealth, IoMT-assisted remote assessment, remote patient monitoring, documentation, medication adherence considerations, escalation, privacy, patient rights, claims-aware coordination, InsightCore AI-assisted workflow governance, and voice-to-text clinical dictation review.',
+    W / 2,
+    H - 247,
+    124,
+    7.5,
+    9,
+    font,
+    dark,
+  );
+
+  drawWrappedCentered(
+    page,
+    'This certificate recognises Contactless Medicine practice-readiness training and safe platform-supported workflow competence. It does not replace statutory professional registration, employer credentialing, specialist qualification, or independent clinical competency assessment.',
+    W / 2,
+    H - 300,
+    130,
+    6.5,
+    8,
+    font,
+    dark,
+  );
+
+  drawWrappedCentered(
+    page,
+    'Training domains: Contactless Medicine framework - IoMT-assisted assessment - Remote monitoring - Documentation - Escalation - Privacy - Claims-aware coordination - InsightCore AI assist - Dictation review',
+    W / 2,
+    276,
+    130,
+    7,
+    8,
+    bold,
+    dark,
+  );
+
+  const label = (text: string, x: number, y: number) =>
+    page.drawText(text, { x, y, size: 7, font: bold, color: teal });
+
+  const value = (text: string, x: number, y: number) =>
+    page.drawText(cleanStr(text) || '-', { x, y, size: 8, font, color: dark });
 
   const leftX = 88;
-  const rightX = 458;
-  let y = 222;
+  const rightX = 460;
 
-  const row = (label: string, value: string, x: number, yy: number) => {
-    let out = '';
-    out += pdfText(label, x, yy, 7, 'F2', 'left');
-    out += pdfText(value || '-', x, yy - 10, 8, 'F1', 'left');
-    return out;
-  };
+  label('CLINICIAN ID', leftX, 221);
+  value(data.clinicianId, leftX, 211);
 
-  c += row('CLINICIAN ID', data.clinicianId, leftX, y);
-  c += row('PROGRAMME', 'Onboarding & Practice Readiness', leftX, y - 28);
-  c += row('COHORT / SESSION', data.trainingSlotId || data.trainingRoomId || '-', leftX, y - 56);
+  label('PROGRAMME', leftX, 193);
+  value('Onboarding & Practice Readiness', leftX, 183);
 
-  c += row('HPCSA', data.hpcsa || 'Not supplied', rightX, y);
-  c += row('TRAINING MODE', data.trainingMode || 'Virtual / In-person', rightX, y - 28);
-  c += row('COMPLETION DATE', data.completedDate || '-', rightX, y - 56);
-  c += row('CERTIFICATE ID', data.certificateNumber || '-', rightX, y - 84);
+  label('COHORT / SESSION', leftX, 165);
+  value(data.trainingSlotId || data.trainingRoomId || '-', leftX, 155);
 
-  c += pdfText(`Issued by: ${CERTIFICATE_ISSUER}`, W / 2, 132, 6.5, 'F1', 'center');
-  c += pdfText(`Programme: ${CERTIFICATE_PROGRAMME}`, W / 2, 121, 6.5, 'F1', 'center');
-  c += pdfText(`Training framework development and support: ${FRAMEWORK_SUPPORT}`, W / 2, 110, 6.5, 'F1', 'center');
+  label('STATUS', leftX, 137);
+  value('Completed / Certified by Admin', leftX, 127);
 
-  c += '0.06 0.12 0.20 RG\n';
-  c += pdfLine(150, 88, 305, 88, 1);
-  c += pdfLine(W - 305, 88, W - 150, 88, 1);
+  label('HPCSA', rightX, 221);
+  value(data.hpcsa || 'Not supplied', rightX, 211);
 
-  c += pdfText(process.env.CERTIFICATE_TRAINING_LEAD_NAME || 'Training Lead', 150, 75, 8, 'F2', 'left');
-  c += pdfText(process.env.CERTIFICATE_TRAINING_LEAD_TITLE || 'Ambulant+ Contactless Medicine', 150, 64, 7, 'F1', 'left');
+  label('TRAINING MODE', rightX, 193);
+  value(data.trainingMode || 'Virtual / In-person', rightX, 183);
 
-  c += pdfText(process.env.CERTIFICATE_AUTHORISED_OFFICER_NAME || 'Ambulant+ Authorised Officer', W - 305, 75, 8, 'F2', 'left');
-  c += pdfText(process.env.CERTIFICATE_AUTHORISED_OFFICER_ORG || CERTIFICATE_ISSUER, W - 305, 64, 7, 'F1', 'left');
+  label('COMPLETION DATE', rightX, 165);
+  value(data.completedDate || '-', rightX, 155);
 
-  c += '0.00 0.67 0.72 RG\n';
-  c += pdfRect(W / 2 - 31, 52, 62, 62, true, false);
-  c += pdfText('AMBULANT+', W / 2, 88, 7, 'F2', 'center');
-  c += pdfText('ONBOARDING', W / 2, 78, 7, 'F2', 'center');
-  c += pdfText('READY', W / 2, 67, 6, 'F1', 'center');
+  label('CERTIFICATE ID', rightX, 137);
+  value(data.certificateNumber || '-', rightX, 127);
 
-  c += pdfText(`Certificate ID: ${data.certificateNumber || '-'}`, 50, 72, 6.5, 'F1', 'left');
-  c += pdfText(`Verify: ${data.verifyUrl || '-'}`, 50, 60, 6.2, 'F1', 'left');
+  drawCenteredText(page, `Issued by: ${CERTIFICATE_ISSUER}`, W / 2, 116, 6.7, font, grey);
+  drawCenteredText(page, `Programme: ${CERTIFICATE_PROGRAMME}`, W / 2, 105, 6.7, font, grey);
+  drawCenteredText(
+    page,
+    `Training framework development and support: ${FRAMEWORK_SUPPORT}`,
+    W / 2,
+    94,
+    6.7,
+    font,
+    grey,
+  );
 
-  const objects: string[] = [];
-
-  objects.push('<< /Type /Catalog /Pages 2 0 R >>');
-  objects.push('<< /Type /Pages /Kids [3 0 R] /Count 1 >>');
-  objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>`);
-  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
-  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
-  objects.push(`<< /Length ${Buffer.byteLength(c, 'latin1')} >>\nstream\n${c}endstream`);
-
-  let pdf = '%PDF-1.4\n';
-  const offsets: number[] = [0];
-
-  for (let i = 0; i < objects.length; i++) {
-    offsets.push(Buffer.byteLength(pdf, 'latin1'));
-    pdf += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+  const trainingLeadSig = await getS3ObjectBuffer(TRAINING_LEAD_SIGNATURE_KEY);
+  if (trainingLeadSig) {
+    const img = await pdfDoc.embedPng(trainingLeadSig);
+    page.drawImage(img, { x: 145, y: 73, width: 150, height: 38 });
   }
 
-  const xrefOffset = Buffer.byteLength(pdf, 'latin1');
-  pdf += `xref\n0 ${objects.length + 1}\n`;
-  pdf += '0000000000 65535 f \n';
-
-  for (let i = 1; i < offsets.length; i++) {
-    pdf += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+  const officerSig = await getS3ObjectBuffer(AUTHORISED_OFFICER_SIGNATURE_KEY);
+  if (officerSig) {
+    const img = await pdfDoc.embedPng(officerSig);
+    page.drawImage(img, { x: W - 300, y: 73, width: 150, height: 38 });
   }
 
-  pdf += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+  page.drawText(process.env.CERTIFICATE_TRAINING_LEAD_NAME || 'Training Lead', {
+    x: 150,
+    y: 65,
+    size: 8,
+    font: bold,
+    color: dark,
+  });
 
-  return Buffer.from(pdf, 'latin1');
+  page.drawText(process.env.CERTIFICATE_TRAINING_LEAD_TITLE || 'Ambulant+ Contactless Medicine', {
+    x: 150,
+    y: 54,
+    size: 7,
+    font,
+    color: grey,
+  });
+
+  page.drawText(process.env.CERTIFICATE_AUTHORISED_OFFICER_NAME || 'Ambulant+ Authorised Officer', {
+    x: W - 305,
+    y: 65,
+    size: 8,
+    font: bold,
+    color: dark,
+  });
+
+  page.drawText(process.env.CERTIFICATE_AUTHORISED_OFFICER_ORG || CERTIFICATE_ISSUER, {
+    x: W - 305,
+    y: 54,
+    size: 7,
+    font,
+    color: grey,
+  });
+
+  page.drawText(`Certificate ID: ${data.certificateNumber || '-'}`, {
+    x: 50,
+    y: 58,
+    size: 6.5,
+    font,
+    color: dark,
+  });
+
+  page.drawText(`Verify: ${data.verifyUrl || '-'}`, {
+    x: 50,
+    y: 46,
+    size: 6.2,
+    font,
+    color: dark,
+  });
+
+  const pdfBytes = await pdfDoc.save();
+  return Buffer.from(pdfBytes);
 }
 
 export async function GET(req: NextRequest) {
@@ -393,7 +490,7 @@ export async function GET(req: NextRequest) {
         'Not supplied',
       certificateNumber: cert.certificateNumber,
       completedDate: formatDate(cert.completedAt),
-      institution: CERTIFICATE_INSTITUTION,
+      institution: cert.institution,
       trainingMode:
         String(training?.mode || '').toLowerCase() === 'in_person'
           ? 'In-person'
@@ -402,11 +499,11 @@ export async function GET(req: NextRequest) {
             : 'Virtual / In-person',
       trainingSlotId,
       trainingRoomId: trainingRoomIdForSlot(trainingSlotId),
-      cohortDates: formatDateRange(training?.startAt, training?.endAt),
+      cohortDates: formatDate(training?.startAt),
       verifyUrl: certificateVerifyUrl(req, cert.certificateNumber),
     };
 
-    const pdfBuffer = renderCertificatePdfBuffer(data);
+    const pdfBuffer = await renderCertificatePdfBuffer(data);
     const filename = `Ambulant-Certificate-${data.certificateNumber}.pdf`;
 
     return new NextResponse(new Uint8Array(pdfBuffer), {
@@ -430,3 +527,4 @@ export async function GET(req: NextRequest) {
     );
   }
 }
+
