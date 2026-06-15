@@ -1,5 +1,4 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
-import sharp from 'sharp';
 import { PDFDocument } from 'pdf-lib';
 import { prisma } from '@/src/lib/prisma';
 
@@ -207,6 +206,9 @@ function bytesToArrayBuffer(bytes: Uint8Array): ArrayBuffer {
 }
 
 async function svgToPng(svg: string) {
+  const sharpModule = await import('sharp');
+  const sharp = sharpModule.default;
+
   return sharp(Buffer.from(svg)).png().toBuffer();
 }
 
