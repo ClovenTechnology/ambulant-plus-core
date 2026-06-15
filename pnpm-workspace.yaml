@@ -3,3 +3,16 @@
   - "packages/*"
   - "shared/*"
   - "scripts"
+
+
+# Ensure native optional dependencies are available for both local Windows
+# development and Linux production deploys, especially sharp/libvips.
+supportedArchitectures:
+  os:
+    - current
+    - linux
+  cpu:
+    - current
+    - x64
+  libc:
+    - glibc
