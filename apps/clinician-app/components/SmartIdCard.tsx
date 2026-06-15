@@ -20,8 +20,13 @@ export function SmartIdCard({ clinicianId, hasActiveSmartId }: SmartIdCardProps)
       const origin = typeof window !== 'undefined' ? window.location.origin : '';
       const res = await fetch('/api/shop/checkout', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'x-uid': clinicianId,
+          'x-role': 'clinician',
+        },
         body: JSON.stringify({
+          buyerUid: clinicianId,
           items: [
             {
               productId: 'smart-id-reprint',
@@ -33,6 +38,7 @@ export function SmartIdCard({ clinicianId, hasActiveSmartId }: SmartIdCardProps)
           successUrl: `${origin}/settings/profile?smartId=reordered`,
           cancelUrl: `${origin}/settings/profile`,
           metadata: {
+            buyerUid: clinicianId,
             clinicianId,
             kind: 'smart-id',
             variant: 'reprint',

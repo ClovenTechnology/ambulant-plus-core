@@ -106,11 +106,25 @@ function clinicianIdFromUrl() {
   return new URLSearchParams(window.location.search).get('clinicianId') || '';
 }
 
-function withClinicianId(path: string) {
-  const clinicianId = clinicianIdFromUrl();
-  if (!clinicianId) return path;
+function withClinicianId(path: string, clinicianId?: string | null) {
+  const resolved = clinicianId || clinicianIdFromUrl();
+  if (!resolved) return path;
   const sep = path.includes('?') ? '&' : '?';
-  return path + sep + 'clinicianId=' + encodeURIComponent(clinicianId);
+  return path + sep + 'clinicianId=' + encodeURIComponent(resolved);
+}
+
+async function resolveCurrentClinicianId(): Promise<string> {
+  const fromUrl = clinicianIdFromUrl();
+  if (fromUrl) return fromUrl;
+
+  const res = await fetch('/api/me', { cache: 'no-store' });
+  const js = await res.json().catch(() => null);
+
+  if (!res.ok || !js?.clinicianId) {
+    throw new Error('Profile could not resolve the current clinician. Please reopen from your clinician workspace or sign in again.');
+  }
+
+  return String(js.clinicianId);
 }
 
 function certificateDownloadHref(clinicianId: string) {
@@ -421,10 +435,12 @@ export default function ClinicianProfilePage() {
         setLoading(true);
         setProfileError(null);
 
+        const activeClinicianId = await resolveCurrentClinicianId();
+
         const [meRes, feeRes, trainingRes] = await Promise.allSettled([
-          fetch(withClinicianId(API_ME), { cache: 'no-store' }),
-          fetch(withClinicianId(API_FEES), { cache: 'no-store' }),
-          fetch(withClinicianId(API_TRAINING_CONTEXT), { cache: 'no-store' }),
+          fetch(withClinicianId(API_ME, activeClinicianId), { cache: 'no-store' }),
+          fetch(withClinicianId(API_FEES, activeClinicianId), { cache: 'no-store' }),
+          fetch(withClinicianId(API_TRAINING_CONTEXT, activeClinicianId), { cache: 'no-store' }),
         ]);
 
         if (meRes.status !== 'fulfilled' || !meRes.value.ok) {
@@ -533,7 +549,7 @@ export default function ClinicianProfilePage() {
     };
 
     try {
-      const res = await fetch(withClinicianId(API_ME), {
+      const res = await fetch(withClinicianId(API_ME, profile.id), {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
@@ -585,10 +601,11 @@ export default function ClinicianProfilePage() {
     setAvatarUploading(true);
     try {
       const formData = new FormData();
-      formData.append('file', file);
+      formData.append('payload', JSON.stringify({}));
+      formData.append('avatar', file);
 
-      const res = await fetch('/api/clinicians/me/avatar', {
-        method: 'POST',
+      const res = await fetch(withClinicianId(API_ME, profile?.id), {
+        method: 'PUT',
         body: formData,
       });
 
@@ -597,21 +614,25 @@ export default function ClinicianProfilePage() {
       }
 
       const js = await res.json().catch(() => null);
-      const url = js?.url || js?.avatarUrl || js?.photoUrl || null;
+      const updatedRaw = profileApiToRaw(js);
+      const updated = mapRawProfile({ ...profile, ...updatedRaw });
+      const url = updated.photoUrl;
 
       if (url && profile) {
-        setProfile({ ...profile, photoUrl: url });
+        setProfile(updated);
+        setForm(profileToForm(updated));
+        setAvatarPreview(url);
         toast('Profile picture updated.', 'success');
       } else {
         toast(
-          'Avatar uploaded, but no URL returned – check the API response.',
+          'Avatar uploaded, but no image was returned from the profile API.',
           'warning',
         );
       }
     } catch (err) {
       console.error('[profile] avatar upload failed', err);
       toast(
-        'Failed to upload profile picture. Implement /api/clinicians/me/avatar on the API gateway.',
+        'Failed to upload profile picture. Please try again or contact support if the problem persists.',
         'error',
       );
     } finally {
