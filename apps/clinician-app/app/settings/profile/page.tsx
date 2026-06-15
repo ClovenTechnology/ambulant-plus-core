@@ -90,57 +90,152 @@ const IMMUTABLE_FIELDS: (keyof ProfileForm)[] = [
   'hpcsaRegNo',
 ];
 
-const API_ME = '/api/clinician/me';
+const API_ME = '/api/profile';
 const API_FEES = '/api/clinicians/me/fees';
+const API_TRAINING_CONTEXT = '/api/training/context';
 
-const DEMO_PROFILE: ClinicianProfile = {
-  id: 'clin-demo-001',
-  userId: 'user-demo-001',
-  fullName: 'Dr Demo Clinician',
-  displayName: 'Dr Demo Clinician',
-  dob: '1985-04-12',
-  email: 'demo.clinician@example.com',
-  gender: 'female',
-  hpcsaRegNo: 'MP 1234567',
-  phone: '+27 82 000 0000',
-  city: 'Johannesburg',
-  country: 'South Africa',
-  addressLine1: '123 Demo Street',
-  addressLine2: 'Sandton',
-
-  // NEW demo defaults
-  practiceName: 'Virtual practice',
-  practiceNumber: '1234567-001',
-  regulatorBody: 'HPCSA',
-  regulatorRegistration: '',
-  acceptsMedicalAid: false,
-  acceptedSchemes: ['Discovery', 'Bonitas'],
-
-  // NEW: demo bio
-  bio: 'Virtual care clinician with a focus on primary care, chronic disease management and patient education.',
-
-  verifiedQualifications: [
-    {
-      type: 'MBChB',
-      institution: 'University of Cape Town',
-      year: '2010',
-    },
-    {
-      type: 'Short Course Contactless Medicine (CPD)',
-      institution: 'Cloven Technology Institute',
-      year: '2024-03-31', // mandatory onboarding training example
-      notes: 'Ambulant+ Onboarding & Virtual Care Safety',
-    },
-  ],
-  additionalQualifications: [],
-  photoUrl: null,
-  feeCents: 75000,
-  currency: 'ZAR',
-  status: 'pending',
-  meta: {
-    smartIdActive: false,
-  },
+type TrainingCertificate = {
+  available: boolean;
+  certificateNumber: string | null;
+  completedAt: string | null;
+  institution: string | null;
 };
+
+function clinicianIdFromUrl() {
+  if (typeof window === 'undefined') return '';
+  return new URLSearchParams(window.location.search).get('clinicianId') || '';
+}
+
+function withClinicianId(path: string) {
+  const clinicianId = clinicianIdFromUrl();
+  if (!clinicianId) return path;
+  const sep = path.includes('?') ? '&' : '?';
+  return path + sep + 'clinicianId=' + encodeURIComponent(clinicianId);
+}
+
+function certificateDownloadHref(clinicianId: string) {
+  return '/api/training/certificate?clinicianId=' + encodeURIComponent(clinicianId) + '&download=1';
+}
+
+function emptyProfile(): ClinicianProfile {
+  return {
+    id: '',
+    fullName: null,
+    displayName: null,
+    dob: null,
+    email: null,
+    gender: null,
+    hpcsaRegNo: null,
+    phone: null,
+    city: null,
+    country: 'South Africa',
+    addressLine1: null,
+    addressLine2: null,
+    practiceName: null,
+    practiceNumber: null,
+    regulatorBody: 'HPCSA',
+    regulatorRegistration: null,
+    acceptsMedicalAid: false,
+    acceptedSchemes: [],
+    bio: null,
+    verifiedQualifications: [],
+    additionalQualifications: [],
+    photoUrl: null,
+    feeCents: null,
+    currency: 'ZAR',
+    status: null,
+    meta: {},
+  };
+}
+
+function profileApiToRaw(js: any): any {
+  if (!js) return null;
+
+  if (js.ok && (js.clinicianId || js.profile)) {
+    const p = js.profile || {};
+
+    return {
+      id: js.clinicianId,
+      clinicianId: js.clinicianId,
+      userId: js.userId ?? null,
+      fullName: js.displayName ?? null,
+      displayName: js.displayName ?? null,
+      name: js.displayName ?? null,
+      email: p.email ?? js.email ?? js.userId ?? null,
+      status: js.status ?? null,
+      specialty: js.specialty ?? null,
+
+      dob: p.dob ?? null,
+      gender: p.gender ?? null,
+      hpcsaRegNo:
+        p.hpcsaRegNo ??
+        p.hpcsaNumber ??
+        p.registrationNumber ??
+        p.regulatorRegistration ??
+        null,
+
+      phone: p.phone ?? null,
+      city: p.city ?? null,
+      country: p.country ?? 'South Africa',
+      addressLine1: p.addressLine1 ?? p.address ?? null,
+      addressLine2: p.addressLine2 ?? null,
+
+      practiceName: p.practiceName ?? null,
+      practiceNumber:
+        p.practiceNumber ??
+        p.practiceNo ??
+        p.bhfNumber ??
+        p.hpcsaPracticeNumber ??
+        null,
+      regulatorBody: p.regulatorBody ?? 'HPCSA',
+      regulatorRegistration: p.regulatorRegistration ?? null,
+      acceptsMedicalAid:
+        typeof p.acceptsMedicalAid === 'boolean'
+          ? p.acceptsMedicalAid
+          : typeof p.hasInsurance === 'boolean'
+          ? p.hasInsurance
+          : false,
+      acceptedSchemes: Array.isArray(p.acceptedSchemes) ? p.acceptedSchemes : [],
+      bio: p.bio ?? null,
+
+      verifiedQualifications: Array.isArray(p.qualifications) ? p.qualifications : [],
+      additionalQualifications: Array.isArray(p.additionalQualifications)
+        ? p.additionalQualifications
+        : [],
+
+      photoUrl: p.avatarDataUrl ?? p.photoUrl ?? null,
+      feeCents: typeof p.feeCents === 'number' ? p.feeCents : null,
+      currency: p.currency ?? 'ZAR',
+      meta: { profile: p },
+    };
+  }
+
+  return js?.clinician ?? js?.profile ?? js?.data ?? js;
+}
+
+function trainingCertificateFromContext(js: any): TrainingCertificate | null {
+  const training = js?.training || {};
+  const available = !!training.certificateAvailable;
+  const certificateNumber = training.certificateNumber || training.certificateId || null;
+  const completedAt = training.certificateCompletedAt || training.completedAt || null;
+  const institution = training.certificateInstitution || training.institution || null;
+
+  if (!available && !certificateNumber) return null;
+
+  return {
+    available,
+    certificateNumber,
+    completedAt,
+    institution,
+  };
+}
+
+function formatDateTimeMaybe(value: string | null | undefined) {
+  if (!value) return 'Not recorded';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return value;
+  return d.toLocaleString();
+}
 
 function normalizeQualification(raw: any): Qualification {
   return {
@@ -163,7 +258,7 @@ function normalizeQualification(raw: any): Qualification {
 }
 
 function mapRawProfile(raw: any): ClinicianProfile {
-  if (!raw) return DEMO_PROFILE;
+  if (!raw) return emptyProfile();
 
   // Try to pick up structured qualifications if backend provides them
   const vqSrc =
@@ -306,7 +401,8 @@ export default function ClinicianProfilePage() {
   const [form, setForm] = useState<ProfileForm | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [usingDemo, setUsingDemo] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [trainingCertificate, setTrainingCertificate] = useState<TrainingCertificate | null>(null);
 
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarUploading, setAvatarUploading] = useState(false);
@@ -316,75 +412,72 @@ export default function ClinicianProfilePage() {
   >([]);
   const [feeSummary, setFeeSummary] = useState<FeeSummary | null>(null);
 
-  // ---- bootstrap profile + fees ----
+  // ---- bootstrap profile + fees + training certificate ----
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
         setLoading(true);
-        setUsingDemo(false);
+        setProfileError(null);
 
-        const [meRes, feeRes] = await Promise.allSettled([
-          fetch(API_ME, { cache: 'no-store' }),
-          fetch(API_FEES, { cache: 'no-store' }),
+        const [meRes, feeRes, trainingRes] = await Promise.allSettled([
+          fetch(withClinicianId(API_ME), { cache: 'no-store' }),
+          fetch(withClinicianId(API_FEES), { cache: 'no-store' }),
+          fetch(withClinicianId(API_TRAINING_CONTEXT), { cache: 'no-store' }),
         ]);
 
-        // PROFILE
-        if (meRes.status === 'fulfilled' && meRes.value.ok) {
-          const js = await meRes.value.json().catch(() => ({} as any));
-          const raw = js?.clinician ?? js?.profile ?? js?.data ?? js;
-          const mapped = mapRawProfile(raw);
-          if (!cancelled) {
-            setProfile(mapped);
-            setForm(profileToForm(mapped));
-            setAdditionalQualifications(mapped.additionalQualifications ?? []);
-          }
-        } else {
-          console.warn('[profile] /api/clinician/me failed, using demo');
-          if (!cancelled) {
-            setProfile(DEMO_PROFILE);
-            setForm(profileToForm(DEMO_PROFILE));
-            setAdditionalQualifications(
-              DEMO_PROFILE.additionalQualifications ?? [],
-            );
-            setUsingDemo(true);
-            toast(
-              "Using demo clinician profile (API gateway not reachable or /api/clinician/me not implemented yet).",
-              'info',
-            );
-          }
+        if (meRes.status !== 'fulfilled' || !meRes.value.ok) {
+          const status =
+            meRes.status === 'fulfilled' ? 'HTTP ' + meRes.value.status : 'request failed';
+          throw new Error('Profile could not be loaded from /api/profile (' + status + ').');
         }
 
-        // FEES
+        const meJson = await meRes.value.json().catch(() => ({} as any));
+        const mapped = mapRawProfile(profileApiToRaw(meJson));
+
+        if (!mapped.id) {
+          throw new Error('Profile response did not include a clinician ID.');
+        }
+
+        if (!cancelled) {
+          setProfile(mapped);
+          setForm(profileToForm(mapped));
+          setAdditionalQualifications(mapped.additionalQualifications ?? []);
+        }
+
         if (feeRes.status === 'fulfilled' && feeRes.value.ok) {
           const js = await feeRes.value.json().catch(() => ({} as any));
-          const cents = Number(js.fee_cents ?? 0);
+          const cents = Number(js.fee_cents ?? js.feeCents ?? 0);
           const currency = js.currency || 'ZAR';
-          if (!cancelled) {
+          if (!cancelled && cents > 0) {
             setFeeSummary({
               feeZar: cents / 100,
               currency,
             });
           }
-        } else {
-          console.warn(
-            '[profile] /api/clinicians/me/fees not available; fees section will be blank',
-          );
+        } else if (!cancelled) {
+          setFeeSummary(null);
         }
-      } catch (err) {
+
+        if (trainingRes.status === 'fulfilled' && trainingRes.value.ok) {
+          const js = await trainingRes.value.json().catch(() => ({} as any));
+          if (!cancelled) {
+            setTrainingCertificate(trainingCertificateFromContext(js));
+          }
+        } else if (!cancelled) {
+          setTrainingCertificate(null);
+        }
+      } catch (err: any) {
         console.error('[profile] bootstrap failed', err);
         if (!cancelled) {
-          setProfile(DEMO_PROFILE);
-          setForm(profileToForm(DEMO_PROFILE));
-          setAdditionalQualifications(
-            DEMO_PROFILE.additionalQualifications ?? [],
-          );
-          setUsingDemo(true);
-          toast(
-            'Using demo clinician profile (API gateway not reachable).',
-            'info',
-          );
+          setProfile(null);
+          setForm(null);
+          setAdditionalQualifications([]);
+          setTrainingCertificate(null);
+          const message = err?.message || 'Profile could not be loaded.';
+          setProfileError(message);
+          toast(message, 'error');
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -440,8 +533,8 @@ export default function ClinicianProfilePage() {
     };
 
     try {
-      const res = await fetch(API_ME, {
-        method: 'PATCH',
+      const res = await fetch(withClinicianId(API_ME), {
+        method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
@@ -451,7 +544,7 @@ export default function ClinicianProfilePage() {
       }
 
       const js = await res.json().catch(() => null);
-      const updatedRaw = js?.clinician ?? js?.profile ?? js?.data ?? js ?? {};
+      const updatedRaw = profileApiToRaw(js) ?? {};
       const merged = {
         ...mapRawProfile(profile),
         ...mapRawProfile({ ...profile, ...updatedRaw }),
@@ -462,12 +555,11 @@ export default function ClinicianProfilePage() {
       setAdditionalQualifications(
         merged.additionalQualifications ?? additionalQualifications,
       );
-      setUsingDemo(false);
       toast('Profile updated.', 'success');
     } catch (err) {
       console.error('[profile] save failed', err);
       toast(
-        'Failed to save profile. Check that /api/clinician/me (PATCH) is implemented.',
+        'Failed to save profile. Please try again or contact support if the problem persists.',
         'error',
       );
     } finally {
@@ -690,11 +782,9 @@ export default function ClinicianProfilePage() {
         </>
       )}
 
-      {usingDemo && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-          Showing a demo clinician profile because the API gateway is not running
-          or <code className="font-mono">{API_ME}</code> doesn&apos;t exist yet.
-          Once you wire that up, this page will load real data.
+      {profileError && (
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+          {profileError}
         </div>
       )}
 
@@ -1217,6 +1307,62 @@ export default function ClinicianProfilePage() {
               </p>
             </div>
 
+            {/* Training certificate */}
+            <div className="rounded-lg border bg-white p-4 space-y-2 text-xs">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-semibold text-gray-800">
+                  Training certificate
+                </h2>
+
+                {trainingCertificate?.available && (
+                  <a
+                    href={certificateDownloadHref(current.id)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[11px] underline"
+                  >
+                    Download PDF
+                  </a>
+                )}
+              </div>
+
+              {trainingCertificate ? (
+                <div className="space-y-1">
+                  <div>
+                    <span className="text-gray-600">Status:</span>{' '}
+                    <span className="font-semibold text-emerald-700">
+                      {trainingCertificate.available ? 'Issued' : 'Recorded'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-gray-600">Certificate ID:</span>{' '}
+                    <span className="font-mono">
+                      {trainingCertificate.certificateNumber || 'Not recorded'}
+                    </span>
+                  </div>
+
+                  <div>
+                    <span className="text-gray-600">Completed:</span>{' '}
+                    {formatDateTimeMaybe(trainingCertificate.completedAt)}
+                  </div>
+
+                  <div>
+                    <span className="text-gray-600">Issuer:</span>{' '}
+                    {trainingCertificate.institution || 'Ambulant+ / Cloven Technology'}
+                  </div>
+                </div>
+              ) : (
+                <p className="text-gray-500">
+                  No issued training certificate is currently linked to this profile.
+                </p>
+              )}
+
+              <p className="text-[11px] text-gray-500">
+                Completion unlocks simulation mode only. Real patient visibility still requires final operational approval.
+              </p>
+            </div>
+
             {/* Smart ID */}
             <SmartIdCard
               clinicianId={current.id}
@@ -1267,19 +1413,7 @@ export default function ClinicianProfilePage() {
             {/* Source info */}
             <div className="border rounded-lg bg-white p-3 text-xs text-gray-600 space-y-1">
               <div className="font-semibold text-gray-800">Profile source</div>
-              <div>
-                {usingDemo ? (
-                  <>
-                    Demo mode – not connected to the API gateway. Start your{' '}
-                    <code className="font-mono">apps/api-gateway</code> service
-                    and implement <code className="font-mono">GET/PATCH {API_ME}</code>{' '}
-                    &amp; <code className="font-mono">GET {API_FEES}</code> to load
-                    real data.
-                  </>
-                ) : (
-                  <>Loaded from backend ({API_ME}).</>
-                )}
-              </div>
+              <div>Loaded from backend ({API_ME}).</div>
               <div className="mt-1 text-[11px] text-gray-500">
                 Fees are edited in{' '}
                 <button
