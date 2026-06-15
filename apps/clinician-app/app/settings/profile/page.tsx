@@ -267,6 +267,88 @@ function smartIdReadiness(profile: ClinicianProfile, certificate: TrainingCertif
   };
 }
 
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read avatar image.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Could not load avatar image.'));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
+async function prepareAvatarForUpload(file: File): Promise<{ file: File; previewUrl: string }> {
+  const maxBytes = 900 * 1024;
+  const maxSide = 512;
+
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Please choose an image file.');
+  }
+
+  const img = await loadImageFromFile(file);
+  const size = Math.min(img.naturalWidth, img.naturalHeight);
+  const sx = Math.max(0, Math.floor((img.naturalWidth - size) / 2));
+  const sy = Math.max(0, Math.floor((img.naturalHeight - size) / 2));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = maxSide;
+  canvas.height = maxSide;
+
+  const ctx = canvas.getContext('2d');
+  if (!ctx) {
+    throw new Error('Avatar image processing is not available in this browser.');
+  }
+
+  ctx.drawImage(img, sx, sy, size, size, 0, 0, maxSide, maxSide);
+
+  let quality = 0.82;
+  let blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, 'image/jpeg', quality),
+  );
+
+  while (blob && blob.size > maxBytes && quality > 0.55) {
+    quality -= 0.08;
+    blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', quality),
+    );
+  }
+
+  if (!blob) {
+    throw new Error('Could not prepare avatar image.');
+  }
+
+  if (blob.size > maxBytes) {
+    throw new Error('Avatar image is still too large after compression. Please choose a smaller square portrait.');
+  }
+
+  const compressed = new File([blob], 'avatar.jpg', {
+    type: 'image/jpeg',
+    lastModified: Date.now(),
+  });
+
+  const previewUrl = await blobToDataUrl(blob);
+
+  return { file: compressed, previewUrl };
+}
+
 function normalizeQualification(raw: any): Qualification {
   return {
     type:
@@ -571,11 +653,11 @@ export default function ClinicianProfilePage() {
         body: JSON.stringify(payload),
       });
 
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
-
       const js = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        throw new Error(js?.error || js?.message || `HTTP ${res.status}`);
+      }
       const updatedRaw = profileApiToRaw(js) ?? {};
       const merged = {
         ...mapRawProfile(profile),
@@ -608,17 +690,14 @@ export default function ClinicianProfilePage() {
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      setAvatarPreview(reader.result as string);
-    };
-    reader.readAsDataURL(file);
-
     setAvatarUploading(true);
     try {
+      const prepared = await prepareAvatarForUpload(file);
+      setAvatarPreview(prepared.previewUrl);
+
       const formData = new FormData();
       formData.append('payload', JSON.stringify({}));
-      formData.append('avatar', file);
+      formData.append('avatar', prepared.file);
 
       const res = await fetch(withClinicianId(API_ME, profile?.id), {
         method: 'PUT',
@@ -645,10 +724,10 @@ export default function ClinicianProfilePage() {
           'warning',
         );
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('[profile] avatar upload failed', err);
       toast(
-        'Failed to upload profile picture. Please try again or contact support if the problem persists.',
+        err?.message || 'Failed to upload profile picture. Please try again or contact support if the problem persists.',
         'error',
       );
     } finally {
