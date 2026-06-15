@@ -251,6 +251,22 @@ function formatDateTimeMaybe(value: string | null | undefined) {
   return d.toLocaleString();
 }
 
+function smartIdReadiness(profile: ClinicianProfile, certificate: TrainingCertificate | null) {
+  const hasCertificate = !!(certificate?.available && certificate.certificateNumber);
+  const hasAvatar = !!profile.photoUrl;
+
+  return {
+    ready: hasCertificate && hasAvatar,
+    hasCertificate,
+    hasAvatar,
+    reason: !hasCertificate
+      ? 'Training certificate is not ready yet.'
+      : !hasAvatar
+      ? 'Upload your profile photo to unlock Smart ID download and print.'
+      : null,
+  };
+}
+
 function normalizeQualification(raw: any): Qualification {
   return {
     type:
@@ -666,6 +682,13 @@ export default function ClinicianProfilePage() {
   ) => {
     const current = profile;
     if (!current?.id) return;
+
+    const readiness = smartIdReadiness(current, trainingCertificate);
+    if (!readiness.ready) {
+      toast(readiness.reason || 'Smart ID is not ready yet.', 'warning');
+      return;
+    }
+
     try {
       const url = `/api/clinicians/${encodeURIComponent(
         current.id,
@@ -697,6 +720,13 @@ export default function ClinicianProfilePage() {
   const openSmartId = async (side: 'front' | 'back') => {
     const current = profile;
     if (!current?.id) return;
+
+    const readiness = smartIdReadiness(current, trainingCertificate);
+    if (!readiness.ready) {
+      toast(readiness.reason || 'Smart ID is not ready yet.', 'warning');
+      return;
+    }
+
     const url = `/api/clinicians/${encodeURIComponent(
       current.id,
     )}/id-card?side=${side}&format=png`;
@@ -709,6 +739,8 @@ export default function ClinicianProfilePage() {
     current.meta &&
     current.meta.smartIdActive
   );
+
+  const smartIdStatus = current ? smartIdReadiness(current, trainingCertificate) : null;
 
   return (
     <main className="max-w-5xl mx-auto p-6 space-y-6">
