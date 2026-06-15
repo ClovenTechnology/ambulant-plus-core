@@ -49,6 +49,43 @@ type Readiness = {
   trainingWeight: number;
   dispatchWeight: number;
 };
+type SimulationAppointmentResult = {
+  ok?: boolean;
+  mode?: string;
+  appointment?: {
+    id?: string;
+    startsAt?: string;
+    endsAt?: string;
+    roomId?: string;
+    status?: string;
+    paymentStatus?: string;
+  };
+  televisit?: {
+    id?: string;
+    roomId?: string;
+    joinOpensAt?: string;
+    joinClosesAt?: string;
+    status?: string;
+  };
+  join?: {
+    clinician?: {
+      participantId?: string;
+      path?: string;
+      url?: string;
+    };
+    testPatient?: {
+      participantId?: string;
+      path?: string;
+      url?: string;
+    };
+  };
+};
+
+type SimulationState = {
+  createdCount: number;
+  latest?: SimulationAppointmentResult;
+  lastCreatedAt?: string;
+};
 
 const STARTER_KIT: { key: string; label: string }[] = [
   { key: 'duecare_health_monitor', label: 'DueCare 6-in-1 Health Monitor' },
@@ -278,6 +315,7 @@ export default function OnboardingDispatchBoard({
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  const [simulationByClinician, setSimulationByClinician] = useState<Record<string, SimulationState>>({});
 
   // schedule modal
   const [schedOpen, setSchedOpen] = useState(false);
@@ -349,6 +387,89 @@ export default function OnboardingDispatchBoard({
       setNotice({ tone: 'ok', text: 'Clinician training link copied.' });
     } catch {
       setNotice({ tone: 'err', text: 'Could not copy link. Open the slot and copy it manually.' });
+    }
+  };
+
+  const copySimulationUrl = async (url: string | undefined, label: string) => {
+    if (!url) {
+      setNotice({ tone: 'err', text: 'No ' + label + ' simulation URL is available yet.' });
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(url);
+      setNotice({ tone: 'ok', text: label + ' simulation URL copied.' });
+    } catch {
+      setNotice({ tone: 'err', text: 'Could not copy ' + label + ' simulation URL.' });
+    }
+  };
+
+  const handleCreateSimulationSession = async (row: OnboardingBoardRow, sessionNumber: number) => {
+    if (row.onboarding.stage !== 'training_completed') {
+      setNotice({
+        tone: 'err',
+        text: 'Simulation sessions can only be created after mandatory training is completed.',
+      });
+      return;
+    }
+
+    setBusyId(row.clinicianId);
+    setNotice(null);
+
+    try {
+      const startsAt = new Date(Date.now() + 2 * 60_000).toISOString();
+
+      const res = await fetch('/api/admin/simulation/appointments', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clinicianId: row.clinicianId,
+          startsAt,
+          durationMinutes: 30,
+          sessionNumber,
+          patientName: 'Simulation Patient ' + sessionNumber,
+          reason: 'Supervised onboarding simulation consultation ' + sessionNumber + ' of 3',
+        }),
+      });
+
+      const js = (await res.json().catch(() => null)) as SimulationAppointmentResult | null;
+
+      if (!res.ok || js?.ok === false) {
+        throw new Error((js as any)?.error || (js as any)?.message || ('HTTP ' + res.status));
+      }
+
+      const result = js || { ok: true };
+
+      setSimulationByClinician((prev) => {
+        const current = prev[row.clinicianId];
+        const nextCount = Math.min(3, Math.max(current?.createdCount || 0, sessionNumber));
+
+        return {
+          ...prev,
+          [row.clinicianId]: {
+            createdCount: nextCount,
+            latest: result,
+            lastCreatedAt: new Date().toISOString(),
+          },
+        };
+      });
+
+      setNotice({
+        tone: 'ok',
+        text:
+          'Simulation session ' +
+          sessionNumber +
+          '/3 created for ' +
+          row.displayName +
+          '. Copy the clinician and test patient URLs from the card.',
+      });
+    } catch (err: any) {
+      setNotice({
+        tone: 'err',
+        text: 'Simulation session creation failed: ' + (err?.message || 'unknown error'),
+      });
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -572,6 +693,10 @@ setBusyId(schedRow.clinicianId);
           const dispatch = row.dispatch;
           const isBusy = busyId === row.clinicianId;
           const readiness = computeReadiness(row);
+          const simulationState = simulationByClinician[row.clinicianId];
+          const simulationCount = Math.min(3, simulationState?.createdCount || 0);
+          const nextSimulationSession = Math.min(3, simulationCount + 1);
+          const simulationReady = row.onboarding.stage === 'training_completed';
 
           const readinessLabel =
             readiness.score >= 80 ? 'Launch-ready' : readiness.score >= 50 ? 'In progress' : 'Early stage';
@@ -736,6 +861,81 @@ setBusyId(schedRow.clinicianId);
                   </div>
                 </div>
 
+                <div className="rounded-lg border bg-white p-2">
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <div className="text-[11px] font-semibold text-gray-800">Simulation sessions</div>
+                    <span className="text-[10px] text-gray-500">{simulationCount}/3</span>
+                  </div>
+
+                  <div className="mb-2 flex items-center gap-2 text-[10px] text-gray-600">
+                    <span>Created</span>
+                    <div className="h-1.5 w-20 rounded-full bg-gray-100">
+                      <div
+                        className="h-1.5 rounded-full bg-slate-800"
+                        style={{ width: String((simulationCount / 3) * 100) + '%' }}
+                      />
+                    </div>
+                    <span>{simulationCount}/3</span>
+                  </div>
+
+                  <div className="flex flex-col gap-1">
+                    <button
+                      type="button"
+                      disabled={isBusy || !simulationReady || simulationCount >= 3}
+                      onClick={() => handleCreateSimulationSession(row, nextSimulationSession)}
+                      className="rounded bg-slate-900 px-3 py-1 text-[11px] font-medium text-white hover:bg-slate-800 disabled:opacity-50"
+                      title={
+                        simulationReady
+                          ? 'Create the next supervised simulation televisit'
+                          : 'Training must be completed before simulation sessions can be created'
+                      }
+                    >
+                      {simulationCount >= 3
+                        ? 'All sessions created'
+                        : 'Create session ' + nextSimulationSession + '/3'}
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isBusy || !simulationState?.latest?.join?.clinician?.url}
+                      onClick={() =>
+                        copySimulationUrl(
+                          simulationState?.latest?.join?.clinician?.url,
+                          'Clinician',
+                        )
+                      }
+                      className="rounded border bg-white px-3 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Copy clinician join URL
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isBusy || !simulationState?.latest?.join?.testPatient?.url}
+                      onClick={() =>
+                        copySimulationUrl(
+                          simulationState?.latest?.join?.testPatient?.url,
+                          'Test patient',
+                        )
+                      }
+                      className="rounded border bg-white px-3 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Copy test patient URL
+                    </button>
+
+                    {simulationState?.latest?.televisit?.roomId && (
+                      <div className="mt-1 break-all rounded border bg-slate-50 px-2 py-1 text-[10px] text-gray-600">
+                        Room: {simulationState.latest.televisit.roomId}
+                      </div>
+                    )}
+
+                    {!simulationReady && (
+                      <div className="text-[10px] text-amber-700">
+                        Complete training before creating simulation sessions.
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div className="rounded-lg border bg-white p-2">
                   <div className="mb-1 text-[11px] font-semibold text-gray-800">Dispatch actions</div>
                   <div className="flex flex-col gap-1">
