@@ -688,7 +688,7 @@ export default function ClinicianProfilePage() {
     } catch (err) {
       console.error('[profile] smart-id png download failed', err);
       toast(
-        'Failed to generate Smart ID image. Check the /api/clinicians/:id/id-card endpoint.',
+        'Failed to generate Smart ID. Please try again or contact support if the problem persists.',
         'error',
       );
     }
@@ -1392,7 +1392,7 @@ export default function ClinicianProfilePage() {
 
             <div className="rounded-lg border bg-white p-4 space-y-2 text-xs">
               <h2 className="text-sm font-semibold text-gray-800">
-                Digital Smart ID (PNG)
+                Digital Smart ID
               </h2>
               <p className="text-[11px] text-gray-500">
                 View or download your Smart ID as a PNG image for digital use

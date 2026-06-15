@@ -30,7 +30,7 @@ export function SmartIdCard({ clinicianId, hasActiveSmartId }: SmartIdCardProps)
           items: [
             {
               productId: 'smart-id-reprint',
-              name: 'Ambulant+ Smart ID (replacement)',
+              name: 'Physical Smart ID replacement (replacement)',
               unitAmountZar: 120, // adjust in sync with your product catalog
               quantity: 1,
             },
@@ -53,7 +53,7 @@ export function SmartIdCard({ clinicianId, hasActiveSmartId }: SmartIdCardProps)
 
       window.location.href = js.checkoutUrl as string;
     } catch (err: any) {
-      setError(err?.message || 'Smart ID reorder failed');
+      setError(err?.message || 'Smart ID replacement request failed');
     } finally {
       setBusy(false);
     }
@@ -63,9 +63,9 @@ export function SmartIdCard({ clinicianId, hasActiveSmartId }: SmartIdCardProps)
     <div className="border rounded-lg bg-white p-4 space-y-2">
       <div className="flex items-center justify-between">
         <div>
-          <div className="text-sm font-semibold">Ambulant+ Smart ID</div>
+          <div className="text-sm font-semibold">Physical Smart ID replacement</div>
           <div className="text-xs text-gray-500">
-            {hasActiveSmartId ? 'You have an active Smart ID on file.' : 'No Smart ID on file.'}
+            {hasActiveSmartId ? 'Digital Smart ID downloads are available above.' : 'Digital Smart ID becomes available after training completion.'}
           </div>
         </div>
         <span className="text-[11px] text-gray-500 font-mono">#{clinicianId}</span>
@@ -77,9 +77,9 @@ export function SmartIdCard({ clinicianId, hasActiveSmartId }: SmartIdCardProps)
         type="button"
         onClick={handleReorder}
         disabled={busy}
-        className="mt-1 inline-flex items-center px-3 py-1.5 rounded-full text-xs bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+        className="mt-1 inline-flex items-center px-3 py-1.5 rounded-md text-xs border bg-white text-slate-800 hover:bg-slate-50 disabled:opacity-50"
       >
-        {busy ? 'Redirecting…' : 'Re-order Smart ID'}
+        {busy ? 'Redirecting…' : 'Request paid replacement'}
       </button>
     </div>
   );
