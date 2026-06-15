@@ -757,7 +757,7 @@ export default function ClinicianProfilePage() {
 
   const downloadSmartId = async (
     side: 'front' | 'back',
-    format: 'png' | 'pdf' = 'png',
+    format: 'svg' | 'pdf' = 'svg',
   ) => {
     const current = profile;
     if (!current?.id) return;
@@ -808,7 +808,7 @@ export default function ClinicianProfilePage() {
 
     const url = `/api/clinicians/${encodeURIComponent(
       current.id,
-    )}/id-card?side=${side}&format=png`;
+    )}/id-card?side=${side}&format=svg`;
     window.open(url, '_blank', 'noopener,noreferrer');
   };
 
@@ -1503,7 +1503,7 @@ export default function ClinicianProfilePage() {
 
             <div className="rounded-lg border bg-white p-4 space-y-2 text-xs">
               <h2 className="text-sm font-semibold text-gray-800">
-                Digital Smart ID
+                ,
               </h2>
               <p className="text-[11px] text-gray-500">
                 View or download your Smart ID as a PNG image for digital use
@@ -1516,28 +1516,28 @@ export default function ClinicianProfilePage() {
                   onClick={() => openSmartId('front')}
                   className="px-3 py-1.5 rounded-full border text-[11px] bg-white hover:bg-gray-50"
                 >
-                  View front (PNG)
+                  , (PNG)
                 </button>
                 <button
                   type="button"
                   onClick={() => openSmartId('back')}
                   className="px-3 py-1.5 rounded-full border text-[11px] bg-white hover:bg-gray-50"
                 >
-                  View back (PNG)
+                  , (PNG)
                 </button>
                 <button
                   type="button"
-                  onClick={() => downloadSmartId('front', 'png')}
+                  onClick={() => downloadSmartId('front', 'svg')}
                   className="px-3 py-1.5 rounded-full border text-[11px] bg-white hover:bg-gray-50"
                 >
-                  Download front PNG
+                  Download front SVG
                 </button>
                 <button
                   type="button"
-                  onClick={() => downloadSmartId('back', 'png')}
+                  onClick={() => downloadSmartId('back', 'svg')}
                   className="px-3 py-1.5 rounded-full border text-[11px] bg-white hover:bg-gray-50"
                 >
-                  Download back PNG
+                  Download back SVG
                 </button>
               </div>
             </div>
