@@ -81,7 +81,30 @@ function buildProfileResponse(clinician: any, profileJson: Record<string, any>) 
 
       // editable
       address: profileJson.address ?? '',
+      addressLine1: profileJson.addressLine1 ?? profileJson.address ?? '',
+      addressLine2: profileJson.addressLine2 ?? '',
       phone: profileJson.phone ?? '',
+      city: profileJson.city ?? '',
+      country: profileJson.country ?? 'South Africa',
+
+      practiceName: profileJson.practiceName ?? '',
+      practiceNumber:
+        profileJson.practiceNumber ??
+        profileJson.practiceNo ??
+        profileJson.bhfNumber ??
+        profileJson.hpcsaPracticeNumber ??
+        '',
+      regulatorBody: profileJson.regulatorBody ?? 'HPCSA',
+      regulatorRegistration: profileJson.regulatorRegistration ?? '',
+      acceptsMedicalAid:
+        typeof profileJson.acceptsMedicalAid === 'boolean'
+          ? profileJson.acceptsMedicalAid
+          : !!profileJson.hasInsurance,
+      acceptedSchemes: Array.isArray(profileJson.acceptedSchemes)
+        ? profileJson.acceptedSchemes
+        : [],
+
+      bio: profileJson.bio ?? '',
       hasInsurance: profileJson.hasInsurance ?? null,
       insurerName: profileJson.insurerName ?? '',
       insuranceType: profileJson.insuranceType ?? '',
@@ -202,8 +225,64 @@ export async function PUT(req: NextRequest) {
       profileJson.address = payload.address.trim();
     }
 
+    if (typeof payload.addressLine1 === 'string') {
+      profileJson.addressLine1 = payload.addressLine1.trim();
+      profileJson.address = payload.addressLine1.trim();
+    }
+
+    if (typeof payload.addressLine2 === 'string') {
+      profileJson.addressLine2 = payload.addressLine2.trim();
+    }
+
     if (typeof payload.phone === 'string') {
       profileJson.phone = payload.phone.trim();
+    }
+
+    if (typeof payload.city === 'string') {
+      profileJson.city = payload.city.trim();
+    }
+
+    if (typeof payload.country === 'string') {
+      profileJson.country = payload.country.trim();
+    }
+
+    if (typeof payload.practiceName === 'string') {
+      profileJson.practiceName = payload.practiceName.trim();
+    }
+
+    if (typeof payload.practiceNumber === 'string') {
+      profileJson.practiceNumber = payload.practiceNumber.trim();
+      profileJson.bhfNumber = payload.practiceNumber.trim();
+    }
+
+    if (typeof payload.regulatorBody === 'string') {
+      profileJson.regulatorBody = payload.regulatorBody.trim();
+    }
+
+    if (typeof payload.regulatorRegistration === 'string') {
+      profileJson.regulatorRegistration = payload.regulatorRegistration.trim();
+    }
+
+    const acceptsMedicalAid = parseBool(payload.acceptsMedicalAid);
+
+    if (acceptsMedicalAid !== null) {
+      profileJson.acceptsMedicalAid = acceptsMedicalAid;
+      profileJson.hasInsurance = acceptsMedicalAid;
+    }
+
+    if (Array.isArray(payload.acceptedSchemes)) {
+      profileJson.acceptedSchemes = payload.acceptedSchemes
+        .map((x: any) => String(x || '').trim())
+        .filter(Boolean);
+    } else if (typeof payload.acceptedSchemes === 'string') {
+      profileJson.acceptedSchemes = payload.acceptedSchemes
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+    }
+
+    if (typeof payload.bio === 'string') {
+      profileJson.bio = payload.bio.trim();
     }
 
     const hasInsurance = parseBool(payload.hasInsurance);
@@ -281,6 +360,14 @@ export async function PUT(req: NextRequest) {
       insurerName: profileJson.insurerName ?? null,
       insuranceType: profileJson.insuranceType ?? null,
       hpcsaNextRenewalDate: profileJson.hpcsaNextRenewalDate ?? null,
+      practiceName: profileJson.practiceName ?? null,
+      practiceNumber: profileJson.practiceNumber ?? null,
+      bhfNumber: profileJson.bhfNumber ?? null,
+      regulatorBody: profileJson.regulatorBody ?? null,
+      regulatorRegistration: profileJson.regulatorRegistration ?? null,
+      acceptsMedicalAid: profileJson.acceptsMedicalAid ?? null,
+      acceptedSchemes: profileJson.acceptedSchemes ?? [],
+      bio: profileJson.bio ?? null,
     };
 
     const updated = await prisma.clinicianProfile.update({
