@@ -83,6 +83,7 @@ function buildJoinPath(args: {
   participantId: string;
   participantRole: string;
   joinToken?: string | null;
+  context?: Record<string, string | number | boolean | null | undefined>;
 }) {
   const qs = new URLSearchParams();
   qs.set('appointmentId', args.appointmentId);
@@ -93,6 +94,13 @@ function buildJoinPath(args: {
   if (args.joinToken) {
     qs.set('joinToken', args.joinToken);
     qs.set('jt', args.joinToken);
+  }
+
+  if (args.context) {
+    for (const [key, value] of Object.entries(args.context)) {
+      if (value === null || value === undefined || value === '') continue;
+      qs.set(key, String(value));
+    }
   }
 
   const basePath = args.app === 'clinician' ? '/sfu' : '/televisit';
@@ -380,6 +388,65 @@ export async function POST(req: NextRequest) {
       throw new Error('simulation_join_token_not_issued');
     }
 
+    const createdAppointment = created.appointment as any;
+    const createdTelevisit = created.televisit as any;
+    const createdAppointmentMeta =
+      createdAppointment?.meta && typeof createdAppointment.meta === 'object'
+        ? (createdAppointment.meta as any)
+        : {};
+
+    const participants = Array.isArray(createdAppointmentMeta.participants)
+      ? createdAppointmentMeta.participants
+      : [];
+
+    const clinicianParty =
+      participants.find((p: any) => String(p?.role || '').toUpperCase().includes('CLINICIAN')) || {};
+    const patientParty =
+      participants.find((p: any) => String(p?.role || '').toUpperCase().includes('PATIENT')) || {};
+
+    const startIso = createdAppointment?.startsAt
+      ? new Date(createdAppointment.startsAt).toISOString()
+      : undefined;
+
+    const endIso = createdAppointment?.endsAt
+      ? new Date(createdAppointment.endsAt).toISOString()
+      : undefined;
+
+    const durationMin =
+      startIso && endIso
+        ? Math.max(1, Math.round((new Date(endIso).getTime() - new Date(startIso).getTime()) / 60_000))
+        : undefined;
+
+    const simulationContext = {
+      simulation: '1',
+      simulationSession: String(createdAppointmentMeta.sessionNumber || ''),
+      bookingSource: 'admin.simulation',
+
+      roomId,
+      visitId: createdTelevisit.id,
+      appointmentId,
+      encounterId: createdAppointment?.encounterId,
+
+      clinicianId: createdAppointment?.clinicianId || clinicianParty?.clinicianId,
+      clinicianName: clinicianParty?.name,
+      clinicianSpecialty: clinicianParty?.specialty,
+
+      patientId: createdAppointment?.patientId || patientParty?.patientId,
+      patientName: createdAppointmentMeta.patientDisplayName || patientParty?.name,
+
+      reason: createdAppointment?.reason || createdAppointmentMeta.reason,
+      startsAt: startIso,
+      scheduledStartAt: startIso,
+      endsAt: endIso,
+      scheduledEndAt: endIso,
+      durationMin,
+      sessionDurationMin: durationMin,
+
+      paymentStatus: createdAppointment?.paymentStatus,
+      paymentMethod: createdAppointment?.paymentMethod || 'SIMULATION',
+      feeZar: 0,
+    };
+
     const clinicianPath = buildJoinPath({
       app: 'clinician',
       roomId,
@@ -388,6 +455,7 @@ export async function POST(req: NextRequest) {
       participantId: clinicianParticipantId,
       participantRole: 'clinician',
       joinToken: clinicianTicket.token,
+      context: simulationContext,
     });
 
     const patientPath = buildJoinPath({
@@ -398,6 +466,7 @@ export async function POST(req: NextRequest) {
       participantId: patientParticipantId,
       participantRole: 'patient',
       joinToken: patientTicket.token,
+      context: simulationContext,
     });
 
     return json({
