@@ -78,15 +78,15 @@ export const DEMO_ALLERGIES: PatientAllergyBrief[] = [
   },
 ];
 
-export const DEMO_PROFILE: PatientProfile = {
-  id: 'pt-dev',
-  name: 'Demo Patient',
-  dob: '1985-04-12',
-  gender: 'Female',
-  mrn: 'MRN-DEMO-123',
-  language: 'English',
-  phone: '+27 82 000 0000',
-  email: 'demo.patient@example.com',
+export const SIMULATION_FALLBACK_PROFILE: PatientProfile = {
+  id: 'simulation-patient',
+  name: 'Simulation Patient',
+  dob: null,
+  gender: null,
+  mrn: null,
+  language: null,
+  phone: null,
+  email: null,
 };
 
 export type PatientContextValue = {
@@ -116,8 +116,8 @@ export function usePatientContext(
   _roomId: string,
   searchParams: ReadonlyURLSearchParams
 ): PatientContextValue {
-  const patientId = searchParams.get('patientId') || 'pt-dev';
-  const patientName = searchParams.get('patientName') || 'Demo Patient';
+  const patientId = searchParams.get('patientId') || searchParams.get('patient') || 'simulation-patient';
+  const patientName = searchParams.get('patientName') || 'Simulation Patient';
   const encounterId = searchParams.get('encounterId') || '';
 
   const [patientProfile, setPatientProfile] = useState<PatientProfile | null>(null);
@@ -140,8 +140,8 @@ export function usePatientContext(
         const pid = patientId;
         if (!pid) {
           if (!cancelled) {
-            setPatientProfile(DEMO_PROFILE);
-            setPatientProfileError('Using demo patient profile (no patientId).');
+            setPatientProfile(SIMULATION_FALLBACK_PROFILE);
+            setPatientProfileError('Using simulation patient profile because no patientId was supplied.');
           }
           return;
         }
@@ -163,20 +163,20 @@ export function usePatientContext(
             raw.fullName ??
             raw.display ??
             patientName ??
-            DEMO_PROFILE.name,
-          dob: raw.dob ?? raw.dateOfBirth ?? DEMO_PROFILE.dob,
-          gender: raw.gender ?? raw.sex ?? DEMO_PROFILE.gender,
-          mrn: raw.mrn ?? raw.medicalRecordNumber ?? DEMO_PROFILE.mrn,
-          language: raw.language ?? raw.preferredLanguage ?? DEMO_PROFILE.language,
-          phone: raw.phone ?? raw.mobile ?? DEMO_PROFILE.phone,
-          email: raw.email ?? raw.emailAddress ?? DEMO_PROFILE.email,
+            SIMULATION_FALLBACK_PROFILE.name,
+          dob: raw.dob ?? raw.dateOfBirth ?? SIMULATION_FALLBACK_PROFILE.dob,
+          gender: raw.gender ?? raw.sex ?? SIMULATION_FALLBACK_PROFILE.gender,
+          mrn: raw.mrn ?? raw.medicalRecordNumber ?? SIMULATION_FALLBACK_PROFILE.mrn,
+          language: raw.language ?? raw.preferredLanguage ?? SIMULATION_FALLBACK_PROFILE.language,
+          phone: raw.phone ?? raw.mobile ?? SIMULATION_FALLBACK_PROFILE.phone,
+          email: raw.email ?? raw.emailAddress ?? SIMULATION_FALLBACK_PROFILE.email,
         };
 
         if (!cancelled) setPatientProfile(prof);
       } catch {
         if (!cancelled) {
-          setPatientProfile(DEMO_PROFILE);
-          setPatientProfileError('Using demo patient profile (live profile unavailable).');
+          setPatientProfile(SIMULATION_FALLBACK_PROFILE);
+          setPatientProfileError('Using simulation patient profile because live profile details are unavailable.');
         }
       }
     })();
@@ -195,7 +195,7 @@ export function usePatientContext(
         if (!pid) {
           if (!cancelled) {
             setPatientMeds(DEMO_MEDS);
-            setMedsError('Using demo medications (no patientId).');
+            setMedsError('Using simulation medication data because live medication feed is unavailable.');
           }
           return;
         }
@@ -222,7 +222,7 @@ export function usePatientContext(
       } catch {
         if (!cancelled) {
           setPatientMeds(DEMO_MEDS);
-          setMedsError('Using demo medications (live medication feed unavailable).');
+          setMedsError('Using simulation medication data because live medication feed is unavailable.');
         }
       }
     })();
@@ -242,7 +242,7 @@ export function usePatientContext(
         if (!pid) {
           if (!cancelled) {
             setPatientAllergies(DEMO_ALLERGIES);
-            setAllergiesError('Using demo allergies (no patientId).');
+            setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
             setAllergiesFromLive(false);
           }
           return;
@@ -272,7 +272,7 @@ export function usePatientContext(
       } catch {
         if (!cancelled) {
           setPatientAllergies(DEMO_ALLERGIES);
-          setAllergiesError('Using demo allergies (live allergy feed unavailable).');
+          setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
           setAllergiesFromLive(false);
         }
       } finally {
@@ -291,7 +291,7 @@ export function usePatientContext(
       const pid = patientId;
       if (!pid) {
         setPatientAllergies(DEMO_ALLERGIES);
-        setAllergiesError('Using demo allergies (no patientId).');
+        setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
         setAllergiesFromLive(false);
         return;
       }
@@ -317,14 +317,14 @@ export function usePatientContext(
       setAllergiesFromLive(true);
     } catch {
       setPatientAllergies(DEMO_ALLERGIES);
-      setAllergiesError('Using demo allergies (live allergy feed unavailable).');
+      setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
       setAllergiesFromLive(false);
     } finally {
       setAllergiesLoading(false);
     }
   }, [patientId]);
 
-  const profile = patientProfile || DEMO_PROFILE;
+  const profile = patientProfile || SIMULATION_FALLBACK_PROFILE;
 
   return {
     profile,

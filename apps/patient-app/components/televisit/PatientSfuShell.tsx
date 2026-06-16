@@ -311,9 +311,9 @@ function InnerPatientSfuShell({ params }: Props) {
     () => ({
       id: appointmentId || `sfu-${roomId}`,
       when: scheduledStartAt || new Date().toISOString(),
-      patientId: search.get('patientId') || search.get('patient') || 'pt-dev',
-      patientName: search.get('patientName') || 'Demo Patient',
-      clinicianName: search.get('clinicianName') || 'Demo Clinician',
+      patientId: search.get('patientId') || search.get('patient') || 'simulation-patient',
+      patientName: search.get('patientName') || 'Simulation Patient',
+      clinicianName: search.get('clinicianName') || 'Simulation Clinician',
       clinicianSpecialty: search.get('clinicianSpecialty') || 'General Practice',
       reason: search.get('reason') || 'Consultation',
       status: state === 'connected' ? 'In progress' : 'Waiting',
