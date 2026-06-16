@@ -1,6 +1,7 @@
 ﻿import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
+import { upsertTicket } from '@/src/lib/join';
 import { verifyAdminRequest } from '../../utils/auth';
 
 export const runtime = 'nodejs';
@@ -75,11 +76,13 @@ function appOrigin(req: NextRequest, names: string[], fallback: string) {
 }
 
 function buildJoinPath(args: {
+  app: 'clinician' | 'patient';
   roomId: string;
   visitId: string;
   appointmentId: string;
   participantId: string;
   participantRole: string;
+  joinToken?: string | null;
 }) {
   const qs = new URLSearchParams();
   qs.set('appointmentId', args.appointmentId);
@@ -87,7 +90,14 @@ function buildJoinPath(args: {
   qs.set('participantId', args.participantId);
   qs.set('participantRole', args.participantRole);
 
-  return `/televisit/${encodeURIComponent(args.roomId)}?${qs.toString()}`;
+  if (args.joinToken) {
+    qs.set('joinToken', args.joinToken);
+    qs.set('jt', args.joinToken);
+    qs.set('token', args.joinToken);
+  }
+
+  const basePath = args.app === 'clinician' ? '/sfu' : '/televisit';
+  return `${basePath}/${encodeURIComponent(args.roomId)}?${qs.toString()}`;
 }
 
 function canCreateSimulation(adminCheck: any) {
@@ -346,20 +356,49 @@ export async function POST(req: NextRequest) {
       'https://patient.ambulantplus.co.za',
     );
 
+    const joinTokenTtlSec = Math.max(
+      900,
+      Math.ceil((new Date(created.televisit.joinClosesAt).getTime() - Date.now()) / 1000),
+    );
+
+    const clinicianTicket = await upsertTicket(
+      created.televisit.id,
+      clinicianParticipantId,
+      joinTokenTtlSec,
+      'clinician' as any,
+      req as any,
+    );
+
+    const patientTicket = await upsertTicket(
+      created.televisit.id,
+      patientParticipantId,
+      joinTokenTtlSec,
+      'patient' as any,
+      req as any,
+    );
+
+    if (!clinicianTicket?.token || !patientTicket?.token) {
+      throw new Error('simulation_join_token_not_issued');
+    }
+
     const clinicianPath = buildJoinPath({
+      app: 'clinician',
       roomId,
       visitId: created.televisit.id,
       appointmentId,
       participantId: clinicianParticipantId,
-      participantRole: 'lead_clinician',
+      participantRole: 'clinician',
+      joinToken: clinicianTicket.token,
     });
 
     const patientPath = buildJoinPath({
+      app: 'patient',
       roomId,
       visitId: created.televisit.id,
       appointmentId,
       participantId: patientParticipantId,
-      participantRole: 'lead_patient',
+      participantRole: 'patient',
+      joinToken: patientTicket.token,
     });
 
     return json({
@@ -391,11 +430,15 @@ export async function POST(req: NextRequest) {
           participantId: clinicianParticipantId,
           path: clinicianPath,
           url: `${clinicianOrigin}${clinicianPath}`,
+          tokenIssued: true,
+          tokenExpiresAt: clinicianTicket.expiresAt,
         },
         testPatient: {
           participantId: patientParticipantId,
           path: patientPath,
           url: `${patientOrigin}${patientPath}`,
+          tokenIssued: true,
+          tokenExpiresAt: patientTicket.expiresAt,
         },
       },
     });
