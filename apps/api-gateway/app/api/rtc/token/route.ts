@@ -253,7 +253,7 @@ export async function POST(req: NextRequest) {
       canSubscribe,
     });
 
-    const rtcToken = at.toJwt();
+    const rtcToken = await at.toJwt();
 
     return NextResponse.json(
       {
@@ -261,6 +261,8 @@ export async function POST(req: NextRequest) {
         provider: 'livekit',
         wsUrl: livekitUrl,
         token: rtcToken,
+        url: livekitUrl,
+        livekitUrl: livekitUrl,
         roomId,
         identity: uid,
         role,
