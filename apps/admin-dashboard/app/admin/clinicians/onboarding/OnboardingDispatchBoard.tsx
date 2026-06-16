@@ -786,6 +786,76 @@ setBusyId(schedRow.clinicianId);
     }
   };
 
+  const handleMarkSimulationComplete = async (
+    row: OnboardingBoardRow,
+    appointmentId?: string | null,
+  ) => {
+    const current = simulationByClinician[row.clinicianId];
+
+    const targetAppointmentId = String(
+      appointmentId ||
+        [...(current?.sessions || [])]
+          .reverse()
+          .find((session) => session.appointmentId && !session.completed)?.appointmentId ||
+        current?.latest?.appointment?.id ||
+        '',
+    ).trim();
+
+    if (!targetAppointmentId) {
+      setNotice({
+        tone: 'err',
+        text: 'No simulation appointment is available to mark complete for ' + row.displayName + '.',
+      });
+      return;
+    }
+
+    setBusyId(row.clinicianId);
+    setNotice(null);
+
+    try {
+      const res = await fetch(
+        '/api/admin/simulation/appointments/' +
+          encodeURIComponent(targetAppointmentId) +
+          '/complete',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify({
+            clinicianId: row.clinicianId,
+            note: 'Marked complete from onboarding board',
+          }),
+        },
+      );
+
+      const js = await res.json().catch(() => null);
+
+      if (!res.ok || js?.ok === false) {
+        throw new Error(js?.error || js?.message || 'HTTP ' + res.status);
+      }
+
+      await loadSimulationStatus(row.clinicianId);
+
+      setNotice({
+        tone: 'ok',
+        text: 'Simulation session marked complete for ' + row.displayName + '.',
+      });
+    } catch (err: any) {
+      setNotice({
+        tone: 'err',
+        text:
+          'Unable to mark simulation session complete for ' +
+          row.displayName +
+          ': ' +
+          (err?.message || 'unknown error'),
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   if (sorted.length === 0) {
     return (
       <section className="rounded-lg border bg-white p-4 text-sm text-gray-600">
@@ -1043,6 +1113,22 @@ setBusyId(schedRow.clinicianId);
                   )}
 
                   <div className="flex flex-col gap-1">
+                    {latestSimulationSession?.appointmentId && !latestSimulationSession.completed && (
+                      <button
+                        type="button"
+                        disabled={isBusy}
+                        onClick={() =>
+                          handleMarkSimulationComplete(
+                            row,
+                            latestSimulationSession.appointmentId,
+                          )
+                        }
+                        className="rounded border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+                      >
+                        Mark latest complete
+                      </button>
+                    )}
+
                     <button
                       type="button"
                       disabled={isBusy || !simulationReady || simulationCount >= simulationRequiredCount}
