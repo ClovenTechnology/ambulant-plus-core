@@ -1,7 +1,7 @@
 // apps/admin-dashboard/app/admin/clinicians/onboarding/OnboardingDispatchBoard.tsx
 'use client';
 
-import { useMemo, useState, useCallback } from 'react';
+import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
 type OnboardingBoardRow = {
@@ -81,10 +81,49 @@ type SimulationAppointmentResult = {
   };
 };
 
+type SimulationStatusSession = {
+  appointmentId?: string;
+  encounterId?: string | null;
+  caseId?: string | null;
+  clinicianId?: string;
+  patientId?: string | null;
+  subjectPatientId?: string | null;
+  roomId?: string | null;
+  reason?: string | null;
+  startsAt?: string | null;
+  endsAt?: string | null;
+  status?: string | null;
+  paymentStatus?: string | null;
+  bookingSource?: string | null;
+  sessionNumber?: number | null;
+  patientDisplayName?: string | null;
+  simulation?: boolean;
+  supervised?: boolean;
+  completed?: boolean;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type SimulationStatusResponse = {
+  ok?: boolean;
+  clinicianId?: string;
+  requiredSessions?: number;
+  createdCount?: number;
+  completedCount?: number;
+  sessions?: SimulationStatusSession[];
+  error?: string;
+  message?: string;
+};
+
 type SimulationState = {
   createdCount: number;
+  completedCount?: number;
+  requiredSessions?: number;
+  sessions?: SimulationStatusSession[];
   latest?: SimulationAppointmentResult;
   lastCreatedAt?: string;
+  statusLoadedAt?: string;
+  statusError?: string | null;
 };
 
 const STARTER_KIT: { key: string; label: string }[] = [
@@ -404,6 +443,97 @@ export default function OnboardingDispatchBoard({
     }
   };
 
+  const loadSimulationStatus = useCallback(
+    async (clinicianId: string, latest?: SimulationAppointmentResult) => {
+      const id = String(clinicianId || '').trim();
+      if (!id) return;
+
+      try {
+        const res = await fetch(
+          '/api/admin/simulation/appointments?clinicianId=' + encodeURIComponent(id),
+          {
+            method: 'GET',
+            headers: { accept: 'application/json' },
+            cache: 'no-store',
+          },
+        );
+
+        const js = (await res.json().catch(() => null)) as SimulationStatusResponse | null;
+
+        if (!res.ok || js?.ok === false) {
+          throw new Error(js?.error || js?.message || 'HTTP ' + res.status);
+        }
+
+        const sessions = Array.isArray(js?.sessions) ? js!.sessions! : [];
+        const requiredSessions = Math.max(1, Number(js?.requiredSessions || 3));
+        const createdCount = Math.min(requiredSessions, Math.max(0, Number(js?.createdCount || 0)));
+        const completedCount = Math.min(requiredSessions, Math.max(0, Number(js?.completedCount || 0)));
+
+        setSimulationByClinician((prev) => {
+          const current = prev[id] || { createdCount: 0 };
+
+          return {
+            ...prev,
+            [id]: {
+              ...current,
+              createdCount,
+              completedCount,
+              requiredSessions,
+              sessions,
+              latest: latest || current.latest,
+              lastCreatedAt: latest ? new Date().toISOString() : current.lastCreatedAt,
+              statusLoadedAt: new Date().toISOString(),
+              statusError: null,
+            },
+          };
+        });
+      } catch (err: any) {
+        setSimulationByClinician((prev) => {
+          const current = prev[id] || { createdCount: 0 };
+
+          return {
+            ...prev,
+            [id]: {
+              ...current,
+              statusError: err?.message || 'Unable to load simulation progress',
+              statusLoadedAt: new Date().toISOString(),
+            },
+          };
+        });
+      }
+    },
+    [],
+  );
+
+  // Hydrate persisted simulation status for all training-completed clinician rows.
+  useEffect(() => {
+    const clinicianIds = Array.from(
+      new Set(
+        rows
+          .filter((row) => row.onboarding.stage === 'training_completed')
+          .map((row) => row.clinicianId)
+          .filter(Boolean),
+      ),
+    );
+
+    if (!clinicianIds.length) return;
+
+    let cancelled = false;
+
+    async function run() {
+      for (const clinicianId of clinicianIds) {
+        if (cancelled) return;
+        await loadSimulationStatus(clinicianId);
+      }
+    }
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [rows, loadSimulationStatus]);
+
   const handleCreateSimulationSession = async (row: OnboardingBoardRow, sessionNumber: number) => {
     if (row.onboarding.stage !== 'training_completed') {
       setNotice({
@@ -454,12 +584,16 @@ export default function OnboardingDispatchBoard({
         };
       });
 
+      await loadSimulationStatus(row.clinicianId, result);
+
       setNotice({
         tone: 'ok',
         text:
           'Simulation session ' +
           sessionNumber +
-          '/3 created for ' +
+          '/' +
+          (simulationByClinician[row.clinicianId]?.requiredSessions || 3) +
+          ' created for ' +
           row.displayName +
           '. Copy the clinician and test patient URLs from the card.',
       });
@@ -694,8 +828,15 @@ setBusyId(schedRow.clinicianId);
           const isBusy = busyId === row.clinicianId;
           const readiness = computeReadiness(row);
           const simulationState = simulationByClinician[row.clinicianId];
-          const simulationCount = Math.min(3, simulationState?.createdCount || 0);
-          const nextSimulationSession = Math.min(3, simulationCount + 1);
+          const simulationRequiredCount = Math.max(1, simulationState?.requiredSessions || 3);
+          const simulationCount = Math.min(simulationRequiredCount, simulationState?.createdCount || 0);
+          const simulationCompletedCount = Math.min(
+            simulationRequiredCount,
+            simulationState?.completedCount || 0,
+          );
+          const simulationSessions = simulationState?.sessions || [];
+          const latestSimulationSession = simulationSessions[simulationSessions.length - 1];
+          const nextSimulationSession = Math.min(simulationRequiredCount, simulationCount + 1);
           const simulationReady = row.onboarding.stage === 'training_completed';
 
           const readinessLabel =
@@ -864,7 +1005,7 @@ setBusyId(schedRow.clinicianId);
                 <div className="rounded-lg border bg-white p-2">
                   <div className="mb-1 flex items-center justify-between gap-2">
                     <div className="text-[11px] font-semibold text-gray-800">Simulation sessions</div>
-                    <span className="text-[10px] text-gray-500">{simulationCount}/3</span>
+                    <span className="text-[10px] text-gray-500">{simulationCount}/{simulationRequiredCount}</span>
                   </div>
 
                   <div className="mb-2 flex items-center gap-2 text-[10px] text-gray-600">
@@ -872,16 +1013,39 @@ setBusyId(schedRow.clinicianId);
                     <div className="h-1.5 w-20 rounded-full bg-gray-100">
                       <div
                         className="h-1.5 rounded-full bg-slate-800"
-                        style={{ width: String((simulationCount / 3) * 100) + '%' }}
+                        style={{
+                          width:
+                            String((simulationCount / simulationRequiredCount) * 100) + '%',
+                        }}
                       />
                     </div>
-                    <span>{simulationCount}/3</span>
+                    <span>{simulationCount}/{simulationRequiredCount}</span>
                   </div>
+
+                  <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-gray-600">
+                    <span>
+                      Completed {simulationCompletedCount}/{simulationRequiredCount}
+                    </span>
+                    <button
+                      type="button"
+                      disabled={isBusy}
+                      onClick={() => loadSimulationStatus(row.clinicianId)}
+                      className="rounded border bg-white px-2 py-0.5 text-[10px] text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                    >
+                      Refresh progress
+                    </button>
+                  </div>
+
+                  {simulationState?.statusError && (
+                    <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-800">
+                      Progress sync failed: {simulationState.statusError}
+                    </div>
+                  )}
 
                   <div className="flex flex-col gap-1">
                     <button
                       type="button"
-                      disabled={isBusy || !simulationReady || simulationCount >= 3}
+                      disabled={isBusy || !simulationReady || simulationCount >= simulationRequiredCount}
                       onClick={() => handleCreateSimulationSession(row, nextSimulationSession)}
                       className="rounded bg-slate-900 px-3 py-1 text-[11px] font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                       title={
@@ -890,9 +1054,9 @@ setBusyId(schedRow.clinicianId);
                           : 'Training must be completed before simulation sessions can be created'
                       }
                     >
-                      {simulationCount >= 3
+                      {simulationCount >= simulationRequiredCount
                         ? 'All sessions created'
-                        : 'Create session ' + nextSimulationSession + '/3'}
+                        : 'Create session ' + nextSimulationSession + '/' + simulationRequiredCount}
                     </button>
 
                     <button
@@ -923,9 +1087,15 @@ setBusyId(schedRow.clinicianId);
                       Copy test patient URL
                     </button>
 
-                    {simulationState?.latest?.televisit?.roomId && (
+                    {(simulationState?.latest?.televisit?.roomId || latestSimulationSession?.roomId) && (
                       <div className="mt-1 break-all rounded border bg-slate-50 px-2 py-1 text-[10px] text-gray-600">
-                        Room: {simulationState.latest.televisit.roomId}
+                        Room: {simulationState?.latest?.televisit?.roomId || latestSimulationSession?.roomId}
+                      </div>
+                    )}
+
+                    {latestSimulationSession && (
+                      <div className="mt-1 rounded border bg-slate-50 px-2 py-1 text-[10px] text-gray-600">
+                        Latest session: {latestSimulationSession.sessionNumber || '—'} · {latestSimulationSession.status || 'unknown'}
                       </div>
                     )}
 
