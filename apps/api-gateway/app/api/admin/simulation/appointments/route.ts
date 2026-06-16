@@ -13,7 +13,7 @@ function json(data: any, status = 200) {
     headers: {
       'cache-control': 'no-store, max-age=0',
       'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'POST,OPTIONS',
+      'access-control-allow-methods': 'GET,POST,OPTIONS',
       'access-control-allow-headers':
         'content-type,authorization,cookie,x-uid,x-role,x-org-id,x-ambulant-identity',
     },
@@ -25,7 +25,7 @@ export async function OPTIONS() {
     status: 204,
     headers: {
       'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'POST,OPTIONS',
+      'access-control-allow-methods': 'GET,POST,OPTIONS',
       'access-control-allow-headers':
         'content-type,authorization,cookie,x-uid,x-role,x-org-id,x-ambulant-identity',
     },
@@ -111,6 +111,135 @@ function canCreateSimulation(adminCheck: any) {
   if (adminCheck?.ok === false) return false;
   if (adminCheck === false || adminCheck == null) return false;
   return true;
+}
+
+
+function asRecord(value: any): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function simulationSessionNumber(meta: any): number | null {
+  const n = Number(asRecord(meta).sessionNumber);
+  return Number.isFinite(n) && n >= 1 && n <= 3 ? Math.trunc(n) : null;
+}
+
+function simulationCompleted(meta: any): boolean {
+  const m = asRecord(meta);
+  const checklist = asRecord(m.simulationChecklist);
+  return Boolean(
+    m.completedAt ||
+      m.simulationCompletedAt ||
+      checklist.completedAt ||
+      checklist.completed === true ||
+      checklist.adminMarkedComplete === true,
+  );
+}
+
+export async function GET(req: NextRequest) {
+  try {
+    const adminCheck = await verifyAdminRequest(req as any);
+
+    if ((adminCheck as any)?.ok === false) {
+      return (adminCheck as any).response;
+    }
+
+    if (!canCreateSimulation(adminCheck)) {
+      return json({ ok: false, error: 'admin_required' }, 403);
+    }
+
+    const clinicianId = cleanStr(req.nextUrl.searchParams.get('clinicianId'), 120);
+    if (!clinicianId) {
+      return json({ ok: false, error: 'clinicianId_required' }, 400);
+    }
+
+    const rows = await prisma.appointment.findMany({
+      where: {
+        clinicianId,
+        bookingSource: 'admin_simulation',
+      },
+      orderBy: [{ startsAt: 'asc' }, { createdAt: 'asc' }],
+      select: {
+        id: true,
+        encounterId: true,
+        caseId: true,
+        clinicianId: true,
+        patientId: true,
+        subjectPatientId: true,
+        roomId: true,
+        reason: true,
+        startsAt: true,
+        endsAt: true,
+        status: true,
+        paymentStatus: true,
+        bookingSource: true,
+        createdAt: true,
+        updatedAt: true,
+        meta: true,
+      },
+    });
+
+    const sessions = rows.map((row) => {
+      const meta = asRecord(row.meta);
+      const sessionNumber = simulationSessionNumber(meta);
+      const patientDisplayName =
+        typeof meta.patientDisplayName === 'string' ? meta.patientDisplayName : null;
+
+      return {
+        appointmentId: row.id,
+        encounterId: row.encounterId,
+        caseId: row.caseId,
+        clinicianId: row.clinicianId,
+        patientId: row.patientId,
+        subjectPatientId: row.subjectPatientId,
+        roomId: row.roomId,
+        reason: row.reason,
+        startsAt: row.startsAt,
+        endsAt: row.endsAt,
+        status: row.status,
+        paymentStatus: row.paymentStatus,
+        bookingSource: row.bookingSource,
+        sessionNumber,
+        patientDisplayName,
+        simulation: meta.simulation === true,
+        supervised: meta.supervised === true,
+        completed: simulationCompleted(meta),
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
+    });
+
+    const createdNumbers = new Set(
+      sessions
+        .map((session) => session.sessionNumber)
+        .filter((n): n is number => typeof n === 'number'),
+    );
+
+    const completedNumbers = new Set(
+      sessions
+        .filter((session) => session.completed)
+        .map((session) => session.sessionNumber)
+        .filter((n): n is number => typeof n === 'number'),
+    );
+
+    return json({
+      ok: true,
+      clinicianId,
+      requiredSessions: 3,
+      createdCount: Math.min(3, createdNumbers.size || sessions.length),
+      completedCount: Math.min(3, completedNumbers.size),
+      sessions,
+    });
+  } catch (err: any) {
+    console.error('[api-gateway][admin][simulation][appointments][GET] error', err);
+
+    return json(
+      {
+        ok: false,
+        error: String(err?.message || 'simulation_status_failed'),
+      },
+      500,
+    );
+  }
 }
 
 export async function POST(req: NextRequest) {
