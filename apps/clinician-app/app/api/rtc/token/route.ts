@@ -50,10 +50,23 @@ function forwardHeaders(req: NextRequest) {
     req.nextUrl.searchParams.get('role') ||
     'clinician';
 
+  const refererJoinToken = (() => {
+    try {
+      const ref = req.headers.get('referer') || '';
+      if (!ref) return '';
+      const url = new URL(ref);
+      return url.searchParams.get('joinToken') || url.searchParams.get('jt') || '';
+    } catch {
+      return '';
+    }
+  })();
+
   const joinToken =
     req.headers.get('x-join-token') ||
     req.nextUrl.searchParams.get('joinToken') ||
     req.nextUrl.searchParams.get('jt') ||
+
+    refererJoinToken ||
     '';
 
   if (uid) h.set('x-uid', uid);
@@ -177,10 +190,23 @@ async function mintTrainingToken(body: any) {
 }
 
 async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
+  const refererJoinToken = (() => {
+    try {
+      const ref = req.headers.get('referer') || '';
+      if (!ref) return '';
+      const url = new URL(ref);
+      return url.searchParams.get('joinToken') || url.searchParams.get('jt') || '';
+    } catch {
+      return '';
+    }
+  })();
+
   const joinToken =
     req.headers.get('x-join-token') ||
     req.nextUrl.searchParams.get('joinToken') ||
     req.nextUrl.searchParams.get('jt') ||
+    String(body?.joinToken || body?.jt || body?.ticket?.token || '').trim() ||
+    refererJoinToken ||
     '';
 
   if (!joinToken && isTrainingRoom(body)) {
@@ -196,9 +222,12 @@ async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
     });
   }
 
+  const upstreamHeaders = new Headers(forwardHeaders(req) as HeadersInit);
+  if (joinToken) upstreamHeaders.set('x-join-token', joinToken);
+
   const upstream = await fetch(`${trimSlash(base)}/api/rtc/token`, {
     method: 'POST',
-    headers: forwardHeaders(req),
+    headers: upstreamHeaders,
     body: bodyText || '{}',
     cache: 'no-store',
   });
