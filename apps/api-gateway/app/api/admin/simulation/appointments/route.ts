@@ -93,7 +93,6 @@ function buildJoinPath(args: {
   if (args.joinToken) {
     qs.set('joinToken', args.joinToken);
     qs.set('jt', args.joinToken);
-    qs.set('token', args.joinToken);
   }
 
   const basePath = args.app === 'clinician' ? '/sfu' : '/televisit';
