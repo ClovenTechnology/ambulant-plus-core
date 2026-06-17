@@ -65,6 +65,19 @@ type AppointmentMeta = {
   coupon?: { applied: boolean; code: string; percent?: number };
 };
 
+type PatientChatMessage = {
+  id: string;
+  from: 'patient' | 'clinician' | 'system';
+  text: string;
+  ts: number;
+};
+
+function chatSenderLabel(from: PatientChatMessage['from']) {
+  if (from === 'patient') return 'You';
+  if (from === 'clinician') return 'Clinician';
+  return 'System';
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return !!v && typeof v === 'object' && !Array.isArray(v);
 }
@@ -525,6 +538,110 @@ function InnerPatientSfuShell({ params }: Props) {
     ),
   });
 
+  const [patientChatMessages, setPatientChatMessages] = useState<PatientChatMessage[]>([]);
+  const [patientChatDraft, setPatientChatDraft] = useState('');
+  const [clinicianTyping, setClinicianTyping] = useState(false);
+  const patientChatEndRef = useRef<HTMLDivElement | null>(null);
+  const clinicianTypingTimerRef = useRef<number | null>(null);
+
+  const appendIncomingChat = useCallback((message: PatientChatMessage) => {
+    setPatientChatMessages((prev) => {
+      if (prev.some((m) => m.id === message.id)) return prev;
+      return [...prev, message].slice(-80);
+    });
+  }, []);
+
+  const handleIncomingChatPayload = useCallback(
+    (parsed: Record<string, unknown>) => {
+      const fromRaw = typeof parsed.from === 'string' ? parsed.from : '';
+      const from = fromRaw.toLowerCase();
+
+      if (from === 'patient') return true;
+
+      const type = typeof parsed.type === 'string' ? parsed.type : 'message';
+
+      if (type === 'typing') {
+        setClinicianTyping(true);
+
+        if (typeof window !== 'undefined') {
+          if (clinicianTypingTimerRef.current) {
+            window.clearTimeout(clinicianTypingTimerRef.current);
+          }
+
+          clinicianTypingTimerRef.current = window.setTimeout(() => {
+            setClinicianTyping(false);
+            clinicianTypingTimerRef.current = null;
+          }, 2200);
+        }
+
+        return true;
+      }
+
+      const text = typeof parsed.text === 'string' ? parsed.text.trim() : '';
+      if (!text) return false;
+
+      const ts = typeof parsed.ts === 'number' && Number.isFinite(parsed.ts) ? parsed.ts : Date.now();
+      const id =
+        typeof parsed.id === 'string' && parsed.id.trim()
+          ? parsed.id.trim()
+          : `clinician-${ts}-${Math.random().toString(36).slice(2, 8)}`;
+
+      appendIncomingChat({
+        id,
+        from: 'clinician',
+        text,
+        ts,
+      });
+
+      return true;
+    },
+    [appendIncomingChat],
+  );
+
+  const sendPatientTyping = useCallback(() => {
+    void publishJson(TOPIC_CHAT, {
+      type: 'typing',
+      from: 'patient',
+      ts: Date.now(),
+    });
+  }, [publishJson]);
+
+  const sendPatientChat = useCallback(async () => {
+    const clean = patientChatDraft.trim();
+    if (!clean) return;
+
+    const ts = Date.now();
+    const message: PatientChatMessage = {
+      id: `patient-${ts}-${Math.random().toString(36).slice(2, 8)}`,
+      from: 'patient',
+      text: clean,
+      ts,
+    };
+
+    setPatientChatMessages((prev) => [...prev, message].slice(-80));
+    setPatientChatDraft('');
+
+    try {
+      await publishJson(TOPIC_CHAT, message);
+    } catch {
+      toast.error?.('Message could not be sent.');
+    }
+  }, [patientChatDraft, publishJson, toast]);
+
+  useEffect(() => {
+    patientChatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [patientChatMessages.length, clinicianTyping]);
+
+  useEffect(() => {
+    return () => {
+      if (typeof window === 'undefined') return;
+      if (clinicianTypingTimerRef.current) {
+        window.clearTimeout(clinicianTypingTimerRef.current);
+        clinicianTypingTimerRef.current = null;
+      }
+    };
+  }, []);
+
   const roomCleanupRef = useRef<(() => void) | null>(null);
 
   const wireRoomEvents = useCallback(
@@ -587,6 +704,7 @@ function InnerPatientSfuShell({ params }: Props) {
 
         if (t === TOPIC_CHAT) {
           if (payment.handleIncomingChatPayload(parsed)) return;
+          if (handleIncomingChatPayload(parsed)) return;
           return;
         }
 
@@ -640,7 +758,7 @@ function InnerPatientSfuShell({ params }: Props) {
         r.off(RoomEvent.DataReceived, onData);
       };
     },
-    [attachTracks, dec, payment, toast],
+    [attachTracks, dec, handleIncomingChatPayload, payment, toast],
   );
 
   const join = useCallback(async () => {
@@ -1033,6 +1151,92 @@ function InnerPatientSfuShell({ params }: Props) {
               </div>
             ) : null}
           </div>
+
+          {!presentation ? (
+            <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Consultation chat</div>
+                  <div className="text-xs text-slate-500">
+                    Secure in-room messages between patient and clinician.
+                  </div>
+                </div>
+                <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-medium text-slate-600">
+                  {state === 'connected' ? 'Live' : state}
+                </span>
+              </div>
+
+              <div className="max-h-72 space-y-3 overflow-y-auto px-4 py-3">
+                {patientChatMessages.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+                    No chat messages yet. Messages from the clinician will appear here.
+                  </div>
+                ) : (
+                  patientChatMessages.map((message) => {
+                    const mine = message.from === 'patient';
+                    return (
+                      <div
+                        key={message.id}
+                        className={`flex ${mine ? 'justify-end' : 'justify-start'}`}
+                      >
+                        <div
+                          className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
+                            mine
+                              ? 'bg-slate-900 text-white'
+                              : 'border border-slate-200 bg-slate-50 text-slate-800'
+                          }`}
+                        >
+                          <div
+                            className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                              mine ? 'text-white/70' : 'text-slate-400'
+                            }`}
+                          >
+                            {chatSenderLabel(message.from)}
+                          </div>
+                          <div className="whitespace-pre-wrap break-words">{message.text}</div>
+                        </div>
+                      </div>
+                    );
+                  })
+                )}
+
+                {clinicianTyping ? (
+                  <div className="text-xs text-slate-500">Clinician is typing…</div>
+                ) : null}
+
+                <div ref={patientChatEndRef} />
+              </div>
+
+              <div className="border-t border-slate-100 p-3">
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <textarea
+                    className="min-h-[44px] flex-1 resize-none rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                    placeholder="Type a message to the clinician…"
+                    value={patientChatDraft}
+                    rows={2}
+                    onChange={(e) => {
+                      setPatientChatDraft(e.target.value);
+                      sendPatientTyping();
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        void sendPatientChat();
+                      }
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void sendPatientChat()}
+                    disabled={!patientChatDraft.trim() || state !== 'connected'}
+                    className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300 sm:self-end"
+                  >
+                    Send
+                  </button>
+                </div>
+              </div>
+            </section>
+          ) : null}
 
           {!presentation && !rightCollapsed ? (
             <PatientRightPane
