@@ -1,4 +1,4 @@
-﻿// apps/clinician-app/app/api/auth/signup/route.ts
+// apps/clinician-app/app/api/auth/signup/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'node:crypto';
 import { PresenceActorType } from '@prisma/client';
@@ -625,7 +625,7 @@ export async function POST(req: NextRequest) {
       const idError = validateSaIdDetailed(idNumber, dob, gender);
       if (idError) return badRequest(idError, 'saIdNumber');
     } else if (citizenship === 'non_south_african') {
-      if (!passportNumberLooksValid(passportNumber)) return badRequest('Passport number must be 5Ã¢â‚¬â€œ20 letters/numbers', 'passportNumber');
+      if (!passportNumberLooksValid(passportNumber)) return badRequest('Passport number must be 5–20 letters/numbers', 'passportNumber');
       if (!citizenshipCountry) return badRequest('Country of citizenship required', 'citizenshipCountry');
       if (!passportIssuingAuthority) return badRequest('Passport issuing authority required', 'passportIssuingAuthority');
       if (!isFutureDate(passportExpiry)) return badRequest('Passport expiry must be in the future', 'passportExpiry');
@@ -873,7 +873,7 @@ export async function POST(req: NextRequest) {
 
     // Email + SMS: clearly explain the workflow (training -> payment -> ship -> certify)
     if (email) {
-      const subject = 'Ambulant+ Clinician Application Received Ã¢â‚¬â€ Next Steps';
+      const subject = 'Ambulant+ Clinician Application Received — Next Steps';
       const html = `
         <p>Hi ${name || 'Clinician'},</p>
         <p>Your Ambulant+ clinician application has been received.</p>
@@ -882,10 +882,10 @@ export async function POST(req: NextRequest) {
         <ol>
           <li><strong>Training scheduling + payment</strong> (required)</li>
           <li><strong>Starter kit dispatch</strong> after payment confirmation</li>
-          <li><strong>Admin certification</strong> Ã¢â‚¬â€ only then your profile becomes visible to patients</li>
+          <li><strong>Admin certification</strong> — only then your profile becomes visible to patients</li>
         </ol>
 
-        <p><a href="${onboardingLink}">Ã°Å¸â€˜â€° Sign in to continue onboarding</a></p>
+        <p><a href="${onboardingLink}">Sign in to continue onboarding</a></p>
 
         <p style="margin-top:12px;"><strong>Starter kit contents</strong> (sent after payment):</p>
         <ul>
@@ -897,8 +897,8 @@ export async function POST(req: NextRequest) {
 
         <p>When the admin assigns courier + tracking, you will receive tracking details by email and SMS.</p>
 
-        <p style="margin-top:12px;">If you didnÃ¢â‚¬â„¢t request this, you can ignore this email.</p>
-        <p>Ã¢â‚¬â€ Ambulant+ Team</p>
+        <p style="margin-top:12px;">If you didn’t request this, you can ignore this email.</p>
+        <p>— Ambulant+ Team</p>
       `;
       sendEmail(email, subject, html).catch(console.error);
     }

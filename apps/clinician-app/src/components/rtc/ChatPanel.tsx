@@ -101,7 +101,7 @@ export default function ChatPanel({
             </div>
           );
         })}
-        {peerTyping && <div className="italic opacity-60">â€¦typing</div>}
+        {peerTyping && <div className="italic opacity-60">”¦typing</div>}
       </div>
       <div className="flex gap-2">
         <input
@@ -109,7 +109,7 @@ export default function ChatPanel({
           value={val}
           onChange={e=>onInput(e.target.value)}
           onKeyDown={onKeyDown}
-          placeholder="Type a messageâ€¦ (Enter to send, Shift+Enter for newline)" />
+          placeholder="Type a message”¦ (Enter to send, Shift+Enter for newline)" />
         <button className="border rounded px-3 py-1" onClick={sendNow}>Send</button>
       </div>
     </div>

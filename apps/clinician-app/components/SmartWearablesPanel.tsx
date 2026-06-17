@@ -42,7 +42,7 @@ export default function SmartWearablesPanel({
         {tab === 'wearables' && (
           <div className="space-y-2">
             {/* Show whichever device the patient is transmitting from (mock: NexRing) */}
-            <div className="text-xs text-gray-600">Device: NexRing â€” <span className="text-emerald-700">Connected</span></div>
+            <div className="text-xs text-gray-600">Device: NexRing ”” <span className="text-emerald-700">Connected</span></div>
             <NexRingPanel roomId={roomId} />
           </div>
         )}

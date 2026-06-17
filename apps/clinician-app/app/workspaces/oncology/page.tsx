@@ -241,7 +241,7 @@ function OncologyWorkspacePageContent() {
   const [regimens, setRegimens] = useState<Regimen[]>([
     {
       id: uid('reg'),
-      name: 'AC â†’ T (demo)',
+      name: 'AC → T (demo)',
       intent: 'neoadjuvant',
       line: '1L',
       startDate: '',

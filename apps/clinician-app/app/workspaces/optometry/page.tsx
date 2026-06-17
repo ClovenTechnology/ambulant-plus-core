@@ -731,7 +731,7 @@ function OptometryWorkspacePageContent() {
                   className="mt-2 w-full rounded border bg-white px-2.5 py-2 text-sm"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search title, note, tagsâ€¦"
+                  placeholder="Search title, note, tags”¦"
                 />
 
                 <div className="mt-3">
@@ -947,7 +947,7 @@ function OptometryWorkspacePageContent() {
                             title={p.label}
                           >
                             <div className="w-6 h-6 rounded-full grid place-items-center text-[11px] font-semibold shadow bg-blue-600 text-white">
-                              â€¢
+                              ”¢
                             </div>
                           </div>
                         ))}
@@ -991,7 +991,7 @@ function OptometryWorkspacePageContent() {
           <section className="rounded-xl border bg-white shadow-sm overflow-hidden">
             <div className="border-b px-4 py-3">
               <div className="text-sm font-semibold text-gray-900">Exam & Findings</div>
-              <div className="text-xs text-gray-500">VA + symptoms + attach selected media â†’ finding</div>
+              <div className="text-xs text-gray-500">VA + symptoms + attach selected media → finding</div>
             </div>
 
             <div className="p-4 space-y-4">
@@ -1191,7 +1191,7 @@ function ExamPanel(props: {
 
       <label className="mt-3 block text-xs text-gray-600">
         Notes
-        <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={symptomNote} onChange={(e) => setSymptomNote(e.target.value)} placeholder="Optional symptom detailsâ€¦" disabled={disabled} />
+        <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={symptomNote} onChange={(e) => setSymptomNote(e.target.value)} placeholder="Optional symptom details”¦" disabled={disabled} />
       </label>
 
       <div className="mt-2 text-[11px] text-gray-500">Later: persist these fields on the encounter (structured observations).</div>
@@ -1253,7 +1253,7 @@ function QuickFindingComposer({
 
         <label className="text-xs text-gray-600">
           Note
-          <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional detailsâ€¦" disabled={disabled} />
+          <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional details”¦" disabled={disabled} />
         </label>
 
         <button
@@ -1292,7 +1292,7 @@ function BookmarkButton({
 
   return (
     <div className="rounded-xl border p-3 bg-white">
-      <div className="text-xs font-semibold text-gray-700">Attach selected media â†’ Finding</div>
+      <div className="text-xs font-semibold text-gray-700">Attach selected media → Finding</div>
       <div className="mt-1 text-sm text-gray-700">
         Eye: <span className="font-mono font-semibold">{eye}</span>
         {zone && zone !== 'unknown' ? <span className="text-gray-500"> · zone:{zone}</span> : null}
@@ -1351,7 +1351,7 @@ function BookmarkButton({
 
               <label className="text-xs text-gray-600 block">
                 Note
-                <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional detailsâ€¦" />
+                <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional details”¦" />
               </label>
 
               <div className="flex items-center justify-end gap-2">

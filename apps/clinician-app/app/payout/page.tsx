@@ -269,7 +269,7 @@ setLoading(true);
       )}
 
       {loading && !summary && (
-        <div className="text-sm text-gray-600">Loading payoutsâ€¦</div>
+        <div className="text-sm text-gray-600">Loading payouts”¦</div>
       )}
     </main>
   );
@@ -360,7 +360,7 @@ function ClinicianPlanSection() {
           disabled={saving}
           className="px-3 py-1.5 rounded bg-black text-white text-xs"
         >
-          {saving ? 'Savingâ€¦' : 'Save settings'}
+          {saving ? 'Saving”¦' : 'Save settings'}
         </button>
 
         <button

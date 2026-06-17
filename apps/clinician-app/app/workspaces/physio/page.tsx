@@ -576,7 +576,7 @@ function PhysioWorkspacePageContent() {
               <div className="rounded-xl border bg-gray-100 h-64 grid place-items-center text-gray-600 relative overflow-hidden">
                 <div className="text-center px-6">
                   <div className="text-sm font-medium">Patient Video View (placeholder)</div>
-                  <div className="text-xs text-gray-500 mt-1">Later: mount SFU remote track here + record/stop â†’ /evidence live_capture</div>
+                  <div className="text-xs text-gray-500 mt-1">Later: mount SFU remote track here + record/stop → /evidence live_capture</div>
                 </div>
 
                 <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between gap-2 rounded-lg border bg-white/85 backdrop-blur px-3 py-2 text-xs">
@@ -1078,7 +1078,7 @@ function ExamPanel(props: {
                     className="w-full rounded border px-2 py-1.5 text-sm"
                     value={customName}
                     onChange={(e) => setCustomName(e.target.value)}
-                    placeholder="Type custom test nameâ€¦"
+                    placeholder="Type custom test name”¦"
                     disabled={disabled}
                   />
                 </div>
@@ -1326,7 +1326,7 @@ function FindingEditor(props: {
           <textarea className="w-full rounded border px-2 py-1.5 text-sm bg-white" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
         <Field label="Tags (comma separated)">
-          <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="pain, rom, shoulderâ€¦" />
+          <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="pain, rom, shoulder”¦" />
         </Field>
       </div>
 
@@ -1479,8 +1479,8 @@ function ProgressPanel(props: {
 
               <Field label="Direction">
                 <select className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={goalDirection} onChange={(e) => setGoalDirection(e.target.value as any)}>
-                  <option value="lte">â‰¤ target</option>
-                  <option value="gte">â‰¥ target</option>
+                  <option value="lte">≤ target</option>
+                  <option value="gte">≥ target</option>
                 </select>
               </Field>
             </div>
@@ -1490,7 +1490,7 @@ function ProgressPanel(props: {
                 <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" type="number" value={goalTarget} onChange={(e) => setGoalTarget(parseFloat(e.target.value))} />
               </Field>
               <Field label="Title (optional)">
-                <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={goalTitle} onChange={(e) => setGoalTitle(e.target.value)} placeholder="e.g., Pain â‰¤ 2/10" />
+                <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={goalTitle} onChange={(e) => setGoalTitle(e.target.value)} placeholder="e.g., Pain ≤ 2/10" />
               </Field>
             </div>
 
@@ -1634,7 +1634,7 @@ function GoalList(props: {
           <div className="min-w-0">
             <div className="text-sm font-semibold text-gray-900 truncate">{g.title}</div>
             <div className="text-xs text-gray-600">
-              Target: <span className="font-mono">{g.direction === 'lte' ? 'â‰¤' : 'â‰¥'} {g.target}</span>
+              Target: <span className="font-mono">{g.direction === 'lte' ? '≤' : '≥'} {g.target}</span>
               {typeof g._current === 'number' ? (
                 <> · Current: <span className="font-mono font-semibold">{g._current}</span></>
               ) : null}
@@ -1710,7 +1710,7 @@ function BookmarkMovementButton({ onBookmark, disabled }: { onBookmark: (note?: 
                   rows={3}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="Optionalâ€¦ e.g., pain with overhead reach"
+                  placeholder="Optional”¦ e.g., pain with overhead reach"
                 />
               </label>
 

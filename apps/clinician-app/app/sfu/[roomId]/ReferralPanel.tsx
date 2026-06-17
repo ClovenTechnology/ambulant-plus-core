@@ -510,11 +510,11 @@ export default function ReferralPanel({
               aria-label="Select clinician for internal referral"
             >
               <option value="">
-                {loading ? 'Loadingâ€¦' : 'Choose a clinician'}
+                {loading ? 'Loading”¦' : 'Choose a clinician'}
               </option>
               {filtered.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} â€” {c.specialty || 'â€”'} â€” {c.location || 'â€”'} (
+                  {c.name} ”” {c.specialty || '””'} ”” {c.location || '””'} (
                   {c.id})
                 </option>
               ))}
@@ -545,11 +545,11 @@ export default function ReferralPanel({
               </div>
               <div>
                 <b>Specialty</b>
-                <div>{sel.specialty || 'â€”'}</div>
+                <div>{sel.specialty || '””'}</div>
               </div>
               <div>
                 <b>Location</b>
-                <div>{sel.location || 'â€”'}</div>
+                <div>{sel.location || '””'}</div>
               </div>
             </div>
           </div>

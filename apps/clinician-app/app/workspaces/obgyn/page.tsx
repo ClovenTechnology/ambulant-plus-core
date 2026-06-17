@@ -953,7 +953,7 @@ function OBGYNWorkspacePageContent() {
         const evCount = evidenceCountForFinding(f.id);
         if (evCount) lines.push(`  Evidence attached: ${evCount}`);
       }
-      if (findingsForTrack.length > 10) lines.push(`- â€¦and ${findingsForTrack.length - 10} more`);
+      if (findingsForTrack.length > 10) lines.push(`- ”¦and ${findingsForTrack.length - 10} more`);
     }
 
     lines.push('');
@@ -1022,7 +1022,7 @@ function OBGYNWorkspacePageContent() {
               </h1>
 
               <div className="mt-1 text-xs text-gray-500">
-                Structured intake · Triage meta â†’ findings · Evidence + annotations · ICD-10 hints · Copy-ready summary
+                Structured intake · Triage meta → findings · Evidence + annotations · ICD-10 hints · Copy-ready summary
               </div>
             </div>
 
@@ -1095,7 +1095,7 @@ function OBGYNWorkspacePageContent() {
               </>
             ) : null}
             <span className="text-[11px] text-gray-500 ml-auto">
-              Context: {!contextReady ? 'Missing IDs' : ctxLoading ? 'Loadingâ€¦' : ctx ? 'Connected' : 'Fallback'}
+              Context: {!contextReady ? 'Missing IDs' : ctxLoading ? 'Loading”¦' : ctx ? 'Connected' : 'Fallback'}
             </span>
           </div>
         </div>
@@ -1128,7 +1128,7 @@ function OBGYNWorkspacePageContent() {
             <SectionHeader
               icon={<Shield className="w-4 h-4 text-gray-700" />}
               title="Patient context & intake"
-              subtitle="Everything here feeds triageMeta â†’ stored into Finding.meta for continuity."
+              subtitle="Everything here feeds triageMeta → stored into Finding.meta for continuity."
             />
 
             <div className="p-4 space-y-4">
@@ -1208,7 +1208,7 @@ function OBGYNWorkspacePageContent() {
                     <Info className="w-4 h-4" />
                     Patient context (feeds)
                   </div>
-                  <span className="text-[11px] text-gray-500">{!contextReady ? 'Missing IDs' : ctxLoading ? 'Loadingâ€¦' : ctx ? 'Connected' : 'Fallback'}</span>
+                  <span className="text-[11px] text-gray-500">{!contextReady ? 'Missing IDs' : ctxLoading ? 'Loading”¦' : ctx ? 'Connected' : 'Fallback'}</span>
                 </div>
 
                 {ctx ? (
@@ -1229,7 +1229,7 @@ function OBGYNWorkspacePageContent() {
                             <b>{ctx.ladyCenter.predictedOvulation ?? '—'}</b> · Pregnancy: <b>{ctx.ladyCenter.possiblePregnancy ?? '—'}</b>
                           </>
                         ) : (
-                          <>Not available yet (wire patient â†’ apigw sync).</>
+                          <>Not available yet (wire patient → apigw sync).</>
                         )}
                       </div>
                     </div>
@@ -1248,7 +1248,7 @@ function OBGYNWorkspacePageContent() {
                             ) : null}
                           </>
                         ) : (
-                          <>Not available yet (wire patient â†’ apigw sync).</>
+                          <>Not available yet (wire patient → apigw sync).</>
                         )}
                       </div>
                     </div>
@@ -1442,7 +1442,7 @@ function OBGYNWorkspacePageContent() {
                       className="pl-8 pr-2 py-1.5 text-xs rounded border bg-white w-44"
                       value={q}
                       onChange={(e) => setQ(e.target.value)}
-                      placeholder="Search findingsâ€¦"
+                      placeholder="Search findings”¦"
                     />
                   </div>
                 </div>
@@ -1590,7 +1590,7 @@ function OBGYNWorkspacePageContent() {
             <SectionHeader
               icon={<Sparkles className="w-4 h-4 text-gray-700" />}
               title="Assessment, ICD-10, summary"
-              subtitle="Fast capture â†’ payer-ready summary pipeline (encounter-level aggregation next)"
+              subtitle="Fast capture → payer-ready summary pipeline (encounter-level aggregation next)"
             />
 
             <div className="p-4 space-y-4">
@@ -1943,7 +1943,7 @@ function QuickFindingComposer(props: {
             rows={3}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Key detailsâ€¦"
+            placeholder="Key details”¦"
             disabled={disabled || saving}
           />
         </label>

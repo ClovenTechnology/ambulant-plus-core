@@ -993,7 +993,7 @@ function NeuroQuickExam(props: NeuroQuickExamProps) {
           value={summaryNote}
           disabled={disabled}
           onChange={(e) => setSummaryNote(e.target.value)}
-          placeholder="Optional exam notesâ€¦"
+          placeholder="Optional exam notes”¦"
         />
       </label>
 
@@ -1056,7 +1056,7 @@ function QuickFindingComposer(props: {
             rows={2}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Optional detailsâ€¦"
+            placeholder="Optional details”¦"
             disabled={disabled || saving}
           />
         </label>
@@ -1075,7 +1075,7 @@ function QuickFindingComposer(props: {
           }}
           type="button"
         >
-          {saving ? 'Savingâ€¦' : 'Create finding'}
+          {saving ? 'Saving”¦' : 'Create finding'}
         </button>
 
         <div className="text-[11px] text-gray-500">Tip: use “Bookmark” to attach snapshot + clip evidence in one step.</div>

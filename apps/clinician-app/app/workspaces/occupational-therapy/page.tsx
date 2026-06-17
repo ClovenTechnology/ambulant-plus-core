@@ -683,7 +683,7 @@ function OTTemplate(props: {
             <input
               ref={adlInputRef as any}
               className="flex-1 rounded border px-2 py-1.5 text-sm bg-white"
-              placeholder="Add a task (e.g., dressing, cooking)â€¦"
+              placeholder="Add a task (e.g., dressing, cooking)”¦"
               disabled={disabled}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -721,7 +721,7 @@ function OTTemplate(props: {
                   disabled={disabled}
                   title="Remove"
                 >
-                  {t} <span className="text-gray-400">Ã—</span>
+                  {t} <span className="text-gray-400">×</span>
                 </button>
               ))
             )}
@@ -799,7 +799,7 @@ function OTTemplate(props: {
             rows={2}
             value={template.notes}
             onChange={(e) => setTemplate({ ...template, notes: e.target.value })}
-            placeholder="Optional detailsâ€¦"
+            placeholder="Optional details”¦"
             disabled={disabled}
           />
         </label>
@@ -865,7 +865,7 @@ function QuickFindingComposer(props: {
             rows={2}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Optional detailsâ€¦"
+            placeholder="Optional details”¦"
             disabled={disabled || saving}
           />
         </label>
