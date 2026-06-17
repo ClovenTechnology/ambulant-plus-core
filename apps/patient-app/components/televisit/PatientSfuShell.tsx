@@ -1150,8 +1150,6 @@ function InnerPatientSfuShell({ params }: Props) {
                 />
               </div>
             ) : null}
-          </div>
-
           {!presentation ? (
             <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
@@ -1237,6 +1235,8 @@ function InnerPatientSfuShell({ params }: Props) {
               </div>
             </section>
           ) : null}
+
+          </div>
 
           {!presentation && !rightCollapsed ? (
             <PatientRightPane
