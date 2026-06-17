@@ -297,19 +297,19 @@ type Vitals = {
 };
 
 const ICD10_SUGGESTIONS: string[] = [
-  'J20.9 â€” Acute bronchitis, unspecified',
-  'R50.9 â€” Fever, unspecified',
-  'R05.9 â€” Cough, unspecified',
-  'I10 â€” Essential (primary) hypertension',
-  'E11.9 â€” Type 2 diabetes mellitus without complications',
+  'J20.9 ”” Acute bronchitis, unspecified',
+  'R50.9 ”” Fever, unspecified',
+  'R05.9 ”” Cough, unspecified',
+  'I10 ”” Essential (primary) hypertension',
+  'E11.9 ”” Type 2 diabetes mellitus without complications',
 ];
 
 function num2(x?: number) {
-  return typeof x === 'number' && Number.isFinite(x) ? Number(x).toFixed(2) : 'â€”';
+  return typeof x === 'number' && Number.isFinite(x) ? Number(x).toFixed(2) : '””';
 }
 function fmtBP(sys?: number, dia?: number) {
   const ok = Number.isFinite(sys as number) && Number.isFinite(dia as number);
-  return ok ? `${Math.round(sys!)} / ${Math.round(dia!)} mmHg` : 'â€”/â€” mmHg';
+  return ok ? `${Math.round(sys!)} / ${Math.round(dia!)} mmHg` : '””/”” mmHg';
 }
 
 // Helper: read join JWT from session (visitId/roomId variants)
@@ -446,7 +446,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       .slice(0, 3)
       .map((a) => {
         const sev = a.severity ? ` (${a.severity})` : '';
-        const rxn = a.reaction ? ` â€” ${a.reaction}` : '';
+        const rxn = a.reaction ? ` ”” ${a.reaction}` : '';
         return `${a.substance}${sev}${rxn}`;
       });
     const base = top.join(', ');
@@ -960,7 +960,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       const text = patientAllergies
         .map((a) => {
           const sev = a.severity ? ` [${a.severity}]` : '';
-          const rxn = a.reaction ? ` â€” ${a.reaction}` : '';
+          const rxn = a.reaction ? ` ”” ${a.reaction}` : '';
           return `${a.substance}${sev}${rxn}`;
         })
         .join('\n');
@@ -973,7 +973,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const [sympCode, setSympCode] = useState<string>('');
   const icdSympOptions = icdSympAuto.opts.map((h) => ({
     code: h.code,
-    text: `${h.code} â€” ${h.title}`,
+    text: `${h.code} ”” ${h.title}`,
   }));
   const icdSympOptionsFinal = icdSympOptions.length
     ? icdSympOptions
@@ -1015,7 +1015,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   }
   const vitalsGraphHolder = useDeferredMount<HTMLDivElement>();
 
-  // Poor network â†’ toast
+  // Poor network → toast
   const prevQualityRef = useRef<ConnectionQuality | undefined>(undefined);
   useEffect(() => {
     if (quality === ConnectionQuality.Poor && prevQualityRef.current !== ConnectionQuality.Poor) {
@@ -1173,7 +1173,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
             await specialistInvite.handleIncomingChatPayload(parsed);
 
             if (parsed.type === 'typing') {
-              setTypingNote('Patient is typingâ€¦');
+              setTypingNote('Patient is typing”¦');
               if (typingTimerRef.current && typeof window !== 'undefined') window.clearTimeout(typingTimerRef.current);
               if (typeof window !== 'undefined') {
                 typingTimerRef.current = window.setTimeout(() => setTypingNote(null), 3000);
@@ -1824,7 +1824,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   // -------------------------
   const encounterSummary = useMemo(() => {
     const lines: string[] = [];
-    lines.push(`Reason for visit: ${appt.reason || 'â€”'}`);
+    lines.push(`Reason for visit: ${appt.reason || '””'}`);
     if (soap.s) lines.push(`Subjective / Symptoms:\n${soap.s}`);
     if (soap.a) lines.push(`Assessment:\n${soap.a}`);
     if (soap.p) lines.push(`Plan / Treatment:\n${soap.p}`);
@@ -1836,8 +1836,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         'Medications prescribed:\n' +
           medsOrdered
             .map((r) => {
-              const parts = [r.drug, r.dose, r.route, r.freq, r.duration].filter(Boolean).join(' Â· ');
-              return `â€¢ ${parts}`;
+              const parts = [r.drug, r.dose, r.route, r.freq, r.duration].filter(Boolean).join(' · ');
+              return `”¢ ${parts}`;
             })
             .join('\n')
       );
@@ -1849,8 +1849,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         'Lab tests ordered:\n' +
           labsOrdered
             .map((l) => {
-              const parts = [l.test, l.priority, l.specimen, l.icd].filter(Boolean).join(' Â· ');
-              return `â€¢ ${parts}`;
+              const parts = [l.test, l.priority, l.specimen, l.icd].filter(Boolean).join(' · ');
+              return `”¢ ${parts}`;
             })
             .join('\n')
       );
@@ -1861,8 +1861,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         .filter((a) => (a.status ?? '').toLowerCase() !== 'entered-in-error')
         .map((a) => {
           const sev = a.severity ? ` [${a.severity}]` : '';
-          const rxn = a.reaction ? ` â€” ${a.reaction}` : '';
-          return `â€¢ ${a.substance}${sev}${rxn}`;
+          const rxn = a.reaction ? ` ”” ${a.reaction}` : '';
+          return `”¢ ${a.substance}${sev}${rxn}`;
         });
       lines.push('Recorded allergies:\n' + algs.join('\n'));
     }
@@ -1955,7 +1955,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         <div className="flex items-center gap-4">
           <div className="flex flex-col">
             <div className="flex items-center gap-4">
-              <h1 className="text-xl font-semibold">SFU Televisit â€” Room {roomId}</h1>
+              <h1 className="text-xl font-semibold">SFU Televisit ”” Room {roomId}</h1>
             </div>
 
             <ClinicianRosterChips roster={roster} />
@@ -2012,7 +2012,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
           {sessionBusy ? (
             <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-700">
-              Resolving sessionâ€¦
+              Resolving session”¦
             </span>
           ) : null}
 
@@ -2147,7 +2147,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       {state === 'reconnecting' && (
         <div className="sticky top-14 z-40 mx-4 my-2 rounded border bg-amber-50 text-amber-900 px-3 py-2 flex items-center gap-2">
           <span className="h-3 w-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
-          Reconnectingâ€¦
+          Reconnecting”¦
         </div>
       )}
 
@@ -2159,7 +2159,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
       {specialistInvite.loadingPersistedQuote && (
         <div className="mx-4 my-2 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-          Loading persisted specialist invite stateâ€¦
+          Loading persisted specialist invite state”¦
         </div>
       )}
 
@@ -2170,11 +2170,11 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
               <div className="font-medium">Specialist invite pending patient approval</div>
               <div className="mt-1 text-xs text-violet-700">
                 Quote ID: <span className="font-mono">{specialistInvite.pendingInviteQuote.quoteId}</span>
-                {' Â· '}
+                {' · '}
                 Total: <span className="font-semibold">R{specialistInvite.pendingInviteQuote.totalZar.toFixed(2)}</span>
                 {specialistInvite.pendingInviteQuote.sessionId ? (
                   <>
-                    {' Â· '}
+                    {' · '}
                     Session: <span className="font-mono">{specialistInvite.pendingInviteQuote.sessionId}</span>
                   </>
                 ) : null}
@@ -2245,7 +2245,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                             profile.gender ? `Sex: ${profile.gender}` : null,
                           ]
                             .filter(Boolean)
-                            .join(' Â· ') || 'â€”'
+                            .join(' · ') || '””'
                         }
                       />
 
@@ -2254,7 +2254,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                         value={
                           !patientAllergies || patientAllergies.length === 0
                             ? 'No allergies recorded'
-                            : `${allergySummary} Â· ${allergyCounts.total} total, ${allergyCounts.active} active, ${allergyCounts.resolved} resolved`
+                            : `${allergySummary} · ${allergyCounts.total} total, ${allergyCounts.active} active, ${allergyCounts.resolved} resolved`
                         }
                       />
 
@@ -2277,7 +2277,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                             profile.email ? `Email: ${profile.email}` : null,
                           ]
                             .filter(Boolean)
-                            .join(' Â· ')}
+                            .join(' · ')}
                         />
                       )}
                     </Collapse>
@@ -2298,7 +2298,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                         >
                           <Tile label="HR" value={`${num2(vitals.hr)} bpm`} />
                           <Tile label="SpOâ‚‚" value={`${num2(vitals.spo2)} %`} />
-                          <Tile label="Temp" value={`${num2(vitals.tempC)} Â°C`} />
+                          <Tile label="Temp" value={`${num2(vitals.tempC)} °C`} />
                           <Tile label="RR" value={`${num2(vitals.rr)} /min`} />
                           <Tile label="BP" value={fmtBP(vitals.sys, vitals.dia)} />
                         </div>
@@ -2399,9 +2399,9 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                                 {activeMeds.map((m) => (
                                   <li key={m.id}>
                                     <span className="font-medium">{m.name}</span>
-                                    {m.dose && <span className="text-gray-700"> Â· {m.dose}</span>}
-                                    {m.frequency && <span className="text-gray-700"> Â· {m.frequency}</span>}
-                                    {m.route && <span className="text-gray-500"> Â· {m.route}</span>}
+                                    {m.dose && <span className="text-gray-700"> · {m.dose}</span>}
+                                    {m.frequency && <span className="text-gray-700"> · {m.frequency}</span>}
+                                    {m.route && <span className="text-gray-500"> · {m.route}</span>}
                                     {m.status && m.status.toLowerCase() !== 'active' && (
                                       <span className="ml-1 text-[11px] text-gray-500">({m.status})</span>
                                     )}
@@ -2559,7 +2559,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                                   }}
                                 >
                                   <span className="font-mono text-xs mr-1">{o.code}</span>
-                                  <span>{o.text.replace(/^([A-Z0-9.]+)\s+â€”\s*/, '')}</span>
+                                  <span>{o.text.replace(/^([A-Z0-9.]+)\s+””\s*/, '')}</span>
                                 </li>
                               ))}
                             </ul>
@@ -2734,7 +2734,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                       className="border rounded px-2 py-1 text-sm flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 resize-y"
                       placeholder={
                         state === 'connected'
-                          ? 'Type messageâ€¦ (Enter to send, Shift+Enter for newline)'
+                          ? 'Type message”¦ (Enter to send, Shift+Enter for newline)'
                           : 'Join the room to send messages'
                       }
                       aria-label="Type chat message"
@@ -2797,7 +2797,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
               title="Drag to move floating video"
             >
               <div className="text-xs text-gray-600">
-                Floating Video <span className="text-gray-400">Â· drag to move</span>
+                Floating Video <span className="text-gray-400">· drag to move</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -2840,43 +2840,43 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
             </div>
             <ul className="text-sm space-y-1">
               <li>
-                <b>M</b> â€” Toggle mic
+                <b>M</b> ”” Toggle mic
               </li>
               <li>
-                <b>V</b> â€” Toggle camera
+                <b>V</b> ”” Toggle camera
               </li>
               <li>
-                <b>C</b> â€” Toggle captions
+                <b>C</b> ”” Toggle captions
               </li>
               <li>
-                <b>O</b> â€” Toggle overlay
+                <b>O</b> ”” Toggle overlay
               </li>
               <li>
-                <b>H</b> â€” Toggle vitals
+                <b>H</b> ”” Toggle vitals
               </li>
               <li>
-                <b>S</b> â€” Toggle vitals stream overlay
+                <b>S</b> ”” Toggle vitals stream overlay
               </li>
               <li>
-                <b>R</b> â€” Toggle recording
+                <b>R</b> ”” Toggle recording
               </li>
               <li>
-                <b>X</b> â€” Toggle XR broadcast
+                <b>X</b> ”” Toggle XR broadcast
               </li>
               <li>
-                <b>F</b> â€” Full screen
+                <b>F</b> ”” Full screen
               </li>
               <li>
-                <b>L</b> â€” Toggle left pane
+                <b>L</b> ”” Toggle left pane
               </li>
               <li>
-                <b>K</b> â€” Toggle right pane
+                <b>K</b> ”” Toggle right pane
               </li>
               <li>
-                <b>?</b> â€” Show this help
+                <b>?</b> ”” Show this help
               </li>
               <li>
-                <b>Esc</b> â€” Close this help
+                <b>Esc</b> ”” Close this help
               </li>
             </ul>
           </div>
