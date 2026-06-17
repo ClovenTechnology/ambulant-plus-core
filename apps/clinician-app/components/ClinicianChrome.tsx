@@ -199,7 +199,7 @@ export default function ClinicianChrome({ children }: { children: React.ReactNod
           </nav>
 
           <div className="ml-auto flex items-center gap-2">
-            <InboxBell clinicianId="clin-za-001" />
+            <InboxBell />
           </div>
         </div>
       </header>

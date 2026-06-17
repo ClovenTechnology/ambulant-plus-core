@@ -15,7 +15,7 @@ import {
   type Participant,
 } from 'livekit-client';
 
-import { connectRoom, getOrCreateUid, mintRtcToken } from '@ambulant/rtc';
+import { connectRoom, getOrCreateUid } from '@ambulant/rtc';
 
 // Shared atoms
 import { Field } from '@/components/shared/Field';
@@ -153,6 +153,77 @@ function extractMintedRtc(
   if (!token) return null;
   const wsUrl = typeof resp.wsUrl === 'string' ? resp.wsUrl : fallbackWsUrl;
   return { wsUrl, token };
+}
+
+type ClinicianRtcMintArgs = {
+  roomId: string;
+  visitId: string;
+  uid: string;
+  role: 'clinician';
+  joinToken: string;
+  identity: string;
+};
+
+async function mintClinicianRtcToken(args: ClinicianRtcMintArgs): Promise<unknown> {
+  const res = await fetch('/api/rtc/token', {
+    method: 'POST',
+    credentials: 'include',
+    cache: 'no-store',
+    headers: {
+      'content-type': 'application/json',
+      'x-join-token': args.joinToken,
+      'x-role': args.role,
+      'x-uid': args.uid,
+    },
+    body: JSON.stringify({
+      roomId: args.roomId,
+      room: args.roomId,
+      visitId: args.visitId,
+      uid: args.uid,
+      identity: args.identity || args.uid,
+      role: args.role,
+      joinToken: args.joinToken,
+    }),
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    const msg =
+      isRecord(data) && typeof data.message === 'string'
+        ? data.message
+        : isRecord(data) && typeof data.error === 'string'
+          ? data.error
+          : `HTTP ${res.status}`;
+    throw new Error(msg);
+  }
+
+  return data;
+}
+
+function rememberJoinTokenForRoom(visitId: string, roomId: string, joinToken: string) {
+  if (typeof window === 'undefined' || !joinToken) return;
+
+  const keys = [
+    `televisit:join:${visitId}`,
+    `televisit:join:${roomId}`,
+    `televisitJoin:${visitId}`,
+    `televisitJoin:${roomId}`,
+    `rtc:join:${visitId}`,
+    `rtc:join:${roomId}`,
+    `joinJwt:${visitId}`,
+    `joinJwt:${roomId}`,
+    `ambulant.televisit.join.${visitId}`,
+    `ambulant.televisit.join.${roomId}`,
+  ];
+
+  for (const key of keys) {
+    try {
+      window.sessionStorage.setItem(key, joinToken);
+    } catch {
+      // ignore storage failures
+    }
+  }
 }
 
 /* ---------------------------
@@ -1291,11 +1362,15 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
       if (!joinToken) {
         setState('disconnected');
-        pushToast('Missing join token (open via Televisit Join so it stores sessionStorage).', 'error');
+        pushToast('Missing join token. Re-open the full clinician simulation link from Admin so the signed join token is present.', 'error');
         return;
       }
 
-      const minted = await mintRtcToken({
+      if (direct) {
+        rememberJoinTokenForRoom(visitId, roomId, direct);
+      }
+
+      const minted = await mintClinicianRtcToken({
         roomId,
         visitId,
         uid,
