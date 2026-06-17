@@ -250,8 +250,8 @@ export async function GET(req: NextRequest) {
       ok: true,
       clinicianId,
       requiredSessions: 3,
-      createdCount: Math.min(3, createdNumbers.size || sessions.length),
-      completedCount: Math.min(3, completedNumbers.size),
+      createdCount: createdNumbers.size || sessions.length,
+      completedCount: completedNumbers.size,
       visibleToPatients,
       realPatientApprovedAt,
       realPatientApproval,
@@ -291,7 +291,7 @@ export async function POST(req: NextRequest) {
 
     const now = new Date();
     const durationMinutes = positiveInt(body.durationMinutes, 30, 10, 120);
-    const sessionNumber = positiveInt(body.sessionNumber, 1, 1, 3);
+    const sessionNumber = positiveInt(body.sessionNumber, 1, 1, 99);
 
     const startsAt = validDateOrDefault(body.startsAt, addMinutes(now, 2));
     const endsAt = addMinutes(startsAt, durationMinutes);
@@ -359,7 +359,9 @@ export async function POST(req: NextRequest) {
 
     const reason =
       cleanOptional(body.reason, 500) ||
-      `Supervised simulation consultation ${sessionNumber}/3`;
+      sessionNumber <= 3
+        ? `Supervised simulation consultation ${sessionNumber}/3`
+        : `Extra supervised simulation consultation ${sessionNumber}`;
 
     const appointmentMeta = {
       simulation: true,

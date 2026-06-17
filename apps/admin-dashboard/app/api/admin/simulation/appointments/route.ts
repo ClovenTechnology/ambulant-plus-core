@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
 
   const startsAt = cleanStr(body?.startsAt, 120);
   const durationMinutes = positiveInt(body?.durationMinutes, 30, 10, 120);
-  const sessionNumber = positiveInt(body?.sessionNumber, 1, 1, 3);
+  const sessionNumber = positiveInt(body?.sessionNumber, 1, 1, 99);
 
   return forwardToGateway(req, '/api/admin/simulation/appointments', {
     clinicianId,
@@ -99,9 +99,12 @@ export async function POST(req: NextRequest) {
     durationMinutes,
     sessionNumber,
     patientId: cleanStr(body?.patientId, 120) || undefined,
-    patientName: cleanStr(body?.patientName, 180) || `Simulation Patient ${sessionNumber}`,
+    patientEmail: cleanStr(body?.patientEmail, 180) || undefined,
+    patientName: cleanStr(body?.patientName, 180) || `Ambulant Test Patient`,
     reason:
       cleanStr(body?.reason, 500) ||
-      `Supervised onboarding simulation consultation ${sessionNumber} of 3`,
+      sessionNumber <= 3
+        ? `Supervised onboarding simulation consultation ${sessionNumber} of 3`
+        : `Extra supervised onboarding simulation consultation ${sessionNumber} for additional readiness review`,
   });
 }

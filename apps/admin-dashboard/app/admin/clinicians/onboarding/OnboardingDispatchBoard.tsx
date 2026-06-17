@@ -472,8 +472,8 @@ export default function OnboardingDispatchBoard({
 
         const sessions = Array.isArray(js?.sessions) ? js!.sessions! : [];
         const requiredSessions = Math.max(1, Number(js?.requiredSessions || 3));
-        const createdCount = Math.min(requiredSessions, Math.max(0, Number(js?.createdCount || 0)));
-        const completedCount = Math.min(requiredSessions, Math.max(0, Number(js?.completedCount || 0)));
+        const createdCount = Math.max(0, Number(js?.createdCount || sessions.length || 0));
+        const completedCount = Math.max(0, Number(js?.completedCount || 0));
 
         setSimulationByClinician((prev) => {
           const current = prev[id] || { createdCount: 0 };
@@ -569,8 +569,13 @@ export default function OnboardingDispatchBoard({
           startsAt,
           durationMinutes: 30,
           sessionNumber,
-          patientName: 'Simulation Patient ' + sessionNumber,
-          reason: 'Supervised onboarding simulation consultation ' + sessionNumber + ' of 3',
+          patientId: 'cmo5tesbf0003bhucefbxvm19',
+          patientEmail: 'ambulant@cloventechnology.com',
+          patientName: 'Ambulant Test Patient',
+          reason:
+            sessionNumber <= 3
+              ? 'Supervised onboarding simulation consultation ' + sessionNumber + ' of 3'
+              : 'Extra supervised onboarding simulation consultation ' + sessionNumber + ' for additional readiness review',
         }),
       });
 
@@ -584,11 +589,12 @@ export default function OnboardingDispatchBoard({
 
       setSimulationByClinician((prev) => {
         const current = prev[row.clinicianId];
-        const nextCount = Math.min(3, Math.max(current?.createdCount || 0, sessionNumber));
+        const nextCount = Math.max(current?.createdCount || 0, sessionNumber);
 
         return {
           ...prev,
           [row.clinicianId]: {
+            ...current,
             createdCount: nextCount,
             latest: result,
             lastCreatedAt: new Date().toISOString(),
@@ -603,8 +609,9 @@ export default function OnboardingDispatchBoard({
         text:
           'Simulation session ' +
           sessionNumber +
-          '/' +
-          (simulationByClinician[row.clinicianId]?.requiredSessions || 3) +
+          (sessionNumber <= (simulationByClinician[row.clinicianId]?.requiredSessions || 3)
+            ? '/' + (simulationByClinician[row.clinicianId]?.requiredSessions || 3)
+            : ' extra') +
           ' created for ' +
           row.displayName +
           '. Copy the clinician and test patient URLs from the card.',
@@ -958,14 +965,11 @@ setBusyId(schedRow.clinicianId);
           const readiness = computeReadiness(row);
           const simulationState = simulationByClinician[row.clinicianId];
           const simulationRequiredCount = Math.max(1, simulationState?.requiredSessions || 3);
-          const simulationCount = Math.min(simulationRequiredCount, simulationState?.createdCount || 0);
-          const simulationCompletedCount = Math.min(
-            simulationRequiredCount,
-            simulationState?.completedCount || 0,
-          );
+          const simulationCount = Math.max(0, simulationState?.createdCount || 0);
+          const simulationCompletedCount = Math.max(0, simulationState?.completedCount || 0);
           const simulationSessions = simulationState?.sessions || [];
           const latestSimulationSession = simulationSessions[simulationSessions.length - 1];
-          const nextSimulationSession = Math.min(simulationRequiredCount, simulationCount + 1);
+          const nextSimulationSession = simulationCount + 1;
           const simulationReady = row.onboarding.stage === 'training_completed';
           const finalApprovalReady =
             simulationReady && simulationCompletedCount >= simulationRequiredCount;
@@ -1149,7 +1153,7 @@ setBusyId(schedRow.clinicianId);
                         className="h-1.5 rounded-full bg-slate-800"
                         style={{
                           width:
-                            String((simulationCount / simulationRequiredCount) * 100) + '%',
+                            String(Math.min(100, (simulationCount / simulationRequiredCount) * 100)) + '%',
                         }}
                       />
                     </div>
@@ -1215,17 +1219,17 @@ setBusyId(schedRow.clinicianId);
 
                     <button
                       type="button"
-                      disabled={isBusy || !simulationReady || simulationCount >= simulationRequiredCount}
+                      disabled={isBusy || !simulationReady}
                       onClick={() => handleCreateSimulationSession(row, nextSimulationSession)}
                       className="rounded bg-slate-900 px-3 py-1 text-[11px] font-medium text-white hover:bg-slate-800 disabled:opacity-50"
                       title={
                         simulationReady
-                          ? 'Create the next supervised simulation televisit'
+                          ? 'Create an additional supervised simulation televisit when more practice or review is needed'
                           : 'Training must be completed before simulation sessions can be created'
                       }
                     >
                       {simulationCount >= simulationRequiredCount
-                        ? 'All sessions created'
+                        ? 'Add extra session ' + nextSimulationSession
                         : 'Create session ' + nextSimulationSession + '/' + simulationRequiredCount}
                     </button>
 
