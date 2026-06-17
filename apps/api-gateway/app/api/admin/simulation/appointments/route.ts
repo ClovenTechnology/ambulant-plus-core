@@ -152,6 +152,31 @@ export async function GET(req: NextRequest) {
       return json({ ok: false, error: 'clinicianId_required' }, 400);
     }
 
+    const clinicianForApprovalState = await prisma.clinicianProfile.findUnique({
+      where: { id: clinicianId },
+      select: {
+        id: true,
+        status: true,
+        disabled: true,
+        archived: true,
+        meta: true,
+      },
+    });
+
+    const clinicianMeta = asRecord(clinicianForApprovalState?.meta);
+    const realPatientApproval = asRecord(clinicianMeta.realPatientApproval);
+    const visibleToPatients =
+      String(clinicianForApprovalState?.status || '').toLowerCase() === 'active' &&
+      clinicianForApprovalState?.disabled !== true &&
+      clinicianForApprovalState?.archived !== true;
+
+    const realPatientApprovedAt =
+      typeof realPatientApproval.approvedAt === 'string'
+        ? realPatientApproval.approvedAt
+        : typeof clinicianMeta.realPatientApprovedAt === 'string'
+        ? clinicianMeta.realPatientApprovedAt
+        : null;
+
     const rows = await prisma.appointment.findMany({
       where: {
         clinicianId,
@@ -227,6 +252,9 @@ export async function GET(req: NextRequest) {
       requiredSessions: 3,
       createdCount: Math.min(3, createdNumbers.size || sessions.length),
       completedCount: Math.min(3, completedNumbers.size),
+      visibleToPatients,
+      realPatientApprovedAt,
+      realPatientApproval,
       sessions,
     });
   } catch (err: any) {

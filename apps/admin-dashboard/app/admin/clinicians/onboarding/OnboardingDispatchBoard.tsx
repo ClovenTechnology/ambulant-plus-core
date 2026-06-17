@@ -110,6 +110,9 @@ type SimulationStatusResponse = {
   requiredSessions?: number;
   createdCount?: number;
   completedCount?: number;
+  visibleToPatients?: boolean;
+  realPatientApprovedAt?: string | null;
+  realPatientApproval?: Record<string, unknown> | null;
   sessions?: SimulationStatusSession[];
   error?: string;
   message?: string;
@@ -119,6 +122,9 @@ type SimulationState = {
   createdCount: number;
   completedCount?: number;
   requiredSessions?: number;
+  visibleToPatients?: boolean;
+  realPatientApprovedAt?: string | null;
+  realPatientApproval?: Record<string, unknown> | null;
   sessions?: SimulationStatusSession[];
   latest?: SimulationAppointmentResult;
   lastCreatedAt?: string;
@@ -479,6 +485,12 @@ export default function OnboardingDispatchBoard({
               createdCount,
               completedCount,
               requiredSessions,
+              visibleToPatients: js?.visibleToPatients === true,
+              realPatientApprovedAt: js?.realPatientApprovedAt || null,
+              realPatientApproval:
+                js?.realPatientApproval && typeof js.realPatientApproval === 'object'
+                  ? js.realPatientApproval
+                  : null,
               sessions,
               latest: latest || current.latest,
               lastCreatedAt: latest ? new Date().toISOString() : current.lastCreatedAt,
@@ -856,6 +868,53 @@ setBusyId(schedRow.clinicianId);
     }
   };
 
+  const handleApproveRealPatients = async (row: OnboardingBoardRow) => {
+    setBusyId(row.clinicianId);
+    setNotice(null);
+
+    try {
+      const res = await fetch(
+        '/api/admin/simulation/clinicians/' +
+          encodeURIComponent(row.clinicianId) +
+          '/approve-real-patients',
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            accept: 'application/json',
+          },
+          body: JSON.stringify({
+            note: 'Final real-patient approval from onboarding board',
+          }),
+        },
+      );
+
+      const js = await res.json().catch(() => null);
+
+      if (!res.ok || js?.ok === false) {
+        throw new Error(js?.error || js?.message || 'HTTP ' + res.status);
+      }
+
+      await loadSimulationStatus(row.clinicianId);
+
+      setNotice({
+        tone: 'ok',
+        text: row.displayName + ' is now approved for real-patient visibility.',
+      });
+    } catch (err: any) {
+      setNotice({
+        tone: 'err',
+        text:
+          'Unable to approve ' +
+          row.displayName +
+          ' for real patients: ' +
+          (err?.message || 'unknown error'),
+      });
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   if (sorted.length === 0) {
     return (
       <section className="rounded-lg border bg-white p-4 text-sm text-gray-600">
@@ -908,6 +967,11 @@ setBusyId(schedRow.clinicianId);
           const latestSimulationSession = simulationSessions[simulationSessions.length - 1];
           const nextSimulationSession = Math.min(simulationRequiredCount, simulationCount + 1);
           const simulationReady = row.onboarding.stage === 'training_completed';
+          const finalApprovalReady =
+            simulationReady && simulationCompletedCount >= simulationRequiredCount;
+          const realPatientApproved =
+            simulationState?.visibleToPatients === true ||
+            Boolean(simulationState?.realPatientApprovedAt);
 
           const readinessLabel =
             readiness.score >= 80 ? 'Launch-ready' : readiness.score >= 50 ? 'In progress' : 'Early stage';
@@ -1126,6 +1190,26 @@ setBusyId(schedRow.clinicianId);
                         className="rounded border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
                       >
                         Mark latest complete
+                      </button>
+                    )}
+
+                    {realPatientApproved ? (
+                      <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-800">
+                        Approved for real patients
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isBusy || !finalApprovalReady}
+                        onClick={() => handleApproveRealPatients(row)}
+                        className="rounded border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50"
+                        title={
+                          finalApprovalReady
+                            ? 'Approve clinician for real-patient marketplace visibility'
+                            : 'Complete 3/3 supervised simulations before real-patient approval'
+                        }
+                      >
+                        Approve for real patients
                       </button>
                     )}
 
