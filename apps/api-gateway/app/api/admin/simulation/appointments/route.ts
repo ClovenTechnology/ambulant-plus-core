@@ -118,9 +118,23 @@ function asRecord(value: any): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
 
-function simulationSessionNumber(meta: any): number | null {
-  const n = Number(asRecord(meta).sessionNumber);
-  return Number.isFinite(n) && n >= 1 && n <= 3 ? Math.trunc(n) : null;
+function simulationSessionNumber(meta: any, reason?: string | null): number | null {
+  const m = asRecord(meta);
+
+  const direct = Number(m.sessionNumber);
+  if (Number.isFinite(direct) && direct >= 1 && direct <= 99) {
+    return Math.trunc(direct);
+  }
+
+  const text = String(reason || m.reason || '').trim();
+  const match =
+    text.match(/(?:session|consultation)\s+(\d+)(?:\s*(?:of|\/)\s*3)?/i) ||
+    text.match(/\b(\d+)\s*\/\s*3\b/);
+
+  const fromReason = match ? Number(match[1]) : NaN;
+  return Number.isFinite(fromReason) && fromReason >= 1 && fromReason <= 99
+    ? Math.trunc(fromReason)
+    : null;
 }
 
 function simulationCompleted(meta: any): boolean {
@@ -205,7 +219,7 @@ export async function GET(req: NextRequest) {
 
     const sessions = rows.map((row) => {
       const meta = asRecord(row.meta);
-      const sessionNumber = simulationSessionNumber(meta);
+      const sessionNumber = simulationSessionNumber(meta, row.reason);
       const patientDisplayName =
         typeof meta.patientDisplayName === 'string' ? meta.patientDisplayName : null;
 
@@ -359,9 +373,9 @@ export async function POST(req: NextRequest) {
 
     const reason =
       cleanOptional(body.reason, 500) ||
-      sessionNumber <= 3
+      (sessionNumber <= 3
         ? `Supervised simulation consultation ${sessionNumber}/3`
-        : `Extra supervised simulation consultation ${sessionNumber}`;
+        : `Extra supervised simulation consultation ${sessionNumber}`);
 
     const appointmentMeta = {
       simulation: true,

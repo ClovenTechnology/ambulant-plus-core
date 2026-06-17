@@ -103,8 +103,8 @@ export async function POST(req: NextRequest) {
     patientName: cleanStr(body?.patientName, 180) || `Ambulant Test Patient`,
     reason:
       cleanStr(body?.reason, 500) ||
-      sessionNumber <= 3
+      (sessionNumber <= 3
         ? `Supervised onboarding simulation consultation ${sessionNumber} of 3`
-        : `Extra supervised onboarding simulation consultation ${sessionNumber} for additional readiness review`,
+        : `Extra supervised onboarding simulation consultation ${sessionNumber} for additional readiness review`),
   });
 }
