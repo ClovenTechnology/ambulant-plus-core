@@ -137,21 +137,113 @@ export default function ErxComposer({
   const [erxSubmitting, setErxSubmitting] = useState(false);
   const [claimSubmitting, setClaimSubmitting] = useState(false);
 
+  const [operational, setOperational] = useState<null | {
+    canPrescribe?: boolean;
+    prescribingMode?: 'no' | 'conditional' | 'yes';
+    maxRxSchedule?: number | null;
+    blockers?: string[];
+    riskFlags?: string[];
+  }>(null);
+
   const erxLabs: LabRow[] = useMemo(
     () => labRows.filter((l) => (l.test || '').trim().length > 0),
     [labRows]
   );
 
-  const hasDemoAllergyCollision = (rows: RxRow[]) => {
-    if (!patientAllergies || patientAllergies.length === 0) return false;
-    return rows.some((rx) =>
-      patientAllergies.some(
-        (all) =>
-          all.substance &&
-          rx.drug.toLowerCase().includes(all.substance.toLowerCase())
-      )
-    );
+  function normalizeForMatch(value: unknown) {
+    return String(value ?? '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim()
+      .replace(/\s+/g, ' ');
+  }
+
+  function isActiveAllergy(a: PatientAllergyBrief) {
+    const s = normalizeForMatch(a.status);
+    if (!s) return true;
+    if (s.includes('entered in error')) return false;
+    if (s.includes('resolved') || s.includes('inactive')) return false;
+    return true;
+  }
+
+  function isSevereAllergy(a: PatientAllergyBrief) {
+    const s = normalizeForMatch(a.severity);
+    return s.includes('severe') || s.includes('critical') || s.includes('high');
+  }
+
+  const allergyConflictsForRows = (rows: RxRow[]) => {
+    const allergies = (patientAllergies || []).filter(isActiveAllergy);
+
+    return rows.flatMap((rx, medicationIndex) => {
+      const drug = normalizeForMatch(rx.drug);
+      if (!drug) return [];
+
+      return allergies
+        .filter((all) => {
+          const substance = normalizeForMatch(all.substance);
+          return substance.length >= 4 && (drug.includes(substance) || substance.includes(drug));
+        })
+        .map((all) => ({
+          medicationIndex,
+          drug: rx.drug,
+          substance: all.substance,
+          severity: all.severity ?? null,
+          reaction: all.reaction ?? null,
+          status: all.status ?? null,
+        }));
+    });
   };
+
+  const severeAllergies = useMemo(
+    () => (patientAllergies || []).filter((a) => isActiveAllergy(a) && isSevereAllergy(a)),
+    [patientAllergies],
+  );
+
+  const recentAllergyReactions = useMemo(() => {
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
+
+    return (patientAllergies || []).filter((a: any) => {
+      const raw = a.recordedAt || a.createdAt || a.updatedAt;
+      if (!raw) return false;
+      const t = Date.parse(raw);
+      return Number.isFinite(t) && t >= cutoff;
+    });
+  }, [patientAllergies]);
+
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadOperational() {
+      try {
+        const res = await fetch('/api/me', {
+          method: 'GET',
+          cache: 'no-store',
+          credentials: 'same-origin',
+        });
+
+        const js = await res.json().catch(() => null as any);
+        if (!alive) return;
+
+        const nextOperational =
+          js?.clinician?.operational && typeof js.clinician.operational === 'object'
+            ? js.clinician.operational
+            : js?.clinician?.activation && typeof js.clinician.activation === 'object'
+              ? js.clinician.activation
+              : null;
+
+        setOperational(nextOperational);
+      } catch {
+        if (!alive) return;
+        setOperational(null);
+      }
+    }
+
+    void loadOperational();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!onSummaryChange) return;
@@ -189,9 +281,57 @@ export default function ErxComposer({
   const removeLabRow = (i: number) =>
     setLabRows((r) => r.filter((_, j) => j !== i));
 
+  function extractMaxScheduleFromRows(rows: RxRow[]) {
+    let maxFound: number | null = null;
+    for (const row of rows) {
+      const text = `${row.drug || ''} ${row.notes || ''} ${row.freq || ''} ${row.duration || ''}`.toLowerCase();
+      const m = text.match(/schedule\s*([1-8])/i);
+      if (m) {
+        const n = Number(m[1]);
+        if (Number.isFinite(n)) {
+          maxFound = maxFound == null ? n : Math.max(maxFound, n);
+        }
+      }
+    }
+    return maxFound;
+  }
+
   const sendErx = async () => {
     const medsToSend = rxRows.filter((r) => r.drug && r.drug.trim().length > 0);
     const labsToSend = labRows.filter((l) => l.test && l.test.trim().length > 0);
+
+    if (operational?.canPrescribe === false) {
+      onToast(
+        'You are not currently cleared to prescribe on Ambulant+.',
+        'error',
+        'Prescribing blocked'
+      );
+      onAudit('erx.send.blocked', {
+        reason: 'canPrescribe_false',
+        blockers: operational?.blockers ?? [],
+        riskFlags: operational?.riskFlags ?? [],
+      });
+      return;
+    }
+
+    const requestedMaxSchedule = extractMaxScheduleFromRows(medsToSend);
+    if (
+      requestedMaxSchedule != null &&
+      typeof operational?.maxRxSchedule === 'number' &&
+      requestedMaxSchedule > operational.maxRxSchedule
+    ) {
+      onToast(
+        `This prescription exceeds your current prescribing authority (max schedule ${operational.maxRxSchedule}).`,
+        'error',
+        'Prescribing limit exceeded'
+      );
+      onAudit('erx.send.blocked', {
+        reason: 'max_schedule_exceeded',
+        requestedMaxSchedule,
+        maxRxSchedule: operational.maxRxSchedule,
+      });
+      return;
+    }
 
     if (!encounterId) {
       onToast('Cannot send eRx: encounterId is missing in the URL.', 'error', 'eRx error');
@@ -207,22 +347,23 @@ export default function ErxComposer({
       return;
     }
 
-    const hasCollision = hasDemoAllergyCollision(medsToSend);
+    const allergyConflicts = allergyConflictsForRows(medsToSend);
+    const hasCollision = allergyConflicts.length > 0;
 
     if (hasCollision) {
-      if (allergiesFromLive) {
-        onToast(
-          'Live allergy reminder: some prescribed drugs textually match recorded allergies. This is a simple reminder and does not replace full clinical decision support.',
-          'warning',
-          'Live allergy reminder'
-        );
-      } else {
-        onToast(
-          'Demo-only allergy reminder: some prescribed drugs textually match recorded allergies. This UI does not perform real clinical allergy checking.',
-          'warning',
-          'Demo allergy reminder'
-        );
-      }
+      onToast(
+        `Prescription blocked: ${allergyConflicts[0].drug} conflicts with recorded allergy ${allergyConflicts[0].substance}.`,
+        'error',
+        'Allergy conflict'
+      );
+
+      onAudit('erx.send.blocked', {
+        reason: 'ALLERGY_CONFLICT',
+        conflicts: allergyConflicts,
+        allergySource: allergiesFromLive ? 'live' : 'demo',
+      });
+
+      return;
     }
 
     setErxSubmitting(true);
@@ -243,6 +384,13 @@ export default function ErxComposer({
           status: a.status,
         })),
         note: soap.p || '',
+        authorization: {
+          canPrescribe: operational?.canPrescribe ?? null,
+          prescribingMode: operational?.prescribingMode ?? null,
+          maxRxSchedule: operational?.maxRxSchedule ?? null,
+          blockers: operational?.blockers ?? [],
+          riskFlags: operational?.riskFlags ?? [],
+        },
       };
 
       const res = await fetch(
@@ -296,6 +444,11 @@ export default function ErxComposer({
         allergySource: allergiesFromLive ? 'live' : 'demo',
         erxId: erx.id,
         status: erx.status,
+        authorization: {
+          canPrescribe: operational?.canPrescribe ?? null,
+          prescribingMode: operational?.prescribingMode ?? null,
+          maxRxSchedule: operational?.maxRxSchedule ?? null,
+        },
       });
     } catch (err: any) {
       const msg = err?.message || 'Unknown error';
@@ -421,11 +574,6 @@ export default function ErxComposer({
     }
   };
 
-  const pushOrder = (dest: 'CarePort' | 'MedReach') => {
-    onToast(`Order pushed to ${dest} (demo).`, 'success');
-    onAudit('order.push.demo', { dest });
-  };
-
   const effectiveIcdSuggestions = icd10Suggestions?.length
     ? icd10Suggestions
     : LOCAL_ICD10_SUGGESTIONS;
@@ -440,7 +588,7 @@ export default function ErxComposer({
           <button
             className="text-xs px-2 py-1 border rounded disabled:opacity-60"
             onClick={sendErx}
-            disabled={erxSubmitting}
+            disabled={erxSubmitting || operational?.canPrescribe === false}
           >
             {erxSubmitting ? 'Sending…' : 'Send eRx'}
           </button>
@@ -454,8 +602,50 @@ export default function ErxComposer({
         </div>
       }
     >
+      {severeAllergies.length > 0 ? (
+        <div className="mb-2 rounded border border-rose-300 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">
+          <div className="font-semibold">Severe allergy on record</div>
+          <div className="mt-1">
+            {severeAllergies
+              .slice(0, 3)
+              .map((a) => `${a.substance}${a.reaction ? ` — ${a.reaction}` : ''}`)
+              .join(', ')}
+            {severeAllergies.length > 3 ? ` +${severeAllergies.length - 3} more` : ''}
+          </div>
+        </div>
+      ) : null}
+
+      {patientAllergies && patientAllergies.length > 0 ? (
+        <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-2 text-[11px] text-amber-900">
+          <div className="font-semibold">Recorded allergies</div>
+          <div className="mt-1">
+            {patientAllergies
+              .filter(isActiveAllergy)
+              .slice(0, 5)
+              .map((a) => {
+                const sev = a.severity ? ` (${a.severity})` : '';
+                const rxn = a.reaction ? ` — ${a.reaction}` : '';
+                return `${a.substance}${sev}${rxn}`;
+              })
+              .join(', ') || 'No active allergies recorded'}
+          </div>
+          {recentAllergyReactions.length > 0 ? (
+            <div className="mt-1 text-amber-800">
+              Recent reactions in last 30 days: {recentAllergyReactions.length}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      {operational?.canPrescribe === false ? (
+        <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
+          Prescribing is currently disabled for this clinician profile.
+        </div>
+      ) : null}
+
+
       <div className="text-xs text-gray-500 mb-2">
-        Add one or more drugs and optional lab tests. We’ll package routing when you send eRx.
+        Add one or more drugs and optional lab tests. This screen authors the encounter record only. Marketplace initiation and payment selection must happen in the patient app.
       </div>
 
       <datalist id="icd10-suggest">
@@ -600,22 +790,13 @@ export default function ErxComposer({
         </div>
       ))}
 
-      <div className="pt-2 flex flex-wrap gap-2">
+      <div className="pt-2 flex flex-wrap gap-2 items-center">
         <button className="px-2 py-1 border rounded text-xs" onClick={addRxRow}>
           Add drug
         </button>
-        <button
-          className="px-2 py-1 border rounded text-xs"
-          onClick={() => pushOrder('CarePort')}
-        >
-          Push to CarePort
-        </button>
-        <button
-          className="px-2 py-1 border rounded text-xs"
-          onClick={() => pushOrder('MedReach')}
-        >
-          Push to MedReach
-        </button>
+        <div className="text-[11px] text-gray-500">
+          After encounter authoring, the patient must open CarePort or MedReach from the patient app to choose fulfillment mode, sponsor use, and payment method.
+        </div>
       </div>
 
       {/* Laboratory */}
@@ -891,7 +1072,7 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
                   </div>
                   {((hit as any).doseForm || (hit as any).route) && (
                     <div className="text-[11px] text-gray-500">
-                      {[ (hit as any).doseForm, (hit as any).route]
+                      {[(hit as any).doseForm, (hit as any).route]
                         .filter(Boolean)
                         .join(' · ')}
                     </div>

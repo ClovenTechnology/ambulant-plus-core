@@ -1,3 +1,4 @@
+// apps/clinician-app/app/sfu/[roomId]/VideoDock.tsx
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -14,7 +15,10 @@ type Vitals = {
   rr?: number;
   sys?: number;
   dia?: number;
-  glu?: number; // normalized blood glucose
+
+  // support both names; clinician UI displays mmol/L
+  glu?: number; // expected mmol/L
+  glucose?: number; // may arrive as mg/dL from demo sources
 };
 
 function num2(x?: number) {
@@ -30,6 +34,15 @@ function fmtWithUnit(x: number | undefined, unit: string) {
   const has = typeof x === 'number' && Number.isFinite(x);
   const base = has ? num2(x) : '—';
   return `${base} ${unit}`;
+}
+
+function toGluMmol(vitals: Vitals): number | undefined {
+  const raw = vitals.glu ?? vitals.glucose;
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return undefined;
+
+  // heuristic: if it looks like mg/dL (common 60–220), convert to mmol/L
+  if (raw > 25) return raw / 18;
+  return raw;
 }
 
 type VideoDockProps = {
@@ -64,11 +77,17 @@ type VideoDockProps = {
 };
 
 function firstRemote(r: Room): RemoteParticipant | undefined {
-  const anyRoom = r as any;
+  const anyRoom = r as unknown as {
+    getParticipants?: () => unknown;
+    remoteParticipants?: Map<string, RemoteParticipant>;
+    participants?: Map<string, RemoteParticipant>;
+  };
+
   if (typeof anyRoom.getParticipants === 'function') {
     const arr = anyRoom.getParticipants();
     if (Array.isArray(arr) && arr.length) return arr[0] as RemoteParticipant;
   }
+
   const maps = [anyRoom.remoteParticipants, anyRoom.participants];
   for (const m of maps) {
     if (m && typeof m.values === 'function') {
@@ -113,13 +132,12 @@ export default function VideoDock({
 
   const [remoteSpeaking, setRemoteSpeaking] = useState(false);
 
+  // PiP drag/lock
   const [videoFloating, setVideoFloating] = useState(false);
   const [videoFloatLocked, setVideoFloatLocked] = useState(true);
-  const [videoPos, setVideoPos] = useState<{ xPct: number; yPct: number }>({
-    xPct: 10,
-    yPct: 10,
-  });
-  const draggingRef = useRef<{ active: boolean; dx: number; dy: number } | null>(null);
+  const [videoPos, setVideoPos] = useState<{ xPct: number; yPct: number }>({ xPct: 10, yPct: 10 });
+
+  const draggingRef = useRef<{ active: boolean; grabDx: number; grabDy: number } | null>(null);
 
   const [showVControls, setShowVControls] = useState(false);
   const touchTimerRef = useRef<number | null>(null);
@@ -127,8 +145,7 @@ export default function VideoDock({
 
   const touchKick = () => {
     setShowVControls(true);
-    if (touchTimerRef.current && typeof window !== 'undefined')
-      window.clearTimeout(touchTimerRef.current);
+    if (touchTimerRef.current && typeof window !== 'undefined') window.clearTimeout(touchTimerRef.current);
     if (typeof window !== 'undefined') {
       touchTimerRef.current = window.setTimeout(() => setShowVControls(false), 2500);
     }
@@ -138,46 +155,62 @@ export default function VideoDock({
     if (draggingRef.current) draggingRef.current.active = false;
     setVideoFloatLocked((prev) => {
       const next = !prev;
-      if (next) setVideoFloating(false);
-      else setVideoFloating(true);
+      setVideoFloating(!next);
       return next;
     });
   };
 
-  const startDragVideo = (clientX: number, clientY: number) => {
+  const startDragPip = (clientX: number, clientY: number) => {
     if (videoFloatLocked) return;
+    const host = videoCardRef.current;
+    const pipEl = localVideoRef.current;
+    if (!host || !pipEl) return;
+
     setVideoFloating(true);
-    draggingRef.current = { active: true, dx: clientX, dy: clientY };
+
+    const pipRect = pipEl.getBoundingClientRect();
+    draggingRef.current = {
+      active: true,
+      grabDx: clientX - pipRect.left,
+      grabDy: clientY - pipRect.top,
+    };
   };
-  const moveDragVideo = (clientX: number, clientY: number) => {
+
+  const moveDragPip = (clientX: number, clientY: number) => {
     if (!draggingRef.current?.active || videoFloatLocked) return;
-    const vw = Math.max(
-      document.documentElement.clientWidth,
-      window.innerWidth || 0
-    );
-    const vh = Math.max(
-      document.documentElement.clientHeight,
-      window.innerHeight || 0
-    );
-    const w = Math.min(vw, 960);
-    const h = (w * 9) / 16;
-    const x = ((clientX - w * 0.5) / vw) * 100;
-    const y = ((clientY - h * 0.5) / vh) * 100;
-    const clamp = (v: number, min: number, max: number) =>
-      Math.max(min, Math.min(max, v));
-    setVideoPos({ xPct: clamp(x, 0, 100), yPct: clamp(y, 0, 100) });
+
+    const host = videoCardRef.current;
+    const pipEl = localVideoRef.current;
+    if (!host || !pipEl) return;
+
+    const hostRect = host.getBoundingClientRect();
+    const pipRect = pipEl.getBoundingClientRect();
+
+    const xPxRaw = clientX - hostRect.left - draggingRef.current.grabDx;
+    const yPxRaw = clientY - hostRect.top - draggingRef.current.grabDy;
+
+    const xPx = Math.max(0, Math.min(hostRect.width - pipRect.width, xPxRaw));
+    const yPx = Math.max(0, Math.min(hostRect.height - pipRect.height, yPxRaw));
+
+    const xPct = (xPx / hostRect.width) * 100;
+    const yPct = (yPx / hostRect.height) * 100;
+
+    setVideoPos({ xPct, yPct });
   };
-  const endDragVideo = () => {
+
+  const endDragPip = () => {
     if (draggingRef.current) draggingRef.current.active = false;
   };
 
   useEffect(() => {
-    const up = () => endDragVideo();
-    const leave = () => endDragVideo();
+    const up = () => endDragPip();
+    const leave = () => endDragPip();
     if (typeof window === 'undefined') return;
+
     window.addEventListener('mouseup', up);
     window.addEventListener('touchend', up);
     window.addEventListener('mouseleave', leave);
+
     return () => {
       window.removeEventListener('mouseup', up);
       window.removeEventListener('touchend', up);
@@ -191,55 +224,43 @@ export default function VideoDock({
 
     const attachTracks = () => {
       const rp = firstRemote(room);
+
       if (rp) {
-        const rvpub = [...rp.videoTrackPublications.values()].find(
-          (p) => p.isSubscribed && p.videoTrack
-        );
-        if (rvpub && remoteVideoRef.current)
-          rvpub.videoTrack?.attach(remoteVideoRef.current);
-        const rapub = [...rp.audioTrackPublications.values()].find(
-          (p) => p.isSubscribed && p.audioTrack
-        );
-        if (rapub && audioSinkRef.current)
-          rapub.audioTrack?.attach(audioSinkRef.current);
+        const rvpub = [...rp.videoTrackPublications.values()].find((p) => p.isSubscribed && p.videoTrack);
+        if (rvpub && remoteVideoRef.current) rvpub.videoTrack?.attach(remoteVideoRef.current);
+
+        const rapub = [...rp.audioTrackPublications.values()].find((p) => p.isSubscribed && p.audioTrack);
+        if (rapub && audioSinkRef.current) rapub.audioTrack?.attach(audioSinkRef.current);
       }
-      const localPubV = [
-        ...room.localParticipant.videoTrackPublications.values(),
-      ].find((p) => p.track);
-      if (localPubV && localVideoRef.current)
-        localPubV.videoTrack?.attach(localVideoRef.current);
+
+      const localPubV = [...room.localParticipant.videoTrackPublications.values()].find((p) => p.track);
+      if (localPubV && localVideoRef.current) localPubV.videoTrack?.attach(localVideoRef.current);
     };
 
     attachTracks();
 
-    const handleTrackSub = () => attachTracks();
-    const handleTrackUnsub = () => attachTracks();
-    const handleLocalPub = () => attachTracks();
-    const handleParticipantConnected = () => attachTracks();
-    const handleParticipantDisconnected = () => attachTracks();
-
     const handleActiveSpeakers = (speakers: Participant[]) => {
-      const someoneRemoteSpeaking = speakers.some(
-        (p) => p.sid !== room.localParticipant.sid
-      );
+      const someoneRemoteSpeaking = speakers.some((p) => p.sid !== room.localParticipant.sid);
       setRemoteSpeaking(someoneRemoteSpeaking);
     };
 
+    const rerender = () => attachTracks();
+
     room
-      .on(RoomEvent.TrackSubscribed, handleTrackSub)
-      .on(RoomEvent.TrackUnsubscribed, handleTrackUnsub)
-      .on(RoomEvent.LocalTrackPublished, handleLocalPub)
-      .on(RoomEvent.ParticipantConnected, handleParticipantConnected)
-      .on(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected)
+      .on(RoomEvent.TrackSubscribed, rerender)
+      .on(RoomEvent.TrackUnsubscribed, rerender)
+      .on(RoomEvent.LocalTrackPublished, rerender)
+      .on(RoomEvent.ParticipantConnected, rerender)
+      .on(RoomEvent.ParticipantDisconnected, rerender)
       .on(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakers);
 
     return () => {
       room
-        .off(RoomEvent.TrackSubscribed, handleTrackSub)
-        .off(RoomEvent.TrackUnsubscribed, handleTrackUnsub)
-        .off(RoomEvent.LocalTrackPublished, handleLocalPub)
-        .off(RoomEvent.ParticipantConnected, handleParticipantConnected)
-        .off(RoomEvent.ParticipantDisconnected, handleParticipantDisconnected)
+        .off(RoomEvent.TrackSubscribed, rerender)
+        .off(RoomEvent.TrackUnsubscribed, rerender)
+        .off(RoomEvent.LocalTrackPublished, rerender)
+        .off(RoomEvent.ParticipantConnected, rerender)
+        .off(RoomEvent.ParticipantDisconnected, rerender)
         .off(RoomEvent.ActiveSpeakersChanged, handleActiveSpeakers);
     };
   }, [room]);
@@ -250,128 +271,101 @@ export default function VideoDock({
   };
 
   return (
-    <Card
-      title={`Consultation — ${patientName}`}
-      dense={dense}
-      gradient
-    >
+    <Card title={`Consultation — ${patientName}`} dense={dense} gradient>
       <div
         ref={videoCardRef}
         role="region"
         aria-label={`Video consultation with ${patientName}`}
         aria-live="polite"
         onDoubleClick={handleDoubleClick}
+        onTouchStart={() => touchKick()}
         className={`relative aspect-video w-full rounded-lg overflow-hidden bg-black ring-1 ring-gray-200 group ${
           presentation ? 'cursor-zoom-out' : 'cursor-default'
         }`}
-        onMouseDown={(e) => startDragVideo(e.clientX, e.clientY)}
-        onMouseMove={(e) => moveDragVideo(e.clientX, e.clientY)}
-        onMouseUp={endDragVideo}
-        onTouchStart={(e) => {
-          const t = e.touches[0];
-          startDragVideo(t.clientX, t.clientY);
-          touchKick();
-        }}
-        onTouchMove={(e) => {
-          const t = e.touches[0];
-          moveDragVideo(t.clientX, t.clientY);
-        }}
       >
         <video
           ref={remoteVideoRef}
           autoPlay
           playsInline
           className={`w-full h-full object-cover ring-1 ring-black/10 ${
-            remoteSpeaking
-              ? 'outline outline-4 outline-emerald-400 outline-offset-0 transition-[outline] duration-200'
-              : ''
+            remoteSpeaking ? 'outline outline-4 outline-emerald-400 outline-offset-0 transition-[outline] duration-200' : ''
           }`}
         />
+
+        {/* Local PiP (draggable only when unlocked) */}
         <video
           ref={localVideoRef}
           autoPlay
           playsInline
           muted
-          className="absolute rounded border border-white/80 shadow-lg object-cover w-40 h-28"
+          className={`absolute rounded border border-white/80 shadow-lg object-cover w-40 h-28 ${
+            videoFloatLocked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
+          }`}
           style={{
             left: `${videoFloating ? videoPos.xPct : pip.x}%`,
             top: `${videoFloating ? videoPos.yPct : pip.y}%`,
           }}
           title="Local preview"
+          onMouseDown={(e) => startDragPip(e.clientX, e.clientY)}
+          onMouseMove={(e) => moveDragPip(e.clientX, e.clientY)}
+          onMouseUp={() => endDragPip()}
+          onTouchStart={(e) => {
+            const t = e.touches[0];
+            startDragPip(t.clientX, t.clientY);
+            touchKick();
+          }}
+          onTouchMove={(e) => {
+            const t = e.touches[0];
+            moveDragPip(t.clientX, t.clientY);
+          }}
         />
+
         <audio ref={audioSinkRef} autoPlay />
 
         {/* Controls bar */}
         <div
           className={`absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-white/85 backdrop-blur rounded-full px-2 py-2 shadow ${hoverOpacity} transition-opacity duration-200`}
+          data-no-drag="true"
+          onMouseDown={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
         >
-          <IconBtn
-            title={micOn ? 'Mute mic' : 'Unmute mic'}
-            active={micOn}
-            onClick={onToggleMic}
-          >
-            <Icon name={micOn ? "mic" : "mic-off"} />
+          <IconBtn active={micOn} title={micOn ? 'Mute mic' : 'Unmute mic'} onClick={onToggleMic}>
+            <Icon name={(!micOn) ? "mic-off" : "mic"} />
           </IconBtn>
-          <IconBtn
-            title={camOn ? 'Stop camera' : 'Start camera'}
-            active={camOn}
-            onClick={onToggleCam}
-          >
-            <Icon name={camOn ? "video" : "video-off"} />
+
+          <IconBtn active={camOn} title={camOn ? 'Stop camera' : 'Start camera'} onClick={onToggleCam}>
+            <Icon name={(!camOn) ? "video-off" : "video"} />
           </IconBtn>
-          <IconBtn
-            title={showVitals ? 'Hide vitals' : 'Show vitals'}
-            aria-pressed={showVitals}
-            onClick={() => onToggleVitals(!showVitals)}
-          >
+
+          <IconBtn active={showVitals} title={showVitals ? 'Hide vitals' : 'Show vitals'} onClick={() => onToggleVitals(!showVitals)}>
             <Icon name="heart" />
           </IconBtn>
-          <IconBtn
-            title={captionsOn ? 'Disable captions' : 'Enable captions'}
-            aria-pressed={captionsOn}
-            onClick={() => onToggleCaptions(!captionsOn)}
-          >
+
+          <IconBtn active={captionsOn} title={captionsOn ? 'Disable captions' : 'Enable captions'} onClick={() => onToggleCaptions(!captionsOn)}>
             <Icon name="cc" />
           </IconBtn>
-          <IconBtn
-            title={showOverlay ? 'Disable overlay' : 'Enable overlay'}
-            aria-pressed={showOverlay}
-            onClick={() => onToggleOverlay(!showOverlay)}
-          >
+
+          <IconBtn active={showOverlay} title={showOverlay ? 'Disable overlay' : 'Enable overlay'} onClick={() => onToggleOverlay(!showOverlay)}>
             <Icon name="layers" />
           </IconBtn>
-          <IconBtn
-            title={
-              showVitalsOverlay
-                ? 'Hide vitals stream overlay'
-                : 'Show vitals stream overlay'
-            }
-            aria-pressed={showVitalsOverlay}
+
+          <IconBtn active={showVitalsOverlay}
+            title={showVitalsOverlay ? 'Hide vitals stream overlay' : 'Show vitals stream overlay'}
             onClick={() => onToggleVitalsOverlay(!showVitalsOverlay)}
           >
             <Icon name="vitals-overlay" />
           </IconBtn>
-          <IconBtn
-            title={isRecording ? 'Stop recording' : 'Start recording'}
-            aria-pressed={isRecording}
-            onClick={() => onToggleRecording(!isRecording)}
-          >
+
+          <IconBtn active={isRecording} title={isRecording ? 'Stop recording' : 'Start recording'} onClick={() => onToggleRecording(!isRecording)}>
             <Icon name="rec" />
           </IconBtn>
-          <IconBtn
-            title={xrEnabled ? 'Disable XR broadcast' : 'Enable XR broadcast'}
-            aria-pressed={xrEnabled}
-            onClick={() => onToggleXr(!xrEnabled)}
-          >
+
+          <IconBtn active={xrEnabled} title={xrEnabled ? 'Disable XR broadcast' : 'Enable XR broadcast'} onClick={() => onToggleXr(!xrEnabled)}>
             <Icon name="xr" />
           </IconBtn>
-          <IconBtn
-            title={
-              videoFloatLocked
-                ? 'Unlock picture-in-picture'
-                : 'Lock picture-in-picture'
-            }
-            aria-pressed={!videoFloatLocked}
+
+          <IconBtn active={!videoFloatLocked}
+            title={videoFloatLocked ? 'Unlock picture-in-picture' : 'Lock picture-in-picture'}
             onClick={toggleFloatLock}
           >
             <Icon name={videoFloatLocked ? 'lock' : 'unlock'} />
@@ -396,40 +390,19 @@ export default function VideoDock({
 }
 
 function VitalsStreamOverlay({ vitals }: { vitals: Vitals }) {
+  const gluMmol = toGluMmol(vitals);
+
   const rows: { key: string; label: string; value: string }[] = [
     { key: 'BP', label: 'BP', value: fmtBP(vitals.sys, vitals.dia) },
-    {
-      key: 'SpO2',
-      label: 'SpO₂',
-      value: fmtWithUnit(vitals.spo2, '%'),
-    },
-    {
-      key: 'Temp',
-      label: 'Temp',
-      value: fmtWithUnit(vitals.tempC, '°C'),
-    },
-    {
-      key: 'HR',
-      label: 'HR',
-      value: fmtWithUnit(vitals.hr, 'bpm'),
-    },
-    {
-      key: 'RR',
-      label: 'RR',
-      value: fmtWithUnit(vitals.rr, '/min'),
-    },
-    {
-      key: 'Glu',
-      label: 'Glu',
-      value: fmtWithUnit(vitals.glu, 'mmol/L'),
-    },
+    { key: 'SpO2', label: 'SpO₂', value: fmtWithUnit(vitals.spo2, '%') },
+    { key: 'Temp', label: 'Temp', value: fmtWithUnit(vitals.tempC, '°C') },
+    { key: 'HR', label: 'HR', value: fmtWithUnit(vitals.hr, 'bpm') },
+    { key: 'RR', label: 'RR', value: fmtWithUnit(vitals.rr, '/min') },
+    { key: 'Glu', label: 'Glu', value: fmtWithUnit(gluMmol, 'mmol/L') },
   ];
 
   return (
-    <div
-      className="absolute right-3 top-1/2 -translate-y-1/2 z-20 pointer-events-none select-none"
-      aria-hidden="true"
-    >
+    <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 pointer-events-none select-none" aria-hidden="true">
       <div className="flex flex-col gap-1 text-white drop-shadow">
         {rows.map((r) => (
           <div key={r.key} className="flex items-center gap-2">

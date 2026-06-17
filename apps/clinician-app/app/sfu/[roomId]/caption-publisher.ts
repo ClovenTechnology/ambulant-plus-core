@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import { Room } from "livekit-client";
 
 type StartOpts = { key?: string; model?: string; language?: string; interim?: boolean };

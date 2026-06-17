@@ -36,32 +36,32 @@ export type PatientProfile = {
   email?: string | null;
 };
 
-export const DEMO_MEDS: PatientMedicationBrief[] = [
+export const SIMULATION_MEDS: PatientMedicationBrief[] = [
   {
-    id: 'demo-metformin',
+    id: 'simulation-medication-1',
     name: 'Metformin 500 mg tablet',
     dose: '500 mg',
     frequency: '1 tablet twice daily with meals',
     route: 'Oral',
     status: 'Active',
     started: '2024-01-05',
-    source: 'demo',
+    source: 'simulation',
   },
   {
-    id: 'demo-amlodipine',
+    id: 'simulation-medication-2',
     name: 'Amlodipine 5 mg tablet',
     dose: '5 mg',
     frequency: 'Once daily',
     route: 'Oral',
     status: 'Active',
     started: '2023-11-12',
-    source: 'demo',
+    source: 'simulation',
   },
 ];
 
-export const DEMO_ALLERGIES: PatientAllergyBrief[] = [
+export const SIMULATION_ALLERGIES: PatientAllergyBrief[] = [
   {
-    id: 'demo-pen',
+    id: 'simulation-allergy-1',
     substance: 'Penicillin',
     reaction: 'Rash / urticaria',
     severity: 'Moderate',
@@ -69,7 +69,7 @@ export const DEMO_ALLERGIES: PatientAllergyBrief[] = [
     status: 'Active',
   },
   {
-    id: 'demo-nuts',
+    id: 'simulation-allergy-2',
     substance: 'Peanuts',
     reaction: 'Lip swelling',
     severity: 'Mild',
@@ -194,7 +194,7 @@ export function usePatientContext(
         const pid = patientId;
         if (!pid) {
           if (!cancelled) {
-            setPatientMeds(DEMO_MEDS);
+            setPatientMeds(SIMULATION_MEDS);
             setMedsError('Using simulation medication data because live medication feed is unavailable.');
           }
           return;
@@ -221,7 +221,7 @@ export function usePatientContext(
         if (!cancelled) setPatientMeds(mapped);
       } catch {
         if (!cancelled) {
-          setPatientMeds(DEMO_MEDS);
+          setPatientMeds(SIMULATION_MEDS);
           setMedsError('Using simulation medication data because live medication feed is unavailable.');
         }
       }
@@ -241,7 +241,7 @@ export function usePatientContext(
         const pid = patientId;
         if (!pid) {
           if (!cancelled) {
-            setPatientAllergies(DEMO_ALLERGIES);
+            setPatientAllergies(SIMULATION_ALLERGIES);
             setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
             setAllergiesFromLive(false);
           }
@@ -271,7 +271,7 @@ export function usePatientContext(
         }
       } catch {
         if (!cancelled) {
-          setPatientAllergies(DEMO_ALLERGIES);
+          setPatientAllergies(SIMULATION_ALLERGIES);
           setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
           setAllergiesFromLive(false);
         }
@@ -290,7 +290,7 @@ export function usePatientContext(
       setAllergiesError(null);
       const pid = patientId;
       if (!pid) {
-        setPatientAllergies(DEMO_ALLERGIES);
+        setPatientAllergies(SIMULATION_ALLERGIES);
         setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
         setAllergiesFromLive(false);
         return;
@@ -316,7 +316,7 @@ export function usePatientContext(
       setPatientAllergies(mapped);
       setAllergiesFromLive(true);
     } catch {
-      setPatientAllergies(DEMO_ALLERGIES);
+      setPatientAllergies(SIMULATION_ALLERGIES);
       setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
       setAllergiesFromLive(false);
     } finally {

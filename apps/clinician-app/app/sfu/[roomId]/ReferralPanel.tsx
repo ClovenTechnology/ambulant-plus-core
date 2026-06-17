@@ -1,4 +1,4 @@
-// apps/clinician-app/app/sfu/[roomId]/ReferralPanel.tsx
+﻿// apps/clinician-app/app/sfu/[roomId]/ReferralPanel.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -60,7 +60,7 @@ export default function ReferralPanel({
 
   const [mode, setMode] = useState<'internal' | 'external' | null>(null);
 
-  const allTabs: UIClass[] = Array.from(UI_CLASSES);
+  const allTabs: UIClass[] = [...UI_CLASSES];
 
   const visibleTabs = useMemo(() => {
     const enabledTabs = allTabs.filter((t) => {
@@ -510,11 +510,11 @@ export default function ReferralPanel({
               aria-label="Select clinician for internal referral"
             >
               <option value="">
-                {loading ? 'Loading…' : 'Choose a clinician'}
+                {loading ? 'Loadingâ€¦' : 'Choose a clinician'}
               </option>
               {filtered.map((c) => (
                 <option key={c.id} value={c.id}>
-                  {c.name} — {c.specialty || '—'} — {c.location || '—'} (
+                  {c.name} â€” {c.specialty || 'â€”'} â€” {c.location || 'â€”'} (
                   {c.id})
                 </option>
               ))}
@@ -545,11 +545,11 @@ export default function ReferralPanel({
               </div>
               <div>
                 <b>Specialty</b>
-                <div>{sel.specialty || '—'}</div>
+                <div>{sel.specialty || 'â€”'}</div>
               </div>
               <div>
                 <b>Location</b>
-                <div>{sel.location || '—'}</div>
+                <div>{sel.location || 'â€”'}</div>
               </div>
             </div>
           </div>
@@ -613,3 +613,4 @@ export default function ReferralPanel({
     </div>
   );
 }
+

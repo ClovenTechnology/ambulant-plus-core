@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { Card, Tabs, Collapse } from '@/components/ui';
@@ -15,6 +15,7 @@ export default function SmartWearablesPanel({
   roomId: string;
   dense?: boolean;
   defaultOpen?: boolean;
+  patientId?: string;
 }) {
   const [open, setOpen] = useState<boolean>(defaultOpen);
   const [tab, setTab] = useState<WTab>('wearables');
@@ -41,7 +42,7 @@ export default function SmartWearablesPanel({
         {tab === 'wearables' && (
           <div className="space-y-2">
             {/* Show whichever device the patient is transmitting from (mock: NexRing) */}
-            <div className="text-xs text-gray-600">Device: NexRing — <span className="text-emerald-700">Connected</span></div>
+            <div className="text-xs text-gray-600">Device: NexRing â€” <span className="text-emerald-700">Connected</span></div>
             <NexRingPanel roomId={roomId} />
           </div>
         )}
@@ -55,3 +56,4 @@ export default function SmartWearablesPanel({
     </Card>
   );
 }
+

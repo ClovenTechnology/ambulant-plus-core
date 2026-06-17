@@ -1,12 +1,19 @@
-// apps/clinician-app/app/sfu/[roomId]/page.tsx
+﻿// apps/clinician-app/app/sfu/[roomId]/page.tsx
 'use client';
 
-import type React from 'react';
+import type * as React from 'react';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useSearchParams } from 'next/navigation';
-import { Room, RoomEvent, ConnectionQuality } from 'livekit-client';
+import {
+  Room,
+  RoomEvent,
+  DataPacket_Kind,
+  ConnectionQuality,
+  ConnectionState,
+  type Participant,
+} from 'livekit-client';
 
 import { connectRoom, getOrCreateUid, mintRtcToken } from '@ambulant/rtc';
 
@@ -24,9 +31,17 @@ import RecordingBanner from '@/components/RecordingBanner';
 import { useAutocomplete, icdSearch } from '@/src/hooks/useAutocomplete';
 import type { ICD10Hit } from '@/src/hooks/useAutocomplete';
 import { useUiPrefs } from '@/hooks/useUiPrefs';
+import useInviteSpecialistApproval from '@/src/hooks/useInviteSpecialistApproval';
 
 import { normalizeVitals } from '@/lib/sfu/vitals';
 import AllergiesPanel, { type NewAllergyDraft } from '@/components/AllergiesPanel';
+import {
+  getSessionByAppointment,
+  clinicianCheckIn,
+  startConsultationSession,
+  completeConsultationSession,
+  type ConsultationSession,
+} from '@/src/lib/consultation-session';
 
 // New local modules
 import VideoDock from './VideoDock';
@@ -34,6 +49,8 @@ import ErxComposer, { type ErxSummary, type SoapState } from './ErxComposer';
 import InsightPane from './InsightPane';
 import ReferralPanel from './ReferralPanel';
 import { usePatientContext, type PatientAllergyBrief } from './patientContext';
+import ClinicianRosterChips from './ClinicianRosterChips';
+import InviteSpecialistDrawer from './InviteSpecialistDrawer';
 
 // History sections
 import CasesHistory from '@/components/cases';
@@ -43,6 +60,100 @@ import AllergiesHistory from '@/components/allergies';
 import OperationsHistory from '@/components/operations';
 import VaccinationsHistory from '@/components/vaccinations';
 import LabsHistory from '@/components/labs';
+
+import {
+  TOPIC_ROSTER,
+  isRosterEnvelope,
+  type RoomParty,
+} from '@/src/lib/rtc/roster-contract';
+
+import {
+  computeRosterAvailability,
+  type ClinicianPlanTier,
+  type PatientPlanTier,
+  type MultipartyParticipant,
+} from '@/src/lib/televisit/multiparty';
+import { bootstrapRosterFromAppointment } from '@/src/lib/televisit/roster-bootstrap';
+import {
+  reconcileParticipantConnected,
+  reconcileParticipantDisconnected,
+} from '@/src/lib/televisit/roster-live-reconcile';
+
+/* ---------------------------------
+   LiveKit topics + codec utilities
+---------------------------------- */
+const TOPIC_VITALS = 'vitals' as const;
+const TOPIC_CHAT = 'chat' as const;
+const TOPIC_CONTROL = 'control' as const;
+
+const TEXT_ENCODER = new TextEncoder();
+const TEXT_DECODER = new TextDecoder();
+
+function safeJsonParse(raw: string): unknown | null {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null;
+}
+
+type ControlKey =
+  | 'overlay'
+  | 'captions'
+  | 'vitals'
+  | 'vitalsOverlay'
+  | 'recording'
+  | 'xr'
+  | 'screenshare'
+  | 'hand'
+  | 'export';
+
+type ControlValue = boolean | string;
+
+function isControlKey(v: unknown): v is ControlKey {
+  return (
+    v === 'overlay' ||
+    v === 'captions' ||
+    v === 'vitals' ||
+    v === 'vitalsOverlay' ||
+    v === 'recording' ||
+    v === 'xr' ||
+    v === 'screenshare' ||
+    v === 'hand' ||
+    v === 'export'
+  );
+}
+
+type CallState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
+
+function mapConnectionState(s: ConnectionState): CallState {
+  switch (s) {
+    case ConnectionState.Connected:
+      return 'connected';
+    case ConnectionState.Connecting:
+      return 'connecting';
+    case ConnectionState.Reconnecting:
+      return 'reconnecting';
+    case ConnectionState.Disconnected:
+    default:
+      return 'disconnected';
+  }
+}
+
+function extractMintedRtc(
+  resp: unknown,
+  fallbackWsUrl: string
+): { wsUrl: string; token: string } | null {
+  if (!isRecord(resp)) return null;
+  const token = typeof resp.token === 'string' ? resp.token : null;
+  if (!token) return null;
+  const wsUrl = typeof resp.wsUrl === 'string' ? resp.wsUrl : fallbackWsUrl;
+  return { wsUrl, token };
+}
 
 /* ---------------------------
    Small Toast system (local)
@@ -74,10 +185,10 @@ function ToastViewport({
             t.kind === 'success'
               ? 'border-emerald-200'
               : t.kind === 'warning'
-              ? 'border-amber-200'
-              : t.kind === 'error'
-              ? 'border-rose-200'
-              : 'border-gray-200',
+                ? 'border-amber-200'
+                : t.kind === 'error'
+                  ? 'border-rose-200'
+                  : 'border-gray-200',
           ].join(' ')}
           role="status"
           aria-live="polite"
@@ -103,7 +214,6 @@ function ToastViewport({
 // =========================
 
 type RightTab = 'soap' | 'erx' | 'conclusions' | 'insight' | 'history';
-type SpecialistTab = 'dental' | 'physio' | 'xray' | 'ent' | 'optometry';
 
 type Vitals = {
   ts?: number;
@@ -116,22 +226,19 @@ type Vitals = {
 };
 
 const ICD10_SUGGESTIONS: string[] = [
-  'J20.9 — Acute bronchitis, unspecified',
-  'R50.9 — Fever, unspecified',
-  'R05.9 — Cough, unspecified',
-  'I10 — Essential (primary) hypertension',
-  'E11.9 — Type 2 diabetes mellitus without complications',
+  'J20.9 â€” Acute bronchitis, unspecified',
+  'R50.9 â€” Fever, unspecified',
+  'R05.9 â€” Cough, unspecified',
+  'I10 â€” Essential (primary) hypertension',
+  'E11.9 â€” Type 2 diabetes mellitus without complications',
 ];
 
 function num2(x?: number) {
-  return typeof x === 'number' && Number.isFinite(x) ? Number(x).toFixed(2) : '—';
+  return typeof x === 'number' && Number.isFinite(x) ? Number(x).toFixed(2) : 'â€”';
 }
 function fmtBP(sys?: number, dia?: number) {
   const ok = Number.isFinite(sys as number) && Number.isFinite(dia as number);
-  return ok ? `${Math.round(sys!)} / ${Math.round(dia!)} mmHg` : '—/— mmHg';
-}
-function normalize(s: string) {
-  return (s ?? '').replace(/\s+/g, ' ').trim();
+  return ok ? `${Math.round(sys!)} / ${Math.round(dia!)} mmHg` : 'â€”/â€” mmHg';
 }
 
 // Helper: read join JWT from session (visitId/roomId variants)
@@ -150,7 +257,9 @@ function readJoinJwtFromSession(visitId: string, roomId: string) {
     try {
       const v = sessionStorage.getItem(k);
       if (v && v.trim()) return v.trim();
-    } catch {}
+    } catch {
+      // ignore
+    }
   }
   return '';
 }
@@ -159,7 +268,7 @@ function readJoinJwtFromSession(visitId: string, roomId: string) {
 function SafeDeviceSettings() {
   return <div className="text-sm text-gray-600">Safe device settings (fallback)</div>;
 }
-const DeviceSettings = dynamic<any>(
+const DeviceSettings = dynamic(
   async () => {
     try {
       const m = await import('@ambulant/rtc');
@@ -172,48 +281,19 @@ const DeviceSettings = dynamic<any>(
 );
 
 // Lazy-loaded heavy panels
-const SessionConclusions = dynamic<any>(() => import('@/components/SessionConclusions'), {
+const SessionConclusions = dynamic(() => import('@/components/SessionConclusions'), {
   ssr: false,
 });
 
-const IntegratedIoMTs = dynamic<any>(() => import('@/components/IntegratedIoMTs'), {
+const IntegratedIoMTs = dynamic(() => import('@/components/IntegratedIoMTs'), {
   ssr: false,
 });
 
-const SmartWearablesPanel = dynamic<any>(() => import('@/components/SmartWearablesPanel'), {
+const SmartWearablesPanel = dynamic(() => import('@/components/SmartWearablesPanel'), {
   ssr: false,
 });
 
-const ClinicianVitalsPanel = dynamic<any>(() => import('../../../components/ClinicianVitalsPanel'), {
-  ssr: false,
-  loading: () => <Skeleton height="h-40" />,
-});
-
-/* -----------------------------
-   Specialist Workspaces (SFU)
-   Mounted inside the SFU page
------------------------------- */
-const DentalWorkspaceSFU = dynamic<any>(() => import('../../workspaces/dental/sfu/page'), {
-  ssr: false,
-  loading: () => <Skeleton height="h-40" />,
-});
-
-const PhysioWorkspaceSFU = dynamic<any>(() => import('../../workspaces/physio/sfu/page'), {
-  ssr: false,
-  loading: () => <Skeleton height="h-40" />,
-});
-
-const XrayWorkspaceSFU = dynamic<any>(() => import('../../workspaces/x-ray/sfu/page'), {
-  ssr: false,
-  loading: () => <Skeleton height="h-40" />,
-});
-
-const EntWorkspaceSFU = dynamic<any>(() => import('../../workspaces/ent/sfu/page'), {
-  ssr: false,
-  loading: () => <Skeleton height="h-40" />,
-});
-
-const OptometryWorkspaceSFU = dynamic<any>(() => import('../../workspaces/optometry/sfu/page'), {
+const ClinicianVitalsPanel = dynamic(() => import('../../../components/ClinicianVitalsPanel'), {
   ssr: false,
   loading: () => <Skeleton height="h-40" />,
 });
@@ -234,13 +314,12 @@ function clamp(n: number, min: number, max: number) {
 
 export default function SFURoomClinician({ params }: { params: { roomId: string } }) {
   const { roomId } = params;
-  const searchParams = useSearchParams();
+  const searchParams = useSearchParams() as any;
   const wsUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL as string | undefined;
 
   // Centralized patient context (profile / meds / allergies)
   const {
     profile,
-    patientProfile,
     patientProfileError,
     patientMeds,
     medsError,
@@ -253,26 +332,35 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     encounterId,
     refreshAllergies,
     setPatientAllergies,
-  } = usePatientContext(roomId, searchParams as any);
+  } = usePatientContext(roomId, searchParams);
 
   // Other URL params
-  const clinicianIdParam = searchParams?.get('clinicianId') || 'clinician-local-001';
-  const clinicNameParam = searchParams?.get('clinicName') || undefined;
-  const clinicAddressParam = searchParams?.get('clinicAddress') || undefined;
+  const clinicianIdParam = searchParams.get('clinicianId') || 'clinician-local-001';
+  const clinicNameParam = searchParams.get('clinicName') || undefined;
+  const clinicAddressParam = searchParams.get('clinicAddress') || undefined;
+  const appointmentId =
+    searchParams.get('appointmentId') ||
+    searchParams.get('appointment') ||
+    searchParams.get('appt') ||
+    null;
+
+  const [consultationSession, setConsultationSession] = useState<ConsultationSession | null>(null);
+  const [sessionBusy, setSessionBusy] = useState(false);
+  const [sessionError, setSessionError] = useState<string | null>(null);
 
   // Appointment/session metadata from URL context. Simulation links are generated by Admin.
   const appt = useMemo(
     () => ({
-      id: searchParams?.get('appointmentId') || `sfu-${roomId}`,
+      id: searchParams.get('appointmentId') || searchParams.get('appointment') || searchParams.get('appt') || `sfu-${roomId}`,
       when:
-        searchParams?.get('scheduledStartAt') ||
-        searchParams?.get('startsAt') ||
+        searchParams.get('scheduledStartAt') ||
+        searchParams.get('startsAt') ||
         new Date().toISOString(),
       patientId,
       patientName,
-      clinicianName: searchParams?.get('clinicianName') || 'Simulation Clinician',
-      clinicianSpecialty: searchParams?.get('clinicianSpecialty') || undefined,
-      reason: searchParams?.get('reason') || 'Simulation consultation',
+      clinicianName: searchParams.get('clinicianName') || 'Simulation Clinician',
+      clinicianSpecialty: searchParams.get('clinicianSpecialty') || undefined,
+      reason: searchParams.get('reason') || 'Simulation consultation',
       status: 'In progress',
       roomId,
     }),
@@ -287,7 +375,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       .slice(0, 3)
       .map((a) => {
         const sev = a.severity ? ` (${a.severity})` : '';
-        const rxn = a.reaction ? ` — ${a.reaction}` : '';
+        const rxn = a.reaction ? ` â€” ${a.reaction}` : '';
         return `${a.substance}${sev}${rxn}`;
       });
     const base = top.join(', ');
@@ -314,15 +402,26 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   // ------------------ Room & connection state ------------------
   const [room, setRoom] = useState<Room | null>(null);
-  const [state, setState] = useState<'disconnected' | 'connecting' | 'connected' | 'reconnecting'>(
-    'disconnected'
-  );
+  const roomRef = useRef<Room | null>(null);
+
+  const [state, setState] = useState<CallState>('disconnected');
+  const stateRef = useRef<CallState>('disconnected');
+
   const [quality, setQuality] = useState<ConnectionQuality | undefined>(undefined);
+
+  useEffect(() => {
+    roomRef.current = room;
+  }, [room]);
+
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
 
   // Auto-reconnect tracking
   const manualLeaveRef = useRef(false);
   const hasEverConnectedRef = useRef(false);
   const reconnectTimerRef = useRef<number | null>(null);
+  const joinInFlightRef = useRef(false);
 
   // Audit helper (PII-light)
   const audit = useCallback(
@@ -348,20 +447,40 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     [roomId, patientId, clinicianIdParam]
   );
 
-  // Toaster
+  // Toaster (tracks timers to avoid leaks)
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const toastTimersRef = useRef<Record<string, number>>({});
+
+  const closeToast = useCallback((id: string) => {
+    const t = toastTimersRef.current[id];
+    if (typeof window !== 'undefined' && typeof t === 'number') window.clearTimeout(t);
+    delete toastTimersRef.current[id];
+    setToasts((prev) => prev.filter((x) => x.id !== id));
+  }, []);
+
   const pushToast = useCallback(
     (body: string, kind: ToastKind = 'info', title?: string, ttl = 4200) => {
       const id = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
       const t: Toast = { id, body, kind, title, ttl };
       setToasts((prev) => [...prev, t]);
+
       if (ttl && typeof window !== 'undefined') {
-        window.setTimeout(() => setToasts((prev) => prev.filter((x) => x.id !== id)), ttl);
+        const timer = window.setTimeout(() => {
+          closeToast(id);
+        }, ttl);
+        toastTimersRef.current[id] = timer;
       }
     },
-    []
+    [closeToast]
   );
-  const closeToast = (id: string) => setToasts((prev) => prev.filter((x) => x.id !== id));
+
+  useEffect(() => {
+    return () => {
+      if (typeof window === 'undefined') return;
+      Object.values(toastTimersRef.current).forEach((t) => window.clearTimeout(t));
+      toastTimersRef.current = {};
+    };
+  }, []);
 
   // Media toggles
   const [micOn, setMicOn] = useState(false);
@@ -381,11 +500,36 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   // UI prefs
   const { state: ui, set: setUi } = useUiPrefs();
-  const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, pip } =
-    ui;
+  const uiRef = useRef(ui);
+  useEffect(() => {
+    uiRef.current = ui;
+  }, [ui]);
 
-  const [rightTab, setRightTab] = useState<RightTab>('soap');
-  const [rightPanelsOpen, setRightPanelsOpen] = useState(true);
+  const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, rightTab, pip } =
+    ui;
+  const rightPanelsOpen = true;
+
+  // keep latest toggles in a ref for clean control handling (prevents duplicate toasts)
+  const togglesRef = useRef({
+    showOverlay,
+    captionsOn,
+    showVitals,
+    showVitalsOverlay,
+    isRecording,
+    xrEnabled,
+    chatVisible,
+  });
+  useEffect(() => {
+    togglesRef.current = {
+      showOverlay,
+      captionsOn,
+      showVitals,
+      showVitalsOverlay,
+      isRecording,
+      xrEnabled,
+      chatVisible,
+    };
+  }, [showOverlay, captionsOn, showVitals, showVitalsOverlay, isRecording, xrEnabled, chatVisible]);
 
   // NEW: narrow video / wider notes toggle
   const [videoNarrow, setVideoNarrow] = useState(false);
@@ -396,9 +540,88 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const [currentMedsOpen, setCurrentMedsOpen] = useState(true);
   const [allergiesOpen, setAllergiesOpen] = useState(true);
 
-  // NEW: Specialist Workspaces
-  const [specialistOpen, setSpecialistOpen] = useState(true);
-  const [specialistTab, setSpecialistTab] = useState<SpecialistTab>('dental');
+  // Roster / multiparty state
+  const [roster, setRoster] = useState<RoomParty[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function hydrateRoster() {
+      const appointmentIdFromSearch =
+        searchParams.get('appointmentId') ||
+        searchParams.get('appointment') ||
+        searchParams.get('appt') ||
+        null;
+
+      const next = await bootstrapRosterFromAppointment({
+        appointmentId: appointmentIdFromSearch,
+        existingRoster: [],
+      });
+
+      if (!alive) return;
+      setRoster(next);
+    }
+
+    void hydrateRoster();
+    return () => {
+      alive = false;
+    };
+  }, [searchParams]);
+
+  const patientPlan = (searchParams.get('patientPlan') || 'plus') as PatientPlanTier;
+  const leadClinicianPlan = (searchParams.get('clinicianPlan') || 'group') as ClinicianPlanTier;
+  const leadClinicianFeeZar = Number(searchParams.get('feeZar') || 1200);
+
+  const remotePatientParticipants = useMemo(() => {
+    const patientLike = roster.filter(
+      (p) =>
+        p.role === 'lead_patient' ||
+        p.role === 'dependent_patient' ||
+        p.role === 'second_patient_participant',
+    );
+    return Math.max(1, patientLike.length || 1);
+  }, [roster]);
+
+  const remoteObservers = useMemo(() => {
+    return roster.filter((p) => p.role === 'observer' || p.role === 'care_ally').length;
+  }, [roster]);
+
+  const rosterAvailability = useMemo(() => {
+    const requiredParticipants: MultipartyParticipant[] = roster
+      .filter((p) => p.required)
+      .map((p) => ({
+        id: p.partyId,
+        role: p.role as any,
+        displayName: p.displayName,
+        attendanceMode: p.required ? 'required' : 'optional',
+        patientId: p.patientId ?? null,
+        clinicianId: p.clinicianId ?? null,
+        accepted: p.state === 'accepted' || p.state === 'joined',
+        calendarFree: true,
+        preflightReady: p.state === 'joined' || p.state === 'accepted',
+        paymentReady: p.state === 'joined' || p.state === 'accepted',
+      }));
+
+    const optionalParticipants: MultipartyParticipant[] = roster
+      .filter((p) => !p.required)
+      .map((p) => ({
+        id: p.partyId,
+        role: p.role as any,
+        displayName: p.displayName,
+        attendanceMode: 'optional',
+        patientId: p.patientId ?? null,
+        clinicianId: p.clinicianId ?? null,
+        accepted: p.state === 'accepted' || p.state === 'joined',
+        calendarFree: true,
+        preflightReady: p.state === 'joined' || p.state === 'accepted',
+        paymentReady: p.state === 'joined' || p.state === 'accepted',
+      }));
+
+    return computeRosterAvailability({
+      requiredParticipants,
+      optionalParticipants,
+    });
+  }, [roster]);
 
   // Refs
   const videoCardRef = useRef<HTMLDivElement | null>(null);
@@ -432,6 +655,11 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const [videoDockSide, setVideoDockSide] = useState<VideoDockSide>('center');
 
   const [floatPos, setFloatPos] = useState<{ xPct: number; yPct: number }>({ xPct: 78, yPct: 70 });
+  const floatPosRef = useRef(floatPos);
+  useEffect(() => {
+    floatPosRef.current = floatPos;
+  }, [floatPos]);
+
   const floatDragRef = useRef<{
     active: boolean;
     startX: number;
@@ -440,20 +668,73 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     startYPct: number;
   } | null>(null);
 
-  // Load dock prefs
+  const ensureClinicianSession = useCallback(async () => {
+    if (!appointmentId) return null;
+
+    setSessionBusy(true);
+    setSessionError(null);
+
+    try {
+      const session = await getSessionByAppointment(appointmentId);
+      setConsultationSession(session);
+      return session;
+    } catch (err: any) {
+      const msg = err?.message || 'Failed to resolve consultation session';
+      setSessionError(msg);
+      return null;
+    } finally {
+      setSessionBusy(false);
+    }
+  }, [appointmentId]);
+
+  const checkInAndStartSession = useCallback(
+    async (roomIdForSession: string) => {
+      const base = consultationSession || (await ensureClinicianSession());
+      if (!base?.id) return null;
+
+      try {
+        const checkedIn = await clinicianCheckIn(base.id);
+        setConsultationSession(checkedIn);
+
+        const started = await startConsultationSession(checkedIn.id, {
+          mediaConnected: true,
+          roomId: roomIdForSession || null,
+        });
+
+        setConsultationSession(started);
+        return started;
+      } catch (err: any) {
+        setSessionError(err?.message || 'Failed to start consultation session');
+        return null;
+      }
+    },
+    [consultationSession, ensureClinicianSession]
+  );
+
+  useEffect(() => {
+    if (!appointmentId) return;
+    ensureClinicianSession();
+  }, [appointmentId, ensureClinicianSession]);
+
+  // Load dock prefs (no `any`)
   useEffect(() => {
     try {
       if (typeof window === 'undefined') return;
       const raw = localStorage.getItem(VIDEO_DOCK_KEY);
       if (!raw) return;
-      const parsed = JSON.parse(raw) as any;
-      const mode: VideoDockMode = parsed?.mode === 'undocked' ? 'undocked' : 'docked';
-      const side: VideoDockSide = parsed?.side === 'left' ? 'left' : 'center';
-      const xPct = typeof parsed?.xPct === 'number' ? parsed.xPct : undefined;
-      const yPct = typeof parsed?.yPct === 'number' ? parsed.yPct : undefined;
+
+      const parsed = safeJsonParse(raw);
+      if (!isRecord(parsed)) return;
+
+      const mode: VideoDockMode = parsed.mode === 'undocked' ? 'undocked' : 'docked';
+      const side: VideoDockSide = parsed.side === 'left' ? 'left' : 'center';
+
+      const xPct = typeof parsed.xPct === 'number' ? parsed.xPct : null;
+      const yPct = typeof parsed.yPct === 'number' ? parsed.yPct : null;
 
       setVideoDockMode(mode);
       setVideoDockSide(side);
+
       if (typeof xPct === 'number' && typeof yPct === 'number') {
         setFloatPos({ xPct: clamp(xPct, 5, 95), yPct: clamp(yPct, 8, 95) });
       }
@@ -503,18 +784,19 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     pushToast('Video undocked (floating).', 'info', 'Video Dock');
   };
 
-  const startFloatDrag = (clientX: number, clientY: number) => {
+  const startFloatDrag = useCallback((clientX: number, clientY: number) => {
     if (typeof window === 'undefined') return;
+    const p = floatPosRef.current;
     floatDragRef.current = {
       active: true,
       startX: clientX,
       startY: clientY,
-      startXPct: floatPos.xPct,
-      startYPct: floatPos.yPct,
+      startXPct: p.xPct,
+      startYPct: p.yPct,
     };
-  };
+  }, []);
 
-  const moveFloatDrag = (clientX: number, clientY: number) => {
+  const moveFloatDrag = useCallback((clientX: number, clientY: number) => {
     if (!floatDragRef.current?.active) return;
     if (typeof window === 'undefined') return;
 
@@ -528,16 +810,19 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     const nextY = floatDragRef.current.startYPct + (dy / vh) * 100;
 
     setFloatPos({ xPct: clamp(nextX, 5, 95), yPct: clamp(nextY, 8, 95) });
-  };
+  }, []);
 
-  const endFloatDrag = () => {
+  const endFloatDrag = useCallback(() => {
     if (floatDragRef.current) floatDragRef.current.active = false;
-  };
+  }, []);
 
+  // Register drag listeners once (no re-bind per move; no `any`)
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
     const onMove = (e: MouseEvent) => moveFloatDrag(e.clientX, e.clientY);
     const onUp = () => endFloatDrag();
+
     const onTouchMove = (e: TouchEvent) => {
       const t = e.touches?.[0];
       if (!t) return;
@@ -554,12 +839,11 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     return () => {
       window.removeEventListener('mousemove', onMove);
       window.removeEventListener('mouseup', onUp);
-      window.removeEventListener('touchmove', onTouchMove as any);
+      window.removeEventListener('touchmove', onTouchMove);
       window.removeEventListener('touchend', onTouchEnd);
       window.removeEventListener('mouseleave', onUp);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [floatPos.xPct, floatPos.yPct]);
+  }, [moveFloatDrag, endFloatDrag]);
 
   // Persist SOAP + meds per-room (fallback / notes)
   useEffect(() => {
@@ -567,10 +851,14 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       if (typeof window === 'undefined') return;
       const saved = localStorage.getItem(`sfu-soap-v2-${roomId}`);
       if (saved) {
-        const parsed = JSON.parse(saved);
-        setSoap(parsed?.soap ?? parsed);
-        if (parsed?.currentMeds !== undefined) setCurrentMeds(parsed.currentMeds);
-        if (parsed?.patientEducation !== undefined) setPatientEducation(parsed.patientEducation);
+        const parsed = safeJsonParse(saved);
+        if (isRecord(parsed)) {
+          const p = parsed as Record<string, unknown>;
+          const soapCandidate = p.soap ?? parsed;
+          if (isRecord(soapCandidate)) setSoap(soapCandidate as SoapState);
+          if (typeof p.currentMeds === 'string') setCurrentMeds(p.currentMeds);
+          if (typeof p.patientEducation === 'string') setPatientEducation(p.patientEducation);
+        }
       }
     } catch {
       // ignore
@@ -601,7 +889,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       const text = patientAllergies
         .map((a) => {
           const sev = a.severity ? ` [${a.severity}]` : '';
-          const rxn = a.reaction ? ` — ${a.reaction}` : '';
+          const rxn = a.reaction ? ` â€” ${a.reaction}` : '';
           return `${a.substance}${sev}${rxn}`;
         })
         .join('\n');
@@ -614,7 +902,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const [sympCode, setSympCode] = useState<string>('');
   const icdSympOptions = icdSympAuto.opts.map((h) => ({
     code: h.code,
-    text: `${h.code} — ${h.title}`,
+    text: `${h.code} â€” ${h.title}`,
   }));
   const icdSympOptionsFinal = icdSympOptions.length
     ? icdSympOptions
@@ -656,7 +944,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   }
   const vitalsGraphHolder = useDeferredMount<HTMLDivElement>();
 
-  // Poor network → toast
+  // Poor network â†’ toast
   const prevQualityRef = useRef<ConnectionQuality | undefined>(undefined);
   useEffect(() => {
     if (quality === ConnectionQuality.Poor && prevQualityRef.current !== ConnectionQuality.Poor) {
@@ -665,122 +953,340 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     prevQualityRef.current = quality;
   }, [quality, pushToast]);
 
-  // Publish data controls
-  const publishControl = async (type: string, value: boolean | string) => {
-    if (!room) return;
-    try {
-      await room.localParticipant.publishData(
-        new TextEncoder().encode(JSON.stringify({ type, value, from: 'clinician' })),
-        {
-          reliable: true,
-          topic: type === 'typing' ? 'chat' : 'control',
-        }
+  /* ---------------------------------
+     Clean publish helpers (no mixing)
+  ---------------------------------- */
+  const publishTopic = useCallback(
+    async (topic: string, payload: unknown, kind: DataPacket_Kind = DataPacket_Kind.RELIABLE) => {
+      const r = roomRef.current;
+      if (!r) return;
+      try {
+        const bytes = TEXT_ENCODER.encode(JSON.stringify(payload));
+        await r.localParticipant.publishData(bytes, { reliable: kind === DataPacket_Kind.RELIABLE, topic });
+      } catch (e) {
+        console.warn('[publish] error', e);
+      }
+    },
+    []
+  );
+
+  const publishControl = useCallback(
+    async (type: ControlKey, value: ControlValue) => {
+      await publishTopic(
+        TOPIC_CONTROL,
+        { type, value, from: 'clinician' },
+        DataPacket_Kind.RELIABLE
       );
-    } catch (e) {
-      console.warn('[control] publish error', e);
+    },
+    [publishTopic]
+  );
+
+  const publishTyping = useCallback(async () => {
+    await publishTopic(TOPIC_CHAT, { type: 'typing', from: 'clinician' }, DataPacket_Kind.RELIABLE);
+  }, [publishTopic]);
+
+  const publishChat = useCallback(
+    async (text: string) => {
+      await publishTopic(TOPIC_CHAT, { from: 'clinician', text }, DataPacket_Kind.RELIABLE);
+    },
+    [publishTopic]
+  );
+
+  const publishRoster = useCallback(
+    async (payload: unknown) => {
+      await publishTopic(TOPIC_ROSTER, payload, DataPacket_Kind.RELIABLE);
+    },
+    [publishTopic]
+  );
+
+  const specialistInvite = useInviteSpecialistApproval({
+    roomId,
+    sessionId: consultationSession?.id ?? null,
+    appointmentId,
+    encounterId,
+    publishTopic,
+    publishRoster,
+    pushToast,
+    setRoster,
+    topicChat: TOPIC_CHAT,
+    reliableKind: DataPacket_Kind.RELIABLE,
+  });
+
+  /* ---------------------------------
+     Room event wiring (single attach)
+     - no duplication on reconnect/join
+     - cleanup on leave/unmount
+  ---------------------------------- */
+  const detachRoomEventsRef = useRef<null | (() => void)>(null);
+
+  const detachRoomEvents = useCallback(() => {
+    try {
+      detachRoomEventsRef.current?.();
+    } finally {
+      detachRoomEventsRef.current = null;
     }
-  };
+  }, []);
 
-  const wireRoomEvents = (r: Room) => {
-    r.on(RoomEvent.ConnectionStateChanged, () => setState(r.state as any))
-      .on(RoomEvent.ConnectionQualityChanged, (q: any) => setQuality(q as ConnectionQuality))
-      .on(RoomEvent.DataReceived, (...args: any[]) => {
-        const [payload, _p, _kind, topic] = args;
-        try {
-          const text = new TextDecoder().decode(payload);
-          const data = JSON.parse(text);
+  const attachRoomEvents = useCallback(
+    (r: Room) => {
+      detachRoomEvents();
 
-          if (topic === 'vitals') {
-            const v = normalizeVitals(data);
-            setVitals(v);
-            return;
+      const onLocalParticipantConnected = () => {
+        setRoster((prev) =>
+          reconcileParticipantConnected({
+            prev,
+            identity: r.localParticipant.identity,
+            metadata: r.localParticipant.metadata,
+            joinedAt: Date.now(),
+          }),
+        );
+      };
+
+      const onConn = (st: ConnectionState) => {
+        const mapped = mapConnectionState(st);
+        setState(mapped);
+
+        if (mapped === 'disconnected') {
+          setQuality(undefined);
+          setMicOn(false);
+          setCamOn(false);
+        }
+      };
+
+      const onQuality = (q: ConnectionQuality, _p?: Participant) => setQuality(q);
+
+      const onParticipantConnected = (p: Participant) => {
+        setRoster((prev) =>
+          reconcileParticipantConnected({
+            prev,
+            identity: p.identity,
+            metadata: p.metadata,
+            joinedAt: Date.now(),
+          }),
+        );
+      };
+
+      const onParticipantDisconnected = (p: Participant) => {
+        setRoster((prev) =>
+          reconcileParticipantDisconnected({
+            prev,
+            identity: p.identity,
+            metadata: p.metadata,
+            leftAt: Date.now(),
+          }),
+        );
+      };
+
+      const onData = async (payload: Uint8Array, _p?: Participant, _kind?: DataPacket_Kind, topic?: string) => {
+        const text = TEXT_DECODER.decode(payload);
+        const parsed = safeJsonParse(text) ?? text;
+        const t = typeof topic === 'string' ? topic : '';
+
+        if (t === TOPIC_VITALS) {
+          try {
+            const input = parsed as Parameters<typeof normalizeVitals>[0];
+            const v = normalizeVitals(input);
+            setVitals(v as Vitals);
+          } catch (err) {
+            console.warn('[vitals] normalize error', err);
           }
+          return;
+        }
 
-          if (topic === 'chat') {
-            if (data?.type === 'typing') {
-              setTypingNote('Patient is typing…');
+        if (t === TOPIC_CHAT) {
+          if (isRecord(parsed)) {
+            const from = typeof parsed.from === 'string' ? parsed.from : 'remote';
+
+            if (from === 'clinician') return;
+
+            await specialistInvite.handleIncomingChatPayload(parsed);
+
+            if (parsed.type === 'typing') {
+              setTypingNote('Patient is typingâ€¦');
               if (typingTimerRef.current && typeof window !== 'undefined') window.clearTimeout(typingTimerRef.current);
               if (typeof window !== 'undefined') {
                 typingTimerRef.current = window.setTimeout(() => setTypingNote(null), 3000);
               }
               return;
             }
-            if (typeof data?.text === 'string') {
-              setChat((c) => [...c, { from: data.from || 'remote', text: data.text }]);
+
+            if (typeof parsed.text === 'string') {
+              setChat((c) => [...c, { from, text: String((parsed as any).text ?? '') }]);
+
+              const visible = uiRef.current.chatVisible;
               const atBottom = chatBoxRef.current
-                ? chatBoxRef.current.scrollHeight - chatBoxRef.current.scrollTop - chatBoxRef.current.clientHeight < 8
+                ? chatBoxRef.current.scrollHeight -
+                    chatBoxRef.current.scrollTop -
+                    chatBoxRef.current.clientHeight <
+                  8
                 : true;
-              if (!chatVisible || !atBottom) setUnread((u) => u + 1);
+
+              if (!visible || !atBottom) setUnread((u) => u + 1);
               return;
             }
           }
-
-          if (topic === 'control') {
-            const v = data?.value;
-            if (data?.type === 'overlay') {
-              setShowOverlay(!!v);
-              pushToast(`Patient ${v ? 'enabled' : 'disabled'} overlay.`, 'info');
-            }
-            if (data?.type === 'captions') {
-              setCaptionsOn(!!v);
-              pushToast(`Patient ${v ? 'enabled' : 'disabled'} captions.`, 'info');
-            }
-            if (data?.type === 'vitals') {
-              setShowVitals(!!v);
-              pushToast(`Patient ${v ? 'showed' : 'hid'} vitals.`, 'info');
-            }
-            if (data?.type === 'vitalsOverlay') {
-              setShowVitalsOverlay(!!v);
-              pushToast(`Patient ${v ? 'enabled' : 'disabled'} stream vitals overlay.`, 'info');
-            }
-            if (data?.type === 'recording') {
-              setIsRecording(!!v);
-              pushToast(`Patient ${v ? 'started' : 'stopped'} recording.`, v ? 'warning' : 'info');
-            }
-            if (data?.type === 'xr') {
-              setXrEnabled(!!v);
-              pushToast(`Patient ${v ? 'enabled' : 'disabled'} XR broadcast.`, 'info');
-            }
-            if (data?.type === 'screenshare') {
-              pushToast(`Patient ${v ? 'started' : 'stopped'} screen sharing.`, 'info');
-            }
-            if (data?.type === 'hand') {
-              if (handTimerRef.current && typeof window !== 'undefined') window.clearTimeout(handTimerRef.current);
-              setHandRaised(!!v);
-              if (v) {
-                pushToast('Patient raised their hand.', 'info');
-                if (typeof window !== 'undefined') {
-                  handTimerRef.current = window.setTimeout(() => setHandRaised(false), 5000);
-                }
-              } else {
-                pushToast('Patient lowered their hand.', 'info');
-              }
-            }
-            if (data?.type === 'export' && typeof v === 'string') {
-              pushToast(`Patient exported ${v}.`, 'success');
-            }
-          }
-        } catch (err) {
-          console.warn('[DataReceived] parse error:', err);
+          return;
         }
-      });
-  };
+
+        if (t === TOPIC_ROSTER) {
+          if (!isRosterEnvelope(parsed)) return;
+
+          if (parsed.type === 'roster.snapshot') {
+            setRoster(parsed.parties || []);
+            return;
+          }
+
+          if (parsed.type === 'roster.party.invited' || parsed.type === 'roster.party.joined') {
+            setRoster((prev) => {
+              const others = prev.filter((x) => x.partyId !== parsed.party.partyId);
+              return [...others, parsed.party];
+            });
+            return;
+          }
+
+          if (parsed.type === 'roster.party.left') {
+            setRoster((prev) =>
+              prev.map((x) =>
+                x.partyId === parsed.partyId ? { ...x, state: 'left', leftAt: parsed.ts } : x
+              )
+            );
+            return;
+          }
+        }
+
+        if (t === TOPIC_CONTROL || t === '') {
+          if (!isRecord(parsed)) return;
+
+          const from = typeof parsed.from === 'string' ? parsed.from : undefined;
+          if (from === 'clinician') return;
+
+          const type = parsed.type;
+          const value = parsed.value;
+
+          if (!isControlKey(type)) return;
+
+          const asBool = (v: unknown) => !!v;
+          const asString = (v: unknown) => (typeof v === 'string' ? v : null);
+
+          if (type === 'overlay') {
+            const next = asBool(value);
+            const prev = togglesRef.current.showOverlay;
+            setShowOverlay(next);
+            if (next !== prev) pushToast(`Patient ${next ? 'enabled' : 'disabled'} overlay.`, 'info');
+            return;
+          }
+
+          if (type === 'captions') {
+            const next = asBool(value);
+            const prev = togglesRef.current.captionsOn;
+            setCaptionsOn(next);
+            if (next !== prev) pushToast(`Patient ${next ? 'enabled' : 'disabled'} captions.`, 'info');
+            return;
+          }
+
+          if (type === 'vitals') {
+            const next = asBool(value);
+            const prev = togglesRef.current.showVitals;
+            setShowVitals(next);
+            if (next !== prev) pushToast(`Patient ${next ? 'showed' : 'hid'} vitals.`, 'info');
+            return;
+          }
+
+          if (type === 'vitalsOverlay') {
+            const next = asBool(value);
+            const prev = togglesRef.current.showVitalsOverlay;
+            setShowVitalsOverlay(next);
+            if (next !== prev) pushToast(`Patient ${next ? 'enabled' : 'disabled'} stream vitals overlay.`, 'info');
+            return;
+          }
+
+          if (type === 'recording') {
+            const next = asBool(value);
+            const prev = togglesRef.current.isRecording;
+            setIsRecording(next);
+            if (next !== prev) pushToast(`Patient ${next ? 'started' : 'stopped'} recording.`, next ? 'warning' : 'info');
+            return;
+          }
+
+          if (type === 'xr') {
+            const next = asBool(value);
+            const prev = togglesRef.current.xrEnabled;
+            setXrEnabled(next);
+            if (next !== prev) pushToast(`Patient ${next ? 'enabled' : 'disabled'} XR broadcast.`, 'info');
+            return;
+          }
+
+          if (type === 'screenshare') {
+            const next = asBool(value);
+            pushToast(`Patient ${next ? 'started' : 'stopped'} screen sharing.`, 'info');
+            return;
+          }
+
+          if (type === 'hand') {
+            const next = asBool(value);
+            if (handTimerRef.current && typeof window !== 'undefined') window.clearTimeout(handTimerRef.current);
+            setHandRaised(next);
+            if (next) {
+              pushToast('Patient raised their hand.', 'info');
+              if (typeof window !== 'undefined') {
+                handTimerRef.current = window.setTimeout(() => setHandRaised(false), 5000);
+              }
+            } else {
+              pushToast('Patient lowered their hand.', 'info');
+            }
+            return;
+          }
+
+          if (type === 'export') {
+            const v = asString(value);
+            if (v) pushToast(`Patient exported ${v}.`, 'success');
+            return;
+          }
+        }
+      };
+
+      r.on(RoomEvent.ConnectionStateChanged, onConn);
+      r.on(RoomEvent.ConnectionQualityChanged, onQuality);
+      r.on(RoomEvent.ParticipantConnected, onLocalParticipantConnected);
+      r.on(RoomEvent.ParticipantConnected, onParticipantConnected);
+      r.on(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+      r.on(RoomEvent.DataReceived, onData);
+
+      detachRoomEventsRef.current = () => {
+        try {
+          r.off(RoomEvent.ConnectionStateChanged, onConn);
+          r.off(RoomEvent.ConnectionQualityChanged, onQuality);
+          r.off(RoomEvent.ParticipantConnected, onLocalParticipantConnected);
+          r.off(RoomEvent.ParticipantConnected, onParticipantConnected);
+          r.off(RoomEvent.ParticipantDisconnected, onParticipantDisconnected);
+          r.off(RoomEvent.DataReceived, onData);
+        } catch {
+          // ignore
+        }
+      };
+    },
+    [detachRoomEvents, pushToast,
+    setRoster,
+    specialistInvite]
+  );
 
   // Join/leave
-  const join = async () => {
+  const join = useCallback(async () => {
     if (!wsUrl) return pushToast('Missing NEXT_PUBLIC_LIVEKIT_URL', 'error');
-    if (state === 'connecting' || state === 'connected') return;
+    if (joinInFlightRef.current) return;
+    if (stateRef.current === 'connecting' || stateRef.current === 'connected') return;
 
     manualLeaveRef.current = false;
+    joinInFlightRef.current = true;
     setState('connecting');
+    setSessionError(null);
 
     try {
       const uid = getOrCreateUid('clinician');
       const visitId =
-        searchParams?.get('visitId') || searchParams?.get('visit') || searchParams?.get('v') || roomId;
+        searchParams.get('visitId') || searchParams.get('visit') || searchParams.get('v') || roomId;
 
-      // allow query token, else sessionStorage
-      const direct = searchParams?.get('joinToken') || searchParams?.get('jt') || '';
+      const direct = searchParams.get('joinToken') || searchParams.get('jt') || '';
       const joinToken = (direct || readJoinJwtFromSession(visitId, roomId)).trim();
 
       if (!joinToken) {
@@ -789,55 +1295,132 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         return;
       }
 
-      const token = await mintRtcToken({
+      const minted = await mintRtcToken({
         roomId,
         visitId,
         uid,
         role: 'clinician',
         joinToken,
         identity: uid,
-      });
+});
 
-      const r = await connectRoom(wsUrl, token, { autoSubscribe: true });
-      wireRoomEvents(r);
+      const extracted = extractMintedRtc(minted, wsUrl);
+      if (!extracted) {
+        setState('disconnected');
+        pushToast('Failed to mint RTC token (invalid response).', 'error');
+        return;
+      }
+
+      try {
+        detachRoomEvents();
+        await roomRef.current?.disconnect();
+      } catch {
+        // ignore
+      }
+
+      const r = await connectRoom(extracted.wsUrl, extracted.token, { autoSubscribe: true });
+      attachRoomEvents(r);
+
       setRoom(r);
+      roomRef.current = r;
+
       setState('connected');
 
-      await r.localParticipant.setMicrophoneEnabled(true);
-      await r.localParticipant.setCameraEnabled(true);
+      try {
+        await r.localParticipant.setMicrophoneEnabled(true);
+        await r.localParticipant.setCameraEnabled(true);
+        setMicOn(true);
+        setCamOn(true);
+      } catch {
+        // media may fail; keep connected
+      }
 
-      setMicOn(true);
-      setCamOn(true);
+      await checkInAndStartSession(roomId);
+
       setQuality(r.localParticipant.connectionQuality);
 
       hasEverConnectedRef.current = true;
       pushToast('Connected to room.', 'success');
       audit('room.join', { netQuality: r.localParticipant.connectionQuality });
-    } catch (err: any) {
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
       console.error('[Join] error', err);
       setState('disconnected');
-      pushToast(`Failed to join room: ${err?.message || err}`, 'error');
-      audit('room.join.error', { message: err?.message || String(err) });
+      pushToast(`Failed to join room: ${message}`, 'error');
+      audit('room.join.error', { message });
+    } finally {
+      joinInFlightRef.current = false;
     }
-  };
+  }, [wsUrl, pushToast,
+    setRoster,
+    audit, roomId, searchParams, attachRoomEvents, detachRoomEvents, checkInAndStartSession]);
 
-  const leave = async () => {
+  const leave = useCallback(async () => {
     manualLeaveRef.current = true;
     audit('room.leave', { reason: 'manual' });
+
+    if (reconnectTimerRef.current && typeof window !== 'undefined') {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
     try {
-      await room?.disconnect();
+      detachRoomEvents();
+      await roomRef.current?.disconnect();
     } catch {
       // ignore
     }
+
+    roomRef.current = null;
     setRoom(null);
     setState('disconnected');
     setMicOn(false);
     setCamOn(false);
+
+    if (typingTimerRef.current && typeof window !== 'undefined') window.clearTimeout(typingTimerRef.current);
+    typingTimerRef.current = null;
+
+    if (handTimerRef.current && typeof window !== 'undefined') window.clearTimeout(handTimerRef.current);
+    handTimerRef.current = null;
+
     pushToast('Left the room.', 'info');
-  };
+  }, [audit, detachRoomEvents, pushToast]);
+
+  // Ensure we cleanup on unmount (no leaks)
+  useEffect(() => {
+    return () => {
+      manualLeaveRef.current = true;
+
+      if (typeof window === 'undefined') {
+        return;
+      }
+
+      if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
+      if (typingTimerRef.current) window.clearTimeout(typingTimerRef.current);
+      if (handTimerRef.current) window.clearTimeout(handTimerRef.current);
+
+      reconnectTimerRef.current = null;
+      typingTimerRef.current = null;
+      handTimerRef.current = null;
+
+      try {
+        detachRoomEventsRef.current?.();
+      } catch {
+        // ignore
+      }
+
+      try {
+        roomRef.current?.disconnect();
+      } catch {
+        // ignore
+      }
+
+      roomRef.current = null;
+    };
+  }, []);
 
   const toggleAndBroadcast = (
-    key: 'overlay' | 'captions' | 'vitals' | 'vitalsOverlay' | 'recording' | 'xr',
+    key: Exclude<ControlKey, 'export'>,
     next: boolean,
     setter: (v: boolean) => void
   ) => {
@@ -848,14 +1431,16 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       key === 'overlay'
         ? 'overlay'
         : key === 'captions'
-        ? 'captions'
-        : key === 'vitals'
-        ? 'vitals'
-        : key === 'vitalsOverlay'
-        ? 'vitals stream overlay'
-        : key === 'recording'
-        ? 'recording'
-        : 'XR broadcast';
+          ? 'captions'
+          : key === 'vitals'
+            ? 'vitals'
+            : key === 'vitalsOverlay'
+              ? 'vitals stream overlay'
+              : key === 'recording'
+                ? 'recording'
+                : key === 'xr'
+                  ? 'XR broadcast'
+                  : key;
 
     pushToast(
       `${next ? 'Enabled' : 'Disabled'} ${label}.`,
@@ -867,18 +1452,15 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     }
   };
 
-  const sendMsg = async () => {
-    if (!room || !msg.trim()) return;
+  const sendMsg = useCallback(async () => {
+    const r = roomRef.current;
+    if (!r || !msg.trim()) return;
+
     setMsgSending(true);
     const text = msg.trim();
+
     try {
-      await room.localParticipant.publishData(
-        new TextEncoder().encode(JSON.stringify({ from: 'clinician', text })),
-        {
-          reliable: true,
-          topic: 'chat',
-        }
-      );
+      await publishChat(text);
       setChat((c) => [...c, { from: 'me', text }]);
       setMsg('');
       if (chatBoxRef.current) chatBoxRef.current.scrollTop = chatBoxRef.current.scrollHeight;
@@ -888,7 +1470,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     } finally {
       setMsgSending(false);
     }
-  };
+  }, [msg, publishChat, pushToast]);
 
   const onChatKey = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -899,7 +1481,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     const now = Date.now();
     if (now - typingThrottledRef.current > 1200) {
       typingThrottledRef.current = now;
-      publishControl('typing', true);
+      publishTyping();
     }
   };
 
@@ -910,7 +1492,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
     if (videoCardRef.current && !document.fullscreenElement) {
       try {
-        await (videoCardRef.current as any).requestFullscreen?.();
+        await videoCardRef.current.requestFullscreen?.();
       } catch {
         // ignore
       }
@@ -931,13 +1513,13 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const toggleMic = () => {
     const next = !micOn;
     setMicOn(next);
-    room?.localParticipant.setMicrophoneEnabled(next).catch(() => {});
+    roomRef.current?.localParticipant.setMicrophoneEnabled(next).catch(() => {});
     pushToast(next ? 'Microphone on.' : 'Microphone off.', 'info');
   };
   const toggleCam = () => {
     const next = !camOn;
     setCamOn(next);
-    room?.localParticipant.setCameraEnabled(next).catch(() => {});
+    roomRef.current?.localParticipant.setCameraEnabled(next).catch(() => {});
     pushToast(next ? 'Camera on.' : 'Camera off.', 'info');
   };
 
@@ -950,35 +1532,27 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   const showLeftInfo = !presentation && !leftCollapsed;
   const showRightPane = !presentation && !rightCollapsed;
-
-  // If dock-left, we keep a left column even when leftCollapsed (video column still exists).
   const showLeftColumn = !presentation && (showLeftInfo || dockToLeft);
 
-  // Column template
   const gridCols = presentation
     ? 'grid-cols-1'
     : showLeftColumn && showRightPane
-    ? dockToLeft
-      ? // left(video+optional info), main(workspaces), right(notes)
-        'lg:grid-cols-[1.05fr_2.15fr_1.2fr]'
-      : // original-ish
-        'lg:grid-cols-[1.2fr_2fr_1.2fr]'
-    : showLeftColumn && !showRightPane
-    ? dockToLeft
-      ? // left(video), main(workspaces) -> maximize workspace
-        'lg:grid-cols-[1.0fr_3.0fr]'
-      : // left(info), main(video+workspaces)
-      videoNarrow
-      ? 'lg:grid-cols-[0.9fr_2.6fr]'
-      : 'lg:grid-cols-[1.2fr_2fr]'
-    : !showLeftColumn && showRightPane
-    ? // main + right
-      videoNarrow
-      ? 'lg:grid-cols-[2.6fr_0.9fr]'
-      : 'lg:grid-cols-[2fr_1.2fr]'
-    : 'grid-cols-1';
+      ? dockToLeft
+        ? 'lg:grid-cols-[1.05fr_2.15fr_1.2fr]'
+        : 'lg:grid-cols-[1.2fr_2fr_1.2fr]'
+      : showLeftColumn && !showRightPane
+        ? dockToLeft
+          ? 'lg:grid-cols-[1.0fr_3.0fr]'
+          : videoNarrow
+            ? 'lg:grid-cols-[0.9fr_2.6fr]'
+            : 'lg:grid-cols-[1.2fr_2fr]'
+        : !showLeftColumn && showRightPane
+          ? videoNarrow
+            ? 'lg:grid-cols-[2.6fr_0.9fr]'
+            : 'lg:grid-cols-[2fr_1.2fr]'
+          : 'grid-cols-1';
 
-  // Auto-reconnect on unexpected drop
+  // Auto-reconnect on unexpected drop (no duplicate timers)
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (state !== 'disconnected') return;
@@ -994,14 +1568,13 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     return () => {
       if (reconnectTimerRef.current) window.clearTimeout(reconnectTimerRef.current);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
+  }, [state, join]);
 
   // Keyboard shortcuts + help modal
   const [helpOpen, setHelpOpen] = useState(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName?.toLowerCase();
+      const tag = (e.target as HTMLElement | null)?.tagName?.toLowerCase();
       const isTyping = tag === 'input' || tag === 'textarea';
 
       if (e.key === 'Escape') {
@@ -1115,9 +1688,9 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
           a.id === id
             ? {
                 ...a,
-                status: updated?.status ?? status,
-                severity: updated?.severity ?? a.severity,
-                reaction: updated?.reaction ?? a.reaction,
+                status: (updated as { status?: string } | null)?.status ?? status,
+                severity: (updated as { severity?: string } | null)?.severity ?? a.severity,
+                reaction: (updated as { reaction?: string } | null)?.reaction ?? a.reaction,
               }
             : a
         )
@@ -1147,14 +1720,19 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const created = await res.json().catch(() => null);
 
+      const c = created as Record<string, unknown> | null;
+
       const newBrief: PatientAllergyBrief = {
-        id: String(created?.id ?? created?.allergyId ?? `alg-${Date.now()}`),
-        substance: created?.substance ?? payload.substance,
-        reaction: created?.reaction ?? payload.reaction,
-        severity: created?.severity ?? payload.severity,
-        criticality: created?.criticality ?? null,
-        status: created?.status ?? payload.status,
-        recordedAt: created?.recordedAt ?? new Date().toISOString(),
+        id: String(c?.id ?? c?.allergyId ?? `alg-${Date.now()}`),
+        substance: (typeof c?.substance === 'string' ? c.substance : null) ?? payload.substance,
+        reaction:
+          (typeof c?.reaction === 'string' ? c.reaction : null) ??
+          (typeof payload.reaction === 'string' ? payload.reaction : null),
+        severity: (typeof c?.severity === 'string' ? c.severity : null) ?? payload.severity,
+        criticality: (typeof c?.criticality === 'string' ? c.criticality : null) ?? null,
+        status: (typeof c?.status === 'string' ? c.status : null) ?? payload.status,
+        recordedAt:
+          (typeof c?.recordedAt === 'string' ? c.recordedAt : null) ?? new Date().toISOString(),
       };
 
       setPatientAllergies((prev) => [...(prev || []), newBrief]);
@@ -1171,7 +1749,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   // -------------------------
   const encounterSummary = useMemo(() => {
     const lines: string[] = [];
-    lines.push(`Reason for visit: ${appt.reason || '—'}`);
+    lines.push(`Reason for visit: ${appt.reason || 'â€”'}`);
     if (soap.s) lines.push(`Subjective / Symptoms:\n${soap.s}`);
     if (soap.a) lines.push(`Assessment:\n${soap.a}`);
     if (soap.p) lines.push(`Plan / Treatment:\n${soap.p}`);
@@ -1183,8 +1761,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         'Medications prescribed:\n' +
           medsOrdered
             .map((r) => {
-              const parts = [r.drug, r.dose, r.route, r.freq, r.duration].filter(Boolean).join(' · ');
-              return `• ${parts}`;
+              const parts = [r.drug, r.dose, r.route, r.freq, r.duration].filter(Boolean).join(' Â· ');
+              return `â€¢ ${parts}`;
             })
             .join('\n')
       );
@@ -1196,8 +1774,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         'Lab tests ordered:\n' +
           labsOrdered
             .map((l) => {
-              const parts = [l.test, l.priority, l.specimen, l.icd].filter(Boolean).join(' · ');
-              return `• ${parts}`;
+              const parts = [l.test, l.priority, l.specimen, l.icd].filter(Boolean).join(' Â· ');
+              return `â€¢ ${parts}`;
             })
             .join('\n')
       );
@@ -1208,8 +1786,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         .filter((a) => (a.status ?? '').toLowerCase() !== 'entered-in-error')
         .map((a) => {
           const sev = a.severity ? ` [${a.severity}]` : '';
-          const rxn = a.reaction ? ` — ${a.reaction}` : '';
-          return `• ${a.substance}${sev}${rxn}`;
+          const rxn = a.reaction ? ` â€” ${a.reaction}` : '';
+          return `â€¢ ${a.substance}${sev}${rxn}`;
         });
       lines.push('Recorded allergies:\n' + algs.join('\n'));
     }
@@ -1220,20 +1798,45 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   // -------------------------
   // End Session -> callback from SessionConclusions
   // -------------------------
-  const handleSessionEnd = useCallback(() => {
-    if (!encounterId) {
+  const handleSessionEnd = useCallback(async () => {
+    if (!consultationSession?.id) {
       pushToast(
-        'Session ended. Draft kept locally, but no encounterId was provided so the server was not updated.',
-        'info',
-        'Session ended'
+        'Session draft saved locally, but no consultation session is attached to this call.',
+        'warning',
+        'Session incomplete'
       );
-      audit('encounter.end.local-only', {});
+      audit('encounter.end.missing_session', { encounterId: encounterId || null });
       return;
     }
 
-    pushToast('Session ended and encounter marked complete.', 'success', 'Encounter closed');
-    audit('encounter.end', { encounterId });
-  }, [encounterId, audit, pushToast]);
+    try {
+      const completed = await completeConsultationSession(consultationSession.id, {
+        encounterStatus: 'completed',
+        encounterReachedClinicalThreshold: true,
+        summaryPayload: {
+          soap,
+          patientEducation,
+          erxSummary,
+          roomId,
+        },
+      });
+
+      setConsultationSession(completed);
+      pushToast('Session ended and consultation marked complete.', 'success', 'Encounter closed');
+      audit('encounter.end', {
+        encounterId: encounterId || null,
+        sessionId: completed.id,
+        outcome: completed.outcome || null,
+      });
+    } catch (err: any) {
+      pushToast(err?.message || 'Failed to complete consultation session.', 'error', 'Completion failed');
+      audit('encounter.end.error', {
+        encounterId: encounterId || null,
+        sessionId: consultationSession.id,
+        error: err?.message || 'unknown_error',
+      });
+    }
+  }, [consultationSession, soap, patientEducation, erxSummary, roomId, encounterId, pushToast, audit]);
 
   // =========================
   // Render helpers
@@ -1275,22 +1878,39 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     <div className="min-h-screen bg-gray-50" data-density={dense ? 'compact' : 'comfort'}>
       <header className="sticky top-0 z-40 flex items-center justify-between p-4 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 shadow-sm">
         <div className="flex items-center gap-4">
-          <h1 className="text-xl font-semibold">SFU Televisit — Room {roomId}</h1>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-4">
+              <h1 className="text-xl font-semibold">SFU Televisit â€” Room {roomId}</h1>
+            </div>
+
+            <ClinicianRosterChips roster={roster} />
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
-          {/* Status / QoS pills */}
           <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border">
             <span
               className={`h-2 w-2 rounded-full ${
                 state === 'connected'
                   ? 'bg-emerald-500'
                   : state === 'connecting'
-                  ? 'bg-amber-500'
-                  : 'bg-slate-400'
+                    ? 'bg-amber-500'
+                    : 'bg-slate-400'
               }`}
             />
             {state}
+          </span>
+
+          <span
+            className={`text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${
+              rosterAvailability.status === 'green'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : rosterAvailability.status === 'amber'
+                ? 'border-amber-200 bg-amber-50 text-amber-800'
+                : 'border-rose-200 bg-rose-50 text-rose-800'
+            }`}
+          >
+            Roster: {rosterAvailability.status}
           </span>
 
           {quality !== undefined && (
@@ -1305,7 +1925,22 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
             </span>
           )}
 
-          {/* Video dock controls */}
+          {consultationSession?.id ? (
+            <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-slate-200 bg-white text-slate-700">
+              Session: {consultationSession.state}
+            </span>
+          ) : appointmentId ? (
+            <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800">
+              Session pending
+            </span>
+          ) : null}
+
+          {sessionBusy ? (
+            <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-700">
+              Resolving sessionâ€¦
+            </span>
+          ) : null}
+
           {!presentation && (
             <>
               {videoIsUndocked ? (
@@ -1372,7 +2007,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
             {dense ? 'Comfort' : 'Compact'}
           </button>
 
-          {/* Wider notes / narrow video toggle */}
           <button
             onClick={() => setVideoNarrow((v) => !v)}
             aria-pressed={videoNarrow}
@@ -1406,6 +2040,13 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
             {rightCollapsed ? 'Show Right' : 'Hide Right'}
           </button>
 
+          <button
+            onClick={() => specialistInvite.openInviteDrawer()}
+            className="px-3 py-1.5 rounded-full border border-violet-200 bg-violet-50 shadow-sm hover:bg-violet-100 text-sm text-violet-700"
+          >
+            Invite Specialist
+          </button>
+
           <Link href="/appointments" className="text-sm text-blue-600 hover:underline">
             Back
           </Link>
@@ -1431,7 +2072,50 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       {state === 'reconnecting' && (
         <div className="sticky top-14 z-40 mx-4 my-2 rounded border bg-amber-50 text-amber-900 px-3 py-2 flex items-center gap-2">
           <span className="h-3 w-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
-          Reconnecting…
+          Reconnectingâ€¦
+        </div>
+      )}
+
+      {sessionError && (
+        <div className="mx-4 my-2 rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+          {sessionError}
+        </div>
+      )}
+
+      {specialistInvite.loadingPersistedQuote && (
+        <div className="mx-4 my-2 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+          Loading persisted specialist invite stateâ€¦
+        </div>
+      )}
+
+      {specialistInvite.pendingInviteQuote && (
+        <div className="mx-4 my-2 rounded border border-violet-200 bg-violet-50 px-3 py-2 text-sm text-violet-800">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="font-medium">Specialist invite pending patient approval</div>
+              <div className="mt-1 text-xs text-violet-700">
+                Quote ID: <span className="font-mono">{specialistInvite.pendingInviteQuote.quoteId}</span>
+                {' Â· '}
+                Total: <span className="font-semibold">R{specialistInvite.pendingInviteQuote.totalZar.toFixed(2)}</span>
+                {specialistInvite.pendingInviteQuote.sessionId ? (
+                  <>
+                    {' Â· '}
+                    Session: <span className="font-mono">{specialistInvite.pendingInviteQuote.sessionId}</span>
+                  </>
+                ) : null}
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => specialistInvite.dismissPendingInviteQuote()}
+                className="rounded border border-violet-200 bg-white px-2.5 py-1 text-xs text-violet-700 hover:bg-violet-100"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -1449,17 +2133,14 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         }`}
       >
         <div className={`grid md:gap-6 gap-3 transition-[grid-template-columns] duration-300 ${gridCols}`}>
-          {/* LEFT COLUMN */}
           {!presentation && showLeftColumn && (
             <div className="flex flex-col space-y-4">
-              {/* If dock-left, video lives here (fixed column; never overlays content) */}
               {!videoIsUndocked && dockToLeft && (
                 <div className="sticky top-4 z-20" ref={videoCardRef}>
                   {VideoDockNode}
                 </div>
               )}
 
-              {/* Left info content remains optional */}
               {!presentation && !leftCollapsed && (
                 <>
                   <Card
@@ -1489,7 +2170,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                             profile.gender ? `Sex: ${profile.gender}` : null,
                           ]
                             .filter(Boolean)
-                            .join(' · ') || '—'
+                            .join(' Â· ') || 'â€”'
                         }
                       />
 
@@ -1498,7 +2179,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                         value={
                           !patientAllergies || patientAllergies.length === 0
                             ? 'No allergies recorded'
-                            : `${allergySummary} · ${allergyCounts.total} total, ${allergyCounts.active} active, ${allergyCounts.resolved} resolved`
+                            : `${allergySummary} Â· ${allergyCounts.total} total, ${allergyCounts.active} active, ${allergyCounts.resolved} resolved`
                         }
                       />
 
@@ -1521,7 +2202,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                             profile.email ? `Email: ${profile.email}` : null,
                           ]
                             .filter(Boolean)
-                            .join(' · ')}
+                            .join(' Â· ')}
                         />
                       )}
                     </Collapse>
@@ -1541,8 +2222,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                           aria-label="Live vital signs from connected devices"
                         >
                           <Tile label="HR" value={`${num2(vitals.hr)} bpm`} />
-                          <Tile label="SpO₂" value={`${num2(vitals.spo2)} %`} />
-                          <Tile label="Temp" value={`${num2(vitals.tempC)} °C`} />
+                          <Tile label="SpOâ‚‚" value={`${num2(vitals.spo2)} %`} />
+                          <Tile label="Temp" value={`${num2(vitals.tempC)} Â°C`} />
                           <Tile label="RR" value={`${num2(vitals.rr)} /min`} />
                           <Tile label="BP" value={fmtBP(vitals.sys, vitals.dia)} />
                         </div>
@@ -1554,114 +2235,26 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                     <IntegratedIoMTs roomId={roomId} patientId={profile.id} dense={dense} defaultOpen />
                   </Card>
 
-                  <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen />
+                  <SmartWearablesPanel roomId={roomId} dense={dense} defaultOpen patientId={profile.id} />
                 </>
               )}
             </div>
           )}
 
-          {/* MAIN COLUMN (Video in center if docked-center; Specialist Workspaces always here) */}
           <div className="flex flex-col space-y-4">
-            {/* Docked-center video lives here (fixed split layout; never overlays content) */}
             {!presentation && !videoIsUndocked && !dockToLeft && (
               <div className="sticky top-4 z-20" ref={videoCardRef}>
                 {VideoDockNode}
               </div>
             )}
 
-            {/* Presentation always shows video in-flow */}
             {presentation && (
               <div className="sticky top-4 z-20" ref={videoCardRef}>
                 {VideoDockNode}
               </div>
             )}
-
-            {/* Specialist Workspaces pane */}
-            {!presentation && (
-              <Card
-                title="Specialist Workspaces"
-                dense={dense}
-                gradient
-                toolbar={<CollapseBtn open={specialistOpen} onClick={() => setSpecialistOpen((v) => !v)} />}
-              >
-                <Collapse open={specialistOpen}>
-                  <div className={dense ? 'p-2' : 'p-3'}>
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-xs text-gray-500">
-                          One SFU session, multiple specialty stations. Same patient + encounter context.
-                        </div>
-                        <div className="mt-1 flex flex-wrap items-center gap-2">
-                          <span className="text-[11px] px-2 py-0.5 rounded-full border bg-white text-gray-700">
-                            Room: <span className="font-mono">{roomId}</span>
-                          </span>
-                          {encounterId ? (
-                            <span className="text-[11px] px-2 py-0.5 rounded-full border bg-white text-gray-700">
-                              Encounter: <span className="font-mono">{encounterId}</span>
-                            </span>
-                          ) : (
-                            <span className="text-[11px] px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-800">
-                              Encounter context unavailable for this session
-                            </span>
-                          )}
-                          <span className="text-[11px] px-2 py-0.5 rounded-full border bg-white text-gray-700">
-                            Patient: <span className="font-medium">{profile.name}</span>
-                          </span>
-                          {videoIsUndocked && (
-                            <span className="text-[11px] px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-800">
-                              Video: Floating (undocked)
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="shrink-0 flex items-center gap-2">
-                        <button
-                          type="button"
-                          className="text-xs px-2 py-1 rounded border bg-white hover:bg-gray-50"
-                          onClick={() => {
-                            pushToast(
-                              'Specialist workspaces are mounted inside this SFU session. Use the tabs to switch stations.',
-                              'info',
-                              'Specialist Workspaces'
-                            );
-                          }}
-                          title="What is this?"
-                        >
-                          Help
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 rounded border bg-white shadow-sm">
-                      <div className="flex items-center justify-between p-1">
-                        <Tabs<SpecialistTab>
-                          active={specialistTab}
-                          onChange={(k) => setSpecialistTab(k)}
-                          items={[
-                            { key: 'dental', label: 'Dental' },
-                            { key: 'physio', label: 'Physio' },
-                            { key: 'xray', label: 'X-Ray' },
-                            { key: 'ent', label: 'ENT' },
-                            { key: 'optometry', label: 'Optometry' },
-                          ]}
-                        />
-                      </div>
-                      <div className={dense ? 'p-2' : 'p-3'}>
-                        {specialistTab === 'dental' && <DentalWorkspaceSFU />}
-                        {specialistTab === 'physio' && <PhysioWorkspaceSFU />}
-                        {specialistTab === 'xray' && <XrayWorkspaceSFU />}
-                        {specialistTab === 'ent' && <EntWorkspaceSFU />}
-                        {specialistTab === 'optometry' && <OptometryWorkspaceSFU />}
-                      </div>
-                    </div>
-                  </div>
-                </Collapse>
-              </Card>
-            )}
           </div>
 
-          {/* RIGHT COLUMN */}
           {!presentation && !rightCollapsed && (
             <div className="flex flex-col space-y-4">
               <div className="px-2">
@@ -1671,8 +2264,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
               <div className="shadow-sm bg-white rounded">
                 <div className="flex items-center justify-between p-1">
                   <Tabs<RightTab>
-                    active={rightTab}
-                    onChange={(key) => setRightTab(key)}
+                    active={rightTab as RightTab}
+                    onChange={(key) => setUi('rightTab', key as any)}
                     items={[
                       { key: 'soap', label: 'Sub' },
                       { key: 'erx', label: 'eRx' },
@@ -1683,7 +2276,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                   />
                   <button
                     className="ml-2 px-2 py-1 text-xs border rounded"
-                    onClick={() => setRightPanelsOpen((v) => !v)}
+                    onClick={() => setUi('rightCollapsed', rightPanelsOpen)}
                     aria-pressed={rightPanelsOpen}
                     aria-label={rightPanelsOpen ? 'Collapse right panels' : 'Expand right panels'}
                     title={rightPanelsOpen ? 'Collapse' : 'Expand'}
@@ -1701,7 +2294,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                         Quickly capture symptoms, allergies, HPI and codes. Free text always allowed.
                       </div>
 
-                      {/* Current Medication */}
                       <div className="mb-2 border rounded bg-white">
                         <div className="flex items-center justify-between px-2 py-1">
                           <div className="flex flex-col">
@@ -1732,9 +2324,9 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                                 {activeMeds.map((m) => (
                                   <li key={m.id}>
                                     <span className="font-medium">{m.name}</span>
-                                    {m.dose && <span className="text-gray-700"> · {m.dose}</span>}
-                                    {m.frequency && <span className="text-gray-700"> · {m.frequency}</span>}
-                                    {m.route && <span className="text-gray-500"> · {m.route}</span>}
+                                    {m.dose && <span className="text-gray-700"> Â· {m.dose}</span>}
+                                    {m.frequency && <span className="text-gray-700"> Â· {m.frequency}</span>}
+                                    {m.route && <span className="text-gray-500"> Â· {m.route}</span>}
                                     {m.status && m.status.toLowerCase() !== 'active' && (
                                       <span className="ml-1 text-[11px] text-gray-500">({m.status})</span>
                                     )}
@@ -1754,7 +2346,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                         </Collapse>
                       </div>
 
-                      {/* Allergies structured panel */}
                       <div className="mt-2 border rounded bg-white">
                         <div className="flex items-center justify-between px-2 py-1">
                           <div className="text-xs font-medium text-gray-700">Allergies</div>
@@ -1794,7 +2385,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                         </Collapse>
                       </div>
 
-                      {/* Symptoms ICD-10 combobox */}
                       <div className="mt-3 space-y-1">
                         <div className="text-xs text-gray-500">Symptoms (ICD-10 autocomplete; free text allowed)</div>
                         <div className="relative">
@@ -1855,8 +2445,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                                 icdSympOptionsFinal.find((o) => o.code.toLowerCase() === norm) ||
                                 icdSympOptionsFinal.find((o) => o.code.toLowerCase() === direct.toLowerCase()) ||
                                 icdSympOptionsFinal.find(
-                                  (o) =>
-                                    o.text.toLowerCase().startsWith(norm) || o.text.toLowerCase().includes(norm)
+                                  (o) => o.text.toLowerCase().startsWith(norm) || o.text.toLowerCase().includes(norm)
                                 );
 
                               if (opt) {
@@ -1895,7 +2484,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                                   }}
                                 >
                                   <span className="font-mono text-xs mr-1">{o.code}</span>
-                                  <span>{o.text.replace(/^([A-Z0-9.]+)\s+—\s*/, '')}</span>
+                                  <span>{o.text.replace(/^([A-Z0-9.]+)\s+â€”\s*/, '')}</span>
                                 </li>
                               ))}
                             </ul>
@@ -1913,18 +2502,21 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                         label="Presenting Complaints"
                         value={soap.a}
                         onChange={(v) => setSoap({ ...soap, a: v })}
+                        dictation
                       />
                       <TextBlock
                         label="History of Present Illness (HPI)"
                         value={soap.p}
                         onChange={(v) => setSoap({ ...soap, p: v })}
                         multiline
+                        dictation
                       />
                       <TextBlock
                         label="Patient Education"
                         value={patientEducation}
                         onChange={setPatientEducation}
                         multiline
+                        dictation
                       />
                     </Card>
                   )}
@@ -1947,7 +2539,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                     />
                   )}
 
-                  {rightTab === 'conclusions' && (
+                  {(rightTab as string) === 'conclusions' && (
                     <Card title="Conclusions" dense={dense} gradient>
                       <div className="text-xs text-gray-500 mb-2">
                         Summarize and finalize. You can also prepare referrals below.
@@ -1988,11 +2580,11 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                       onChangeSoap={(next) => setSoap(next)}
                       onChangePatientEducation={setPatientEducation}
                       onToast={pushToast}
-                      onShowSoapTab={() => setRightTab('soap')}
+                      onShowSoapTab={() => setUi('rightTab', 'soap')}
                     />
                   )}
 
-                  {rightTab === 'history' && (
+                  {(rightTab as string) === 'history' && (
                     <Card title="History" dense={dense} gradient>
                       <div className="text-xs text-gray-500 mb-2">
                         Longitudinal view of the patient: cases, chronic conditions, medications, allergies, labs,
@@ -2012,7 +2604,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                 </>
               </Collapse>
 
-              {/* Room Chat */}
               <Card
                 title={
                   <span>
@@ -2054,7 +2645,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                     ))}
                     {chat.length === 0 && (
                       <div className="text-gray-400 text-sm italic flex items-center gap-2">
-                        <span aria-hidden>💬</span>
+                        <span aria-hidden>ðŸ’¬</span>
                         No messages yet
                       </div>
                     )}
@@ -2068,7 +2659,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                       className="border rounded px-2 py-1 text-sm flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 resize-y"
                       placeholder={
                         state === 'connected'
-                          ? 'Type message… (Enter to send, Shift+Enter for newline)'
+                          ? 'Type messageâ€¦ (Enter to send, Shift+Enter for newline)'
                           : 'Join the room to send messages'
                       }
                       aria-label="Type chat message"
@@ -2089,7 +2680,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
                 </Collapse>
               </Card>
 
-              {/* Bedside Monitor */}
               <section ref={vitalsGraphHolder.ref}>
                 <Card
                   title="Bedside Monitor (live)"
@@ -2111,7 +2701,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         </div>
       </div>
 
-      {/* Floating (Undocked) video pane — overlays by design */}
       {videoIsUndocked && (
         <div
           className="fixed z-[900] w-[min(520px,92vw)]"
@@ -2122,7 +2711,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
           }}
         >
           <div className="rounded-xl shadow-2xl">
-            {/* Drag handle */}
             <div
               className="flex items-center justify-between px-3 py-2 rounded-t-xl border border-gray-200 bg-white cursor-move select-none"
               onMouseDown={(e) => startFloatDrag(e.clientX, e.clientY)}
@@ -2134,7 +2722,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
               title="Drag to move floating video"
             >
               <div className="text-xs text-gray-600">
-                Floating Video <span className="text-gray-400">· drag to move</span>
+                Floating Video <span className="text-gray-400">Â· drag to move</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -2154,7 +2742,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
               </div>
             </div>
 
-            {/* Content */}
             <div ref={videoCardRef} className="rounded-b-xl overflow-hidden">
               {VideoDockNode}
             </div>
@@ -2162,7 +2749,6 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         </div>
       )}
 
-      {/* Help modal */}
       {helpOpen && (
         <div
           className="fixed inset-0 z-[1000] grid place-items-center bg-black/40 p-4"
@@ -2179,51 +2765,72 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
             </div>
             <ul className="text-sm space-y-1">
               <li>
-                <b>M</b> — Toggle mic
+                <b>M</b> â€” Toggle mic
               </li>
               <li>
-                <b>V</b> — Toggle camera
+                <b>V</b> â€” Toggle camera
               </li>
               <li>
-                <b>C</b> — Toggle captions
+                <b>C</b> â€” Toggle captions
               </li>
               <li>
-                <b>O</b> — Toggle overlay
+                <b>O</b> â€” Toggle overlay
               </li>
               <li>
-                <b>H</b> — Toggle vitals
+                <b>H</b> â€” Toggle vitals
               </li>
               <li>
-                <b>S</b> — Toggle vitals stream overlay
+                <b>S</b> â€” Toggle vitals stream overlay
               </li>
               <li>
-                <b>R</b> — Toggle recording
+                <b>R</b> â€” Toggle recording
               </li>
               <li>
-                <b>X</b> — Toggle XR broadcast
+                <b>X</b> â€” Toggle XR broadcast
               </li>
               <li>
-                <b>F</b> — Full screen
+                <b>F</b> â€” Full screen
               </li>
               <li>
-                <b>L</b> — Toggle left pane
+                <b>L</b> â€” Toggle left pane
               </li>
               <li>
-                <b>K</b> — Toggle right pane
+                <b>K</b> â€” Toggle right pane
               </li>
               <li>
-                <b>?</b> — Show this help
+                <b>?</b> â€” Show this help
               </li>
               <li>
-                <b>Esc</b> — Close this help
+                <b>Esc</b> â€” Close this help
               </li>
             </ul>
           </div>
         </div>
       )}
 
-      {/* Toasts */}
+      <InviteSpecialistDrawer
+        open={specialistInvite.inviteDrawerOpen}
+        onClose={() => specialistInvite.closeInviteDrawer()}
+        patientPlan={patientPlan}
+        leadClinicianPlan={leadClinicianPlan}
+        leadClinicianId={clinicianIdParam}
+        leadClinicianFeeZar={leadClinicianFeeZar}
+        remotePatientParticipants={remotePatientParticipants}
+        remoteObservers={remoteObservers}
+        onConfirm={async ({ invitedClinicians, quote }) => {
+          await specialistInvite.confirmInvite({ invitedClinicians, quote });
+        }}
+      />
+
       <ToastViewport toasts={toasts} onClose={closeToast} />
     </div>
   );
 }
+
+
+
+
+
+
+
+
