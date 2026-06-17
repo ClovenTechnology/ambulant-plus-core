@@ -510,6 +510,69 @@ function InnerPatientSfuShell({ params }: Props) {
     [publishJson],
   );
 
+
+  const publishTelevisitVitals = useCallback(
+    async (reading: unknown) => {
+      if (!reading || typeof reading !== 'object') return;
+
+      const record = reading as Record<string, unknown>;
+      const rawPayload = record.payload;
+      const payload =
+        rawPayload && typeof rawPayload === 'object' && !Array.isArray(rawPayload)
+          ? (rawPayload as Record<string, unknown>)
+          : {};
+
+      const kind = typeof record.kind === 'string' ? record.kind : '';
+      const label = typeof record.label === 'string' ? record.label : kind || 'vital';
+      const at = typeof record.at === 'string' ? record.at : new Date().toISOString();
+      const parsedAt = Date.parse(at);
+      const ts = Number.isFinite(parsedAt) ? parsedAt : Date.now();
+
+      const num = (...values: unknown[]) => {
+        for (const value of values) {
+          if (typeof value === 'number' && Number.isFinite(value)) return value;
+          if (typeof value === 'string' && value.trim()) {
+            const next = Number(value);
+            if (Number.isFinite(next)) return next;
+          }
+        }
+        return undefined;
+      };
+
+      const packet: Record<string, unknown> = {
+        type: 'vitals.snapshot',
+        from: 'patient',
+        source: 'health_monitor',
+        roomId,
+        patientId: appt.patientId,
+        encounterId: encounterId || null,
+        kind,
+        label,
+        at,
+        ts,
+        payload,
+      };
+
+      if (kind === 'bp') {
+        packet.sys = num(payload.systolic, payload.sys);
+        packet.dia = num(payload.diastolic, payload.dia);
+        packet.hr = num(payload.pulse, payload.bpm, payload.hr);
+      } else if (kind === 'spo2') {
+        packet.spo2 = num(payload.pct, payload.spo2, payload.value);
+        packet.hr = num(payload.pulse, payload.bpm, payload.hr);
+      } else if (kind === 'hr') {
+        packet.hr = num(payload.bpm, payload.pulse, payload.hr, payload.value);
+      } else if (kind === 'temp') {
+        packet.tempC = num(payload.celsius, payload.temp, payload.temperature, payload.value);
+      } else if (kind === 'glu') {
+        packet.glucose = num(payload.glucose, payload.value, payload.mmolL, payload.mgDl, payload.mg_dl);
+      }
+
+      await publishJson('vitals', packet);
+    },
+    [appt.patientId, encounterId, publishJson, roomId],
+  );
+
   const payment = usePaymentApproval({
     toast,
     sendPaymentResponse: useCallback(
@@ -1103,7 +1166,14 @@ function InnerPatientSfuShell({ params }: Props) {
               roomId={roomId}
               encounterId={encounterId}
               dense={dense}
-              embeddedIoMT={<IoMTPane />}
+              embeddedIoMT={
+                <IoMTPane
+                  roomId={roomId}
+                  patientId={appt.patientId}
+                  encounterId={encounterId}
+                  onHealthMonitorResult={publishTelevisitVitals}
+                />
+              }
             />
           ) : null}
 

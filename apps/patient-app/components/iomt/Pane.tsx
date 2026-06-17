@@ -18,6 +18,13 @@ import OtoPane from '@/components/iomt/OtoPane';
 
 type Tab = 'wearable' | 'hm' | 'stetho' | 'oto';
 
+type IoMTPaneProps = {
+  roomId?: string;
+  patientId?: string;
+  encounterId?: string | null;
+  onHealthMonitorResult?: (result: unknown) => void;
+};
+
 type TabMeta = {
   id: Tab;
   title: string;
@@ -194,9 +201,15 @@ function ConsoleTabCard({
 function ActiveSurface({
   tab,
   href,
+  roomId,
+  patientId,
+  onHealthMonitorResult,
 }: {
   tab: Tab;
   href: string;
+  roomId?: string;
+  patientId?: string;
+  onHealthMonitorResult?: (result: unknown) => void;
 }) {
   return (
     <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
@@ -220,14 +233,14 @@ function ActiveSurface({
       </div>
 
       {tab === 'wearable' ? <WearablePane /> : null}
-      {tab === 'hm' ? <HMPane /> : null}
+      {tab === 'hm' ? <HMPane roomId={roomId} patientId={patientId} onResult={onHealthMonitorResult} /> : null}
       {tab === 'stetho' ? <StethoPane /> : null}
       {tab === 'oto' ? <OtoPane /> : null}
     </section>
   );
 }
 
-export default function IoMTPane() {
+export default function IoMTPane({ roomId, patientId, onHealthMonitorResult }: IoMTPaneProps = {}) {
   const [tab, setTab] = useState<Tab>('wearable');
 
   const activeMeta = useMemo(
@@ -259,7 +272,13 @@ export default function IoMTPane() {
         </div>
       </section>
 
-      <ActiveSurface tab={tab} href={activeMeta.href} />
+      <ActiveSurface
+        tab={tab}
+        href={activeMeta.href}
+        roomId={roomId}
+        patientId={patientId}
+        onHealthMonitorResult={onHealthMonitorResult}
+      />
     </div>
   );
 }
