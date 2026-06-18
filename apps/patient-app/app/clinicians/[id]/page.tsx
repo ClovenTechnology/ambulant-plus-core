@@ -140,8 +140,7 @@ export default function ClinicianBioPage({
   const router = useRouter();
   const id = params.id;
 
-  const GATEWAY = process.env.NEXT_PUBLIC_APIGW_BASE ?? '';
-
+  
   const [profile, setProfile] = useState<BookingProfile | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -153,13 +152,10 @@ export default function ClinicianBioPage({
         setBusy(true);
         setErr(null);
 
-        // Preferred endpoint: effective booking profile (fees + durations + buffers + refund policy)
-        if (!GATEWAY) {
-          throw new Error('Clinician profile service is not configured.');
-        }
-
+        // Preferred endpoint: local patient-app proxy.
+        // Never call API Gateway directly from the browser for patient profile detail.
         const r = await fetch(
-          `${GATEWAY}/api/clinicians/${encodeURIComponent(id)}/booking-profile`,
+          `/api/clinicians/${encodeURIComponent(id)}/booking-profile`,
           {
             cache: 'no-store',
           },
@@ -185,7 +181,7 @@ export default function ClinicianBioPage({
     return () => {
       cancelled = true;
     };
-  }, [GATEWAY, id]);
+  }, [id]);
 
   const policy = useMemo(() => {
     return (

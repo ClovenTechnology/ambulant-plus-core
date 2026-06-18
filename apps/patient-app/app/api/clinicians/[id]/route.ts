@@ -64,7 +64,7 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
   }
 
   const id = encodeURIComponent(ctx.params.id);
-  const upstreamUrl = `${base}/api/clinicians/${id}/booking-profile`;
+  const upstreamUrl = `${base}/api/clinicians/${id}`;
 
   try {
     const r = await fetch(upstreamUrl, {
@@ -83,7 +83,7 @@ export async function GET(req: NextRequest, ctx: { params: { id: string } }) {
     });
   } catch (e: any) {
     return NextResponse.json(
-      { ok: false, error: e?.message || 'booking_profile_proxy_failed' },
+      { ok: false, error: e?.message || 'clinician_detail_proxy_failed' },
       { status: 502 },
     );
   }
