@@ -1,4 +1,4 @@
-// apps/api-gateway/app/api/clinicians/route.ts
+﻿// apps/api-gateway/app/api/clinicians/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { sendEmail, sendSms } from '@/src/lib/mailer';
@@ -195,8 +195,27 @@ function publicClinicianName(row: any, meta: any) {
   return cleanStr(row.displayName ?? row.name ?? meta.displayName ?? meta.name) || 'Clinician';
 }
 
+function normalizeCountryCode(value: unknown) {
+  const raw = String(value ?? '').trim().slice(0, 80);
+  const s = raw.trim().toLowerCase();
+
+  if (!s) return 'ZA';
+
+  if (
+    s === 'za' ||
+    s === 'zaf' ||
+    s === 'south africa' ||
+    s === 'south-africa' ||
+    s === 'republic of south africa'
+  ) {
+    return 'ZA';
+  }
+
+  return raw.toUpperCase();
+}
+
 function publicClinicianCountry(row: any, meta: any) {
-  return cleanStr(row.country ?? meta.country) || 'ZA';
+  return normalizeCountryCode(row.country ?? meta.country ?? meta.rawProfile?.country);
 }
 
 function publicClinicianLocation(row: any, meta: any) {
@@ -492,7 +511,7 @@ export async function POST(req: NextRequest) {
     });
 
     // Seed feesV2 (ClinicianFee) if you want immediate compatibility with fee engine
-    // (non-fatal if model exists but relation fails later — this should match your schema)
+    // (non-fatal if model exists but relation fails later â€” this should match your schema)
     try {
       const standardMinor = Math.max(0, feeCents);
       const followupMinor = Math.max(0, Math.round(standardMinor * 0.75));
@@ -525,7 +544,7 @@ export async function POST(req: NextRequest) {
     const trainingLink = `${baseUrl}/auth/login?reason=training_required&next=${encodeURIComponent('/')}`;
 
     if (email) {
-      const subject = 'Ambulant+ Clinician Application Received — Next Steps';
+      const subject = 'Ambulant+ Clinician Application Received â€” Next Steps';
       const html = `
         <p>Hi ${displayName},</p>
         <p>Your Ambulant+ clinician application has been received.</p>
@@ -533,11 +552,11 @@ export async function POST(req: NextRequest) {
         <ol>
           <li><strong>Training scheduling + payment</strong> (required)</li>
           <li><strong>Starter kit dispatch</strong> after payment confirmation</li>
-          <li><strong>Admin certification</strong> — only then your profile becomes visible to patients</li>
+          <li><strong>Admin certification</strong> â€” only then your profile becomes visible to patients</li>
         </ol>
-        <p><a href="${trainingLink}">👉 Sign in to continue onboarding</a></p>
-        <p style="margin-top:12px;">If you didn’t request this, you can ignore this email.</p>
-        <p>— Ambulant+ Team</p>
+        <p><a href="${trainingLink}">ðŸ‘‰ Sign in to continue onboarding</a></p>
+        <p style="margin-top:12px;">If you didnâ€™t request this, you can ignore this email.</p>
+        <p>â€” Ambulant+ Team</p>
       `;
       sendEmail(email, subject, html).catch(() => {});
     }
@@ -653,8 +672,8 @@ export async function GET(req: NextRequest) {
 
     return json({
       ok: true,
-      clinicians: items, // ✅ legacy consumers
-      items, // ✅ new consumers
+      clinicians: items, // âœ… legacy consumers
+      items, // âœ… new consumers
       total,
       page,
       pageSize,
@@ -845,10 +864,12 @@ export async function DELETE(req: NextRequest) {
       data: { status: 'archived', archived: true, disabled: false },
     });
 
-    // keep onboarding row (history), don’t delete
+    // keep onboarding row (history), donâ€™t delete
     return json({ ok: true, clinician: profile });
   } catch (err: any) {
     console.error('clinicians DELETE error', err);
     return json({ ok: false, error: err?.message || String(err) }, 500);
   }
 }
+
+
