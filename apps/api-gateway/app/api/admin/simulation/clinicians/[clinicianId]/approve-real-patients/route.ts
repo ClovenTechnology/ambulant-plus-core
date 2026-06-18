@@ -26,9 +26,23 @@ function cleanStr(value: unknown, max = 240) {
   return String(value ?? '').trim().slice(0, max);
 }
 
-function sessionNumber(meta: any): number | null {
-  const n = Number(asRecord(meta).sessionNumber);
-  return Number.isFinite(n) && n >= 1 && n <= 3 ? Math.trunc(n) : null;
+function sessionNumber(meta: any, reason?: string | null): number | null {
+  const m = asRecord(meta);
+
+  const direct = Number(m.sessionNumber);
+  if (Number.isFinite(direct) && direct >= 1 && direct <= 99) {
+    return Math.trunc(direct);
+  }
+
+  const text = String(reason || m.reason || '').trim();
+  const match =
+    text.match(/(?:session|consultation)\s+(\d+)(?:\s*(?:of|\/)\s*3)?/i) ||
+    text.match(/\b(\d+)\s*\/\s*3\b/);
+
+  const fromReason = match ? Number(match[1]) : NaN;
+  return Number.isFinite(fromReason) && fromReason >= 1 && fromReason <= 99
+    ? Math.trunc(fromReason)
+    : null;
 }
 
 function simulationCompleted(meta: any): boolean {
@@ -152,27 +166,33 @@ export async function POST(
       },
       select: {
         id: true,
+        reason: true,
         meta: true,
       },
     });
 
     const completedNumbers = new Set<number>();
+    let completedRows = 0;
 
     for (const row of simulationRows) {
       const meta = asRecord(row.meta);
       if (!simulationCompleted(meta)) continue;
 
-      const n = sessionNumber(meta);
+      completedRows += 1;
+
+      const n = sessionNumber(meta, row.reason);
       if (n) completedNumbers.add(n);
     }
 
-    if (completedNumbers.size < 3) {
+    const completedCount = Math.max(completedNumbers.size, completedRows);
+
+    if (completedCount < 3) {
       return json(
         {
           ok: false,
           error: 'simulation_incomplete',
           requiredSessions: 3,
-          completedCount: completedNumbers.size,
+          completedCount,
           message: 'Three completed supervised simulation sessions are required before real-patient approval.',
         },
         409,
@@ -233,7 +253,7 @@ export async function POST(
         updated.archived !== true,
       realPatientApprovedAt: nextMeta.realPatientApproval.approvedAt,
       requiredSessions: 3,
-      completedCount: completedNumbers.size,
+      completedCount,
       clinician: updated,
     });
   } catch (err: any) {

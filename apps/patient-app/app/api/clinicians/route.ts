@@ -1,245 +1,101 @@
 // apps/patient-app/app/api/clinicians/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
-import cleanText from '@/lib/cleanText';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const DEFAULT_PAGE = 1;
-const DEFAULT_PER_PAGE = 25;
-
-function json(data: any, status = 200) {
-  return NextResponse.json(data, { status });
+function gatewayBase() {
+  return (
+    process.env.APIGW_BASE ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.API_GATEWAY_URL ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : '')
+  ).replace(/\/+$/, '');
 }
 
-function safeNumber(value: unknown, fallback: number) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
+function forwardHeaders(req: NextRequest) {
+  const headers = new Headers();
 
-function mapOut(c: any) {
-  return {
-    id: String(c.id ?? ''),
-    name: cleanText(c.displayName ?? c.name ?? ''),
-    specialty: cleanText(c.specialty ?? ''),
-    location: cleanText(c.meta?.location ?? c.city ?? c.location ?? ''),
-    cls: c.cls ?? c.meta?.class ?? 'Doctor',
-    gender: c.gender ?? null,
-    priceZAR:
-      typeof c.feeCents === 'number'
-        ? Math.round(c.feeCents / 100)
-        : typeof c.priceZAR === 'number'
-          ? c.priceZAR
-          : undefined,
-    priceCents: typeof c.feeCents === 'number' ? c.feeCents : undefined,
-    currency: c.currency ?? 'ZAR',
-    rating: typeof c.rating === 'number' ? c.rating : 0,
-    ratingCount:
-      typeof c.ratingCount === 'number'
-        ? c.ratingCount
-        : typeof c.ratingsCount === 'number'
-          ? c.ratingsCount
-          : undefined,
-    online: Boolean(c.online),
-    lastBookedAt: c.lastBookedAt ? +new Date(c.lastBookedAt) : null,
-    lastSeenAt: c.lastSeenAt ? +new Date(c.lastSeenAt) : null,
-    onlineSeq: c.onlineSeq ?? null,
-    recentBookedCount: c.recentBookedCount ?? 0,
-    status: c.status ?? null,
-    disabled: Boolean(c.disabled),
-    archived: Boolean(c.archived),
-    acceptsMedicalAid:
-      typeof c.acceptsMedicalAid === 'boolean'
-        ? c.acceptsMedicalAid
-        : Boolean(c.meta?.acceptsMedicalAid),
-    acceptedSchemes: Array.isArray(c.acceptedSchemes)
-      ? c.acceptedSchemes
-      : Array.isArray(c.meta?.acceptedSchemes)
-        ? c.meta.acceptedSchemes
-        : [],
-    practiceName: c.practiceName ?? c.meta?.practiceName ?? undefined,
-    country: c.country ?? c.meta?.country ?? 'ZA',
-    speaks: Array.isArray(c.speaks)
-      ? c.speaks
-      : Array.isArray(c.meta?.speaks)
-        ? c.meta.speaks
-        : undefined,
-    yearsExp:
-      typeof c.yearsExp === 'number'
-        ? c.yearsExp
-        : typeof c.meta?.yearsExp === 'number'
-          ? c.meta.yearsExp
-          : undefined,
-    joinedAt: c.createdAt ?? c.joinedAt ?? null,
-    meta: c.meta ?? {},
-  };
+  [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-org',
+    'x-org-id',
+    'x-role',
+    'x-email',
+    'x-name',
+    'x-display-name',
+    'x-correlation-id',
+    'x-request-id',
+  ].forEach((key) => {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
+  });
+
+  headers.set('accept', 'application/json');
+  if (!headers.get('x-role') && !headers.get('x-ambulant-role')) {
+    headers.set('x-role', 'patient');
+  }
+  if (!headers.get('x-org-id') && !headers.get('x-ambulant-org-id')) {
+    headers.set('x-org-id', process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default');
+  }
+
+  return headers;
 }
 
 export async function GET(req: NextRequest) {
-  try {
-    const url = new URL(req.url);
+  const base = gatewayBase();
 
-    const q = (url.searchParams.get('q') ?? '').trim();
-    const specialty = url.searchParams.get('specialty') || undefined;
-    const gender = url.searchParams.get('gender') || undefined;
-    const location = url.searchParams.get('location') || undefined;
-    const country = url.searchParams.get('country') || undefined;
-
-    const page = Math.max(
-      DEFAULT_PAGE,
-      safeNumber(url.searchParams.get('page'), DEFAULT_PAGE),
-    );
-
-    const perPage = Math.min(
-      500,
-      Math.max(
-        5,
-        safeNumber(
-          url.searchParams.get('perPage') ??
-            url.searchParams.get('limit') ??
-            DEFAULT_PER_PAGE,
-          DEFAULT_PER_PAGE,
-        ),
-      ),
-    );
-
-    if (!prisma || !(prisma as any).clinicianProfile?.findMany) {
-      return json({
-        ok: true,
+  if (!base) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'api_gateway_not_configured',
         items: [],
         clinicians: [],
-        meta: {
-          total: 0,
-          page,
-          perPage,
-          source: 'store_unavailable',
-        },
-      });
-    }
-
-    const where: any = {
-      status: {
-        in: ['active', 'ACTIVE'],
+        meta: { total: 0, page: 1, perPage: 25, source: 'patient_proxy_unconfigured' },
       },
-      disabled: false,
-      archived: false,
-    };
+      { status: 503 },
+    );
+  }
 
-    if (specialty) {
-      where.specialty = { contains: specialty, mode: 'insensitive' };
-    }
+  const incoming = new URL(req.url);
+  const upstream = new URL('/api/clinicians', base);
+  upstream.search = incoming.search;
 
-    if (gender) {
-      where.gender = gender;
-    }
+  try {
+    const res = await fetch(upstream.toString(), {
+      method: 'GET',
+      headers: forwardHeaders(req),
+      cache: 'no-store',
+    });
 
-    if (country) {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : []),
-        {
-          OR: [
-            { country },
-            { meta: { path: ['country'], equals: country } },
-          ],
-        },
-      ];
-    }
-
-    if (location) {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : []),
-        {
-          OR: [
-            { city: { contains: location, mode: 'insensitive' } },
-            { location: { contains: location, mode: 'insensitive' } },
-            { meta: { path: ['location'], string_contains: location } },
-          ],
-        },
-      ];
-    }
-
-    if (q) {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : []),
-        {
-          OR: [
-            { displayName: { contains: q, mode: 'insensitive' } },
-            { name: { contains: q, mode: 'insensitive' } },
-            { specialty: { contains: q, mode: 'insensitive' } },
-            { city: { contains: q, mode: 'insensitive' } },
-          ],
-        },
-      ];
-    }
-
-    const orderBy: any[] = [
-      { online: 'desc' },
-      { recentBookedCount: 'asc' },
-      { lastBookedAt: 'asc' },
-      { onlineSeq: 'asc' },
-      { rating: 'desc' },
-      { displayName: 'asc' },
-    ];
-
-    const [items, total] = await Promise.all([
-      (prisma as any).clinicianProfile.findMany({
-        where,
-        skip: (page - 1) * perPage,
-        take: perPage,
-        orderBy,
-      }),
-      (prisma as any).clinicianProfile.count({ where }),
-    ]);
-
-    const mapped = Array.isArray(items)
-      ? items
-          .map(mapOut)
-          .filter((x) => {
-            if (!x.id) return false;
-
-            const status = String(x.status || '').toLowerCase();
-            if (status !== 'active') return false;
-
-            if (x.disabled || x.archived) return false;
-
-            const op = (x as any).meta?.operational ?? (x as any).operational;
-            if (op) {
-              if (op.canBeListed === false) return false;
-              if (op.canBeBooked === false) return false;
-            }
-
-            return true;
-          })
-      : [];
-
-    return json({
-      ok: true,
-      items: mapped,
-      clinicians: mapped,
-      meta: {
-        total,
-        page,
-        perPage,
-        source: 'database',
+    const text = await res.text();
+    return new NextResponse(text || '{}', {
+      status: res.status,
+      headers: {
+        'content-type': res.headers.get('content-type') || 'application/json',
+        'cache-control': 'no-store, max-age=0',
       },
     });
   } catch (err: any) {
-    console.error('GET /api/clinicians error', err);
-
-    return json(
+    return NextResponse.json(
       {
         ok: false,
-        error: err?.message || 'failed_to_load_clinicians',
+        error: String(err?.message || 'clinician_directory_proxy_failed'),
         items: [],
         clinicians: [],
-        meta: {
-          total: 0,
-          page: DEFAULT_PAGE,
-          perPage: DEFAULT_PER_PAGE,
-        },
+        meta: { total: 0, page: 1, perPage: 25, source: 'patient_proxy_error' },
       },
-      500,
+      { status: 502 },
     );
   }
 }

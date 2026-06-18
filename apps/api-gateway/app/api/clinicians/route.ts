@@ -105,6 +105,294 @@ function getBaseUrl(req: NextRequest) {
    - ClinicianOnboarding (upsert)
    - (Optional) seeds ClinicianFee v2 for STANDARD/FOLLOWUP
 ------------------------------ */
+
+function safeParseJson(value: unknown): any {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function realPatientApproved(meta: any) {
+  const m = safeParseJson(meta);
+  const approval = safeParseJson(m.realPatientApproval);
+
+  return Boolean(
+    m.adminFinalApproved === true ||
+      m.realPatientApprovedAt ||
+      m.patientVisible === true ||
+      approval.approved === true ||
+      approval.approvedAt
+  );
+}
+
+function normalizePublicClass(value: unknown): 'Doctor' | 'Allied Health' | 'Wellness' {
+  const s = String(value || '').trim().toLowerCase();
+
+  if (
+    s === 'allied health' ||
+    s === 'allied_health' ||
+    s === 'nurse' ||
+    s === 'nursing' ||
+    s === 'pharmacist' ||
+    s === 'physiotherapist' ||
+    s === 'dietitian'
+  ) {
+    return 'Allied Health';
+  }
+
+  if (
+    s === 'wellness' ||
+    s === 'coach' ||
+    s === 'health coach' ||
+    s === 'lifestyle' ||
+    s === 'chiropractor'
+  ) {
+    return 'Wellness';
+  }
+
+  return 'Doctor';
+}
+
+function toMs(value: unknown): number | null {
+  if (!value) return null;
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  const d = value instanceof Date ? value : new Date(String(value));
+  const t = d.getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+function publicFairScore(row: any, now = Date.now()) {
+  const online = row.online === true;
+  const lastBookedAt = toMs(row.lastBookedAt);
+  const recentBookedCount = Number.isFinite(Number(row.recentBookedCount))
+    ? Math.max(0, Number(row.recentBookedCount))
+    : 0;
+
+  const rating =
+    Number.isFinite(Number(row.ratingAvg))
+      ? Number(row.ratingAvg)
+      : Number.isFinite(Number(row.rating))
+        ? Number(row.rating)
+        : 0;
+
+  const onlineCredit = online ? 240 : 0;
+
+  const recentBookingPenalty =
+    recentBookedCount * 90 +
+    (lastBookedAt ? Math.max(0, 120 - Math.min(120, (now - lastBookedAt) / 60000)) : 0);
+
+  const ratingCredit = Math.max(0, Math.min(5, rating)) * 8;
+
+  return onlineCredit + ratingCredit - recentBookingPenalty;
+}
+
+function publicClinicianName(row: any, meta: any) {
+  return cleanStr(row.displayName ?? row.name ?? meta.displayName ?? meta.name) || 'Clinician';
+}
+
+function publicClinicianCountry(row: any, meta: any) {
+  return cleanStr(row.country ?? meta.country) || 'ZA';
+}
+
+function publicClinicianLocation(row: any, meta: any) {
+  const city = cleanStr(row.city ?? meta.city);
+  const region = cleanStr(meta.region ?? meta.province ?? meta.state);
+  const location = cleanStr(row.location ?? meta.location);
+
+  if (location) return location;
+  if (city && region) return `${city}, ${region}`;
+  return city || region || '';
+}
+
+function publicMapClinician(row: any) {
+  const meta = safeParseJson(row.meta);
+  const rawProfile = safeParseJson(meta.rawProfileJson || meta.rawProfile || meta.submittedProfile);
+  const mergedMeta = { ...meta, ...(rawProfile || {}) };
+
+  const cls = normalizePublicClass(row.cls ?? mergedMeta.class ?? mergedMeta.cls ?? row.specialty);
+
+  return {
+    id: String(row.id ?? ''),
+    userId: row.userId ?? null,
+    name: publicClinicianName(row, mergedMeta),
+    displayName: publicClinicianName(row, mergedMeta),
+    specialty: cleanStr(row.specialty ?? mergedMeta.specialty) || 'General Practice',
+    location: publicClinicianLocation(row, mergedMeta),
+    cls,
+    gender: row.gender ?? mergedMeta.gender ?? null,
+    priceZAR:
+      typeof row.feeCents === 'number'
+        ? Math.round(row.feeCents / 100)
+        : typeof mergedMeta.priceZAR === 'number'
+          ? mergedMeta.priceZAR
+          : undefined,
+    priceCents: typeof row.feeCents === 'number' ? row.feeCents : undefined,
+    currency: row.currency ?? 'ZAR',
+    rating:
+      typeof row.ratingAvg === 'number'
+        ? row.ratingAvg
+        : typeof row.rating === 'number'
+          ? row.rating
+          : 0,
+    ratingCount:
+      typeof row.ratingCount === 'number'
+        ? row.ratingCount
+        : typeof row.ratingsCount === 'number'
+          ? row.ratingsCount
+          : undefined,
+    online: Boolean(row.online),
+    lastBookedAt: row.lastBookedAt ? +new Date(row.lastBookedAt) : null,
+    lastSeenAt: row.lastSeenAt ? +new Date(row.lastSeenAt) : null,
+    onlineSeq: row.onlineSeq != null ? Number(row.onlineSeq) : null,
+    recentBookedCount: row.recentBookedCount ?? 0,
+    status: row.status ?? null,
+    disabled: Boolean(row.disabled),
+    archived: Boolean(row.archived),
+    acceptsMedicalAid:
+      typeof row.acceptsMedicalAid === 'boolean'
+        ? row.acceptsMedicalAid
+        : Boolean(mergedMeta.acceptsMedicalAid),
+    acceptedSchemes: Array.isArray(row.acceptedSchemes)
+      ? row.acceptedSchemes
+      : Array.isArray(mergedMeta.acceptedSchemes)
+        ? mergedMeta.acceptedSchemes
+        : [],
+    practiceName: row.practiceName ?? mergedMeta.practiceName ?? undefined,
+    country: publicClinicianCountry(row, mergedMeta),
+    speaks: Array.isArray(mergedMeta.speaks) ? mergedMeta.speaks : undefined,
+    yearsExp:
+      typeof mergedMeta.yearsExp === 'number'
+        ? mergedMeta.yearsExp
+        : undefined,
+    joinedAt: row.createdAt ?? row.joinedAt ?? null,
+    operational: {
+      canBeListed: true,
+      canBeBooked: row.bookingEnabled === false ? false : true,
+      canPrescribe: false,
+      prescribingMode: 'no',
+      allowedWorkspaces: ['televisit', 'encounters', 'referrals', 'certificates'],
+      patientCategory: cls === 'Wellness' ? 'wellness' : 'clinical',
+      blockers: [],
+      riskFlags: [],
+      ambulantId: mergedMeta.ambulantId ?? mergedMeta.smartId?.ambulantId ?? null,
+    },
+  };
+}
+
+async function publicClinicianDirectory(req: NextRequest) {
+  const url = new URL(req.url);
+
+  const q = clampLen(url.searchParams.get('q') || '', 120).toLowerCase();
+  const specialty = clampLen(url.searchParams.get('specialty') || '', 120).toLowerCase();
+  const gender = clampLen(url.searchParams.get('gender') || '', 60).toLowerCase();
+  const country = clampLen(url.searchParams.get('country') || '', 12).toUpperCase();
+
+  const page = toPosInt(url.searchParams.get('page'), 1);
+  const perPageRaw = Number.parseInt(
+    url.searchParams.get('perPage') ||
+      url.searchParams.get('pageSize') ||
+      url.searchParams.get('limit') ||
+      '25',
+    10,
+  );
+  const perPage = Number.isFinite(perPageRaw)
+    ? Math.min(500, Math.max(5, perPageRaw))
+    : 25;
+
+  const rows = await (prisma as any).clinicianProfile.findMany({
+    where: {
+      status: { in: ['active', 'ACTIVE', 'approved', 'APPROVED', 'verified', 'VERIFIED'] },
+      disabled: false,
+      archived: false,
+      trainingCompleted: true,
+    },
+    orderBy: [
+      { online: 'desc' },
+      { recentBookedCount: 'asc' },
+      { lastBookedAt: 'asc' },
+      { onlineSeq: 'asc' },
+      { ratingAvg: 'desc' },
+      { displayName: 'asc' },
+    ],
+    take: 500,
+  });
+
+  const now = Date.now();
+
+  let mapped = rows
+    .filter((row: any) => {
+      const meta = safeParseJson(row.meta);
+
+      if (meta.discoverable === false || meta.visible === false || meta.patientVisible === false) {
+        return false;
+      }
+
+      return realPatientApproved(meta);
+    })
+    .map(publicMapClinician)
+    .filter((item: any) => {
+      if (!item.id) return false;
+      if (item.disabled || item.archived) return false;
+
+      if (country && String(item.country || '').toUpperCase() !== country) return false;
+      if (gender && String(item.gender || '').toLowerCase() !== gender) return false;
+
+      if (specialty) {
+        const hay = `${item.specialty || ''} ${item.name || ''}`.toLowerCase();
+        if (!hay.includes(specialty)) return false;
+      }
+
+      if (q) {
+        const hay = `${item.name || ''} ${item.specialty || ''} ${item.location || ''} ${item.practiceName || ''}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+
+      return true;
+    });
+
+  mapped = mapped
+    .map((item: any) => ({ ...item, _fairRankScore: publicFairScore(item, now) }))
+    .sort((a: any, b: any) => {
+      if (b._fairRankScore !== a._fairRankScore) return b._fairRankScore - a._fairRankScore;
+
+      const aSeq = Number.isFinite(Number(a.onlineSeq)) ? Number(a.onlineSeq) : Number.POSITIVE_INFINITY;
+      const bSeq = Number.isFinite(Number(b.onlineSeq)) ? Number(b.onlineSeq) : Number.POSITIVE_INFINITY;
+      if (aSeq !== bSeq) return aSeq - bSeq;
+
+      const aBooked = Number.isFinite(Number(a.recentBookedCount)) ? Number(a.recentBookedCount) : 0;
+      const bBooked = Number.isFinite(Number(b.recentBookedCount)) ? Number(b.recentBookedCount) : 0;
+      if (aBooked !== bBooked) return aBooked - bBooked;
+
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    })
+    .map(({ _fairRankScore, ...item }: any) => item);
+
+  const total = mapped.length;
+  const start = (page - 1) * perPage;
+  const paged = mapped.slice(start, start + perPage);
+
+  return json({
+    ok: true,
+    items: paged,
+    clinicians: paged,
+    total,
+    page,
+    pageSize: perPage,
+    meta: {
+      total,
+      page,
+      perPage,
+      source: 'api_gateway_public_directory',
+      fairness: 'directory_fairness_v1_online_booking_penalty_queue_tiebreak',
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({} as any));
@@ -281,7 +569,7 @@ export async function POST(req: NextRequest) {
 export async function GET(req: NextRequest) {
   try {
     const isAdmin = await verifyAdminRequest(req);
-    if (!isAdmin) return json({ ok: false, error: 'admin_required' }, 403);
+    if (!isAdmin) return publicClinicianDirectory(req);
 
     const url = new URL(req.url);
     const id = clampLen(url.searchParams.get('id') || '', 80);
