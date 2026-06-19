@@ -17,7 +17,7 @@ function json(data: any, status = 200) {
 }
 
 function clinicianUid(auth: any) {
-  return String(auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || auth?.clinicianId || '').trim();
+  return String(auth?.clinicianId || auth?.clinician?.id || auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || '').trim();
 }
 
 export async function GET(req: NextRequest, ctx: { params: { clinicianId: string } }) {
@@ -32,6 +32,7 @@ export async function GET(req: NextRequest, ctx: { params: { clinicianId: string
       if (!auth.ok) return authErrorResponse(auth);
       clinicianId = auth.clinicianId;
       headers['x-uid'] = clinicianUid(auth);
+      headers['x-clinician-id'] = auth.clinicianId;
       headers['x-role'] = auth.role;
     }
 

@@ -45,7 +45,7 @@ function normalizeDispatch(raw: unknown): SmartIdDispatchOption {
 }
 
 async function resolveClinician(req: NextRequest) {
-  const uid = String(req.headers.get('x-uid') || req.headers.get('x-clinician-id') || '').trim();
+  const uid = String(req.headers.get('x-clinician-id') || req.headers.get('x-uid') || '').trim();
 
   if (!uid) {
     return { error: json({ ok: false, error: 'missing_clinician_identity' }, 401), clinician: null };

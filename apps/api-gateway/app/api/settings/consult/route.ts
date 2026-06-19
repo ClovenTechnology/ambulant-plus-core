@@ -37,7 +37,7 @@ function num(value: unknown, fallback: number) {
 }
 
 async function resolveClinician(req: NextRequest) {
-  const uid = String(req.headers.get('x-uid') || '').trim();
+  const uid = String(req.headers.get('x-clinician-id') || req.headers.get('x-uid') || '').trim();
 
   if (!uid) {
     return { error: json({ ok: false, error: 'missing_clinician_identity' }, 401), clinician: null };

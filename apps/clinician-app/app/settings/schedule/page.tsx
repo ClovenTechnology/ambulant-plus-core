@@ -4,7 +4,6 @@ import { SettingsTabs } from '@/components/SettingsTabs';
 import { useEffect, useState } from 'react';
 import CalendarPreview from '../../../components/CalendarPreview';
 
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? '';
 type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 const DAYS: DayKey[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
 const DAY_LABEL: Record<DayKey, string> = {
@@ -83,14 +82,8 @@ export default function SchedulePage() {
       setLoading(true);
       try {
         const [r1, r2] = await Promise.all([
-          fetch(`${GATEWAY}/api/settings/schedule`, {
-            cache: 'no-store',
-            headers: { 'x-uid': 'clinician-local-001', 'x-role': 'clinician' },
-          }),
-          fetch(`${GATEWAY}/api/settings/consult`, {
-            cache: 'no-store',
-            headers: { 'x-uid': 'clinician-local-001', 'x-role': 'clinician' },
-          }),
+          fetch('/api/settings/schedule', { cache: 'no-store' }),
+          fetch('/api/settings/consult', { cache: 'no-store' }),
         ]);
         const s = r1.ok ? await r1.json() : DEFAULT;
         const c = r2.ok
@@ -157,17 +150,17 @@ export default function SchedulePage() {
     setSaving(true);
     try {
       const schedulePayload = { ...cfg, slotMin: slotMin, slotMax: slotMax };
-      const r = await fetch(`${GATEWAY}/api/settings/schedule`, {
+      const r = await fetch('/api/settings/schedule', {
         method: 'PUT',
-        headers: { 'content-type': 'application/json', 'x-uid': 'clinician-local-001', 'x-role': 'clinician' },
+        headers: { 'content-type': 'application/json' },
         body: JSON.stringify(schedulePayload),
       });
 
       let r2 = { ok: true } as Response;
       if (consult) {
-        r2 = await fetch(`${GATEWAY}/api/settings/consult`, {
+        r2 = await fetch('/api/settings/consult', {
           method: 'PUT',
-          headers: { 'content-type': 'application/json', 'x-uid': 'clinician-local-001', 'x-role': 'clinician' },
+          headers: { 'content-type': 'application/json' },
           body: JSON.stringify(consult),
         });
       }

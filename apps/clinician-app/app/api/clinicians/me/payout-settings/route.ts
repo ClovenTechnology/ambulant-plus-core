@@ -17,7 +17,7 @@ function json(data: any, status = 200) {
 }
 
 function clinicianUid(auth: any) {
-  return String(auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || auth?.clinicianId || '').trim();
+  return String(auth?.clinicianId || auth?.clinician?.id || auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || '').trim();
 }
 
 async function proxy(req: NextRequest, method: 'GET' | 'PUT') {
@@ -35,6 +35,7 @@ async function proxy(req: NextRequest, method: 'GET' | 'PUT') {
     headers: {
       accept: 'application/json',
       'x-uid': uid,
+      'x-clinician-id': auth.clinicianId,
       'x-role': auth.role,
     },
   };

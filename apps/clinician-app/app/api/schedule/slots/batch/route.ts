@@ -26,7 +26,7 @@ function hhmm(value: any) {
 }
 
 function clinicianUid(auth: any) {
-  return String(auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || auth?.clinicianId || '').trim();
+  return String(auth?.clinicianId || auth?.clinician?.id || auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || '').trim();
 }
 
 async function resolveClinician(req: NextRequest, rawClinicianId: string) {
