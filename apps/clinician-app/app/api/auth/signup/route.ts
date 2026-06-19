@@ -617,10 +617,6 @@ export async function POST(req: NextRequest) {
       return badRequest('BHF/PCNS practice number must contain exactly 13 digits', 'practiceNumber');
     }
 
-    if (practiceNumber && (!practiceNumberRenewalDate || !isTodayOrFuture(practiceNumberRenewalDate))) {
-      return badRequest('BHF/PCNS next renewal date is required when a practice number is entered', 'practiceNumberRenewalDate');
-    }
-
     if (citizenship === 'south_african') {
       const idError = validateSaIdDetailed(idNumber, dob, gender);
       if (idError) return badRequest(idError, 'saIdNumber');
@@ -654,8 +650,12 @@ export async function POST(req: NextRequest) {
     if (!normalizeSpaces(shipping?.city)) return badRequest('Shipping city required', 'shipping.city');
 
 
-    if (hpcsaFile && !uploadedFileLooksUsable(hpcsaFile)) {
-      return badRequest('If uploaded, the HPCSA registration document/certificate must be a valid file up to 10 MB.', 'hpcsaDoc');
+    if (!hpcsaFile) {
+      return badRequest('HPCSA registration document/certificate is required.', 'hpcsaDoc');
+    }
+
+    if (!uploadedFileLooksUsable(hpcsaFile)) {
+      return badRequest('The HPCSA registration document/certificate must be a valid file up to 10 MB.', 'hpcsaDoc');
     }
 
     // Optional HPCSA upload
@@ -708,7 +708,7 @@ export async function POST(req: NextRequest) {
       qualificationYear,
       practiceNumber: practiceNumber || undefined,
       practiceNumberType: practiceNumber ? 'BHF_PCNS' : undefined,
-      practiceNumberRenewalDate: practiceNumber ? practiceNumberRenewalDate : undefined,
+      practiceNumberRenewalDate: undefined,
       hpcsaNextRenewalDate,
       specialtyKey: specialtyKey || undefined,
       regulatorBody: 'HPCSA',
@@ -803,7 +803,7 @@ export async function POST(req: NextRequest) {
                   submittedAt,
                   hpcsaNextRenewalDate,
                   practiceNumber: practiceNumber || null,
-                  practiceNumberRenewalDate: practiceNumber ? practiceNumberRenewalDate : null,
+                  practiceNumberRenewalDate: null,
                 },
                 insurance: {
                   status: mergedProfile?.piInsuranceNumber || mergedProfile?.insurerName ? 'submitted' : 'missing',
@@ -929,6 +929,3 @@ export async function POST(req: NextRequest) {
     return json({ ok: false, error: 'Unable to process your clinician application right now. Please try again shortly.' }, 500);
   }
 }
-
-
-

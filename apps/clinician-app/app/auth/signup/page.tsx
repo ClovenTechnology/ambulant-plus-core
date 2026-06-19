@@ -5,7 +5,6 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
-  Sparkles,
   ShieldCheck,
   ClipboardCheck,
   BadgeCheck,
@@ -99,6 +98,66 @@ const PHONE_COUNTRY_CODES = [
   { code: '+268', label: 'Eswatini +268' },
   { code: '+264', label: 'Namibia +264' },
   { code: '+267', label: 'Botswana +267' },
+] as const;
+
+
+const CLINICAL_SPECIALTIES = [
+  { key: 'general-practice', label: 'General Practice', professionKey: 'gp' },
+  { key: 'cardiology', label: 'Cardiology', professionKey: 'specialist' },
+  { key: 'dental', label: 'Dental', professionKey: 'dentist' },
+  { key: 'dermatology', label: 'Dermatology', professionKey: 'specialist' },
+  { key: 'endocrinology', label: 'Endocrinology', professionKey: 'specialist' },
+  { key: 'ent', label: 'ENT', professionKey: 'specialist' },
+  { key: 'fertility', label: 'Fertility', professionKey: 'specialist' },
+  { key: 'neurology', label: 'Neurology', professionKey: 'specialist' },
+  { key: 'obgyn', label: 'Obstetrics & Gynaecology', professionKey: 'specialist' },
+  { key: 'oncology', label: 'Oncology', professionKey: 'specialist' },
+  { key: 'optometry', label: 'Optometry', professionKey: 'optometrist' },
+  { key: 'paediatric', label: 'Paediatric Care', professionKey: 'specialist' },
+  { key: 'physio', label: 'Physiotherapy', professionKey: 'physiotherapist' },
+  { key: 'psychiatry', label: 'Psychiatry', professionKey: 'specialist' },
+  { key: 'psychology', label: 'Psychology', professionKey: 'psychologist' },
+  { key: 'radiology', label: 'Radiology', professionKey: 'specialist' },
+  { key: 'speech-therapy', label: 'Speech Therapy', professionKey: 'speech_therapist' },
+  { key: 'surgery', label: 'Surgery', professionKey: 'specialist' },
+  { key: 'urology', label: 'Urology', professionKey: 'specialist' },
+] as const;
+
+const ZA_PROVINCES = [
+  'Eastern Cape',
+  'Free State',
+  'Gauteng',
+  'KwaZulu-Natal',
+  'Limpopo',
+  'Mpumalanga',
+  'Northern Cape',
+  'North West',
+  'Western Cape',
+] as const;
+
+const LANGUAGE_OPTIONS = [
+  'Afrikaans',
+  'English',
+  'isiNdebele',
+  'isiXhosa',
+  'isiZulu',
+  'Sepedi',
+  'Sesotho',
+  'Setswana',
+  'siSwati',
+  'Tshivenda',
+  'XiTsonga',
+  'South African Sign Language',
+  'Arabic',
+  'Chinese',
+  'French',
+  'German',
+  'Hindi',
+  'Italian',
+  'Portuguese',
+  'Spanish',
+  'Swahili',
+  'Yoruba',
 ] as const;
 
 const CURRENT_YEAR = new Date().getFullYear();
@@ -277,7 +336,9 @@ export default function ClinicianSignupPage() {
   const router = useRouter();
 
   // Basic identity
-  const [name, setName] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [middleName, setMiddleName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
   const [showPw, setShowPw] = useState(false);
@@ -289,7 +350,13 @@ export default function ClinicianSignupPage() {
   const [license, setLicense] = useState('');
   const [dob, setDob] = useState('');
   const [gender, setGender] = useState<'male' | 'female' | 'other' | ''>('');
-  const [address, setAddress] = useState('');
+  const [practiceAddressLine1, setPracticeAddressLine1] = useState('');
+  const [practiceAddressLine2, setPracticeAddressLine2] = useState('');
+  const [practiceSuburbTown, setPracticeSuburbTown] = useState('');
+  const [practiceCity, setPracticeCity] = useState('');
+  const [practiceProvince, setPracticeProvince] = useState('Gauteng');
+  const [practicePostalCode, setPracticePostalCode] = useState('');
+  const [practiceCountry, setPracticeCountry] = useState('South Africa');
 
   const [qualifications, setQualifications] = useState<Qualification[]>([
     { degree: '', institution: '', yearOfCompletion: '' },
@@ -318,12 +385,15 @@ export default function ClinicianSignupPage() {
   const [hasInsurance, setHasInsurance] = useState<boolean | null>(null);
   const [insurerName, setInsurerName] = useState('');
   const [insuranceType, setInsuranceType] = useState('');
+  const [insurancePolicyName, setInsurancePolicyName] = useState('');
+  const [insurancePolicyNumber, setInsurancePolicyNumber] = useState('');
+  const [insuranceRenewalDate, setInsuranceRenewalDate] = useState('');
   const [insuranceCoversVirtual, setInsuranceCoversVirtual] = useState<'yes' | 'no' | ''>('');
 
   // Communication / languages
   const [preferredCommunication, setPreferredCommunication] = useState<string[]>([]);
   const [primaryLanguage, setPrimaryLanguage] = useState('');
-  const [otherLanguages, setOtherLanguages] = useState('');
+  const [otherLanguages, setOtherLanguages] = useState<string[]>([]);
   const [hasTelemedicineExperience, setHasTelemedicineExperience] = useState<boolean | null>(null);
 
   // Mandatory onboarding data
@@ -398,7 +468,8 @@ export default function ClinicianSignupPage() {
   const canGoNext = useMemo(() => {
     if (step === 0) {
       return (
-        !!normalizeSpaces(name) &&
+        !!normalizeSpaces(firstName) &&
+        !!normalizeSpaces(lastName) &&
         emailLooksValid(email) &&
         passwordLooksStrong(pw) &&
         phoneLooksValid(normalizedPhone)
@@ -415,7 +486,10 @@ export default function ClinicianSignupPage() {
         !!primaryQualification?.degree?.trim() &&
         !!primaryQualification?.institution?.trim() &&
         qualificationYearLooksValid(qualificationYear) &&
-        hpcsaRegistrationLooksValid(license)
+        hpcsaRegistrationLooksValid(license) &&
+        preferredCommunication.length > 0 &&
+        !!primaryLanguage &&
+        !!hpcsaDocFile
       );
     }
 
@@ -450,7 +524,9 @@ export default function ClinicianSignupPage() {
     );
   }, [
     step,
-    name,
+    firstName,
+    middleName,
+    lastName,
     email,
     pw,
     phone,
@@ -462,6 +538,9 @@ export default function ClinicianSignupPage() {
     primaryQualification,
     qualificationYear,
     license,
+    preferredCommunication,
+    primaryLanguage,
+    hpcsaDocFile,
     citizenship,
     saIdNumber,
     passportNumber,
@@ -474,6 +553,9 @@ export default function ClinicianSignupPage() {
     hasInsurance,
     insurerName,
     insuranceType,
+    insurancePolicyName,
+    insurancePolicyNumber,
+    insuranceRenewalDate,
     insuranceCoversVirtual,
     consent,
     training.preferredDate,
@@ -490,8 +572,8 @@ export default function ClinicianSignupPage() {
   }
 
   function validateFinal(): ValidationFailure | null {
-    const finalNameParts = normalizeSpaces(name).split(' ').filter(Boolean);
-    if (finalNameParts.length < 2) return fail(0, 'Enter both first name and last name / surname.');
+    if (!normalizeSpaces(firstName)) return fail(0, 'First name is required.');
+    if (!normalizeSpaces(lastName)) return fail(0, 'Last name / surname is required.');
     if (!emailLooksValid(email)) return fail(0, 'Enter a valid email address.');
     if (!passwordLooksStrong(pw)) return fail(0, 'Password must be at least 10 characters and include uppercase, lowercase, number, and special character.');
     if (!phoneLooksValid(normalizedPhone)) return fail(0, 'Enter a valid mobile number with country code, for example +27821234567.');
@@ -506,6 +588,9 @@ export default function ClinicianSignupPage() {
       return fail(1, `Qualification year must be between 1940 and ${CURRENT_YEAR - 1}.`);
     }
     if (!hpcsaRegistrationLooksValid(license)) return fail(1, 'HPCSA registration must look like MP1111111.');
+    if (preferredCommunication.length === 0) return fail(1, 'Select at least one communication option.');
+    if (!primaryLanguage) return fail(1, 'Primary language is required.');
+    if (!hpcsaDocFile) return fail(1, 'Upload your HPCSA registration certificate/document.');
 
     if (!citizenship) return fail(2, 'Citizenship status is required.');
     if (citizenship === 'south_african') {
@@ -513,7 +598,7 @@ export default function ClinicianSignupPage() {
       if (idErr) return fail(2, idErr);
     }
     if (citizenship === 'non_south_african') {
-      if (!passportNumberLooksValid(passportNumber)) return fail(2, 'Passport number must be 5–20 letters/numbers.');
+      if (!passportNumberLooksValid(passportNumber)) return fail(2, 'Passport number must be 5â€“20 letters/numbers.');
       if (!citizenshipCountry.trim()) return fail(2, 'Country of citizenship is required.');
       if (!passportIssuingAuthority.trim()) return fail(2, 'Passport issuing authority is required.');
       if (!isFutureDate(passportExpiry)) return fail(2, 'Passport expiry must be a future date.');
@@ -522,7 +607,8 @@ export default function ClinicianSignupPage() {
     if (!nextRenewalDate || !isTodayOrFuture(nextRenewalDate)) return fail(2, 'HPCSA next renewal date is required and must not be expired.');
     if (!platformCover && hasInsurance === null) return fail(2, 'Please confirm whether you have professional indemnity cover.');
     if (!platformCover && hasInsurance === true && !insurerName.trim()) return fail(2, 'Insurer name is required.');
-    if (!platformCover && hasInsurance === true && !insuranceType.trim()) return fail(2, 'Insurance type is required.');
+    if (!platformCover && hasInsurance === true && !insurancePolicyNumber.trim()) return fail(2, 'Insurance policy number is required.');
+    if (!platformCover && hasInsurance === true && !insuranceRenewalDate) return fail(2, 'Insurance expiry / next renewal date is required.');
     if (!platformCover && hasInsurance === true && !insuranceCoversVirtual) {
       return fail(2, 'Please confirm whether your cover includes virtual consultations.');
     }
@@ -576,23 +662,33 @@ export default function ClinicianSignupPage() {
       const normalizedHpcsaRegistration = String(license || '').trim().toUpperCase().replace(/\s+/g, '');
       const normalizedPracticeNumber = digitsOnly(practiceNumber);
       const normalizedSaId = digitsOnly(saIdNumber);
-      const submittedFullName = normalizeSpaces(name);
-      const submittedNameParts = submittedFullName.split(' ').filter(Boolean);
-      const firstName = submittedNameParts[0] || '';
-      const lastName = submittedNameParts.length > 1 ? submittedNameParts[submittedNameParts.length - 1] : '';
-      const middleName = submittedNameParts.length > 2 ? submittedNameParts.slice(1, -1).join(' ') : '';
+      const finalFirstName = normalizeSpaces(firstName);
+      const finalMiddleName = normalizeSpaces(middleName);
+      const finalLastName = normalizeSpaces(lastName);
+      const finalFullName = normalizeSpaces([finalFirstName, finalMiddleName, finalLastName].filter(Boolean).join(' '));
 
-      // Build a single “profile” blob (stored server-side in metadata.rawProfileJson)
+      // Build a single â€œprofileâ€ blob (stored server-side in metadata.rawProfileJson)
       const profile = {
-        firstName,
-        middleName: middleName || undefined,
-        lastName,
-        surname: lastName,
+        firstName: finalFirstName,
+        middleName: finalMiddleName || undefined,
+        lastName: finalLastName,
+        surname: finalLastName,
+        fullName: finalFullName,
+        displayName: finalFullName,
 
         dob: dob || undefined,
         dateOfBirth: dob || undefined,
         gender: gender || undefined,
-        address: address || undefined,
+        address: [practiceAddressLine1, practiceAddressLine2, practiceSuburbTown, practiceCity, practiceProvince, practicePostalCode, practiceCountry].filter(Boolean).join(', ') || undefined,
+        practiceAddress: {
+          line1: normalizeSpaces(practiceAddressLine1) || undefined,
+          line2: normalizeSpaces(practiceAddressLine2) || undefined,
+          suburbTown: normalizeSpaces(practiceSuburbTown) || undefined,
+          city: normalizeSpaces(practiceCity) || undefined,
+          province: normalizeSpaces(practiceProvince) || undefined,
+          postalCode: normalizeSpaces(practicePostalCode) || undefined,
+          country: normalizeSpaces(practiceCountry || 'South Africa'),
+        },
 
         phone: normalizedPhone,
         phoneCountryCode,
@@ -633,7 +729,7 @@ export default function ClinicianSignupPage() {
         bhfPracticeNumber: normalizedPracticeNumber || undefined,
         pcnsPracticeNumber: normalizedPracticeNumber || undefined,
         practiceNumberType: normalizedPracticeNumber ? 'BHF_PCNS' : undefined,
-        practiceNumberRenewalDate: normalizedPracticeNumber ? nextRenewalDate || undefined : undefined,
+        practiceNumberRenewalDate: undefined,
 
         // Insurance: if platform cover enabled, capture nothing here
         platformCoverEnabled: platformCover,
@@ -644,10 +740,7 @@ export default function ClinicianSignupPage() {
 
         preferredCommunication,
         primaryLanguage: normalizeSpaces(primaryLanguage) || undefined,
-        otherLanguages: otherLanguages
-          .split(',')
-          .map((s) => normalizeSpaces(s))
-          .filter(Boolean),
+        otherLanguages,
         hasTelemedicineExperience: typeof hasTelemedicineExperience === 'boolean' ? hasTelemedicineExperience : undefined,
 
         declarations: {
@@ -684,7 +777,7 @@ export default function ClinicianSignupPage() {
       // Prefer multipart (supports file upload)
       const fd = new FormData();
       fd.set('role', 'clinician');
-      fd.set('name', submittedFullName);
+      fd.set('name', finalFullName);
       fd.set('email', emailNorm);
       fd.set('password', pw);
       fd.set('phone', normalizedPhone);
@@ -710,10 +803,10 @@ export default function ClinicianSignupPage() {
 
       setDone(true);
 
-      // ✅ Redirect priority:
+      // âœ… Redirect priority:
       // 1) server-supplied internal redirectTo
       // 2) server-supplied internal trainingLink
-      // 3) default “premium” flow: training schedule (with clinicianId when available)
+      // 3) default â€œpremiumâ€ flow: training schedule (with clinicianId when available)
       const redirectTo = safeInternalPath(data?.redirectTo, '');
       if (redirectTo) {
         router.replace(redirectTo);
@@ -749,8 +842,7 @@ export default function ClinicianSignupPage() {
           {/* Left: story / trust */}
           <section>
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
-              <Sparkles className="h-4 w-4 text-indigo-700" />
-              Ambulant+ · Clinician
+              Ambulant+ Â· Clinician
             </div>
 
             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
@@ -761,7 +853,7 @@ export default function ClinicianSignupPage() {
             </h1>
 
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600">
-              Training is mandatory. Once your training is scheduled and paid, your starter kit is dispatched, and you’ll
+              Training is mandatory. Once your training is scheduled and paid, your starter kit is dispatched, and youâ€™ll
               be certified by an admin before your profile becomes visible to patients.
             </p>
 
@@ -843,16 +935,27 @@ export default function ClinicianSignupPage() {
                 ) : null}
 
                 <form onSubmit={handleSubmit} className="mt-5 space-y-5">
+                <details className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+                  <summary className="cursor-pointer font-extrabold">Mandatory training and starter kit cost notice</summary>
+                  <div className="mt-2 space-y-2 text-[13px] leading-6">
+                    <p>Training is mandatory before your profile can become visible to real patients. Training slots are set by Ambulant+ admin. If no admin slot is available, you may submit a preferred date and time for review.</p>
+                    <p>Training payment and starter kit dispatch are part of onboarding. Your kit is dispatched after payment confirmation, and admin adds courier/tracking details.</p>
+                  </div>
+                </details>
+
+
                   {step === 0 ? (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                      <Field label="Full name *" icon={<User className="h-4 w-4" />}>
-                        <input
-                          value={name}
-                          onChange={(e) => setName(e.target.value)}
-                          className={inputCls}
-                          placeholder="Dr. Jane Doe"
-                          required
-                        />
+                      <Field label="First name *" icon={<User className="h-4 w-4" />}>
+                        <input value={firstName} onChange={(e) => setFirstName(e.target.value)} className={inputCls} placeholder="Jane" autoComplete="given-name" required />
+                      </Field>
+
+                      <Field label="Middle name / other names" icon={<User className="h-4 w-4" />}>
+                        <input value={middleName} onChange={(e) => setMiddleName(e.target.value)} className={inputCls} placeholder="Optional" autoComplete="additional-name" />
+                      </Field>
+
+                      <Field label="Last name / surname *" icon={<User className="h-4 w-4" />}>
+                        <input value={lastName} onChange={(e) => setLastName(e.target.value)} className={inputCls} placeholder="Doe" autoComplete="family-name" required />
                       </Field>
 
                       <Field label="Email *" icon={<Mail className="h-4 w-4" />}>
@@ -868,7 +971,7 @@ export default function ClinicianSignupPage() {
                       </Field>
 
                       <Field
-                        label="Password * (min 8)"
+                        label="Password *"
                         icon={<Lock className="h-4 w-4" />}
                         right={
                           <button
@@ -885,11 +988,12 @@ export default function ClinicianSignupPage() {
                           value={pw}
                           onChange={(e) => setPw(e.target.value)}
                           className={inputCls}
-                          placeholder="••••••••"
+                          placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
                           type={showPw ? 'text' : 'password'}
                           autoComplete="new-password"
                           required
                         />
+                        <div className="mt-1 text-[11px] text-slate-500">Use at least 10 characters with uppercase, lowercase, number, and special character.</div>
                       </Field>
 
                       <Field label="Mobile number *" icon={<Phone className="h-4 w-4" />}>
@@ -925,13 +1029,13 @@ export default function ClinicianSignupPage() {
                     <div className="space-y-5">
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                         <Field label="Specialty *" icon={<Stethoscope className="h-4 w-4" />}>
-                          <input
-                            value={specialty}
-                            onChange={(e) => setSpecialty(e.target.value)}
-                            className={inputCls}
-                            placeholder="General Practice"
-                            required
-                          />
+                          <select value={specialty} onChange={(e) => setSpecialty(e.target.value)} className={selectCls} required>
+                            <option value="">Select specialty</option>
+                            {CLINICAL_SPECIALTIES.map((s) => (
+                              <option key={s.key} value={s.label}>{s.label}</option>
+                            ))}
+                          </select>
+                          <div className="mt-1 text-[11px] text-slate-500">Specialty is controlled so patients can search and filter accurately.</div>
                         </Field>
 
                         <Field label="HPCSA registration number *" icon={<BadgeCheck className="h-4 w-4" />}>
@@ -942,7 +1046,7 @@ export default function ClinicianSignupPage() {
                             placeholder="MP1111111"
                             required
                           />
-                          <div className="mt-1 text-[11px] text-slate-500">Format: MP followed by 6–8 digits.</div>
+                          <div className="mt-1 text-[11px] text-slate-500">Format: MP followed by 6â€“8 digits.</div>
                         </Field>
 
                         <Field label="Date of birth *" icon={<CalendarDays className="h-4 w-4" />}>
@@ -959,14 +1063,35 @@ export default function ClinicianSignupPage() {
                           </select>
                         </Field>
 
-                        <Field label="Address (optional)" icon={<MapPin className="h-4 w-4" />} className="sm:col-span-2">
-                          <textarea
-                            value={address}
-                            onChange={(e) => setAddress(e.target.value)}
-                            className={textareaCls}
-                            rows={3}
-                            placeholder="Practice / billing address (optional)"
-                          />
+                        <Field label="Street address 1" icon={<MapPin className="h-4 w-4" />} className="sm:col-span-2">
+                          <input value={practiceAddressLine1} onChange={(e) => setPracticeAddressLine1(e.target.value)} className={inputCls} placeholder="Street number, complex or building" />
+                        </Field>
+                        <Field label="Street address 2" icon={<MapPin className="h-4 w-4" />} className="sm:col-span-2">
+                          <input value={practiceAddressLine2} onChange={(e) => setPracticeAddressLine2(e.target.value)} className={inputCls} placeholder="Suite, floor or unit (optional)" />
+                        </Field>
+                        <Field label="Suburb / town" icon={<MapPin className="h-4 w-4" />}>
+                          <input value={practiceSuburbTown} onChange={(e) => setPracticeSuburbTown(e.target.value)} className={inputCls} placeholder="Sandton, Honeydew, Sea Point" />
+                        </Field>
+                        <Field label="City" icon={<MapPin className="h-4 w-4" />}>
+                          <input value={practiceCity} onChange={(e) => setPracticeCity(e.target.value)} className={inputCls} placeholder="Johannesburg" />
+                        </Field>
+                        <Field label="Province" icon={<MapPin className="h-4 w-4" />}>
+                          <select value={practiceProvince} onChange={(e) => setPracticeProvince(e.target.value)} className={selectCls}>
+                            {ZA_PROVINCES.map((p) => (<option key={p} value={p}>{p}</option>))}
+                          </select>
+                        </Field>
+                        <Field label="Postal code" icon={<MapPin className="h-4 w-4" />}>
+                          <input value={practicePostalCode} onChange={(e) => setPracticePostalCode(e.target.value)} className={inputCls} placeholder="2196" inputMode="numeric" />
+                        </Field>
+                        <Field label="Country" icon={<MapPin className="h-4 w-4" />}>
+                          <select value={practiceCountry} onChange={(e) => setPracticeCountry(e.target.value)} className={selectCls}>
+                            <option value="South Africa">South Africa</option>
+                            <option value="Botswana">Botswana</option>
+                            <option value="Lesotho">Lesotho</option>
+                            <option value="Namibia">Namibia</option>
+                            <option value="Nigeria">Nigeria</option>
+                            <option value="United Kingdom">United Kingdom</option>
+                          </select>
                         </Field>
                       </div>
 
@@ -1004,7 +1129,7 @@ export default function ClinicianSignupPage() {
                                     className="rounded-2xl border border-slate-200 px-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
                                     aria-label="Remove qualification"
                                   >
-                                    ×
+                                    Ã—
                                   </button>
                                 </div>
                               </MiniField>
@@ -1049,7 +1174,7 @@ export default function ClinicianSignupPage() {
                                     className="rounded-2xl border border-slate-200 px-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
                                     aria-label="Remove award"
                                   >
-                                    ×
+                                    Ã—
                                   </button>
                                 </div>
                               </MiniField>
@@ -1074,21 +1199,43 @@ export default function ClinicianSignupPage() {
                         </div>
 
                         <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <MiniField label="Primary language">
-                            <input
-                              value={primaryLanguage}
-                              onChange={(e) => setPrimaryLanguage(e.target.value)}
-                              className={inputCls}
-                              placeholder="English"
-                            />
+                          <MiniField label="Primary language *">
+                            <select value={primaryLanguage} onChange={(e) => setPrimaryLanguage(e.target.value)} className={selectCls} required>
+                              <option value="">Select primary language</option>
+                              {LANGUAGE_OPTIONS.map((x) => (
+                                <option key={x} value={x}>{x}</option>
+                              ))}
+                            </select>
                           </MiniField>
-                          <MiniField label="Other languages (comma separated)">
-                            <input
-                              value={otherLanguages}
-                              onChange={(e) => setOtherLanguages(e.target.value)}
-                              className={inputCls}
-                              placeholder="Zulu, Afrikaans"
-                            />
+                          <MiniField label="Other languages">
+                            <select
+                              value=""
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                if (!value) return;
+                                setOtherLanguages((prev) => (prev.includes(value) ? prev : [...prev, value]));
+                              }}
+                              className={selectCls}
+                            >
+                              <option value="">Add another language</option>
+                              {LANGUAGE_OPTIONS.filter((x) => x !== primaryLanguage && !otherLanguages.includes(x)).map((x) => (
+                                <option key={x} value={x}>{x}</option>
+                              ))}
+                            </select>
+                            {otherLanguages.length ? (
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {otherLanguages.map((lang) => (
+                                  <button
+                                    key={lang}
+                                    type="button"
+                                    onClick={() => setOtherLanguages((prev) => prev.filter((x) => x !== lang))}
+                                    className="rounded-full border border-slate-200 bg-white px-2 py-1 text-[11px] font-bold text-slate-700"
+                                  >
+                                    {lang} ×
+                                  </button>
+                                ))}
+                              </div>
+                            ) : null}
                           </MiniField>
                         </div>
 
@@ -1147,7 +1294,7 @@ export default function ClinicianSignupPage() {
                         ) : null}
                       </Section>
 
-                      <Section title="Regulatory registration">
+                      <Section title="HPCSA registration">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                           <MiniField label="BHF / PCNS practice number (optional)">
                             <input
@@ -1158,16 +1305,16 @@ export default function ClinicianSignupPage() {
                               inputMode="numeric"
                               maxLength={13}
                             />
-                            <div className="mt-1 text-[11px] text-slate-500">Optional. If entered, use exactly 13 digits. This is separate from your HPCSA MP registration number.</div>
+                            <div className="mt-1 text-[11px] text-slate-500">Optional. This is separate from your mandatory HPCSA registration.</div>
                           </MiniField>
 
-                          <MiniField label="HPCSA next renewal date *">
+                          <MiniField label="HPCSA registration next renewal date *">
                             <input value={nextRenewalDate} onChange={(e) => setNextRenewalDate(e.target.value)} className={inputCls} type="date" />
                           </MiniField>
                         </div>
 
                         <div className="mt-4">
-                          <div className="text-xs font-black text-slate-700">Upload HPCSA certificate (optional now, recommended)</div>
+                          <div className="text-xs font-black text-slate-700">Upload HPCSA registration certificate/document *</div>
                           <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
                             <div className="flex items-center gap-2 text-sm text-slate-700">
                               <FileUp className="h-4 w-4 text-slate-500" />
@@ -1184,7 +1331,7 @@ export default function ClinicianSignupPage() {
                             </label>
                           </div>
                           <div className="mt-2 text-[11px] text-slate-500">
-                            This document helps admins verify you faster. If you skip it now, you can upload later.
+                            Required for verification. Upload a PDF, JPG or PNG copy of your current registration evidence.
                           </div>
                         </div>
                       </Section>
@@ -1204,7 +1351,7 @@ export default function ClinicianSignupPage() {
                           </div>
                         ) : (
                           <>
-                            <div className="text-xs font-black text-slate-700">Do you have your own cover?</div>
+                            <div className="text-xs font-black text-slate-700">Do you have your own professional indemnity cover? *</div>
                             <div className="mt-2 flex gap-2">
                               <Pill label="Yes" selected={hasInsurance === true} onClick={() => setHasInsurance(true)} />
                               <Pill label="No" selected={hasInsurance === false} onClick={() => setHasInsurance(false)} />
@@ -1212,15 +1359,21 @@ export default function ClinicianSignupPage() {
 
                             {hasInsurance ? (
                               <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                                <MiniField label="Insurer name">
+                                <MiniField label="Insurer name *">
                                   <input value={insurerName} onChange={(e) => setInsurerName(e.target.value)} className={inputCls} />
                                 </MiniField>
-                                <MiniField label="Insurance type">
-                                  <input value={insuranceType} onChange={(e) => setInsuranceType(e.target.value)} className={inputCls} />
+                                <MiniField label="Policy number *">
+                                  <input value={insurancePolicyNumber} onChange={(e) => setInsurancePolicyNumber(e.target.value)} className={inputCls} />
+                                </MiniField>
+                                <MiniField label="Policy name">
+                                  <input value={insurancePolicyName} onChange={(e) => setInsurancePolicyName(e.target.value)} className={inputCls} />
+                                </MiniField>
+                                <MiniField label="Expiry / next renewal date *">
+                                  <input value={insuranceRenewalDate} onChange={(e) => setInsuranceRenewalDate(e.target.value)} className={inputCls} type="date" />
                                 </MiniField>
 
                                 <div className="sm:col-span-2">
-                                  <div className="text-xs font-black text-slate-700">Covers virtual consultations?</div>
+                                  <div className="text-xs font-black text-slate-700">Does it cover virtual consultations using IoMT-supported remote assessment? *</div>
                                   <div className="mt-2 flex gap-2">
                                     <Pill label="Yes" selected={insuranceCoversVirtual === 'yes'} onClick={() => setInsuranceCoversVirtual('yes')} />
                                     <Pill label="No" selected={insuranceCoversVirtual === 'no'} onClick={() => setInsuranceCoversVirtual('no')} />
@@ -1293,7 +1446,7 @@ export default function ClinicianSignupPage() {
                         </div>
 
                         <div className="mt-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[12px] text-indigo-900">
-                          After you submit, you’ll be taken to <span className="font-extrabold">training scheduling + payment</span>.
+                          After you submit, youâ€™ll be taken to <span className="font-extrabold">training scheduling + payment</span>.
                           Once payment is confirmed, your starter kit is dispatched.
                         </div>
                       </Section>
@@ -1305,7 +1458,7 @@ export default function ClinicianSignupPage() {
                               value={shipping.recipientName}
                               onChange={(e) => setShipping((s) => ({ ...s, recipientName: e.target.value }))}
                               className={inputCls}
-                              placeholder="Dr. Jane Doe"
+                              placeholder="Jane Doe"
                               required
                             />
                           </MiniField>
@@ -1426,7 +1579,7 @@ export default function ClinicianSignupPage() {
                           {loading ? (
                             <>
                               <Loader2 className="h-4 w-4 animate-spin" />
-                              Submitting…
+                              Submittingâ€¦
                             </>
                           ) : (
                             <>
@@ -1449,7 +1602,7 @@ export default function ClinicianSignupPage() {
               </Card>
 
               <div className="mt-4 text-center text-[11px] text-slate-500">
-                By applying you agree to your clinic’s terms and privacy policy.
+                By applying you agree to your clinicâ€™s terms and privacy policy.
               </div>
             </div>
           </section>
