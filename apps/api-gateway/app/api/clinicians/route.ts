@@ -228,6 +228,62 @@ function publicClinicianLocation(row: any, meta: any) {
   return city || region || '';
 }
 
+function publicAcceptedSchemes(row: any, meta: any) {
+  const source =
+    row.acceptedSchemes ??
+    meta.acceptedSchemes ??
+    meta.schemes ??
+    meta.insurers ??
+    meta.acceptedSchemesCsv;
+
+  if (Array.isArray(source)) {
+    return source.map(String).map((s) => s.trim()).filter(Boolean);
+  }
+
+  if (typeof source === 'string') {
+    return source
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+
+  return [];
+}
+
+function publicAcceptsMedicalAid(row: any, meta: any) {
+  const schemes = publicAcceptedSchemes(row, meta);
+
+  return Boolean(
+    row.acceptsMedicalAid === true ||
+      meta.acceptsMedicalAid === true ||
+      meta.hasInsurance === true ||
+      meta.acceptsInsurance === true ||
+      meta.acceptEligibleMedicalAid === true ||
+      schemes.length > 0,
+  );
+}
+
+function publicAvatarUrl(row: any, meta: any) {
+  return (
+    cleanStr(row.avatarUrl ?? row.photoUrl ?? meta.avatarUrl ?? meta.photoUrl) ||
+    null
+  );
+}
+
+function publicAvatarDataUrl(row: any, meta: any) {
+  const value = row.avatarDataUrl ?? meta.avatarDataUrl;
+  const s = typeof value === 'string' ? value.trim() : '';
+
+  if (!s) return null;
+  if (!s.startsWith('data:image/')) return null;
+
+  // Temporary list-card support until avatarUrl is stored in object storage.
+  // Keep a ceiling so one malformed profile cannot bloat the directory response.
+  if (s.length > 750000) return null;
+
+  return s;
+}
+
 function publicMapClinician(row: any) {
   const meta = safeParseJson(row.meta);
   const rawProfile = safeParseJson(meta.rawProfileJson || meta.rawProfile || meta.submittedProfile);
@@ -270,17 +326,13 @@ function publicMapClinician(row: any) {
     onlineSeq: row.onlineSeq != null ? Number(row.onlineSeq) : null,
     recentBookedCount: row.recentBookedCount ?? 0,
     status: row.status ?? null,
+    photoUrl: publicAvatarUrl(row, mergedMeta),
+    avatarUrl: publicAvatarUrl(row, mergedMeta),
+    avatarDataUrl: publicAvatarDataUrl(row, mergedMeta),
     disabled: Boolean(row.disabled),
     archived: Boolean(row.archived),
-    acceptsMedicalAid:
-      typeof row.acceptsMedicalAid === 'boolean'
-        ? row.acceptsMedicalAid
-        : Boolean(mergedMeta.acceptsMedicalAid),
-    acceptedSchemes: Array.isArray(row.acceptedSchemes)
-      ? row.acceptedSchemes
-      : Array.isArray(mergedMeta.acceptedSchemes)
-        ? mergedMeta.acceptedSchemes
-        : [],
+    acceptsMedicalAid: publicAcceptsMedicalAid(row, mergedMeta),
+    acceptedSchemes: publicAcceptedSchemes(row, mergedMeta),
     practiceName: row.practiceName ?? mergedMeta.practiceName ?? undefined,
     country: publicClinicianCountry(row, mergedMeta),
     speaks: Array.isArray(mergedMeta.speaks) ? mergedMeta.speaks : undefined,

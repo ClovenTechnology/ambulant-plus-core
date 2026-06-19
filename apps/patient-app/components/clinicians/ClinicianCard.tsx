@@ -14,6 +14,9 @@ export type ClinicianCardItem = {
   ratingCount?: number;
   online?: boolean;
   status?: string;
+  photoUrl?: string | null;
+  avatarUrl?: string | null;
+  avatarDataUrl?: string | null;
   acceptsMedicalAid?: boolean;
   speaks?: string[];
   yearsExp?: number;
@@ -108,12 +111,26 @@ export function ClinicianCard({
   onBook,
 }: ClinicianCardProps) {
   const bookingReason = bookingBlockedReason(clinician);
+  const avatarSrc =
+    clinician.avatarUrl ||
+    clinician.photoUrl ||
+    clinician.avatarDataUrl ||
+    '';
 
   return (
     <div className="group p-4 md:p-5 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 transition hover:bg-white/70 hover:backdrop-blur-sm">
       <div className="flex gap-3 items-start min-w-0 flex-1">
         <div className="h-11 w-11 rounded-full bg-gradient-to-br from-indigo-600 via-cyan-500 to-fuchsia-500 text-white grid place-items-center font-semibold shrink-0 shadow-[0_10px_24px_rgba(79,70,229,0.28)]">
-          {initialsFromName(clinician.name)}
+          {avatarSrc ? (
+            <img
+              src={avatarSrc}
+              alt={`${clinician.name} profile picture`}
+              className="h-full w-full rounded-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            initialsFromName(clinician.name)
+          )}
         </div>
 
         <div className="min-w-0 flex-1">
