@@ -1,10 +1,17 @@
 // apps/api-gateway/src/consult/engine.ts
+import { prisma } from '@/src/lib/db';
+import { getSchedule, type DayKey, type ScheduleConfig } from '@/src/store/schedule';
+import { getAdminPolicy, getClinicianConsult } from '@/src/store/consult';
 
 export type EffectiveConsultConfig = {
-  slotMinutes: number; // e.g. 30
-  startHour: number; // working day start hour (0-23)
-  endHour: number; // working day end hour (0-24)
-  timeZone?: string; // e.g. "Africa/Johannesburg"
+  slotMinutes: number;
+  bufferMinutes: number;
+  minAdvanceMinutes: number;
+  maxAdvanceDays: number;
+  timeZone?: string;
+  schedule: ScheduleConfig;
+  clinicianId?: string;
+  clinicianUserId?: string;
 };
 
 export type GeneratedSlot = {
@@ -15,45 +22,135 @@ export type GeneratedSlot = {
   status?: string;
 };
 
-/**
- * Effective config = admin defaults + clinician overrides (eventually).
- * For now it's a stub, but it matches your route usage: await getEffectiveConsultConfig(clinicianId)
- */
+const DAY_KEYS: DayKey[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+
+function parseObject(value: unknown): Record<string, any> {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
+function profileJson(clinician: any): Record<string, any> {
+  const meta = parseObject(clinician?.meta);
+  if (meta.rawProfile && typeof meta.rawProfile === 'object') return meta.rawProfile;
+  if (typeof meta.rawProfileJson === 'string') return parseObject(meta.rawProfileJson);
+  return meta;
+}
+
+function num(value: unknown, fallback: number) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function hhmmToMinutes(value: unknown, fallback: number) {
+  const s = String(value ?? '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return fallback;
+  const hh = Math.max(0, Math.min(23, Number(m[1])));
+  const mm = Math.max(0, Math.min(59, Number(m[2])));
+  return hh * 60 + mm;
+}
+
+async function resolveClinician(identifier?: string) {
+  const raw = String(identifier || '').trim();
+  if (!raw) return null;
+
+  return (prisma as any).clinicianProfile.findFirst({
+    where: {
+      OR: [
+        { id: raw },
+        { userId: raw },
+        { email: raw },
+      ],
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
 export async function getEffectiveConsultConfig(
   clinicianId?: string,
 ): Promise<EffectiveConsultConfig> {
-  void clinicianId;
+  const clinician = await resolveClinician(clinicianId);
+  const clinicianUserId = String(clinician?.userId || clinicianId || '').trim();
+
+  const [schedule, consult, admin] = await Promise.all([
+    getSchedule(clinicianUserId),
+    getClinicianConsult(clinicianUserId),
+    getAdminPolicy(),
+  ]);
+
+  const profile = profileJson(clinician);
+  const storedConsult = parseObject(profile.consultSettings);
+  const bufferMinutes = Math.max(
+    0,
+    Math.round(num(storedConsult.bufferMinutes ?? profile.bufferMinutes, admin.bufferAfterMinutes)),
+  );
 
   return {
-    slotMinutes: 30,
-    startHour: 8,
-    endHour: 17,
-    timeZone: process.env.DEFAULT_TIMEZONE || 'Africa/Johannesburg',
+    slotMinutes: Math.max(5, Math.min(240, Math.round(num(consult.defaultStandardMin, 30)))),
+    bufferMinutes,
+    minAdvanceMinutes: Math.max(0, Math.round(num(consult.minAdvanceMinutes, 30))),
+    maxAdvanceDays: Math.max(1, Math.round(num(consult.maxAdvanceDays, 30))),
+    timeZone: schedule.timezone || process.env.DEFAULT_TIMEZONE || 'Africa/Johannesburg',
+    schedule,
+    clinicianId: clinician?.id || clinicianId,
+    clinicianUserId,
   };
 }
 
-/**
- * IMPORTANT:
- * `dayStartUtc` should be the UTC instant that corresponds to "local midnight"
- * in the clinician timezone (your batch route constructs this).
- * Then adding hours/minutes in UTC preserves intended wall-clock schedule.
- */
 export function generateSlotsForDate(
   dayStartUtc: Date,
   cfg: EffectiveConsultConfig,
 ): GeneratedSlot[] {
-  const slotMin = Math.max(5, Math.min(240, Math.floor(cfg.slotMinutes || 30)));
-  const startHour = Math.max(0, Math.min(23, Math.floor(cfg.startHour || 0)));
-  const endHour = Math.max(0, Math.min(24, Math.floor(cfg.endHour || 24)));
+  const dateKey = dayStartUtc.toISOString().slice(0, 10);
+  if ((cfg.schedule.exceptions || []).some((ex) => ex.date === dateKey)) {
+    return [];
+  }
 
-  const startMs = dayStartUtc.getTime() + startHour * 60 * 60000;
-  const endMs = dayStartUtc.getTime() + endHour * 60 * 60000;
+  const dayKey = DAY_KEYS[dayStartUtc.getUTCDay()];
+  const dayTemplate = cfg.schedule.template?.[dayKey];
+
+  if (!dayTemplate?.enabled || !Array.isArray(dayTemplate.ranges) || dayTemplate.ranges.length === 0) {
+    return [];
+  }
+
+  const slotMin = Math.max(5, Math.min(240, Math.floor(cfg.slotMinutes || 30)));
+  const bufferMin = Math.max(0, Math.min(240, Math.floor(cfg.bufferMinutes || 0)));
+  const stepMin = Math.max(5, slotMin + bufferMin);
+  const dayBaseMs = Date.UTC(
+    dayStartUtc.getUTCFullYear(),
+    dayStartUtc.getUTCMonth(),
+    dayStartUtc.getUTCDate(),
+    0,
+    0,
+    0,
+    0,
+  );
 
   const out: GeneratedSlot[] = [];
-  for (let t = startMs; t + slotMin * 60000 <= endMs; t += slotMin * 60000) {
-    const s = new Date(t);
-    const e = new Date(t + slotMin * 60000);
-    out.push({ start: s, end: e, label: 'Available', booked: false });
+
+  for (const range of dayTemplate.ranges) {
+    const startMin = hhmmToMinutes(range.start, 9 * 60);
+    let endMin = hhmmToMinutes(range.end, 17 * 60);
+
+    if (endMin <= startMin) {
+      endMin += 24 * 60;
+    }
+
+    for (let t = startMin; t + slotMin <= endMin; t += stepMin) {
+      const s = new Date(dayBaseMs + t * 60000);
+      const e = new Date(s.getTime() + slotMin * 60000);
+      out.push({ start: s, end: e, label: 'Available', booked: false, status: 'available' });
+    }
   }
+
   return out;
 }

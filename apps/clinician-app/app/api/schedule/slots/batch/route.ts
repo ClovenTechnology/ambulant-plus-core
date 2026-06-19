@@ -1,101 +1,95 @@
 // apps/clinician-app/app/api/schedule/slots/batch/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const GATEWAY =
-  process.env.GATEWAY_URL ||
-  process.env.APIGW_BASE ||
-  process.env.NEXT_PUBLIC_APIGW_BASE ||
+const GW =
+  process.env.API_GATEWAY_URL?.replace(/\/+$/, '') ||
+  process.env.NEXT_PUBLIC_API_GATEWAY_URL?.replace(/\/+$/, '') ||
+  process.env.APIGW_BASE?.replace(/\/+$/, '') ||
+  process.env.NEXT_PUBLIC_GATEWAY_ORIGIN?.replace(/\/+$/, '') ||
   '';
 
-type Slot = { start: string; end: string; booked?: boolean; patientId?: string };
-type DaySlots = { start: string; end?: string; label?: string }[];
-type BatchResp = { slots: Record<string, DaySlots> };
-
-function groupIntoBatch(slots: Slot[]): BatchResp {
-  const out: Record<string, DaySlots> = {};
-
-  for (const s of slots) {
-    if (!s.start) continue;
-    const dt = new Date(s.start);
-    if (!Number.isFinite(dt.getTime())) continue;
-
-    const key = dt.toISOString().slice(0, 10); // YYYY-MM-DD
-    if (!out[key]) out[key] = [];
-
-    // Only include free slots in availability view by default
-    if (s.booked) continue;
-
-    out[key].push({
-      start: s.start,
-      end: s.end,
-      label: s.booked ? 'Booked' : 'Available',
-    });
-  }
-
-  return { slots: out };
+function json(data: any, status = 200) {
+  return NextResponse.json(data, { status, headers: { 'cache-control': 'no-store' } });
 }
 
-function generateMockSlots(startStr: string, days: number): BatchResp {
-  const base = new Date(startStr);
-  if (!Number.isFinite(base.getTime())) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    base.setTime(today.getTime());
+function hhmm(value: any) {
+  const raw = typeof value === 'string' ? value : String(value?.start || value || '');
+  if (!raw) return '';
+  if (/^\d{2}:\d{2}$/.test(raw)) return raw;
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw.slice(0, 5);
+  return d.toISOString().slice(11, 16);
+}
+
+function clinicianUid(auth: any) {
+  return String(auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || auth?.clinicianId || '').trim();
+}
+
+async function resolveClinician(req: NextRequest, rawClinicianId: string) {
+  if (rawClinicianId && rawClinicianId !== 'me' && rawClinicianId !== 'clinician-local-001') {
+    return { clinicianId: rawClinicianId, headers: {} as Record<string, string>, error: null as any };
   }
 
-  const all: Slot[] = [];
-  const SLOT_MIN = 9; // 09:00
-  const SLOT_MAX = 17; // 17:00
-  const DURATION_MIN = 30;
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return { clinicianId: '', headers: {}, error: authErrorResponse(auth) };
 
-  for (let d = 0; d < days; d++) {
-    for (let h = SLOT_MIN; h < SLOT_MAX; h++) {
-      for (let m = 0; m < 60; m += DURATION_MIN) {
-        const start = new Date(base);
-        start.setDate(base.getDate() + d);
-        start.setHours(h, m, 0, 0);
-        const end = new Date(start);
-        end.setMinutes(end.getMinutes() + DURATION_MIN);
-
-        all.push({
-          start: start.toISOString(),
-          end: end.toISOString(),
-          booked: false,
-        });
-      }
-    }
-  }
-
-  return groupIntoBatch(all);
+  return {
+    clinicianId: auth.clinicianId,
+    headers: {
+      'x-uid': clinicianUid(auth),
+      'x-role': auth.role,
+    },
+    error: null,
+  };
 }
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const clinicianId = url.searchParams.get('clinicianId') || 'clin-demo';
-  const startStr =
-    url.searchParams.get('start') || new Date().toISOString().slice(0, 10);
-  const days = Number(url.searchParams.get('days') || '14') || 14;
+  try {
+    if (!GW) return json({ ok: false, error: 'missing_gateway_origin' }, 500);
 
-  if (GATEWAY) {
-    try {
-      const r = await fetch(
-        `${GATEWAY}/api/clinicians/${encodeURIComponent(
-          clinicianId,
-        )}/slots`,
-        { cache: 'no-store' },
-      );
-      if (r.ok) {
-        const slots = (await r.json().catch(() => [])) as Slot[];
-        return NextResponse.json(groupIntoBatch(slots));
-      }
-      console.warn('[slots/batch] gateway returned non-OK status', r.status);
-    } catch (e) {
-      console.warn('[slots/batch] gateway error, using mock slots', e);
-    }
+    const q = req.nextUrl.searchParams;
+    const start = q.get('start') || new Date().toISOString().slice(0, 10);
+    const days = String(Math.max(1, Math.min(62, Number(q.get('days') || '7'))));
+    const rawClinicianId = q.get('clinicianId') || q.get('clinician_id') || 'me';
+
+    const resolved = await resolveClinician(req, rawClinicianId);
+    if (resolved.error) return resolved.error;
+
+    const gwQ = new URLSearchParams({
+      start,
+      days,
+      clinicianId: resolved.clinicianId,
+    });
+
+    const res = await fetch(`${GW}/api/schedule/slots?${gwQ.toString()}`, {
+      cache: 'no-store',
+      headers: resolved.headers,
+    });
+
+    const body = await res.json().catch(() => ({} as any));
+
+    const record = body.slots && typeof body.slots === 'object' && !Array.isArray(body.slots)
+      ? body.slots
+      : {};
+
+    const items = Object.keys(record).map((date) => ({
+      date,
+      slots: Array.isArray(record[date]) ? record[date].map(hhmm).filter(Boolean) : [],
+    }));
+
+    return json({
+      ok: res.ok,
+      start,
+      items,
+      slots: record,
+      source: 'clinician_app_proxy',
+    }, res.status);
+  } catch (err: any) {
+    console.error('[clinician-app] slots batch proxy failed', err);
+    return json({ ok: false, error: err?.message || 'gateway_failed' }, 500);
   }
-
-  const mock = generateMockSlots(startStr, days);
-  return NextResponse.json(mock);
 }

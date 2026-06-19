@@ -1,185 +1,68 @@
+// apps/clinician-app/app/api/clinicians/me/payout-settings/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type PlanTierId = 'solo' | 'starter' | 'team' | 'group';
-type SmartIdDispatchOption = 'collect' | 'courier';
-type BillingCycle = 'monthly' | 'annual';
-
-const ALLOWED_PLAN_IDS: PlanTierId[] = ['solo', 'starter', 'team', 'group'];
+const GW =
+  process.env.API_GATEWAY_URL?.replace(/\/+$/, '') ||
+  process.env.NEXT_PUBLIC_API_GATEWAY_URL?.replace(/\/+$/, '') ||
+  process.env.APIGW_BASE?.replace(/\/+$/, '') ||
+  process.env.NEXT_PUBLIC_GATEWAY_ORIGIN?.replace(/\/+$/, '') ||
+  '';
 
 function json(data: any, status = 200) {
-  return NextResponse.json(data, { status });
+  return NextResponse.json(data, { status, headers: { 'cache-control': 'no-store' } });
 }
 
-function parseObject(value: unknown): Record<string, any> {
-  if (!value) return {};
-
-  if (typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, any>;
-  }
-
-  if (typeof value === 'string') {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as Record<string, any>
-        : {};
-    } catch {
-      return {};
-    }
-  }
-
-  return {};
+function clinicianUid(auth: any) {
+  return String(auth?.clinician?.userId || auth?.session?.email || auth?.session?.sub || auth?.clinicianId || '').trim();
 }
 
-function normalizePlanId(raw: unknown): PlanTierId {
-  if (typeof raw === 'string' && ALLOWED_PLAN_IDS.includes(raw as PlanTierId)) {
-    return raw as PlanTierId;
-  }
+async function proxy(req: NextRequest, method: 'GET' | 'PUT') {
+  if (!GW) return json({ ok: false, error: 'missing_gateway_origin' }, 500);
 
-  return 'solo';
-}
+  const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
+  if (!auth.ok) return authErrorResponse(auth);
 
-function normalizeBillingCycle(raw: unknown): BillingCycle {
-  return raw === 'annual' ? 'annual' : 'monthly';
-}
+  const uid = clinicianUid(auth);
+  if (!uid) return json({ ok: false, error: 'missing_clinician_identity' }, 401);
 
-function normalizeDispatch(raw: unknown): SmartIdDispatchOption {
-  return raw === 'courier' ? 'courier' : 'collect';
-}
-
-function getProfileJson(clinician: any): Record<string, any> {
-  const meta = parseObject(clinician?.meta);
-
-  if (meta.rawProfile && typeof meta.rawProfile === 'object') {
-    return meta.rawProfile as Record<string, any>;
-  }
-
-  if (typeof meta.rawProfileJson === 'string') {
-    return parseObject(meta.rawProfileJson);
-  }
-
-  return meta;
-}
-
-async function getClinician(req: NextRequest) {
-  const url = new URL(req.url);
-  const clinicianId = url.searchParams.get('clinicianId')?.trim();
-
-  if (clinicianId) {
-    return prisma.clinicianProfile.findUnique({
-      where: { id: clinicianId },
-    });
-  }
-
-  return prisma.clinicianProfile.findFirst({
-    orderBy: { createdAt: 'asc' },
-  });
-}
-
-function buildResponse(clinician: any, profileJson: Record<string, any>) {
-  const payout = parseObject(profileJson.payoutSettings);
-
-  const currentPlanId = normalizePlanId(payout.planTierId);
-  const billingCycle = normalizeBillingCycle(payout.billingCycle);
-  const smartIdDispatch = normalizeDispatch(payout.smartIdDispatch);
-
-  const maxAdminStaffSlots =
-    typeof payout.maxAdminStaffSlotsOverride === 'number'
-      ? payout.maxAdminStaffSlotsOverride
-      : null;
-
-  const activeAdminStaffSlots =
-    typeof payout.activeAdminStaffSlots === 'number'
-      ? payout.activeAdminStaffSlots
-      : 0;
-
-  return {
-    ok: true,
-    clinicianId: clinician.id,
-    currentPlanId,
-    smartIdDispatch,
-    billingCycle,
-    maxAdminStaffSlots,
-    activeAdminStaffSlots,
+  const init: RequestInit = {
+    method,
+    cache: 'no-store',
+    headers: {
+      accept: 'application/json',
+      'x-uid': uid,
+      'x-role': auth.role,
+    },
   };
+
+  if (method === 'PUT') {
+    (init.headers as any)['content-type'] = 'application/json';
+    init.body = JSON.stringify(await req.json().catch(() => ({})));
+  }
+
+  const res = await fetch(`${GW}/api/clinicians/me/payout-settings`, init);
+  const body = await res.json().catch(() => ({}));
+  return json(body, res.status);
 }
 
 export async function GET(req: NextRequest) {
   try {
-    const clinician = await getClinician(req);
-
-    if (!clinician) {
-      return json({ ok: false, error: 'no_clinician_found' }, 404);
-    }
-
-    const profileJson = getProfileJson(clinician);
-
-    return json(buildResponse(clinician, profileJson));
+    return await proxy(req, 'GET');
   } catch (err: any) {
-    console.error('GET /api/clinicians/me/payout-settings error', err);
-
-    return json(
-      { ok: false, error: err?.message || 'failed_to_load_payout_settings' },
-      500
-    );
+    console.error('[clinician-app] payout settings proxy failed', err);
+    return json({ ok: false, error: err?.message || 'gateway_failed' }, 500);
   }
 }
 
 export async function PUT(req: NextRequest) {
   try {
-    const clinician = await getClinician(req);
-
-    if (!clinician) {
-      return json({ ok: false, error: 'no_clinician_found' }, 404);
-    }
-
-    const body = await req.json().catch(() => ({} as any));
-
-    const planTierId = normalizePlanId(body.planTierId);
-    const billingCycle = normalizeBillingCycle(body.billingCycle);
-    const smartIdDispatch = normalizeDispatch(body.smartIdDispatch);
-
-    const clinicianAny = clinician as any;
-    const existingMeta = parseObject(clinicianAny.meta);
-    const profileJson = getProfileJson(clinician);
-    const prevPayout = parseObject(profileJson.payoutSettings);
-
-    const nextProfileJson = {
-      ...profileJson,
-      payoutSettings: {
-        ...prevPayout,
-        planTierId,
-        billingCycle,
-        smartIdDispatch,
-      },
-    };
-
-    const nextMeta = {
-      ...existingMeta,
-      rawProfile: nextProfileJson,
-      rawProfileJson: JSON.stringify(nextProfileJson),
-    };
-
-    const updated = await prisma.clinicianProfile.update({
-      where: { id: clinician.id },
-      data: {
-        meta: nextMeta as any,
-      } as any,
-    });
-
-    const updatedProfileJson = getProfileJson(updated);
-
-    return json(buildResponse(updated, updatedProfileJson));
+    return await proxy(req, 'PUT');
   } catch (err: any) {
-    console.error('PUT /api/clinicians/me/payout-settings error', err);
-
-    return json(
-      { ok: false, error: err?.message || 'failed_to_update_payout_settings' },
-      500
-    );
+    console.error('[clinician-app] payout settings save proxy failed', err);
+    return json({ ok: false, error: err?.message || 'gateway_failed' }, 500);
   }
 }

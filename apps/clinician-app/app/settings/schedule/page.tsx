@@ -473,7 +473,7 @@ export default function SchedulePage() {
 
       {/* Calendar preview — pass window + default duration + preview mode */}
       <CalendarPreview
-        clinicianId="clinician-local-001"
+        clinicianId="me"
         initialView={patientView ? 'month' : 'week'}
         useBatchForWeek={!patientView}
       />
