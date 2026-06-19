@@ -179,7 +179,7 @@ function emailLooksValid(v: string) {
 }
 
 function passwordLooksStrong(v: string) {
-  return v.length >= 10 && /[a-z]/.test(v) && /[A-Z]/.test(v) && /\d/.test(v) && /[^A-Za-z0-9]/.test(v);
+  return String(v || '').length >= 8 && !/\s/.test(String(v || ''));
 }
 
 function composePhone(countryCode: string, local: string) {
@@ -341,6 +341,7 @@ export default function ClinicianSignupPage() {
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [pw, setPw] = useState('');
+  const [confirmPw, setConfirmPw] = useState('');
   const [showPw, setShowPw] = useState(false);
   const [phone, setPhone] = useState('');
   const [phoneCountryCode, setPhoneCountryCode] = useState('+27');
@@ -444,6 +445,38 @@ export default function ClinicianSignupPage() {
     setPreferredCommunication((prev) => (prev.includes(value) ? prev.filter((v) => v !== value) : [...prev, value]));
   };
 
+
+  const passwordQuality = useMemo(() => {
+    const value = pw || '';
+    const checks = {
+      len8: value.length >= 8,
+      lower: /[a-z]/.test(value),
+      upper: /[A-Z]/.test(value),
+      number: /[0-9]/.test(value),
+      symbol: /[^A-Za-z0-9]/.test(value),
+      noSpaces: !/\s/.test(value),
+    };
+
+    const score = [
+      checks.len8,
+      checks.lower,
+      checks.upper,
+      checks.number,
+      checks.symbol,
+      checks.noSpaces,
+    ].filter(Boolean).length;
+
+    return { checks, score };
+  }, [pw]);
+
+  const passwordStrengthLabel = useMemo(() => {
+    if (!pw) return 'Not started';
+    if (passwordQuality.score <= 2) return 'Weak';
+    if (passwordQuality.score <= 4) return 'Fair';
+    if (passwordQuality.score === 5) return 'Good';
+    return 'Strong';
+  }, [passwordQuality.score, pw]);
+
   const normalizedPhone = useMemo(() => composePhone(phoneCountryCode, phone), [phoneCountryCode, phone]);
   const normalizedShippingPhone = useMemo(
     () => composePhone(shippingPhoneCountryCode, shipping.phone),
@@ -472,6 +505,8 @@ export default function ClinicianSignupPage() {
         !!normalizeSpaces(lastName) &&
         emailLooksValid(email) &&
         passwordLooksStrong(pw) &&
+        !!confirmPw &&
+        pw === confirmPw &&
         phoneLooksValid(normalizedPhone)
       );
     }
@@ -488,8 +523,7 @@ export default function ClinicianSignupPage() {
         qualificationYearLooksValid(qualificationYear) &&
         hpcsaRegistrationLooksValid(license) &&
         preferredCommunication.length > 0 &&
-        !!primaryLanguage &&
-        !!hpcsaDocFile
+        !!primaryLanguage
       );
     }
 
@@ -508,7 +542,7 @@ export default function ClinicianSignupPage() {
       if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return false;
       if (!nextRenewalDate || !isTodayOrFuture(nextRenewalDate)) return false;
       if (!platformCover && hasInsurance === null) return false;
-      if (!platformCover && hasInsurance === true && (!insurerName.trim() || !insuranceType.trim() || !insuranceCoversVirtual)) {
+      if (!platformCover && hasInsurance === true && (!insurerName.trim() || !insurancePolicyNumber.trim() || !insuranceRenewalDate || !insuranceCoversVirtual)) {
         return false;
       }
       return consent;
@@ -529,6 +563,7 @@ export default function ClinicianSignupPage() {
     lastName,
     email,
     pw,
+    confirmPw,
     phone,
     phoneCountryCode,
     normalizedPhone,
@@ -575,7 +610,8 @@ export default function ClinicianSignupPage() {
     if (!normalizeSpaces(firstName)) return fail(0, 'First name is required.');
     if (!normalizeSpaces(lastName)) return fail(0, 'Last name / surname is required.');
     if (!emailLooksValid(email)) return fail(0, 'Enter a valid email address.');
-    if (!passwordLooksStrong(pw)) return fail(0, 'Password must be at least 10 characters and include uppercase, lowercase, number, and special character.');
+    if (!passwordLooksStrong(pw)) return fail(0, 'Password must be at least 8 characters and must not contain spaces.');
+    if (!confirmPw || pw !== confirmPw) return fail(0, 'Passwords do not match.');
     if (!phoneLooksValid(normalizedPhone)) return fail(0, 'Enter a valid mobile number with country code, for example +27821234567.');
 
     if (!specialty.trim()) return fail(1, 'Specialty is required.');
@@ -590,7 +626,7 @@ export default function ClinicianSignupPage() {
     if (!hpcsaRegistrationLooksValid(license)) return fail(1, 'HPCSA registration must look like MP1111111.');
     if (preferredCommunication.length === 0) return fail(1, 'Select at least one communication option.');
     if (!primaryLanguage) return fail(1, 'Primary language is required.');
-    if (!hpcsaDocFile) return fail(1, 'Upload your HPCSA registration certificate/document.');
+    if (!hpcsaDocFile) return fail(2, 'Upload your HPCSA registration certificate/document.');
 
     if (!citizenship) return fail(2, 'Citizenship status is required.');
     if (citizenship === 'south_african') {
@@ -598,7 +634,7 @@ export default function ClinicianSignupPage() {
       if (idErr) return fail(2, idErr);
     }
     if (citizenship === 'non_south_african') {
-      if (!passportNumberLooksValid(passportNumber)) return fail(2, 'Passport number must be 5â€“20 letters/numbers.');
+      if (!passportNumberLooksValid(passportNumber)) return fail(2, 'Passport number must be 5-20 letters/numbers.');
       if (!citizenshipCountry.trim()) return fail(2, 'Country of citizenship is required.');
       if (!passportIssuingAuthority.trim()) return fail(2, 'Passport issuing authority is required.');
       if (!isFutureDate(passportExpiry)) return fail(2, 'Passport expiry must be a future date.');
@@ -667,7 +703,7 @@ export default function ClinicianSignupPage() {
       const finalLastName = normalizeSpaces(lastName);
       const finalFullName = normalizeSpaces([finalFirstName, finalMiddleName, finalLastName].filter(Boolean).join(' '));
 
-      // Build a single â€œprofileâ€ blob (stored server-side in metadata.rawProfileJson)
+      // Build a single "profile" blob (stored server-side in metadata.rawProfileJson)
       const profile = {
         firstName: finalFirstName,
         middleName: finalMiddleName || undefined,
@@ -736,6 +772,9 @@ export default function ClinicianSignupPage() {
         hasInsurance: platformCover ? undefined : typeof hasInsurance === 'boolean' ? hasInsurance : undefined,
         insurerName: platformCover ? undefined : hasInsurance ? normalizeSpaces(insurerName) : undefined,
         insuranceType: platformCover ? undefined : hasInsurance ? normalizeSpaces(insuranceType) : undefined,
+        insurancePolicyName: platformCover ? undefined : hasInsurance ? normalizeSpaces(insurancePolicyName) : undefined,
+        insurancePolicyNumber: platformCover ? undefined : hasInsurance ? normalizeSpaces(insurancePolicyNumber) : undefined,
+        insuranceRenewalDate: platformCover ? undefined : hasInsurance ? insuranceRenewalDate || undefined : undefined,
         insuranceCoversVirtual: platformCover ? undefined : hasInsurance ? insuranceCoversVirtual === 'yes' : undefined,
 
         preferredCommunication,
@@ -803,10 +842,10 @@ export default function ClinicianSignupPage() {
 
       setDone(true);
 
-      // âœ… Redirect priority:
+      // ... Redirect priority:
       // 1) server-supplied internal redirectTo
       // 2) server-supplied internal trainingLink
-      // 3) default â€œpremiumâ€ flow: training schedule (with clinicianId when available)
+      // 3) default premium flow: training schedule (with clinicianId when available)
       const redirectTo = safeInternalPath(data?.redirectTo, '');
       if (redirectTo) {
         router.replace(redirectTo);
@@ -836,13 +875,13 @@ export default function ClinicianSignupPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(1200px_circle_at_20%_-10%,rgba(99,102,241,0.18),transparent_55%),radial-gradient(900px_circle_at_100%_0%,rgba(16,185,129,0.12),transparent_50%)]">
+    <main className="min-h-screen bg-slate-50">
       <div className="mx-auto max-w-6xl px-6 py-10">
         <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
           {/* Left: story / trust */}
           <section>
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
-              Ambulant+ Â· Clinician
+              Ambulant+ Clinician
             </div>
 
             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
@@ -853,8 +892,7 @@ export default function ClinicianSignupPage() {
             </h1>
 
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600">
-              Training is mandatory. Once your training is scheduled and paid, your starter kit is dispatched, and youâ€™ll
-              be certified by an admin before your profile becomes visible to patients.
+              Training is mandatory. Once your training is scheduled and paid, your starter kit is dispatched, and you will be certified by an admin before your profile becomes visible to patients.
             </p>
 
             <div className="mt-6 grid max-w-xl gap-3 sm:grid-cols-2">
@@ -988,12 +1026,28 @@ export default function ClinicianSignupPage() {
                           value={pw}
                           onChange={(e) => setPw(e.target.value)}
                           className={inputCls}
-                          placeholder="â€¢â€¢â€¢â€¢â€¢â€¢â€¢â€¢"
+                          placeholder="Create password"
                           type={showPw ? 'text' : 'password'}
                           autoComplete="new-password"
                           required
                         />
-                        <div className="mt-1 text-[11px] text-slate-500">Use at least 10 characters with uppercase, lowercase, number, and special character.</div>
+                        <div className="mt-1 text-[11px] text-slate-500">Use at least 8 characters. Add uppercase, lowercase, numbers, and symbols for stronger security.</div>
+                        <div className="mt-1 text-[11px] font-bold text-slate-600">Password strength: {passwordStrengthLabel}</div>
+                      </Field>
+
+                      <Field label="Confirm password *" icon={<Lock className="h-4 w-4" />}>
+                        <input
+                          value={confirmPw}
+                          onChange={(e) => setConfirmPw(e.target.value)}
+                          className={inputCls}
+                          placeholder="Re-enter password"
+                          type={showPw ? 'text' : 'password'}
+                          autoComplete="new-password"
+                          required
+                        />
+                        {confirmPw && pw !== confirmPw ? (
+                          <div className="mt-1 text-[11px] font-bold text-rose-600">Passwords do not match.</div>
+                        ) : null}
                       </Field>
 
                       <Field label="Mobile number *" icon={<Phone className="h-4 w-4" />}>
@@ -1046,7 +1100,7 @@ export default function ClinicianSignupPage() {
                             placeholder="MP1111111"
                             required
                           />
-                          <div className="mt-1 text-[11px] text-slate-500">Format: MP followed by 6â€“8 digits.</div>
+                          <div className="mt-1 text-[11px] text-slate-500">Format: MP followed by 6-8 digits.</div>
                         </Field>
 
                         <Field label="Date of birth *" icon={<CalendarDays className="h-4 w-4" />}>
@@ -1129,7 +1183,7 @@ export default function ClinicianSignupPage() {
                                     className="rounded-2xl border border-slate-200 px-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
                                     aria-label="Remove qualification"
                                   >
-                                    Ã—
+                                    —
                                   </button>
                                 </div>
                               </MiniField>
@@ -1174,7 +1228,7 @@ export default function ClinicianSignupPage() {
                                     className="rounded-2xl border border-slate-200 px-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
                                     aria-label="Remove award"
                                   >
-                                    Ã—
+                                    —
                                   </button>
                                 </div>
                               </MiniField>
@@ -1446,7 +1500,7 @@ export default function ClinicianSignupPage() {
                         </div>
 
                         <div className="mt-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[12px] text-indigo-900">
-                          After you submit, youâ€™ll be taken to <span className="font-extrabold">training scheduling + payment</span>.
+                          After you submit, you will be taken to <span className="font-extrabold">training scheduling + payment</span>.
                           Once payment is confirmed, your starter kit is dispatched.
                         </div>
                       </Section>
@@ -1579,7 +1633,7 @@ export default function ClinicianSignupPage() {
                           {loading ? (
                             <>
                               <Loader2 className="h-4 w-4 animate-spin" />
-                              Submittingâ€¦
+                              Submitting"¦
                             </>
                           ) : (
                             <>
@@ -1602,7 +1656,7 @@ export default function ClinicianSignupPage() {
               </Card>
 
               <div className="mt-4 text-center text-[11px] text-slate-500">
-                By applying you agree to your clinicâ€™s terms and privacy policy.
+                By applying, you agree to Ambulant+ terms and privacy policy.
               </div>
             </div>
           </section>

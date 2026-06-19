@@ -58,14 +58,7 @@ function emailLooksValid(v: string) {
 }
 
 function passwordLooksStrong(v: string) {
-  const value = String(v || '');
-  return (
-    value.length >= 10 &&
-    /[a-z]/.test(value) &&
-    /[A-Z]/.test(value) &&
-    /\d/.test(value) &&
-    /[^A-Za-z0-9]/.test(value)
-  );
+  return String(v || '').length >= 8 && !/\s/.test(String(v || ''));
 }
 
 function phoneLooksValid(value: string) {
@@ -591,7 +584,7 @@ export async function POST(req: NextRequest) {
     if (!name) return badRequest('Full name required', 'name');
     if (!emailLooksValid(email)) return badRequest('Valid email required', 'email');
     if (!passwordLooksStrong(password)) {
-      return badRequest('Password must be at least 10 characters and include uppercase, lowercase, number, and special character', 'password');
+      return badRequest('Password must be at least 8 characters and must not contain spaces', 'password');
     }
     if (!phoneLooksValid(normalizedPhone)) return badRequest('Valid mobile number with country code required', 'phone');
     if (!specialty) return badRequest('Select your clinical specialty/workspace', 'specialty');
@@ -873,7 +866,7 @@ export async function POST(req: NextRequest) {
 
     // Email + SMS: clearly explain the workflow (training -> payment -> ship -> certify)
     if (email) {
-      const subject = 'Ambulant+ Clinician Application Received — Next Steps';
+      const subject = 'Ambulant+ Clinician Application Received — Next Steps';
       const html = `
         <p>Hi ${name || 'Clinician'},</p>
         <p>Your Ambulant+ clinician application has been received.</p>
@@ -882,7 +875,7 @@ export async function POST(req: NextRequest) {
         <ol>
           <li><strong>Training scheduling + payment</strong> (required)</li>
           <li><strong>Starter kit dispatch</strong> after payment confirmation</li>
-          <li><strong>Admin certification</strong> — only then your profile becomes visible to patients</li>
+          <li><strong>Admin certification</strong> — only then your profile becomes visible to patients</li>
         </ol>
 
         <p><a href="${onboardingLink}">Sign in to continue onboarding</a></p>
@@ -897,8 +890,8 @@ export async function POST(req: NextRequest) {
 
         <p>When the admin assigns courier + tracking, you will receive tracking details by email and SMS.</p>
 
-        <p style="margin-top:12px;">If you didn’t request this, you can ignore this email.</p>
-        <p>— Ambulant+ Team</p>
+        <p style="margin-top:12px;">If you didn't request this, you can ignore this email.</p>
+        <p>— Ambulant+ Team</p>
       `;
       sendEmail(email, subject, html).catch(console.error);
     }
