@@ -1,14 +1,13 @@
 // apps/patient-app/components/RefundPolicyPanel.tsx
 'use client';
 import { useEffect, useState } from 'react';
-import { API, BASE } from '@/src/lib/config';
 
 export default function RefundPolicyPanel({ clinicianId }: { clinicianId: string }) {
   const [text, setText] = useState<string>('Loading policy...');
   useEffect(() => {
     let alive = true;
     (async () => {
-      const url = `${API || BASE}/api/clinicians/${encodeURIComponent(clinicianId)}/refund-policy`;
+      const url = `/api/clinicians/${encodeURIComponent(clinicianId)}/refund-policy`;
       try {
         const r = await fetch(url, { cache: 'no-store' });
         if (!r.ok) throw new Error(await r.text());

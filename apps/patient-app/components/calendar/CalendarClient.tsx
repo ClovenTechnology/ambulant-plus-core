@@ -4,7 +4,8 @@ import React, { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 
 /** Public props */
-export type CalendarClientProps = { clinicianId: string };
+export type CalendarClientProps = { clinicianId: string;
+  clinicianName?: string; };
 
 /** Local helpers */
 type DaySlots = { label: string; dateISO: string; slots: string[] };
@@ -45,7 +46,7 @@ function fmt(dtISO?: string) {
 }
 
 /** Component */
-export default function CalendarClient({ clinicianId }: CalendarClientProps) {
+export default function CalendarClient({ clinicianId, clinicianName }: CalendarClientProps) {
   const router = useRouter();
   const days = useMemo(() => genSlots(), []);
   const [selected, setSelected] = useState<{ day: number; time: string } | null>(null);
@@ -175,7 +176,7 @@ export default function CalendarClient({ clinicianId }: CalendarClientProps) {
       {!booking ? (
         <>
           <div className="text-sm text-gray-700">
-            Booking for clinician: <strong>{clinicianId}</strong>
+            Booking for clinician: <strong>{clinicianName || clinicianId}</strong>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">

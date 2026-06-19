@@ -27,6 +27,63 @@ function normalizeProfessionKey(value: unknown): string | null {
     .replace(/^_+|_+$/g, '');
 
   const aliases: Record<string, string> = {
+    medical_specialist: 'specialist',
+    consultant: 'specialist',
+    consultant_specialist: 'specialist',
+
+    oncology: 'specialist',
+    oncologist: 'specialist',
+    cardiology: 'specialist',
+    cardiologist: 'specialist',
+    dermatology: 'specialist',
+    dermatologist: 'specialist',
+    paediatrics: 'specialist',
+    paediatrician: 'specialist',
+    pediatrics: 'specialist',
+    pediatrician: 'specialist',
+    obstetrics_gynaecology: 'specialist',
+    obstetrics_and_gynaecology: 'specialist',
+    obstetrics_gynecology: 'specialist',
+    obstetrics_and_gynecology: 'specialist',
+    gynaecology: 'specialist',
+    gynecology: 'specialist',
+    obstetrician_gynaecologist: 'specialist',
+    psychiatrist: 'specialist',
+    psychiatry: 'specialist',
+    neurologist: 'specialist',
+    neurology: 'specialist',
+    orthopaedics: 'specialist',
+    orthopedics: 'specialist',
+    orthopaedic_surgeon: 'specialist',
+    general_surgery: 'specialist',
+    surgeon: 'specialist',
+    ent: 'specialist',
+    ophthalmology: 'specialist',
+    ophthalmologist: 'specialist',
+    urology: 'specialist',
+    urologist: 'specialist',
+    nephrology: 'specialist',
+    nephrologist: 'specialist',
+    endocrinology: 'specialist',
+    endocrinologist: 'specialist',
+    gastroenterology: 'specialist',
+    gastroenterologist: 'specialist',
+    pulmonology: 'specialist',
+    pulmonologist: 'specialist',
+    respiratory_medicine: 'specialist',
+    rheumatology: 'specialist',
+    rheumatologist: 'specialist',
+    radiology: 'specialist',
+    radiologist: 'specialist',
+    pathology: 'specialist',
+    pathologist: 'specialist',
+    anaesthetics: 'specialist',
+    anaesthetist: 'specialist',
+    anesthesiology: 'specialist',
+    anesthesiologist: 'specialist',
+    emergency_medicine: 'specialist',
+    emergency_physician: 'specialist',
+
     gp: 'gp',
     general_practice: 'gp',
     general_practitioner: 'gp',
@@ -48,6 +105,44 @@ function normalizeProfessionKey(value: unknown): string | null {
   };
 
   return aliases[s] || s;
+}
+
+function safeParseObjectForOperational(value: unknown): AnyObj {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value as AnyObj;
+
+  try {
+    const parsed = JSON.parse(String(value));
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? (parsed as AnyObj)
+      : {};
+  } catch {
+    return {};
+  }
+}
+
+function hasRealPatientApproval(clinician: AnyObj, rawProfile: AnyObj): boolean {
+  const meta = safeParseObjectForOperational(clinician?.meta);
+  const metadata = safeParseObjectForOperational(clinician?.metadata);
+  const approval = safeParseObjectForOperational(
+    meta.realPatientApproval ??
+      metadata.realPatientApproval ??
+      rawProfile?.realPatientApproval,
+  );
+
+  return Boolean(
+    meta.adminFinalApproved === true ||
+      metadata.adminFinalApproved === true ||
+      rawProfile?.adminFinalApproved === true ||
+      meta.patientVisible === true ||
+      metadata.patientVisible === true ||
+      rawProfile?.patientVisible === true ||
+      meta.realPatientApprovedAt ||
+      metadata.realPatientApprovedAt ||
+      rawProfile?.realPatientApprovedAt ||
+      approval.approved === true ||
+      approval.approvedAt,
+  );
 }
 
 function normalizeWorkspaceClaims(rawProfile: AnyObj): string[] {
@@ -169,6 +264,19 @@ export function computeClinicianOperationalState(args: {
     checks,
   });
 
+  const legacyApprovalAllowsBooking =
+    !!policy &&
+    activation.visibleToPatients &&
+    String(clinician?.status || '').toLowerCase() === 'active' &&
+    !!clinician?.trainingCompleted &&
+    hasRealPatientApproval(clinician, rawProfile) &&
+    readiness.bucket === 'missing_compliance' &&
+    readiness.blockers.length === 0;
+
+  const effectiveOkToBook = readiness.okToBook || legacyApprovalAllowsBooking;
+  const outputReadinessBlockers = legacyApprovalAllowsBooking ? [] : readiness.blockers;
+  const outputMissingChecks = legacyApprovalAllowsBooking ? [] : readiness.missingChecks;
+
   const prescribingMode = policy?.rx.canPrescribe ?? 'no';
 
   const hasPrescribingAuthorityCheck =
@@ -196,8 +304,8 @@ export function computeClinicianOperationalState(args: {
   const blockers = Array.from(
     new Set([
       ...(Array.isArray(activation.blockers) ? activation.blockers : []),
-      ...(Array.isArray(readiness.blockers) ? readiness.blockers : []),
-      ...readiness.missingChecks.map((m) =>
+      ...(Array.isArray(outputReadinessBlockers) ? outputReadinessBlockers : []),
+      ...outputMissingChecks.map((m) =>
         `missing_check:${m.kind}${m.regulator ? `:${m.regulator}` : ''}`,
       ),
     ]),
@@ -206,6 +314,8 @@ export function computeClinicianOperationalState(args: {
   const riskFlags: string[] = [];
 
   if (!policy) riskFlags.push('unknown_profession_policy');
+  if (legacyApprovalAllowsBooking) riskFlags.push('legacy_real_patient_approval_used_for_booking');
+  if (activation.blockers.includes('smart_id_not_issued')) riskFlags.push('smart_id_not_issued_warning');
   if (prescribingMode === 'conditional' && !hasPrescribingAuthorityCheck) {
     riskFlags.push('conditional_prescribing_authority_not_approved');
   }
@@ -225,7 +335,7 @@ export function computeClinicianOperationalState(args: {
 
     canPractice: activation.canPractice,
     canBeListed: activation.visibleToPatients,
-    canBeBooked: readiness.okToBook && activation.visibleToPatients,
+    canBeBooked: effectiveOkToBook && activation.visibleToPatients,
 
     canPrescribe,
     prescribingMode,

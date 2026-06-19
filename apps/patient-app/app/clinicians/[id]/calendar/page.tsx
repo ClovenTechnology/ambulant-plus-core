@@ -635,7 +635,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
             )}
           </section>
 
-          <CalendarClient clinicianId={params.id} />
+          <CalendarClient clinicianId={params.id} clinicianName={c.name} />
 
           <section className="bg-white border rounded-lg p-4">
             <div className="flex items-center justify-between gap-2">
