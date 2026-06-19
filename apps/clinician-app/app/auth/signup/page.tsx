@@ -376,6 +376,8 @@ export default function ClinicianSignupPage() {
 
   // HPCSA
   const [practiceNumber, setPracticeNumber] = useState('');
+  const [bhfPcnsRenewalDate, setBhfPcnsRenewalDate] = useState('');
+  const [bhfPcnsDocFile, setBhfPcnsDocFile] = useState<File | null>(null);
   const [hpcsaDocFile, setHpcsaDocFile] = useState<File | null>(null);
   const [nextRenewalDate, setNextRenewalDate] = useState('');
 
@@ -522,6 +524,9 @@ export default function ClinicianSignupPage() {
         !!primaryQualification?.institution?.trim() &&
         qualificationYearLooksValid(qualificationYear) &&
         hpcsaRegistrationLooksValid(license) &&
+        !!nextRenewalDate &&
+        isTodayOrFuture(nextRenewalDate) &&
+        !!hpcsaDocFile &&
         preferredCommunication.length > 0 &&
         !!primaryLanguage
       );
@@ -539,8 +544,11 @@ export default function ClinicianSignupPage() {
       ) {
         return false;
       }
-      if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return false;
-      if (!nextRenewalDate || !isTodayOrFuture(nextRenewalDate)) return false;
+      if (practiceNumber) {
+        if (!practiceNumberLooksValid(practiceNumber)) return false;
+        if (!bhfPcnsRenewalDate || !isTodayOrFuture(bhfPcnsRenewalDate)) return false;
+        if (!bhfPcnsDocFile) return false;
+      }
       if (!platformCover && hasInsurance === null) return false;
       if (!platformCover && hasInsurance === true && (!insurerName.trim() || !insurancePolicyNumber.trim() || !insuranceRenewalDate || !insuranceCoversVirtual)) {
         return false;
@@ -583,6 +591,8 @@ export default function ClinicianSignupPage() {
     passportIssuingAuthority,
     passportExpiry,
     practiceNumber,
+    bhfPcnsRenewalDate,
+    bhfPcnsDocFile,
     nextRenewalDate,
     platformCover,
     hasInsurance,
@@ -600,6 +610,91 @@ export default function ClinicianSignupPage() {
     normalizedShippingPhone,
     shipping.addressLine1,
     shipping.city,
+  ]);
+
+
+  const stepBlockerHint = useMemo(() => {
+    if (canGoNext || step === 3) return null;
+
+    if (step === 0) {
+      if (!normalizeSpaces(firstName)) return 'Enter the clinician first name.';
+      if (!normalizeSpaces(lastName)) return 'Enter the clinician last name / surname.';
+      if (!emailLooksValid(email)) return 'Enter a valid email address.';
+      if (!passwordLooksStrong(pw)) return 'Password must be at least 8 characters and must not contain spaces.';
+      if (!confirmPw || pw !== confirmPw) return 'Confirm password must match the password.';
+      if (!phoneLooksValid(normalizedPhone)) return 'Enter a valid mobile number with country code.';
+    }
+
+    if (step === 1) {
+      if (!specialty.trim()) return 'Select a specialty.';
+      if (!hpcsaRegistrationLooksValid(license)) return 'Enter a valid HPCSA registration number, for example MP1111111.';
+      if (!nextRenewalDate || !isTodayOrFuture(nextRenewalDate)) return 'Enter a current or future HPCSA renewal date.';
+      if (!hpcsaDocFile) return 'Upload the HPCSA registration certificate/document.';
+      if (!dob || !isPastOrToday(dob) || (ageOnToday(dob) ?? 0) < 18) return 'Enter a valid date of birth for a clinician aged at least 18.';
+      if (!gender) return 'Select gender for identity checks.';
+      if (!primaryQualification?.degree?.trim()) return 'Enter the primary qualification.';
+      if (!primaryQualification?.institution?.trim()) return 'Enter the qualification institution.';
+      if (!qualificationYearLooksValid(qualificationYear)) return 'Enter a valid qualification year.';
+      if (preferredCommunication.length === 0) return 'Select at least one communication option.';
+      if (!primaryLanguage) return 'Select a primary language.';
+    }
+
+    if (step === 2) {
+      if (!citizenship) return 'Select citizenship status.';
+      if (citizenship === 'south_african' && validateSaIdDetailed(saIdNumber, dob, gender)) return validateSaIdDetailed(saIdNumber, dob, gender);
+      if (citizenship === 'non_south_african') {
+        if (!passportNumberLooksValid(passportNumber)) return 'Enter a valid passport number.';
+        if (!citizenshipCountry.trim()) return 'Enter country of citizenship.';
+        if (!passportIssuingAuthority.trim()) return 'Enter passport issuing authority.';
+        if (!isFutureDate(passportExpiry)) return 'Enter a future passport expiry date.';
+      }
+      if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return 'BHF/PCNS practice number must contain exactly 13 digits.';
+      if (practiceNumber && (!bhfPcnsRenewalDate || !isTodayOrFuture(bhfPcnsRenewalDate))) return 'Enter the BHF/PCNS expiry or next renewal date.';
+      if (practiceNumber && !bhfPcnsDocFile) return 'Upload BHF/PCNS proof for the supplied practice number.';
+      if (!platformCover && hasInsurance === null) return 'Confirm whether you have professional indemnity cover.';
+      if (!platformCover && hasInsurance === true && !insurerName.trim()) return 'Enter insurer name.';
+      if (!platformCover && hasInsurance === true && !insurancePolicyNumber.trim()) return 'Enter insurance policy number.';
+      if (!platformCover && hasInsurance === true && !insuranceRenewalDate) return 'Enter insurance expiry / next renewal date.';
+      if (!platformCover && hasInsurance === true && !insuranceCoversVirtual) return 'Confirm whether cover includes virtual consultations.';
+      if (!consent) return 'Accept the Ambulant+ terms and privacy policy.';
+    }
+
+    return 'Complete the required fields on this step.';
+  }, [
+    canGoNext,
+    step,
+    firstName,
+    lastName,
+    email,
+    pw,
+    confirmPw,
+    normalizedPhone,
+    specialty,
+    license,
+    nextRenewalDate,
+    hpcsaDocFile,
+    dob,
+    gender,
+    primaryQualification,
+    qualificationYear,
+    preferredCommunication,
+    primaryLanguage,
+    citizenship,
+    saIdNumber,
+    passportNumber,
+    citizenshipCountry,
+    passportIssuingAuthority,
+    passportExpiry,
+    practiceNumber,
+    bhfPcnsRenewalDate,
+    bhfPcnsDocFile,
+    platformCover,
+    hasInsurance,
+    insurerName,
+    insurancePolicyNumber,
+    insuranceRenewalDate,
+    insuranceCoversVirtual,
+    consent,
   ]);
 
   function fail(stepNo: 0 | 1 | 2 | 3, message: string): ValidationFailure {
@@ -624,9 +719,10 @@ export default function ClinicianSignupPage() {
       return fail(1, `Qualification year must be between 1940 and ${CURRENT_YEAR - 1}.`);
     }
     if (!hpcsaRegistrationLooksValid(license)) return fail(1, 'HPCSA registration must look like MP1111111.');
+    if (!nextRenewalDate || !isTodayOrFuture(nextRenewalDate)) return fail(1, 'HPCSA next renewal date is required and must not be expired.');
+    if (!hpcsaDocFile) return fail(1, 'Upload your HPCSA registration certificate/document.');
     if (preferredCommunication.length === 0) return fail(1, 'Select at least one communication option.');
     if (!primaryLanguage) return fail(1, 'Primary language is required.');
-    if (!hpcsaDocFile) return fail(2, 'Upload your HPCSA registration certificate/document.');
 
     if (!citizenship) return fail(2, 'Citizenship status is required.');
     if (citizenship === 'south_african') {
@@ -640,7 +736,10 @@ export default function ClinicianSignupPage() {
       if (!isFutureDate(passportExpiry)) return fail(2, 'Passport expiry must be a future date.');
     }
     if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return fail(2, 'BHF/PCNS practice number must contain exactly 13 digits.');
-    if (!nextRenewalDate || !isTodayOrFuture(nextRenewalDate)) return fail(2, 'HPCSA next renewal date is required and must not be expired.');
+    if (practiceNumber && (!bhfPcnsRenewalDate || !isTodayOrFuture(bhfPcnsRenewalDate))) {
+      return fail(2, 'BHF/PCNS expiry or next renewal date is required when BHF/PCNS number is supplied.');
+    }
+    if (practiceNumber && !bhfPcnsDocFile) return fail(2, 'Upload BHF/PCNS proof when BHF/PCNS number is supplied.');
     if (!platformCover && hasInsurance === null) return fail(2, 'Please confirm whether you have professional indemnity cover.');
     if (!platformCover && hasInsurance === true && !insurerName.trim()) return fail(2, 'Insurer name is required.');
     if (!platformCover && hasInsurance === true && !insurancePolicyNumber.trim()) return fail(2, 'Insurance policy number is required.');
@@ -673,6 +772,21 @@ export default function ClinicianSignupPage() {
   const addOtherQualification = () =>
     setOtherQualifications((prev) => [...prev, { award: '', institution: '', yearOfCompletion: '' }]);
   const removeOtherQualification = (idx: number) => setOtherQualifications((prev) => prev.filter((_, i) => i !== idx));
+
+  function handleNextStep() {
+    const err = validateFinal();
+
+    if (err && err.step <= step) {
+      setMsg(`Error: ${err.message}`);
+      setStep(err.step);
+      return;
+    }
+
+    setMsg(null);
+    setStep((s) => (s < 3 ? ((s + 1) as any) : s));
+  }
+
+
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -765,7 +879,9 @@ export default function ClinicianSignupPage() {
         bhfPracticeNumber: normalizedPracticeNumber || undefined,
         pcnsPracticeNumber: normalizedPracticeNumber || undefined,
         practiceNumberType: normalizedPracticeNumber ? 'BHF_PCNS' : undefined,
-        practiceNumberRenewalDate: undefined,
+        practiceNumberRenewalDate: normalizedPracticeNumber ? (bhfPcnsRenewalDate || undefined) : undefined,
+        bhfPcnsNextRenewalDate: normalizedPracticeNumber ? (bhfPcnsRenewalDate || undefined) : undefined,
+        bhfPcnsProofSubmitted: !!(normalizedPracticeNumber && bhfPcnsDocFile),
 
         // Insurance: if platform cover enabled, capture nothing here
         platformCoverEnabled: platformCover,
@@ -826,6 +942,10 @@ export default function ClinicianSignupPage() {
 
       if (hpcsaDocFile) {
         fd.set('hpcsaDoc', hpcsaDocFile);
+      }
+
+      if (normalizedPracticeNumber && bhfPcnsDocFile) {
+        fd.set('bhfPcnsDoc', bhfPcnsDocFile);
       }
 
       const res = await fetch('/api/auth/signup', {
@@ -1103,6 +1223,34 @@ export default function ClinicianSignupPage() {
                           <div className="mt-1 text-[11px] text-slate-500">Format: MP followed by 6-8 digits.</div>
                         </Field>
 
+
+                        <Field label="HPCSA next renewal date *" icon={<CalendarDays className="h-4 w-4" />}>
+                          <input value={nextRenewalDate} onChange={(e) => setNextRenewalDate(e.target.value)} className={inputCls} type="date" required />
+                          <div className="mt-1 text-[11px] text-slate-500">Required for regulatory verification. Must be today or a future date.</div>
+                        </Field>
+
+                        <div className="sm:col-span-2">
+                          <div className="text-xs font-black text-slate-700">Professional registration proof *</div>
+                          <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                            <div className="flex items-center gap-2 text-sm text-slate-700">
+                              <FileUp className="h-4 w-4 text-slate-500" />
+                              <span className="font-semibold">{hpcsaDocFile ? hpcsaDocFile.name : 'Upload current HPCSA certificate/document'}</span>
+                            </div>
+                            <label className="cursor-pointer rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-slate-800">
+                              Browse
+                              <input
+                                type="file"
+                                className="hidden"
+                                onChange={(e) => setHpcsaDocFile(e.target.files?.[0] ?? null)}
+                                accept=".pdf,image/*"
+                              />
+                            </label>
+                          </div>
+                          <div className="mt-2 text-[11px] text-slate-500">
+                            Upload a PDF, JPG or PNG copy of current HPCSA registration evidence.
+                          </div>
+                        </div>
+
                         <Field label="Date of birth *" icon={<CalendarDays className="h-4 w-4" />}>
                           <input value={dob} onChange={(e) => setDob(e.target.value)} className={inputCls} type="date" required />
                           <div className="mt-1 text-[11px] text-slate-500">Clinician must be at least 18 years old.</div>
@@ -1348,46 +1496,64 @@ export default function ClinicianSignupPage() {
                         ) : null}
                       </Section>
 
-                      <Section title="HPCSA registration">
+                      <Section title="Practice billing credential (optional)">
                         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <MiniField label="BHF / PCNS practice number (optional)">
+                          <MiniField label="BHF / PCNS practice number">
                             <input
                               value={practiceNumber}
-                              onChange={(e) => setPracticeNumber(digitsOnly(e.target.value).slice(0, 13))}
+                              onChange={(e) => {
+                                const next = digitsOnly(e.target.value).slice(0, 13);
+                                setPracticeNumber(next);
+                                if (!next) {
+                                  setBhfPcnsRenewalDate('');
+                                  setBhfPcnsDocFile(null);
+                                }
+                              }}
                               className={inputCls}
                               placeholder="13-digit BHF/PCNS number"
                               inputMode="numeric"
                               maxLength={13}
                             />
-                            <div className="mt-1 text-[11px] text-slate-500">Optional. This is separate from your mandatory HPCSA registration.</div>
-                          </MiniField>
-
-                          <MiniField label="HPCSA registration next renewal date *">
-                            <input value={nextRenewalDate} onChange={(e) => setNextRenewalDate(e.target.value)} className={inputCls} type="date" />
-                          </MiniField>
-                        </div>
-
-                        <div className="mt-4">
-                          <div className="text-xs font-black text-slate-700">Upload HPCSA registration certificate/document *</div>
-                          <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
-                            <div className="flex items-center gap-2 text-sm text-slate-700">
-                              <FileUp className="h-4 w-4 text-slate-500" />
-                              <span className="font-semibold">{hpcsaDocFile ? hpcsaDocFile.name : 'Choose a file'}</span>
+                            <div className="mt-1 text-[11px] text-slate-500">
+                              Optional. Required only if you want a billing/practice credential recorded.
                             </div>
-                            <label className="cursor-pointer rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-slate-800">
-                              Browse
+                          </MiniField>
+
+                          {practiceNumber ? (
+                            <MiniField label="BHF / PCNS expiry or next renewal date *">
                               <input
-                                type="file"
-                                className="hidden"
-                                onChange={(e) => setHpcsaDocFile(e.target.files?.[0] ?? null)}
-                                accept=".pdf,image/*"
+                                value={bhfPcnsRenewalDate}
+                                onChange={(e) => setBhfPcnsRenewalDate(e.target.value)}
+                                className={inputCls}
+                                type="date"
                               />
-                            </label>
-                          </div>
-                          <div className="mt-2 text-[11px] text-slate-500">
-                            Required for verification. Upload a PDF, JPG or PNG copy of your current registration evidence.
-                          </div>
+                            </MiniField>
+                          ) : null}
                         </div>
+
+                        {practiceNumber ? (
+                          <div className="mt-4">
+                            <div className="text-xs font-black text-slate-700">Upload BHF/PCNS proof *</div>
+                            <div className="mt-2 flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+                              <div className="flex items-center gap-2 text-sm text-slate-700">
+                                <FileUp className="h-4 w-4 text-slate-500" />
+                                <span className="font-semibold">{bhfPcnsDocFile ? bhfPcnsDocFile.name : 'Choose a BHF/PCNS document'}</span>
+                              </div>
+                              <label className="cursor-pointer rounded-xl bg-slate-900 px-3 py-1.5 text-xs font-extrabold text-white hover:bg-slate-800">
+                                Browse
+                                <input
+                                  type="file"
+                                  className="hidden"
+                                  onChange={(e) => setBhfPcnsDocFile(e.target.files?.[0] ?? null)}
+                                  accept=".pdf,image/*"
+                                />
+                              </label>
+                            </div>
+                            <div className="mt-2 text-[11px] text-slate-500">
+                              Required only when a BHF/PCNS practice number is supplied.
+                            </div>
+                          </div>
+                        ) : null}
                       </Section>
 
                       <Section title="Insurance">
@@ -1443,7 +1609,7 @@ export default function ClinicianSignupPage() {
                         <label className="flex items-start gap-2 text-sm text-slate-700">
                           <input type="checkbox" className="mt-1" checked={consent} onChange={(e) => setConsent(e.target.checked)} />
                           <span>
-                            I agree to Ambulant+ terms of use and privacy policy <span className="font-extrabold">*</span>
+                            I agree to Ambulant+ <Link href="/terms" target="_blank" className="font-extrabold text-indigo-700 hover:underline">terms of use</Link> and <Link href="/privacy" target="_blank" className="font-extrabold text-indigo-700 hover:underline">privacy policy</Link> <span className="font-extrabold">*</span>
                           </span>
                         </label>
                       </div>
@@ -1594,6 +1760,12 @@ export default function ClinicianSignupPage() {
                     </div>
                   ) : null}
 
+                  {stepBlockerHint ? (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
+                      {stepBlockerHint}
+                    </div>
+                  ) : null}
+
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                     <button
                       type="button"
@@ -1611,8 +1783,8 @@ export default function ClinicianSignupPage() {
                       {step < 3 ? (
                         <button
                           type="button"
-                          onClick={() => setStep((s) => (s < 3 ? ((s + 1) as any) : s))}
-                          disabled={!canGoNext}
+                          onClick={handleNextStep}
+                          aria-disabled={!canGoNext}
                           className={cx(
                             'inline-flex items-center gap-2 rounded-2xl bg-indigo-600 px-4 py-3 text-sm font-extrabold text-white transition hover:bg-indigo-700',
                             !canGoNext && 'opacity-50 cursor-not-allowed',
@@ -1633,7 +1805,7 @@ export default function ClinicianSignupPage() {
                           {loading ? (
                             <>
                               <Loader2 className="h-4 w-4 animate-spin" />
-                              Submitting"¦
+                              Submitting...
                             </>
                           ) : (
                             <>
@@ -1656,7 +1828,7 @@ export default function ClinicianSignupPage() {
               </Card>
 
               <div className="mt-4 text-center text-[11px] text-slate-500">
-                By applying, you agree to Ambulant+ terms and privacy policy.
+                By applying, you agree to Ambulant+ <Link href="/terms" target="_blank" className="font-bold text-slate-700 hover:underline">terms</Link> and <Link href="/privacy" target="_blank" className="font-bold text-slate-700 hover:underline">privacy policy</Link>.
               </div>
             </div>
           </section>

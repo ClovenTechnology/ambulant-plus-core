@@ -494,6 +494,7 @@ export async function POST(req: NextRequest) {
     let license = '';
     let profileRaw = '{}';
     let hpcsaFile: File | null = null;
+    let bhfPcnsFile: File | null = null;
 
     if (ct.includes('multipart/form-data')) {
       const fd = await req.formData();
@@ -506,6 +507,8 @@ export async function POST(req: NextRequest) {
       profileRaw = String(fd.get('profile') || '{}');
       const f = fd.get('hpcsaDoc');
       if (f && typeof f === 'object' && 'arrayBuffer' in f) hpcsaFile = f as File;
+      const b = fd.get('bhfPcnsDoc');
+      if (b && typeof b === 'object' && 'arrayBuffer' in b) bhfPcnsFile = b as File;
     } else {
       // JSON fallback
       const body = await req.json().catch(() => ({}));
@@ -610,6 +613,18 @@ export async function POST(req: NextRequest) {
       return badRequest('BHF/PCNS practice number must contain exactly 13 digits', 'practiceNumber');
     }
 
+    if (practiceNumber) {
+      if (!practiceNumberRenewalDate || !isTodayOrFuture(practiceNumberRenewalDate)) {
+        return badRequest('BHF/PCNS expiry or next renewal date is required when BHF/PCNS number is supplied', 'practiceNumberRenewalDate');
+      }
+      if (!bhfPcnsFile) {
+        return badRequest('BHF/PCNS proof document is required when a practice number is supplied', 'bhfPcnsDoc');
+      }
+      if (!uploadedFileLooksUsable(bhfPcnsFile)) {
+        return badRequest('The BHF/PCNS proof document must be a valid file up to 10 MB.', 'bhfPcnsDoc');
+      }
+    }
+
     if (citizenship === 'south_african') {
       const idError = validateSaIdDetailed(idNumber, dob, gender);
       if (idError) return badRequest(idError, 'saIdNumber');
@@ -628,7 +643,10 @@ export async function POST(req: NextRequest) {
 
     if (!platformCoverEnabled && hasInsurance === true) {
       if (!safeStr(profile?.insurerName)) return badRequest('Insurer name required', 'insurerName');
-      if (!safeStr(profile?.insuranceType)) return badRequest('Insurance type required', 'insuranceType');
+      if (!safeStr(profile?.insurancePolicyNumber)) return badRequest('Insurance policy number required', 'insurancePolicyNumber');
+      if (!isTodayOrFuture(safeStr(profile?.insuranceRenewalDate))) {
+        return badRequest('Insurance expiry / next renewal date is required and must not be expired', 'insuranceRenewalDate');
+      }
       if (typeof profile?.insuranceCoversVirtual !== 'boolean') {
         return badRequest('Virtual consultation cover answer required', 'insuranceCoversVirtual');
       }
@@ -679,6 +697,34 @@ export async function POST(req: NextRequest) {
       }
     }
 
+
+    let bhfPcnsS3Key: string | null = null;
+    let bhfPcnsFileMeta: any = null;
+
+    if (bhfPcnsFile) {
+      const safeName = String(bhfPcnsFile.name || `bhf-pcns-${Date.now()}`).replace(/[^a-zA-Z0-9.\-_]/g, '_');
+      const key = `uploads/bhf-pcns/${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${safeName}`;
+
+      const up = await uploadToS3(bhfPcnsFile, key);
+      if (up.ok) {
+        bhfPcnsS3Key = key;
+        bhfPcnsFileMeta = {
+          filename: bhfPcnsFile.name,
+          size: Number(bhfPcnsFile.size || 0),
+          mime: bhfPcnsFile.type || 'application/octet-stream',
+          s3Key: key,
+        };
+      } else {
+        bhfPcnsFileMeta = {
+          filename: bhfPcnsFile.name,
+          size: Number(bhfPcnsFile.size || 0),
+          mime: bhfPcnsFile.type || 'application/octet-stream',
+          upload: 'skipped',
+          reason: up.error,
+        };
+      }
+    }
+
     // Create Auth0 user (if configured)
     let auth0UserId: string | undefined;
     const authRes = await createAuth0User(email, name, password);
@@ -701,7 +747,9 @@ export async function POST(req: NextRequest) {
       qualificationYear,
       practiceNumber: practiceNumber || undefined,
       practiceNumberType: practiceNumber ? 'BHF_PCNS' : undefined,
-      practiceNumberRenewalDate: undefined,
+      practiceNumberRenewalDate: practiceNumber ? practiceNumberRenewalDate : undefined,
+      bhfPcnsNextRenewalDate: practiceNumber ? practiceNumberRenewalDate : undefined,
+      bhfPcnsProofUploaded: !!bhfPcnsFileMeta,
       hpcsaNextRenewalDate,
       specialtyKey: specialtyKey || undefined,
       regulatorBody: 'HPCSA',
@@ -789,6 +837,11 @@ export async function POST(req: NextRequest) {
                   : hpcsaFileMeta
                     ? { ...hpcsaFileMeta }
                     : null,
+                bhfPcns: bhfPcnsS3Key
+                  ? { s3Key: bhfPcnsS3Key, ...bhfPcnsFileMeta }
+                  : bhfPcnsFileMeta
+                    ? { ...bhfPcnsFileMeta }
+                    : null,
               },
               compliance: {
                 regulator: {
@@ -796,7 +849,8 @@ export async function POST(req: NextRequest) {
                   submittedAt,
                   hpcsaNextRenewalDate,
                   practiceNumber: practiceNumber || null,
-                  practiceNumberRenewalDate: null,
+                  practiceNumberRenewalDate: practiceNumber ? practiceNumberRenewalDate : null,
+                  practiceNumberDocument: practiceNumber ? (bhfPcnsFileMeta ? 'submitted' : 'missing') : 'not_applicable',
                 },
                 insurance: {
                   status: mergedProfile?.piInsuranceNumber || mergedProfile?.insurerName ? 'submitted' : 'missing',
