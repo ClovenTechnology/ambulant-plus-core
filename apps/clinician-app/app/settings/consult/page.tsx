@@ -552,6 +552,39 @@ function Num({
     return out;
   };
 
+  function commit(raw: string, mode: 'live' | 'blur') {
+    const trimmed = String(raw ?? '').trim();
+
+    if (!trimmed) {
+      if (mode === 'blur') {
+        const next = clamp(0);
+        setLocal(String(next));
+        onChange(next);
+      }
+      return;
+    }
+
+    const parsed = Number(trimmed);
+
+    if (!Number.isFinite(parsed)) {
+      if (mode === 'blur') {
+        setError('Enter a valid number.');
+      }
+      return;
+    }
+
+    const next = mode === 'blur'
+      ? clamp(Math.floor(parsed))
+      : Math.floor(parsed);
+
+    onChange(next);
+
+    if (mode === 'blur') {
+      setLocal(String(next));
+      setError(null);
+    }
+  }
+
   return (
     <label className="text-sm flex items-center gap-2" aria-live="polite">
       <span className="w-56 text-gray-700">{label}</span>
@@ -560,31 +593,20 @@ function Num({
         type="number"
         value={local}
         onChange={(e) => {
-          setLocal(e.target.value);
+          const next = e.target.value;
+          setLocal(next);
           setError(null);
+          commit(next, 'live');
         }}
-        onBlur={() => {
-          const parsed = Number(local || 0);
-          if (Number.isNaN(parsed)) {
-            setError('Invalid number');
-            setLocal(String(v || 0));
-            return;
-          }
-          const floored = Math.floor(parsed);
-          const clamped = clamp(floored);
-          setLocal(String(clamped));
-          onChange(clamped);
-        }}
-        className="border rounded px-2 py-1 w-28 disabled:opacity-60 focus:ring-2 focus:ring-indigo-200"
+        onBlur={() => commit(local, 'blur')}
         disabled={disabled}
         min={min}
         max={max}
         step={step}
-        aria-valuemin={min}
-        aria-valuemax={max}
+        className="border rounded px-2 py-1 w-28 disabled:bg-gray-50"
       />
-      {suffix ? <span className="text-gray-500">{suffix}</span> : null}
-      {error && <span className="text-xs text-rose-600 ml-2">{error}</span>}
+      {suffix && <span className="text-gray-600">{suffix}</span>}
+      {error && <span className="text-xs text-rose-600">{error}</span>}
     </label>
   );
 }
