@@ -1,202 +1,299 @@
 // apps/patient-app/app/api/appointments/new/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
+export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const GATEWAY = (
-  process.env.APIGW_BASE ??
-  process.env.NEXT_PUBLIC_APIGW_BASE ??
-  'https://ambulant-plus-core-api-gateway-kdon.vercel.app'
-).replace(/\/+$/, '');
 
 type PaymentMethod = 'card' | 'medical_aid' | 'voucher';
 
-type NewAppointmentPerson = {
-  mode: 'SELF' | 'FAMILY';
-  subjectPatientId?: string | null;
-  relationshipId?: string | null;
-};
+function trimSlash(value: string) {
+  return String(value || '').replace(/\/+$/, '');
+}
 
-type NewAppointmentObserver = {
-  email?: string;
-  phone?: string;
-  name?: string;
-};
+function gatewayBase() {
+  return trimSlash(
+    process.env.APIGW_BASE ||
+      process.env.API_GATEWAY_BASE_URL ||
+      process.env.API_GATEWAY_URL ||
+      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+      'https://ambulant-plus-core-api-gateway-kdon.vercel.app',
+  );
+}
 
-type NewAppointmentMedicalAid = {
-  scheme?: string;
-  memberNumber?: string;
-  dependentCode?: string;
-  telemedCovered?: boolean;
-  telemedCoverType?: string | null;
-  telemedCopayType?: string | null;
-  telemedCopayValue?: number | null;
-  policyId?: string | null;
-};
+function noStore(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'Cache-Control': 'no-store, max-age=0' },
+  });
+}
 
-type NewAppointmentRequestBody = {
-  clinicianId: string;
-  startsAt: string;
-  endsAt: string;
-  reason: string;
-  roomId: string;
+function clean(value: unknown, max = 240) {
+  return String(value ?? '').trim().slice(0, max);
+}
 
-  paymentMethod: PaymentMethod;
-  voucherCode?: string | null;
-  medicalAid?: NewAppointmentMedicalAid | null;
-
-  person?: NewAppointmentPerson;
-  observers?: NewAppointmentObserver[];
-};
-
-function isISO(s: string) {
-  const ms = Date.parse(s);
+function isIsoDate(value: unknown) {
+  const ms = Date.parse(String(value || ''));
   return Number.isFinite(ms);
 }
 
-export async function POST(req: NextRequest) {
-  let body: NewAppointmentRequestBody | null = null;
+function safeSlug(value: unknown, fallback = 'booking') {
+  return String(value ?? fallback)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || fallback;
+}
+
+function makeRoomId(clinicianId: string, startsAt: string) {
+  const stamp = Date.parse(startsAt);
+  const when = Number.isFinite(stamp) ? String(stamp) : String(Date.now());
+  const rand =
+    globalThis.crypto?.randomUUID?.().slice(0, 8) ||
+    Math.random().toString(36).slice(2, 10);
+
+  return `room-${safeSlug(clinicianId, 'clinician')}-${when}-${rand}`;
+}
+
+function normalizePaymentMethod(value: unknown): PaymentMethod {
+  const v = String(value || 'card').trim().toLowerCase();
+  if (v === 'medical_aid' || v === 'voucher' || v === 'card') return v as PaymentMethod;
+  return 'card';
+}
+
+function readUid(req: NextRequest, body: any) {
+  return clean(
+    req.headers.get('x-uid') ||
+      req.headers.get('x-user-id') ||
+      req.headers.get('x-ambulant-user-id') ||
+      body?.hostUserId ||
+      body?.host_user_id ||
+      body?.patientId ||
+      body?.patient_id ||
+      '',
+  );
+}
+
+function forwardHeaders(req: NextRequest, uid: string) {
+  const headers = new Headers();
+
+  for (const key of [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-ambulant-user-id',
+    'x-ambulant-org-id',
+    'x-ambulant-role',
+    'x-user-id',
+    'x-uid',
+    'x-org',
+    'x-org-id',
+    'x-role',
+    'x-email',
+    'x-name',
+    'x-display-name',
+    'x-correlation-id',
+    'x-request-id',
+    'idempotency-key',
+    'x-idempotency-key',
+  ]) {
+    const value = req.headers.get(key);
+    if (value) headers.set(key, value);
+  }
+
+  headers.set('accept', 'application/json');
+  headers.set('content-type', 'application/json');
+  headers.set('x-role', 'patient');
+  headers.set('x-uid', uid);
+
+  if (!headers.get('x-org-id') && !headers.get('x-ambulant-org-id')) {
+    headers.set('x-org-id', process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default');
+  }
+
+  return headers;
+}
+
+async function readPayload(res: Response) {
+  const text = await res.text();
+  if (!text) return null;
+
   try {
-    body = (await req.json()) as NewAppointmentRequestBody;
+    return JSON.parse(text);
   } catch {
-    return NextResponse.json({ ok: false, error: 'Invalid JSON body' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+    return { raw: text };
+  }
+}
+
+export async function POST(req: NextRequest) {
+  const base = gatewayBase();
+
+  if (!base) {
+    return noStore({ ok: false, error: 'api_gateway_base_not_configured' }, 503);
   }
 
-  if (!body) {
-    return NextResponse.json({ ok: false, error: 'Empty request body' }, { status: 400, headers: { 'Cache-Control': 'no-store' } });
+  let body: any = {};
+  try {
+    body = await req.json();
+  } catch {
+    return noStore({ ok: false, error: 'invalid_json_body' }, 400);
   }
 
-  const {
+  const clinicianId = clean(body.clinicianId || body.clinician_id);
+  const startsAt = clean(body.startsAt || body.starts_at);
+  const endsAt = clean(body.endsAt || body.ends_at);
+  const uid = readUid(req, body);
+
+  if (!clinicianId || !startsAt || !endsAt) {
+    return noStore(
+      { ok: false, error: 'clinicianId_startsAt_endsAt_required' },
+      400,
+    );
+  }
+
+  if (!isIsoDate(startsAt) || !isIsoDate(endsAt) || Date.parse(endsAt) <= Date.parse(startsAt)) {
+    return noStore({ ok: false, error: 'invalid_time_range' }, 400);
+  }
+
+  if (!uid) {
+    return noStore({ ok: false, error: 'patient_identity_required' }, 401);
+  }
+
+  const roomId = clean(body.roomId || body.room_id) || makeRoomId(clinicianId, startsAt);
+  const paymentMethod = normalizePaymentMethod(body.paymentMethod || body.payment_method);
+  const patientId = clean(body.patientId || body.patient_id || uid);
+  const hostUserId = clean(body.hostUserId || body.host_user_id || uid);
+
+  const isFamily = body?.person?.mode === 'FAMILY';
+
+  const payload: any = {
+    ...body,
+
     clinicianId,
-    startsAt,
-    endsAt,
-    reason,
-    roomId,
-    paymentMethod,
-    voucherCode,
-    medicalAid,
-    person,
-    observers = [],
-  } = body;
-
-  if (!clinicianId || !startsAt || !endsAt || !roomId) {
-    return NextResponse.json(
-      { ok: false, error: 'Missing required fields (clinicianId, startsAt, endsAt, roomId)' },
-      { status: 400, headers: { 'Cache-Control': 'no-store' } },
-    );
-  }
-
-  if (!isISO(startsAt) || !isISO(endsAt) || Date.parse(endsAt) <= Date.parse(startsAt)) {
-    return NextResponse.json(
-      { ok: false, error: 'Invalid time range' },
-      { status: 400, headers: { 'Cache-Control': 'no-store' } },
-    );
-  }
-
-  const hostUserId = String(req.headers.get('x-uid') || req.headers.get('X-Uid') || '').trim();
-
-  if (!hostUserId) {
-    return NextResponse.json(
-      { ok: false, error: 'Missing x-uid.' },
-      { status: 401, headers: { 'Cache-Control': 'no-store' } },
-    );
-  }
-
-  const gwMedicalAid =
-    medicalAid && (medicalAid.scheme || medicalAid.memberNumber)
-      ? {
-          scheme: medicalAid.scheme,
-          member_number: medicalAid.memberNumber,
-          dependent_code: medicalAid.dependentCode ?? '',
-          telemed_covered: medicalAid.telemedCovered ?? undefined,
-          telemed_cover_type: medicalAid.telemedCoverType ?? undefined,
-          telemed_copay_type: medicalAid.telemedCopayType ?? undefined,
-          telemed_copay_value: medicalAid.telemedCopayValue ?? undefined,
-          policy_id: medicalAid.policyId ?? undefined,
-        }
-      : undefined;
-
-  const gwPayload: any = {
     clinician_id: clinicianId,
-    starts_at: startsAt,
-    ends_at: endsAt,
-    reason,
-    room_id: roomId,
-    payment_method: paymentMethod,
 
-    subject_patient_id: person?.mode === 'FAMILY' ? person.subjectPatientId ?? undefined : undefined,
-    family_relationship_id: person?.mode === 'FAMILY' ? person.relationshipId ?? undefined : undefined,
+    patientId,
+    patient_id: patientId,
+    subjectPatientId: isFamily
+      ? clean(body?.person?.subjectPatientId || body.subjectPatientId || body.subject_patient_id)
+      : clean(body.subjectPatientId || body.subject_patient_id || patientId),
+    subject_patient_id: isFamily
+      ? clean(body?.person?.subjectPatientId || body.subjectPatientId || body.subject_patient_id)
+      : clean(body.subjectPatientId || body.subject_patient_id || patientId),
 
+    familyRelationshipId: isFamily
+      ? clean(body?.person?.relationshipId || body.familyRelationshipId || body.family_relationship_id)
+      : clean(body.familyRelationshipId || body.family_relationship_id),
+    family_relationship_id: isFamily
+      ? clean(body?.person?.relationshipId || body.familyRelationshipId || body.family_relationship_id)
+      : clean(body.familyRelationshipId || body.family_relationship_id),
+
+    hostUserId,
     host_user_id: hostUserId,
 
-    observers: observers.filter((o) => (o.email && o.email.trim()) || (o.phone && o.phone.trim())),
+    startsAt,
+    starts_at: startsAt,
+    endsAt,
+    ends_at: endsAt,
+
+    roomId,
+    room_id: roomId,
+
+    paymentMethod,
+    payment_method: paymentMethod,
+
+    patientEmail: body.patientEmail || body.patient_email || null,
+    patient_email: body.patientEmail || body.patient_email || null,
+
+    callbackUrl: body.callbackUrl || body.callback_url || null,
+    callback_url: body.callbackUrl || body.callback_url || null,
+
+    reason: clean(body.reason || body.title || body.notes) || 'Televisit consultation',
+    kind: body.kind || 'standard',
+    visitMode: body.visitMode || body.visit_mode || 'televisit',
+    visit_mode: body.visitMode || body.visit_mode || 'televisit',
+
+    source: body.source || 'patient-app-calendar',
   };
 
-  if (paymentMethod === 'voucher' && voucherCode) {
-    gwPayload.voucher_code = voucherCode.trim();
-  }
-
-  if (paymentMethod === 'medical_aid' && gwMedicalAid) {
-    gwPayload.medical_aid = gwMedicalAid;
-  }
-
   try {
-    const res = await fetch(`${GATEWAY}/api/appointments/book`, {
+    const upstream = new URL('/api/appointments', base);
+
+    const res = await fetch(upstream.toString(), {
       method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'x-role': 'patient',
-        'x-uid': hostUserId,
-      },
-      body: JSON.stringify(gwPayload),
+      headers: forwardHeaders(req, uid),
+      body: JSON.stringify(payload),
+      cache: 'no-store',
     });
 
-    const raw = await res.json().catch(() => ({} as any));
+    const data: any = await readPayload(res);
 
-    if (!res.ok) {
-      const msg = raw?.error || `Gateway responded ${res.status}`;
-      return NextResponse.json({ ok: false, error: msg }, { status: res.status, headers: { 'Cache-Control': 'no-store' } });
+    if (!res.ok || data?.ok === false) {
+      return noStore(
+        {
+          ok: false,
+          error: data?.error || data?.message || `appointments_gateway_http_${res.status}`,
+          details: data,
+        },
+        res.status,
+      );
     }
 
-    const appointmentId = raw.appointment_id || raw.id || null;
-    const redirectUrl = typeof raw.redirect_url === 'string' ? raw.redirect_url : null;
+    const appointment = data?.appointment || data || {};
+    const appointmentId =
+      data?.appointmentId ||
+      data?.appointment_id ||
+      appointment?.id ||
+      appointment?.appointmentId ||
+      '';
 
-    // Compatibility: seed the in-process televisit runtime store only after a real gateway booking succeeds.
-    try {
-      const mod: any = await import('@runtime/store');
-      const st = mod?.store;
-      const tv = st?.televisits;
-      if (appointmentId && tv && typeof tv.set === 'function') {
-        const visitId = String(appointmentId);
-        tv.set(visitId, {
-          id: visitId,
-          visitId,
-          roomId: roomId || visitId,
-          startsAt,
-          endsAt,
-          kind: 'televisit',
-          title: 'Televisit',
-          hostUserId,
-          clinicianId,
-        });
-      }
-    } catch {
-      // ignore
-    }
+    const encounterId =
+      data?.encounterId ||
+      data?.encounter_id ||
+      appointment?.encounterId ||
+      '';
 
-    return NextResponse.json(
+    const paymentRef =
+      data?.paymentRef ||
+      data?.payment_ref ||
+      data?.providerRef ||
+      data?.payment?.providerRef ||
+      data?.payment?.provider_ref ||
+      appointment?.paymentRef ||
+      '';
+
+    const redirectUrl =
+      data?.redirectUrl ||
+      data?.redirect_url ||
+      data?.payment?.redirectUrl ||
+      data?.payment?.redirect_url ||
+      '';
+
+    return noStore(
       {
         ok: true,
+        ...data,
+        appointment,
         appointmentId,
+        appointment_id: appointmentId,
+        encounterId,
+        encounter_id: encounterId,
+        roomId: data?.roomId || appointment?.roomId || roomId,
+        paymentMethod,
+        paymentRef,
+        payment_ref: paymentRef,
         redirectUrl,
-        raw,
+        redirect_url: redirectUrl,
       },
-      { headers: { 'Cache-Control': 'no-store' } },
+      res.status === 201 ? 201 : 200,
     );
-  } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || 'Failed to create appointment via gateway' },
-      { status: 502, headers: { 'Cache-Control': 'no-store' } },
+  } catch (error: any) {
+    return noStore(
+      {
+        ok: false,
+        error: error?.message || 'appointments_gateway_failed',
+      },
+      502,
     );
   }
 }

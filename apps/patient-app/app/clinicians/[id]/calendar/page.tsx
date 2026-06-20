@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { usePlan } from '@/components/context/PlanContext';
-import CalendarClient from '@/components/calendar/CalendarClient';
 import RefundPolicyPanel from '@/components/RefundPolicyPanel';
 
 type Slot = { start: string; end?: string };
@@ -634,9 +633,6 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
               </div>
             )}
           </section>
-
-          <CalendarClient clinicianId={params.id} clinicianName={c.name} />
-
           <section className="bg-white border rounded-lg p-4">
             <div className="flex items-center justify-between gap-2">
               <div>
