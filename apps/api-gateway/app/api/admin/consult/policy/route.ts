@@ -17,8 +17,16 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const policy = await getAdminPolicy();
-  return NextResponse.json(policy);
+  try {
+    const policy = await getAdminPolicy();
+    return NextResponse.json(policy);
+  } catch (err: any) {
+    console.error('[api-gateway] admin consult policy GET failed', err);
+    return NextResponse.json(
+      { ok: false, error: err?.message || 'admin_consult_policy_load_failed' },
+      { status: 500 },
+    );
+  }
 }
 
 export async function PUT(req: NextRequest) {
@@ -26,46 +34,51 @@ export async function PUT(req: NextRequest) {
     return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  const current = await getAdminPolicy();
+  try {
+    const body = await req.json().catch(() => ({}));
+    const current = await getAdminPolicy();
 
-  await setAdminPolicy({
-    minStandardMinutes: numberFromBody(
-      body.minStandardMinutes,
-      current.minStandardMinutes ?? 30,
-    ),
-    minFollowupMinutes: numberFromBody(
-      body.minFollowupMinutes,
-      current.minFollowupMinutes ?? 15,
-    ),
-    bufferAfterMinutes: numberFromBody(
-      body.bufferAfterMinutes,
-      current.bufferAfterMinutes ?? 5,
-    ),
-    joinGracePatientMin: numberFromBody(
-      body.joinGracePatientMin,
-      current.joinGracePatientMin ?? 5,
-    ),
-    joinGraceClinicianMin: numberFromBody(
-      body.joinGraceClinicianMin,
-      current.joinGraceClinicianMin ?? 5,
-    ),
+    const saved = await setAdminPolicy({
+      minStandardMinutes: numberFromBody(
+        body.minStandardMinutes,
+        current.minStandardMinutes ?? 30,
+      ),
+      minFollowupMinutes: numberFromBody(
+        body.minFollowupMinutes,
+        current.minFollowupMinutes ?? 15,
+      ),
+      bufferAfterMinutes: numberFromBody(
+        body.bufferAfterMinutes,
+        current.bufferAfterMinutes ?? 5,
+      ),
+      joinGracePatientMin: numberFromBody(
+        body.joinGracePatientMin,
+        current.joinGracePatientMin ?? 5,
+      ),
+      joinGraceClinicianMin: numberFromBody(
+        body.joinGraceClinicianMin,
+        current.joinGraceClinicianMin ?? 5,
+      ),
+      minCancel24hRefund: numberFromBody(
+        body.minCancel24hRefund,
+        current.minCancel24hRefund ?? 50,
+      ),
+      minNoShowRefund: numberFromBody(
+        body.minNoShowRefund,
+        current.minNoShowRefund ?? 0,
+      ),
+      minClinicianMissRefund: numberFromBody(
+        body.minClinicianMissRefund,
+        current.minClinicianMissRefund ?? 100,
+      ),
+    });
 
-    // Required refund-policy fields on AdminPolicy.
-    // Preserve existing values unless explicitly changed by the request body.
-    minCancel24hRefund: numberFromBody(
-      body.minCancel24hRefund,
-      current.minCancel24hRefund ?? 100,
-    ),
-    minNoShowRefund: numberFromBody(
-      body.minNoShowRefund,
-      current.minNoShowRefund ?? 0,
-    ),
-    minClinicianMissRefund: numberFromBody(
-      body.minClinicianMissRefund,
-      current.minClinicianMissRefund ?? 100,
-    ),
-  });
-
-  return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, admin: saved });
+  } catch (err: any) {
+    console.error('[api-gateway] admin consult policy PUT failed', err);
+    return NextResponse.json(
+      { ok: false, error: err?.message || 'admin_consult_policy_save_failed' },
+      { status: 500 },
+    );
+  }
 }

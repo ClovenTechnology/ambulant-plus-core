@@ -74,6 +74,7 @@ export async function PUT(req: NextRequest) {
         {
           ok: false,
           error: gwBody?.error || gwBody?.message || `gateway_failed_${res.status}`,
+          message: gwBody?.error || gwBody?.message || `gateway_failed_${res.status}`,
         },
         res.status,
       );

@@ -62,6 +62,20 @@ function clampPercent(value: unknown, fallback: number, min = 0): number {
   return Math.max(min, Math.min(100, Math.round(n)));
 }
 
+function parseObject(value: unknown): Record<string, any> {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, any>;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 function adminPolicyDelegate() {
   return (prisma as any).adminConsultPolicy;
 }
@@ -74,6 +88,110 @@ function clinicianRefundPolicyDelegate() {
   return (prisma as any).clinicianRefundPolicy;
 }
 
+async function clinicianProfileByUserId(userId: string) {
+  return (prisma as any).clinicianProfile?.findFirst?.({
+    where: {
+      OR: [
+        { userId },
+        { id: userId },
+        { email: userId },
+      ],
+    },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
+function profileJson(clinician: any): { meta: Record<string, any>; profile: Record<string, any> } {
+  const meta = parseObject(clinician?.meta);
+  const profile =
+    meta.rawProfile && typeof meta.rawProfile === 'object'
+      ? meta.rawProfile
+      : typeof meta.rawProfileJson === 'string'
+        ? parseObject(meta.rawProfileJson)
+        : meta;
+
+  return { meta, profile };
+}
+
+async function updateClinicianProfileMeta(userId: string, patch: Record<string, any>) {
+  const clinician = await clinicianProfileByUserId(userId);
+  if (!clinician?.id) return false;
+
+  const { meta, profile } = profileJson(clinician);
+  const nextProfile = {
+    ...profile,
+    ...patch,
+  };
+
+  const nextMeta = {
+    ...meta,
+    rawProfile: nextProfile,
+    rawProfileJson: JSON.stringify(nextProfile),
+  };
+
+  await (prisma as any).clinicianProfile.update({
+    where: { id: clinician.id },
+    data: { meta: nextMeta as any },
+  });
+
+  return true;
+}
+
+function safeAdmin(input: Partial<AdminPolicy> = {}): AdminPolicy {
+  return {
+    minStandardMinutes: num(input.minStandardMinutes, DEFAULT_ADMIN.minStandardMinutes),
+    minFollowupMinutes: num(input.minFollowupMinutes, DEFAULT_ADMIN.minFollowupMinutes),
+    bufferAfterMinutes: num(input.bufferAfterMinutes, DEFAULT_ADMIN.bufferAfterMinutes),
+    joinGracePatientMin: num(input.joinGracePatientMin, DEFAULT_ADMIN.joinGracePatientMin),
+    joinGraceClinicianMin: num(input.joinGraceClinicianMin, DEFAULT_ADMIN.joinGraceClinicianMin),
+    minCancel24hRefund: clampPercent(input.minCancel24hRefund, DEFAULT_ADMIN.minCancel24hRefund),
+    minNoShowRefund: clampPercent(input.minNoShowRefund, DEFAULT_ADMIN.minNoShowRefund),
+    minClinicianMissRefund: clampPercent(
+      input.minClinicianMissRefund,
+      DEFAULT_ADMIN.minClinicianMissRefund,
+    ),
+  };
+}
+
+function safeConsult(input: Partial<ClinicianConsult>, admin: AdminPolicy): ClinicianConsult {
+  return {
+    defaultStandardMin: Math.max(
+      num(input.defaultStandardMin, DEFAULT_CLINICIAN_CONSULT.defaultStandardMin),
+      admin.minStandardMinutes,
+    ),
+    defaultFollowupMin: Math.max(
+      num(input.defaultFollowupMin, DEFAULT_CLINICIAN_CONSULT.defaultFollowupMin),
+      admin.minFollowupMinutes,
+    ),
+    minAdvanceMinutes: num(input.minAdvanceMinutes, DEFAULT_CLINICIAN_CONSULT.minAdvanceMinutes),
+    maxAdvanceDays: num(input.maxAdvanceDays, DEFAULT_CLINICIAN_CONSULT.maxAdvanceDays),
+  };
+}
+
+function safeRefunds(input: Partial<ClinicianRefunds>, admin: AdminPolicy): ClinicianRefunds {
+  return {
+    within24hPercent: clampPercent(
+      input.within24hPercent,
+      DEFAULT_CLINICIAN_REFUNDS.within24hPercent,
+      admin.minCancel24hRefund,
+    ),
+    noShowPercent: clampPercent(
+      input.noShowPercent,
+      DEFAULT_CLINICIAN_REFUNDS.noShowPercent,
+      admin.minNoShowRefund,
+    ),
+    clinicianMissPercent: clampPercent(
+      input.clinicianMissPercent,
+      DEFAULT_CLINICIAN_REFUNDS.clinicianMissPercent,
+      admin.minClinicianMissRefund,
+    ),
+    networkProrate:
+      typeof input.networkProrate === 'boolean'
+        ? input.networkProrate
+        : DEFAULT_CLINICIAN_REFUNDS.networkProrate,
+  };
+}
+
 export async function getAdminPolicy(): Promise<AdminPolicy> {
   const delegate = adminPolicyDelegate();
 
@@ -81,55 +199,42 @@ export async function getAdminPolicy(): Promise<AdminPolicy> {
     return DEFAULT_ADMIN;
   }
 
-  const row = await delegate.findUnique({
-    where: { id: 'singleton' },
-  });
+  try {
+    const row = await delegate.findUnique({
+      where: { id: 'singleton' },
+    });
 
-  if (!row) return DEFAULT_ADMIN;
-
-  return {
-    minStandardMinutes: num(row.minStandardMinutes, DEFAULT_ADMIN.minStandardMinutes),
-    minFollowupMinutes: num(row.minFollowupMinutes, DEFAULT_ADMIN.minFollowupMinutes),
-    bufferAfterMinutes: num(row.bufferAfterMinutes, DEFAULT_ADMIN.bufferAfterMinutes),
-    joinGracePatientMin: num(row.joinGracePatientMin, DEFAULT_ADMIN.joinGracePatientMin),
-    joinGraceClinicianMin: num(row.joinGraceClinicianMin, DEFAULT_ADMIN.joinGraceClinicianMin),
-    minCancel24hRefund: num(row.minCancel24hRefund, DEFAULT_ADMIN.minCancel24hRefund),
-    minNoShowRefund: num(row.minNoShowRefund, DEFAULT_ADMIN.minNoShowRefund),
-    minClinicianMissRefund: num(row.minClinicianMissRefund, DEFAULT_ADMIN.minClinicianMissRefund),
-  };
+    if (!row) return DEFAULT_ADMIN;
+    return safeAdmin(row);
+  } catch (err: any) {
+    console.error('[consult-store] getAdminPolicy failed; using defaults', err);
+    return DEFAULT_ADMIN;
+  }
 }
 
 export async function setAdminPolicy(policy: AdminPolicy): Promise<AdminPolicy> {
-  const safe: AdminPolicy = {
-    minStandardMinutes: num(policy.minStandardMinutes, DEFAULT_ADMIN.minStandardMinutes),
-    minFollowupMinutes: num(policy.minFollowupMinutes, DEFAULT_ADMIN.minFollowupMinutes),
-    bufferAfterMinutes: num(policy.bufferAfterMinutes, DEFAULT_ADMIN.bufferAfterMinutes),
-    joinGracePatientMin: num(policy.joinGracePatientMin, DEFAULT_ADMIN.joinGracePatientMin),
-    joinGraceClinicianMin: num(policy.joinGraceClinicianMin, DEFAULT_ADMIN.joinGraceClinicianMin),
-    minCancel24hRefund: clampPercent(policy.minCancel24hRefund, DEFAULT_ADMIN.minCancel24hRefund),
-    minNoShowRefund: clampPercent(policy.minNoShowRefund, DEFAULT_ADMIN.minNoShowRefund),
-    minClinicianMissRefund: clampPercent(
-      policy.minClinicianMissRefund,
-      DEFAULT_ADMIN.minClinicianMissRefund,
-    ),
-  };
-
+  const safe = safeAdmin(policy);
   const delegate = adminPolicyDelegate();
 
   if (!delegate?.upsert) {
-    return safe;
+    throw new Error('adminConsultPolicy_delegate_missing');
   }
 
-  await delegate.upsert({
-    where: { id: 'singleton' },
-    update: safe,
-    create: {
-      id: 'singleton',
-      ...safe,
-    },
-  });
+  try {
+    await delegate.upsert({
+      where: { id: 'singleton' },
+      update: safe,
+      create: {
+        id: 'singleton',
+        ...safe,
+      },
+    });
 
-  return safe;
+    return safe;
+  } catch (err: any) {
+    console.error('[consult-store] setAdminPolicy failed', err);
+    throw new Error(err?.message || 'admin_consult_policy_persist_failed');
+  }
 }
 
 export async function saveAdminConsultSettings(
@@ -137,60 +242,68 @@ export async function saveAdminConsultSettings(
 ): Promise<AdminPolicy> {
   const current = await getAdminPolicy();
 
-  const next: AdminPolicy = {
-    minStandardMinutes: num(input.minStandardMinutes, current.minStandardMinutes),
-    minFollowupMinutes: num(input.minFollowupMinutes, current.minFollowupMinutes),
-    bufferAfterMinutes: num(input.bufferAfterMinutes, current.bufferAfterMinutes),
-    joinGracePatientMin: num(input.joinGracePatientMin, current.joinGracePatientMin),
-    joinGraceClinicianMin: num(input.joinGraceClinicianMin, current.joinGraceClinicianMin),
-    minCancel24hRefund: clampPercent(
-      input.minCancel24hRefund,
-      current.minCancel24hRefund,
-    ),
-    minNoShowRefund: clampPercent(
-      input.minNoShowRefund,
-      current.minNoShowRefund,
-    ),
-    minClinicianMissRefund: clampPercent(
-      input.minClinicianMissRefund,
-      current.minClinicianMissRefund,
-    ),
-  };
+  const next = safeAdmin({
+    minStandardMinutes: input.minStandardMinutes ?? current.minStandardMinutes,
+    minFollowupMinutes: input.minFollowupMinutes ?? current.minFollowupMinutes,
+    bufferAfterMinutes: input.bufferAfterMinutes ?? current.bufferAfterMinutes,
+    joinGracePatientMin: input.joinGracePatientMin ?? current.joinGracePatientMin,
+    joinGraceClinicianMin: input.joinGraceClinicianMin ?? current.joinGraceClinicianMin,
+    minCancel24hRefund: input.minCancel24hRefund ?? current.minCancel24hRefund,
+    minNoShowRefund: input.minNoShowRefund ?? current.minNoShowRefund,
+    minClinicianMissRefund: input.minClinicianMissRefund ?? current.minClinicianMissRefund,
+  });
 
   return setAdminPolicy(next);
 }
 
 export async function getClinicianConsult(userId: string): Promise<ClinicianConsult> {
+  const admin = await getAdminPolicy();
   const delegate = clinicianConsultSettingsDelegate();
 
-  if (!delegate?.findUnique) {
-    return DEFAULT_CLINICIAN_CONSULT;
+  if (delegate?.findUnique) {
+    try {
+      const row = await delegate.findUnique({
+        where: { userId },
+      });
+
+      if (row) {
+        return safeConsult(row, admin);
+      }
+    } catch (err: any) {
+      console.error('[consult-store] getClinicianConsult dedicated table failed; falling back to meta', err);
+    }
   }
 
-  const row = await delegate.findUnique({
-    where: { userId },
-  });
+  try {
+    const clinician = await clinicianProfileByUserId(userId);
+    const { profile } = profileJson(clinician);
+    const stored = parseObject(profile.consultSettings);
 
-  if (!row) return DEFAULT_CLINICIAN_CONSULT;
-
-  return {
-    defaultStandardMin: num(
-      row.defaultStandardMin,
-      DEFAULT_CLINICIAN_CONSULT.defaultStandardMin,
-    ),
-    defaultFollowupMin: num(
-      row.defaultFollowupMin,
-      DEFAULT_CLINICIAN_CONSULT.defaultFollowupMin,
-    ),
-    minAdvanceMinutes: num(
-      row.minAdvanceMinutes,
-      DEFAULT_CLINICIAN_CONSULT.minAdvanceMinutes,
-    ),
-    maxAdvanceDays: num(
-      row.maxAdvanceDays,
-      DEFAULT_CLINICIAN_CONSULT.maxAdvanceDays,
-    ),
-  };
+    return safeConsult(
+      {
+        defaultStandardMin:
+          stored.defaultStandardMin ??
+          stored.defaultMinutes ??
+          profile.defaultStandardMin ??
+          profile.defaultMinutes,
+        defaultFollowupMin:
+          stored.defaultFollowupMin ??
+          stored.followupMinutes ??
+          profile.defaultFollowupMin ??
+          profile.followupMinutes,
+        minAdvanceMinutes:
+          stored.minAdvanceMinutes ??
+          profile.minAdvanceMinutes,
+        maxAdvanceDays:
+          stored.maxAdvanceDays ??
+          profile.maxAdvanceDays,
+      },
+      admin,
+    );
+  } catch (err: any) {
+    console.error('[consult-store] getClinicianConsult meta fallback failed; using defaults', err);
+    return safeConsult(DEFAULT_CLINICIAN_CONSULT, admin);
+  }
 }
 
 export async function setClinicianConsult(
@@ -199,75 +312,71 @@ export async function setClinicianConsult(
   adminPolicy?: AdminPolicy,
 ): Promise<ClinicianConsult> {
   const admin = adminPolicy ?? (await getAdminPolicy());
-
-  const safe: ClinicianConsult = {
-    defaultStandardMin: Math.max(
-      num(consult.defaultStandardMin, DEFAULT_CLINICIAN_CONSULT.defaultStandardMin),
-      admin.minStandardMinutes,
-    ),
-    defaultFollowupMin: Math.max(
-      num(consult.defaultFollowupMin, DEFAULT_CLINICIAN_CONSULT.defaultFollowupMin),
-      admin.minFollowupMinutes,
-    ),
-    minAdvanceMinutes: num(
-      consult.minAdvanceMinutes,
-      DEFAULT_CLINICIAN_CONSULT.minAdvanceMinutes,
-    ),
-    maxAdvanceDays: num(
-      consult.maxAdvanceDays,
-      DEFAULT_CLINICIAN_CONSULT.maxAdvanceDays,
-    ),
-  };
-
+  const safe = safeConsult(consult, admin);
   const delegate = clinicianConsultSettingsDelegate();
 
-  if (!delegate?.upsert) {
-    return safe;
+  let dedicatedSaved = false;
+
+  if (delegate?.upsert) {
+    try {
+      await delegate.upsert({
+        where: { userId },
+        update: safe,
+        create: {
+          userId,
+          ...safe,
+        },
+      });
+      dedicatedSaved = true;
+    } catch (err: any) {
+      console.error('[consult-store] setClinicianConsult dedicated table failed; falling back to meta', err);
+    }
   }
 
-  await delegate.upsert({
-    where: { userId },
-    update: safe,
-    create: {
-      userId,
-      ...safe,
+  await updateClinicianProfileMeta(userId, {
+    consultSettings: {
+      defaultMinutes: safe.defaultStandardMin,
+      defaultStandardMin: safe.defaultStandardMin,
+      followupMinutes: safe.defaultFollowupMin,
+      defaultFollowupMin: safe.defaultFollowupMin,
+      minAdvanceMinutes: safe.minAdvanceMinutes,
+      maxAdvanceDays: safe.maxAdvanceDays,
     },
   });
+
+  if (!dedicatedSaved) {
+    console.warn('[consult-store] clinician consult settings saved to profile meta fallback only');
+  }
 
   return safe;
 }
 
 export async function getClinicianRefunds(userId: string): Promise<ClinicianRefunds> {
+  const admin = await getAdminPolicy();
   const delegate = clinicianRefundPolicyDelegate();
 
-  if (!delegate?.findUnique) {
-    return DEFAULT_CLINICIAN_REFUNDS;
+  if (delegate?.findUnique) {
+    try {
+      const row = await delegate.findUnique({
+        where: { userId },
+      });
+
+      if (row) return safeRefunds(row, admin);
+    } catch (err: any) {
+      console.error('[consult-store] getClinicianRefunds dedicated table failed; falling back to meta', err);
+    }
   }
 
-  const row = await delegate.findUnique({
-    where: { userId },
-  });
+  try {
+    const clinician = await clinicianProfileByUserId(userId);
+    const { profile } = profileJson(clinician);
+    const stored = parseObject(profile.refundSettings || profile.refunds || profile.refundPolicy);
 
-  if (!row) return DEFAULT_CLINICIAN_REFUNDS;
-
-  return {
-    within24hPercent: clampPercent(
-      row.within24hPercent,
-      DEFAULT_CLINICIAN_REFUNDS.within24hPercent,
-    ),
-    noShowPercent: clampPercent(
-      row.noShowPercent,
-      DEFAULT_CLINICIAN_REFUNDS.noShowPercent,
-    ),
-    clinicianMissPercent: clampPercent(
-      row.clinicianMissPercent,
-      DEFAULT_CLINICIAN_REFUNDS.clinicianMissPercent,
-    ),
-    networkProrate:
-      typeof row.networkProrate === 'boolean'
-        ? row.networkProrate
-        : DEFAULT_CLINICIAN_REFUNDS.networkProrate,
-  };
+    return safeRefunds(stored, admin);
+  } catch (err: any) {
+    console.error('[consult-store] getClinicianRefunds meta fallback failed; using defaults', err);
+    return safeRefunds(DEFAULT_CLINICIAN_REFUNDS, admin);
+  }
 }
 
 export async function setClinicianRefunds(
@@ -276,40 +385,34 @@ export async function setClinicianRefunds(
   adminPolicy?: AdminPolicy,
 ): Promise<ClinicianRefunds> {
   const admin = adminPolicy ?? (await getAdminPolicy());
-
-  const safe: ClinicianRefunds = {
-    within24hPercent: clampPercent(
-      refunds.within24hPercent,
-      DEFAULT_CLINICIAN_REFUNDS.within24hPercent,
-      admin.minCancel24hRefund,
-    ),
-    noShowPercent: clampPercent(
-      refunds.noShowPercent,
-      DEFAULT_CLINICIAN_REFUNDS.noShowPercent,
-      admin.minNoShowRefund,
-    ),
-    clinicianMissPercent: clampPercent(
-      refunds.clinicianMissPercent,
-      DEFAULT_CLINICIAN_REFUNDS.clinicianMissPercent,
-      admin.minClinicianMissRefund,
-    ),
-    networkProrate: Boolean(refunds.networkProrate),
-  };
-
+  const safe = safeRefunds(refunds, admin);
   const delegate = clinicianRefundPolicyDelegate();
 
-  if (!delegate?.upsert) {
-    return safe;
+  let dedicatedSaved = false;
+
+  if (delegate?.upsert) {
+    try {
+      await delegate.upsert({
+        where: { userId },
+        update: safe,
+        create: {
+          userId,
+          ...safe,
+        },
+      });
+      dedicatedSaved = true;
+    } catch (err: any) {
+      console.error('[consult-store] setClinicianRefunds dedicated table failed; falling back to meta', err);
+    }
   }
 
-  await delegate.upsert({
-    where: { userId },
-    update: safe,
-    create: {
-      userId,
-      ...safe,
-    },
+  await updateClinicianProfileMeta(userId, {
+    refundSettings: safe,
   });
+
+  if (!dedicatedSaved) {
+    console.warn('[consult-store] clinician refund policy saved to profile meta fallback only');
+  }
 
   return safe;
 }

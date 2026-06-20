@@ -164,7 +164,7 @@ export default function AdminConsultSettingsPage() {
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body?.message || `Save failed (${res.status})`);
+        throw new Error(body?.message || body?.error || `Save failed (${res.status})`);
       }
       setSaved(true);
       setTimeout(() => setSaved(false), 2000);
