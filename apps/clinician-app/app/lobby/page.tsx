@@ -1,17 +1,21 @@
-//apps/clinician-app/app/lobby/page.tsx
+// apps/clinician-app/app/lobby/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 
 type Ctx = {
+  appointmentId?: string;
+  encounterId?: string;
+  visitId?: string;
   patientId?: string;
   patientName?: string;
-  encounterId?: string;
   clinicianId?: string;
   clinicianName?: string;
   clinicName?: string;
   clinicAddress?: string;
   reason?: string;
+  participantId?: string;
+  joinToken?: string;
 };
 
 function normalizeOrigin(x?: string | null) {
@@ -21,57 +25,36 @@ function normalizeOrigin(x?: string | null) {
 }
 
 function derivePatientOriginFromHere(here: URL) {
-  // 1) Same host but different port (local dev)
-  if (here.hostname === 'localhost' || here.hostname === '127.0.0.1') {
-    const u = new URL(here.toString());
-    u.port = '3000';
-    u.pathname = '/';
-    u.search = '';
-    u.hash = '';
-    return u.origin;
-  }
-
-  // 2) Common subdomain swap: clinician.* -> patient.*
   if (here.hostname.startsWith('clinician.')) {
-    return `${here.protocol}//${here.hostname.replace(/^clinician\./, 'patient.')}`;
+    return here.protocol + '//' + here.hostname.replace(/^clinician\./, 'patient.');
   }
 
-  // 3) Fallback: same origin
   return here.origin;
 }
 
 function buildSfuUrl(origin: string, roomId: string, ctx: Ctx) {
-  const u = new URL(origin);
-  u.pathname = `/sfu/${encodeURIComponent(roomId)}`;
-  u.search = '';
-  u.hash = '';
-
-  // only attach non-empty params
+  const base = normalizeOrigin(origin);
+  const u = new URL(base + '/sfu/' + encodeURIComponent(roomId));
   const sp = u.searchParams;
-  (Object.entries(ctx) as Array<[keyof Ctx, string | undefined]>).forEach(([k, v]) => {
-    const val = (v ?? '').trim();
-    if (val) sp.set(String(k), val);
+
+  Object.entries(ctx).forEach(([k, v]) => {
+    const val = String(v ?? '').trim();
+    if (val) sp.set(k, val);
   });
 
   return u.toString();
 }
 
-function makeLinks(roomId: string, ctx: Ctx) {
-  // SSR-safe defaults (dev-friendly)
+function makeFallbackLinks(roomId: string, ctx: Ctx, patientParticipantId?: string) {
   if (typeof window === 'undefined') {
-    const clinicianOrigin = normalizeOrigin(process.env.NEXT_PUBLIC_CLINICIAN_APP_ORIGIN) || 'http://localhost:3001';
-    const patientOrigin = normalizeOrigin(process.env.NEXT_PUBLIC_PATIENT_APP_ORIGIN) || 'http://localhost:3000';
-    return {
-      clinician: buildSfuUrl(clinicianOrigin, roomId, ctx),
-      patient: buildSfuUrl(patientOrigin, roomId, ctx),
-    };
+    return { clinician: '', patient: '' };
   }
 
   const here = new URL(window.location.href);
 
   const clinicianOrigin =
     normalizeOrigin(process.env.NEXT_PUBLIC_CLINICIAN_APP_ORIGIN) ||
-    here.origin.replace(/\/lobby\/?$/, '');
+    here.origin;
 
   const patientOrigin =
     normalizeOrigin(process.env.NEXT_PUBLIC_PATIENT_APP_ORIGIN) ||
@@ -79,36 +62,71 @@ function makeLinks(roomId: string, ctx: Ctx) {
 
   return {
     clinician: buildSfuUrl(clinicianOrigin, roomId, ctx),
-    patient: buildSfuUrl(patientOrigin, roomId, ctx),
+    patient: buildSfuUrl(patientOrigin, roomId, {
+      ...ctx,
+      participantId: patientParticipantId || '',
+      joinToken: '',
+    }),
   };
 }
 
 export default function Lobby() {
-  const [roomId, setRoomId] = useState('[roomId]');
+  const [ready, setReady] = useState(false);
+  const [roomId, setRoomId] = useState('');
   const [ctx, setCtx] = useState<Ctx>({});
+  const [patientJoinUrl, setPatientJoinUrl] = useState('');
+  const [clinicianJoinUrl, setClinicianJoinUrl] = useState('');
+  const [patientParticipantId, setPatientParticipantId] = useState('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
+
     const sp = new URL(window.location.href).searchParams;
 
-    setCtx({
+    const nextRoomId =
+      sp.get('roomId') ||
+      sp.get('room') ||
+      sp.get('roomName') ||
+      '';
+
+    const nextCtx: Ctx = {
+      appointmentId: sp.get('appointmentId') ?? sp.get('appt') ?? undefined,
+      encounterId: sp.get('encounterId') ?? undefined,
+      visitId: sp.get('visitId') ?? sp.get('televisitId') ?? undefined,
       patientId: sp.get('patientId') ?? undefined,
       patientName: sp.get('patientName') ?? undefined,
-      encounterId: sp.get('encounterId') ?? undefined,
       clinicianId: sp.get('clinicianId') ?? undefined,
       clinicianName: sp.get('clinicianName') ?? undefined,
       clinicName: sp.get('clinicName') ?? undefined,
       clinicAddress: sp.get('clinicAddress') ?? undefined,
       reason: sp.get('reason') ?? undefined,
-    });
+      participantId: sp.get('participantId') ?? undefined,
+      joinToken: sp.get('joinToken') ?? sp.get('jt') ?? undefined,
+    };
+
+    setRoomId(nextRoomId);
+    setCtx(nextCtx);
+    setPatientParticipantId(sp.get('patientParticipantId') || '');
+    setPatientJoinUrl(sp.get('patientJoinUrl') || '');
+    setClinicianJoinUrl(sp.get('clinicianJoinUrl') || '');
+    setReady(true);
   }, []);
 
-  const links = useMemo(() => makeLinks(roomId, ctx), [roomId, ctx]);
+  const links = useMemo(() => {
+    if (!roomId) return { clinician: '', patient: '' };
+
+    const fallback = makeFallbackLinks(roomId, ctx, patientParticipantId);
+
+    return {
+      clinician: clinicianJoinUrl || fallback.clinician,
+      patient: patientJoinUrl || fallback.patient,
+    };
+  }, [roomId, ctx, patientJoinUrl, clinicianJoinUrl, patientParticipantId]);
 
   const copy = async (txt: string) => {
     try {
       await navigator.clipboard.writeText(txt);
-      alert('Copied!');
+      alert('Copied.');
     } catch {
       const ta = document.createElement('textarea');
       ta.value = txt;
@@ -116,81 +134,94 @@ export default function Lobby() {
       ta.select();
       document.execCommand('copy');
       ta.remove();
-      alert('Copied!');
+      alert('Copied.');
     }
   };
 
+  if (!ready) {
+    return <main className="p-6 max-w-xl mx-auto">Loading lobby...</main>;
+  }
+
+  if (!roomId) {
+    return (
+      <main className="p-6 max-w-xl mx-auto space-y-4">
+        <h1 className="text-2xl font-semibold">Clinician Lobby</h1>
+        <div className="rounded border border-amber-200 bg-amber-50 p-4 text-amber-800">
+          No appointment room was supplied. Open the lobby from Today or Appointments.
+        </div>
+        <a href="/today" className="inline-flex rounded border px-3 py-2 hover:bg-gray-50">
+          Back to Today
+        </a>
+      </main>
+    );
+  }
+
   return (
-    <main className="p-6 max-w-xl mx-auto space-y-6">
-      <h1 className="text-2xl font-semibold">Clinician Lobby</h1>
+    <main className="p-6 max-w-2xl mx-auto space-y-6">
+      <div>
+        <h1 className="text-2xl font-semibold">Clinician Lobby</h1>
+        <p className="text-sm text-gray-600">
+          Prepare for the consultation, review patient context, then enter the secure room.
+        </p>
+      </div>
 
       <div className="rounded border p-4 space-y-3 bg-white">
-        <label className="block text-sm text-gray-600">
-          This is your waiting area to prepare for your upcoming appointment. You can take time to exhale, review the
-          patient file(s), historic vitals, EHR, eRx, labs and more before the session commences.
-        </label>
+        <div className="grid gap-2 text-sm">
+          <div><span className="text-gray-500">Room:</span> <span className="font-mono">{roomId}</span></div>
+          {ctx.appointmentId && <div><span className="text-gray-500">Appointment:</span> {ctx.appointmentId}</div>}
+          {ctx.encounterId && <div><span className="text-gray-500">Encounter:</span> {ctx.encounterId}</div>}
+          {ctx.patientName && <div><span className="text-gray-500">Patient:</span> {ctx.patientName}</div>}
+          {ctx.reason && <div><span className="text-gray-500">Reason:</span> {ctx.reason}</div>}
+        </div>
 
-        <input
-          value={roomId}
-          onChange={(e) => setRoomId(e.target.value)}
-          className="border rounded px-3 py-2 w-full"
-          placeholder="e.g. dev, call-123"
-        />
-
-        <div className="flex flex-wrap gap-2">
+        <div className="flex flex-wrap gap-2 pt-2">
           <a
             href={links.clinician}
-            className="px-3 py-2 border rounded hover:bg-gray-100"
+            className="px-4 py-2 rounded bg-black text-white hover:bg-gray-800"
           >
             Proceed to Consultation Session
           </a>
 
-          <button
-            onClick={() => copy(links.patient)}
-            className="px-3 py-2 border rounded hover:bg-gray-100"
-            type="button"
-            title="Copy patient invite link"
-          >
-            Copy Patient Invite
-          </button>
+          {links.patient && (
+            <button
+              onClick={() => copy(links.patient)}
+              className="px-4 py-2 border rounded hover:bg-gray-100"
+              type="button"
+              title="Copy patient invite link"
+            >
+              Copy Patient Invite
+            </button>
+          )}
         </div>
       </div>
 
       <div className="rounded border p-4 space-y-3 bg-white">
-        <div className="font-medium">Invite Links</div>
+        <div className="font-medium">Secure invite links</div>
         <div className="text-sm text-gray-600">
-          Share the invite link with intended participants only. Do not share with unauthorized parties.
+          Share only with the intended participant. Do not expose links in screenshots or public channels.
         </div>
 
         <div className="space-y-2">
           <div className="text-xs text-gray-500">Clinician</div>
           <div className="flex gap-2">
-            <input readOnly value={links.clinician} className="border rounded px-2 py-1 flex-1" />
+            <input readOnly value={links.clinician} className="border rounded px-2 py-1 flex-1 text-xs" />
             <button onClick={() => copy(links.clinician)} className="px-3 py-1 border rounded" type="button">
               Copy
             </button>
           </div>
         </div>
 
-        <div className="space-y-2 pt-2">
-          <div className="text-xs text-gray-500">Patient</div>
-          <div className="flex gap-2">
-            <input readOnly value={links.patient} className="border rounded px-2 py-1 flex-1" />
-            <button onClick={() => copy(links.patient)} className="px-3 py-1 border rounded" type="button">
-              Copy
-            </button>
+        {links.patient && (
+          <div className="space-y-2 pt-2">
+            <div className="text-xs text-gray-500">Patient</div>
+            <div className="flex gap-2">
+              <input readOnly value={links.patient} className="border rounded px-2 py-1 flex-1 text-xs" />
+              <button onClick={() => copy(links.patient)} className="px-3 py-1 border rounded" type="button">
+                Copy
+              </button>
+            </div>
           </div>
-        </div>
-
-        <div className="pt-2">
-          <button
-            onClick={() => copy(`Clinician: ${links.clinician}\nPatient: ${links.patient}`)}
-            className="px-3 py-2 border rounded w-full"
-            type="button"
-          >
-            Copy Both
-          </button>
-        </div>
+        )}
       </div>
     </main>
   );

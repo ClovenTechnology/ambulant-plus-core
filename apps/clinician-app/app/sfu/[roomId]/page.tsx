@@ -406,7 +406,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   } = usePatientContext(roomId, searchParams);
 
   // Other URL params
-  const clinicianIdParam = searchParams.get('clinicianId') || 'clinician-local-001';
+  const clinicianIdParam = searchParams.get('clinicianId') || searchParams.get('clinician') || '';
   const clinicNameParam = searchParams.get('clinicName') || undefined;
   const clinicAddressParam = searchParams.get('clinicAddress') || undefined;
   const appointmentId =
@@ -429,9 +429,9 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         new Date().toISOString(),
       patientId,
       patientName,
-      clinicianName: searchParams.get('clinicianName') || 'Simulation Clinician',
+      clinicianName: searchParams.get('clinicianName') || 'Clinician',
       clinicianSpecialty: searchParams.get('clinicianSpecialty') || undefined,
-      reason: searchParams.get('reason') || 'Simulation consultation',
+      reason: searchParams.get('reason') || 'Consultation',
       status: 'In progress',
       roomId,
     }),

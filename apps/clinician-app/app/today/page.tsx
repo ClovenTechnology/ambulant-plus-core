@@ -68,6 +68,35 @@ function getSeverityClass(severity: AlertSeverity) {
   }
 }
 
+function buildLobbyHrefForAppointment(a: any) {
+  const roomId = a?.roomId || a?.roomName || (a?.id ? 'room-' + a.id : '');
+  const sp = new URLSearchParams();
+
+  if (roomId) sp.set('roomId', roomId);
+  if (a?.id) sp.set('appointmentId', a.id);
+  if (a?.encounterId) sp.set('encounterId', a.encounterId);
+  if (a?.visitId || a?.televisitId) sp.set('visitId', String(a.visitId || a.televisitId));
+
+  const clinicianId = a?.clinician?.id || a?.clinicianId || '';
+  if (clinicianId) sp.set('clinicianId', clinicianId);
+
+  const clinicianName = a?.clinician?.name || a?.clinicianName || '';
+  if (clinicianName) sp.set('clinicianName', clinicianName);
+
+  const patientId = a?.patient?.id || a?.patientId || '';
+  if (patientId) sp.set('patientId', patientId);
+
+  const patientName = a?.patient?.name || a?.patientName || '';
+  if (patientName) sp.set('patientName', patientName);
+
+  if (a?.clinicianParticipantId) sp.set('participantId', a.clinicianParticipantId);
+  if (a?.patientParticipantId) sp.set('patientParticipantId', a.patientParticipantId);
+  if (a?.patientJoinUrl) sp.set('patientJoinUrl', a.patientJoinUrl);
+  if (a?.clinicianJoinUrl) sp.set('clinicianJoinUrl', a.clinicianJoinUrl);
+
+  return '/lobby?' + sp.toString();
+}
+
 function getSeverityAccentClass(severity: AlertSeverity) {
   switch (severity) {
     case 'critical':
@@ -389,7 +418,7 @@ export default function TodayPage() {
                   type="button"
                   className="px-3 py-2 bg-indigo-600 text-white rounded"
                   onClick={() =>
-                    window.open(`/sfu/room-${selected.id}`, '_blank')
+                    window.open(buildLobbyHrefForAppointment(selected as any), '_blank')
                   }
                 >
                   Join Televisit

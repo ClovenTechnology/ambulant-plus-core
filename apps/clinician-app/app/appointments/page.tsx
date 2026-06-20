@@ -6,8 +6,12 @@ import { useEffect, useMemo, useState } from 'react';
 type Appt = {
   id: string;
   encounterId?: string | null;
+  visitId?: string | null;
+  televisitId?: string | null;
   patientId?: string | null;
+  patientName?: string | null;
   clinicianId?: string | null;
+  clinicianName?: string | null;
   startsAt?: string | null;
   endsAt?: string | null;
   start?: string | null;
@@ -15,6 +19,12 @@ type Appt = {
   status?: string | null;
   priceCents?: number | null;
   currency?: string | null;
+  roomId?: string | null;
+  roomName?: string | null;
+  patientJoinUrl?: string | null;
+  clinicianJoinUrl?: string | null;
+  patientParticipantId?: string | null;
+  clinicianParticipantId?: string | null;
 };
 
 function fmt(dt: string | null | undefined) {
@@ -59,12 +69,32 @@ async function resolveClinicianId(): Promise<string> {
       me?.clinician?.id ||
       me?.user?.clinicianId ||
       me?.user?.clinician?.id ||
-      me?.id ||
       ''
     );
   } catch {
     return '';
   }
+}
+
+function lobbyHref(a: Appt) {
+  const roomId = a.roomId || a.roomName || ('room-' + a.id);
+  const sp = new URLSearchParams();
+
+  sp.set('roomId', roomId);
+  sp.set('appointmentId', a.id);
+
+  if (a.encounterId) sp.set('encounterId', a.encounterId);
+  if (a.visitId || a.televisitId) sp.set('visitId', String(a.visitId || a.televisitId));
+  if (a.patientId) sp.set('patientId', a.patientId);
+  if (a.patientName) sp.set('patientName', a.patientName);
+  if (a.clinicianId) sp.set('clinicianId', a.clinicianId);
+  if (a.clinicianName) sp.set('clinicianName', a.clinicianName);
+  if (a.patientParticipantId) sp.set('patientParticipantId', a.patientParticipantId);
+  if (a.clinicianParticipantId) sp.set('participantId', a.clinicianParticipantId);
+  if (a.patientJoinUrl) sp.set('patientJoinUrl', a.patientJoinUrl);
+  if (a.clinicianJoinUrl) sp.set('clinicianJoinUrl', a.clinicianJoinUrl);
+
+  return '/lobby?' + sp.toString();
 }
 
 export default function ClinicianAppointmentsPage() {
@@ -88,15 +118,16 @@ export default function ClinicianAppointmentsPage() {
 
       const params = new URLSearchParams();
       params.set('clinicianId', clinicianId);
+      params.set('excludeSimulation', '1');
       if (q.trim()) params.set('q', q.trim());
 
       const r = await fetch('/api/appointments?' + params.toString(), {
         cache: 'no-store',
       });
 
-      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json().catch(() => ({}));
+      if (!r.ok || data?.ok === false) throw new Error(data?.error || 'HTTP ' + r.status);
 
-      const data = await r.json();
       setItems(asList(data));
     } catch (e: any) {
       setItems([]);
@@ -161,8 +192,8 @@ export default function ClinicianAppointmentsPage() {
           </div>
         ) : (
           filtered.map((a) => (
-            <div key={a.id} className="p-4 flex items-center justify-between">
-              <div>
+            <div key={a.id} className="p-4 flex items-center justify-between gap-4">
+              <div className="min-w-0">
                 <div className="font-medium">
                   #{a.id} - <span className="text-gray-600">{a.status || 'pending'}</span>
                 </div>
@@ -172,16 +203,27 @@ export default function ClinicianAppointmentsPage() {
                 </div>
 
                 <div className="text-xs text-gray-500">
-                  Patient: {a.patientId || '-'} - Encounter: {a.encounterId || '-'}
+                  Patient: {a.patientName || a.patientId || '-'} - Encounter: {a.encounterId || '-'}
+                </div>
+
+                <div className="text-xs text-gray-500">
+                  Room: {a.roomId || a.roomName || '-'}
                 </div>
               </div>
 
-              <div className="text-right">
+              <div className="text-right space-y-2">
                 {a.priceCents != null && (
                   <div className="text-sm">
                     {(a.currency || 'ZAR')} {(a.priceCents / 100).toFixed(2)}
                   </div>
                 )}
+
+                <a
+                  href={lobbyHref(a)}
+                  className="inline-flex rounded bg-black px-3 py-1.5 text-sm text-white hover:bg-gray-800"
+                >
+                  Open lobby
+                </a>
               </div>
             </div>
           ))
