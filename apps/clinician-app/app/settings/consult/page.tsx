@@ -3,7 +3,7 @@
 
 import { SettingsTabs } from '@/components/SettingsTabs';
 import { useEffect, useMemo, useState } from 'react';
-import SchedulePreview from '@/components/SchedulePreview';
+import CalendarPreview from '@/components/CalendarPreview';
 
 type Refunds = {
   within24hPercent: number;
@@ -69,12 +69,6 @@ export default function ConsultSettingsPage() {
   }
 
   const [patientView, setPatientView] = useState(false);
-
-  // Preview state (avoid rendering HTML error dumps)
-  const [previewData, setPreviewData] = useState<any | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
-  const [previewLoading, setPreviewLoading] = useState(false);
-
   useEffect(() => {
     (async () => {
       try {
@@ -167,55 +161,6 @@ export default function ConsultSettingsPage() {
       }
     })();
   }, []);
-
-  // Fetch preview after cfg is available
-  useEffect(() => {
-    if (!cfg) return;
-    (async () => {
-      setPreviewLoading(true);
-      setPreviewData(null);
-      setPreviewError(null);
-
-      try {
-        // start date = today (YYYY-MM-DD)
-        const start = new Date().toISOString().slice(0, 10);
-        const url = `/api/schedule/slots/batch?start=${encodeURIComponent(start)}&days=42`;
-        const res = await fetch(url, {
-          cache: 'no-store',
-          headers: {
-            Accept: 'application/json',
-          },
-        });
-
-        const ct = res.headers.get('content-type') || '';
-        if (!res.ok) {
-          // If server returned e.g. 404 with HTML, avoid rendering it — surface friendly message
-          const text = await res.text().catch(() => '');
-          console.warn('Preview fetch error', { status: res.status, contentType: ct, text });
-          setPreviewError(`Preview unavailable (status ${res.status}). See console for details.`);
-          setPreviewLoading(false);
-          return;
-        }
-
-        if (ct.includes('application/json')) {
-          const json = await res.json();
-          setPreviewData(json);
-        } else {
-          // Non-JSON response (likely HTML error page). Don't render it.
-          const text = await res.text().catch(() => '');
-          console.warn('Preview returned non-JSON; suppressing HTML output', { contentType: ct, text });
-          setPreviewError(
-            'Preview endpoint returned an HTML error (not JSON). The preview is unavailable — check the API or open the endpoint in a new tab for debugging.',
-          );
-        }
-      } catch (e: any) {
-        console.error('Failed to fetch preview', e);
-        setPreviewError('Failed to load preview. See console for details.');
-      } finally {
-        setPreviewLoading(false);
-      }
-    })();
-  }, [cfg]);
 
   const canEdit = useMemo(
     () => ({
@@ -479,31 +424,16 @@ export default function ConsultSettingsPage() {
         </label>
       </div>
 
-      <section className="border rounded p-4 bg-white">
-        <div className="font-medium mb-2">Availability preview</div>
-
-        {previewLoading && <div className="text-sm text-gray-600">Loading preview…</div>}
-
-        {!previewLoading && previewError && (
-          <div className="text-sm text-rose-600 space-y-2">
-            <div>{previewError}</div>
-            <div className="text-xs text-gray-600">
-              Please check your saved schedule if no booking times appear.
-            </div>
-          </div>
-        )}
-
-        {!previewLoading && !previewError && previewData && (
-          <SchedulePreview days={42} />
-        )}
-
-        {!previewLoading && !previewError && !previewData && (
-          <div className="text-sm text-gray-600">Preview is not available.</div>
-        )}
-
-        <div className="text-xs text-gray-600 mt-2">
-          Available booking times will appear here after your schedule has been saved.
-        </div>
+      <section className="space-y-2">
+        <div className="font-medium">Availability preview</div>
+        <p className="text-xs text-gray-600">
+          These are the booking slots patients will see, based on your saved schedule, consult duration, buffer, and booking window.
+        </p>
+        <CalendarPreview
+          clinicianId="me"
+          initialView={patientView ? 'month' : 'week'}
+          useBatchForWeek={!patientView}
+        />
       </section>
     </main>
   );
