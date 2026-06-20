@@ -30,7 +30,7 @@ function clinicianUid(auth: any) {
 }
 
 async function resolveClinician(req: NextRequest, rawClinicianId: string) {
-  if (rawClinicianId && rawClinicianId !== 'me' && rawClinicianId !== 'clinician-local-001') {
+  if (rawClinicianId && rawClinicianId !== 'me') {
     return { clinicianId: rawClinicianId, headers: {} as Record<string, string>, error: null as any };
   }
 

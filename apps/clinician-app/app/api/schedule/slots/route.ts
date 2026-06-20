@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
     let clinicianId = q.get('clinicianId') || q.get('clinician_id') || 'me';
     const headers: Record<string, string> = {};
 
-    if (clinicianId === 'me' || clinicianId === 'clinician-local-001') {
+    if (clinicianId === 'me') {
       const auth = await requireClinicianAuth(req, { allowAdmin: true, allowAdminStaff: true });
       if (!auth.ok) return authErrorResponse(auth);
       clinicianId = auth.clinicianId;

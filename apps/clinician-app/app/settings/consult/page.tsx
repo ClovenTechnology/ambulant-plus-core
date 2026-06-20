@@ -91,23 +91,50 @@ export default function ConsultSettingsPage() {
         const data1 = (await r1.json()) || {};
         const data2 = (await r2.json()) || {};
 
+        const clinicianCfg = data1?.clinician || data1 || {};
+        const effectiveCfg = data1?.effective || data1 || {};
+        const adminCfg = data1?.admin || data1?.adminMinimums || {};
+
         const safe: ConsultSettings = {
-          defaultMinutes: data1?.clinician?.defaultStandardMin ?? 30,
-          followupMinutes: data1?.clinician?.defaultFollowupMin ?? 15,
-          bufferMinutes: data1?.effective?.bufferAfterMinutes ?? 5,
-          joinGracePatientMin: data1?.effective?.joinGracePatientMin ?? 5,
-          joinGraceClinicianMin: data1?.effective?.joinGraceClinicianMin ?? 5,
-          minAdvanceMinutes: data1?.clinician?.minAdvanceMinutes ?? 30,
-          maxAdvanceDays: data1?.clinician?.maxAdvanceDays ?? 30,
-          locked: data1?.admin
-            ? {
-                bufferMinutes: !!data1.admin.bufferAfterMinutes,
-                joinGracePatientMin: !!data1.admin.joinGracePatientMin,
-                joinGraceClinicianMin: !!data1.admin.joinGraceClinicianMin,
-                defaultMinutesMin: data1.admin.minStandardMinutes ?? undefined,
-                followupMinutesMin: data1.admin.minFollowupMinutes ?? undefined,
-              }
-            : {},
+          defaultMinutes:
+            clinicianCfg.defaultStandardMin ??
+            data1?.defaultStandardMin ??
+            data1?.defaultMinutes ??
+            30,
+          followupMinutes:
+            clinicianCfg.defaultFollowupMin ??
+            data1?.defaultFollowupMin ??
+            data1?.followupMinutes ??
+            15,
+          bufferMinutes:
+            effectiveCfg.bufferAfterMinutes ??
+            data1?.bufferMinutes ??
+            5,
+          joinGracePatientMin:
+            effectiveCfg.joinGracePatientMin ??
+            adminCfg.joinGracePatientMin ??
+            data1?.joinGracePatientMin ??
+            5,
+          joinGraceClinicianMin:
+            effectiveCfg.joinGraceClinicianMin ??
+            adminCfg.joinGraceClinicianMin ??
+            data1?.joinGraceClinicianMin ??
+            5,
+          minAdvanceMinutes:
+            clinicianCfg.minAdvanceMinutes ??
+            data1?.minAdvanceMinutes ??
+            30,
+          maxAdvanceDays:
+            clinicianCfg.maxAdvanceDays ??
+            data1?.maxAdvanceDays ??
+            30,
+          locked: {
+            bufferMinutes: false,
+            joinGracePatientMin: true,
+            joinGraceClinicianMin: true,
+            defaultMinutesMin: adminCfg.minStandardMinutes ?? undefined,
+            followupMinutesMin: adminCfg.minFollowupMinutes ?? undefined,
+          },
         };
         setCfg(safe);
 
@@ -216,12 +243,13 @@ export default function ConsultSettingsPage() {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            clinician: {
-              defaultStandardMin: cfg.defaultMinutes,
-              defaultFollowupMin: cfg.followupMinutes,
-              minAdvanceMinutes: cfg.minAdvanceMinutes,
-              maxAdvanceDays: cfg.maxAdvanceDays,
-            },
+            defaultStandardMin: cfg.defaultMinutes,
+            defaultFollowupMin: cfg.followupMinutes,
+            defaultMinutes: cfg.defaultMinutes,
+            followupMinutes: cfg.followupMinutes,
+            bufferMinutes: cfg.bufferMinutes,
+            minAdvanceMinutes: cfg.minAdvanceMinutes,
+            maxAdvanceDays: cfg.maxAdvanceDays,
           }),
         }),
         fetch('/api/settings/refunds', {

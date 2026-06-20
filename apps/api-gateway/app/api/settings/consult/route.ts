@@ -106,26 +106,64 @@ async function buildResponse(clinician: any) {
 
   const { profile } = readProfileJson(clinician);
   const storedConsult = parseObject(profile.consultSettings);
+
   const bufferMinutes = Math.max(
     0,
     Math.round(num(storedConsult.bufferMinutes ?? profile.bufferMinutes, admin.bufferAfterMinutes)),
   );
 
+  const joinGracePatientMin = Math.max(0, Math.round(num(admin.joinGracePatientMin, 5)));
+  const joinGraceClinicianMin = Math.max(0, Math.round(num(admin.joinGraceClinicianMin, 5)));
+
+  const clinicianShape = {
+    defaultStandardMin: consult.defaultStandardMin,
+    defaultFollowupMin: consult.defaultFollowupMin,
+    minAdvanceMinutes: consult.minAdvanceMinutes,
+    maxAdvanceDays: consult.maxAdvanceDays,
+  };
+
+  const adminShape = {
+    minStandardMinutes: admin.minStandardMinutes,
+    minFollowupMinutes: admin.minFollowupMinutes,
+    bufferAfterMinutes: admin.bufferAfterMinutes,
+    joinGracePatientMin,
+    joinGraceClinicianMin,
+    minCancel24hRefund: admin.minCancel24hRefund,
+    minNoShowRefund: admin.minNoShowRefund,
+    minClinicianMissRefund: admin.minClinicianMissRefund,
+  };
+
+  const effectiveShape = {
+    defaultStandardMin: consult.defaultStandardMin,
+    defaultFollowupMin: consult.defaultFollowupMin,
+    bufferAfterMinutes: bufferMinutes,
+    joinGracePatientMin,
+    joinGraceClinicianMin,
+    minAdvanceMinutes: consult.minAdvanceMinutes,
+    maxAdvanceDays: consult.maxAdvanceDays,
+  };
+
   return {
     ok: true,
     clinicianId: clinician.id,
     clinicianUserId: userId,
+
+    // Current flat shape
     defaultMinutes: consult.defaultStandardMin,
     defaultStandardMin: consult.defaultStandardMin,
     defaultFollowupMin: consult.defaultFollowupMin,
+    followupMinutes: consult.defaultFollowupMin,
     bufferMinutes,
+    joinGracePatientMin,
+    joinGraceClinicianMin,
     minAdvanceMinutes: consult.minAdvanceMinutes,
     maxAdvanceDays: consult.maxAdvanceDays,
-    adminMinimums: {
-      minStandardMinutes: admin.minStandardMinutes,
-      minFollowupMinutes: admin.minFollowupMinutes,
-      bufferAfterMinutes: admin.bufferAfterMinutes,
-    },
+
+    // Legacy/UI-compatible shape
+    clinician: clinicianShape,
+    admin: adminShape,
+    effective: effectiveShape,
+    adminMinimums: adminShape,
   };
 }
 
@@ -147,25 +185,35 @@ export async function PUT(req: NextRequest) {
     if (error || !clinician) return error;
 
     const body = await req.json().catch(() => ({} as any));
+    const nested = parseObject(body.clinician);
+    const source = Object.keys(nested).length ? nested : body;
+
     const current = await getClinicianConsult(clinician.userId || clinician.id);
 
     const defaultStandardMin = Math.max(
       1,
-      Math.round(num(body.defaultStandardMin ?? body.defaultMinutes, current.defaultStandardMin)),
+      Math.round(num(source.defaultStandardMin ?? source.defaultMinutes, current.defaultStandardMin)),
     );
+
     const defaultFollowupMin = Math.max(
       1,
-      Math.round(num(body.defaultFollowupMin ?? body.followupMinutes, current.defaultFollowupMin)),
+      Math.round(num(source.defaultFollowupMin ?? source.followupMinutes, current.defaultFollowupMin)),
     );
+
     const minAdvanceMinutes = Math.max(
       0,
-      Math.round(num(body.minAdvanceMinutes, current.minAdvanceMinutes)),
+      Math.round(num(source.minAdvanceMinutes, current.minAdvanceMinutes)),
     );
+
     const maxAdvanceDays = Math.max(
       1,
-      Math.round(num(body.maxAdvanceDays, current.maxAdvanceDays)),
+      Math.round(num(source.maxAdvanceDays, current.maxAdvanceDays)),
     );
-    const bufferMinutes = Math.max(0, Math.round(num(body.bufferMinutes, 5)));
+
+    const bufferMinutes = Math.max(
+      0,
+      Math.round(num(body.bufferMinutes ?? source.bufferMinutes, 5)),
+    );
 
     await setClinicianConsult(clinician.userId || clinician.id, {
       defaultStandardMin,
@@ -178,6 +226,7 @@ export async function PUT(req: NextRequest) {
       defaultMinutes: defaultStandardMin,
       defaultStandardMin,
       defaultFollowupMin,
+      followupMinutes: defaultFollowupMin,
       minAdvanceMinutes,
       maxAdvanceDays,
       bufferMinutes,
