@@ -114,11 +114,15 @@ type UndoAction =
 function CalendarPageContent() {
   const searchParams = useSearchParams();
 
-  const clinicianId =
+  const requestedClinicianId =
     searchParams?.get('clinicianId') ||
     searchParams?.get('clinician') ||
     searchParams?.get('id') ||
-    'clinician-local-001';
+    '';
+
+  const [clinicianId, setClinicianId] = useState('');
+  const [identityLoading, setIdentityLoading] = useState(true);
+  const [identityError, setIdentityError] = useState('');
   const calendarRef = useRef<FullCalendar | null>(null);
   const headerRef = useRef<HTMLDivElement | null>(null);
   const [appointments, setAppointments] = useState<EventInput[]>([]);
@@ -130,6 +134,65 @@ function CalendarPageContent() {
   const [undoStack, setUndoStack] = useState<UndoAction[]>([]);
   const [bgEvents, setBgEvents] = useState<EventInput[]>([]);
   const liveAppointments = useLiveAppointments(clinicianId);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function resolveIdentity() {
+      setIdentityLoading(true);
+      setIdentityError('');
+
+      try {
+        const res = await fetch('/api/me', { cache: 'no-store' });
+        const data = await res.json().catch(() => ({}));
+
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.error || 'Unable to resolve clinician identity.');
+        }
+
+        const signedInClinicianId = String(
+          data?.clinicianId ||
+          data?.clinician?.id ||
+          data?.user?.clinicianId ||
+          '',
+        ).trim();
+
+        const role = String(data?.role || '').toLowerCase();
+
+        const resolved =
+          role === 'admin' && requestedClinicianId
+            ? requestedClinicianId
+            : signedInClinicianId;
+
+        if (!resolved) {
+          throw new Error('Missing clinician identity.');
+        }
+
+        if (resolved === 'clinician-local-001' || resolved === 'clin-demo') {
+          throw new Error(`Production calendar cannot use ${resolved}.`);
+        }
+
+        if (!cancelled) {
+          setClinicianId(resolved);
+        }
+      } catch (err: any) {
+        if (!cancelled) {
+          setClinicianId('');
+          setIdentityError(err?.message || 'Unable to resolve clinician identity.');
+        }
+      } finally {
+        if (!cancelled) {
+          setIdentityLoading(false);
+        }
+      }
+    }
+
+    resolveIdentity();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [requestedClinicianId]);
 
   // preferences persisted in localStorage
   const durationStorageKey = `clinician:${clinicianId}:duration`;
@@ -227,6 +290,12 @@ function CalendarPageContent() {
 
   // initial load
   useEffect(() => {
+    if (!clinicianId) {
+      setAppointments([]);
+      setLoading(false);
+      return;
+    }
+
     let mounted = true;
     (async () => {
       setLoading(true);
@@ -245,7 +314,7 @@ function CalendarPageContent() {
   }, [clinicianId]);
 
   useEffect(() => {
-    if (!liveAppointments) return;
+    if (!clinicianId || !liveAppointments) return;
     const unsub = liveAppointments((update) => {
       setAppointments(prev => {
         const exists = prev.find(e => e.id === update.id);
@@ -254,9 +323,11 @@ function CalendarPageContent() {
       });
     });
     return unsub;
-  }, [liveAppointments]);
+  }, [clinicianId, liveAppointments]);
 
   const handleDatesSet = async (dates: DatesSetArg) => {
+    if (!clinicianId) return;
+
     const start = dates.start;
     const end = dates.end;
     const days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86400000));
@@ -685,6 +756,26 @@ function CalendarPageContent() {
       console.error('saveWindow failed', e);
       toast.error('Failed to save window');
     }
+  }
+
+  if (identityLoading) {
+    return (
+      <div className="p-6">
+        <div className="rounded border bg-white p-4 text-sm text-gray-600">
+          Resolving clinician calendar...
+        </div>
+      </div>
+    );
+  }
+
+  if (!clinicianId || identityError) {
+    return (
+      <div className="p-6">
+        <div className="rounded border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
+          {identityError || 'Clinician identity is unavailable.'}
+        </div>
+      </div>
+    );
   }
 
   return (

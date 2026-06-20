@@ -81,9 +81,14 @@ export async function getEffectiveConsultConfig(
   const clinician = await resolveClinician(clinicianId);
   const clinicianUserId = String(clinician?.userId || clinicianId || '').trim();
 
+  // Canonical production key:
+  // clinician-app settings are saved under the clinician profile id, not the email.
+  // Reading schedule/consult by email causes saved weekend availability to be missed.
+  const clinicianSettingsKey = String(clinician?.id || clinicianId || clinicianUserId || '').trim();
+
   const [schedule, consult, admin] = await Promise.all([
-    getSchedule(clinicianUserId),
-    getClinicianConsult(clinicianUserId),
+    getSchedule(clinicianSettingsKey),
+    getClinicianConsult(clinicianSettingsKey),
     getAdminPolicy(),
   ]);
 
