@@ -30,9 +30,6 @@ function normalisePolicy(input: Record<string, any> = {}) {
     bufferAfterMinutes: numberFromBody(input.bufferAfterMinutes, 5),
     joinGracePatientMin: numberFromBody(input.joinGracePatientMin, 5),
     joinGraceClinicianMin: numberFromBody(input.joinGraceClinicianMin, 5),
-    minCancel24hRefund: numberFromBody(input.minCancel24hRefund, 50),
-    minNoShowRefund: numberFromBody(input.minNoShowRefund, 0),
-    minClinicianMissRefund: numberFromBody(input.minClinicianMissRefund, 100),
   };
 }
 

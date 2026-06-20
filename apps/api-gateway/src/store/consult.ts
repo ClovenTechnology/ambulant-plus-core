@@ -212,7 +212,7 @@ export async function getAdminPolicy(): Promise<AdminPolicy> {
   }
 }
 
-export async function setAdminPolicy(policy: AdminPolicy): Promise<AdminPolicy> {
+export async function setAdminPolicy(policy: Partial<AdminPolicy>): Promise<AdminPolicy> {
   const safe = safeAdmin(policy);
   const delegate = adminPolicyDelegate();
 
@@ -221,12 +221,20 @@ export async function setAdminPolicy(policy: AdminPolicy): Promise<AdminPolicy> 
   }
 
   try {
+    const persist = {
+      minStandardMinutes: safe.minStandardMinutes,
+      minFollowupMinutes: safe.minFollowupMinutes,
+      bufferAfterMinutes: safe.bufferAfterMinutes,
+      joinGracePatientMin: safe.joinGracePatientMin,
+      joinGraceClinicianMin: safe.joinGraceClinicianMin,
+    };
+
     await delegate.upsert({
       where: { id: 'singleton' },
-      update: safe,
+      update: persist,
       create: {
         id: 'singleton',
-        ...safe,
+        ...persist,
       },
     });
 
@@ -258,6 +266,45 @@ export async function saveAdminConsultSettings(
 
 export async function getClinicianConsult(userId: string): Promise<ClinicianConsult> {
   const admin = await getAdminPolicy();
+
+  /*
+   * Clinician consult settings are clinician-owned settings.
+   * The profile meta copy is treated as the UI source of truth because the
+   * settings page writes there after save. If an older dedicated-table row
+   * exists, it must not override the clinician's latest saved UI values.
+   */
+  try {
+    const clinician = await clinicianProfileByUserId(userId);
+    const { profile } = profileJson(clinician);
+    const stored = parseObject(profile.consultSettings);
+
+    const hasProfileSettings =
+      stored.defaultStandardMin != null ||
+      stored.defaultMinutes != null ||
+      stored.defaultFollowupMin != null ||
+      stored.followupMinutes != null ||
+      stored.minAdvanceMinutes != null ||
+      stored.maxAdvanceDays != null;
+
+    if (hasProfileSettings) {
+      return safeConsult(
+        {
+          defaultStandardMin:
+            stored.defaultStandardMin ??
+            stored.defaultMinutes,
+          defaultFollowupMin:
+            stored.defaultFollowupMin ??
+            stored.followupMinutes,
+          minAdvanceMinutes: stored.minAdvanceMinutes,
+          maxAdvanceDays: stored.maxAdvanceDays,
+        },
+        admin,
+      );
+    }
+  } catch (err: any) {
+    console.error('[consult-store] getClinicianConsult profile-meta read failed; checking dedicated table', err);
+  }
+
   const delegate = clinicianConsultSettingsDelegate();
 
   if (delegate?.findUnique) {
@@ -270,40 +317,11 @@ export async function getClinicianConsult(userId: string): Promise<ClinicianCons
         return safeConsult(row, admin);
       }
     } catch (err: any) {
-      console.error('[consult-store] getClinicianConsult dedicated table failed; falling back to meta', err);
+      console.error('[consult-store] getClinicianConsult dedicated table failed; using defaults', err);
     }
   }
 
-  try {
-    const clinician = await clinicianProfileByUserId(userId);
-    const { profile } = profileJson(clinician);
-    const stored = parseObject(profile.consultSettings);
-
-    return safeConsult(
-      {
-        defaultStandardMin:
-          stored.defaultStandardMin ??
-          stored.defaultMinutes ??
-          profile.defaultStandardMin ??
-          profile.defaultMinutes,
-        defaultFollowupMin:
-          stored.defaultFollowupMin ??
-          stored.followupMinutes ??
-          profile.defaultFollowupMin ??
-          profile.followupMinutes,
-        minAdvanceMinutes:
-          stored.minAdvanceMinutes ??
-          profile.minAdvanceMinutes,
-        maxAdvanceDays:
-          stored.maxAdvanceDays ??
-          profile.maxAdvanceDays,
-      },
-      admin,
-    );
-  } catch (err: any) {
-    console.error('[consult-store] getClinicianConsult meta fallback failed; using defaults', err);
-    return safeConsult(DEFAULT_CLINICIAN_CONSULT, admin);
-  }
+  return safeConsult(DEFAULT_CLINICIAN_CONSULT, admin);
 }
 
 export async function setClinicianConsult(

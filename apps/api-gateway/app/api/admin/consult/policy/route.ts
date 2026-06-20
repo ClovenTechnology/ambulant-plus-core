@@ -59,18 +59,6 @@ export async function PUT(req: NextRequest) {
         body.joinGraceClinicianMin,
         current.joinGraceClinicianMin ?? 5,
       ),
-      minCancel24hRefund: numberFromBody(
-        body.minCancel24hRefund,
-        current.minCancel24hRefund ?? 50,
-      ),
-      minNoShowRefund: numberFromBody(
-        body.minNoShowRefund,
-        current.minNoShowRefund ?? 0,
-      ),
-      minClinicianMissRefund: numberFromBody(
-        body.minClinicianMissRefund,
-        current.minClinicianMissRefund ?? 100,
-      ),
     });
 
     return NextResponse.json({ ok: true, admin: saved });
