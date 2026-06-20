@@ -302,8 +302,7 @@ export default function ConsultSettingsPage() {
             <div className="font-medium">Welcome — quick tips</div>
             <div className="text-xs text-gray-700 mt-1">
               This panel sets default durations, buffer time, and booking windows. Fields marked{' '}
-              <strong>Admin-controlled</strong> cannot be changed here. Use <em>Calendar Preview</em> below to see how
-              patient booking will look.
+              <strong>Admin-controlled</strong> cannot be changed here. Use the availability preview below to see how patient booking will look.
             </div>
           </div>
           <div className="flex flex-col items-end gap-2">
@@ -481,7 +480,7 @@ export default function ConsultSettingsPage() {
       </div>
 
       <section className="border rounded p-4 bg-white">
-        <div className="font-medium mb-2">Calendar Preview (read-only)</div>
+        <div className="font-medium mb-2">Availability preview</div>
 
         {previewLoading && <div className="text-sm text-gray-600">Loading preview…</div>}
 
@@ -489,17 +488,7 @@ export default function ConsultSettingsPage() {
           <div className="text-sm text-rose-600 space-y-2">
             <div>{previewError}</div>
             <div className="text-xs text-gray-600">
-              You can open the preview endpoint in a new tab to inspect the full response (developer only):
-              <div className="mt-1">
-                <a
-                  href={`/api/schedule/slots/batch?start=${new Date().toISOString().slice(0, 10)}&days=42`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-indigo-700 underline"
-                >
-                  Open preview endpoint
-                </a>
-              </div>
+              Please check your saved schedule if no booking times appear.
             </div>
           </div>
         )}
@@ -513,8 +502,7 @@ export default function ConsultSettingsPage() {
         )}
 
         <div className="text-xs text-gray-600 mt-2">
-          Preview is generated via /api/schedule/slots/batch and reflects Admin + Clinician settings, exceptions, and
-          holidays.
+          Available booking times will appear here after your schedule has been saved.
         </div>
       </section>
     </main>
