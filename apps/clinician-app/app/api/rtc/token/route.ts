@@ -349,13 +349,23 @@ async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
 
   const joinToken = rtcIsCompactJws(rawJoinToken) ? String(rawJoinToken).trim() : '';
 
-  const clinicianDirect = await mintAuthenticatedClinicianRtcToken(req, body);
-  if (clinicianDirect) {
-    return clinicianDirect;
-  }
-
+  /*
+    Important production ordering:
+    - If a signed joinToken exists, send it to the gateway for verification.
+    - Do not apply the local clinician-owned-room heuristic first.
+    - Simulation/training/admin-created rooms may not include the clinicianId in the room name.
+    - Without a joinToken, training rooms can still use the local training token path.
+    - Without a joinToken and outside training, real clinician-owned rooms can use direct authenticated minting.
+  */
   if (!joinToken && isTrainingRoom(body)) {
     return mintTrainingToken(body);
+  }
+
+  if (!joinToken) {
+    const clinicianDirect = await mintAuthenticatedClinicianRtcToken(req, body);
+    if (clinicianDirect) {
+      return clinicianDirect;
+    }
   }
 
   const base = pickBase();
