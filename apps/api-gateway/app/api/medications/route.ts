@@ -51,8 +51,11 @@ export async function GET(req: NextRequest) {
   try {
     const url = new URL(req.url);
     const status = normalizeMedicationStatus(url.searchParams.get('status'));
+    const patientId = cleanStr(url.searchParams.get('patientId'));
 
-    const where: any = status ? { status } : undefined;
+    const where: any = {};
+    if (status) where.status = status;
+    if (patientId) where.patientId = patientId;
 
     const meds = await prisma.medication.findMany({
       where,

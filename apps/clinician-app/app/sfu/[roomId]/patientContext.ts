@@ -36,59 +36,6 @@ export type PatientProfile = {
   email?: string | null;
 };
 
-export const SIMULATION_MEDS: PatientMedicationBrief[] = [
-  {
-    id: 'simulation-medication-1',
-    name: 'Metformin 500 mg tablet',
-    dose: '500 mg',
-    frequency: '1 tablet twice daily with meals',
-    route: 'Oral',
-    status: 'Active',
-    started: '2024-01-05',
-    source: 'simulation',
-  },
-  {
-    id: 'simulation-medication-2',
-    name: 'Amlodipine 5 mg tablet',
-    dose: '5 mg',
-    frequency: 'Once daily',
-    route: 'Oral',
-    status: 'Active',
-    started: '2023-11-12',
-    source: 'simulation',
-  },
-];
-
-export const SIMULATION_ALLERGIES: PatientAllergyBrief[] = [
-  {
-    id: 'simulation-allergy-1',
-    substance: 'Penicillin',
-    reaction: 'Rash / urticaria',
-    severity: 'Moderate',
-    criticality: 'High',
-    status: 'Active',
-  },
-  {
-    id: 'simulation-allergy-2',
-    substance: 'Peanuts',
-    reaction: 'Lip swelling',
-    severity: 'Mild',
-    criticality: 'High',
-    status: 'Active',
-  },
-];
-
-export const SIMULATION_FALLBACK_PROFILE: PatientProfile = {
-  id: 'simulation-patient',
-  name: 'Simulation Patient',
-  dob: null,
-  gender: null,
-  mrn: null,
-  language: null,
-  phone: null,
-  email: null,
-};
-
 export type PatientContextValue = {
   profile: PatientProfile;
   patientProfile: PatientProfile | null;
@@ -112,12 +59,46 @@ export type PatientContextValue = {
   >;
 };
 
+function fallbackProfile(patientId: string, patientName: string): PatientProfile {
+  return {
+    id: patientId || '',
+    name: patientName || 'Patient',
+    dob: null,
+    gender: null,
+    mrn: null,
+    language: null,
+    phone: null,
+    email: null,
+  };
+}
+
+function errorMessage(err: unknown, fallback: string) {
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+function medicationList(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.medications)) return data.medications;
+  if (Array.isArray(data?.data)) return data.data;
+  return [];
+}
+
+function allergyList(data: any): any[] {
+  if (Array.isArray(data)) return data;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.allergies)) return data.allergies;
+  if (Array.isArray(data?.data)) return data.data;
+  return [];
+}
+
 export function usePatientContext(
   _roomId: string,
-  searchParams: ReadonlyURLSearchParams
+  searchParams: ReadonlyURLSearchParams,
 ): PatientContextValue {
-  const patientId = searchParams.get('patientId') || searchParams.get('patient') || 'simulation-patient';
-  const patientName = searchParams.get('patientName') || 'Simulation Patient';
+  const patientId = searchParams.get('patientId') || searchParams.get('patient') || '';
+  const patientName = searchParams.get('patientName') || 'Patient';
   const encounterId = searchParams.get('encounterId') || '';
 
   const [patientProfile, setPatientProfile] = useState<PatientProfile | null>(null);
@@ -131,85 +112,84 @@ export function usePatientContext(
   const [allergiesLoading, setAllergiesLoading] = useState(false);
   const [allergiesFromLive, setAllergiesFromLive] = useState(false);
 
-  // Profile
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    async function loadProfile() {
       try {
         setPatientProfileError(null);
-        const pid = patientId;
-        if (!pid) {
+
+        if (!patientId) {
           if (!cancelled) {
-            setPatientProfile(SIMULATION_FALLBACK_PROFILE);
-            setPatientProfileError('Using simulation patient profile because no patientId was supplied.');
+            setPatientProfile(fallbackProfile('', patientName));
+            setPatientProfileError('Missing patientId; live patient profile was not requested.');
           }
           return;
         }
-        const qs = new URLSearchParams({ patientId: pid });
+
+        const qs = new URLSearchParams({ patientId });
         if (encounterId) qs.set('encounterId', encounterId);
-        const url = `/api/patient/profile?${qs.toString()}`;
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const res = await fetch('/api/patient/profile?' + qs.toString(), {
+          cache: 'no-store',
+        });
+
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+
         const js = await res.json().catch(() => null);
-        const raw: any =
-          (js && (js.patient || js.profile || js.data)) ||
-          js ||
-          {};
+        const raw: any = (js && (js.patient || js.profile || js.data)) || js || {};
 
         const prof: PatientProfile = {
-          id: String(raw.id ?? raw.patientId ?? pid),
-          name:
-            raw.name ??
-            raw.fullName ??
-            raw.display ??
-            patientName ??
-            SIMULATION_FALLBACK_PROFILE.name,
-          dob: raw.dob ?? raw.dateOfBirth ?? SIMULATION_FALLBACK_PROFILE.dob,
-          gender: raw.gender ?? raw.sex ?? SIMULATION_FALLBACK_PROFILE.gender,
-          mrn: raw.mrn ?? raw.medicalRecordNumber ?? SIMULATION_FALLBACK_PROFILE.mrn,
-          language: raw.language ?? raw.preferredLanguage ?? SIMULATION_FALLBACK_PROFILE.language,
-          phone: raw.phone ?? raw.mobile ?? SIMULATION_FALLBACK_PROFILE.phone,
-          email: raw.email ?? raw.emailAddress ?? SIMULATION_FALLBACK_PROFILE.email,
+          id: String(raw.id ?? raw.patientId ?? patientId),
+          name: raw.name ?? raw.fullName ?? raw.display ?? patientName ?? 'Patient',
+          dob: raw.dob ?? raw.dateOfBirth ?? null,
+          gender: raw.gender ?? raw.sex ?? null,
+          mrn: raw.mrn ?? raw.medicalRecordNumber ?? null,
+          language: raw.language ?? raw.preferredLanguage ?? null,
+          phone: raw.phone ?? raw.mobile ?? null,
+          email: raw.email ?? raw.emailAddress ?? null,
         };
 
         if (!cancelled) setPatientProfile(prof);
-      } catch {
+      } catch (err) {
         if (!cancelled) {
-          setPatientProfile(SIMULATION_FALLBACK_PROFILE);
-          setPatientProfileError('Using simulation patient profile because live profile details are unavailable.');
+          setPatientProfile(fallbackProfile(patientId, patientName));
+          setPatientProfileError('Live patient profile unavailable: ' + errorMessage(err, 'profile_failed'));
         }
       }
-    })();
+    }
+
+    void loadProfile();
+
     return () => {
       cancelled = true;
     };
   }, [patientId, patientName, encounterId]);
 
-  // Medications
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    async function loadMeds() {
       try {
         setMedsError(null);
-        const pid = patientId;
-        if (!pid) {
+
+        if (!patientId) {
           if (!cancelled) {
-            setPatientMeds(SIMULATION_MEDS);
-            setMedsError('Using simulation medication data because live medication feed is unavailable.');
+            setPatientMeds([]);
+            setMedsError('Missing patientId; live medication feed was not requested.');
           }
           return;
         }
-        const url = `/api/medications?patientId=${encodeURIComponent(pid)}`;
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const res = await fetch('/api/medications?patientId=' + encodeURIComponent(patientId), {
+          cache: 'no-store',
+        });
+
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+
         const data = await res.json();
-        const list: any[] = Array.isArray(data)
-          ? data
-          : Array.isArray((data as any).items)
-          ? (data as any).items
-          : [];
-        const mapped: PatientMedicationBrief[] = list.map((m: any, idx: number) => ({
-          id: String(m.id ?? m.medicationId ?? `med-${idx}`),
+        const mapped: PatientMedicationBrief[] = medicationList(data).map((m: any, idx: number) => ({
+          id: String(m.id ?? m.medicationId ?? 'med-' + idx),
           name: m.name ?? m.drug ?? m.title ?? 'Unnamed medication',
           dose: m.dose ?? m.doseText ?? null,
           frequency: m.frequency ?? m.sig ?? null,
@@ -218,67 +198,18 @@ export function usePatientContext(
           started: m.started ?? m.startDate ?? m.authoredOn ?? null,
           source: m.source ?? m.origin ?? null,
         }));
-        if (!cancelled) setPatientMeds(mapped);
-      } catch {
-        if (!cancelled) {
-          setPatientMeds(SIMULATION_MEDS);
-          setMedsError('Using simulation medication data because live medication feed is unavailable.');
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [patientId]);
 
-  // Allergies (initial load)
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        setAllergiesError(null);
-        setAllergiesLoading(true);
-        const pid = patientId;
-        if (!pid) {
-          if (!cancelled) {
-            setPatientAllergies(SIMULATION_ALLERGIES);
-            setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
-            setAllergiesFromLive(false);
-          }
-          return;
-        }
-        const url = `/api/allergies?patientId=${encodeURIComponent(pid)}`;
-        const res = await fetch(url, { cache: 'no-store' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = await res.json();
-        const list: any[] = Array.isArray(data)
-          ? data
-          : Array.isArray((data as any).items)
-          ? (data as any).items
-          : [];
-        const mapped: PatientAllergyBrief[] = list.map((a: any, idx: number) => ({
-          id: String(a.id ?? a.allergyId ?? `alg-${idx}`),
-          substance: a.substance ?? a.agent ?? a.code?.text ?? 'Unknown',
-          reaction: a.reaction ?? a.manifestation ?? null,
-          severity: a.severity ?? null,
-          criticality: a.criticality ?? null,
-          status: a.status ?? a.clinicalStatus ?? null,
-          recordedAt: a.recordedAt ?? a.onset ?? null,
-        }));
+        if (!cancelled) setPatientMeds(mapped);
+      } catch (err) {
         if (!cancelled) {
-          setPatientAllergies(mapped);
-          setAllergiesFromLive(true);
+          setPatientMeds([]);
+          setMedsError('Live medication feed unavailable: ' + errorMessage(err, 'medications_failed'));
         }
-      } catch {
-        if (!cancelled) {
-          setPatientAllergies(SIMULATION_ALLERGIES);
-          setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
-          setAllergiesFromLive(false);
-        }
-      } finally {
-        if (!cancelled) setAllergiesLoading(false);
       }
-    })();
+    }
+
+    void loadMeds();
+
     return () => {
       cancelled = true;
     };
@@ -286,26 +217,26 @@ export function usePatientContext(
 
   const refreshAllergies = useCallback(async () => {
     setAllergiesLoading(true);
+
     try {
       setAllergiesError(null);
-      const pid = patientId;
-      if (!pid) {
-        setPatientAllergies(SIMULATION_ALLERGIES);
-        setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
+
+      if (!patientId) {
+        setPatientAllergies([]);
+        setAllergiesError('Missing patientId; live allergy feed was not requested.');
         setAllergiesFromLive(false);
         return;
       }
-      const url = `/api/allergies?patientId=${encodeURIComponent(pid)}`;
-      const res = await fetch(url, { cache: 'no-store' });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const res = await fetch('/api/allergies?patientId=' + encodeURIComponent(patientId), {
+        cache: 'no-store',
+      });
+
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
       const data = await res.json();
-      const list: any[] = Array.isArray(data)
-        ? data
-        : Array.isArray((data as any).items)
-        ? (data as any).items
-        : [];
-      const mapped: PatientAllergyBrief[] = list.map((a: any, idx: number) => ({
-        id: String(a.id ?? a.allergyId ?? `alg-${idx}`),
+      const mapped: PatientAllergyBrief[] = allergyList(data).map((a: any, idx: number) => ({
+        id: String(a.id ?? a.allergyId ?? 'alg-' + idx),
         substance: a.substance ?? a.agent ?? a.code?.text ?? 'Unknown',
         reaction: a.reaction ?? a.manifestation ?? null,
         severity: a.severity ?? null,
@@ -313,18 +244,23 @@ export function usePatientContext(
         status: a.status ?? a.clinicalStatus ?? null,
         recordedAt: a.recordedAt ?? a.onset ?? null,
       }));
+
       setPatientAllergies(mapped);
       setAllergiesFromLive(true);
-    } catch {
-      setPatientAllergies(SIMULATION_ALLERGIES);
-      setAllergiesError('Using simulation allergy data because live allergy feed is unavailable.');
+    } catch (err) {
+      setPatientAllergies([]);
+      setAllergiesError('Live allergy feed unavailable: ' + errorMessage(err, 'allergies_failed'));
       setAllergiesFromLive(false);
     } finally {
       setAllergiesLoading(false);
     }
   }, [patientId]);
 
-  const profile = patientProfile || SIMULATION_FALLBACK_PROFILE;
+  useEffect(() => {
+    void refreshAllergies();
+  }, [refreshAllergies]);
+
+  const profile = patientProfile || fallbackProfile(patientId, patientName);
 
   return {
     profile,

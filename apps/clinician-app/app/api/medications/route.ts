@@ -1,46 +1,64 @@
-//apps/clinician-app/app/api/medications/route.ts
+// apps/clinician-app/app/api/medications/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const GW = process.env.APIGW_BASE?.replace(/\/+$/, '');
+const GW =
+  process.env.API_GATEWAY_URL?.replace(/\/+$/, '') ||
+  process.env.NEXT_PUBLIC_API_GATEWAY_URL?.replace(/\/+$/, '') ||
+  process.env.APIGW_BASE?.replace(/\/+$/, '') ||
+  process.env.NEXT_PUBLIC_GATEWAY_ORIGIN?.replace(/\/+$/, '') ||
+  '';
 
-const DEMO = [
-  {
-    id: 'demo-metformin',
-    name: 'Metformin 500 mg tablet',
-    dose: '500 mg',
-    frequency: '1 tablet twice daily with meals',
-    route: 'Oral',
-    status: 'Active',
-    started: '2024-01-05',
-    source: 'demo',
-  },
-  {
-    id: 'demo-amlodipine',
-    name: 'Amlodipine 5 mg tablet',
-    dose: '5 mg',
-    frequency: 'Once daily',
-    route: 'Oral',
-    status: 'Active',
-    started: '2023-11-12',
-    source: 'demo',
-  },
-];
+function json(data: any, status = 200) {
+  return NextResponse.json(data, {
+    status,
+    headers: { 'cache-control': 'no-store' },
+  });
+}
+
+function clinicianUid(auth: any) {
+  return String(
+    auth?.clinicianId ||
+      auth?.clinician?.id ||
+      auth?.clinician?.userId ||
+      auth?.session?.email ||
+      auth?.session?.sub ||
+      '',
+  ).trim();
+}
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const patientId = searchParams.get('patientId') || 'pt-dev';
+  try {
+    if (!GW) return json({ ok: false, error: 'missing_gateway_origin' }, 500);
 
-  if (GW) {
-    const r = await fetch(`${GW}/api/medications?patientId=${encodeURIComponent(patientId)}`, { cache: 'no-store' })
-      .catch(() => null);
-    if (r?.ok) {
-      const js = await r.json();
-      return NextResponse.json(js, { headers: { 'Cache-Control': 'no-store' } });
-    }
+    const auth = await requireClinicianAuth(req, {
+      allowAdmin: true,
+      allowAdminStaff: true,
+    });
+
+    if (!auth.ok) return authErrorResponse(auth);
+
+    const uid = clinicianUid(auth);
+    const clinicianId = String(auth.clinicianId || uid).trim();
+
+    const url = new URL(req.url);
+    const res = await fetch(GW + '/api/medications?' + url.searchParams.toString(), {
+      cache: 'no-store',
+      headers: {
+        accept: 'application/json',
+        'x-uid': uid,
+        'x-clinician-id': clinicianId,
+        'x-role': auth.role,
+      },
+    });
+
+    const body = await res.json().catch(() => []);
+    return json(body, res.status);
+  } catch (err: any) {
+    console.error('[clinician-app] medications proxy failed', err);
+    return json({ ok: false, error: err?.message || 'medications_failed' }, 500);
   }
-
-  return NextResponse.json(DEMO, { headers: { 'Cache-Control': 'no-store' } });
 }
