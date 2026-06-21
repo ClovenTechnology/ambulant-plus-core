@@ -189,6 +189,144 @@ async function mintTrainingToken(body: any) {
   });
 }
 
+
+function rtcIsCompactJws(value: unknown) {
+  const s = String(value ?? '').trim();
+  if (!s) return false;
+  const parts = s.split('.');
+  return parts.length === 3 && parts.every(Boolean);
+}
+
+function rtcEnvFirst(keys: string[]) {
+  for (const key of keys) {
+    const v = String(process.env[key] || '').trim();
+    if (v) return v;
+  }
+  return '';
+}
+
+function rtcNormaliseWsUrl(raw: string) {
+  const v = String(raw || '').trim();
+  if (!v) return '';
+  if (v.startsWith('wss://') || v.startsWith('ws://')) return v;
+  if (v.startsWith('https://')) return 'wss://' + v.slice('https://'.length);
+  if (v.startsWith('http://')) return 'ws://' + v.slice('http://'.length);
+  return v;
+}
+
+function readClinicianSessionFromCookie(req: NextRequest) {
+  try {
+    const raw = req.cookies.get('ambulant_clinician_session')?.value || '';
+    if (!raw) return null;
+
+    const json = Buffer.from(raw, 'base64').toString('utf8');
+    const parsed = JSON.parse(json);
+
+    const clinicianId = String(parsed?.clinicianId || parsed?.sub || '').trim();
+    const role = String(parsed?.role || '').trim().toLowerCase();
+
+    if (!clinicianId || role !== 'clinician') return null;
+
+    return {
+      clinicianId,
+      email: String(parsed?.email || '').trim(),
+      name: String(parsed?.name || '').trim(),
+      canPractice: parsed?.canPractice === true,
+      visibleToPatients: parsed?.visibleToPatients === true,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getRtcRoomId(body: any) {
+  return String(body?.roomId || body?.room || body?.roomName || '').trim();
+}
+
+function getRtcUid(body: any, fallbackClinicianId: string) {
+  return String(
+    body?.uid ||
+    body?.identity ||
+    body?.participantId ||
+    `clin-${fallbackClinicianId}`
+  ).trim();
+}
+
+async function mintAuthenticatedClinicianRtcToken(req: NextRequest, body: any) {
+  const session = readClinicianSessionFromCookie(req);
+  const roomId = getRtcRoomId(body);
+  const role = String(body?.role || req.headers.get('x-role') || 'clinician').trim().toLowerCase();
+
+  if (!session || role !== 'clinician' || !roomId) return null;
+
+  // Production safety gate:
+  // real appointment room IDs are clinician-scoped: room-<clinicianId>-...
+  if (!roomId.includes(session.clinicianId)) {
+    return safeJson(403, {
+      ok: false,
+      error: 'room_not_owned_by_authenticated_clinician',
+    });
+  }
+
+  if (!session.canPractice) {
+    return safeJson(403, {
+      ok: false,
+      error: 'clinician_not_authorised_for_live_consults',
+    });
+  }
+
+  const livekitKey = rtcEnvFirst(['LIVEKIT_API_KEY', 'LK_API_KEY']);
+  const livekitSecret = rtcEnvFirst(['LIVEKIT_API_SECRET', 'LK_API_SECRET']);
+  const livekitUrl = rtcNormaliseWsUrl(
+    rtcEnvFirst([
+      'LIVEKIT_WS_URL',
+      'LIVEKIT_URL',
+      'NEXT_PUBLIC_LIVEKIT_WS_URL',
+      'NEXT_PUBLIC_LIVEKIT_URL',
+      'LK_WS_URL',
+      'LK_URL',
+    ]),
+  );
+
+  if (!livekitKey || !livekitSecret || !livekitUrl) {
+    return safeJson(500, {
+      ok: false,
+      error: 'server_misconfig_missing_livekit_credentials',
+      message: 'Missing LIVEKIT_API_KEY, LIVEKIT_API_SECRET, and LIVEKIT_URL/LIVEKIT_WS_URL on clinician-app.',
+    });
+  }
+
+  const uid = getRtcUid(body, session.clinicianId);
+  const { AccessToken } = await import('livekit-server-sdk');
+
+  const at = new AccessToken(livekitKey, livekitSecret, {
+    identity: uid,
+    name: session.name || uid,
+  });
+
+  at.addGrant({
+    room: roomId,
+    roomJoin: true,
+    canPublish: true,
+    canPublishData: true,
+    canSubscribe: true,
+  });
+
+  const token = await at.toJwt();
+
+  return safeJson(200, {
+    ok: true,
+    provider: 'livekit',
+    mode: 'authenticated_clinician_direct',
+    wsUrl: livekitUrl,
+    token,
+    roomId,
+    identity: uid,
+    role: 'clinician',
+  });
+}
+
+
 async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
   const refererJoinToken = (() => {
     try {
@@ -201,13 +339,20 @@ async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
     }
   })();
 
-  const joinToken =
+  const rawJoinToken =
     req.headers.get('x-join-token') ||
     req.nextUrl.searchParams.get('joinToken') ||
     req.nextUrl.searchParams.get('jt') ||
     String(body?.joinToken || body?.jt || body?.ticket?.token || '').trim() ||
     refererJoinToken ||
     '';
+
+  const joinToken = rtcIsCompactJws(rawJoinToken) ? String(rawJoinToken).trim() : '';
+
+  const clinicianDirect = await mintAuthenticatedClinicianRtcToken(req, body);
+  if (clinicianDirect) {
+    return clinicianDirect;
+  }
 
   if (!joinToken && isTrainingRoom(body)) {
     return mintTrainingToken(body);
