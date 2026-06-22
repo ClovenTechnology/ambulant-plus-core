@@ -475,6 +475,96 @@ function initialsFromName(value: unknown) {
   return `${parts[0]?.[0] || ""}${parts[1]?.[0] || ""}`.toUpperCase() || "PT";
 }
 
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () =>
+      reject(reader.error || new Error("Could not read avatar image."));
+
+    reader.readAsDataURL(blob);
+  });
+}
+
+function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Could not load avatar image."));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
+async function prepareAvatarForUpload(file: File): Promise<{ file: File; previewUrl: string }> {
+  const maxBytes = 900 * 1024;
+  const maxSide = 512;
+
+  if (!file.type.startsWith("image/")) {
+    throw new Error("Please choose an image file.");
+  }
+
+  if (file.size > 8 * 1024 * 1024) {
+    throw new Error("Profile picture must be smaller than 8 MB.");
+  }
+
+  const img = await loadImageFromFile(file);
+  const size = Math.min(img.naturalWidth, img.naturalHeight);
+  const sx = Math.max(0, Math.floor((img.naturalWidth - size) / 2));
+  const sy = Math.max(0, Math.floor((img.naturalHeight - size) / 2));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = maxSide;
+  canvas.height = maxSide;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) {
+    throw new Error("Avatar image processing is not available in this browser.");
+  }
+
+  ctx.drawImage(img, sx, sy, size, size, 0, 0, maxSide, maxSide);
+
+  let quality = 0.82;
+  let blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, "image/jpeg", quality),
+  );
+
+  while (blob && blob.size > maxBytes && quality > 0.55) {
+    quality -= 0.08;
+    blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, "image/jpeg", quality),
+    );
+  }
+
+  if (!blob) {
+    throw new Error("Could not prepare avatar image.");
+  }
+
+  if (blob.size > maxBytes) {
+    throw new Error("Avatar image is still too large after compression. Please choose a smaller square portrait.");
+  }
+
+  const compressed = new File([blob], "patient-avatar.jpg", {
+    type: "image/jpeg",
+    lastModified: Date.now(),
+  });
+
+  const previewUrl = await blobToDataUrl(blob);
+
+  return { file: compressed, previewUrl };
+}
+
 function OrbitalScore({ score }: { score: number }) {
   return (
     <div className="relative flex h-[250px] w-[250px] items-center justify-center sm:h-[280px] sm:w-[280px]">
@@ -558,6 +648,8 @@ export default function Profile() {
   const [sharingPreference, setSharingPreference] =
     useState<SharingPreference | null>(null);
   const [sharingBusy, setSharingBusy] = useState(false);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const [avatarUploadError, setAvatarUploadError] = useState<string | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -835,6 +927,74 @@ export default function Profile() {
       alert(err?.message || "Save failed");
     } finally {
       setSaving(false);
+    }
+  }
+
+
+  async function handleAvatarFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+
+    if (!file) return;
+
+    setAvatarUploading(true);
+    setAvatarUploadError(null);
+
+    try {
+      const prepared = await prepareAvatarForUpload(file);
+
+      setForm((prev) => ({
+        ...prev,
+        photoUrl: prepared.previewUrl,
+      }));
+
+      const fd = new FormData();
+
+      fd.set(
+        "payload",
+        JSON.stringify({
+          patientId: profile?.patientId || profile?.id || undefined,
+          userId: profile?.userId || undefined,
+        }),
+      );
+
+      fd.set("avatar", prepared.file);
+
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        body: fd,
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok || !data?.ok) {
+        throw new Error(data?.error || `Profile picture upload failed (${res.status})`);
+      }
+
+      const saved = data.profile || data;
+      const nextPhotoUrl = saved.photoUrl || saved.avatarUrl || prepared.previewUrl;
+
+      setProfile((prev: any) => ({
+        ...(prev || {}),
+        ...saved,
+        photoUrl: nextPhotoUrl,
+        avatarUrl: nextPhotoUrl,
+      }));
+
+      setForm((prev) => ({
+        ...prev,
+        photoUrl: nextPhotoUrl,
+      }));
+    } catch (err: any) {
+      console.error("patient.avatar.upload.failed", err);
+      const message =
+        err?.message ||
+        "Could not upload profile picture. Please try another image.";
+
+      setAvatarUploadError(message);
+      alert(message);
+    } finally {
+      setAvatarUploading(false);
+      e.target.value = "";
     }
   }
 
@@ -1763,20 +1923,53 @@ export default function Profile() {
                         )}
                       </div>
                       <div className="text-center text-[11px] text-slate-500">
-                        Paste a secure image URL for now. File upload can be connected to document storage next.
+                        Square portrait recommended.
                       </div>
                     </div>
 
                     <div className="grid gap-3">
-                      <label className="text-sm text-slate-500">
-                        Photo URL
-                        <input
-                          value={form.photoUrl}
-                          onChange={(e) => setForm({ ...form, photoUrl: e.target.value })}
-                          placeholder="https://..."
-                          className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 outline-none"
-                        />
-                      </label>
+                      <div>
+                        <div className="text-sm font-semibold text-slate-700">
+                          Profile picture
+                        </div>
+                        <p className="mt-1 text-sm text-slate-500">
+                          Upload a JPG or PNG. Ambulant+ will crop and compress it securely for your patient profile.
+                        </p>
+
+                        <div className="mt-3 flex flex-wrap items-center gap-3">
+                          <label className="cursor-pointer rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-slate-800">
+                            {avatarUploading ? "Uploading..." : "Choose image"}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={handleAvatarFileChange}
+                              disabled={avatarUploading}
+                            />
+                          </label>
+
+                          {form.photoUrl ? (
+                            <button
+                              type="button"
+                              onClick={() => setForm({ ...form, photoUrl: "" })}
+                              disabled={avatarUploading}
+                              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                            >
+                              Remove preview
+                            </button>
+                          ) : null}
+                        </div>
+
+                        {avatarUploadError ? (
+                          <div className="mt-2 rounded-2xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+                            {avatarUploadError}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-2 text-[11px] text-slate-500">
+                          This image appears on your patient profile and identity passport. Do not upload someone else's photo.
+                        </div>
+                      </div>
 
                       <div className="rounded-3xl border border-emerald-100 bg-emerald-50/55 p-4">
                         <div className="flex items-start gap-3">

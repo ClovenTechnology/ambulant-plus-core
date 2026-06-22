@@ -181,6 +181,25 @@ function forwardHeaders(req: NextRequest) {
   return h;
 }
 
+
+function uploadedAvatarLooksUsable(file: File) {
+  const type = String(file.type || "").toLowerCase();
+
+  if (!type.startsWith("image/")) return false;
+  if (!Number.isFinite(file.size) || file.size <= 0) return false;
+  if (file.size > 5 * 1024 * 1024) return false;
+
+  return true;
+}
+
+async function avatarFileToDataUrl(file: File) {
+  const arrayBuffer = await file.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  const mime = file.type || "image/jpeg";
+
+  return `data:${mime};base64,${base64}`;
+}
+
 function cleanString(value: unknown, max = 500) {
   return String(value ?? '').trim().slice(0, max);
 }
@@ -976,7 +995,7 @@ function buildProfileUpdateData(body: any, existing: any) {
   }
 
   if ('photoUrl' in body || 'avatarUrl' in body) {
-    data.photoUrl = nullableString(body.photoUrl ?? body.avatarUrl, 1000);
+    data.photoUrl = nullableString(body.photoUrl ?? body.avatarUrl, 1_500_000);
   }
 
   if ('addressLine1' in body || 'address' in body) {
@@ -1036,7 +1055,23 @@ function buildProfileUpdateData(body: any, existing: any) {
 export async function PATCH(req: NextRequest) {
   try {
     const url = new URL(req.url);
-    const body = await req.json().catch(() => ({} as any));
+    const ct = req.headers.get('content-type') || '';
+
+    let body: any = {};
+    let avatarFile: File | null = null;
+
+    if (ct.includes('multipart/form-data')) {
+      const fd = await req.formData();
+      const payload = fd.get('payload');
+      body = safeJsonParse(payload) || {};
+
+      const avatar = fd.get('avatar');
+      if (avatar && typeof avatar === 'object' && 'arrayBuffer' in avatar) {
+        avatarFile = avatar as File;
+      }
+    } else {
+      body = await req.json().catch(() => ({} as any));
+    }
 
     const sessionIdentity = readIdentity(req);
     const requestedUserId =
@@ -1065,6 +1100,20 @@ export async function PATCH(req: NextRequest) {
     }
 
     const data = buildProfileUpdateData(body, existing);
+
+    if (avatarFile) {
+      if (!uploadedAvatarLooksUsable(avatarFile)) {
+        return json(
+          {
+            ok: false,
+            error: 'avatar_must_be_an_image_up_to_5mb',
+          },
+          400,
+        );
+      }
+
+      data.photoUrl = await avatarFileToDataUrl(avatarFile);
+    }
 
     if (Object.keys(data).length === 0 && existing) {
       const sharingPreference = await readSharingPreference(existing.id);
