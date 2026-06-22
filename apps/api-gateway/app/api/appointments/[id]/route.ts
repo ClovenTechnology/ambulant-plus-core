@@ -23,8 +23,25 @@ function clean(value: unknown, max = 240) {
   return String(value ?? '').trim().slice(0, max);
 }
 
-function shape(row: any, visit: any) {
+function patientDisplay(profile: any, fallback: unknown) {
+  return clean(profile?.name) || clean(profile?.displayName) || clean(profile?.fullName) || clean(fallback) || 'Patient';
+}
+
+function clinicianDisplay(profile: any, fallback: unknown) {
+  return clean(profile?.displayName) || clean(profile?.name) || clean(profile?.email) || clean(fallback) || 'Clinician';
+}
+
+function shape(row: any, visit: any, clinician: any, patient: any) {
   const meta = row?.meta && typeof row.meta === 'object' ? row.meta : {};
+  const roomId = row.roomId ?? visit?.roomId ?? meta.roomId ?? null;
+
+  const patientName =
+    clean(meta.patientDisplayName) ||
+    patientDisplay(patient, row.subjectPatientId || row.patientId);
+
+  const clinicianName =
+    clean(meta.clinicianDisplayName) ||
+    clinicianDisplay(clinician, row.clinicianId);
 
   return {
     ...row,
@@ -36,11 +53,28 @@ function shape(row: any, visit: any) {
     updatedAt: row.updatedAt instanceof Date ? row.updatedAt.toISOString() : row.updatedAt,
     visitId: visit?.id ?? meta.visitId ?? null,
     televisitId: visit?.id ?? meta.televisitId ?? null,
-    roomId: row.roomId ?? visit?.roomId ?? meta.roomId ?? null,
+    roomId,
     patientJoinUrl: meta.patientJoinUrl ?? null,
     clinicianJoinUrl: meta.clinicianJoinUrl ?? null,
-    patientName: meta.patientDisplayName ?? row.patientId ?? 'Patient',
-    clinicianName: meta.clinicianDisplayName ?? row.clinicianId ?? 'Clinician',
+    patientParticipantId: meta.patientParticipantId ?? (row.patientId ? 'pat-' + row.patientId : null),
+    clinicianParticipantId: meta.clinicianParticipantId ?? (row.clinicianId ? 'clin-' + row.clinicianId : null),
+
+    patientName,
+    patientDisplayName: patientName,
+    patientAvatarUrl: patient?.photoUrl ?? meta.patientAvatarUrl ?? null,
+    patientGender: patient?.gender ?? null,
+    patientDob: patient?.dob instanceof Date ? patient.dob.toISOString() : patient?.dob ?? null,
+
+    clinicianName,
+    clinicianDisplayName: clinicianName,
+    clinicianSpecialty: clinician?.specialty ?? meta.clinicianSpecialty ?? null,
+    clinicianAvatarUrl: clinician?.photoUrl ?? meta.clinicianAvatarUrl ?? null,
+    clinicianGender: clinician?.gender ?? null,
+    clinicianLocation:
+      clean(clinician?.city) ||
+      clean(clinician?.practiceName) ||
+      clean(clinician?.country) ||
+      null,
   };
 }
 
@@ -55,12 +89,51 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
 
     if (!row) return json({ ok: false, error: 'not_found' }, 404);
 
-    const visit = await prisma.televisit.findFirst({
-      where: { appointmentId: row.id },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [visit, clinician, patient] = await Promise.all([
+      prisma.televisit.findFirst({
+        where: { appointmentId: row.id },
+        orderBy: { createdAt: 'desc' },
+      }),
+      prisma.clinicianProfile.findUnique({
+        where: { id: row.clinicianId },
+        select: {
+          id: true,
+          userId: true,
+          displayName: true,
+          specialty: true,
+          gender: true,
+          photoUrl: true,
+          city: true,
+          country: true,
+          practiceName: true,
+          email: true,
+        },
+      }).catch(() => null),
+      prisma.patientProfile.findFirst({
+        where: {
+          OR: [
+            { id: row.subjectPatientId || row.patientId },
+            { userId: row.subjectPatientId || row.patientId },
+            { id: row.patientId },
+            { userId: row.patientId },
+          ],
+        },
+        select: {
+          id: true,
+          userId: true,
+          name: true,
+          gender: true,
+          dob: true,
+          photoUrl: true,
+          contactEmail: true,
+          phone: true,
+          city: true,
+        },
+      }).catch(() => null),
+    ]);
 
-    return json({ ok: true, appointment: shape(row, visit), ...shape(row, visit) });
+    const appointment = shape(row, visit, clinician, patient);
+    return json({ ok: true, appointment, ...appointment });
   } catch (err: any) {
     return json({ ok: false, error: err?.message || 'appointment_load_failed' }, 500);
   }

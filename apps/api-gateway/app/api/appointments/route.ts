@@ -73,9 +73,56 @@ function buildJoinUrl(origin: string, roomId: string, params: Record<string, str
   return url.toString();
 }
 
-function shapeAppointment(item: any, visitByAppt: Map<string, any>) {
+function uniqueClean(values: unknown[]) {
+  return Array.from(
+    new Set(
+      values
+        .map((v) => clean(v))
+        .filter(Boolean),
+    ),
+  );
+}
+
+function patientDisplay(profile: any, fallback: unknown) {
+  return (
+    clean(profile?.name) ||
+    clean(profile?.displayName) ||
+    clean(profile?.fullName) ||
+    clean(fallback) ||
+    'Patient'
+  );
+}
+
+function clinicianDisplay(profile: any, fallback: unknown) {
+  return (
+    clean(profile?.displayName) ||
+    clean(profile?.name) ||
+    clean(profile?.email) ||
+    clean(fallback) ||
+    'Clinician'
+  );
+}
+
+function shapeAppointment(
+  item: any,
+  visitByAppt: Map<string, any>,
+  clinicianById = new Map<string, any>(),
+  patientById = new Map<string, any>(),
+) {
   const visit = visitByAppt.get(String(item.id));
   const meta = item?.meta && typeof item.meta === 'object' ? item.meta : {};
+
+  const subjectId = item.subjectPatientId || item.patientId;
+  const patient =
+    patientById.get(String(subjectId || '')) ||
+    patientById.get(String(item.patientId || '')) ||
+    null;
+
+  const clinician = clinicianById.get(String(item.clinicianId || '')) || null;
+
+  const roomId = item.roomId ?? visit?.roomId ?? meta.roomId ?? null;
+  const patientName = clean(meta.patientDisplayName) || patientDisplay(patient, subjectId || item.patientId);
+  const clinicianName = clean(meta.clinicianDisplayName) || clinicianDisplay(clinician, item.clinicianId);
 
   return {
     ...item,
@@ -86,11 +133,28 @@ function shapeAppointment(item: any, visitByAppt: Map<string, any>) {
     updatedAt: item.updatedAt instanceof Date ? item.updatedAt.toISOString() : item.updatedAt,
     visitId: visit?.id ?? meta.visitId ?? null,
     televisitId: visit?.id ?? meta.televisitId ?? null,
-    roomId: item.roomId ?? visit?.roomId ?? meta.roomId ?? null,
+    roomId,
     patientJoinUrl: meta.patientJoinUrl ?? null,
     clinicianJoinUrl: meta.clinicianJoinUrl ?? null,
     patientParticipantId: meta.patientParticipantId ?? (item.patientId ? 'pat-' + item.patientId : null),
     clinicianParticipantId: meta.clinicianParticipantId ?? (item.clinicianId ? 'clin-' + item.clinicianId : null),
+
+    patientName,
+    patientDisplayName: patientName,
+    patientAvatarUrl: patient?.photoUrl ?? meta.patientAvatarUrl ?? null,
+    patientGender: patient?.gender ?? null,
+    patientDob: patient?.dob instanceof Date ? patient.dob.toISOString() : patient?.dob ?? null,
+
+    clinicianName,
+    clinicianDisplayName: clinicianName,
+    clinicianSpecialty: clinician?.specialty ?? meta.clinicianSpecialty ?? null,
+    clinicianAvatarUrl: clinician?.photoUrl ?? meta.clinicianAvatarUrl ?? null,
+    clinicianGender: clinician?.gender ?? null,
+    clinicianLocation:
+      clean(clinician?.city) ||
+      clean(clinician?.practiceName) ||
+      clean(clinician?.country) ||
+      null,
   };
 }
 
@@ -100,17 +164,40 @@ export async function OPTIONS() {
 
 export async function GET(req: NextRequest) {
   try {
+    const who = readIdentity(req.headers);
     const u = new URL(req.url);
-    const patientId = clean(u.searchParams.get('patientId')) || undefined;
+
+    let patientId = clean(u.searchParams.get('patientId')) || undefined;
+    const subjectPatientId = clean(u.searchParams.get('subjectPatientId')) || undefined;
     const clinicianId = clean(u.searchParams.get('clinicianId')) || undefined;
+
+    if (!patientId && who.role === 'patient') {
+      patientId = clean(who.actorRefId || who.uid) || undefined;
+    }
+
     const excludeSimulation =
       u.searchParams.get('excludeSimulation') === '1' ||
       u.searchParams.get('production') === '1' ||
       u.searchParams.get('production-check') === '1';
 
     const where: any = {};
-    if (patientId) where.patientId = patientId;
+
     if (clinicianId) where.clinicianId = clinicianId;
+
+    const patientOr: any[] = [];
+    if (patientId) {
+      patientOr.push({ patientId });
+      patientOr.push({ hostUserId: patientId });
+    }
+    if (subjectPatientId) {
+      patientOr.push({ subjectPatientId });
+    }
+
+    if (patientOr.length === 1) {
+      Object.assign(where, patientOr[0]);
+    } else if (patientOr.length > 1) {
+      where.OR = patientOr;
+    }
 
     const from = dateFrom(u.searchParams.get('from') || u.searchParams.get('dateFrom'));
     const to = dateFrom(u.searchParams.get('to') || u.searchParams.get('dateTo'));
@@ -137,8 +224,64 @@ export async function GET(req: NextRequest) {
         })
       : [];
 
+    const clinicianIds = uniqueClean(filtered.map((item) => item.clinicianId));
+    const patientIds = uniqueClean(
+      filtered.flatMap((item) => [item.patientId, item.subjectPatientId, item.hostUserId]),
+    );
+
+    const [clinicianRows, patientRows] = await Promise.all([
+      clinicianIds.length
+        ? prisma.clinicianProfile.findMany({
+            where: { id: { in: clinicianIds } },
+            select: {
+              id: true,
+              userId: true,
+              displayName: true,
+              specialty: true,
+              gender: true,
+              photoUrl: true,
+              city: true,
+              country: true,
+              practiceName: true,
+              email: true,
+            },
+          })
+        : Promise.resolve([]),
+      patientIds.length
+        ? prisma.patientProfile.findMany({
+            where: {
+              OR: [
+                { id: { in: patientIds } },
+                { userId: { in: patientIds } },
+              ],
+            },
+            select: {
+              id: true,
+              userId: true,
+              name: true,
+              gender: true,
+              dob: true,
+              photoUrl: true,
+              contactEmail: true,
+              phone: true,
+              city: true,
+            },
+          })
+        : Promise.resolve([]),
+    ]);
+
     const visitByAppt = new Map(visitRows.map((v) => [String(v.appointmentId), v]));
-    const items = filtered.map((item) => shapeAppointment(item, visitByAppt));
+    const clinicianById = new Map(clinicianRows.map((c) => [String(c.id), c]));
+
+    const patientById = new Map();
+    for (const p of patientRows as any[]) {
+      patientById.set(String(p.id), p);
+      if (p.userId) patientById.set(String(p.userId), p);
+    }
+
+    const items = filtered.map((item) =>
+      shapeAppointment(item, visitByAppt, clinicianById, patientById),
+    );
 
     return json({
       ok: true,
@@ -174,6 +317,14 @@ export async function POST(req: NextRequest) {
     if (!clinicianRef) return json({ ok: false, error: 'clinicianId_required' }, 400);
     if (!patientId) return json({ ok: false, error: 'patient_identity_required' }, 401);
 
+    const hostUserId = clean(body.hostUserId || body.host_user_id || who.uid || patientId);
+    const subjectPatientId = clean(
+      body.subjectPatientId ||
+        body.subject_patient_id ||
+        body.person?.subjectPatientId ||
+        patientId,
+    );
+
     const startsAt = dateFrom(body.startsAt || body.starts_at || body.start || body.startTime);
     if (!startsAt) return json({ ok: false, error: 'startsAt_required' }, 400);
 
@@ -204,6 +355,11 @@ export async function POST(req: NextRequest) {
         userId: true,
         displayName: true,
         specialty: true,
+        gender: true,
+        photoUrl: true,
+        city: true,
+        country: true,
+        practiceName: true,
         feeCents: true,
         currency: true,
         status: true,
@@ -222,17 +378,64 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: 'clinician_not_bookable' }, 409);
     }
 
+    const patientProfile = subjectPatientId
+      ? await prisma.patientProfile.findFirst({
+          where: {
+            OR: [
+              { id: subjectPatientId },
+              { userId: subjectPatientId },
+              { id: patientId },
+              { userId: patientId },
+            ],
+          },
+          select: { id: true, userId: true, name: true, gender: true, dob: true, photoUrl: true },
+        }).catch(() => null)
+      : null;
+
+    const activeStatuses = ['cancelled', 'canceled', 'Cancelled', 'completed', 'Completed'];
+
     const conflict = await prisma.appointment.findFirst({
       where: {
         clinicianId: clinician.id,
         startsAt: { lt: endsAt },
         endsAt: { gt: startsAt },
-        status: { notIn: ['cancelled', 'canceled', 'Cancelled', 'completed', 'Completed'] },
+        status: { notIn: activeStatuses },
       },
       select: { id: true },
     });
 
     if (conflict) return json({ ok: false, error: 'clinician_conflict', appointmentId: conflict.id }, 409);
+
+    const patientConflictOr: any[] = [];
+    if (patientId) patientConflictOr.push({ patientId }, { hostUserId: patientId });
+    if (hostUserId) patientConflictOr.push({ hostUserId });
+    if (subjectPatientId) patientConflictOr.push({ subjectPatientId });
+
+    const patientConflict = patientConflictOr.length
+      ? await prisma.appointment.findFirst({
+          where: {
+            OR: patientConflictOr,
+            startsAt: { lt: endsAt },
+            endsAt: { gt: startsAt },
+            status: { notIn: activeStatuses },
+          },
+          select: { id: true, startsAt: true, endsAt: true, clinicianId: true },
+        })
+      : null;
+
+    if (patientConflict) {
+      return json(
+        {
+          ok: false,
+          error: 'patient_conflict',
+          appointmentId: patientConflict.id,
+          startsAt: patientConflict.startsAt,
+          endsAt: patientConflict.endsAt,
+          clinicianId: patientConflict.clinicianId,
+        },
+        409,
+      );
+    }
 
     const now = new Date();
     const orgId = clean(body.orgId || body.org_id || req.headers.get('x-org-id')) || 'org-default';
@@ -281,8 +484,17 @@ export async function POST(req: NextRequest) {
       caseId,
       patientParticipantId,
       clinicianParticipantId,
-      patientDisplayName: clean(body.patientName || body.patient_name) || 'Patient',
+      patientDisplayName:
+        clean(body.patientName || body.patient_name) ||
+        clean(patientProfile?.name) ||
+        'Patient',
+      patientAvatarUrl: patientProfile?.photoUrl || null,
+      patientGender: patientProfile?.gender || null,
       clinicianDisplayName: clinician.displayName || 'Clinician',
+      clinicianAvatarUrl: clinician.photoUrl || null,
+      clinicianSpecialty: clinician.specialty || null,
+      clinicianGender: clinician.gender || null,
+      clinicianLocation: clean(clinician.city) || clean(clinician.practiceName) || clean(clinician.country) || null,
       participants: [
         {
           partyId: clinicianParticipantId,
@@ -304,7 +516,10 @@ export async function POST(req: NextRequest) {
           role: 'PRIMARY_PATIENT',
           required: true,
           source: 'appointment',
-          name: clean(body.patientName || body.patient_name) || 'Patient',
+          name:
+            clean(body.patientName || body.patient_name) ||
+            clean(patientProfile?.name) ||
+            'Patient',
           access: {
             canJoinTelevisit: true,
             canViewHealth: false,
@@ -336,7 +551,8 @@ export async function POST(req: NextRequest) {
           caseId,
           clinicianId: clinician.id,
           patientId,
-          subjectPatientId: patientId,
+          hostUserId,
+          subjectPatientId,
           roomId,
           reason: clean(body.reason || body.title || body.notes) || 'Televisit consultation',
           kind: clean(body.kind).toUpperCase() === 'FOLLOWUP' ? 'FOLLOWUP' : 'STANDARD',
@@ -375,6 +591,7 @@ export async function POST(req: NextRequest) {
           caseId,
           clinicianId: clinician.id,
           patientId,
+          hostUserId,
           visitMode: 'TELEVISIT',
           roomId,
           state: 'READY',
@@ -469,6 +686,8 @@ export async function POST(req: NextRequest) {
       clinicianId: clinician.id,
       patientId,
       reason: created.appointment.reason || '',
+      patientName: baseMeta.patientDisplayName,
+      clinicianName: baseMeta.clinicianDisplayName,
     };
 
     const clinicianJoinUrl = buildJoinUrl(clinicianOrigin, roomId, {
@@ -509,6 +728,14 @@ export async function POST(req: NextRequest) {
       patientJoinUrl,
       clinicianParticipantId,
       patientParticipantId,
+      patientName: baseMeta.patientDisplayName,
+      patientDisplayName: baseMeta.patientDisplayName,
+      patientAvatarUrl: baseMeta.patientAvatarUrl,
+      clinicianName: baseMeta.clinicianDisplayName,
+      clinicianDisplayName: baseMeta.clinicianDisplayName,
+      clinicianAvatarUrl: baseMeta.clinicianAvatarUrl,
+      clinicianSpecialty: baseMeta.clinicianSpecialty,
+      clinicianLocation: baseMeta.clinicianLocation,
     };
 
     return json({

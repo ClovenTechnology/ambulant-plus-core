@@ -51,6 +51,15 @@ type Appointment = {
   paymentRef?: string | null;
   priceCents?: number | null;
   currency?: string | null;
+  patientJoinUrl?: string | null;
+  clinicianJoinUrl?: string | null;
+  patientParticipantId?: string | null;
+  clinicianParticipantId?: string | null;
+  clinicianSpecialty?: string | null;
+  clinicianAvatarUrl?: string | null;
+  clinicianLocation?: string | null;
+  patientName?: string | null;
+  patientAvatarUrl?: string | null;
 };
 
 type Rating = {
@@ -107,11 +116,24 @@ function canJoinAppointment(a: Appointment) {
   const status = normalizeStatus(a.status);
 
   return (
-    Boolean(a.roomId) &&
+    Boolean(a.patientJoinUrl || a.roomId) &&
     ['scheduled', 'confirmed', 'checked_in', 'in_consult'].includes(
       status,
     )
   );
+}
+
+function joinHrefForAppointment(a: Appointment) {
+  if (a.patientJoinUrl) return a.patientJoinUrl;
+  if (!a.roomId) return '#';
+
+  const qs = new URLSearchParams();
+  qs.set('appointmentId', a.id);
+  if (a.patientId) qs.set('patientId', a.patientId);
+  if (a.subjectPatientId) qs.set('subjectPatientId', a.subjectPatientId);
+
+  const suffix = qs.toString();
+  return `/sfu/${encodeURIComponent(a.roomId)}${suffix ? `?${suffix}` : ''}`;
 }
 
 function statusChipClasses(status: string) {
@@ -542,7 +564,7 @@ function UpcomingAppointmentCard({
 
           {canJoin ? (
             <Link
-              href={`/sfu/${appointment.roomId}`}
+              href={joinHrefForAppointment(appointment)}
               className="rounded-full bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700"
             >
               Join televisit

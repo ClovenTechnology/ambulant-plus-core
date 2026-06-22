@@ -31,6 +31,15 @@ type Appt = {
   priceCents?: number | null;
   currency?: string | null;
   meta?: Record<string, any> | null;
+  patientJoinUrl?: string | null;
+  clinicianJoinUrl?: string | null;
+  patientParticipantId?: string | null;
+  clinicianParticipantId?: string | null;
+  clinicianSpecialty?: string | null;
+  clinicianAvatarUrl?: string | null;
+  clinicianLocation?: string | null;
+  patientName?: string | null;
+  patientAvatarUrl?: string | null;
 };
 
 type Rating = {
@@ -188,8 +197,9 @@ async function fetchAuthMe(): Promise<AuthMe | null> {
 
 async function fetchAppointmentById(apptId: string, me?: AuthMe | null): Promise<Appt | null> {
   try {
-    const direct = await fetch(`${GATEWAY}/api/appointments/${encodeURIComponent(apptId)}`, {
+    const direct = await fetch(`/api/appointments/${encodeURIComponent(apptId)}`, {
       cache: 'no-store',
+      credentials: 'include',
       headers: getIdentityHeaders(me),
     });
     if (!direct.ok) return null;
@@ -341,7 +351,10 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
   const canJoin = useMemo(() => {
     if (!appt || appt === 'notfound') return false;
     const s = String(appt.status || '').toLowerCase();
-    return (s === 'scheduled' || s === 'confirmed' || s === 'checked_in') && Boolean(appt.roomId);
+    return (
+      (s === 'scheduled' || s === 'confirmed' || s === 'checked_in' || s === 'in_consult') &&
+      Boolean(appt.patientJoinUrl || appt.roomId)
+    );
   }, [appt]);
 
   const canRate = useMemo(() => {
@@ -517,6 +530,12 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
   const backHref = subjectPatientId
     ? `/appointments?subjectPatientId=${encodeURIComponent(subjectPatientId)}${relationshipId ? `&relationshipId=${encodeURIComponent(relationshipId)}` : ''}`
     : '/appointments';
+
+  const joinHref =
+    appt.patientJoinUrl ||
+    (appt.roomId
+      ? `/sfu/${encodeURIComponent(appt.roomId)}?appointmentId=${encodeURIComponent(appt.id)}`
+      : '#');
 
   return (
     <main className="p-6 space-y-4 max-w-3xl mx-auto">
@@ -722,7 +741,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
               ? 'border-blue-600 text-blue-700 hover:bg-blue-50'
               : 'border-gray-200 text-gray-400 cursor-not-allowed'
           }`}
-          href={canJoin ? `/sfu/${appt.roomId}` : '#'}
+          href={canJoin ? joinHref : '#'}
           aria-disabled={!canJoin}
         >
           Join Televisit
