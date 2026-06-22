@@ -91,14 +91,24 @@ type AuthMe = {
 };
 
 function getIdentityHeaders(me?: AuthMe | null): HeadersInit {
-  const uid = me?.uid || me?.userId || me?.user?.id || '';
+  const uid =
+    me?.uid ||
+    me?.userId ||
+    me?.user?.id ||
+    '';
+
+  const actorRefId =
+    me?.actorRefId ||
+    me?.user?.actorRefId ||
+    '';
 
   const orgId =
     me?.orgId || me?.user?.orgId || DEFAULT_ORG_ID;
 
   return {
     'x-role': 'patient',
-    ...(uid ? { 'x-uid': String(uid) } : {}),
+    ...(uid ? { 'x-uid': String(uid), 'x-ambulant-user-id': String(uid) } : {}),
+    ...(actorRefId ? { 'x-actor-ref-id': String(actorRefId), 'x-patient-id': String(actorRefId) } : {}),
     ...(orgId ? { 'x-org-id': String(orgId) } : {}),
   };
 }
@@ -117,9 +127,17 @@ function canJoinAppointment(a: Appointment) {
 
   return (
     Boolean(a.patientJoinUrl || a.roomId) &&
-    ['scheduled', 'confirmed', 'checked_in', 'in_consult'].includes(
-      status,
-    )
+    [
+      'scheduled',
+      'confirmed',
+      'pending_payment',
+      'pending',
+      'checked_in',
+      'in_consult',
+      'in_progress',
+      'active',
+      'ready',
+    ].includes(status)
   );
 }
 
@@ -162,8 +180,8 @@ function statusChipClasses(status: string) {
 }
 
 function starsText(score: number) {
-  const s = Math.max(0, Math.min(5, Math.round(score)));
-  return '★'.repeat(s) + '☆'.repeat(5 - s);
+  const value = Math.max(0, Math.min(5, Math.round(score)));
+  return '★'.repeat(value) + '☆'.repeat(5 - value);
 }
 
 async function fetchAuthMe(): Promise<AuthMe | null> {
@@ -265,6 +283,91 @@ async function fetchPaymentState(
   } catch {
     return null;
   }
+}
+
+function asAppointmentList(raw: any): Appointment[] {
+  const source =
+    Array.isArray(raw)
+      ? raw
+      : Array.isArray(raw?.appointments)
+        ? raw.appointments
+        : Array.isArray(raw?.items)
+          ? raw.items
+          : Array.isArray(raw?.data?.appointments)
+            ? raw.data.appointments
+            : Array.isArray(raw?.data?.items)
+              ? raw.data.items
+              : Array.isArray(raw?.data)
+                ? raw.data
+                : Array.isArray(raw?.results)
+                  ? raw.results
+                  : [];
+
+  return source
+    .map((item: any) => {
+      if (!item || typeof item !== 'object') return null;
+
+      const id = String(item.id || item.appointmentId || item.appointment_id || '').trim();
+      if (!id) return null;
+
+      return {
+        ...item,
+        id,
+        clinicianId: String(item.clinicianId || item.clinician_id || item.providerId || item.provider_id || '').trim(),
+        clinicianName:
+          item.clinicianName ||
+          item.clinicianDisplayName ||
+          item.clinician?.displayName ||
+          item.clinician?.name ||
+          item.meta?.clinicianDisplayName ||
+          null,
+        clinicianSpecialty:
+          item.clinicianSpecialty ||
+          item.clinician?.specialty ||
+          item.meta?.clinicianSpecialty ||
+          null,
+        clinicianAvatarUrl:
+          item.clinicianAvatarUrl ||
+          item.clinician?.photoUrl ||
+          item.meta?.clinicianAvatarUrl ||
+          null,
+        clinicianLocation:
+          item.clinicianLocation ||
+          item.clinician?.practiceName ||
+          item.clinician?.city ||
+          item.meta?.clinicianLocation ||
+          null,
+        patientName:
+          item.patientName ||
+          item.patientDisplayName ||
+          item.meta?.patientDisplayName ||
+          null,
+        patientAvatarUrl:
+          item.patientAvatarUrl ||
+          item.meta?.patientAvatarUrl ||
+          null,
+        startsAt: item.startsAt || item.start || item.startTime || item.when || '',
+        endsAt: item.endsAt || item.end || item.endTime || '',
+        status: item.status || 'scheduled',
+        paymentStatus:
+          item.paymentStatus ||
+          item.payment_status ||
+          item.payment?.status ||
+          null,
+        roomId: item.roomId || item.room_id || item.meta?.roomId || null,
+        patientJoinUrl:
+          item.patientJoinUrl ||
+          item.patient_join_url ||
+          item.meta?.patientJoinUrl ||
+          null,
+        clinicianJoinUrl:
+          item.clinicianJoinUrl ||
+          item.clinician_join_url ||
+          item.meta?.clinicianJoinUrl ||
+          null,
+      } as Appointment;
+    })
+    .filter(Boolean) as Appointment[];
 }
 
 function AppointmentStatusChip({ status }: { status: string }) {
@@ -767,11 +870,7 @@ function PatientAppointmentsContent() {
 
       const raw = await res.json().catch(() => ({}));
 
-      setAppointments(
-        Array.isArray(raw?.appointments)
-          ? raw.appointments
-          : [],
-      );
+      setAppointments(asAppointmentList(raw));
     } catch (e: any) {
       setError(e?.message || 'Failed to load appointments');
     } finally {

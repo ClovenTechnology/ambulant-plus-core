@@ -1,4 +1,5 @@
 // apps/patient-app/app/api/appointments/route.ts
+import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -27,6 +28,113 @@ function noStore(body: unknown, status = 200) {
   });
 }
 
+
+const SESSION_COOKIE_CANDIDATES = [
+  '__Host-ambulant_session',
+  'ambulant_session',
+  'ambulant.session',
+  'auth_session',
+  'session',
+  'token',
+];
+
+function cookieValue(req: NextRequest, name: string) {
+  const raw = req.headers.get('cookie') || '';
+  const parts = raw.split(';').map((p) => p.trim()).filter(Boolean);
+
+  for (const part of parts) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) continue;
+
+    const key = part.slice(0, eq).trim();
+    const value = part.slice(eq + 1).trim();
+
+    if (key === name) return decodeURIComponent(value);
+  }
+
+  return '';
+}
+
+function sessionTokenFromRequest(req: NextRequest) {
+  for (const name of SESSION_COOKIE_CANDIDATES) {
+    const token = cookieValue(req, name);
+    if (token) return token;
+  }
+
+  return '';
+}
+
+function b64urlToBuffer(value: string) {
+  const pad = value.length % 4 === 0 ? '' : '='.repeat(4 - (value.length % 4));
+  const b64 = (value + pad).replace(/-/g, '+').replace(/_/g, '/');
+  return Buffer.from(b64, 'base64');
+}
+
+function safeJsonParse(buf: Buffer) {
+  try {
+    return JSON.parse(buf.toString('utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function timingSafeEqualText(a: string, b: string) {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+
+  if (ab.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ab, bb);
+}
+
+function verifyPatientSessionToken(token: string) {
+  const secret = process.env.AUTH_SESSION_SECRET || process.env.NEXTAUTH_SECRET || '';
+  if (!secret) return null;
+
+  try {
+    const parts = String(token || '').split('.');
+    if (parts.length !== 3) return null;
+
+    const [h, p, sig] = parts;
+    const expected = crypto.createHmac('sha256', secret).update(h + '.' + p).digest('base64url');
+
+    if (!timingSafeEqualText(sig, expected)) return null;
+
+    const payload = safeJsonParse(b64urlToBuffer(p));
+    if (!payload) return null;
+
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof payload.exp === 'number' && payload.exp <= now) return null;
+
+    const role = String(payload.role || payload.actorRole || payload.actorType || payload.actor_type || '').toLowerCase();
+    if (role && role !== 'patient' && role !== 'pat') return null;
+
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+function patientSessionIdentity(req: NextRequest) {
+  const token = sessionTokenFromRequest(req);
+  const payload = token ? verifyPatientSessionToken(token) : null;
+
+  if (!payload) {
+    return {
+      token: '',
+      uid: '',
+      actorRefId: '',
+      orgId: '',
+    };
+  }
+
+  return {
+    token,
+    uid: String(payload.sub || payload.uid || payload.userId || payload.user_id || '').trim(),
+    actorRefId: String(payload.actorRefId || payload.actor_ref_id || payload.patientId || payload.patient_id || '').trim(),
+    orgId: String(payload.orgId || payload.org_id || payload.tenantId || payload.tenant_id || '').trim(),
+  };
+}
+
 function forwardHeaders(req: NextRequest, includeJson = false) {
   const headers = new Headers();
 
@@ -52,6 +160,29 @@ function forwardHeaders(req: NextRequest, includeJson = false) {
   ]) {
     const value = req.headers.get(key);
     if (value) headers.set(key, value);
+  }
+
+  const session = patientSessionIdentity(req);
+
+  if (session.token && !headers.get('authorization')) {
+    headers.set('authorization', 'Bearer ' + session.token);
+  }
+
+  if (session.uid && !headers.get('x-uid')) {
+    headers.set('x-uid', session.uid);
+  }
+
+  if (session.uid && !headers.get('x-ambulant-user-id')) {
+    headers.set('x-ambulant-user-id', session.uid);
+  }
+
+  if (session.actorRefId) {
+    headers.set('x-actor-ref-id', session.actorRefId);
+    headers.set('x-patient-id', session.actorRefId);
+  }
+
+  if (session.orgId && !headers.get('x-org-id')) {
+    headers.set('x-org-id', session.orgId);
   }
 
   headers.set('accept', 'application/json');
@@ -215,6 +346,13 @@ export async function GET(req: NextRequest) {
     const upstream = new URL('/api/appointments', base);
     appendIncomingQuery(req, upstream);
 
+    const session = patientSessionIdentity(req);
+
+    if (!upstream.searchParams.get('patientId') && !upstream.searchParams.get('subjectPatientId')) {
+      const patientId = session.actorRefId || session.uid;
+      if (patientId) upstream.searchParams.set('patientId', patientId);
+    }
+
     const res = await fetch(upstream.toString(), {
       method: 'GET',
       headers: forwardHeaders(req),
@@ -244,6 +382,8 @@ export async function GET(req: NextRequest) {
     return noStore({
       ok: true,
       appointments,
+      items: appointments,
+      total: appointments.length,
       raw: payload,
     });
   } catch (error: any) {
