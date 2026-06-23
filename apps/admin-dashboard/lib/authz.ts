@@ -89,7 +89,7 @@ export function hasScope(scopes: Set<string>, needed: string | string[]) {
   return needs.every(n => scopes.has(n));
 }
 
-/** Map path → required scope (prefix-aware). Extend here as routes grow. */
+/** Map path â†’ required scope (prefix-aware). Extend here as routes grow. */
 export function requiredScopeForRoute(pathname: string): Scope | null {
   const p = pathname.replace(/\/+$/, '') || '/';
 
@@ -103,6 +103,7 @@ export function requiredScopeForRoute(pathname: string): Scope | null {
   // Singles
   if (p.startsWith('/analytics')) return 'analytics.view';
   if (p.startsWith('/reports')) return 'reports.view';
+  if (p.startsWith('/admin/medical-aids')) return 'insurance.view';
   if (p.startsWith('/insurance') && !p.startsWith('/settings')) return 'insurance.view';
   if (p.startsWith('/promotions')) return 'promotions.manage';
   if (p.startsWith('/consult')) return 'consult.view';
@@ -140,7 +141,7 @@ export function requiredScopeForRoute(pathname: string): Scope | null {
   return null;
 }
 
-/** Role → preset scopes (aligns to your sidebar) */
+/** Role â†’ preset scopes (aligns to your sidebar) */
 export const rolePresets = {
   'Super Admin': {
     description: 'Full platform access.',

@@ -120,10 +120,16 @@ export default function ClientLoginPage() {
             </a>
 
             <button type="submit" disabled={submitting} style={primaryButton}>
-              {submitting ? "Signing in…" : "Sign in"}
+              {submitting ? "Signing inâ€¦" : "Sign in"}
             </button>
           </div>
         </form>
+        <div style={{ marginTop: 16, textAlign: "center", fontSize: 14, color: "#475569" }}>
+          Need client portal access?{" "}
+          <a href="/auth/request-access" style={{ color: "#0369a1", fontWeight: 700 }}>
+            Request medical aid access
+          </a>
+        </div>
 
         <div
           style={{

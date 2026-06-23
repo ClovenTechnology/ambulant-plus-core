@@ -68,7 +68,7 @@ function hasAny(scopes: string[], need?: string | string[]) {
 export default function AdminSidebar() {
   const pathname = usePathname();
 
-  // ✅ Hide sidebar on auth routes without changing app/layout.tsx
+  // âœ… Hide sidebar on auth routes without changing app/layout.tsx
   if (pathname?.startsWith('/auth')) return null;
 
   const [collapsed, setCollapsed] = useState(false);
@@ -138,8 +138,9 @@ export default function AdminSidebar() {
       { href: '/analytics', label: 'Analytics', icon: BarChart3, requires: ['reports', 'finance'] },
       { href: '/reports', label: 'Reports', icon: FileText, requires: 'reports' },
       { href: '/insurance', label: 'Insurance', icon: Shield, requires: 'finance' },
+    { href: '/admin/medical-aids', label: 'Medical Aids', icon: Shield, requires: 'finance' },
 
-      // ✅ NEW: Forex (FX)
+      // âœ… NEW: Forex (FX)
       { href: '/finance/fx', label: 'Forex', icon: ArrowLeftRight, requires: 'finance' },
 
       { href: '/promotions', label: 'Promotions', icon: Sparkles /* public within admin */ },
@@ -227,7 +228,7 @@ export default function AdminSidebar() {
   function ItemRow(it: Item) {
     const gated = !!it.requires;
 
-    // ✅ Force-show mode: render everything
+    // âœ… Force-show mode: render everything
     const allowed = FORCE_SHOW_ALL ? true : scopes ? hasAny(scopes, it.requires) : !gated;
     if (!allowed) return null;
 
@@ -275,7 +276,7 @@ export default function AdminSidebar() {
             <g.icon className="h-4 w-4 text-black/50" />
             {!collapsed && <span className="font-medium">{g.label}</span>}
           </span>
-          {!collapsed && <span className="text-xs text-black/40">{expanded ? '▾' : '▸'}</span>}
+          {!collapsed && <span className="text-xs text-black/40">{expanded ? 'â–¾' : 'â–¸'}</span>}
         </button>
 
         {!collapsed && expanded && (
