@@ -1,11 +1,8 @@
 // apps/clinician-app/app/api/encounters/[id]/erx/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { readDb, writeDb } from '../../../erx/_lib_db_compat';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const GW = process.env.APIGW_BASE?.replace(/\/+$/, '');
 
 type Coding = {
   system: string;
@@ -13,205 +10,286 @@ type Coding = {
   display: string;
 };
 
-type MedicationDto = {
-  coding: Coding[];
-  formText?: string;
-  doseText?: string;
-  routeText?: string;
-  frequencyText?: string;
-  durationText?: string;
-  quantity?: { value?: number; unit?: string; text?: string };
-  repeats?: number;
-  note?: string;
-};
+type AnyRecord = Record<string, any>;
 
-type LabDto = {
-  testText: string;
-  priority?: 'Routine' | 'Urgent' | 'Stat';
-  specimenText?: string;
-  icd10?: Coding;
-  note?: string;
-};
+const CANONICAL_API_GATEWAY = 'https://api-gateway.ambulantplus.co.za';
 
-type AllergyDto = {
-  coding?: Coding[];
-  substanceText: string;
-  reactionText?: string | null;
-  severity?: string | null;
-  status?: string | null;
-};
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'host',
+  'content-length',
+]);
 
-type PatientRef = {
-  id: string;
-  name?: string;
-};
+const FORWARD_HEADER_ALLOWLIST = [
+  'authorization',
+  'cookie',
+  'x-ambulant-identity',
+  'x-ambulant-user-id',
+  'x-ambulant-role',
+  'x-ambulant-org-id',
+  'x-ambulant-workspace',
+  'x-ambulant-trusted',
+  'x-user-id',
+  'x-uid',
+  'x-role',
+  'x-org-id',
+  'x-actor-ref-id',
+  'x-clinician-id',
+  'x-patient-id',
+  'x-current-patient-id',
+];
 
-type ClinicianRef = {
-  id: string;
-  name?: string;
-};
+function gatewayBase() {
+  const base =
+    process.env.APIGW_BASE ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    CANONICAL_API_GATEWAY;
 
-type ErxDto = {
-  encounterId: string;
-  patient: PatientRef;
-  clinician: ClinicianRef;
-  reason?: string;
-  medications: MedicationDto[];
-  labs: LabDto[];
-  allergies?: AllergyDto[];
-  note?: string;
-};
+  return base.replace(/\/+$/, '');
+}
 
-export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const encounterId = params.id;
-  const body = (await req.json().catch(() => null)) as ErxDto | null;
+function clean(value: unknown, max = 4000) {
+  return String(value ?? '').trim().slice(0, max);
+}
 
-  if (!body) {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+function optionalString(value: unknown, max = 4000) {
+  const valueClean = clean(value, max);
+  return valueClean ? valueClean : undefined;
+}
+
+function forwardHeaders(req: NextRequest) {
+  const headers = new Headers();
+
+  for (const name of FORWARD_HEADER_ALLOWLIST) {
+    const value = req.headers.get(name);
+    if (value) headers.set(name, value);
   }
 
-  const meds = Array.isArray((body as any).medications) ? (body as any).medications : [];
-  const labs = Array.isArray((body as any).labs) ? (body as any).labs : [];
+  headers.set('accept', 'application/json');
+  headers.set('content-type', 'application/json');
 
-  if (meds.length === 0 && labs.length === 0) {
+  return headers;
+}
+
+function responseHeaders(upstream: Response) {
+  const headers = new Headers();
+
+  upstream.headers.forEach((value, key) => {
+    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
+      headers.set(key, value);
+    }
+  });
+
+  headers.set('cache-control', 'no-store');
+  return headers;
+}
+
+async function relayGatewayResponse(upstream: Response) {
+  const headers = responseHeaders(upstream);
+  const contentType = upstream.headers.get('content-type') || '';
+
+  if (contentType.includes('application/json')) {
+    const json = await upstream.json().catch(() => null);
+    return NextResponse.json(json, {
+      status: upstream.status,
+      headers,
+    });
+  }
+
+  const text = await upstream.text().catch(() => '');
+  return new NextResponse(text, {
+    status: upstream.status,
+    headers,
+  });
+}
+
+function textCoding(value: unknown): Coding[] {
+  const display = optionalString(value, 500);
+  if (!display) return [];
+
+  return [
+    {
+      system: 'text',
+      code: display,
+      display,
+    },
+  ];
+}
+
+function normalizeMedication(raw: AnyRecord) {
+  const coding = Array.isArray(raw?.coding)
+    ? raw.coding
+    : Array.isArray(raw?.codings)
+      ? raw.codings
+      : raw?.rxcui
+        ? [
+            {
+              system: 'rxnorm',
+              code: clean(raw.rxcui, 120),
+              display: optionalString(raw.drug || raw.name || raw.display, 500) || clean(raw.rxcui, 120),
+            },
+          ]
+        : textCoding(raw?.drug || raw?.name || raw?.display);
+
+  const quantityText = optionalString(raw?.quantity?.text, 200) || optionalString(raw?.qty, 200);
+
+  return {
+    coding,
+    formText: optionalString(raw?.formText || raw?.form, 120),
+    doseText: optionalString(raw?.doseText || raw?.dose, 200),
+    routeText: optionalString(raw?.routeText || raw?.route, 120),
+    frequencyText: optionalString(raw?.frequencyText || raw?.freq || raw?.frequency, 200),
+    durationText: optionalString(raw?.durationText || raw?.duration, 200),
+    quantity: raw?.quantity && typeof raw.quantity === 'object'
+      ? raw.quantity
+      : quantityText
+        ? { text: quantityText }
+        : undefined,
+    repeats: typeof raw?.repeats === 'number'
+      ? raw.repeats
+      : typeof raw?.refills === 'number'
+        ? raw.refills
+        : 0,
+    note: optionalString(raw?.note || raw?.notes, 2000),
+  };
+}
+
+function normalizeLab(raw: AnyRecord) {
+  const icdRaw = raw?.icd10 || raw?.icd;
+
+  const icd10 =
+    icdRaw && typeof icdRaw === 'object'
+      ? icdRaw
+      : optionalString(icdRaw, 120)
+        ? {
+            system: 'icd-10',
+            code: clean(icdRaw, 120),
+            display: clean(icdRaw, 120),
+          }
+        : undefined;
+
+  return {
+    testText: optionalString(raw?.testText || raw?.test || raw?.name, 500) || 'Lab order',
+    priority: optionalString(raw?.priority, 40) || 'Routine',
+    specimenText: optionalString(raw?.specimenText || raw?.specimen, 200),
+    icd10,
+    note: optionalString(raw?.note || raw?.instructions, 2000),
+  };
+}
+
+function normalizePayload(body: AnyRecord, encounterId: string) {
+  const medications = Array.isArray(body?.medications)
+    ? body.medications.map(normalizeMedication)
+    : [];
+
+  const labs = Array.isArray(body?.labs)
+    ? body.labs.map(normalizeLab)
+    : [];
+
+  return {
+    ...body,
+    encounterId,
+    patient: body?.patient && typeof body.patient === 'object'
+      ? body.patient
+      : {
+          id: optionalString(body?.patientId, 120),
+          name: optionalString(body?.patientName, 240),
+        },
+    clinician: body?.clinician && typeof body.clinician === 'object'
+      ? body.clinician
+      : {
+          id: optionalString(body?.clinicianId, 120),
+          name: optionalString(body?.clinicianName, 240),
+        },
+    medications,
+    labs,
+  };
+}
+
+export async function POST(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
+  const encounterId = clean(params.id, 120);
+
+  if (!encounterId) {
+    return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
+  }
+
+  const body = (await req.json().catch(() => null)) as AnyRecord | null;
+
+  if (!body || typeof body !== 'object') {
+    return NextResponse.json({ ok: false, error: 'invalid_json_body' }, { status: 400 });
+  }
+
+  const payload = normalizePayload(body, encounterId);
+
+  if (payload.medications.length === 0 && payload.labs.length === 0) {
     return NextResponse.json(
-      { error: 'At least one medication or lab order is required (medications[] or labs[]).' },
+      { ok: false, error: 'at_least_one_medication_or_lab_required' },
       { status: 400 },
     );
   }
 
-  // If an API gateway is configured, try to forward the DTO as-is
-  if (GW) {
-    try {
-      const r = await fetch(
-        `${GW}/api/encounters/${encodeURIComponent(encounterId)}/erx`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-      );
-      if (r.ok) {
-        const json = await r.json().catch(() => ({}));
-        return NextResponse.json(json, { status: r.status });
-      }
-      // fall through to local fallback on non-2xx
-      console.warn(
-        '[encounters/erx][POST] GW upstream non-OK, falling back to local store',
-        r.status,
-      );
-    } catch (err) {
-      console.error('[encounters/erx][POST] GW upstream error, falling back to local store', err);
-    }
+  const upstreamUrl = `${gatewayBase()}/api/encounters/${encodeURIComponent(encounterId)}/erx`;
+
+  try {
+    const upstream = await fetch(upstreamUrl, {
+      method: 'POST',
+      headers: forwardHeaders(req),
+      body: JSON.stringify(payload),
+      cache: 'no-store',
+    });
+
+    return relayGatewayResponse(upstream);
+  } catch (err) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'api_gateway_unreachable',
+        message: err instanceof Error ? err.message : String(err),
+      },
+      { status: 502 },
+    );
   }
-
-  // ---- local fallback: create a legacy ERX row for dev/demo ----
-  const db = await readDb();
-
-  const appt =
-    db.appointments.find((a: any) => a.encounterId === encounterId) ||
-    db.appointments[0];
-
-  const legacyMeds = meds.map((m: MedicationDto) => {
-    const first = (m.coding && m.coding[0]) || null;
-    return {
-      drug: first?.display || first?.code || '',
-      dose: m.doseText || '',
-      route: m.routeText || '',
-      freq: m.frequencyText || '',
-      duration: m.durationText || '',
-      qty:
-        m.quantity?.text ??
-        (typeof m.quantity?.value === 'number'
-          ? `${m.quantity.value}${m.quantity.unit ? ' ' + m.quantity.unit : ''}`
-          : ''),
-      refills: typeof m.repeats === 'number' ? m.repeats : 0,
-      notes: m.note || '',
-    };
-  });
-
-  const legacyLabs = labs.map((l: LabDto) => ({
-    test: l.testText,
-    priority: l.priority || '',
-    specimen: l.specimenText || '',
-    icd: l.icd10?.code || '',
-    instructions: l.note || '',
-  }));
-
-  const erx = {
-    id: `rx-${Math.random().toString(36).slice(2, 10)}`,
-    appointmentId: appt?.id ?? `appt-${encounterId}`,
-    encounterId,
-    patientName: body.patient?.name ?? appt?.patientName ?? 'Demo Patient',
-    clinicianName: body.clinician?.name ?? appt?.clinicianName ?? 'Demo Clinician',
-    meds: legacyMeds,
-    labTests: legacyLabs,
-    notes: body.note ?? null,
-    status: 'queued',
-    createdAt: new Date().toISOString(),
-    dispenseCode: '—',
-  };
-
-  if (!Array.isArray(db.erx)) db.erx = [];
-  db.erx.unshift(erx);
-  await writeDb(db);
-
-  return NextResponse.json(erx, { status: 201 });
 }
 
-/**
- * GET /api/encounters/:id/erx
- *
- * Returns the latest ERX row for the encounter.
- * Used by FollowupSlotPicker to show upcoming lab tests.
- */
 export async function GET(
-  _req: NextRequest,
-  { params }: { params: { id: string } }
+  req: NextRequest,
+  { params }: { params: { id: string } },
 ) {
-  const encounterId = params.id;
+  const encounterId = clean(params.id, 120);
 
-  // 1) Try upstream gateway if configured
-  if (GW) {
-    try {
-      const r = await fetch(
-        `${GW}/api/encounters/${encodeURIComponent(encounterId)}/erx`,
-        { method: 'GET', headers: { accept: 'application/json' } },
-      );
-      if (r.ok) {
-        const json = await r.json().catch(() => ({}));
-        return NextResponse.json(json, { status: r.status });
-      }
-      console.warn('[encounters/erx][GET] GW non-OK, falling back to local store', r.status);
-    } catch (err) {
-      console.error('[encounters/erx][GET] GW error, falling back to local store', err);
-    }
+  if (!encounterId) {
+    return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
   }
 
-  // 2) Local demo: read last ERX for this encounter from db.erx
+  const upstreamUrl = `${gatewayBase()}/api/encounters/${encodeURIComponent(encounterId)}/erx`;
+
   try {
-    const db = await readDb();
-    const list: any[] = Array.isArray(db.erx) ? db.erx : [];
-    const forEncounter = list
-      .filter((row) => row.encounterId === encounterId)
-      .sort((a, b) =>
-        (a.createdAt || '') > (b.createdAt || '') ? -1 : 1,
-      );
+    const upstream = await fetch(upstreamUrl, {
+      method: 'GET',
+      headers: forwardHeaders(req),
+      cache: 'no-store',
+    });
 
-    if (!forEncounter.length) {
-      return NextResponse.json(
-        { error: 'No eRx found for encounter', labs: [], meds: [] },
-        { status: 404 },
-      );
-    }
-
-    const latest = forEncounter[0];
-    return NextResponse.json(latest, { status: 200 });
+    return relayGatewayResponse(upstream);
   } catch (err) {
-    console.error('[encounters/erx][GET] local readDb failed', err);
     return NextResponse.json(
-      { error: 'Failed to load eRx for encounter' },
-      { status: 500 },
+      {
+        ok: false,
+        error: 'api_gateway_unreachable',
+        message: err instanceof Error ? err.message : String(err),
+      },
+      { status: 502 },
     );
   }
 }
