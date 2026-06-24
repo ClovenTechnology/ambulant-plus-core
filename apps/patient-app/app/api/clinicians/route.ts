@@ -4,98 +4,133 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+const CANONICAL_API_GATEWAY = 'https://api-gateway.ambulantplus.co.za';
+
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+  'host',
+  'content-length',
+]);
+
+function trimSlash(value: string) {
+  return String(value || '').replace(/\/+$/, '');
+}
+
 function gatewayBase() {
-  return (
+  return trimSlash(
     process.env.APIGW_BASE ||
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.API_GATEWAY_URL ||
-    process.env.API_GATEWAY_BASE_URL ||
-    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
-    (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : '')
-  ).replace(/\/+$/, '');
+      process.env.API_GATEWAY_BASE_URL ||
+      process.env.API_GATEWAY_URL ||
+      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+      CANONICAL_API_GATEWAY,
+  );
+}
+
+function gatewayUrl(req: NextRequest) {
+  const src = new URL(req.url);
+  const dest = new URL('/api/clinicians', gatewayBase());
+
+  src.searchParams.forEach((value, key) => {
+    dest.searchParams.append(key, value);
+  });
+
+  return dest.toString();
 }
 
 function forwardHeaders(req: NextRequest) {
   const headers = new Headers();
 
-  [
+  for (const key of [
     'authorization',
     'cookie',
     'x-ambulant-identity',
     'x-ambulant-user-id',
-    'x-ambulant-org-id',
     'x-ambulant-role',
+    'x-ambulant-org-id',
     'x-user-id',
     'x-uid',
-    'x-org',
-    'x-org-id',
     'x-role',
-    'x-email',
-    'x-name',
-    'x-display-name',
-    'x-correlation-id',
+    'x-org-id',
+    'x-actor-ref-id',
+    'x-patient-id',
+    'x-current-patient-id',
     'x-request-id',
-  ].forEach((key) => {
+    'x-correlation-id',
+  ]) {
     const value = req.headers.get(key);
     if (value) headers.set(key, value);
-  });
+  }
 
   headers.set('accept', 'application/json');
+
   if (!headers.get('x-role') && !headers.get('x-ambulant-role')) {
     headers.set('x-role', 'patient');
   }
-  if (!headers.get('x-org-id') && !headers.get('x-ambulant-org-id')) {
-    headers.set('x-org-id', process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default');
+
+  const defaultOrg = process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || '';
+  if (defaultOrg && !headers.get('x-org-id') && !headers.get('x-ambulant-org-id')) {
+    headers.set('x-org-id', defaultOrg);
   }
 
   return headers;
 }
 
+function relayHeaders(upstream: Response) {
+  const headers = new Headers();
+
+  upstream.headers.forEach((value, key) => {
+    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) {
+      headers.set(key, value);
+    }
+  });
+
+  headers.set('cache-control', 'no-store, max-age=0');
+  return headers;
+}
+
 export async function GET(req: NextRequest) {
-  const base = gatewayBase();
-
-  if (!base) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: 'api_gateway_not_configured',
-        items: [],
-        clinicians: [],
-        meta: { total: 0, page: 1, perPage: 25, source: 'patient_proxy_unconfigured' },
-      },
-      { status: 503 },
-    );
-  }
-
-  const incoming = new URL(req.url);
-  const upstream = new URL('/api/clinicians', base);
-  upstream.search = incoming.search;
-
   try {
-    const res = await fetch(upstream.toString(), {
+    const upstream = await fetch(gatewayUrl(req), {
       method: 'GET',
       headers: forwardHeaders(req),
       cache: 'no-store',
     });
 
-    const text = await res.text();
-    return new NextResponse(text || '{}', {
-      status: res.status,
-      headers: {
-        'content-type': res.headers.get('content-type') || 'application/json',
-        'cache-control': 'no-store, max-age=0',
-      },
+    const contentType = upstream.headers.get('content-type') || '';
+    const headers = relayHeaders(upstream);
+
+    if (contentType.includes('application/json')) {
+      const json = await upstream.json().catch(() => null);
+      return NextResponse.json(json, {
+        status: upstream.status,
+        headers,
+      });
+    }
+
+    const text = await upstream.text().catch(() => '');
+    return new NextResponse(text, {
+      status: upstream.status,
+      headers,
     });
-  } catch (err: any) {
+  } catch (error) {
     return NextResponse.json(
       {
         ok: false,
-        error: String(err?.message || 'clinician_directory_proxy_failed'),
+        error: 'clinician_directory_proxy_failed',
+        message: error instanceof Error ? error.message : String(error),
         items: [],
         clinicians: [],
-        meta: { total: 0, page: 1, perPage: 25, source: 'patient_proxy_error' },
+        meta: { total: 0, page: 1, perPage: 25 },
       },
-      { status: 502 },
+      { status: 502, headers: { 'cache-control': 'no-store' } },
     );
   }
 }
