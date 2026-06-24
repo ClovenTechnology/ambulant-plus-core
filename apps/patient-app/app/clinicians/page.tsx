@@ -120,6 +120,33 @@ function normalizeClassParam(v: string | null): UIClass | null {
   return null;
 }
 
+function normalizeClinicianClassValue(
+  raw: unknown,
+  specialty?: unknown,
+): 'Doctor' | 'Allied Health' | 'Wellness' {
+  const s = String(raw ?? '').trim().toLowerCase();
+
+  if (
+    s === 'doctor' ||
+    s === 'doctors' ||
+    s === 'medical' ||
+    s === 'clinical' ||
+    s === 'general practice' ||
+    s === 'general practitioner'
+  ) {
+    return 'Doctor';
+  }
+
+  if (s.includes('allied')) return 'Allied Health';
+  if (s.includes('wellness')) return 'Wellness';
+
+  const spec = String(specialty ?? '').trim().toLowerCase();
+  if (spec.includes('wellness')) return 'Wellness';
+  if (spec.includes('allied')) return 'Allied Health';
+
+  return 'Doctor';
+}
+
 function formatMoney(currency?: string, cents?: number, fallbackZar?: number) {
   if (typeof cents === 'number' && currency) {
     try {
@@ -451,6 +478,16 @@ function mapApiToItem(c: any): ClinicianItem {
     rating: Number.isFinite(rating) ? rating : 0,
     ratingCount,
     online: Boolean(c.online),
+
+    cls: normalizeClinicianClassValue(
+      c.cls ??
+        c['class'] ??
+        c.className ??
+        c.category ??
+        c.patientCategory ??
+        c.operational?.patientCategory,
+      c.specialty,
+    ),
 
     priceZAR:
       typeof c.priceZAR === 'number'
@@ -814,8 +851,9 @@ function CliniciansPageContent() {
     params.set('page', '1');
     params.set('perPage', '500');
     params.set('country', country);
+    params.set('class', tab === 'Doctors' ? 'doctor' : tab.toLowerCase());
     return `/api/clinicians?${params.toString()}`;
-  }, [country]);
+  }, [country, tab]);
 
   const { data, error, isValidating } = useSWR(apiUrl, fetcher, {
     revalidateOnFocus: false,
