@@ -342,6 +342,22 @@ export async function POST(req: NextRequest) {
 
     if (endsAt <= startsAt) return json({ ok: false, error: 'invalid_time_range' }, 400);
 
+    const joinClosesAtPreview = new Date(endsAt.getTime() + 60 * 60 * 1000);
+
+    if (joinClosesAtPreview.getTime() <= Date.now() + 30_000) {
+      return json(
+        {
+          ok: false,
+          error: 'appointment_window_expired',
+          message: 'This slot is no longer available. Please choose a future slot.',
+          startsAt: startsAt.toISOString(),
+          endsAt: endsAt.toISOString(),
+          joinClosesAt: joinClosesAtPreview.toISOString(),
+        },
+        400,
+      );
+    }
+
     const clinician = await prisma.clinicianProfile.findFirst({
       where: {
         OR: [
