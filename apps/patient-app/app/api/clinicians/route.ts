@@ -108,11 +108,57 @@ export async function GET(req: NextRequest) {
     const headers = relayHeaders(upstream);
 
     if (contentType.includes('application/json')) {
-      const json = await upstream.json().catch(() => null);
-      return NextResponse.json(json, {
-        status: upstream.status,
-        headers,
-      });
+      const json: any = await upstream.json().catch(() => null);
+
+      if (json && typeof json === 'object') {
+        const items = Array.isArray(json.items)
+          ? json.items
+          : Array.isArray(json.clinicians)
+            ? json.clinicians
+            : Array.isArray(json.data)
+              ? json.data
+              : [];
+
+        const meta =
+          json.meta && typeof json.meta === 'object'
+            ? {
+                ...json.meta,
+                total: Number(json.meta.total ?? items.length),
+                page: Number(json.meta.page ?? 1),
+                perPage: Number(json.meta.perPage ?? json.meta.pageSize ?? 25),
+              }
+            : { total: items.length, page: 1, perPage: 25 };
+
+        return NextResponse.json(
+          {
+            ...json,
+            ok: json.ok !== false,
+            items,
+            clinicians: items,
+            data: items,
+            meta,
+          },
+          {
+            status: upstream.status,
+            headers,
+          },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'invalid_clinician_directory_response',
+          items: [],
+          clinicians: [],
+          data: [],
+          meta: { total: 0, page: 1, perPage: 25 },
+        },
+        {
+          status: upstream.status,
+          headers,
+        },
+      );
     }
 
     const text = await upstream.text().catch(() => '');
