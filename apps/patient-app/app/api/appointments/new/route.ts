@@ -6,6 +6,16 @@ export const dynamic = 'force-dynamic';
 
 type PaymentMethod = 'card' | 'medical_aid' | 'voucher';
 
+type PatientSessionIdentity = {
+  uid: string;
+  patientId: string;
+  orgId: string;
+  email: string;
+  name: string;
+};
+
+const CANONICAL_API_GATEWAY = 'https://api-gateway.ambulantplus.co.za';
+
 function trimSlash(value: string) {
   return String(value || '').replace(/\/+$/, '');
 }
@@ -17,7 +27,7 @@ function gatewayBase() {
       process.env.API_GATEWAY_URL ||
       process.env.NEXT_PUBLIC_APIGW_BASE ||
       process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
-      'https://ambulant-plus-core-api-gateway-kdon.vercel.app',
+      CANONICAL_API_GATEWAY,
   );
 }
 
@@ -38,12 +48,14 @@ function isIsoDate(value: unknown) {
 }
 
 function safeSlug(value: unknown, fallback = 'booking') {
-  return String(value ?? fallback)
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || fallback;
+  return (
+    String(value ?? fallback)
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || fallback
+  );
 }
 
 function makeRoomId(clinicianId: string, startsAt: string) {
@@ -62,37 +74,74 @@ function normalizePaymentMethod(value: unknown): PaymentMethod {
   return 'card';
 }
 
-function readUid(req: NextRequest, body: any) {
-  return clean(
-    req.headers.get('x-uid') ||
-      req.headers.get('x-user-id') ||
-      req.headers.get('x-ambulant-user-id') ||
-      body?.hostUserId ||
-      body?.host_user_id ||
-      body?.patientId ||
-      body?.patient_id ||
-      '',
-  );
+function pickUserPayload(payload: any) {
+  return payload?.user && typeof payload.user === 'object' ? payload.user : payload;
 }
 
-function forwardHeaders(req: NextRequest, uid: string) {
+async function readPatientSession(req: NextRequest): Promise<PatientSessionIdentity | null> {
+  const authUrl = new URL('/api/auth/me', req.url);
+
+  const res = await fetch(authUrl.toString(), {
+    method: 'GET',
+    headers: {
+      cookie: req.headers.get('cookie') || '',
+      authorization: req.headers.get('authorization') || '',
+      accept: 'application/json',
+    },
+    cache: 'no-store',
+  }).catch(() => null);
+
+  if (!res || !res.ok) return null;
+
+  const json = await res.json().catch(() => null);
+  if (!json || json.ok === false) return null;
+
+  const user = pickUserPayload(json);
+
+  const actorType = clean(json.actorType || user.actorType || user.actor_type, 80).toUpperCase();
+  if (actorType && actorType !== 'PATIENT') return null;
+
+  const uid = clean(
+    json.uid ||
+      json.userId ||
+      json.id ||
+      user.uid ||
+      user.userId ||
+      user.id ||
+      user.sub,
+    160,
+  );
+
+  const patientId = clean(
+    json.actorRefId ||
+      json.actor_ref_id ||
+      json.patientId ||
+      json.patient_id ||
+      user.actorRefId ||
+      user.actor_ref_id ||
+      user.patientId ||
+      user.patient_id,
+    160,
+  );
+
+  if (!uid || !patientId) return null;
+
+  return {
+    uid,
+    patientId,
+    orgId: clean(json.orgId || json.org_id || user.orgId || user.org_id, 120),
+    email: clean(json.email || user.email || user.contactEmail, 240),
+    name: clean(json.name || json.displayName || user.name || user.displayName, 240),
+  };
+}
+
+function forwardHeaders(req: NextRequest, identity: PatientSessionIdentity, includeJson = true) {
   const headers = new Headers();
 
   for (const key of [
     'authorization',
     'cookie',
     'x-ambulant-identity',
-    'x-ambulant-user-id',
-    'x-ambulant-org-id',
-    'x-ambulant-role',
-    'x-user-id',
-    'x-uid',
-    'x-org',
-    'x-org-id',
-    'x-role',
-    'x-email',
-    'x-name',
-    'x-display-name',
     'x-correlation-id',
     'x-request-id',
     'idempotency-key',
@@ -103,12 +152,26 @@ function forwardHeaders(req: NextRequest, uid: string) {
   }
 
   headers.set('accept', 'application/json');
-  headers.set('content-type', 'application/json');
-  headers.set('x-role', 'patient');
-  headers.set('x-uid', uid);
+  if (includeJson) headers.set('content-type', 'application/json');
 
-  if (!headers.get('x-org-id') && !headers.get('x-ambulant-org-id')) {
-    headers.set('x-org-id', process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default');
+  headers.set('x-role', 'patient');
+  headers.set('x-ambulant-role', 'patient');
+  headers.set('x-uid', identity.uid);
+  headers.set('x-user-id', identity.uid);
+  headers.set('x-ambulant-user-id', identity.uid);
+  headers.set('x-actor-ref-id', identity.patientId);
+  headers.set('x-patient-id', identity.patientId);
+  headers.set('x-current-patient-id', identity.patientId);
+
+  if (identity.orgId) {
+    headers.set('x-org-id', identity.orgId);
+    headers.set('x-ambulant-org-id', identity.orgId);
+  }
+
+  if (identity.email) headers.set('x-email', identity.email);
+  if (identity.name) {
+    headers.set('x-name', identity.name);
+    headers.set('x-display-name', identity.name);
   }
 
   return headers;
@@ -125,11 +188,63 @@ async function readPayload(res: Response) {
   }
 }
 
+function pickAmountMinor(data: any, appointment: any, body: any) {
+  const candidates = [
+    body?.amountCents,
+    body?.amount_cents,
+    body?.amountMinor,
+    body?.amount_minor,
+    body?.patientPayableMinor,
+    body?.patient_payable_minor,
+    body?.reimbursementIntent?.patientPayableMinor,
+    body?.reimbursementIntent?.patient_payable_minor,
+    body?.priceLock?.amountCents,
+    body?.priceLock?.amount_cents,
+    body?.priceLock?.patientPayableMinor,
+    data?.amountCents,
+    data?.amount_cents,
+    data?.amountMinor,
+    data?.amount_minor,
+    data?.priceCents,
+    data?.price_cents,
+    appointment?.amountCents,
+    appointment?.amount_cents,
+    appointment?.amountMinor,
+    appointment?.amount_minor,
+    appointment?.priceCents,
+    appointment?.price_cents,
+  ];
+
+  for (const value of candidates) {
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) return Math.round(n);
+  }
+
+  return 0;
+}
+
+function pickCurrency(data: any, appointment: any, body: any) {
+  return clean(
+    body?.currency ||
+      body?.reimbursementIntent?.currency ||
+      body?.priceLock?.currency ||
+      data?.currency ||
+      appointment?.currency,
+    3,
+  ).toUpperCase() || 'ZAR';
+}
+
 export async function POST(req: NextRequest) {
   const base = gatewayBase();
 
   if (!base) {
     return noStore({ ok: false, error: 'api_gateway_base_not_configured' }, 503);
+  }
+
+  const identity = await readPatientSession(req);
+
+  if (!identity) {
+    return noStore({ ok: false, error: 'patient_session_required' }, 401);
   }
 
   let body: any = {};
@@ -142,7 +257,6 @@ export async function POST(req: NextRequest) {
   const clinicianId = clean(body.clinicianId || body.clinician_id);
   const startsAt = clean(body.startsAt || body.starts_at);
   const endsAt = clean(body.endsAt || body.ends_at);
-  const uid = readUid(req, body);
 
   if (!clinicianId || !startsAt || !endsAt) {
     return noStore(
@@ -155,14 +269,13 @@ export async function POST(req: NextRequest) {
     return noStore({ ok: false, error: 'invalid_time_range' }, 400);
   }
 
-  if (!uid) {
-    return noStore({ ok: false, error: 'patient_identity_required' }, 401);
-  }
-
   const roomId = clean(body.roomId || body.room_id) || makeRoomId(clinicianId, startsAt);
   const paymentMethod = normalizePaymentMethod(body.paymentMethod || body.payment_method);
-  const patientId = clean(body.patientId || body.patient_id || uid);
-  const hostUserId = clean(body.hostUserId || body.host_user_id || uid);
+
+  const patientId = identity.patientId;
+  const hostUserId = identity.uid;
+  const patientEmail = clean(body.patientEmail || body.patient_email || identity.email, 240);
+  const patientName = clean(body.patientName || body.patient_name || identity.name, 240);
 
   const isFamily = body?.person?.mode === 'FAMILY';
 
@@ -174,12 +287,13 @@ export async function POST(req: NextRequest) {
 
     patientId,
     patient_id: patientId,
+
     subjectPatientId: isFamily
       ? clean(body?.person?.subjectPatientId || body.subjectPatientId || body.subject_patient_id)
-      : clean(body.subjectPatientId || body.subject_patient_id || patientId),
+      : patientId,
     subject_patient_id: isFamily
       ? clean(body?.person?.subjectPatientId || body.subjectPatientId || body.subject_patient_id)
-      : clean(body.subjectPatientId || body.subject_patient_id || patientId),
+      : patientId,
 
     familyRelationshipId: isFamily
       ? clean(body?.person?.relationshipId || body.familyRelationshipId || body.family_relationship_id)
@@ -202,8 +316,10 @@ export async function POST(req: NextRequest) {
     paymentMethod,
     payment_method: paymentMethod,
 
-    patientEmail: body.patientEmail || body.patient_email || null,
-    patient_email: body.patientEmail || body.patient_email || null,
+    patientEmail: patientEmail || null,
+    patient_email: patientEmail || null,
+    patientName: patientName || null,
+    patient_name: patientName || null,
 
     callbackUrl: body.callbackUrl || body.callback_url || null,
     callback_url: body.callbackUrl || body.callback_url || null,
@@ -217,25 +333,23 @@ export async function POST(req: NextRequest) {
   };
 
   try {
-    const upstream = new URL('/api/appointments', base);
-
-    const res = await fetch(upstream.toString(), {
+    const appointmentRes = await fetch(new URL('/api/appointments', base).toString(), {
       method: 'POST',
-      headers: forwardHeaders(req, uid),
+      headers: forwardHeaders(req, identity, true),
       body: JSON.stringify(payload),
       cache: 'no-store',
     });
 
-    const data: any = await readPayload(res);
+    const data: any = await readPayload(appointmentRes);
 
-    if (!res.ok || data?.ok === false) {
+    if (!appointmentRes.ok || data?.ok === false) {
       return noStore(
         {
           ok: false,
-          error: data?.error || data?.message || `appointments_gateway_http_${res.status}`,
+          error: data?.error || data?.message || `appointments_gateway_http_${appointmentRes.status}`,
           details: data,
         },
-        res.status,
+        appointmentRes.status,
       );
     }
 
@@ -253,7 +367,18 @@ export async function POST(req: NextRequest) {
       appointment?.encounterId ||
       '';
 
-    const paymentRef =
+    const caseId =
+      data?.caseId ||
+      data?.case_id ||
+      appointment?.caseId ||
+      appointment?.case_id ||
+      '';
+
+    const amountCents = pickAmountMinor(data, appointment, body);
+    const currency = pickCurrency(data, appointment, body);
+
+    let payment: any = null;
+    let paymentRef =
       data?.paymentRef ||
       data?.payment_ref ||
       data?.providerRef ||
@@ -262,12 +387,102 @@ export async function POST(req: NextRequest) {
       appointment?.paymentRef ||
       '';
 
-    const redirectUrl =
+    let redirectUrl =
       data?.redirectUrl ||
       data?.redirect_url ||
       data?.payment?.redirectUrl ||
       data?.payment?.redirect_url ||
       '';
+
+    const shouldStartCardCheckout =
+      paymentMethod === 'card' &&
+      amountCents > 0 &&
+      appointmentId &&
+      !redirectUrl;
+
+    if (shouldStartCardCheckout) {
+      if (!patientEmail) {
+        return noStore(
+          {
+            ok: false,
+            error: 'patient_email_required_for_card_checkout',
+            appointmentId,
+            appointment_id: appointmentId,
+          },
+          400,
+        );
+      }
+
+      const paymentRes = await fetch(new URL('/api/payments', base).toString(), {
+        method: 'POST',
+        headers: forwardHeaders(req, identity, true),
+        body: JSON.stringify({
+          action: 'initialize',
+          appointmentId,
+          encounterId: encounterId || null,
+          caseId: caseId || null,
+          amountCents,
+          currency,
+          paymentMethod: 'CARD',
+          email: patientEmail,
+          callbackUrl: payload.callbackUrl || null,
+          patientId,
+          clinicianId,
+          meta: {
+            source: 'patient-app-appointments-new',
+            priceLock: body.priceLock || body.price_lock || null,
+            reimbursementIntent: body.reimbursementIntent || null,
+          },
+        }),
+        cache: 'no-store',
+      });
+
+      payment = await readPayload(paymentRes);
+
+      if (!paymentRes.ok || payment?.ok === false) {
+        return noStore(
+          {
+            ok: false,
+            error: payment?.error || payment?.message || `payment_gateway_http_${paymentRes.status}`,
+            appointmentId,
+            appointment_id: appointmentId,
+            details: payment,
+          },
+          paymentRes.status,
+        );
+      }
+
+      paymentRef =
+        payment?.providerRef ||
+        payment?.provider_ref ||
+        payment?.payment?.providerRef ||
+        payment?.payment?.provider_ref ||
+        payment?.payment?.id ||
+        paymentRef ||
+        '';
+
+      redirectUrl =
+        payment?.redirectUrl ||
+        payment?.redirect_url ||
+        payment?.payment?.redirectUrl ||
+        payment?.payment?.redirect_url ||
+        redirectUrl ||
+        '';
+
+      if (!redirectUrl) {
+        return noStore(
+          {
+            ok: false,
+            error: 'card_checkout_redirect_missing',
+            appointmentId,
+            appointment_id: appointmentId,
+            paymentRef,
+            payment,
+          },
+          502,
+        );
+      }
+    }
 
     return noStore(
       {
@@ -278,14 +493,17 @@ export async function POST(req: NextRequest) {
         appointment_id: appointmentId,
         encounterId,
         encounter_id: encounterId,
+        caseId,
+        case_id: caseId,
         roomId: data?.roomId || appointment?.roomId || roomId,
         paymentMethod,
+        payment,
         paymentRef,
         payment_ref: paymentRef,
         redirectUrl,
         redirect_url: redirectUrl,
       },
-      res.status === 201 ? 201 : 200,
+      appointmentRes.status === 201 ? 201 : 200,
     );
   } catch (error: any) {
     return noStore(
