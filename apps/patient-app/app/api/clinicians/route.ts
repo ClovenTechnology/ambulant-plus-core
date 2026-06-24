@@ -17,6 +17,9 @@ const HOP_BY_HOP_HEADERS = new Set([
   'upgrade',
   'host',
   'content-length',
+  'content-encoding',
+  'content-md5',
+  'etag',
 ]);
 
 function trimSlash(value: string) {
@@ -91,6 +94,14 @@ function relayHeaders(upstream: Response) {
       headers.set(key, value);
     }
   });
+
+  // The upstream fetch body may be decompressed by the runtime, and this proxy
+  // re-serializes JSON. Never relay encoding/length validators from upstream.
+  headers.delete('content-encoding');
+  headers.delete('content-length');
+  headers.delete('transfer-encoding');
+  headers.delete('content-md5');
+  headers.delete('etag');
 
   headers.set('cache-control', 'no-store, max-age=0');
   return headers;
