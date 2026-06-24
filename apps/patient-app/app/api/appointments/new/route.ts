@@ -42,6 +42,11 @@ function clean(value: unknown, max = 240) {
   return String(value ?? '').trim().slice(0, max);
 }
 
+function normalizeEmail(value: unknown) {
+  const email = clean(value, 240).toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) ? email : '';
+}
+
 function isIsoDate(value: unknown) {
   const ms = Date.parse(String(value || ''));
   return Number.isFinite(ms);
@@ -177,6 +182,63 @@ function forwardHeaders(req: NextRequest, identity: PatientSessionIdentity, incl
   return headers;
 }
 
+async function readPatientProfileContact(
+  req: NextRequest,
+  identity: PatientSessionIdentity,
+): Promise<{ email: string; name: string }> {
+  const profileUrl = new URL('/api/profile', req.url);
+
+  const res = await fetch(profileUrl.toString(), {
+    method: 'GET',
+    headers: forwardHeaders(req, identity, false),
+    cache: 'no-store',
+  }).catch(() => null);
+
+  if (!res || !res.ok) {
+    return { email: '', name: '' };
+  }
+
+  const json: any = await res.json().catch(() => null);
+  if (!json || json.ok === false) {
+    return { email: '', name: '' };
+  }
+
+  const profile =
+    json.profile && typeof json.profile === 'object'
+      ? json.profile
+      : json.patient && typeof json.patient === 'object'
+        ? json.patient
+        : json;
+
+  const patient =
+    profile.patient && typeof profile.patient === 'object'
+      ? profile.patient
+      : {};
+
+  return {
+    email: normalizeEmail(
+      profile.email ||
+        profile.contactEmail ||
+        profile.patientEmail ||
+        profile.patient_email ||
+        json.email ||
+        json.contactEmail ||
+        patient.email ||
+        patient.contactEmail,
+    ),
+    name: clean(
+      profile.name ||
+        profile.displayName ||
+        profile.fullName ||
+        json.name ||
+        json.displayName ||
+        patient.name ||
+        patient.displayName,
+      240,
+    ),
+  };
+}
+
 async function readPayload(res: Response) {
   const text = await res.text();
   if (!text) return null;
@@ -274,8 +336,26 @@ export async function POST(req: NextRequest) {
 
   const patientId = identity.patientId;
   const hostUserId = identity.uid;
-  const patientEmail = clean(body.patientEmail || body.patient_email || identity.email, 240);
-  const patientName = clean(body.patientName || body.patient_name || identity.name, 240);
+
+  const profileContact =
+    !normalizeEmail(identity.email) || !identity.name
+      ? await readPatientProfileContact(req, identity)
+      : { email: '', name: '' };
+
+  const patientEmail = normalizeEmail(
+    body.patientEmail ||
+      body.patient_email ||
+      identity.email ||
+      profileContact.email,
+  );
+
+  const patientName = clean(
+    body.patientName ||
+      body.patient_name ||
+      identity.name ||
+      profileContact.name,
+    240,
+  );
 
   const isFamily = body?.person?.mode === 'FAMILY';
 
