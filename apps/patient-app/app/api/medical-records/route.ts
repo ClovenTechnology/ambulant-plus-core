@@ -1,4 +1,5 @@
 ﻿import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/prisma';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -239,6 +240,28 @@ function normalizeLab(row: any) {
   };
 }
 
+function normalizePatientDocument(row: any) {
+  if (!row || typeof row !== 'object') return null;
+
+  const id = clean(row.id || row.documentId, 180);
+  if (!id) return null;
+
+  const kind = clean(row.documentKind || row.docType || row.type || 'other', 80) || 'other';
+
+  return {
+    id,
+    date: toIso(row.createdAt || row.updatedAt),
+    title: firstText(row.title, row.fileName, 'Uploaded document'),
+    type: kind,
+    source: firstText(row.sourceApp, row.sourceType, 'Ambulant+'),
+    fileName: row.fileName || null,
+    mimeType: row.mimeType || null,
+    sizeBytes: Number.isFinite(Number(row.sizeBytes)) ? Number(row.sizeBytes) : undefined,
+    downloadUrl: `/api/medical-records/file?documentId=${encodeURIComponent(id)}`,
+    viewHref: undefined,
+  };
+}
+
 function normalizeDocsFromEncounters(encounters: any[]) {
   const docs: any[] = [];
 
@@ -305,11 +328,18 @@ export async function GET(req: NextRequest) {
     mrn: profile.mrn || me.payload?.mrn || undefined,
   };
 
-  const [encountersRes, medsRes, allergiesRes, labsRes] = await Promise.all([
+  const patientDocsPromise = prisma.patientDocument.findMany({
+    where: { patientId },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  });
+
+  const [encountersRes, medsRes, allergiesRes, labsRes, patientDocs] = await Promise.all([
     fetchJson(req, '/api/encounters?limit=100'),
     fetchJson(req, `/api/medications?patientId=${encodeURIComponent(patientId)}`),
     fetchJson(req, `/api/allergies?patientId=${encodeURIComponent(patientId)}`),
     fetchJson(req, '/api/labs'),
+    patientDocsPromise,
   ]);
 
   const rawEncounters = arrayFromPayload(encountersRes.payload, ['encounters', 'items', 'data']);
@@ -321,7 +351,9 @@ export async function GET(req: NextRequest) {
   const medications = rawMeds.map(normalizeMedication).filter(Boolean);
   const allergies = rawAllergies.map(normalizeAllergy).filter(Boolean);
   const labs = rawLabs.map(normalizeLab).filter(Boolean);
-  const docs = normalizeDocsFromEncounters(rawEncounters);
+  const encounterDocs = normalizeDocsFromEncounters(rawEncounters);
+  const uploadedDocs = Array.isArray(patientDocs) ? patientDocs.map(normalizePatientDocument).filter(Boolean) : [];
+  const docs = [...uploadedDocs, ...encounterDocs];
 
   const updatedAt = new Date().toISOString();
 

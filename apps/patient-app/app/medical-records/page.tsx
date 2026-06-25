@@ -302,6 +302,7 @@ export default function MedicalRecordsPage() {
   const [dateTo, setDateTo] = useState<string>('');
 
   const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const tabs = useMemo(
@@ -536,7 +537,37 @@ export default function MedicalRecordsPage() {
     setUploadOpen(false);
     if (!files || files.length === 0) return;
 
-    toast(`Selected ${files.length} file(s). Secure document upload is being prepared; no file was uploaded yet.`, 'info');
+    setUploading(true);
+    try {
+      let uploaded = 0;
+
+      for (const file of Array.from(files)) {
+        const form = new FormData();
+        form.set('file', file);
+        form.set('documentKind', file.type.startsWith('image/') ? 'imaging-report' : 'other');
+        form.set('title', file.name.replace(/\.[^.]+$/, '') || file.name);
+
+        const res = await fetch('/api/medical-records/upload', {
+          method: 'POST',
+          body: form,
+        });
+
+        const data = await res.json().catch(() => null);
+        if (!res.ok || !data?.ok) {
+          throw new Error(data?.message || data?.error || `Upload failed for ${file.name}`);
+        }
+
+        uploaded += 1;
+      }
+
+      toast(`Uploaded ${uploaded} document(s) to your medical records.`, 'success');
+      window.location.reload();
+    } catch (error: any) {
+      toast(error?.message || 'Document upload failed.', 'error');
+    } finally {
+      setUploading(false);
+      if (fileRef.current) fileRef.current.value = '';
+    }
   }
 
   const TopBar = (
@@ -594,7 +625,7 @@ export default function MedicalRecordsPage() {
           )}
         >
           <Upload className="h-4 w-4" />
-          Upload
+          {uploading ? 'Uploading…' : 'Upload'}
         </button>
 
         <input
@@ -851,7 +882,7 @@ export default function MedicalRecordsPage() {
                     className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-3 py-2 text-sm font-extrabold text-white hover:bg-slate-800"
                   >
                     <Upload className="h-4 w-4" />
-                    Upload
+                      {uploading ? 'Uploading…' : 'Upload'}
                   </button>
                 }
               >
@@ -1113,7 +1144,7 @@ export default function MedicalRecordsPage() {
                   onClick={onUploadClick}
                   className="inline-flex items-center justify-between gap-3 rounded-2xl bg-slate-900 px-4 py-3 text-sm font-extrabold text-white hover:bg-slate-800"
                 >
-                  Upload document
+                  {uploading ? 'Uploading document…' : 'Upload document'}
                   <Upload className="h-4 w-4 text-white/90" />
                 </button>
               </div>
@@ -1170,7 +1201,7 @@ export default function MedicalRecordsPage() {
                 onClick={() => fileRef.current?.click()}
                 className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800"
               >
-                Choose files
+                {uploading ? 'Uploading…' : 'Choose files'}
               </button>
             </div>
           </div>
