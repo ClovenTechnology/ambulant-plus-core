@@ -28,7 +28,7 @@ import {
 import { toast } from '@/components/ToastMount';
 
 type RecordDocType = 'clinical-note' | 'lab-report' | 'imaging-report' | 'prescription' | 'referral' | 'other';
-type LabFlag = 'low' | 'high' | 'critical' | 'normal';
+type LabFlag = 'low' | 'high' | 'critical' | 'normal' | 'abnormal';
 
 type PatientMini = {
   id: string;
@@ -304,6 +304,7 @@ export default function MedicalRecordsPage() {
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [shareBusy, setShareBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [shareScope, setShareScope] = useState<'full_record' | 'documents_only' | 'labs_only'>('documents_only');
   const [shareTtlHours, setShareTtlHours] = useState<1 | 6 | 12 | 24 | 72>(24);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -450,7 +451,7 @@ export default function MedicalRecordsPage() {
 
     for (const l of filteredLabs.slice(0, 12)) {
       const tone =
-        l.flag === 'critical' ? 'danger' : l.flag === 'high' || l.flag === 'low' ? 'warn' : l.flag === 'normal' ? 'ok' : 'neutral';
+        l.flag === 'critical' ? 'danger' : l.flag === 'high' || l.flag === 'low' || l.flag === 'abnormal' ? 'warn' : l.flag === 'normal' ? 'ok' : 'neutral';
       items.push({
         id: `lab_${l.id}`,
         date: l.date,
@@ -493,19 +494,34 @@ export default function MedicalRecordsPage() {
     return parts.join(' • ');
   }, [patient?.mrn, patient?.dob, bundle?.updatedAt]);
 
-  function doExport() {
-    if (!bundle) return;
+  async function doExport() {
+    if (!bundle || exporting) return;
+
+    setExporting(true);
     try {
-      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const res = await fetch('/api/reports/export', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ kind: 'medical-records' }),
+      });
+
+      const blob = await res.blob();
+      if (!res.ok || !blob.size) {
+        const text = await blob.text().catch(() => '');
+        throw new Error(text || 'Export failed.');
+      }
+
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
-      a.download = `ambulant-medical-records-${patient?.id || 'patient'}.json`;
+      a.download = `ambulant-health-records-${patient?.id || 'patient'}.pdf`;
       a.click();
       URL.revokeObjectURL(url);
-      toast('Exported records JSON.', 'success');
-    } catch {
-      toast('Export failed.', 'error');
+      toast('Exported health records PDF.', 'success');
+    } catch (error: any) {
+      toast(error?.message || 'Export failed.', 'error');
+    } finally {
+      setExporting(false);
     }
   }
 
@@ -647,13 +663,14 @@ export default function MedicalRecordsPage() {
         <button
           type="button"
           onClick={doExport}
+          disabled={exporting}
           className={cx(
             'inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-extrabold text-slate-800',
             'hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25',
           )}
         >
           <Download className="h-4 w-4" />
-          Export
+          {exporting ? 'Exporting…' : 'Export'}
         </button>
 
         <button
@@ -674,7 +691,7 @@ export default function MedicalRecordsPage() {
           className="hidden"
           multiple
           onChange={(e) => onFilesChosen(e.target.files)}
-          accept=".pdf,.png,.jpg,.jpeg,.heic,.doc,.docx,.txt,.csv"
+          accept=".pdf,.png,.jpg,.jpeg,.webp"
         />
       </div>
     </div>

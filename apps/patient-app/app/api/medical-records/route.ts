@@ -208,24 +208,24 @@ function normalizeAllergy(row: any) {
   };
 }
 
+function normalizeLabFlag(value: unknown) {
+  const raw = clean(value, 80).toLowerCase();
+
+  if (raw.includes('critical')) return 'critical';
+  if (raw.includes('abnormal')) return 'abnormal';
+  if (raw.includes('high')) return 'high';
+  if (raw.includes('low')) return 'low';
+  if (raw.includes('normal')) return 'normal';
+
+  return undefined;
+}
+
 function normalizeLab(row: any) {
   if (!row || typeof row !== 'object') return null;
 
   const id = clean(row.id || row.labId || row.orderId, 180);
   const test = firstText(row.test, row.name, row.title, row.panel);
   if (!id || !test) return null;
-
-  const rawFlag = clean(row.flag || row.resultFlag || row.status, 80).toLowerCase();
-  const flag =
-    rawFlag.includes('critical')
-      ? 'critical'
-      : rawFlag.includes('high')
-        ? 'high'
-        : rawFlag.includes('low')
-          ? 'low'
-          : rawFlag.includes('normal')
-            ? 'normal'
-            : undefined;
 
   return {
     id,
@@ -235,8 +235,61 @@ function normalizeLab(row: any) {
     value: firstText(row.value, row.result, row.status),
     unit: firstText(row.unit),
     ref: firstText(row.ref, row.reference, row.referenceRange),
-    flag,
+    flag: normalizeLabFlag(row.flag || row.resultFlag || row.status),
     orderingClinician: firstText(row.orderingClinician, row.clinicianName, row.performer),
+  };
+}
+
+function normalizeRealLabResult(row: any) {
+  if (!row || typeof row !== 'object') return null;
+
+  const id = clean(row.id, 180);
+  const test = firstText(row.name, row.loincCode, 'Laboratory result');
+  if (!id || !test) return null;
+
+  const order = row.order && typeof row.order === 'object' ? row.order : null;
+  const hasNumericValue = row.valueNum !== null && row.valueNum !== undefined && Number.isFinite(Number(row.valueNum));
+
+  const value = hasNumericValue
+    ? String(row.valueNum)
+    : row.isPositive === true
+      ? 'Positive'
+      : row.isPositive === false
+        ? 'Negative'
+        : firstText(row.flag, 'Result available');
+
+  return {
+    id,
+    date: toIso(row.createdAt || order?.updatedAt || order?.createdAt),
+    panel: firstText(order?.panel),
+    test,
+    value,
+    unit: firstText(row.unit),
+    ref: firstText(row.loincCode, order?.id),
+    flag: normalizeLabFlag(row.flag),
+    orderingClinician: firstText(row.clinicianId, order?.clinicianId),
+  };
+}
+
+function normalizeLabOrder(row: any) {
+  if (!row || typeof row !== 'object') return null;
+
+  const id = clean(row.id, 180);
+  if (!id) return null;
+
+  const tests = Array.isArray(row.tests) ? row.tests : [];
+  const firstTest = tests.find((x: any) => x && typeof x === 'object') || null;
+
+  return {
+    id: `order_${id}`,
+    date: toIso(row.updatedAt || row.createdAt),
+    panel: firstText(row.panel, 'Laboratory order'),
+    test: firstText(row.panel, firstTest?.name, firstTest?.test, 'Laboratory order'),
+    value: firstText(row.status, 'Ordered'),
+    unit: '',
+    ref: id,
+    flag: undefined,
+    orderingClinician: firstText(row.clinicianId),
   };
 }
 
@@ -334,23 +387,61 @@ export async function GET(req: NextRequest) {
     take: 200,
   });
 
-  const [encountersRes, medsRes, allergiesRes, labsRes, patientDocs] = await Promise.all([
+  const labResultsPromise = prisma.labResult.findMany({
+    where: { patientId },
+    include: {
+      order: {
+        select: {
+          id: true,
+          panel: true,
+          status: true,
+          clinicianId: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 300,
+  });
+
+  const labOrdersPromise = prisma.labOrder.findMany({
+    where: { patientId },
+    include: {
+      results: {
+        select: { id: true },
+        take: 1,
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  });
+
+  const [encountersRes, medsRes, allergiesRes, patientDocs, labResults, labOrders] = await Promise.all([
     fetchJson(req, '/api/encounters?limit=100'),
     fetchJson(req, `/api/medications?patientId=${encodeURIComponent(patientId)}`),
     fetchJson(req, `/api/allergies?patientId=${encodeURIComponent(patientId)}`),
-    fetchJson(req, '/api/labs'),
     patientDocsPromise,
+    labResultsPromise,
+    labOrdersPromise,
   ]);
 
   const rawEncounters = arrayFromPayload(encountersRes.payload, ['encounters', 'items', 'data']);
   const rawMeds = arrayFromPayload(medsRes.payload, ['items', 'medications', 'meds', 'data']);
   const rawAllergies = arrayFromPayload(allergiesRes.payload, ['items', 'allergies', 'data']);
-  const rawLabs = arrayFromPayload(labsRes.payload, ['items', 'labs', 'data']);
 
   const encounters = rawEncounters.map(normalizeEncounter).filter(Boolean);
   const medications = rawMeds.map(normalizeMedication).filter(Boolean);
   const allergies = rawAllergies.map(normalizeAllergy).filter(Boolean);
-  const labs = rawLabs.map(normalizeLab).filter(Boolean);
+  const resultLabs = Array.isArray(labResults) ? labResults.map(normalizeRealLabResult).filter(Boolean) : [];
+  const resultOrderIds = new Set((Array.isArray(labResults) ? labResults : []).map((row: any) => clean(row?.orderId, 180)).filter(Boolean));
+  const pendingOrderLabs = Array.isArray(labOrders)
+    ? labOrders
+        .filter((row: any) => !resultOrderIds.has(clean(row?.id, 180)))
+        .map(normalizeLabOrder)
+        .filter(Boolean)
+    : [];
+  const labs = [...resultLabs, ...pendingOrderLabs];
   const encounterDocs = normalizeDocsFromEncounters(rawEncounters);
   const uploadedDocs = Array.isArray(patientDocs) ? patientDocs.map(normalizePatientDocument).filter(Boolean) : [];
   const docs = [...uploadedDocs, ...encounterDocs];
@@ -377,7 +468,9 @@ export async function GET(req: NextRequest) {
       encounters: { ok: encountersRes.ok, status: encountersRes.status, count: encounters.length },
       medications: { ok: medsRes.ok, status: medsRes.status, count: medications.length },
       allergies: { ok: allergiesRes.ok, status: allergiesRes.status, count: allergies.length },
-      labs: { ok: labsRes.ok, status: labsRes.status, count: labs.length, note: 'labs_route_currently_local_patient_app_source' },
+      labs: { ok: true, status: 200, count: labs.length, source: 'prisma.labResult/prisma.labOrder' },
+      labResults: { count: Array.isArray(labResults) ? labResults.length : 0 },
+      labOrders: { count: Array.isArray(labOrders) ? labOrders.length : 0 },
     },
   });
 }
