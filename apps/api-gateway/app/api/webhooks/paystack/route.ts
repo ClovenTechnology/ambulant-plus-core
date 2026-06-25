@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import * as nodeCrypto from 'node:crypto';
 import { prisma } from '@/src/lib/db';
 import { getProvider } from '@/src/payments';
+import {
+  resolvePaymentReference,
+  syncVerifiedPaymentToAppointment,
+} from '@/src/payments/payment-sync';
 
 export const dynamic = 'force-dynamic';
 
@@ -372,10 +376,11 @@ export async function POST(req: NextRequest) {
   const data  = body?.data || {};
   const reference: string = String(data?.reference || body?.reference || '');
 
-  // === Appointment mapping by paymentRef ===
-  const appt = reference
-    ? await prisma.appointment.findFirst({ where: { paymentRef: reference } })
-    : null;
+  // === Appointment mapping by provider reference, payment row metadata, or embedded appointment ID ===
+  const resolvedPayment = reference
+    ? await resolvePaymentReference(reference)
+    : { appointment: null };
+  const appt = resolvedPayment.appointment;
 
   // === Provider capture ===
   if (event === 'charge.success') {
@@ -391,22 +396,29 @@ export async function POST(req: NextRequest) {
     }
 
     // 2) Appointment payment success
-    if (appt) {
-      if (appt.status !== 'confirmed') {
-        await prisma.appointment.update({ where: { id: appt.id }, data: { status: 'confirmed' } });
-      }
+    if (reference && appt) {
+      const amountCents =
+        typeof data?.amount === 'number'
+          ? Math.round(data.amount)
+          : Number(data?.amount || appt.priceCents || 0);
 
-      await prisma.auditEvent.create({
-        data: {
-          kind: 'payment_captured',
-          actorId: null,
-          actorRole: 'system',
-          subjectId: appt.id,
-          meta: JSON.stringify({ provider: 'paystack', reference }),
-        },
-      }).catch(() => {});
+      const currency = String(data?.currency || appt.currency || 'ZAR').toUpperCase();
 
-      return NextResponse.json({ ok: true, kind: 'appointment' });
+      const synced = await syncVerifiedPaymentToAppointment({
+        reference,
+        provider: 'paystack',
+        state: 'captured',
+        amountCents,
+        currency,
+        raw: body,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        kind: 'appointment',
+        appointmentId: synced.appointment?.id ?? appt.id,
+        paymentId: synced.payment.id,
+      });
     }
 
     // 3) Shop order payment success

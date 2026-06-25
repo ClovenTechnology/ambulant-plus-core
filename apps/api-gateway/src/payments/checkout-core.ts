@@ -115,7 +115,10 @@ export async function beginCheckout(input: BeginCheckoutInput): Promise<BeginChe
     currency: input.currency,
     email: input.email.trim(),
     reference,
-    callbackUrl: input.callbackUrl || undefined,
+    callbackUrl:
+      input.callbackUrl ||
+      process.env.PAYSTACK_CALLBACK_URL?.trim() ||
+      undefined,
     metadata: input.metadata as Record<string, any> | undefined,
   });
 
@@ -135,7 +138,8 @@ export async function verifyCheckout(input: VerifyCheckoutInput): Promise<Verify
   if (
     verified.status === 'captured' &&
     typeof verified.amountCents === 'number' &&
-    verified.amountCents !== input.expectedAmountCents
+    Number(input.expectedAmountCents || 0) > 0 &&
+    verified.amountCents !== Number(input.expectedAmountCents)
   ) {
     return {
       ...verified,
@@ -150,6 +154,7 @@ export async function verifyCheckout(input: VerifyCheckoutInput): Promise<Verify
   if (
     verified.status === 'captured' &&
     verified.currency &&
+    input.expectedCurrency &&
     verified.currency.toUpperCase() !== input.expectedCurrency.toUpperCase()
   ) {
     return {

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyCheckout } from '@/src/payments/checkout-core';
-import { syncVerifiedPaymentToAppointment } from '@/src/payments/payment-sync';
+import {
+  resolvePaymentReference,
+  syncVerifiedPaymentToAppointment,
+} from '@/src/payments/payment-sync';
 import { prisma } from '@/src/lib/db';
 
 export const dynamic = 'force-dynamic';
@@ -72,24 +75,29 @@ async function reconcileCarePortPayment(reference: string, verified: any) {
 }
 
 
-export async function GET(req: NextRequest) {
-  try {
-    const url = new URL(req.url);
-    const reference =
-      url.searchParams.get('reference') ||
-      url.searchParams.get('trxref') ||
-      url.searchParams.get('paymentRef') ||
-      '';
+function patientAppBaseUrl() {
+  return (
+    process.env.PATIENT_APP_URL?.trim() ||
+    process.env.PATIENT_APP_ORIGIN?.trim() ||
+    'https://patient.ambulantplus.co.za'
+  );
+}
 
-    if (!reference.trim()) {
-      return NextResponse.json({ ok: false, error: 'reference_required' }, { status: 400 });
-    }
+function wantsJsonResponse(req: NextRequest, url: URL) {
+  const format = String(url.searchParams.get('format') || '').toLowerCase();
+  if (format === 'json') return true;
 
-    const appointment = await prisma.appointment.findFirst({
-      where: { paymentRef: reference.trim() },
-    });
+  const accept = String(req.headers.get('accept') || '').toLowerCase();
+  if (accept.includes('application/json') && !accept.includes('text/html')) return true;
 
-    function payableAmountMinor(appointment: any) {
+  return String(req.headers.get('x-requested-with') || '').toLowerCase() === 'xmlhttprequest';
+}
+
+function absolutePatientUrl(path: string) {
+  return new URL(path || '/appointments', patientAppBaseUrl());
+}
+
+function payableAmountMinor(appointment: any) {
   const copay = Number(appointment?.patientCopayMinor ?? 0);
   const price = Number(appointment?.priceCents ?? appointment?.amountMinor ?? appointment?.totalMinor ?? 0);
 
@@ -99,32 +107,57 @@ export async function GET(req: NextRequest) {
   return 0;
 }
 
-const expectedAmountCents = payableAmountMinor(appointment);
-const expectedCurrency = appointment?.currency ?? 'ZAR';
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+
+  try {
+    const reference =
+      url.searchParams.get('reference') ||
+      url.searchParams.get('trxref') ||
+      url.searchParams.get('paymentRef') ||
+      '';
+
+    if (!reference.trim()) {
+      if (!wantsJsonResponse(req, url)) {
+        return NextResponse.redirect(
+          absolutePatientUrl('/appointments?payment=failed&error=reference_required'),
+          303,
+        );
+      }
+
+      return NextResponse.json({ ok: false, error: 'reference_required' }, { status: 400 });
+    }
+
+    const cleanReference = reference.trim();
+    const resolved = await resolvePaymentReference(cleanReference);
+    const appointment = resolved.appointment;
 
     const verified = await verifyCheckout({
       provider: 'paystack',
-      reference: reference.trim(),
-      expectedAmountCents,
-      expectedCurrency,
+      reference: cleanReference,
+      expectedAmountCents: appointment ? payableAmountMinor(appointment) : 0,
+      expectedCurrency: appointment?.currency ?? 'ZAR',
     });
 
-    const carePort = await reconcileCarePortPayment(reference.trim(), verified);
+    const carePort = await reconcileCarePortPayment(cleanReference, verified);
     if (carePort) {
-      return NextResponse.json(
-        {
-          ok: true,
-          verification: verified,
-          carePortOrderId: carePort.orderId,
-          paymentIntent: carePort.paymentIntent,
-          redirect: carePort.redirect,
-        },
-        { status: 200 },
-      );
+      const body = {
+        ok: true,
+        verification: verified,
+        carePortOrderId: carePort.orderId,
+        paymentIntent: carePort.paymentIntent,
+        redirect: carePort.redirect,
+      };
+
+      if (!wantsJsonResponse(req, url)) {
+        return NextResponse.redirect(absolutePatientUrl(carePort.redirect), 303);
+      }
+
+      return NextResponse.json(body, { status: 200 });
     }
 
     const synced = await syncVerifiedPaymentToAppointment({
-      reference: reference.trim(),
+      reference: cleanReference,
       provider: 'paystack',
       state: verified.status,
       amountCents: verified.amountCents,
@@ -132,23 +165,42 @@ const expectedCurrency = appointment?.currency ?? 'ZAR';
       raw: (verified.raw as Record<string, unknown>) || null,
     });
 
-    return NextResponse.json(
-      {
-        ok: true,
-        verification: verified,
-        appointmentId: synced.appointment?.id ?? null,
-        paymentId: synced.payment.id,
-        redirect:
-          verified.status === 'captured'
-            ? `/appointments/${encodeURIComponent(synced.appointment?.id || '')}?payment=success`
-            : `/appointments/${encodeURIComponent(synced.appointment?.id || '')}?payment=${encodeURIComponent(verified.status)}`,
-      },
-      { status: 200 },
-    );
+    const appointmentId = synced.appointment?.id ?? appointment?.id ?? null;
+
+    const paymentState =
+      verified.status === 'captured'
+        ? 'success'
+        : verified.status === 'pending'
+          ? 'pending'
+          : 'failed';
+
+    const redirectPath = appointmentId
+      ? `/appointments/${encodeURIComponent(appointmentId)}?payment=${encodeURIComponent(paymentState)}`
+      : `/appointments?payment=${encodeURIComponent(paymentState)}`;
+
+    const body = {
+      ok: true,
+      verification: verified,
+      appointmentId,
+      paymentId: synced.payment.id,
+      redirect: redirectPath,
+    };
+
+    if (!wantsJsonResponse(req, url)) {
+      return NextResponse.redirect(absolutePatientUrl(redirectPath), 303);
+    }
+
+    return NextResponse.json(body, { status: 200 });
   } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || 'payment_verify_failed' },
-      { status: 400 },
-    );
+    const error = String(e?.message || 'payment_verify_failed');
+
+    if (!wantsJsonResponse(req, url)) {
+      return NextResponse.redirect(
+        absolutePatientUrl(`/appointments?payment=failed&error=${encodeURIComponent(error)}`),
+        303,
+      );
+    }
+
+    return NextResponse.json({ ok: false, error }, { status: 400 });
   }
 }

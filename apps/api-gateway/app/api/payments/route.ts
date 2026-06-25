@@ -166,13 +166,31 @@ export async function POST(req: NextRequest) {
         providerRef: checkout.reference,
         meta: jsonSafe({
           ...(b.meta ?? {}),
+          appointmentId,
+          encounterId,
+          caseId: b.caseId ?? null,
           provider: checkout.provider === 'internal' ? 'mock' : checkout.provider,
+          providerRef: checkout.reference,
           paymentMethod,
           redirectUrl: checkout.redirectUrl,
           checkout: checkout.raw ?? null,
         }),
       } as any,
     });
+
+    await prisma.appointment.update({
+      where: { id: appointmentId },
+      data: {
+        paymentProvider: checkout.provider === 'internal' ? 'mock' : checkout.provider,
+        paymentRef: checkout.reference,
+        paymentStatus:
+          payment.status === 'captured'
+            ? 'CAPTURED'
+            : payment.status === 'pending'
+              ? 'PENDING'
+              : 'FAILED',
+      } as any,
+    }).catch(() => null);
 
     await prisma.auditEvent.create({
       data: {

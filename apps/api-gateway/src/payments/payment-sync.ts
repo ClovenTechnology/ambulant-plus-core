@@ -19,10 +19,78 @@ function readMeta(value: unknown): Record<string, any> {
     : {};
 }
 
+function clean(value: unknown, max = 240) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
 function toAppointmentPaymentStatus(state: PaymentVerificationState): AppointmentPaymentStatus {
   if (state === 'captured') return AppointmentPaymentStatus.CAPTURED;
   if (state === 'pending') return AppointmentPaymentStatus.PENDING;
   return AppointmentPaymentStatus.FAILED;
+}
+
+export function extractAppointmentIdFromPaymentReference(reference: string) {
+  const ref = clean(reference, 320);
+  const match = ref.match(/(?:^|_)(appt-[A-Za-z0-9-]+)(?:_|$)/);
+  return match?.[1] || null;
+}
+
+function uniq(values: Array<string | null | undefined>) {
+  return Array.from(
+    new Set(
+      values
+        .map((v) => clean(v, 240))
+        .filter(Boolean),
+    ),
+  );
+}
+
+export async function resolvePaymentReference(reference: string) {
+  const ref = clean(reference, 320);
+
+  if (!ref) {
+    return {
+      appointment: null as any,
+      payment: null as any,
+      appointmentId: null as string | null,
+    };
+  }
+
+  const payment = await prisma.payment.findFirst({
+    where: {
+      OR: [
+        { providerRef: ref },
+        { id: ref },
+      ],
+    },
+  }).catch(() => null);
+
+  const paymentMeta = readMeta(payment?.meta);
+
+  const appointmentIdCandidates = uniq([
+    paymentMeta.appointmentId,
+    paymentMeta.appointment_id,
+    paymentMeta.appointment?.id,
+    extractAppointmentIdFromPaymentReference(ref),
+  ]);
+
+  const appointmentOr: any[] = [
+    { paymentRef: ref },
+  ];
+
+  for (const id of appointmentIdCandidates) {
+    appointmentOr.push({ id });
+  }
+
+  const appointment = await prisma.appointment.findFirst({
+    where: { OR: appointmentOr },
+  }).catch(() => null);
+
+  return {
+    appointment,
+    payment,
+    appointmentId: appointment?.id ?? appointmentIdCandidates[0] ?? null,
+  };
 }
 
 export async function syncVerifiedPaymentToAppointment(args: {
@@ -33,13 +101,9 @@ export async function syncVerifiedPaymentToAppointment(args: {
   currency?: string;
   raw?: Record<string, unknown> | null;
 }) {
-  const appointment = await prisma.appointment.findFirst({
-    where: { paymentRef: args.reference },
-  });
-
-  const existingPayment = await prisma.payment.findFirst({
-    where: { providerRef: args.reference },
-  });
+  const resolved = await resolvePaymentReference(args.reference);
+  const appointment = resolved.appointment;
+  const existingPayment = resolved.payment;
 
   let payment = existingPayment;
 
@@ -61,7 +125,7 @@ export async function syncVerifiedPaymentToAppointment(args: {
         meta: jsonSafe({
           provider: args.provider,
           verification: args.raw ?? null,
-          appointmentId: appointment?.id ?? null,
+          appointmentId: appointment?.id ?? resolved.appointmentId ?? null,
         }),
       } as any,
     });
@@ -84,6 +148,7 @@ export async function syncVerifiedPaymentToAppointment(args: {
           ...meta,
           provider: args.provider,
           verification: args.raw ?? null,
+          appointmentId: appointment?.id ?? meta.appointmentId ?? resolved.appointmentId ?? null,
           verifiedAt: new Date().toISOString(),
         }),
       },
