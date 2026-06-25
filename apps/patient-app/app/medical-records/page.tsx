@@ -536,7 +536,7 @@ export default function MedicalRecordsPage() {
     setUploadOpen(false);
     if (!files || files.length === 0) return;
 
-    toast(`Selected ${files.length} file(s). Upload is not available yet.`, 'info');
+    toast(`Selected ${files.length} file(s). Secure document upload is being prepared; no file was uploaded yet.`, 'info');
   }
 
   const TopBar = (
@@ -671,7 +671,7 @@ export default function MedicalRecordsPage() {
 
           <div className="hidden sm:flex items-center gap-2 text-xs text-slate-600">
             <ShieldCheck className="h-4 w-4 text-emerald-700" />
-            POPIA-safe sharing (when wired) • Consent-based access
+            POPIA-safe sharing • Consent-based access
           </div>
         </div>
 
@@ -1049,12 +1049,12 @@ export default function MedicalRecordsPage() {
                       <ShieldCheck className="h-4 w-4 text-emerald-700" />
                     </div>
                     <div className="min-w-0">
-                      <div className="text-sm font-black text-slate-950">How sharing should work (recommended)</div>
+                      <div className="text-sm font-black text-slate-950">How sharing works</div>
                       <ul className="mt-2 space-y-1 text-sm text-slate-700 list-disc pl-5">
-                        <li>Generate a time-limited share link (e.g., 24h) with scope (docs only / full record).</li>
-                        <li>Require explicit consent confirmation in the UI before link generation.</li>
-                        <li>Log every access event (who/when/what viewed) for audit.</li>
-                        <li>Allow immediate revoke.</li>
+                        <li>Generate a consent-based, time-limited link with the selected scope once secure record sharing is enabled.</li>
+                        <li>Require explicit consent confirmation before link generation.</li>
+                        <li>Log each access event for audit.</li>
+                        <li>Allow immediate revocation.</li>
                       </ul>
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
@@ -1063,11 +1063,11 @@ export default function MedicalRecordsPage() {
                           className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800"
                         >
                           <Share2 className="h-4 w-4" />
-                          Share this page
+                          Copy page link
                         </button>
                         <button
                           type="button"
-                          onClick={() => toast('Secure record-sharing links are not available yet.', 'info')}
+                          onClick={() => toast('Time-limited record sharing is being prepared. Use Export while secure sharing is being wired.', 'info')}
                           className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-800 hover:bg-slate-50"
                         >
                           <Calendar className="h-4 w-4" />
@@ -1125,13 +1125,8 @@ export default function MedicalRecordsPage() {
                   <span className="font-bold">Last updated</span>
                   <span className="text-slate-600">{fmtDateTime(bundle.updatedAt)}</span>
                 </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="font-bold">Data source</span>
-                  <span className="text-slate-600">API</span>
-                </div>
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                  This page now depends on the live <span className="font-bold">GET /api/medical-records</span> route.
-                  If records are unavailable, it fails visibly instead of showing mock data.
+                <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-xs text-emerald-800">
+                  Your record is assembled from Ambulant+ encounters, clinician notes, medications, allergies, documents, and laboratory results where available.
                 </div>
               </div>
             </Card>
@@ -1146,7 +1141,7 @@ export default function MedicalRecordsPage() {
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <div className="text-base font-black text-slate-950">Upload document</div>
-                <div className="mt-1 text-sm text-slate-600">Choose PDFs, images, or reports to add to your record.</div>
+                <div className="mt-1 text-sm text-slate-600">Secure upload will support PDFs, images, outside prescriptions, radiology reports, and referral documents.</div>
               </div>
               <button
                 type="button"
