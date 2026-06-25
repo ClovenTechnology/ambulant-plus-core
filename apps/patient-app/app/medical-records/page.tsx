@@ -303,6 +303,9 @@ export default function MedicalRecordsPage() {
 
   const [uploadOpen, setUploadOpen] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareScope, setShareScope] = useState<'full_record' | 'documents_only' | 'labs_only'>('documents_only');
+  const [shareTtlHours, setShareTtlHours] = useState<1 | 6 | 12 | 24 | 72>(24);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const tabs = useMemo(
@@ -567,6 +570,43 @@ export default function MedicalRecordsPage() {
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = '';
+    }
+  }
+
+  async function createTimeLimitedShareLink() {
+    const consent = window.confirm(
+      'Create a time-limited medical record share link? Only share this with a trusted recipient. Access will be logged.',
+    );
+
+    if (!consent) return;
+
+    setShareBusy(true);
+    try {
+      const res = await fetch('/api/medical-records/share', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          scope: shareScope,
+          ttlHours: shareTtlHours,
+          consentConfirmed: true,
+        }),
+      });
+
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok || !data?.share?.shareUrl) {
+        throw new Error(data?.error || 'Could not create share link.');
+      }
+
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(data.share.shareUrl);
+        toast('Time-limited share link copied to clipboard.', 'success');
+      } else {
+        toast(data.share.shareUrl, 'info');
+      }
+    } catch (error: any) {
+      toast(error?.message || 'Could not create share link.', 'error');
+    } finally {
+      setShareBusy(false);
     }
   }
 
@@ -1087,22 +1127,54 @@ export default function MedicalRecordsPage() {
                         <li>Log each access event for audit.</li>
                         <li>Allow immediate revocation.</li>
                       </ul>
+                      <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <label className="block">
+                          <span className="text-xs font-black uppercase tracking-wide text-slate-500">Share scope</span>
+                          <select
+                            value={shareScope}
+                            onChange={(e) => setShareScope(e.target.value as 'full_record' | 'documents_only' | 'labs_only')}
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+                          >
+                            <option value="documents_only">Documents only</option>
+                            <option value="labs_only">Laboratory results only</option>
+                            <option value="full_record">Full record</option>
+                          </select>
+                        </label>
+
+                        <label className="block">
+                          <span className="text-xs font-black uppercase tracking-wide text-slate-500">Expires after</span>
+                          <select
+                            value={shareTtlHours}
+                            onChange={(e) => setShareTtlHours(Number(e.target.value) as 1 | 6 | 12 | 24 | 72)}
+                            className="mt-1 w-full rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/25"
+                          >
+                            <option value={1}>1 hour</option>
+                            <option value={6}>6 hours</option>
+                            <option value={12}>12 hours</option>
+                            <option value={24}>24 hours</option>
+                            <option value={72}>72 hours</option>
+                          </select>
+                        </label>
+                      </div>
+
                       <div className="mt-3 flex flex-wrap gap-2">
                         <button
                           type="button"
+                          onClick={createTimeLimitedShareLink}
+                          disabled={shareBusy}
+                          className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Calendar className="h-4 w-4" />
+                          {shareBusy ? 'Creating secure link…' : 'Generate time-limited link'}
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={doShare}
-                          className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2 text-sm font-extrabold text-white hover:bg-slate-800"
+                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-800 hover:bg-slate-50"
                         >
                           <Share2 className="h-4 w-4" />
                           Copy page link
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toast('Time-limited record sharing is being prepared. Use Export while secure sharing is being wired.', 'info')}
-                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-800 hover:bg-slate-50"
-                        >
-                          <Calendar className="h-4 w-4" />
-                          Generate time-limited link
                         </button>
                       </div>
                     </div>
