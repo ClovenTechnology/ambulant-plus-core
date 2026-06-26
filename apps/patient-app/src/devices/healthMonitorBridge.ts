@@ -2227,6 +2227,39 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
       raw: Array.from(raw),
     });
 
+    // Linktop Ox/SpO2 packets must be consumed before generic frame parsing.
+    // The Android SDK routes these 20-byte packets into OxTask before normal
+    // module dispatch; otherwise the 14/16-byte Ox payload is separated from
+    // the raw wrapper and pulse derivation never sees the complete stream.
+    if (this.mode === 'spo2' && charKey === 'vendor_notify') {
+      const recordedAt = new Date().toISOString();
+      const sdkOxSamples = this.consumeSdkOxFrame(raw, recordedAt);
+
+      if (sdkOxSamples > 0) {
+        this.noteGenericSignal(this.spo2State);
+        this.spo2PpgFrames += 1;
+
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(
+            new CustomEvent('iomt:ppg', {
+              detail: {
+                deviceId: DEVICE_ID,
+                timestamp: recordedAt,
+                sampleHz: 125,
+                samples: [],
+                raw: Array.from(raw),
+                sdkOxSamples,
+                pulse: this.spo2LastPulse,
+                route: 'sdk_ox_raw',
+              },
+            }),
+          );
+        }
+
+        return;
+      }
+    }
+
     const exact = parseLinktopFrame(raw);
     if (exact) {
       console.info('[HealthMonitorBridge] parsed exact frame', {
