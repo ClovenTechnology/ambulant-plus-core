@@ -164,6 +164,68 @@ function isCompleted(status: string) {
   return s === 'completed' || s === 'done' || s === 'closed';
 }
 
+function normalizeStatus(status: unknown) {
+  return String(status || '').trim().toLowerCase();
+}
+
+function appointmentPaymentStatus(appt: Appt) {
+  const meta = asObj(appt.meta);
+
+  return normalizeStatus(
+    appt.paymentStatus ||
+      meta.paymentStatus ||
+      meta.payment_status ||
+      '',
+  );
+}
+
+function appointmentPaymentIsPending(appt: Appt) {
+  const status = normalizeStatus(appt.status);
+  const paymentStatus = appointmentPaymentStatus(appt);
+
+  return (
+    status === 'pending_payment' ||
+    status === 'pending' ||
+    ['pending', 'initiated', 'init', 'processing', 'authorization'].includes(paymentStatus)
+  );
+}
+
+function appointmentPaymentIsFailed(appt: Appt) {
+  const status = normalizeStatus(appt.status);
+  const paymentStatus = appointmentPaymentStatus(appt);
+
+  return (
+    ['failed', 'cancelled_payment_timeout', 'payment_expired', 'payment_init_failed'].includes(status) ||
+    ['failed', 'abandoned', 'cancelled', 'canceled', 'expired'].includes(paymentStatus)
+  );
+}
+
+function appointmentJoinBlockReason(appt: Appt) {
+  if (!appt.patientJoinUrl && !appt.roomId) return 'Televisit room is not ready yet.';
+  if (appointmentPaymentIsPending(appt)) return 'Complete payment before joining the televisit.';
+  if (appointmentPaymentIsFailed(appt)) return 'Payment failed or expired. Please rebook or retry checkout.';
+
+  const status = normalizeStatus(appt.status);
+  if (['completed', 'done', 'closed'].includes(status)) return 'This appointment has already been completed.';
+  if (['cancelled', 'canceled'].includes(status)) return 'This appointment has been cancelled.';
+
+  return 'This appointment is not ready for televisit entry yet.';
+}
+
+function lobbyHrefForAppointment(appt: Appt) {
+  if (!appt.roomId && appt.patientJoinUrl) return appt.patientJoinUrl;
+  if (!appt.roomId) return '#';
+
+  const qs = new URLSearchParams();
+  qs.set('appointmentId', appt.id);
+  qs.set('roomId', appt.roomId);
+  if (appt.patientId) qs.set('patientId', appt.patientId);
+  if (appt.subjectPatientId) qs.set('subjectPatientId', appt.subjectPatientId);
+  if (appt.reason) qs.set('reason', appt.reason);
+
+  return `/lobby?${qs.toString()}`;
+}
+
 function starsText(score: number) {
   const s = Math.max(0, Math.min(5, Math.round(score)));
   return '★'.repeat(s) + '☆'.repeat(5 - s);
@@ -350,10 +412,13 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
 
   const canJoin = useMemo(() => {
     if (!appt || appt === 'notfound') return false;
-    const s = String(appt.status || '').toLowerCase();
+    const s = normalizeStatus(appt.status);
+
     return (
       (s === 'scheduled' || s === 'confirmed' || s === 'checked_in' || s === 'in_consult') &&
-      Boolean(appt.patientJoinUrl || appt.roomId)
+      Boolean(appt.patientJoinUrl || appt.roomId) &&
+      !appointmentPaymentIsPending(appt) &&
+      !appointmentPaymentIsFailed(appt)
     );
   }, [appt]);
 
@@ -531,11 +596,8 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
     ? `/appointments?subjectPatientId=${encodeURIComponent(subjectPatientId)}${relationshipId ? `&relationshipId=${encodeURIComponent(relationshipId)}` : ''}`
     : '/appointments';
 
-  const joinHref =
-    appt.patientJoinUrl ||
-    (appt.roomId
-      ? `/sfu/${encodeURIComponent(appt.roomId)}?appointmentId=${encodeURIComponent(appt.id)}`
-      : '#');
+  const joinHref = lobbyHrefForAppointment(appt);
+  const joinReason = appointmentJoinBlockReason(appt);
 
   return (
     <main className="p-6 space-y-4 max-w-3xl mx-auto">
@@ -743,9 +805,16 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
           }`}
           href={canJoin ? joinHref : '#'}
           aria-disabled={!canJoin}
+          title={canJoin ? 'Open pre-visit lobby' : joinReason}
         >
-          Join Televisit
+          {canJoin ? 'Open lobby' : 'Join locked'}
         </Link>
+
+        {!canJoin && joinReason ? (
+          <span className="self-center text-xs text-amber-700">
+            {joinReason}
+          </span>
+        ) : null}
 
         <Link className="underline text-sm self-center" href={backHref}>
           ← Back

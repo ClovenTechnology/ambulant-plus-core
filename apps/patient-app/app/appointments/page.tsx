@@ -122,16 +122,45 @@ function isCompleted(status: string) {
   return s === 'completed' || s === 'done' || s === 'closed';
 }
 
-function canJoinAppointment(a: Appointment) {
+function paymentStatusOf(a: Appointment, paymentState?: PaymentState | null) {
+  return normalizeStatus(
+    String(paymentState?.paymentStatus || a.paymentStatus || ''),
+  );
+}
+
+function paymentIsPending(a: Appointment, paymentState?: PaymentState | null) {
+  const status = normalizeStatus(a.status);
+  const paymentStatus = paymentStatusOf(a, paymentState);
+
+  return (
+    Boolean(paymentState?.pending) ||
+    status === 'pending_payment' ||
+    status === 'pending' ||
+    ['pending', 'initiated', 'init', 'processing', 'authorization'].includes(paymentStatus)
+  );
+}
+
+function paymentIsFailed(a: Appointment, paymentState?: PaymentState | null) {
+  const status = normalizeStatus(a.status);
+  const paymentStatus = paymentStatusOf(a, paymentState);
+
+  return (
+    Boolean(paymentState?.failed) ||
+    ['failed', 'cancelled_payment_timeout', 'payment_expired', 'payment_init_failed'].includes(status) ||
+    ['failed', 'abandoned', 'cancelled', 'canceled', 'expired'].includes(paymentStatus)
+  );
+}
+
+function canJoinAppointment(a: Appointment, paymentState?: PaymentState | null) {
   const status = normalizeStatus(a.status);
 
   return (
     Boolean(a.patientJoinUrl || a.roomId) &&
+    !paymentIsPending(a, paymentState) &&
+    !paymentIsFailed(a, paymentState) &&
     [
       'scheduled',
       'confirmed',
-      'pending_payment',
-      'pending',
       'checked_in',
       'in_consult',
       'in_progress',
@@ -141,17 +170,30 @@ function canJoinAppointment(a: Appointment) {
   );
 }
 
+function joinBlockReason(a: Appointment, paymentState?: PaymentState | null) {
+  if (!a.patientJoinUrl && !a.roomId) return 'Televisit room is not ready yet.';
+  if (paymentIsPending(a, paymentState)) return 'Complete payment before joining the televisit.';
+  if (paymentIsFailed(a, paymentState)) return 'Payment failed or expired. Please rebook or retry checkout.';
+
+  const status = normalizeStatus(a.status);
+  if (['completed', 'done', 'closed'].includes(status)) return 'This appointment has already been completed.';
+  if (['cancelled', 'canceled'].includes(status)) return 'This appointment has been cancelled.';
+
+  return 'This appointment is not ready for televisit entry yet.';
+}
+
 function joinHrefForAppointment(a: Appointment) {
-  if (a.patientJoinUrl) return a.patientJoinUrl;
+  if (!a.roomId && a.patientJoinUrl) return a.patientJoinUrl;
   if (!a.roomId) return '#';
 
   const qs = new URLSearchParams();
   qs.set('appointmentId', a.id);
+  qs.set('roomId', a.roomId);
   if (a.patientId) qs.set('patientId', a.patientId);
   if (a.subjectPatientId) qs.set('subjectPatientId', a.subjectPatientId);
+  if (a.reason) qs.set('reason', a.reason);
 
-  const suffix = qs.toString();
-  return `/sfu/${encodeURIComponent(a.roomId)}${suffix ? `?${suffix}` : ''}`;
+  return `/lobby?${qs.toString()}`;
 }
 
 function statusChipClasses(status: string) {
@@ -163,9 +205,14 @@ function statusChipClasses(status: string) {
   if (
     s === 'scheduled' ||
     s === 'confirmed' ||
-    s === 'pending_payment'
+    s === 'checked_in' ||
+    s === 'in_consult'
   ) {
     return `${base} border-emerald-200 bg-emerald-50 text-emerald-700`;
+  }
+
+  if (s === 'pending_payment' || s === 'pending') {
+    return `${base} border-amber-200 bg-amber-50 text-amber-800`;
   }
 
   if (s === 'completed' || s === 'done' || s === 'closed') {
@@ -585,7 +632,8 @@ function UpcomingAppointmentCard({
     addSuffix: true,
   });
 
-  const canJoin = canJoinAppointment(appointment);
+  const canJoin = canJoinAppointment(appointment, paymentState);
+  const joinReason = joinBlockReason(appointment, paymentState);
 
   return (
     <div className="rounded-3xl border bg-white p-5 shadow-sm transition hover:shadow-md">
@@ -618,13 +666,13 @@ function UpcomingAppointmentCard({
               </span>
             )}
 
-            {paymentState?.pending && (
+            {paymentIsPending(appointment, paymentState) && (
               <span className="rounded-full bg-amber-100 px-3 py-1 text-amber-800">
                 Awaiting payment
               </span>
             )}
 
-            {paymentState?.failed && (
+            {paymentIsFailed(appointment, paymentState) && (
               <span className="rounded-full bg-rose-100 px-3 py-1 text-rose-800">
                 Payment failed
               </span>
@@ -675,9 +723,10 @@ function UpcomingAppointmentCard({
           ) : (
             <span
               aria-disabled="true"
+              title={joinReason}
               className="cursor-not-allowed rounded-full border border-slate-200 px-4 py-2 text-xs text-slate-400"
             >
-              Join televisit
+              Join locked
             </span>
           )}
         </div>
