@@ -170,14 +170,16 @@ function decodeGlucoseOnly(dv: DataView): LinktopDecoded {
 function decodeSpo2Only(dv: DataView): LinktopDecoded {
   const raw = asU8(dv);
 
-  const ack = ackIfTiny(raw);
-  if (ack) return ack;
-
   const battery = batteryIfPresent(raw);
   if (battery) return battery;
 
+  // SpO2/HR spot-read packets are commonly compact 2-3 byte payloads.
+  // Parse scalar results before treating tiny payloads as generic ACKs.
   const scalar = spo2IfPresent(dv);
   if (scalar) return scalar;
+
+  const ack = ackIfTiny(raw);
+  if (ack) return ack;
 
   const ppg = parsePPGWave(dv);
   if (ppg) {
