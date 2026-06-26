@@ -197,6 +197,9 @@ type BpComputedResult = {
   beatCount: number;
   peakAmplitude: number;
   mapPressure: number;
+  confidence: 'threshold' | 'partial_threshold_fallback';
+  algorithm: 'bp-js-native-shaped' | 'bp-js-native-shaped-partial-threshold';
+  fallbackReason?: string | null;
 };
 
 type BpAlgorithmState = {
@@ -638,6 +641,99 @@ export class HealthMonitorBridge {
     return bpm;
   }
 
+  private isFiniteBpPressure(value: number | null | undefined): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0;
+  }
+
+  private clampBpValue(value: number, min: number, max: number) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  private estimateBpFromPartialThresholds(opts: {
+    mapPressure: number;
+    sbpPressure: number | null;
+    dbpPressure: number | null;
+    beatPressures: number[];
+    peakIdx: number;
+  }): { systolic: number; diastolic: number; fallbackReason: string } | null {
+    const mapPressure = opts.mapPressure;
+    if (!Number.isFinite(mapPressure) || mapPressure < 45 || mapPressure > 180) {
+      return null;
+    }
+
+    const prePeakPressures = opts.beatPressures
+      .slice(0, Math.max(0, opts.peakIdx))
+      .filter((value) => this.isFiniteBpPressure(value));
+
+    const postPeakPressures = opts.beatPressures
+      .slice(opts.peakIdx + 1)
+      .filter((value) => this.isFiniteBpPressure(value));
+
+    const observedHigh = prePeakPressures.length ? Math.max(...prePeakPressures) : null;
+    const observedLow = postPeakPressures.length ? Math.min(...postPeakPressures) : null;
+
+    let systolic = this.isFiniteBpPressure(opts.sbpPressure) ? opts.sbpPressure : null;
+    let diastolic = this.isFiniteBpPressure(opts.dbpPressure) ? opts.dbpPressure : null;
+
+    const reasons: string[] = [];
+
+    if (systolic == null) {
+      if (observedHigh != null && observedHigh > mapPressure + 8) {
+        systolic = observedHigh;
+        reasons.push('systolic_from_pre_peak_pressure');
+      } else {
+        reasons.push('systolic_from_map_pressure');
+      }
+    }
+
+    if (diastolic == null) {
+      if (observedLow != null && observedLow < mapPressure - 8) {
+        diastolic = observedLow;
+        reasons.push('diastolic_from_post_peak_pressure');
+      } else {
+        reasons.push('diastolic_from_map_pressure');
+      }
+    }
+
+    if (systolic == null && diastolic == null) {
+      const pulsePressure = this.clampBpValue(mapPressure * 0.5, 30, 80);
+      systolic = mapPressure + (2 * pulsePressure) / 3;
+      diastolic = mapPressure - pulsePressure / 3;
+    } else if (systolic != null && diastolic == null) {
+      diastolic = (3 * mapPressure - systolic) / 2;
+    } else if (systolic == null && diastolic != null) {
+      systolic = 3 * mapPressure - 2 * diastolic;
+    }
+
+    if (systolic == null || diastolic == null) {
+      return null;
+    }
+
+    systolic = Math.round(this.clampBpValue(systolic, 70, 240));
+    diastolic = Math.round(this.clampBpValue(diastolic, 35, 150));
+
+    const pulsePressure = systolic - diastolic;
+
+    if (pulsePressure > 95) {
+      diastolic = Math.round(this.clampBpValue(systolic - 95, 35, 150));
+    }
+
+    if (systolic <= diastolic || systolic - diastolic < 10) {
+      const pulsePressureFromMap = this.clampBpValue(mapPressure * 0.45, 30, 80);
+      systolic = Math.round(this.clampBpValue(mapPressure + (2 * pulsePressureFromMap) / 3, 70, 240));
+      diastolic = Math.round(this.clampBpValue(mapPressure - pulsePressureFromMap / 3, 35, 150));
+    }
+
+    if (!Number.isFinite(systolic) || !Number.isFinite(diastolic)) return null;
+    if (systolic <= diastolic || systolic - diastolic < 10) return null;
+
+    return {
+      systolic,
+      diastolic,
+      fallbackReason: reasons.join('+') || 'partial_threshold_fallback',
+    };
+  }
+
   private decodeOx24(b0: number, b1: number, b2: number): number {
     return ((b0 & 0xff) << 16) | ((b1 & 0xff) << 8) | (b2 & 0xff);
   }
@@ -989,7 +1085,19 @@ export class HealthMonitorBridge {
       }
     }
 
+    let confidence: BpComputedResult['confidence'] = 'threshold';
+    let algorithm: BpComputedResult['algorithm'] = 'bp-js-native-shaped';
+    let fallbackReason: string | null = null;
+
     if (sbpPressure == null || dbpPressure == null) {
+      const fallback = this.estimateBpFromPartialThresholds({
+        mapPressure,
+        sbpPressure,
+        dbpPressure,
+        beatPressures,
+        peakIdx,
+      });
+
       console.warn('[HealthMonitorBridge] bp_threshold_crossing_failed', {
         peakIdx,
         peakAmplitude,
@@ -1002,8 +1110,16 @@ export class HealthMonitorBridge {
         prePeakAmplitudes: beatAmplitudes.slice(Math.max(0, peakIdx - 10), peakIdx),
         postPeakPressures: beatPressures.slice(peakIdx + 1, Math.min(beatPressures.length, peakIdx + 11)),
         postPeakAmplitudes: beatAmplitudes.slice(peakIdx + 1, Math.min(beatAmplitudes.length, peakIdx + 11)),
+        fallback,
       });
-      return null;
+
+      if (!fallback) return null;
+
+      sbpPressure = fallback.systolic;
+      dbpPressure = fallback.diastolic;
+      confidence = 'partial_threshold_fallback';
+      algorithm = 'bp-js-native-shaped-partial-threshold';
+      fallbackReason = fallback.fallbackReason;
     }
 
     const systolic = Math.round(sbpPressure);
@@ -1022,6 +1138,9 @@ export class HealthMonitorBridge {
       beatCount: beatIndices.length,
       peakAmplitude,
       mapPressure,
+      confidence,
+      algorithm,
+      fallbackReason,
     };
   }
 
@@ -1049,7 +1168,9 @@ export class HealthMonitorBridge {
           source: 'ble',
           route: 'vendor_notify',
           authoritative: false,
-          algorithm: 'bp-js-native-shaped',
+          algorithm: result.algorithm,
+          confidence: result.confidence,
+          fallbackReason: result.fallbackReason ?? null,
           beatCount: result.beatCount,
           mapPressure: result.mapPressure,
           peakAmplitude: result.peakAmplitude,
@@ -1069,7 +1190,8 @@ export class HealthMonitorBridge {
             source: 'ble',
             parent: 'blood_pressure',
             authoritative: false,
-            algorithm: 'bp-js-native-shaped',
+            algorithm: result.algorithm,
+            parentConfidence: result.confidence,
           },
           dedupeKey: 'hr',
         });
