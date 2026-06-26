@@ -19,16 +19,10 @@ import {
 } from 'lucide-react';
 
 import { toast } from '@/components/ToastMount';
-import { loadHistory } from '@/src/analytics/history';
 import { computeCardioRisk, hypertensionIndex } from '@/src/analytics/cardio';
 import { generateHealthReport } from '@/src/analytics/report';
 
 type RangeKey = '7d' | '30d' | '90d' | '1y';
-
-type HistoryRecord = {
-  timestamp: string;
-  data: Record<string, any>;
-};
 
 type BpPoint = {
   ts: string;
@@ -72,6 +66,15 @@ function addDaysISO(iso: string, days: number) {
 function fmtNum(n?: number, digits = 0) {
   if (typeof n !== 'number' || !Number.isFinite(n)) return '—';
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: digits }).format(n);
+}
+
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return undefined;
 }
 
 function fmtDateTime(ts?: string, hideSensitive?: boolean) {
@@ -340,82 +343,57 @@ function VitalsReportPageContent() {
 
     async function load() {
       setLoading(true);
+
       try {
-        if (!patientId) {
-          setBpPoints([]);
-          setLatest({});
-          return;
+        const qs = new URLSearchParams({ range });
+        if (patientId) qs.set('patientId', patientId);
+
+        const res = await fetch(`/api/reports/vitals?${qs.toString()}`, {
+          cache: 'no-store',
+          headers: { accept: 'application/json' },
+        });
+
+        const report = await res.json().catch(() => null);
+
+        if (!res.ok || !report || report.ok === false) {
+          throw new Error(report?.error || `reports_vitals_failed_${res.status}`);
         }
 
-        const days = rangeToDays(range);
-        const today = toLocalISODate(new Date());
-        const startISO = addDaysISO(today, -(days - 1));
+        const trend = Array.isArray(report?.trend) ? report.trend : [];
 
-        // Primary: BP history used by the PDF report
-        const bpHistory = (await loadHistory('duecare.health-monitor', 'bp').catch(() => [])) as HistoryRecord[];
-
-        const points: BpPoint[] = (Array.isArray(bpHistory) ? bpHistory : [])
-          .map((r) => {
-            const ts = String(r?.timestamp || '');
+        const points: BpPoint[] = trend
+          .map((point: any) => {
+            const ts = String(point?.ts || point?.t || point?.recorded_at || '');
             const d = new Date(ts);
             const dateISO = Number.isNaN(d.getTime()) ? '' : toLocalISODate(d);
-            const sys = Number(r?.data?.systolic);
-            const dia = Number(r?.data?.diastolic);
+            const systolic = toFiniteNumber(point?.sys ?? point?.systolic);
+            const diastolic = toFiniteNumber(point?.dia ?? point?.diastolic);
+
             return {
               ts,
               dateISO,
-              systolic: Number.isFinite(sys) ? sys : undefined,
-              diastolic: Number.isFinite(dia) ? dia : undefined,
+              systolic,
+              diastolic,
             };
           })
-          .filter((p) => !!p.dateISO)
-          .sort((a, b) => a.ts.localeCompare(b.ts))
-          .filter((p) => p.dateISO >= startISO && p.dateISO <= today);
+          .filter((point) => !!point.dateISO && (point.systolic != null || point.diastolic != null))
+          .sort((a, b) => a.ts.localeCompare(b.ts));
 
-
-        // Try to extract other vitals from any plausible history keys (non-breaking if absent)
-        const candidates: Array<{ deviceId: string; modality: string }> = [
-          { deviceId: 'duecare.health-monitor', modality: 'vitals' },
-          { deviceId: 'duecare.nexring', modality: 'vitals' },
-          { deviceId: 'duecare.nexring', modality: 'health' },
-        ];
-
-        let latestVitals: LatestVitals = {};
-        for (const c of candidates) {
-          const hx = (await loadHistory(c.deviceId, c.modality).catch(() => [])) as HistoryRecord[];
-          if (!Array.isArray(hx) || hx.length === 0) continue;
-
-          const last = hx
-            .slice()
-            .sort((a, b) => String(a?.timestamp || '').localeCompare(String(b?.timestamp || '')))
-            .at(-1);
-
-          if (!last?.data) continue;
-
-          const d = last.data || {};
-          const pick = (k: string) => {
-            const n = Number(d?.[k]);
-            return Number.isFinite(n) ? n : undefined;
-          };
-
-          // common key guesses
-          latestVitals = {
-            ts: String(last.timestamp || ''),
-            hr: pick('hr') ?? pick('heartRate'),
-            spo2: pick('spo2') ?? pick('SpO2'),
-            temp: pick('temp') ?? pick('temp_c') ?? pick('temperature'),
-            rr: pick('rr') ?? pick('respRate'),
-            glucose: pick('glucose'),
-            steps: pick('steps'),
-            calories: pick('calories'),
-            distance: pick('distance'),
-          };
-
-          // if we got anything useful, stop
-          if (Object.values(latestVitals).some((v) => typeof v === 'number' && Number.isFinite(v))) break;
-        }
+        const latestPayload = report?.latest || {};
+        const latestVitals: LatestVitals = {
+          ts: String(latestPayload?.ts || report?.generatedAtISO || ''),
+          hr: toFiniteNumber(latestPayload?.hr),
+          spo2: toFiniteNumber(latestPayload?.spo2),
+          temp: toFiniteNumber(latestPayload?.temp_c ?? latestPayload?.temp),
+          rr: toFiniteNumber(latestPayload?.rr ?? latestPayload?.respiratoryRate),
+          glucose: toFiniteNumber(latestPayload?.glucose),
+          steps: toFiniteNumber(latestPayload?.steps),
+          calories: toFiniteNumber(latestPayload?.calories),
+          distance: toFiniteNumber(latestPayload?.distance),
+        };
 
         if (!alive) return;
+
         setBpPoints(points);
         setLatest(latestVitals);
       } catch (e) {
@@ -430,6 +408,7 @@ function VitalsReportPageContent() {
     }
 
     load();
+
     return () => {
       alive = false;
     };
@@ -572,7 +551,7 @@ function VitalsReportPageContent() {
                   {range.toUpperCase()}
                 </span>
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs text-emerald-700">
-                  Local data
+                  Persisted data
                 </span>
               </div>
               <div className="mt-1 text-xs text-slate-500">
@@ -657,7 +636,7 @@ function VitalsReportPageContent() {
                 right={
                   <span className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-xs text-slate-600">
                     <ShieldCheck className="h-3.5 w-3.5" />
-                    Local-only
+                    Persisted
                   </span>
                 }
               >
