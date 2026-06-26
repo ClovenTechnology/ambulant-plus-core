@@ -437,24 +437,51 @@ function readingFromEvent(evt: HealthMonitorLiveEvent): HealthMonitorReading | n
   }
 
   if (evt.type === 'ecg_cycle_complete') {
+    const heartRate = typeof detail.heartRate === 'number' ? Math.round(detail.heartRate) : null;
+    const sampleCount = typeof detail.sampleCount === 'number' ? detail.sampleCount : null;
+    const signalQuality =
+      typeof detail.signalQuality === 'number' ? Math.round(detail.signalQuality) : null;
+    const durationSec =
+      typeof detail.durationSec === 'number' && Number.isFinite(detail.durationSec)
+        ? detail.durationSec
+        : null;
+
+    const secondary = [
+      sampleCount != null ? `${sampleCount} samples` : null,
+      signalQuality != null ? `Signal quality ${signalQuality}` : null,
+      durationSec != null ? `${durationSec}s` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
     return {
       id: createReadingId('ecg', at),
       kind: 'ecg',
       label: 'ECG',
-      primary: detail.sampleCount != null ? String(detail.sampleCount) : '—',
+      primary: heartRate != null ? String(heartRate) : sampleCount != null ? String(sampleCount) : '—',
       secondary:
-        detail.signalQuality != null
-          ? `Signal quality ${detail.signalQuality}`
-          : detail.reason
-            ? String(detail.reason).replace(/_/g, ' ')
-            : 'ECG session completed',
-      unit: 'samples',
+        secondary ||
+        detail.conclusion ||
+        (detail.reason ? String(detail.reason).replace(/_/g, ' ') : 'ECG session completed'),
+      unit: heartRate != null ? 'bpm' : 'samples',
       at,
       source: 'health_monitor',
       payload: {
-        sampleCount: detail.sampleCount ?? null,
-        signalQuality: detail.signalQuality ?? null,
+        sampleCount,
+        signalQuality,
+        sampleHz: detail.sampleHz ?? null,
+        durationSec,
+        heartRate,
+        conclusion: detail.conclusion ?? null,
         reason: detail.reason ?? null,
+        waveformPreview: Array.isArray(detail.waveformPreview) ? detail.waveformPreview : [],
+        summary: {
+          conclusion: detail.conclusion ?? null,
+          heartRate,
+          signalQuality,
+          sampleCount,
+          durationSec,
+        },
       },
     };
   }
@@ -589,22 +616,48 @@ function readingFromState(
   if (kind === 'ecg' && state.lastEcgCycleComplete) {
     const r: any = state.lastEcgCycleComplete;
     const at = String(r.recordedAt || now);
+    const heartRate = typeof r.heartRate === 'number' ? Math.round(r.heartRate) : null;
+    const sampleCount = typeof r.sampleCount === 'number' ? r.sampleCount : null;
+    const signalQuality =
+      typeof r.signalQuality === 'number' ? Math.round(r.signalQuality) : null;
+    const durationSec =
+      typeof r.durationSec === 'number' && Number.isFinite(r.durationSec)
+        ? r.durationSec
+        : null;
+
+    const secondary = [
+      sampleCount != null ? `${sampleCount} samples` : null,
+      signalQuality != null ? `Signal quality ${signalQuality}` : null,
+      durationSec != null ? `${durationSec}s` : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
 
     return {
       id: createReadingId('ecg', at),
       kind: 'ecg',
       label: 'ECG',
-      primary: r.sampleCount != null ? String(r.sampleCount) : '—',
-      secondary:
-        r.signalQuality != null
-          ? `Signal quality ${r.signalQuality}`
-          : 'ECG session completed',
-      unit: 'samples',
+      primary: heartRate != null ? String(heartRate) : sampleCount != null ? String(sampleCount) : '—',
+      secondary: secondary || r.conclusion || 'ECG session completed',
+      unit: heartRate != null ? 'bpm' : 'samples',
       at,
       source: 'health_monitor',
       payload: {
-        sampleCount: r.sampleCount ?? null,
-        signalQuality: r.signalQuality ?? null,
+        sampleCount,
+        signalQuality,
+        sampleHz: r.sampleHz ?? null,
+        durationSec,
+        heartRate,
+        conclusion: r.conclusion ?? null,
+        reason: r.reason ?? null,
+        waveformPreview: Array.isArray(r.waveformPreview) ? r.waveformPreview : [],
+        summary: {
+          conclusion: r.conclusion ?? null,
+          heartRate,
+          signalQuality,
+          sampleCount,
+          durationSec,
+        },
       },
     };
   }
@@ -652,6 +705,9 @@ function snapshotPatchFromReading(reading: HealthMonitorReading) {
     return {
       ecgSampleCount: reading.payload.sampleCount ?? null,
       ecgSignalQuality: reading.payload.signalQuality ?? null,
+      ecgHeartRate: reading.payload.heartRate ?? null,
+      ecgDurationSec: reading.payload.durationSec ?? null,
+      ecgConclusion: reading.payload.conclusion ?? null,
     };
   }
 

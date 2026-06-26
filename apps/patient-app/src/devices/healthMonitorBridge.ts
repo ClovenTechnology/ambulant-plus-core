@@ -104,6 +104,11 @@ type BridgeDeviceEvent =
       reason: GenericCycleReason;
       sampleCount: number;
       signalQuality: number | null;
+      sampleHz: number | null;
+      durationSec: number | null;
+      heartRate: number | null;
+      conclusion: string;
+      waveformPreview: number[];
     };
 
 type BridgeOpts = {
@@ -294,6 +299,9 @@ export class HealthMonitorBridge {
   private ecgState: GenericMeasureState = this.makeGenericState();
   private ecgSampleCount = 0;
   private ecgSignalQuality: number | null = null;
+  private ecgSampleHz: number | null = null;
+  private ecgLastSampleAt = 0;
+  private ecgSamples: number[] = [];
 
   private lastStopCommandAt: Partial<Record<LinktopControlOp, number>> = {};
 
@@ -377,6 +385,9 @@ export class HealthMonitorBridge {
     this.resetGenericState(this.ecgState);
     this.ecgSampleCount = 0;
     this.ecgSignalQuality = null;
+    this.ecgSampleHz = null;
+    this.ecgLastSampleAt = 0;
+    this.ecgSamples = [];
   }
 
   private resetBpAlgo() {
@@ -1925,6 +1936,125 @@ export class HealthMonitorBridge {
     this.mode = 'idle';
   }
 
+  private estimateEcgSignalQuality(samples: number[]) {
+    if (samples.length < 32) return null;
+
+    const tail = samples.slice(-2048);
+    const min = Math.min(...tail);
+    const max = Math.max(...tail);
+    const span = max - min;
+
+    if (!Number.isFinite(span) || span <= 0) return 0;
+
+    const mean = tail.reduce((sum, value) => sum + value, 0) / tail.length;
+    const variance =
+      tail.reduce((sum, value) => {
+        const delta = value - mean;
+        return sum + delta * delta;
+      }, 0) / tail.length;
+
+    const sd = Math.sqrt(Math.max(0, variance));
+    const nonFlatRatio =
+      tail.filter((value) => Math.abs(value - mean) > Math.max(1, sd * 0.15)).length /
+      Math.max(1, tail.length);
+
+    const spanScore = Math.min(45, Math.max(0, (span / 800) * 45));
+    const densityScore = Math.min(35, Math.max(0, nonFlatRatio * 35));
+    const sampleScore = Math.min(20, Math.max(0, (samples.length / 1024) * 20));
+
+    return Math.round(Math.min(100, spanScore + densityScore + sampleScore));
+  }
+
+  private estimateEcgHeartRate(samples: number[], sampleHz: number | null) {
+    const hz = sampleHz && Number.isFinite(sampleHz) && sampleHz > 0 ? sampleHz : 512;
+    if (samples.length < hz * 2) return null;
+
+    const tail = samples.slice(-Math.min(samples.length, Math.round(hz * 12)));
+    const mean = tail.reduce((sum, value) => sum + value, 0) / tail.length;
+    const variance =
+      tail.reduce((sum, value) => {
+        const delta = value - mean;
+        return sum + delta * delta;
+      }, 0) / tail.length;
+
+    const sd = Math.sqrt(Math.max(0, variance));
+    if (!Number.isFinite(sd) || sd <= 0) return null;
+
+    const threshold = mean + sd * 0.85;
+    const minGap = Math.max(1, Math.round(hz * 0.32));
+    const peakIndices: number[] = [];
+    let lastPeak = -minGap;
+
+    for (let i = 1; i < tail.length - 1; i++) {
+      const value = tail[i];
+
+      if (value < threshold) continue;
+      if (value < tail[i - 1] || value <= tail[i + 1]) continue;
+      if (i - lastPeak < minGap) continue;
+
+      peakIndices.push(i);
+      lastPeak = i;
+    }
+
+    if (peakIndices.length < 3) return null;
+
+    const intervals: number[] = [];
+    for (let i = 1; i < peakIndices.length; i++) {
+      const interval = peakIndices[i] - peakIndices[i - 1];
+      if (interval > 0) intervals.push(interval);
+    }
+
+    if (intervals.length < 2) return null;
+
+    intervals.sort((a, b) => a - b);
+    const median = intervals[Math.floor(intervals.length / 2)];
+    if (!Number.isFinite(median) || median <= 0) return null;
+
+    const bpm = Math.round((60 * hz) / median);
+    if (bpm < 30 || bpm > 220) return null;
+
+    return bpm;
+  }
+
+  private summarizeEcg(reason: GenericCycleReason) {
+    const samples = this.ecgSamples.slice();
+    const sampleHz = this.ecgSampleHz;
+    const signalQuality = this.estimateEcgSignalQuality(samples);
+    const heartRate = this.estimateEcgHeartRate(samples, sampleHz);
+    const durationSec =
+      sampleHz && sampleHz > 0
+        ? Math.round((this.ecgSampleCount / sampleHz) * 10) / 10
+        : this.ecgState.startedAt > 0 && this.ecgLastSampleAt > 0
+          ? Math.round(((this.ecgLastSampleAt - this.ecgState.startedAt) / 1000) * 10) / 10
+          : null;
+
+    const waveformPreview =
+      samples.length > 0
+        ? samples.slice(-160).map((value) => Math.round(Number(value) || 0))
+        : [];
+
+    const conclusion =
+      this.ecgSampleCount <= 0
+        ? reason === 'timeout'
+          ? 'No ECG signal captured before timeout.'
+          : 'No ECG signal captured.'
+        : signalQuality != null && signalQuality < 25
+          ? 'ECG signal captured, but waveform quality is limited.'
+          : heartRate != null
+            ? `ECG captured. Estimated heart rate ${heartRate} bpm.`
+            : 'ECG captured. Rhythm interpretation not generated.';
+
+    return {
+      sampleCount: this.ecgSampleCount,
+      signalQuality,
+      sampleHz,
+      durationSec,
+      heartRate,
+      conclusion,
+      waveformPreview,
+    };
+  }
+
   private async finishEcgCycle(reason: GenericCycleReason) {
     if (this.ecgState.completionEmitted) return;
     this.ecgState.completionEmitted = true;
@@ -1938,11 +2068,18 @@ export class HealthMonitorBridge {
     const normalizedReason: GenericCycleReason =
       reason === 'manual_stop' && this.ecgSampleCount > 0 ? 'result_received' : reason;
 
+    const summary = this.summarizeEcg(normalizedReason);
+
     this.opts?.onDeviceEvent?.({
       type: 'ecg_cycle_complete',
       reason: normalizedReason,
-      sampleCount: this.ecgSampleCount,
-      signalQuality: this.ecgSignalQuality,
+      sampleCount: summary.sampleCount,
+      signalQuality: summary.signalQuality,
+      sampleHz: summary.sampleHz,
+      durationSec: summary.durationSec,
+      heartRate: summary.heartRate,
+      conclusion: summary.conclusion,
+      waveformPreview: summary.waveformPreview,
     });
 
     this.resetEcgState();
@@ -2283,7 +2420,22 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
       }
 
       case 'ecg_wave': {
-        this.ecgSampleCount += result.samples.length;
+        const samples = Array.isArray(result.samples) ? result.samples : [];
+        this.ecgSampleCount += samples.length;
+        this.ecgSampleHz =
+          typeof result.sampleHz === 'number' && Number.isFinite(result.sampleHz)
+            ? result.sampleHz
+            : this.ecgSampleHz;
+        this.ecgLastSampleAt = Date.now();
+
+        if (samples.length > 0) {
+          this.ecgSamples.push(...samples.map((value) => Math.round(Number(value) || 0)));
+          if (this.ecgSamples.length > 4096) {
+            this.ecgSamples = this.ecgSamples.slice(-4096);
+          }
+          this.ecgSignalQuality = this.estimateEcgSignalQuality(this.ecgSamples);
+        }
+
         this.noteGenericSignal(this.ecgState, ECG_IDLE_STOP_MS, () => {
           void this.finishEcgCycle(
             this.ecgSampleCount > 0 ? 'result_received' : 'signal_detected_no_result',

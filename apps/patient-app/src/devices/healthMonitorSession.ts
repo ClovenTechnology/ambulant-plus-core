@@ -121,6 +121,11 @@ export type HealthMonitorLiveEvent =
           | 'signal_detected_no_result';
         sampleCount: number;
         signalQuality: number | null;
+        sampleHz?: number | null;
+        durationSec?: number | null;
+        heartRate?: number | null;
+        conclusion?: string | null;
+        waveformPreview?: number[];
         recordedAt: string;
       };
     };
@@ -226,6 +231,11 @@ export type HealthMonitorSessionState = {
       | 'signal_detected_no_result';
     sampleCount: number;
     signalQuality: number | null;
+    sampleHz?: number | null;
+    durationSec?: number | null;
+    heartRate?: number | null;
+    conclusion?: string | null;
+    waveformPreview?: number[];
     recordedAt: string;
   } | null;
 };
@@ -576,6 +586,13 @@ export function createHealthMonitorSession(opts: {
                 reason: evt.reason,
                 sampleCount: evt.sampleCount,
                 signalQuality: evt.signalQuality,
+                sampleHz: (evt as any).sampleHz ?? null,
+                durationSec: (evt as any).durationSec ?? null,
+                heartRate: (evt as any).heartRate ?? null,
+                conclusion: (evt as any).conclusion ?? null,
+                waveformPreview: Array.isArray((evt as any).waveformPreview)
+                  ? (evt as any).waveformPreview
+                  : [],
                 recordedAt: new Date().toISOString(),
               };
 
