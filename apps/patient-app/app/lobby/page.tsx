@@ -615,7 +615,7 @@ export default function PatientLobbyPage() {
 
       try {
         const res = await fetch(
-          `/api/appointments/${encodeURIComponent(ctx.appointmentId)}`,
+          `/api/appointments/${encodeURIComponent(ctx.appointmentId)}/payment-state`,
           { cache: 'no-store' },
         );
 
@@ -629,7 +629,7 @@ export default function PatientLobbyPage() {
           );
         }
 
-        const appointment = data?.appointment || data;
+        const appointment = data?.appointment || data?.data?.appointment || data?.data || data;
         setAppointmentState(data);
 
         setCtx((prev) => ({
@@ -703,8 +703,8 @@ export default function PatientLobbyPage() {
     let score = 0;
 
     if (roomId.trim()) score += 18;
-    if (ctx.appointmentId || ctx.patientName || ctx.patientId) score += 14;
-    if (appointmentState?.ready || !ctx.appointmentId) score += 12;
+    if (ctx.appointmentId && !appointmentBusy && !appointmentError) score += 14;
+    if (ctx.appointmentId && appointmentState?.ready) score += 12;
     if (device.hasCamera) score += 8;
     if (device.hasMicrophone) score += 8;
     if (device.previewReady) score += 20;
@@ -723,17 +723,23 @@ export default function PatientLobbyPage() {
     vitalsSnapshot,
   ]);
 
-  const canProceed = Boolean(roomId.trim()) && !appointmentState?.failed;
+  const canProceed =
+    Boolean(roomId.trim()) &&
+    Boolean(ctx.appointmentId) &&
+    Boolean(appointmentState?.ready) &&
+    !appointmentState?.pending &&
+    !appointmentState?.failed &&
+    !appointmentBusy;
 
   const readinessItems = [
     { label: 'Consultation room selected', ok: Boolean(roomId.trim()) },
     {
       label: 'Appointment context loaded',
-      ok: Boolean(ctx.appointmentId || ctx.patientName || ctx.patientId),
+      ok: Boolean(ctx.appointmentId) && !appointmentBusy && !appointmentError,
     },
     {
-      label: 'Payment or appointment state acceptable',
-      ok: Boolean(appointmentState?.ready || !ctx.appointmentId),
+      label: 'Payment confirmed or appointment approved',
+      ok: Boolean(ctx.appointmentId && appointmentState?.ready),
     },
     { label: 'Camera detected', ok: device.hasCamera },
     { label: 'Microphone detected', ok: device.hasMicrophone },
