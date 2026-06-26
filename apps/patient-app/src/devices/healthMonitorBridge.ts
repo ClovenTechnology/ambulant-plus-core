@@ -267,6 +267,13 @@ export class HealthMonitorBridge {
   private spo2PpgFrames = 0;
   private spo2LastPulse: number | null = null;
   private spo2LastSpo2: number | null = null;
+  private spo2OxRemainder: number[] = [];
+  private spo2IrSamples: number[] = [];
+  private spo2SampleIndex = 0;
+  private spo2PeakIndices: number[] = [];
+  private spo2AcSign = 0;
+  private spo2PositiveRun: Array<{ index: number; value: number }> = [];
+  private spo2PulseLastEmittedAt = 0;
 
   private tempState: GenericMeasureState = this.makeGenericState();
   private tempLastCelsius: number | null = null;
@@ -337,6 +344,13 @@ export class HealthMonitorBridge {
     this.spo2PpgFrames = 0;
     this.spo2LastPulse = null;
     this.spo2LastSpo2 = null;
+    this.spo2OxRemainder = [];
+    this.spo2IrSamples = [];
+    this.spo2SampleIndex = 0;
+    this.spo2PeakIndices = [];
+    this.spo2AcSign = 0;
+    this.spo2PositiveRun = [];
+    this.spo2PulseLastEmittedAt = 0;
   }
 
   private resetTempState() {
@@ -622,6 +636,182 @@ export class HealthMonitorBridge {
     const bpm = Math.round(5860 / median);
     if (bpm < 25 || bpm > 180) return null;
     return bpm;
+  }
+
+  private decodeOx24(b0: number, b1: number, b2: number): number {
+    return ((b0 & 0xff) << 16) | ((b1 & 0xff) << 8) | (b2 & 0xff);
+  }
+
+  private extractSdkOxPayload(rawLike: ArrayLike<number> | null | undefined): number[] | null {
+    if (!rawLike) return null;
+
+    const raw = Array.from(rawLike, (v) => Number(v) & 0xff);
+    if (raw.length !== 20) return null;
+
+    // Android SDK Communicate routes Linktop Ox packets before normal module routing:
+    //   0x84 / 0x87 head packets -> bytes 6..19, length 14
+    //   continuation/tail packets -> bytes 0..15, length 16
+    if (raw[0] === 2 && raw[3] === 4 && (raw[4] === 0x84 || raw[4] === 0x87)) {
+      return raw.slice(6, 20);
+    }
+
+    if (raw[16] === 0 && (raw[19] === 0xff || (raw[18] === 0xff && raw[19] === 0))) {
+      return raw.slice(0, 16);
+    }
+
+    return null;
+  }
+
+  private consumeSdkOxPayload(payload: number[], recordedAt: string): number {
+    if (!payload.length) return 0;
+
+    this.spo2OxRemainder.push(...payload.map((v) => Number(v) & 0xff));
+
+    let samples = 0;
+    while (this.spo2OxRemainder.length >= 6) {
+      const chunk = this.spo2OxRemainder.splice(0, 6);
+      const red = this.decodeOx24(chunk[0], chunk[1], chunk[2]);
+      const ir = this.decodeOx24(chunk[3], chunk[4], chunk[5]);
+
+      this.ingestSpo2IrSample(ir, recordedAt);
+      samples += 1;
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('iomt:ppg-sample', {
+            detail: {
+              deviceId: DEVICE_ID,
+              timestamp: recordedAt,
+              sampleHz: 125,
+              red,
+              ir,
+            },
+          }),
+        );
+      }
+    }
+
+    if (this.spo2OxRemainder.length > 5) {
+      this.spo2OxRemainder = this.spo2OxRemainder.slice(-5);
+    }
+
+    return samples;
+  }
+
+  private consumeSdkOxFrame(rawLike: ArrayLike<number> | null | undefined, recordedAt: string): number {
+    const payload = this.extractSdkOxPayload(rawLike);
+    if (!payload) return 0;
+    return this.consumeSdkOxPayload(payload, recordedAt);
+  }
+
+  private consumeFallbackPpgSamples(samples: ArrayLike<number> | null | undefined, recordedAt: string): number {
+    if (!samples) return 0;
+
+    let count = 0;
+    for (const value of Array.from(samples)) {
+      const sample = Number(value);
+      if (!Number.isFinite(sample)) continue;
+      this.ingestSpo2IrSample(Math.round(sample), recordedAt);
+      count += 1;
+    }
+
+    return count;
+  }
+
+  private ingestSpo2IrSample(ir: number, recordedAt: string) {
+    if (!Number.isFinite(ir)) return;
+
+    this.spo2IrSamples.push(ir);
+    this.spo2SampleIndex += 1;
+
+    // Keep enough history for the SDK-shaped 81-sample moving baseline while bounding memory.
+    if (this.spo2IrSamples.length > 750) {
+      this.spo2IrSamples.shift();
+    }
+
+    if (this.spo2IrSamples.length < 81) return;
+
+    const tail = this.spo2IrSamples.slice(-81);
+    const mean = tail.reduce((sum, value) => sum + value, 0) / tail.length;
+    const centre = tail[40];
+    const ac = centre - mean;
+    const acIndex = this.spo2SampleIndex - 41;
+
+    const sign = ac > 0 ? 1 : ac < 0 ? -1 : this.spo2AcSign;
+
+    if (this.spo2AcSign !== 0 && sign !== this.spo2AcSign) {
+      if (this.spo2AcSign === 1 && sign === -1 && this.spo2PositiveRun.length > 22) {
+        let peak = this.spo2PositiveRun[0];
+        for (const point of this.spo2PositiveRun) {
+          if (point.value > peak.value) peak = point;
+        }
+        this.acceptSpo2Peak(peak.index, recordedAt);
+      }
+
+      this.spo2PositiveRun = [];
+    }
+
+    if (sign === 1) {
+      this.spo2PositiveRun.push({ index: acIndex, value: ac });
+    }
+
+    this.spo2AcSign = sign;
+  }
+
+  private acceptSpo2Peak(index: number, recordedAt: string) {
+    const last = this.spo2PeakIndices[this.spo2PeakIndices.length - 1];
+
+    if (last != null) {
+      const interval = index - last;
+
+      if (interval < 38) {
+        return;
+      }
+
+      if (interval > 260) {
+        this.spo2PeakIndices = [index];
+        return;
+      }
+    }
+
+    this.spo2PeakIndices.push(index);
+    if (this.spo2PeakIndices.length > 8) {
+      this.spo2PeakIndices = this.spo2PeakIndices.slice(-8);
+    }
+
+    if (this.spo2PeakIndices.length < 3) return;
+
+    const intervals: number[] = [];
+    for (let i = 1; i < this.spo2PeakIndices.length; i++) {
+      const interval = this.spo2PeakIndices[i] - this.spo2PeakIndices[i - 1];
+      if (interval >= 38 && interval <= 260) intervals.push(interval);
+    }
+
+    if (intervals.length < 2) return;
+
+    intervals.sort((a, b) => a - b);
+    const median = intervals[Math.floor(intervals.length / 2)];
+    const pulse = Math.round((60 * 125) / median);
+
+    if (!Number.isFinite(pulse) || pulse < 30 || pulse > 220) return;
+
+    const nowMs = Date.now();
+    const changed = this.spo2LastPulse == null || Math.abs(this.spo2LastPulse - pulse) >= 2;
+    const elapsed = nowMs - this.spo2PulseLastEmittedAt;
+
+    this.spo2LastPulse = pulse;
+
+    if (changed || elapsed > 2000) {
+      this.spo2PulseLastEmittedAt = nowMs;
+      this.opts?.onDeviceEvent?.({
+        type: 'spo2_result',
+        spo2: this.spo2LastSpo2,
+        pulse,
+        pi: null,
+        recordedAt,
+        estimatedFrom: 'ppg_wave',
+      } as any);
+    }
   }
 
   private convertBtRawToCelsius(raw: number): number {
@@ -1998,6 +2188,11 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
         this.noteGenericSignal(this.spo2State);
         this.spo2PpgFrames += 1;
 
+        const sdkSamples = this.consumeSdkOxFrame(result.raw, recordedAt);
+        if (sdkSamples === 0) {
+          this.consumeFallbackPpgSamples(result.samples, recordedAt);
+        }
+
         if (typeof window !== 'undefined') {
           window.dispatchEvent(
             new CustomEvent('iomt:ppg', {
@@ -2007,6 +2202,8 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
                 sampleHz: result.sampleHz,
                 samples: result.samples,
                 raw: Array.from(result.raw),
+                sdkOxSamples: sdkSamples,
+                pulse: this.spo2LastPulse,
               },
             }),
           );
@@ -2134,9 +2331,11 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
     this.resetSpo2State();
     this.startGenericTimeout(this.spo2State, SPO2_TIMEOUT_MS, () => {
       void this.finishSpo2Cycle(
-        this.spo2PpgFrames > 0 || this.spo2LastPulse != null
-          ? 'signal_detected_no_result'
-          : 'timeout',
+        this.spo2LastPulse != null || this.spo2LastSpo2 != null
+          ? 'result_received'
+          : this.spo2PpgFrames > 0
+            ? 'signal_detected_no_result'
+            : 'timeout',
       );
     });
     await this.sendControl('start_spo2');
