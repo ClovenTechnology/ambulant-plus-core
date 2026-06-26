@@ -6,7 +6,15 @@ export type VitalsType =
   | 'temperature'
   | 'heart_rate'
   | 'blood_glucose'
-  | 'ecg';
+  | 'ecg'
+  | 'activity'
+  | 'sleep'
+  | 'respiratory_rate'
+  | 'hrv'
+  | 'readiness'
+  | 'sleep_score'
+  | 'night_spo2'
+  | 'temperature_deviation';
 
 export type VitalSource =
   | 'health_monitor'
@@ -227,6 +235,23 @@ export async function emitNexRingMetricSet(input: {
   recorded_at?: string;
   heart_rate?: number;
   spo2?: number;
+  steps?: number;
+  calories?: number;
+  distance_km?: number;
+  sleep_total_hours?: number;
+  sleep_deep_hours?: number;
+  sleep_light_hours?: number;
+  sleep_rem_hours?: number;
+  sleep_score?: number;
+  hrv_ms?: number;
+  readiness?: number;
+  respiratory_rate?: number;
+  night_spo2?: number;
+  temperature_deviation?: number;
+  /**
+   * Deprecated: NexRing does not report actual body temperature.
+   * Do not map this to temperature_celsius; use temperature_deviation instead.
+   */
   temperature?: number;
   meta?: Record<string, any>;
 }) {
@@ -258,15 +283,128 @@ export async function emitNexRingMetricSet(input: {
     );
   }
 
-  if (typeof input.temperature === 'number') {
+  if (
+    typeof input.steps === 'number' ||
+    typeof input.calories === 'number' ||
+    typeof input.distance_km === 'number'
+  ) {
     out.push(
       emitNexRingVital({
         patientId: input.patientId,
-        type: 'temperature',
-        payload: { celsius: input.temperature },
+        type: 'activity',
+        payload: {
+          steps: input.steps,
+          calories: input.calories,
+          distance_km: input.distance_km,
+        },
         deviceId: input.deviceId,
         recorded_at: input.recorded_at,
         meta: input.meta,
+      }),
+    );
+  }
+
+  if (
+    typeof input.sleep_total_hours === 'number' ||
+    typeof input.sleep_deep_hours === 'number' ||
+    typeof input.sleep_light_hours === 'number' ||
+    typeof input.sleep_rem_hours === 'number'
+  ) {
+    out.push(
+      emitNexRingVital({
+        patientId: input.patientId,
+        type: 'sleep',
+        payload: {
+          total_hours: input.sleep_total_hours,
+          deep_hours: input.sleep_deep_hours,
+          light_hours: input.sleep_light_hours,
+          rem_hours: input.sleep_rem_hours,
+        },
+        deviceId: input.deviceId,
+        recorded_at: input.recorded_at,
+        meta: input.meta,
+      }),
+    );
+  }
+
+  if (typeof input.respiratory_rate === 'number') {
+    out.push(
+      emitNexRingVital({
+        patientId: input.patientId,
+        type: 'respiratory_rate',
+        payload: { rpm: input.respiratory_rate },
+        deviceId: input.deviceId,
+        recorded_at: input.recorded_at,
+        meta: input.meta,
+      }),
+    );
+  }
+
+  if (typeof input.hrv_ms === 'number') {
+    out.push(
+      emitNexRingVital({
+        patientId: input.patientId,
+        type: 'hrv',
+        payload: { ms: input.hrv_ms },
+        deviceId: input.deviceId,
+        recorded_at: input.recorded_at,
+        meta: input.meta,
+      }),
+    );
+  }
+
+  if (typeof input.readiness === 'number') {
+    out.push(
+      emitNexRingVital({
+        patientId: input.patientId,
+        type: 'readiness',
+        payload: { score: input.readiness },
+        deviceId: input.deviceId,
+        recorded_at: input.recorded_at,
+        meta: input.meta,
+      }),
+    );
+  }
+
+  if (typeof input.sleep_score === 'number') {
+    out.push(
+      emitNexRingVital({
+        patientId: input.patientId,
+        type: 'sleep_score',
+        payload: { score: input.sleep_score },
+        deviceId: input.deviceId,
+        recorded_at: input.recorded_at,
+        meta: input.meta,
+      }),
+    );
+  }
+
+  if (typeof input.night_spo2 === 'number') {
+    out.push(
+      emitNexRingVital({
+        patientId: input.patientId,
+        type: 'night_spo2',
+        payload: { pct: input.night_spo2 },
+        deviceId: input.deviceId,
+        recorded_at: input.recorded_at,
+        meta: input.meta,
+      }),
+    );
+  }
+
+  if (typeof input.temperature_deviation === 'number') {
+    out.push(
+      emitNexRingVital({
+        patientId: input.patientId,
+        type: 'temperature_deviation',
+        payload: { delta_c: input.temperature_deviation },
+        deviceId: input.deviceId,
+        recorded_at: input.recorded_at,
+        meta: {
+          ...(input.meta ?? {}),
+          fertility_signal: true,
+          note: 'NexRing temperature value is deviation/variation, not actual body temperature.',
+        },
       }),
     );
   }
@@ -282,10 +420,10 @@ export async function emitNexRingMetricSet(input: {
  */
 export function explainVitalPriorityRule() {
   return {
-    overlapping_types: ['heart_rate', 'spo2', 'temperature'],
+    overlapping_types: ['heart_rate', 'spo2'],
     preferred_source: 'health_monitor',
     fallback_source: 'nexring',
     rationale:
-      'Health Monitor is treated as a medical-grade device; NexRing is treated as a wellness device.',
+      'Health Monitor is treated as a medical-grade device; NexRing is treated as a wellness device. NexRing temperature is stored as temperature deviation, not actual body temperature.',
   };
 }

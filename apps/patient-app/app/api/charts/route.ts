@@ -23,11 +23,18 @@ const SERIES_META: Record<string, { label: string; unit: string; sensitive?: boo
   spo2: { label: 'SpO₂', unit: '%' },
   rr: { label: 'Respiratory rate', unit: 'rpm' },
   temp: { label: 'Temperature', unit: '°C' },
+  'temperature.deviation': { label: 'Temperature deviation', unit: 'Δ°C' },
   sys: { label: 'Blood pressure systolic', unit: 'mmHg', sensitive: true },
   dia: { label: 'Blood pressure diastolic', unit: 'mmHg', sensitive: true },
   glucose: { label: 'Glucose', unit: 'mg/dL', sensitive: true },
   steps: { label: 'Steps', unit: 'steps' },
+  calories: { label: 'Calories', unit: 'kcal' },
+  distance: { label: 'Distance', unit: 'km' },
+  hrv: { label: 'HRV', unit: 'ms' },
+  readiness: { label: 'Readiness', unit: 'score' },
+  'sleep.score': { label: 'Sleep score', unit: 'score' },
   'sleep.total': { label: 'Sleep', unit: 'h' },
+  'night.spo2': { label: 'Night SpO₂', unit: '%' },
 };
 
 function json(body: unknown, status = 200) {
@@ -121,8 +128,16 @@ function buildSeries(key: string, trend: any[]): Series {
 
       if (key === 'temp') {
         value = toFiniteNumber(point?.temp_c ?? point?.temp);
+      } else if (key === 'temperature.deviation') {
+        value = toFiniteNumber(point?.temperature_deviation ?? point?.tempDeviation ?? point?.temperatureDeviation);
       } else if (key === 'sleep.total') {
         value = toFiniteNumber(point?.sleep_total ?? point?.sleepHours ?? point?.sleep?.totalHours);
+      } else if (key === 'sleep.score') {
+        value = toFiniteNumber(point?.sleep_score ?? point?.sleepScore);
+      } else if (key === 'night.spo2') {
+        value = toFiniteNumber(point?.night_spo2 ?? point?.nightSpO2);
+      } else if (key === 'distance') {
+        value = toFiniteNumber(point?.distance_km ?? point?.distance);
       } else {
         value = toFiniteNumber(point?.[key]);
       }

@@ -12,6 +12,14 @@ const ALLOWED_TYPES = new Set([
   'blood_glucose',
   'glucose',
   'ecg',
+  'activity',
+  'sleep',
+  'respiratory_rate',
+  'hrv',
+  'readiness',
+  'sleep_score',
+  'night_spo2',
+  'temperature_deviation',
 ]);
 
 function corsHeaders() {
@@ -60,9 +68,18 @@ function unitFor(vType: string, payload: Record<string, any>, fallback?: string 
 
   if (vType.includes('blood_pressure')) return 'mmHg';
   if (vType.includes('pulse') || vType === 'heart_rate') return 'bpm';
+  if (vType === 'temperature_deviation') return 'Δ°C';
   if (vType.includes('temperature')) return 'C';
   if (vType.includes('spo2')) return '%';
   if (vType.includes('glucose')) return 'mg/dL';
+  if (vType === 'steps') return 'steps';
+  if (vType === 'calories') return 'kcal';
+  if (vType === 'distance_km') return 'km';
+  if (vType.startsWith('sleep_')) return 'h';
+  if (vType === 'respiratory_rate') return 'rpm';
+  if (vType === 'hrv') return 'ms';
+  if (vType === 'readiness' || vType === 'sleep_score') return 'score';
+  if (vType === 'night_spo2') return '%';
 
   return null;
 }
@@ -118,6 +135,49 @@ function metricRows(type: string, payload: Record<string, any>) {
     case 'ecg':
       pushMetric(rows, 'ecg_signal_quality', payload.signalQuality ?? payload.quality, payload, null);
       pushMetric(rows, 'ecg_sample_count', payload.sampleCount ?? payload.samples, payload, 'samples');
+      break;
+
+    case 'activity':
+      pushMetric(rows, 'steps', payload.steps, payload, 'steps');
+      pushMetric(rows, 'calories', payload.calories ?? payload.kcal, payload, 'kcal');
+      pushMetric(rows, 'distance_km', payload.distance_km ?? payload.distanceKm ?? payload.distance, payload, 'km');
+      break;
+
+    case 'sleep':
+      pushMetric(rows, 'sleep_total', payload.total_hours ?? payload.totalHours ?? payload.total, payload, 'h');
+      pushMetric(rows, 'sleep_deep', payload.deep_hours ?? payload.deepHours ?? payload.deep, payload, 'h');
+      pushMetric(rows, 'sleep_light', payload.light_hours ?? payload.lightHours ?? payload.light, payload, 'h');
+      pushMetric(rows, 'sleep_rem', payload.rem_hours ?? payload.remHours ?? payload.rem, payload, 'h');
+      break;
+
+    case 'respiratory_rate':
+      pushMetric(rows, 'respiratory_rate', payload.rpm ?? payload.value ?? payload.respiratoryRate, payload, 'rpm');
+      break;
+
+    case 'hrv':
+      pushMetric(rows, 'hrv', payload.ms ?? payload.value ?? payload.hrv, payload, 'ms');
+      break;
+
+    case 'readiness':
+      pushMetric(rows, 'readiness', payload.score ?? payload.value ?? payload.readiness, payload, 'score');
+      break;
+
+    case 'sleep_score':
+      pushMetric(rows, 'sleep_score', payload.score ?? payload.value ?? payload.sleepScore, payload, 'score');
+      break;
+
+    case 'night_spo2':
+      pushMetric(rows, 'night_spo2', payload.pct ?? payload.value ?? payload.spo2, payload, '%');
+      break;
+
+    case 'temperature_deviation':
+      pushMetric(
+        rows,
+        'temperature_deviation',
+        payload.delta_c ?? payload.deltaC ?? payload.value ?? payload.tempDeviation ?? payload.temperatureDeviation,
+        payload,
+        'Δ°C',
+      );
       break;
   }
 

@@ -15,6 +15,14 @@ const ALLOWED_VITAL_TYPES = new Set([
   'blood_glucose',
   'glucose',
   'ecg',
+  'activity',
+  'sleep',
+  'respiratory_rate',
+  'hrv',
+  'readiness',
+  'sleep_score',
+  'night_spo2',
+  'temperature_deviation',
 ]);
 
 function trimSlash(value: string) {

@@ -32,6 +32,19 @@ type VitalsTrendPoint = {
   glucose?: number;
   sys?: number;
   dia?: number;
+  steps?: number;
+  calories?: number;
+  distance_km?: number;
+  sleep_total?: number;
+  sleep_deep?: number;
+  sleep_light?: number;
+  sleep_rem?: number;
+  sleep_score?: number;
+  hrv?: number;
+  readiness?: number;
+  rr?: number;
+  night_spo2?: number;
+  temperature_deviation?: number;
 };
 
 type SourceRecord = {
@@ -279,12 +292,114 @@ function normalizeTrend(rows: VitalRow[]) {
     if (key === 'blood_pressure_pulse') {
       const hr = metricValue(row, 'pulse', 'hr', 'value');
       if (hr !== undefined) mergePoint(map, ts, { hr });
+      continue;
+    }
+
+    if (key === 'steps') {
+      const steps = metricValue(row, 'steps', 'value');
+      if (steps !== undefined) mergePoint(map, ts, { steps });
+      continue;
+    }
+
+    if (key === 'calories') {
+      const calories = metricValue(row, 'calories', 'kcal', 'value');
+      if (calories !== undefined) mergePoint(map, ts, { calories });
+      continue;
+    }
+
+    if (key === 'distance_km') {
+      const distance_km = metricValue(row, 'distance_km', 'distanceKm', 'distance', 'value');
+      if (distance_km !== undefined) mergePoint(map, ts, { distance_km });
+      continue;
+    }
+
+    if (key === 'sleep_total') {
+      const sleep_total = metricValue(row, 'total_hours', 'totalHours', 'total', 'value');
+      if (sleep_total !== undefined) mergePoint(map, ts, { sleep_total });
+      continue;
+    }
+
+    if (key === 'sleep_deep') {
+      const sleep_deep = metricValue(row, 'deep_hours', 'deepHours', 'deep', 'value');
+      if (sleep_deep !== undefined) mergePoint(map, ts, { sleep_deep });
+      continue;
+    }
+
+    if (key === 'sleep_light') {
+      const sleep_light = metricValue(row, 'light_hours', 'lightHours', 'light', 'value');
+      if (sleep_light !== undefined) mergePoint(map, ts, { sleep_light });
+      continue;
+    }
+
+    if (key === 'sleep_rem') {
+      const sleep_rem = metricValue(row, 'rem_hours', 'remHours', 'rem', 'value');
+      if (sleep_rem !== undefined) mergePoint(map, ts, { sleep_rem });
+      continue;
+    }
+
+    if (key === 'sleep_score') {
+      const sleep_score = metricValue(row, 'score', 'sleepScore', 'value');
+      if (sleep_score !== undefined) mergePoint(map, ts, { sleep_score });
+      continue;
+    }
+
+    if (key === 'hrv') {
+      const hrv = metricValue(row, 'ms', 'hrv', 'value');
+      if (hrv !== undefined) mergePoint(map, ts, { hrv });
+      continue;
+    }
+
+    if (key === 'readiness') {
+      const readiness = metricValue(row, 'score', 'readiness', 'value');
+      if (readiness !== undefined) mergePoint(map, ts, { readiness });
+      continue;
+    }
+
+    if (key === 'respiratory_rate') {
+      const rr = metricValue(row, 'rpm', 'respiratoryRate', 'value');
+      if (rr !== undefined) mergePoint(map, ts, { rr });
+      continue;
+    }
+
+    if (key === 'night_spo2') {
+      const night_spo2 = metricValue(row, 'pct', 'spo2', 'value');
+      if (night_spo2 !== undefined) mergePoint(map, ts, { night_spo2 });
+      continue;
+    }
+
+    if (key === 'temperature_deviation') {
+      const temperature_deviation = metricValue(
+        row,
+        'delta_c',
+        'deltaC',
+        'tempDeviation',
+        'temperatureDeviation',
+        'value',
+      );
+      if (temperature_deviation !== undefined) mergePoint(map, ts, { temperature_deviation });
     }
   }
 
   return Array.from(map.values())
     .filter((point) =>
-      [point.hr, point.spo2, point.temp_c, point.glucose, point.sys, point.dia].some(
+      [
+        point.hr,
+        point.spo2,
+        point.temp_c,
+        point.glucose,
+        point.sys,
+        point.dia,
+        point.steps,
+        point.calories,
+        point.distance_km,
+        point.sleep_total,
+        point.sleep_score,
+        point.hrv,
+        point.readiness,
+        point.rr,
+        point.night_spo2,
+        point.temperature_deviation,
+      ].some(
         (value) => typeof value === 'number' && Number.isFinite(value),
       ),
     )
@@ -326,9 +441,24 @@ export async function GET(req: NextRequest) {
       .slice()
       .reverse()
       .find((point) =>
-        [point.hr, point.spo2, point.temp_c, point.glucose, point.sys, point.dia].some(
-          (value) => typeof value === 'number' && Number.isFinite(value),
-        ),
+        [
+          point.hr,
+          point.spo2,
+          point.temp_c,
+          point.glucose,
+          point.sys,
+          point.dia,
+          point.steps,
+          point.calories,
+          point.distance_km,
+          point.sleep_total,
+          point.sleep_score,
+          point.hrv,
+          point.readiness,
+          point.rr,
+          point.night_spo2,
+          point.temperature_deviation,
+        ].some((value) => typeof value === 'number' && Number.isFinite(value)),
       )?.ts || null;
 
   const latestHr = latestMetric(
@@ -344,6 +474,32 @@ export async function GET(req: NextRequest) {
   );
   const latestGlucose = latestMetric(rows, ['blood_glucose', 'glucose'], (row) =>
     metricValue(row, 'mgDl', 'mg_dl', 'value', 'glucose'),
+  );
+  const latestSteps = latestMetric(rows, ['steps'], (row) => metricValue(row, 'steps', 'value'));
+  const latestCalories = latestMetric(rows, ['calories'], (row) =>
+    metricValue(row, 'calories', 'kcal', 'value'),
+  );
+  const latestDistance = latestMetric(rows, ['distance_km'], (row) =>
+    metricValue(row, 'distance_km', 'distanceKm', 'distance', 'value'),
+  );
+  const latestSleepTotal = latestMetric(rows, ['sleep_total'], (row) =>
+    metricValue(row, 'total_hours', 'totalHours', 'total', 'value'),
+  );
+  const latestSleepScore = latestMetric(rows, ['sleep_score'], (row) =>
+    metricValue(row, 'score', 'sleepScore', 'value'),
+  );
+  const latestHrv = latestMetric(rows, ['hrv'], (row) => metricValue(row, 'ms', 'hrv', 'value'));
+  const latestReadiness = latestMetric(rows, ['readiness'], (row) =>
+    metricValue(row, 'score', 'readiness', 'value'),
+  );
+  const latestRr = latestMetric(rows, ['respiratory_rate'], (row) =>
+    metricValue(row, 'rpm', 'respiratoryRate', 'value'),
+  );
+  const latestNightSpo2 = latestMetric(rows, ['night_spo2'], (row) =>
+    metricValue(row, 'pct', 'spo2', 'value'),
+  );
+  const latestTempDeviation = latestMetric(rows, ['temperature_deviation'], (row) =>
+    metricValue(row, 'delta_c', 'deltaC', 'tempDeviation', 'temperatureDeviation', 'value'),
   );
   const latestSys = latestMetric(rows, ['blood_pressure_systolic'], (row) =>
     metricValue(row, 'systolic', 'sys', 'value'),
@@ -362,6 +518,16 @@ export async function GET(req: NextRequest) {
           glucose: latestGlucose?.value ?? null,
           sys: latestSys?.value ?? null,
           dia: latestDia?.value ?? null,
+          steps: latestSteps?.value ?? null,
+          calories: latestCalories?.value ?? null,
+          distance_km: latestDistance?.value ?? null,
+          sleep_total: latestSleepTotal?.value ?? null,
+          sleep_score: latestSleepScore?.value ?? null,
+          hrv: latestHrv?.value ?? null,
+          readiness: latestReadiness?.value ?? null,
+          rr: latestRr?.value ?? null,
+          night_spo2: latestNightSpo2?.value ?? null,
+          temperature_deviation: latestTempDeviation?.value ?? null,
         }
       : null;
 
@@ -377,12 +543,28 @@ export async function GET(req: NextRequest) {
       avgSys: average(trend.map((point) => point.sys)),
       avgDia: average(trend.map((point) => point.dia)),
       avgGlucose: average(trend.map((point) => point.glucose)),
+      avgReadiness: average(trend.map((point) => point.readiness)),
+      avgSleepScore: average(trend.map((point) => point.sleep_score)),
+      avgHrv: average(trend.map((point) => point.hrv)),
+      avgRespiratoryRate: average(trend.map((point) => point.rr)),
+      avgNightSpO2: average(trend.map((point) => point.night_spo2)),
+      avgTemperatureDeviation: average(trend.map((point) => point.temperature_deviation)),
       readingCounts: {
         heart_rate: trend.filter((point) => point.hr != null).length,
         spo2: trend.filter((point) => point.spo2 != null).length,
         temperature: trend.filter((point) => point.temp_c != null).length,
         blood_pressure: trend.filter((point) => point.sys != null || point.dia != null).length,
         blood_glucose: trend.filter((point) => point.glucose != null).length,
+        steps: trend.filter((point) => point.steps != null).length,
+        calories: trend.filter((point) => point.calories != null).length,
+        distance: trend.filter((point) => point.distance_km != null).length,
+        sleep: trend.filter((point) => point.sleep_total != null).length,
+        sleep_score: trend.filter((point) => point.sleep_score != null).length,
+        hrv: trend.filter((point) => point.hrv != null).length,
+        readiness: trend.filter((point) => point.readiness != null).length,
+        respiratory_rate: trend.filter((point) => point.rr != null).length,
+        night_spo2: trend.filter((point) => point.night_spo2 != null).length,
+        temperature_deviation: trend.filter((point) => point.temperature_deviation != null).length,
       },
     },
     latest,
@@ -396,6 +578,18 @@ export async function GET(req: NextRequest) {
           ? sourceFor((latestSys || latestDia)!.row, (latestSys || latestDia)!.ts)
           : undefined,
       blood_glucose: latestGlucose ? sourceFor(latestGlucose.row, latestGlucose.ts) : undefined,
+      steps: latestSteps ? sourceFor(latestSteps.row, latestSteps.ts) : undefined,
+      calories: latestCalories ? sourceFor(latestCalories.row, latestCalories.ts) : undefined,
+      distance: latestDistance ? sourceFor(latestDistance.row, latestDistance.ts) : undefined,
+      sleep: latestSleepTotal ? sourceFor(latestSleepTotal.row, latestSleepTotal.ts) : undefined,
+      sleep_score: latestSleepScore ? sourceFor(latestSleepScore.row, latestSleepScore.ts) : undefined,
+      hrv: latestHrv ? sourceFor(latestHrv.row, latestHrv.ts) : undefined,
+      readiness: latestReadiness ? sourceFor(latestReadiness.row, latestReadiness.ts) : undefined,
+      respiratory_rate: latestRr ? sourceFor(latestRr.row, latestRr.ts) : undefined,
+      night_spo2: latestNightSpo2 ? sourceFor(latestNightSpo2.row, latestNightSpo2.ts) : undefined,
+      temperature_deviation: latestTempDeviation
+        ? sourceFor(latestTempDeviation.row, latestTempDeviation.ts)
+        : undefined,
     },
   });
 }
