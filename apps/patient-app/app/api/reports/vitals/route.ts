@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/api/reports/vitals/route.ts
+// apps/patient-app/app/api/reports/vitals/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -9,9 +9,17 @@ type RangeKey = '7d' | '30d' | '90d' | '1y';
 type VitalRow = {
   id?: string;
   type?: string;
+  vType?: string;
+  value?: number | string | null;
+  valueNum?: number | string | null;
+  unit?: string | null;
   recorded_at?: string | null;
+  t?: string | null;
   ts?: string | null;
   createdAt?: string | null;
+  deviceId?: string | null;
+  source?: string | null;
+  roomId?: string | null;
   payload?: Record<string, any> | null;
   meta?: Record<string, any> | null;
 };
@@ -24,6 +32,13 @@ type VitalsTrendPoint = {
   glucose?: number;
   sys?: number;
   dia?: number;
+};
+
+type SourceRecord = {
+  source: string;
+  recorded_at: string | null;
+  vType?: string;
+  deviceId?: string | null;
 };
 
 function json(body: unknown, status = 200) {
@@ -53,19 +68,43 @@ function toNum(...values: unknown[]) {
       if (Number.isFinite(parsed)) return parsed;
     }
   }
+
   return undefined;
 }
 
 function pickTs(row: VitalRow) {
-  const raw = row.recorded_at || row.ts || row.createdAt || '';
+  const raw = row.recorded_at || row.t || row.ts || row.createdAt || '';
   const d = new Date(raw);
   return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function metricKey(row: VitalRow) {
+  return String(row.vType || row.type || '').trim();
+}
+
+function metricValue(row: VitalRow, ...payloadKeys: string[]) {
+  const payload = row.payload || {};
+
+  const direct = toNum(row.valueNum, row.value);
+  if (direct !== undefined) return direct;
+
+  for (const key of payloadKeys) {
+    const value = toNum(payload[key]);
+    if (value !== undefined) return value;
+  }
+
+  return undefined;
 }
 
 function parseBp(payload: Record<string, any> | null | undefined) {
   const systolic = toNum(payload?.systolic, payload?.sys, payload?.sbp, payload?.high);
   const diastolic = toNum(payload?.diastolic, payload?.dia, payload?.dbp, payload?.low);
-  const text = typeof payload?.bp === 'string' ? payload.bp : typeof payload?.value === 'string' ? payload.value : '';
+  const text =
+    typeof payload?.bp === 'string'
+      ? payload.bp
+      : typeof payload?.value === 'string'
+        ? payload.value
+        : '';
 
   if ((systolic == null || diastolic == null) && text.includes('/')) {
     const [s, d] = text.split('/');
@@ -81,10 +120,41 @@ function average(values: Array<number | undefined>) {
   return clean.reduce((sum, value) => sum + value, 0) / clean.length;
 }
 
-function latestOf(rows: VitalRow[], type: string) {
-  return rows
-    .filter((row) => row.type === type)
-    .sort((a, b) => Date.parse(pickTs(b) || '') - Date.parse(pickTs(a) || ''))[0];
+function sourceFor(row: VitalRow, ts: string | null): SourceRecord {
+  return {
+    source: row.source || row.deviceId || 'patient-vitals',
+    recorded_at: ts,
+    vType: metricKey(row) || undefined,
+    deviceId: row.deviceId || null,
+  };
+}
+
+function mergePoint(
+  map: Map<string, VitalsTrendPoint>,
+  ts: string,
+  patch: Partial<VitalsTrendPoint>,
+) {
+  const existing = map.get(ts) || { ts };
+  map.set(ts, { ...existing, ...patch });
+}
+
+function latestMetric(rows: VitalRow[], keys: string[], pick: (row: VitalRow) => number | undefined) {
+  const found = rows
+    .map((row) => {
+      const ts = pickTs(row);
+      if (!ts) return null;
+      const key = metricKey(row);
+      if (!keys.includes(key)) return null;
+      const value = pick(row);
+      if (value === undefined) return null;
+      return { row, ts, value };
+    })
+    .filter(Boolean)
+    .sort((a: any, b: any) => Date.parse(b.ts) - Date.parse(a.ts))[0] as
+    | { row: VitalRow; ts: string; value: number }
+    | undefined;
+
+  return found || null;
 }
 
 async function resolvePatientId(req: NextRequest) {
@@ -116,17 +186,110 @@ async function loadVitals(req: NextRequest, patientId: string, range: RangeKey) 
   });
 
   const url = new URL(req.url);
-  const res = await fetch(`${url.origin}/api/v1/patients/${encodeURIComponent(patientId)}/vitals?${qs.toString()}`, {
-    cache: 'no-store',
-    headers: {
-      cookie: req.headers.get('cookie') || '',
-      authorization: req.headers.get('authorization') || '',
+  const res = await fetch(
+    `${url.origin}/api/v1/patients/${encodeURIComponent(patientId)}/vitals?${qs.toString()}`,
+    {
+      cache: 'no-store',
+      headers: {
+        cookie: req.headers.get('cookie') || '',
+        authorization: req.headers.get('authorization') || '',
+      },
     },
-  }).catch(() => null);
+  ).catch(() => null);
 
   if (!res?.ok) return [];
+
   const data = await res.json().catch(() => null);
   return Array.isArray(data?.items) ? (data.items as VitalRow[]) : [];
+}
+
+function normalizeTrend(rows: VitalRow[]) {
+  const map = new Map<string, VitalsTrendPoint>();
+
+  for (const row of rows) {
+    const ts = pickTs(row);
+    if (!ts) continue;
+
+    const key = metricKey(row);
+    const payload = row.payload || {};
+
+    if (key === 'heart_rate') {
+      const hr = metricValue(row, 'bpm', 'value', 'hr', 'pulse');
+      if (hr !== undefined) mergePoint(map, ts, { hr });
+      continue;
+    }
+
+    if (key === 'spo2') {
+      const spo2 = metricValue(row, 'pct', 'value', 'spo2');
+      const pulse = toNum(payload.pulse, payload.hr);
+
+      if (spo2 !== undefined) mergePoint(map, ts, { spo2 });
+      if (pulse !== undefined) mergePoint(map, ts, { hr: pulse });
+      continue;
+    }
+
+    if (key === 'spo2_pulse') {
+      const hr = metricValue(row, 'pulse', 'hr', 'value');
+      if (hr !== undefined) mergePoint(map, ts, { hr });
+      continue;
+    }
+
+    if (key === 'temperature' || key === 'temperature_celsius') {
+      const temp_c = metricValue(row, 'celsius', 'value', 'temp', 'temperature');
+      if (temp_c !== undefined) mergePoint(map, ts, { temp_c });
+      continue;
+    }
+
+    if (key === 'temperature_fahrenheit') {
+      const f = metricValue(row, 'fahrenheit', 'value');
+      if (f !== undefined) mergePoint(map, ts, { temp_c: (f - 32) * (5 / 9) });
+      continue;
+    }
+
+    if (key === 'blood_glucose' || key === 'glucose') {
+      const glucose = metricValue(row, 'mgDl', 'mg_dl', 'value', 'glucose');
+      if (glucose !== undefined) mergePoint(map, ts, { glucose });
+      continue;
+    }
+
+    if (key === 'blood_pressure') {
+      const bp = parseBp(payload);
+      const pulse = toNum(payload.pulse, payload.hr);
+
+      mergePoint(map, ts, {
+        sys: bp.sys,
+        dia: bp.dia,
+        ...(pulse !== undefined ? { hr: pulse } : {}),
+      });
+      continue;
+    }
+
+    if (key === 'blood_pressure_systolic') {
+      const sys = metricValue(row, 'systolic', 'sys', 'value');
+      if (sys !== undefined) mergePoint(map, ts, { sys });
+      continue;
+    }
+
+    if (key === 'blood_pressure_diastolic') {
+      const dia = metricValue(row, 'diastolic', 'dia', 'value');
+      if (dia !== undefined) mergePoint(map, ts, { dia });
+      continue;
+    }
+
+    if (key === 'blood_pressure_pulse') {
+      const hr = metricValue(row, 'pulse', 'hr', 'value');
+      if (hr !== undefined) mergePoint(map, ts, { hr });
+    }
+  }
+
+  return Array.from(map.values())
+    .filter((point) =>
+      [point.hr, point.spo2, point.temp_c, point.glucose, point.sys, point.dia].some(
+        (value) => typeof value === 'number' && Number.isFinite(value),
+      ),
+    )
+    .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))
+    .slice(-120);
 }
 
 export async function GET(req: NextRequest) {
@@ -156,73 +319,51 @@ export async function GET(req: NextRequest) {
   }
 
   const rows = await loadVitals(req, patientId, range);
+  const trend = normalizeTrend(rows);
 
-  const heartRows = rows.filter((r) => r.type === 'heart_rate');
-  const spo2Rows = rows.filter((r) => r.type === 'spo2');
-  const tempRows = rows.filter((r) => r.type === 'temperature');
-  const glucoseRows = rows.filter((r) => r.type === 'blood_glucose' || r.type === 'glucose');
-  const bpRows = rows.filter((r) => r.type === 'blood_pressure');
+  const latestTs =
+    trend
+      .slice()
+      .reverse()
+      .find((point) =>
+        [point.hr, point.spo2, point.temp_c, point.glucose, point.sys, point.dia].some(
+          (value) => typeof value === 'number' && Number.isFinite(value),
+        ),
+      )?.ts || null;
 
-  const trend = rows
-    .reduce<VitalsTrendPoint[]>((acc, row) => {
-      const ts = pickTs(row);
-      if (!ts) return acc;
+  const latestHr = latestMetric(
+    rows,
+    ['heart_rate', 'spo2_pulse', 'blood_pressure_pulse', 'spo2', 'blood_pressure'],
+    (row) => metricValue(row, 'bpm', 'value', 'hr', 'pulse'),
+  );
+  const latestSpo2 = latestMetric(rows, ['spo2'], (row) =>
+    metricValue(row, 'pct', 'value', 'spo2'),
+  );
+  const latestTemp = latestMetric(rows, ['temperature', 'temperature_celsius'], (row) =>
+    metricValue(row, 'celsius', 'value', 'temp', 'temperature'),
+  );
+  const latestGlucose = latestMetric(rows, ['blood_glucose', 'glucose'], (row) =>
+    metricValue(row, 'mgDl', 'mg_dl', 'value', 'glucose'),
+  );
+  const latestSys = latestMetric(rows, ['blood_pressure_systolic'], (row) =>
+    metricValue(row, 'systolic', 'sys', 'value'),
+  );
+  const latestDia = latestMetric(rows, ['blood_pressure_diastolic'], (row) =>
+    metricValue(row, 'diastolic', 'dia', 'value'),
+  );
 
-      const payload = row.payload || {};
-
-      if (row.type === 'heart_rate') {
-        acc.push({ ts, hr: toNum(payload.bpm, payload.value, payload.hr) });
-        return acc;
-      }
-
-      if (row.type === 'spo2') {
-        acc.push({ ts, spo2: toNum(payload.pct, payload.value, payload.spo2) });
-        return acc;
-      }
-
-      if (row.type === 'temperature') {
-        acc.push({ ts, temp_c: toNum(payload.celsius, payload.value, payload.temp, payload.temperature) });
-        return acc;
-      }
-
-      if (row.type === 'blood_glucose' || row.type === 'glucose') {
-        acc.push({ ts, glucose: toNum(payload.mgDl, payload.mg_dl, payload.value, payload.glucose) });
-        return acc;
-      }
-
-      if (row.type === 'blood_pressure') {
-        const bp = parseBp(payload);
-        acc.push({ ts, sys: bp.sys, dia: bp.dia });
-      }
-
-      return acc;
-    }, [])
-    .sort((a, b) => Date.parse(a.ts) - Date.parse(b.ts))
-    .slice(-120);
-
-  const latestHeart = latestOf(rows, 'heart_rate');
-  const latestSpo2 = latestOf(rows, 'spo2');
-  const latestTemp = latestOf(rows, 'temperature');
-  const latestGlucose = latestOf(rows, 'blood_glucose') || latestOf(rows, 'glucose');
-  const latestBp = latestOf(rows, 'blood_pressure');
-
-  const latestBpParsed = parseBp(latestBp?.payload || null);
-  const latest = rows.length
-    ? {
-        ts: [latestHeart, latestSpo2, latestTemp, latestGlucose, latestBp]
-          .map((row) => (row ? pickTs(row) : null))
-          .filter(Boolean)
-          .sort((a, b) => Date.parse(String(b)) - Date.parse(String(a)))[0] || null,
-        hr: toNum(latestHeart?.payload?.bpm, latestHeart?.payload?.value, latestHeart?.payload?.hr),
-        spo2: toNum(latestSpo2?.payload?.pct, latestSpo2?.payload?.value, latestSpo2?.payload?.spo2),
-        temp_c: toNum(latestTemp?.payload?.celsius, latestTemp?.payload?.value, latestTemp?.payload?.temp, latestTemp?.payload?.temperature),
-        glucose: toNum(latestGlucose?.payload?.mgDl, latestGlucose?.payload?.mg_dl, latestGlucose?.payload?.value, latestGlucose?.payload?.glucose),
-        sys: latestBpParsed.sys,
-        dia: latestBpParsed.dia,
-      }
-    : null;
-
-  const bpParsed = bpRows.map((row) => parseBp(row.payload));
+  const latest =
+    trend.length > 0
+      ? {
+          ts: latestTs,
+          hr: latestHr?.value ?? null,
+          spo2: latestSpo2?.value ?? null,
+          temp_c: latestTemp?.value ?? null,
+          glucose: latestGlucose?.value ?? null,
+          sys: latestSys?.value ?? null,
+          dia: latestDia?.value ?? null,
+        }
+      : null;
 
   return json({
     ok: true,
@@ -230,28 +371,31 @@ export async function GET(req: NextRequest) {
     range,
     generatedAtISO: new Date().toISOString(),
     summary: {
-      avgHR: average(heartRows.map((row) => toNum(row.payload?.bpm, row.payload?.value, row.payload?.hr))),
-      avgSpO2: average(spo2Rows.map((row) => toNum(row.payload?.pct, row.payload?.value, row.payload?.spo2))),
-      avgTempC: average(tempRows.map((row) => toNum(row.payload?.celsius, row.payload?.value, row.payload?.temp, row.payload?.temperature))),
-      avgSys: average(bpParsed.map((bp) => bp.sys)),
-      avgDia: average(bpParsed.map((bp) => bp.dia)),
-      avgGlucose: average(glucoseRows.map((row) => toNum(row.payload?.mgDl, row.payload?.mg_dl, row.payload?.value, row.payload?.glucose))),
+      avgHR: average(trend.map((point) => point.hr)),
+      avgSpO2: average(trend.map((point) => point.spo2)),
+      avgTempC: average(trend.map((point) => point.temp_c)),
+      avgSys: average(trend.map((point) => point.sys)),
+      avgDia: average(trend.map((point) => point.dia)),
+      avgGlucose: average(trend.map((point) => point.glucose)),
       readingCounts: {
-        heart_rate: heartRows.length,
-        spo2: spo2Rows.length,
-        temperature: tempRows.length,
-        blood_pressure: bpRows.length,
-        blood_glucose: glucoseRows.length,
+        heart_rate: trend.filter((point) => point.hr != null).length,
+        spo2: trend.filter((point) => point.spo2 != null).length,
+        temperature: trend.filter((point) => point.temp_c != null).length,
+        blood_pressure: trend.filter((point) => point.sys != null || point.dia != null).length,
+        blood_glucose: trend.filter((point) => point.glucose != null).length,
       },
     },
     latest,
     trend,
     sources: {
-      heart_rate: latestHeart ? { source: 'patient-vitals', recorded_at: pickTs(latestHeart) } : undefined,
-      spo2: latestSpo2 ? { source: 'patient-vitals', recorded_at: pickTs(latestSpo2) } : undefined,
-      temperature: latestTemp ? { source: 'patient-vitals', recorded_at: pickTs(latestTemp) } : undefined,
-      blood_pressure: latestBp ? { source: 'patient-vitals', recorded_at: pickTs(latestBp) } : undefined,
-      blood_glucose: latestGlucose ? { source: 'patient-vitals', recorded_at: pickTs(latestGlucose) } : undefined,
+      heart_rate: latestHr ? sourceFor(latestHr.row, latestHr.ts) : undefined,
+      spo2: latestSpo2 ? sourceFor(latestSpo2.row, latestSpo2.ts) : undefined,
+      temperature: latestTemp ? sourceFor(latestTemp.row, latestTemp.ts) : undefined,
+      blood_pressure:
+        latestSys || latestDia
+          ? sourceFor((latestSys || latestDia)!.row, (latestSys || latestDia)!.ts)
+          : undefined,
+      blood_glucose: latestGlucose ? sourceFor(latestGlucose.row, latestGlucose.ts) : undefined,
     },
   });
 }
