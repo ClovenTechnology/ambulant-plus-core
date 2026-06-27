@@ -84,19 +84,12 @@ async function postVital(input: EmitVitalInput) {
 /**
  * Thin NexRing-only adapter.
  *
- * Maps only safe shared-vital-compatible metrics into emitVital:
- * - health.hr   -> heart_rate
- * - health.spo2 -> spo2
- * - temperature -> temperature (only when explicitly allowed)
+ * Maps NexRing wearable metrics into the shared persisted vitals stream.
+ * NexRing remains tagged as a wellness source.
  *
- * Everything else stays out of shared vitals:
- * - sleep
- * - readiness
- * - stress
- * - activity
- * - HRV
- * - RR
- * - battery
+ * Important:
+ * - NexRing temperature is temperature deviation / variation.
+ * - Never persist NexRing temperature as body temperature.
  */
 export async function persistNexRingMetric(
   metric: RingMetric,
@@ -169,6 +162,75 @@ export async function persistNexRingMetric(
       });
     }
 
+    const hrv = finiteNumber(metric.hrv);
+    if (typeof hrv === 'number') {
+      pushes.push({
+        patientId: opts.patientId,
+        type: 'hrv',
+        deviceId: opts.deviceId,
+        recorded_at: isoFromTs(metric.ts),
+        payload: { ms: hrv },
+        meta: baseMeta(metric, opts, {
+          origin: 'continuous_wearable',
+          subkind: 'hrv',
+          rhr: finiteNumber(metric.rhr),
+          stress: finiteNumber(metric.stress),
+          readiness: finiteNumber(metric.readiness),
+        }),
+      });
+    }
+
+    const rr = finiteNumber(metric.rr);
+    if (typeof rr === 'number') {
+      pushes.push({
+        patientId: opts.patientId,
+        type: 'respiratory_rate',
+        deviceId: opts.deviceId,
+        recorded_at: isoFromTs(metric.ts),
+        payload: { rpm: rr },
+        meta: baseMeta(metric, opts, {
+          origin: 'continuous_wearable',
+          subkind: 'respiratory_rate',
+          rhr: finiteNumber(metric.rhr),
+          sleepAvgHr: finiteNumber(metric.sleepAvgHr),
+        }),
+      });
+    }
+
+    const readiness = finiteNumber(metric.readiness);
+    if (typeof readiness === 'number') {
+      pushes.push({
+        patientId: opts.patientId,
+        type: 'readiness',
+        deviceId: opts.deviceId,
+        recorded_at: isoFromTs(metric.ts),
+        payload: { score: readiness },
+        meta: baseMeta(metric, opts, {
+          origin: 'continuous_wearable',
+          subkind: 'readiness',
+          hrv,
+          rhr: finiteNumber(metric.rhr),
+          stress: finiteNumber(metric.stress),
+        }),
+      });
+    }
+
+    const nightSpo2 = finiteNumber(metric.nightSpo2);
+    if (typeof nightSpo2 === 'number') {
+      pushes.push({
+        patientId: opts.patientId,
+        type: 'night_spo2',
+        deviceId: opts.deviceId,
+        recorded_at: isoFromTs(metric.ts),
+        payload: { pct: nightSpo2 },
+        meta: baseMeta(metric, opts, {
+          origin: 'continuous_wearable',
+          subkind: 'night_spo2',
+          sleepAvgHr: finiteNumber(metric.sleepAvgHr),
+        }),
+      });
+    }
+
     if (!pushes.length) {
       result.skipped.push({
         reason: 'no_supported_vital_mapping',
@@ -177,57 +239,151 @@ export async function persistNexRingMetric(
       });
     }
   } else if (metric.kind === 'temperature') {
-    const celsius = finiteNumber(metric.celsius);
+    const deltaC = finiteNumber(metric.celsius);
 
-    if (typeof celsius !== 'number') {
+    if (typeof deltaC !== 'number') {
       result.skipped.push({
         reason: 'missing_value',
         kind: metric.kind,
-        detail: 'temperature metric missing celsius value',
-      });
-    } else if (!opts.persistTemperature) {
-      result.skipped.push({
-        reason: 'temperature_not_allowed',
-        kind: metric.kind,
-        detail: 'persistTemperature is false',
-      });
-    } else if (!opts.temperatureMode) {
-      result.skipped.push({
-        reason: 'temperature_missing_mode',
-        kind: metric.kind,
-        detail: 'temperatureMode must be explicit for NexRing temperature',
-      });
-    } else if (opts.temperatureMode !== 'body') {
-      result.skipped.push({
-        reason: 'temperature_not_clinically_normalized',
-        kind: metric.kind,
-        detail: `temperatureMode=${opts.temperatureMode}; only body-normalized values should go to shared vitals`,
+        detail: 'temperature metric missing deviation value',
       });
     } else {
       pushes.push({
         patientId: opts.patientId,
-        type: 'temperature',
+        type: 'temperature_deviation',
         deviceId: opts.deviceId,
         recorded_at: isoFromTs(metric.ts),
         payload: {
-          celsius,
+          delta_c: deltaC,
         },
         meta: baseMeta(metric, opts, {
           origin: 'continuous_wearable',
-          subkind: 'temperature',
-          temperatureMode: opts.temperatureMode,
+          subkind: 'temperature_deviation',
+          valueSemantics: 'variation_not_body_temperature',
+          fertility_signal: true,
+          unit: 'Δ°C',
         }),
       });
     }
-    } else if (
-    metric.kind === 'sleep' ||
-    metric.kind === 'activity' ||
-    metric.kind === 'battery'
-  ) {
+
+  } else if (metric.kind === 'sleep') {
+    const before = pushes.length;
+    const totalHours =
+      typeof finiteNumber(metric.totalMinutes) === 'number'
+        ? Math.round((finiteNumber(metric.totalMinutes)! / 60) * 100) / 100
+        : null;
+    const deepHours =
+      typeof finiteNumber(metric.deepMinutes) === 'number'
+        ? Math.round((finiteNumber(metric.deepMinutes)! / 60) * 100) / 100
+        : null;
+    const lightHours =
+      typeof finiteNumber(metric.lightMinutes) === 'number'
+        ? Math.round((finiteNumber(metric.lightMinutes)! / 60) * 100) / 100
+        : null;
+    const remHours =
+      typeof finiteNumber(metric.remMinutes) === 'number'
+        ? Math.round((finiteNumber(metric.remMinutes)! / 60) * 100) / 100
+        : null;
+    const awakeHours =
+      typeof finiteNumber(metric.awakeMinutes) === 'number'
+        ? Math.round((finiteNumber(metric.awakeMinutes)! / 60) * 100) / 100
+        : null;
+
+    if (
+      typeof totalHours === 'number' ||
+      typeof deepHours === 'number' ||
+      typeof lightHours === 'number' ||
+      typeof remHours === 'number'
+    ) {
+      pushes.push({
+        patientId: opts.patientId,
+        type: 'sleep',
+        deviceId: opts.deviceId,
+        recorded_at: isoFromTs(metric.ts),
+        payload: {
+          total_hours: totalHours,
+          deep_hours: deepHours,
+          light_hours: lightHours,
+          rem_hours: remHours,
+          awake_hours: awakeHours,
+          startTs: metric.startTs ?? null,
+          endTs: metric.endTs ?? null,
+        },
+        meta: baseMeta(metric, opts, {
+          origin: 'continuous_wearable',
+          subkind: 'sleep',
+          sourceMode: metric.sourceMode,
+        }),
+      });
+    }
+
+    const score = finiteNumber(metric.score);
+    if (typeof score === 'number') {
+      pushes.push({
+        patientId: opts.patientId,
+        type: 'sleep_score',
+        deviceId: opts.deviceId,
+        recorded_at: isoFromTs(metric.ts),
+        payload: { score },
+        meta: baseMeta(metric, opts, {
+          origin: 'continuous_wearable',
+          subkind: 'sleep_score',
+          sourceMode: metric.sourceMode,
+        }),
+      });
+    }
+
+    if (pushes.length === before) {
+      result.skipped.push({
+        reason: 'missing_value',
+        kind: metric.kind,
+        detail: 'sleep metric had no mappable sleep duration or score',
+      });
+    }
+  } else if (metric.kind === 'activity') {
+    const before = pushes.length;
+    const steps = finiteNumber(metric.steps);
+    const calories = finiteNumber(metric.calories);
+    const distanceMeters = finiteNumber(metric.distanceMeters);
+
+    if (
+      typeof steps === 'number' ||
+      typeof calories === 'number' ||
+      typeof distanceMeters === 'number'
+    ) {
+      pushes.push({
+        patientId: opts.patientId,
+        type: 'activity',
+        deviceId: opts.deviceId,
+        recorded_at: isoFromTs(metric.ts),
+        payload: {
+          steps,
+          calories,
+          distance_km:
+            typeof distanceMeters === 'number'
+              ? Math.round((distanceMeters / 1000) * 1000) / 1000
+              : null,
+          distance_meters: distanceMeters,
+        },
+        meta: baseMeta(metric, opts, {
+          origin: 'continuous_wearable',
+          subkind: 'activity',
+        }),
+      });
+    }
+
+    if (pushes.length === before) {
+      result.skipped.push({
+        reason: 'missing_value',
+        kind: metric.kind,
+        detail: 'activity metric had no mappable steps, calories, or distance',
+      });
+    }
+  } else if (metric.kind === 'battery') {
     result.skipped.push({
       reason: 'unsupported_metric_kind',
       kind: metric.kind,
-      detail: 'This metric belongs in wearable summaries/device metrics, not shared vitals',
+      detail: 'battery belongs in device telemetry, not shared vitals',
     });
   }
 

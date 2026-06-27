@@ -56,7 +56,9 @@ export type SleepSession = {
   };
 };
 
-export type PersistStampMap = Partial<Record<'health' | 'temperature', number>>;
+export type PersistStampMap = Partial<
+  Record<'health' | 'temperature' | 'sleep' | 'activity', number>
+>;
 
 export const MAX_HR_POINTS = 120;
 export const MAX_STRESS_POINTS = 96;
@@ -140,6 +142,16 @@ export function shouldPersistMetric(metric: RingMetric, stamps: PersistStampMap)
   if (metric.kind === 'temperature') {
     const last = stamps.temperature ?? 0;
     return now - last >= 5 * 60_000;
+  }
+
+  if (metric.kind === 'activity') {
+    const last = stamps.activity ?? 0;
+    return now - last >= 5 * 60_000;
+  }
+
+  if (metric.kind === 'sleep') {
+    const last = stamps.sleep ?? 0;
+    return now - last >= 15 * 60_000;
   }
 
   return false;

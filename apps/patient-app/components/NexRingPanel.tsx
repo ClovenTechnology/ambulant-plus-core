@@ -255,7 +255,12 @@ export default function NexRingPanel({
         try {
           await persistMetric(metric);
 
-          if (metric.kind === 'health' || metric.kind === 'temperature') {
+          if (
+            metric.kind === 'health' ||
+            metric.kind === 'temperature' ||
+            metric.kind === 'sleep' ||
+            metric.kind === 'activity'
+          ) {
             lastPersistRef.current[metric.kind] = metric.ts || Date.now();
           }
         } catch (err) {
@@ -322,6 +327,24 @@ export default function NexRingPanel({
         if (metric.kind === 'sleep') {
           setSleepSessions((prev) => upsertSleepSession(prev, metric));
         }
+
+        if (!persistMetric) return;
+        if (!shouldPersistMetric(metric, lastPersistRef.current)) return;
+
+        void persistMetric(metric)
+          .then(() => {
+            if (
+              metric.kind === 'health' ||
+              metric.kind === 'temperature' ||
+              metric.kind === 'sleep' ||
+              metric.kind === 'activity'
+            ) {
+              lastPersistRef.current[metric.kind] = metric.ts || Date.now();
+            }
+          })
+          .catch((err) => {
+            console.warn('[NexRing] historical persist failed', err);
+          });
       },
 
       onDeviceInfo(info) {
