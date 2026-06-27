@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import React from 'react';
 import { Document, Page, Text, View, StyleSheet, pdf } from '@react-pdf/renderer';
 
@@ -268,6 +268,308 @@ async function fetchAdapter<T>(
 function wantsAll(sections?: ExportSections) {
   if (!sections) return true;
   return !Object.values(sections).some(Boolean);
+}
+
+
+type SleepVitalRow = {
+  id?: string;
+  type?: string;
+  value?: number | string | null;
+  valueNum?: number | string | null;
+  payload?: Record<string, any> | null;
+  recorded_at?: string | null;
+  createdAt?: string | null;
+  ts?: string | null;
+  meta?: Record<string, any> | null;
+};
+
+function sleepToNum(v: unknown): number | undefined {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function sleepClamp(n: number, a: number, b: number) {
+  return Math.max(a, Math.min(b, n));
+}
+
+function sleepSafeIso(v: unknown): string | null {
+  if (!v) return null;
+  const d = new Date(String(v));
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+function sleepIsoFromEpochish(v: unknown): string | null {
+  const n = sleepToNum(v);
+  if (typeof n === 'number') {
+    const ms = n < 10_000_000_000 ? n * 1000 : n;
+    return sleepSafeIso(ms);
+  }
+  return sleepSafeIso(v);
+}
+
+function sleepPickTs(row: SleepVitalRow): string | null {
+  return sleepSafeIso(row.recorded_at) || sleepSafeIso(row.ts) || sleepSafeIso(row.createdAt);
+}
+
+function sleepDateFromTs(ts: string | null): string {
+  const d = ts ? new Date(ts) : new Date();
+  if (Number.isNaN(d.getTime())) return new Date().toISOString().slice(0, 10);
+  return d.toISOString().slice(0, 10);
+}
+
+function sleepStageMinutes(payload: Record<string, any>, stage: 'deep' | 'rem' | 'light' | 'awake') {
+  const direct =
+    sleepToNum(payload?.stagesMin?.[stage]) ??
+    sleepToNum(payload?.stages?.[stage]) ??
+    sleepToNum(payload?.[stage]) ??
+    sleepToNum(payload?.[`${stage}Minutes`]);
+
+  if (typeof direct === 'number') return direct;
+
+  const hours = sleepToNum(payload?.[`${stage}_hours`]);
+  return typeof hours === 'number' ? Math.round(hours * 60) : 0;
+}
+
+function sleepQualityLabel(score: number) {
+  if (score >= 80) return 'Restorative';
+  if (score >= 65) return 'Fair';
+  if (score >= 45) return 'Light';
+  return 'Fragmented';
+}
+
+function sleepQualityFromStages(stages: SleepStages, hrv: number, directScore?: number): number {
+  if (typeof directScore === 'number') return sleepClamp(Math.round(directScore), 0, 100);
+
+  const total = stages.deep + stages.rem + stages.light + stages.awake;
+  if (total <= 0) return 0;
+
+  const sleepMinutes = stages.deep + stages.rem + stages.light;
+  const efficiency = sleepMinutes / Math.max(1, total);
+
+  const stageScore =
+    efficiency * 55 +
+    sleepClamp(stages.deep / Math.max(1, sleepMinutes), 0, 0.35) * 80 +
+    sleepClamp(stages.rem / Math.max(1, sleepMinutes), 0, 0.3) * 70 +
+    sleepClamp(hrv, 20, 90) * 0.25;
+
+  return sleepClamp(Math.round(stageScore), 0, 100);
+}
+
+async function fetchSleepVitalsForType(
+  origin: string,
+  patientId: string,
+  type: string,
+  from: string,
+  to: string,
+): Promise<SleepVitalRow[]> {
+  const qs = new URLSearchParams({ type, from, to });
+  const url = `${origin}/api/v1/patients/${encodeURIComponent(patientId)}/vitals?${qs.toString()}`;
+
+  const res = await fetch(url, { cache: 'no-store' });
+  if (!res.ok) return [];
+
+  const json = await res.json().catch(() => ({ items: [] }));
+  return Array.isArray(json?.items) ? json.items : [];
+}
+
+function latestByDate(rows: SleepVitalRow[], valuePicker: (row: SleepVitalRow) => number | undefined) {
+  const map = new Map<string, { ts: string | null; value: number; row: SleepVitalRow }>();
+
+  for (const row of rows) {
+    const ts = sleepPickTs(row);
+    const date = sleepDateFromTs(ts);
+    const value = valuePicker(row);
+    if (typeof value !== 'number') continue;
+
+    const prev = map.get(date);
+    if (!prev || String(ts || '').localeCompare(String(prev.ts || '')) >= 0) {
+      map.set(date, { ts, value, row });
+    }
+  }
+
+  return map;
+}
+
+export async function GET(req: NextRequest) {
+  const url = new URL(req.url);
+
+  const patientId = url.searchParams.get('patientId') || '';
+  const range = (url.searchParams.get('range') || '30d') as RangeKey;
+
+  if (!patientId) {
+    return NextResponse.json(
+      { ok: false, error: 'patient_required', range, generatedAtISO: new Date().toISOString(), nights: [] },
+      { status: 400 },
+    );
+  }
+
+  const days = range === '7d' ? 7 : range === '90d' ? 90 : range === '1y' ? 365 : 30;
+  const now = new Date();
+  const fromDate = new Date(now);
+  fromDate.setDate(now.getDate() - (days - 1));
+
+  const from = fromDate.toISOString();
+  const to = now.toISOString();
+
+  const [sleepRows, sleepScoreRows, hrvRows, rrRows, nightSpo2Rows, readinessRows] = await Promise.all([
+    fetchSleepVitalsForType(url.origin, patientId, 'sleep', from, to),
+    fetchSleepVitalsForType(url.origin, patientId, 'sleep_score', from, to),
+    fetchSleepVitalsForType(url.origin, patientId, 'hrv', from, to),
+    fetchSleepVitalsForType(url.origin, patientId, 'respiratory_rate', from, to),
+    fetchSleepVitalsForType(url.origin, patientId, 'night_spo2', from, to),
+    fetchSleepVitalsForType(url.origin, patientId, 'readiness', from, to),
+  ]);
+
+  const scoreByDate = latestByDate(
+    sleepScoreRows,
+    (row) => sleepToNum(row.payload?.score ?? row.payload?.sleepScore ?? row.payload?.value ?? row.valueNum ?? row.value),
+  );
+
+  const hrvByDate = latestByDate(
+    hrvRows,
+    (row) => sleepToNum(row.payload?.ms ?? row.payload?.hrv ?? row.payload?.avgHrv ?? row.payload?.value ?? row.valueNum ?? row.value),
+  );
+
+  const nights = sleepRows
+    .map((row) => {
+      const payload = row.payload || {};
+      const ts = sleepPickTs(row);
+      const dateISO = sleepDateFromTs(ts);
+
+      const stagesMin: SleepStages = {
+        deep: sleepStageMinutes(payload, 'deep'),
+        rem: sleepStageMinutes(payload, 'rem'),
+        light: sleepStageMinutes(payload, 'light'),
+        awake: sleepStageMinutes(payload, 'awake'),
+      };
+
+      const explicitTotal =
+        sleepToNum(payload?.total_minutes) ??
+        sleepToNum(payload?.totalMinutes) ??
+        (typeof sleepToNum(payload?.total_hours) === 'number'
+          ? Math.round(sleepToNum(payload?.total_hours)! * 60)
+          : undefined);
+
+      if (explicitTotal && stagesMin.deep + stagesMin.rem + stagesMin.light <= 0) {
+        stagesMin.light = explicitTotal;
+      }
+
+      const wakeISO =
+        sleepIsoFromEpochish(payload?.endTs ?? payload?.end_ts ?? payload?.wakeISO) ||
+        ts ||
+        new Date().toISOString();
+
+      const sleepMinutes = stagesMin.deep + stagesMin.rem + stagesMin.light;
+      const totalMinutes = sleepMinutes + stagesMin.awake;
+      const bedtimeISO =
+        sleepIsoFromEpochish(payload?.startTs ?? payload?.start_ts ?? payload?.bedtimeISO) ||
+        new Date(new Date(wakeISO).getTime() - Math.max(sleepMinutes, 1) * 60000).toISOString();
+
+      const hrv = hrvByDate.get(dateISO)?.value ?? sleepToNum(payload?.hrv) ?? 0;
+      const directScore =
+        scoreByDate.get(dateISO)?.value ??
+        sleepToNum(payload?.score ?? payload?.sleepScore ?? payload?.qualityScore);
+
+      const qualityScore = sleepQualityFromStages(stagesMin, hrv || 50, directScore);
+      const efficiency =
+        totalMinutes > 0 ? sleepClamp(Math.round((sleepMinutes / totalMinutes) * 100), 0, 100) : 0;
+
+      return {
+        dateISO,
+        bedtimeISO,
+        wakeISO,
+        stagesMin,
+        hrv,
+        efficiency,
+        qualityScore,
+        qualityLabel: sleepQualityLabel(qualityScore),
+        note: null,
+      };
+    })
+    .filter((night) => night.stagesMin.deep + night.stagesMin.rem + night.stagesMin.light > 0)
+    .sort((a, b) => a.dateISO.localeCompare(b.dateISO));
+
+  const latestNight = nights[nights.length - 1] || null;
+  const avgQuality = nights.length
+    ? Math.round(nights.reduce((sum, n) => sum + n.qualityScore, 0) / nights.length)
+    : null;
+
+  const response = {
+    ok: true,
+    patientId,
+    userId: patientId,
+    range,
+    generatedAtISO: new Date().toISOString(),
+    mock: false,
+    nights,
+    insights: {
+      headline: nights.length
+        ? `Sleep report is using persisted wearable sleep data across ${nights.length} night(s).`
+        : 'No persisted sleep nights are available for this range yet.',
+      highlights: [
+        {
+          title: 'Persisted sleep stages',
+          detail: 'Sleep duration and stage data are read from the shared wearable vitals stream.',
+        },
+        {
+          title: 'Recovery context',
+          detail: 'HRV, respiratory rate, readiness and night SpO₂ sources are checked alongside sleep where available.',
+        },
+      ],
+      recommendations: [
+        {
+          title: 'Sync after waking',
+          detail: 'Open NexRing and use Sync ring after sleep so overnight history can populate this report.',
+        },
+      ],
+    },
+    sources: {
+      sleep: {
+        source: sleepRows.length ? 'patient_vitals_sleep_read_model' : 'unavailable',
+        recorded_at: latestNight?.wakeISO ?? null,
+        inferred: false,
+      },
+      sleep_score: {
+        source: sleepScoreRows.length ? 'patient_vitals_sleep_score_read_model' : 'derived_from_sleep_stages',
+        recorded_at: latestNight?.wakeISO ?? null,
+        inferred: !sleepScoreRows.length,
+      },
+      hrv: {
+        source: hrvRows.length ? 'patient_vitals_hrv_read_model' : 'unavailable',
+        recorded_at: latestNight?.wakeISO ?? null,
+        inferred: false,
+      },
+      respiratory_rate: {
+        source: rrRows.length ? 'patient_vitals_respiratory_rate_read_model' : 'unavailable',
+        recorded_at: latestNight?.wakeISO ?? null,
+        inferred: false,
+      },
+      night_spo2: {
+        source: nightSpo2Rows.length ? 'patient_vitals_night_spo2_read_model' : 'unavailable',
+        recorded_at: latestNight?.wakeISO ?? null,
+        inferred: false,
+      },
+      readiness: {
+        source: readinessRows.length ? 'patient_vitals_readiness_read_model' : 'unavailable',
+        recorded_at: latestNight?.wakeISO ?? null,
+        inferred: false,
+      },
+    },
+    summary: {
+      avgQualityScore: avgQuality,
+      nights: nights.length,
+      sampleCounts: {
+        sleep: sleepRows.length,
+        sleepScore: sleepScoreRows.length,
+        hrv: hrvRows.length,
+        respiratoryRate: rrRows.length,
+        nightSpo2: nightSpo2Rows.length,
+        readiness: readinessRows.length,
+      },
+    },
+  } as SleepReportResponse & { summary: Record<string, unknown> };
+
+  return NextResponse.json(response);
 }
 
 export async function POST(req: NextRequest) {

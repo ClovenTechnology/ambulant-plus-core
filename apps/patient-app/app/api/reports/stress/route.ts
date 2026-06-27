@@ -16,6 +16,8 @@ type VitalRow = {
   meta?: Record<string, any> | null;
   createdAt?: string | null;
   ts?: string | null;
+  value?: number | string | null;
+  valueNum?: number | string | null;
 };
 
 type StressTrendPoint = {
@@ -275,12 +277,13 @@ export async function GET(req: NextRequest) {
   const from = fromDate.toISOString();
   const to = now.toISOString();
 
-  const [directStressRows, hrvRows, restingHrRows, hrRows, sleepRows, activityRows] = await Promise.all([
+  const [directStressRows, hrvRows, restingHrRows, hrRows, sleepRows, sleepScoreRows, activityRows] = await Promise.all([
     fetchVitalsForType(url.origin, patientId, 'stress', from, to),
     fetchVitalsForType(url.origin, patientId, 'hrv', from, to),
     fetchVitalsForType(url.origin, patientId, 'resting_heart_rate', from, to),
     fetchVitalsForType(url.origin, patientId, 'heart_rate', from, to),
     fetchVitalsForType(url.origin, patientId, 'sleep', from, to),
+    fetchVitalsForType(url.origin, patientId, 'sleep_score', from, to),
     fetchVitalsForType(url.origin, patientId, 'activity', from, to),
   ]);
 
@@ -294,21 +297,21 @@ export async function GET(req: NextRequest) {
 
   for (const row of hrvRows) {
     const ts = pickTs(row);
-    const value = toNum(row.payload?.value ?? row.payload?.hrv ?? row.payload?.avgHrv);
+    const value = toNum(row.payload?.ms ?? row.payload?.value ?? row.payload?.hrv ?? row.payload?.avgHrv ?? row.valueNum ?? row.value);
     const p = ensurePoint(ts);
     if (p && typeof value === 'number') p.hrv = value;
   }
 
   for (const row of restingHrRows) {
     const ts = pickTs(row);
-    const value = toNum(row.payload?.rhr ?? row.payload?.value ?? row.payload?.hr);
+    const value = toNum(row.payload?.rhr ?? row.payload?.value ?? row.payload?.hr ?? row.valueNum ?? row.value);
     const p = ensurePoint(ts);
     if (p && typeof value === 'number') p.restingHr = value;
   }
 
   for (const row of hrRows) {
     const ts = pickTs(row);
-    const value = toNum(row.payload?.bpm ?? row.payload?.hr ?? row.payload?.heartRate ?? row.payload?.value);
+    const value = toNum(row.payload?.bpm ?? row.payload?.hr ?? row.payload?.heartRate ?? row.payload?.value ?? row.valueNum ?? row.value);
     const p = ensurePoint(ts);
     if (p && typeof value === 'number' && typeof p.restingHr !== 'number') {
       p.restingHr = value;
@@ -320,6 +323,13 @@ export async function GET(req: NextRequest) {
     const value = computeSleepScoreFromRow(row);
     const p = ensurePoint(ts);
     if (p && typeof value === 'number') p.sleepScore = value;
+  }
+
+  for (const row of sleepScoreRows) {
+    const ts = pickTs(row);
+    const value = toNum(row.payload?.score ?? row.payload?.sleepScore ?? row.payload?.value ?? row.valueNum ?? row.value);
+    const p = ensurePoint(ts);
+    if (p && typeof value === 'number') p.sleepScore = clamp(Math.round(value), 0, 100);
   }
 
   for (const row of activityRows) {
@@ -413,7 +423,7 @@ export async function GET(req: NextRequest) {
       sampleCounts: {
         hrv: hrvRows.length,
         restingHr: restingHrRows.length + hrRows.length,
-        sleep: sleepRows.length,
+        sleep: sleepRows.length + sleepScoreRows.length,
         activity: activityRows.length,
         directStress: directStressRows.length,
       },
@@ -471,7 +481,11 @@ export async function GET(req: NextRequest) {
         inferred: !restingHrRows.length && !!hrRows.length,
       },
       sleepScore: {
-        source: sleepRows.length ? 'patient_vitals_sleep_read_model' : 'unavailable',
+        source: sleepScoreRows.length
+          ? 'patient_vitals_sleep_score_read_model'
+          : sleepRows.length
+            ? 'patient_vitals_sleep_read_model'
+            : 'unavailable',
         recorded_at: latestTs,
         inferred: true,
       },
