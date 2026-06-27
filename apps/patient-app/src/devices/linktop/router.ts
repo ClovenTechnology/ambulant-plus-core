@@ -258,22 +258,22 @@ function decodeGeneral(dv: DataView): LinktopDecoded {
   const spo2 = spo2IfPresent(dv);
   if (spo2) return spo2;
 
-  const ecg = parseECGWave(dv);
-  if (ecg) {
-    return {
-      kind: 'ecg_wave',
-      sampleHz: ecg.sampleHz,
-      samples: ecg.samples,
-      raw,
-    };
-  }
-
   const ppg = parsePPGWave(dv);
   if (ppg) {
     return {
       kind: 'ppg_wave',
       sampleHz: ppg.sampleHz,
       samples: ppg.samples,
+      raw,
+    };
+  }
+
+  const ecg = parseECGWave(dv);
+  if (ecg) {
+    return {
+      kind: 'ecg_wave',
+      sampleHz: ecg.sampleHz,
+      samples: ecg.samples,
       raw,
     };
   }

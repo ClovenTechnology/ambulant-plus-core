@@ -600,9 +600,9 @@ export function createHealthMonitorSession(opts: {
                 streaming: false,
                 mode: 'idle',
                 error:
-                  evt.reason === 'timeout'
+                  evt.reason === 'timeout' && evt.sampleCount <= 0
                     ? 'ECG session timed out'
-                    : evt.reason === 'signal_detected_no_result'
+                    : evt.reason === 'signal_detected_no_result' && evt.sampleCount <= 0
                       ? 'ECG signal activity seen but no finalized session summary was produced'
                       : null,
                 lastEcgCycleComplete: detail,

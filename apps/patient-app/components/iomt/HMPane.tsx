@@ -902,6 +902,17 @@ function ResultScreen({
   );
 }
 
+function isMeaningfulHistoryReading(item: HealthMonitorReading) {
+  if (item.kind !== 'ecg') return true;
+
+  const sampleCount = Number(item.payload?.sampleCount ?? 0);
+  const hasHeartRate = typeof item.payload?.heartRate === 'number';
+  const hasWaveformPreview =
+    Array.isArray(item.payload?.waveformPreview) && item.payload.waveformPreview.length > 0;
+
+  return sampleCount >= 256 || hasHeartRate || hasWaveformPreview;
+}
+
 function HistoryList({
   history,
   selected,
@@ -909,7 +920,10 @@ function HistoryList({
   history: HealthMonitorReading[];
   selected: VitalKind;
 }) {
-  const filtered = history.filter((item) => item.kind === selected).slice(0, 6);
+  const filtered = history
+    .filter((item) => item.kind === selected)
+    .filter(isMeaningfulHistoryReading)
+    .slice(0, 6);
 
   return (
     <div className="rounded-[24px] border border-slate-200 bg-white p-4">
@@ -1045,6 +1059,14 @@ export default function HMPane({
   }, [history, latest, selected, sessionState]);
 
   function recordReading(reading: HealthMonitorReading) {
+    if (!isMeaningfulHistoryReading(reading)) {
+      console.info('[HMPane] ignored non-meaningful ECG history row', {
+        kind: reading.kind,
+        payload: reading.payload,
+      });
+      return;
+    }
+
     setLatest(reading);
 
     const patch = snapshotPatchFromReading(reading);

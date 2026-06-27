@@ -1283,7 +1283,7 @@ export class HealthMonitorBridge {
         return kind === 'ecg_wave' || kind === 'battery' || kind === 'ack' || kind === 'unknown';
       case 'idle':
       default:
-        return true;
+        return kind === 'battery' || kind === 'ack' || kind === 'unknown';
     }
   }
 
@@ -2066,7 +2066,7 @@ export class HealthMonitorBridge {
     }
 
     const normalizedReason: GenericCycleReason =
-      reason === 'manual_stop' && this.ecgSampleCount > 0 ? 'result_received' : reason;
+      this.ecgSampleCount > 0 ? 'result_received' : reason;
 
     const summary = this.summarizeEcg(normalizedReason);
 
