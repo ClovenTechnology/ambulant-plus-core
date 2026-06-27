@@ -46,6 +46,7 @@ type FertilityReportResponse = {
     pregnancyConfidence: number;
     sampleCounts: {
       temperature: number;
+      temperatureDeviation: number;
       hrv: number;
       rhr: number;
       spo2: number;
@@ -260,6 +261,7 @@ function buildMockFertilityReport(patientId: string, range: RangeKey, lmp?: stri
       pregnancyConfidence: pregnancy.confidence,
       sampleCounts: {
         temperature: enriched.length,
+        temperatureDeviation: 0,
         hrv: enriched.length,
         rhr: enriched.length,
         spo2: enriched.length,
@@ -281,7 +283,7 @@ function buildMockFertilityReport(patientId: string, range: RangeKey, lmp?: stri
         },
     trend: enriched,
     insights: {
-      headline: 'Showing demo fertility data until persisted wearable-derived fertility inputs are fully wired.',
+      headline: 'Live fertility data is pending until persisted wearable-derived fertility inputs are available.',
       bullets,
       recommendations: [
         {
@@ -321,8 +323,9 @@ export async function GET(req: NextRequest) {
   const from = fromDate.toISOString();
   const to = now.toISOString();
 
-  const [tempRows, hrvRows, rhrRows, hrRows, spo2Rows] = await Promise.all([
+  const [tempRows, tempDeviationRows, hrvRows, rhrRows, hrRows, spo2Rows] = await Promise.all([
     fetchVitalsForType(url.origin, patientId, 'temperature', from, to),
+    fetchVitalsForType(url.origin, patientId, 'temperature_deviation', from, to),
     fetchVitalsForType(url.origin, patientId, 'hrv', from, to),
     fetchVitalsForType(url.origin, patientId, 'resting_heart_rate', from, to),
     fetchVitalsForType(url.origin, patientId, 'heart_rate', from, to),
@@ -340,15 +343,47 @@ export async function GET(req: NextRequest) {
   for (const row of tempRows) {
     const ts = safeIso(row.recorded_at) || safeIso(row.ts) || safeIso(row.createdAt);
     const date = toDateISO(ts);
-    const value = toNum(row.payload?.celsius ?? row.payload?.temp_c ?? row.payload?.temperature ?? row.payload?.value);
+    const value = toNum(
+      row.payload?.celsius ??
+        row.payload?.temp_c ??
+        row.payload?.temperature ??
+        row.payload?.value ??
+        (row as any).valueNum ??
+        (row as any).value,
+    );
     const p = ensurePoint(date);
     if (p && typeof value === 'number') p.tempC = value;
+  }
+
+  for (const row of tempDeviationRows) {
+    const ts = safeIso(row.recorded_at) || safeIso(row.ts) || safeIso(row.createdAt);
+    const date = toDateISO(ts);
+    const value = toNum(
+      row.payload?.delta_c ??
+        row.payload?.deltaC ??
+        row.payload?.tempDeviation ??
+        row.payload?.temperatureDeviation ??
+        row.payload?.value ??
+        (row as any).valueNum ??
+        (row as any).value,
+    );
+    const p = ensurePoint(date);
+    if (p && typeof value === 'number') {
+      p.deltaTemp = Number(value.toFixed(2));
+    }
   }
 
   for (const row of hrvRows) {
     const ts = safeIso(row.recorded_at) || safeIso(row.ts) || safeIso(row.createdAt);
     const date = toDateISO(ts);
-    const value = toNum(row.payload?.hrv ?? row.payload?.avgHrv ?? row.payload?.value);
+    const value = toNum(
+      row.payload?.ms ??
+        row.payload?.hrv ??
+        row.payload?.avgHrv ??
+        row.payload?.value ??
+        (row as any).valueNum ??
+        (row as any).value,
+    );
     const p = ensurePoint(date);
     if (p && typeof value === 'number') p.hrv = value;
   }
@@ -356,7 +391,13 @@ export async function GET(req: NextRequest) {
   for (const row of rhrRows) {
     const ts = safeIso(row.recorded_at) || safeIso(row.ts) || safeIso(row.createdAt);
     const date = toDateISO(ts);
-    const value = toNum(row.payload?.rhr ?? row.payload?.value ?? row.payload?.hr);
+    const value = toNum(
+      row.payload?.rhr ??
+        row.payload?.value ??
+        row.payload?.hr ??
+        (row as any).valueNum ??
+        (row as any).value,
+    );
     const p = ensurePoint(date);
     if (p && typeof value === 'number') p.rhr = value;
   }
@@ -364,7 +405,14 @@ export async function GET(req: NextRequest) {
   for (const row of hrRows) {
     const ts = safeIso(row.recorded_at) || safeIso(row.ts) || safeIso(row.createdAt);
     const date = toDateISO(ts);
-    const value = toNum(row.payload?.bpm ?? row.payload?.hr ?? row.payload?.heartRate ?? row.payload?.value);
+    const value = toNum(
+      row.payload?.bpm ??
+        row.payload?.hr ??
+        row.payload?.heartRate ??
+        row.payload?.value ??
+        (row as any).valueNum ??
+        (row as any).value,
+    );
     const p = ensurePoint(date);
     if (p && typeof value === 'number' && typeof p.rhr !== 'number') {
       p.rhr = value;
@@ -374,7 +422,14 @@ export async function GET(req: NextRequest) {
   for (const row of spo2Rows) {
     const ts = safeIso(row.recorded_at) || safeIso(row.ts) || safeIso(row.createdAt);
     const date = toDateISO(ts);
-    const value = toNum(row.payload?.pct ?? row.payload?.spo2 ?? row.payload?.SpO2 ?? row.payload?.value);
+    const value = toNum(
+      row.payload?.pct ??
+        row.payload?.spo2 ??
+        row.payload?.SpO2 ??
+        row.payload?.value ??
+        (row as any).valueNum ??
+        (row as any).value,
+    );
     const p = ensurePoint(date);
     if (p && typeof value === 'number') p.spo2 = value;
   }
@@ -383,6 +438,7 @@ export async function GET(req: NextRequest) {
 
   const meaningful =
     trend.some((t) => typeof t.tempC === 'number') ||
+    trend.some((t) => typeof t.deltaTemp === 'number') ||
     trend.some((t) => typeof t.hrv === 'number') ||
     trend.some((t) => typeof t.rhr === 'number');
 
@@ -391,18 +447,26 @@ export async function GET(req: NextRequest) {
   }
 
   const tempSeries = trend.map((p) => p.tempC).filter((n): n is number => typeof n === 'number');
-  const baselineTemp = avg(tempSeries.slice(0, Math.min(14, tempSeries.length))) ?? avg(tempSeries) ?? 36.5;
+  const baselineTemp =
+    tempSeries.length > 0
+      ? avg(tempSeries.slice(0, Math.min(14, tempSeries.length))) ?? avg(tempSeries)
+      : null;
 
   const enriched = trend.map((p) => ({
     ...p,
-    deltaTemp: typeof p.tempC === 'number' ? Number((p.tempC - baselineTemp).toFixed(2)) : undefined,
+    deltaTemp:
+      typeof p.deltaTemp === 'number'
+        ? Number(p.deltaTemp.toFixed(2))
+        : typeof p.tempC === 'number' && baselineTemp != null
+          ? Number((p.tempC - baselineTemp).toFixed(2))
+          : undefined,
   }));
 
   const phase = getFertilityStatus(
     enriched.map((p) => p.deltaTemp ?? 0),
     enriched.map((p) => p.hrv ?? 0),
     enriched.map((p) => p.rhr ?? 0),
-    baselineTemp,
+    baselineTemp ?? 0,
   );
 
   const pregnancy = detectPregnancy(
@@ -475,7 +539,8 @@ export async function GET(req: NextRequest) {
       likelyPregnancy: pregnancy.status === 'likely' || pregnancy.status === 'confirmed',
       pregnancyConfidence: pregnancy.confidence,
       sampleCounts: {
-        temperature: tempRows.length,
+        temperature: tempRows.length + tempDeviationRows.length,
+        temperatureDeviation: tempDeviationRows.length,
         hrv: hrvRows.length,
         rhr: rhrRows.length + hrRows.length,
         spo2: spo2Rows.length,
@@ -517,7 +582,18 @@ export async function GET(req: NextRequest) {
     },
     sources: {
       temperature: {
-        source: tempRows.length ? 'patient_vitals_temp_read_model' : 'unavailable',
+        source: tempRows.length
+          ? 'patient_vitals_temp_read_model'
+          : tempDeviationRows.length
+            ? 'patient_vitals_temperature_deviation_read_model'
+            : 'unavailable',
+        recorded_at: latestRecordedAt,
+        inferred: false,
+      },
+      temperature_deviation: {
+        source: tempDeviationRows.length
+          ? 'patient_vitals_temperature_deviation_read_model'
+          : 'unavailable',
         recorded_at: latestRecordedAt,
         inferred: false,
       },
