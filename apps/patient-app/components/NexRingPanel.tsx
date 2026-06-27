@@ -39,14 +39,6 @@ type NexRingPanelProps = {
   embedded?: boolean;
 };
 
-function safeStringify(value: unknown) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
 function finiteNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
@@ -95,23 +87,10 @@ export default function NexRingPanel({
   const [stressHistory, setStressHistory] = useState<StressPoint[]>([]);
   const [tempHistory, setTempHistory] = useState<TempPoint[]>([]);
   const [sleepSessions, setSleepSessions] = useState<SleepSession[]>([]);
-  const [copyStatus, setCopyStatus] = useState<string>('');
 
   const title = useMemo(
     () => `NexRing${roomId ? ` • ${roomId}` : ''}`,
     [roomId],
-  );
-
-  const traceDump = useMemo(
-    () =>
-      safeStringify({
-        lastCmd,
-        hydration,
-        dailySummary: reportSnapshot?.dailySummary ?? null,
-        derived: reportSnapshot?.derived ?? null,
-        trace,
-      }),
-    [lastCmd, hydration, reportSnapshot, trace],
   );
 
   const persistMetric = useMemo(() => {
@@ -146,7 +125,7 @@ export default function NexRingPanel({
       onTrace(event) {
         setTrace((prev) => {
           const next = [...prev, event];
-          return next.length <= 10000 ? next : next.slice(next.length - 10000);
+          return next.length <= 250 ? next : next.slice(next.length - 250);
         });
       },
 
@@ -414,31 +393,6 @@ export default function NexRingPanel({
     nightSpo2: metrics.nightSpo2 ?? reportSnapshot?.derived?.nightSpo2,
     historyRr: metrics.historyRr ?? reportSnapshot?.derived?.rr,
   };
-
-  async function copyTraceDump() {
-    try {
-      await navigator.clipboard.writeText(traceDump);
-      setCopyStatus('Copied full session trace.');
-      setTimeout(() => setCopyStatus(''), 2000);
-    } catch {
-      setCopyStatus('Copy failed.');
-      setTimeout(() => setCopyStatus(''), 2000);
-    }
-  }
-
-  function downloadTraceDump() {
-    const blob = new Blob([traceDump], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-
-    a.href = url;
-    a.download = `nexring-trace-${stamp}.json`;
-    a.click();
-
-    URL.revokeObjectURL(url);
-  }
-
   return (
     <div
       className={
@@ -467,15 +421,6 @@ export default function NexRingPanel({
         </div>
       ) : null}
 
-      {!state.lastError && isWebTransport ? (
-        <div className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm text-cyan-800">
-          The NexRing session is now instrumented in three layers: full trace
-          archive, receive-family counters, and a command ledger showing
-          expected families, matched families, and retained metrics. Use this to
-          distinguish passive hydration, single-health, and live-health behavior
-          precisely.
-        </div>
-      ) : null}
 
       <section
         className={
@@ -510,54 +455,6 @@ export default function NexRingPanel({
         />
       </section>
 
-      {!embedded ? (
-        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <h3 className="text-base font-semibold text-slate-900">
-                Full session trace archive
-              </h3>
-              <p className="mt-1 text-sm text-slate-500">
-                This keeps the full session available for copy/download after
-                disconnect so early bootstrap packets, receive-family drift, and
-                retained-metric decisions are all visible in one artifact.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={copyTraceDump}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                Copy full trace
-              </button>
-              <button
-                type="button"
-                onClick={downloadTraceDump}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                Download JSON
-              </button>
-              <button
-                type="button"
-                onClick={() => setTrace([])}
-                className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-              >
-                Clear trace
-              </button>
-            </div>
-          </div>
-
-          {copyStatus ? (
-            <div className="mt-3 text-sm text-cyan-700">{copyStatus}</div>
-          ) : null}
-
-          <div className="mt-4 max-h-[560px] overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-200">
-            <pre>{traceDump}</pre>
-          </div>
-        </section>
-      ) : null}
     </div>
   );
 }

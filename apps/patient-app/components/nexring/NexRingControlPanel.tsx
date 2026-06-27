@@ -1,7 +1,7 @@
 // apps/patient-app/components/nexring/NexRingControlPanel.tsx
 'use client';
 
-import React, { useMemo } from 'react';
+import React from 'react';
 import type {
   RingCommandResult,
   RingDailySummary,
@@ -36,42 +36,19 @@ type ControlActions = {
   runHydrationBootstrap: () => void;
 };
 
-type CommandMatrixRow = {
-  label: string;
-  expectedFamilies: string[];
-  matchedFamilies: string[];
-  observedPackets: number;
-  retainedMetrics: number;
-};
-
-function tracePreview(trace: RingTraceEvent[]) {
-  return trace.slice(-10).reverse();
+function formatDistance(meters?: number | null) {
+  if (typeof meters !== 'number' || !Number.isFinite(meters)) return '—';
+  if (meters >= 1000) return `${(meters / 1000).toFixed(2)} km`;
+  return `${Math.round(meters)} m`;
 }
 
-function familyCountRows(hydration: RingHydrationState) {
-  return Object.entries(hydration.familyCounts ?? {})
-    .map(([family, count]) => ({
-      family,
-      count: typeof count === 'number' && Number.isFinite(count) ? count : 0,
-    }))
-    .sort((a, b) => b.count - a.count);
+function formatNumber(value?: number | null, suffix = '') {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  return `${new Intl.NumberFormat().format(Math.round(value))}${suffix}`;
 }
 
-function matrixFromLastCmd(lastCmd: RingCommandResult | null): CommandMatrixRow[] {
-  const ledger = (lastCmd?.raw as any)?.ledger;
-  if (!Array.isArray(ledger)) return [];
-
-  return ledger.map((row: any) => ({
-    label: String(row?.label ?? 'unknown'),
-    expectedFamilies: Array.isArray(row?.expectedFamilies)
-      ? row.expectedFamilies
-      : [],
-    matchedFamilies: Array.isArray(row?.matchedFamilies)
-      ? row.matchedFamilies
-      : [],
-    observedPackets: Number(row?.observedPackets ?? 0),
-    retainedMetrics: Number(row?.retainedMetrics ?? 0),
-  }));
+function isConnectedPhase(phase?: string | null) {
+  return phase === 'ready' || phase === 'connected';
 }
 
 export function NexRingControlPanel({
@@ -85,10 +62,10 @@ export function NexRingControlPanel({
   lastPersistAt,
   state,
   deviceInfo,
-  lastCmd,
+  lastCmd: _lastCmd,
   hydration,
   dailySummary,
-  trace,
+  trace: _trace,
   compact = false,
 }: {
   isWebTransport: boolean;
@@ -107,162 +84,72 @@ export function NexRingControlPanel({
   trace: RingTraceEvent[];
   compact?: boolean;
 }) {
-  const matrix = useMemo(() => matrixFromLastCmd(lastCmd), [lastCmd]);
-  const families = useMemo(() => familyCountRows(hydration), [hydration]);
-
-  if (compact) {
-    return (
-      <div className="space-y-4">
-        <Card
-          title="Ring control"
-          subtitle="Compact connection and hydration surface."
-        >
-          <div className="grid gap-3 sm:grid-cols-2">
-            <InfoTile label="Status" value={state.phase} />
-            <InfoTile
-              label="Selected ring"
-              value={selected?.name || 'None selected'}
-            />
-            <InfoTile label="Hydration phase" value={hydration.phase} />
-            <InfoTile
-              label="History metrics"
-              value={String(hydration.receivedMetrics)}
-            />
-          </div>
-
-          <div className="mt-4 grid gap-2 sm:grid-cols-2">
-            <ActionButton onClick={actions.scan}>Scan</ActionButton>
-            <ActionButton onClick={actions.stopScan}>Stop scan</ActionButton>
-            <ActionButton disabled={!selected} onClick={actions.connect}>
-              Connect
-            </ActionButton>
-            <ActionButton onClick={actions.disconnect}>Disconnect</ActionButton>
-            <ActionButton onClick={actions.startHealth}>
-              Live health
-            </ActionButton>
-            <ActionButton onClick={actions.startSingleHealth}>
-              Single health
-            </ActionButton>
-            <ActionButton onClick={actions.runHydrationBootstrap}>
-              Hydrate reports
-            </ActionButton>
-            <ActionButton onClick={actions.requestNewAlgorithmHistoryData}>
-              Algorithm history
-            </ActionButton>
-          </div>
-        </Card>
-
-        <Card title="Diagnostic matrix">
-          <div className="space-y-2 text-xs text-slate-600">
-            {matrix.length === 0 ? (
-              <div>No command ledger yet.</div>
-            ) : (
-              matrix
-                .slice(-6)
-                .reverse()
-                .map((row, idx) => (
-                  <div
-                    key={`${row.label}-${idx}`}
-                    className="rounded-xl border border-slate-200 p-3"
-                  >
-                    <div className="font-semibold text-slate-900">
-                      {row.label}
-                    </div>
-                    <div>
-                      Expected: {row.expectedFamilies.join(', ') || '—'}
-                    </div>
-                    <div>
-                      Matched: {row.matchedFamilies.join(', ') || '—'}
-                    </div>
-                    <div>Packets: {row.observedPackets}</div>
-                    <div>Retained: {row.retainedMetrics}</div>
-                  </div>
-                ))
-            )}
-          </div>
-        </Card>
-
-        <Card title="Debug trace">
-          <div className="max-h-72 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-200">
-            <pre>
-              {JSON.stringify({ lastCmd, trace: tracePreview(trace) }, null, 2)}
-            </pre>
-          </div>
-        </Card>
-      </div>
-    );
-  }
+  const connected = isConnectedPhase(state.phase);
+  const selectedLabel =
+    selected?.name || state.connectedDevice?.name || 'No ring selected';
+  const connectedLabel =
+    state.connectedDevice?.name || selected?.name || 'Not connected';
 
   return (
     <div className="space-y-4">
-      <Card title="Ring control">
-        <div className="flex flex-wrap gap-2">
+      <Card
+        title="Ring connection"
+        subtitle="Pair, sync and refresh NexRing wellness metrics."
+      >
+        <div className="grid gap-3 sm:grid-cols-2">
+          <InfoTile
+            label="Status"
+            value={connected ? 'Connected' : state.phase || 'Ready'}
+          />
+          <InfoTile label="Selected ring" value={selectedLabel} />
+          <InfoTile label="Last seen" value={relativeTime(state.lastSeenTs)} />
+          <InfoTile label="Last sync" value={relativeTime(lastPersistAt)} />
+        </div>
+
+        <div className="mt-4 grid gap-2 sm:grid-cols-2">
           <ActionButton
             onClick={actions.askPermissions}
             disabled={isWebTransport}
           >
-            Ask permissions
+            Enable Bluetooth
           </ActionButton>
-          <ActionButton onClick={actions.scan}>Scan</ActionButton>
+          <ActionButton onClick={actions.scan}>Find ring</ActionButton>
           <ActionButton onClick={actions.stopScan}>Stop scan</ActionButton>
           <ActionButton disabled={!selected} onClick={actions.connect}>
             Connect
           </ActionButton>
           <ActionButton onClick={actions.disconnect}>Disconnect</ActionButton>
-
-          <ActionButton onClick={actions.syncTime}>Sync time</ActionButton>
-          <ActionButton onClick={actions.requestBattery}>Battery</ActionButton>
-          <ActionButton onClick={actions.requestDeviceInfo}>
-            Device info
-          </ActionButton>
-          <ActionButton onClick={actions.startHealth}>Live health</ActionButton>
-          <ActionButton onClick={actions.startSingleHealth}>
-            Single health
-          </ActionButton>
-          <ActionButton onClick={actions.requestHistoricalCount}>
-            History count
-          </ActionButton>
-          <ActionButton onClick={actions.requestHistoricalData}>
-            History data
-          </ActionButton>
-          <ActionButton onClick={actions.requestActiveData}>
-            Active data
-          </ActionButton>
-          <ActionButton onClick={actions.requestActiveData2}>
-            Active data 2
-          </ActionButton>
-          <ActionButton onClick={actions.requestNewAlgorithmHistoryCount}>
-            Alg count
-          </ActionButton>
-          <ActionButton onClick={actions.requestNewAlgorithmHistoryData}>
-            Alg data
-          </ActionButton>
-          <ActionButton onClick={actions.requestStep}>Step</ActionButton>
-          <ActionButton onClick={actions.requestTemperature}>Temp</ActionButton>
           <ActionButton onClick={actions.runHydrationBootstrap}>
-            Hydrate reports
+            Sync ring
           </ActionButton>
+          <ActionButton onClick={actions.requestBattery}>
+            Refresh battery
+          </ActionButton>
+          <ActionButton onClick={actions.syncTime}>Sync time</ActionButton>
         </div>
 
-        {isWebTransport ? (
-          <p className="mt-3 text-xs text-slate-500">
-            Web mode now records a command ledger so you can compare sent
-            commands, expected receive families, observed families, and retained
-            metrics instead of relying only on a rolling JSON trace.
-          </p>
-        ) : null}
+        <div className="mt-4 rounded-2xl border border-cyan-100 bg-cyan-50 px-4 py-3 text-xs leading-5 text-cyan-900">
+          NexRing sync pulls wellness, sleep, activity and recovery metrics into
+          your patient reports. Advanced protocol diagnostics have moved out of
+          this patient-facing panel.
+        </div>
+
+        <div className="mt-3">
+          <a
+            href="/myCare/devices/ble-debug"
+            className="text-xs font-semibold text-cyan-700 underline-offset-4 hover:underline"
+          >
+            Open advanced BLE debug console
+          </a>
+        </div>
       </Card>
 
-      <Card
-        title="Nearby rings"
-        subtitle="Select the strongest ring candidate before connecting."
-      >
-        <div className="max-h-72 overflow-auto rounded-2xl border border-slate-200">
-          {devices.length === 0 ? (
-            <div className="p-4 text-sm text-slate-500">
-              No devices discovered yet.
-            </div>
-          ) : (
+      {devices.length > 0 ? (
+        <Card
+          title="Nearby rings"
+          subtitle="Select the ring you want to pair before connecting."
+        >
+          <div className="max-h-72 overflow-auto rounded-2xl border border-slate-200">
             <div className="divide-y divide-slate-200">
               {devices.map((d) => {
                 const active = d.id === selectedId;
@@ -271,7 +158,7 @@ export function NexRingControlPanel({
                   <button
                     key={d.id || d.mac || `${d.name}-${d.rssi}`}
                     className={`flex w-full items-center justify-between px-4 py-3 text-left ${
-                      active ? 'bg-slate-50' : 'bg-white'
+                      active ? 'bg-cyan-50' : 'bg-white'
                     }`}
                     onClick={() => onSelectDevice(d.id)}
                     type="button"
@@ -291,204 +178,92 @@ export function NexRingControlPanel({
                 );
               })}
             </div>
-          )}
-        </div>
-      </Card>
+          </div>
+        </Card>
+      ) : null}
 
-      <Card title="Hydration status">
-        <div className="grid gap-3 md:grid-cols-2">
-          <InfoTile label="Phase" value={hydration.phase} />
-          <InfoTile
-            label="Received packets"
-            value={String(hydration.receivedPackets)}
-          />
-          <InfoTile
-            label="Received metrics"
-            value={String(hydration.receivedMetrics)}
-          />
-          <InfoTile
-            label="Count estimate"
-            value={
-              typeof hydration.countEstimate === 'number'
-                ? String(hydration.countEstimate)
-                : '—'
-            }
-          />
-          <InfoTile
-            label="Algorithm packets"
-            value={String(hydration.algorithmPackets)}
-          />
-          <InfoTile
-            label="Active packets"
-            value={String(hydration.activePackets)}
-          />
-          <InfoTile
-            label="Sleep packets"
-            value={String(hydration.sleepPackets)}
-          />
-          <InfoTile
-            label="History errors"
-            value={String(hydration.historyErrorPackets)}
-          />
-        </div>
-      </Card>
-
-      <Card title="Observed receive families">
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-          {families.length === 0 ? (
-            <div className="text-sm text-slate-500">
-              No receive families counted yet.
-            </div>
-          ) : (
-            families.map((row) => (
-              <InfoTile
-                key={row.family}
-                label={row.family}
-                value={String(row.count)}
-              />
-            ))
-          )}
-        </div>
-      </Card>
-
-      <Card title="Command / response matrix">
-        <div className="space-y-3">
-          {matrix.length === 0 ? (
-            <div className="text-sm text-slate-500">No command ledger yet.</div>
-          ) : (
-            matrix
-              .slice(-12)
-              .reverse()
-              .map((row, idx) => (
-                <div
-                  key={`${row.label}-${idx}`}
-                  className="rounded-2xl border border-slate-200 p-4"
-                >
-                  <div className="text-sm font-semibold text-slate-900">
-                    {row.label}
-                  </div>
-                  <div className="mt-2 grid gap-2 text-xs text-slate-600 md:grid-cols-2 xl:grid-cols-4">
-                    <div>
-                      <div className="font-medium text-slate-900">
-                        Expected
-                      </div>
-                      <div>{row.expectedFamilies.join(', ') || '—'}</div>
-                    </div>
-                    <div>
-                      <div className="font-medium text-slate-900">Matched</div>
-                      <div>{row.matchedFamilies.join(', ') || '—'}</div>
-                    </div>
-                    <div>
-                      <div className="font-medium text-slate-900">
-                        Observed packets
-                      </div>
-                      <div>{row.observedPackets}</div>
-                    </div>
-                    <div>
-                      <div className="font-medium text-slate-900">
-                        Retained metrics
-                      </div>
-                      <div>{row.retainedMetrics}</div>
-                    </div>
-                  </div>
-                </div>
-              ))
-          )}
-        </div>
-      </Card>
-
-      <Card title="Daily summary">
+      <Card title="Today from NexRing">
         <div className="grid gap-3 md:grid-cols-2">
           <InfoTile
             label="Steps"
-            value={
-              dailySummary?.steps != null ? String(dailySummary.steps) : '—'
-            }
+            value={formatNumber(dailySummary?.steps)}
           />
           <InfoTile
             label="Calories"
-            value={
-              dailySummary?.calories != null
-                ? String(dailySummary.calories)
-                : '—'
-            }
+            value={formatNumber(dailySummary?.calories, ' kcal')}
           />
           <InfoTile
             label="Distance"
-            value={
-              dailySummary?.distanceMeters != null
-                ? `${Math.round(dailySummary.distanceMeters)} m`
-                : '—'
-            }
+            value={formatDistance(dailySummary?.distanceMeters)}
           />
           <InfoTile
             label="Walking steps"
-            value={
-              dailySummary?.walkingSteps != null
-                ? String(dailySummary.walkingSteps)
-                : '—'
-            }
+            value={formatNumber(dailySummary?.walkingSteps)}
           />
           <InfoTile
             label="Running steps"
+            value={formatNumber(dailySummary?.runningSteps)}
+          />
+          <InfoTile
+            label="Battery"
             value={
-              dailySummary?.runningSteps != null
-                ? String(dailySummary.runningSteps)
+              typeof state.batteryPct === 'number'
+                ? `${Math.round(state.batteryPct)}%`
                 : '—'
             }
           />
-          <InfoTile
-            label="Last hydrate"
-            value={relativeTime(hydration.lastPacketTs)}
-          />
         </div>
       </Card>
 
-      <Card title="Persistence">
+      <Card title="Report sync">
         <div className="grid gap-3 md:grid-cols-2">
+          <InfoTile label="Sync phase" value={hydration.phase || 'ready'} />
+          <InfoTile
+            label="Metrics received"
+            value={String(hydration.receivedMetrics || 0)}
+          />
+          <InfoTile
+            label="Sleep records"
+            value={String(hydration.sleepPackets || 0)}
+          />
+          <InfoTile
+            label="Activity records"
+            value={String(hydration.activePackets || 0)}
+          />
           <InfoTile label="Persist status" value={persistInfo} />
-          <InfoTile label="Last persist" value={relativeTime(lastPersistAt)} />
+          <InfoTile label="Transport" value={isWebTransport ? 'Web bridge' : 'Web Bluetooth'} />
         </div>
-        <p className="mt-3 text-xs text-slate-500">
-          Safe shared-vital persistence currently targets heart rate and SpO₂.
-          Temperature remains baseline-deviation-only until clinically
-          normalized.
+
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          Sleep, recovery, daytime stress, activity and temperature variation
+          are synced as wellness metrics. NexRing temperature variation is kept
+          separate from clinical body temperature.
         </p>
       </Card>
 
-      <Card title="Ring profile">
-        <div className="grid gap-3 md:grid-cols-2">
-          <InfoTile
-            label="Connected device"
-            value={state.connectedDevice?.name || selected?.name || '—'}
-          />
-          <InfoTile
-            label="Device address"
-            value={
-              state.connectedDevice?.mac || selected?.mac || selected?.id || '—'
-            }
-          />
-          <InfoTile label="Model" value={deviceInfo?.model || '—'} />
-          <InfoTile label="Firmware" value={deviceInfo?.firmware || '—'} />
-          <InfoTile
-            label="Manufacturer"
-            value={deviceInfo?.manufacturer || '—'}
-          />
-          <InfoTile label="Software" value={deviceInfo?.software || '—'} />
-        </div>
-      </Card>
-
-      <Card title="Last command / sync">
-        <pre className="overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-200">
-          {JSON.stringify(lastCmd, null, 2)}
-        </pre>
-      </Card>
-
-      <Card title="Session trace">
-        <pre className="max-h-80 overflow-auto rounded-2xl bg-slate-950 p-4 text-xs text-slate-200">
-          {JSON.stringify(tracePreview(trace), null, 2)}
-        </pre>
-      </Card>
+      {!compact ? (
+        <Card title="Ring details">
+          <div className="grid gap-3 md:grid-cols-2">
+            <InfoTile label="Connected ring" value={connectedLabel} />
+            <InfoTile
+              label="Device address"
+              value={
+                state.connectedDevice?.mac ||
+                selected?.mac ||
+                selected?.id ||
+                '—'
+              }
+            />
+            <InfoTile label="Model" value={deviceInfo?.model || '—'} />
+            <InfoTile label="Firmware" value={deviceInfo?.firmware || '—'} />
+            <InfoTile
+              label="Manufacturer"
+              value={deviceInfo?.manufacturer || '—'}
+            />
+            <InfoTile label="Software" value={deviceInfo?.software || '—'} />
+          </div>
+        </Card>
+      ) : null}
     </div>
   );
 }
