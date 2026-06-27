@@ -426,12 +426,15 @@ function readingFromEvent(evt: HealthMonitorLiveEvent): HealthMonitorReading | n
       label: 'Blood Glucose',
       primary: detail.glucose != null ? String(detail.glucose) : '—',
       secondary: 'Glucose reading captured',
-      unit: detail.unit || 'mmol/L',
+      unit: detail.unit || 'mg/dL',
       at,
       source: 'health_monitor',
       payload: {
         glucose: detail.glucose ?? null,
-        unit: detail.unit || 'mmol/L',
+        value: detail.glucose ?? null,
+        mgDl: detail.unit === 'mmol/L' ? null : (detail.glucose ?? null),
+        mmol: detail.unit === 'mmol/L' ? (detail.glucose ?? null) : null,
+        unit: detail.unit || 'mg/dL',
       },
     };
   }
@@ -603,12 +606,15 @@ function readingFromState(
       label: 'Blood Glucose',
       primary: r.glucose != null ? String(r.glucose) : '—',
       secondary: 'Glucose captured',
-      unit: r.unit || 'mmol/L',
+      unit: r.unit || 'mg/dL',
       at,
       source: 'health_monitor',
       payload: {
         glucose: r.glucose ?? null,
-        unit: r.unit || 'mmol/L',
+        value: r.glucose ?? null,
+        mgDl: r.unit === 'mmol/L' ? null : (r.glucose ?? null),
+        mmol: r.unit === 'mmol/L' ? (r.glucose ?? null) : null,
+        unit: r.unit || 'mg/dL',
       },
     };
   }

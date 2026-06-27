@@ -129,7 +129,13 @@ function metricRows(type: string, payload: Record<string, any>) {
 
     case 'blood_glucose':
     case 'glucose':
-      pushMetric(rows, 'blood_glucose', payload.glucose ?? payload.value, payload, payload.unit || 'mg/dL');
+      pushMetric(
+        rows,
+        'blood_glucose',
+        payload.glucose ?? payload.mgDl ?? payload.mg_dl ?? payload.value ?? payload.mmol,
+        payload,
+        payload.unit || 'mg/dL',
+      );
       break;
 
     case 'ecg':
