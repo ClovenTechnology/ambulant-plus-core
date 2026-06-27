@@ -54,6 +54,12 @@ function mergeDailySummary(
   };
 }
 
+function isTrustedNightSpo2(value: number, sourceMode?: string) {
+  if (!Number.isFinite(value)) return false;
+  if (value < 80 || value > 100) return false;
+  return sourceMode !== 'live';
+}
+
 export class NexRingReportStore {
   private hydration: RingHydrationState = initialHydrationState();
   private sleepSessions: SleepSession[] = [];
@@ -144,11 +150,14 @@ export class NexRingReportStore {
           this.derived = { ...this.derived, rr: metric.rr };
         }
 
-        if (typeof metric.nightSpo2 === 'number') {
+        if (
+          typeof metric.nightSpo2 === 'number' &&
+          isTrustedNightSpo2(metric.nightSpo2, metric.sourceMode)
+        ) {
           this.derived = { ...this.derived, nightSpo2: metric.nightSpo2 };
         } else if (
           typeof metric.spo2 === 'number' &&
-          metric.sourceMode !== 'live'
+          isTrustedNightSpo2(metric.spo2, metric.sourceMode)
         ) {
           this.derived = { ...this.derived, nightSpo2: metric.spo2 };
         }

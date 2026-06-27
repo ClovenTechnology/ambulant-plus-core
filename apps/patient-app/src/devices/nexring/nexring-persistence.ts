@@ -49,6 +49,17 @@ function finiteNumber(v: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function isTrustedNightSpo2(metric: RingMetric, value: number) {
+  if (!Number.isFinite(value)) return false;
+  if (value < 80 || value > 100) return false;
+
+  if (metric.kind === 'health' && metric.sourceMode === 'live') {
+    return false;
+  }
+
+  return true;
+}
+
 function baseMeta(
   metric: RingMetric,
   opts: PersistNexRingMetricOptions,
@@ -216,7 +227,7 @@ export async function persistNexRingMetric(
     }
 
     const nightSpo2 = finiteNumber(metric.nightSpo2);
-    if (typeof nightSpo2 === 'number') {
+    if (typeof nightSpo2 === 'number' && isTrustedNightSpo2(metric, nightSpo2)) {
       pushes.push({
         patientId: opts.patientId,
         type: 'night_spo2',
@@ -226,8 +237,18 @@ export async function persistNexRingMetric(
         meta: baseMeta(metric, opts, {
           origin: 'continuous_wearable',
           subkind: 'night_spo2',
+          quality: 'trusted_nightly_history',
+          minAcceptedPct: 80,
+          maxAcceptedPct: 100,
+          sourceMode: metric.sourceMode,
           sleepAvgHr: finiteNumber(metric.sleepAvgHr),
         }),
+      });
+    } else if (typeof nightSpo2 === 'number') {
+      result.skipped.push({
+        reason: 'missing_value',
+        kind: metric.kind,
+        detail: `night_spo2 ${nightSpo2}% excluded by wearable quality gate`,
       });
     }
 
