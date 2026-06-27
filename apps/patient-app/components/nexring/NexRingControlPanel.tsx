@@ -215,6 +215,22 @@ export function NexRingControlPanel({
         </div>
       </Card>
 
+      <Card
+        title="Exercise and mindfulness"
+        subtitle="Mode support is being verified before patient-facing controls are enabled."
+      >
+        <div className="grid gap-3 md:grid-cols-2">
+          <InfoTile label="Exercise mode" value="Command detected · pending verification" />
+          <InfoTile label="Mindfulness mode" value="Stream detected · command not confirmed" />
+        </div>
+
+        <p className="mt-3 text-xs leading-5 text-slate-500">
+          NexRing packets can identify exercise and mindfulness streams, but
+          production start/stop buttons remain disabled until the command
+          payloads and safe stop semantics are confirmed against the ring.
+        </p>
+      </Card>
+
       <Card title="Report sync">
         <div className="grid gap-3 md:grid-cols-2">
           <InfoTile label="Sync phase" value={hydration.phase || 'ready'} />
