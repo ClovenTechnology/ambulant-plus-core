@@ -1,29 +1,203 @@
 // apps/medreach/app/lab/[labId]/tests/page.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
-import type { LabTest } from '@/app/api/lab-tests/route';
+import Link from 'next/link';
+
+type OfferedTest = {
+  id?: string;
+  labId?: string;
+  catalogTestId?: string | null;
+  code?: string;
+  localCode?: string | null;
+  name?: string;
+  localName?: string;
+  catalogName?: string | null;
+  category?: string | null;
+  priceCents?: number;
+  priceZAR?: number;
+  currency?: string;
+  turnaroundHours?: number;
+  etaDays?: number;
+  specimenType?: string | null;
+  sampleType?: string | null;
+  containerType?: string | null;
+  requiresColdChain?: boolean;
+  requiredTempMinC?: number | null;
+  requiredTempMaxC?: number | null;
+  maxTransitMins?: number | null;
+  prepNotes?: string | null;
+  instructions?: string;
+  active?: boolean;
+};
+
+type LabPanel = {
+  id?: string;
+  labId?: string;
+  code?: string;
+  name?: string;
+  description?: string | null;
+  active?: boolean;
+  priceCents?: number;
+  priceZAR?: number;
+  currency?: string;
+  turnaroundHours?: number;
+  etaDays?: number;
+  tests?: OfferedTest[];
+  itemCount?: number;
+};
+
+type TestDraft = {
+  code: string;
+  name: string;
+  category: string;
+  specimenType: string;
+  containerType: string;
+  priceZAR: number;
+  turnaroundHours: number;
+  requiresColdChain: boolean;
+  requiredTempMinC: string;
+  requiredTempMaxC: string;
+  maxTransitMins: string;
+  prepNotes: string;
+};
+
+type PanelDraft = {
+  code: string;
+  name: string;
+  description: string;
+  localCodes: string;
+  priceZAR: string;
+  turnaroundHours: string;
+};
+
+function asArray(value: any) {
+  if (Array.isArray(value?.data)) return value.data;
+  if (Array.isArray(value?.tests)) return value.tests;
+  if (Array.isArray(value?.panels)) return value.panels;
+  if (Array.isArray(value?.items)) return value.items;
+  if (Array.isArray(value)) return value;
+
+  return [];
+}
+
+function n(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function money(centsOrZar: unknown, isZar = false) {
+  const raw = n(centsOrZar);
+  const zar = isZar ? raw : raw / 100;
+
+  return `R ${zar.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function splitCsv(value: string) {
+  return value
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function testCode(test: OfferedTest) {
+  return String(test.localCode || test.code || test.id || '').trim();
+}
+
+function testName(test: OfferedTest) {
+  return String(test.localName || test.name || test.catalogName || 'Unnamed test').trim();
+}
+
+function panelCode(panel: LabPanel) {
+  return String(panel.code || panel.id || '').trim();
+}
+
+function panelName(panel: LabPanel) {
+  return String(panel.name || panel.code || 'Unnamed panel').trim();
+}
+
+function resetTestDraft(): TestDraft {
+  return {
+    code: '',
+    name: '',
+    category: '',
+    specimenType: '',
+    containerType: '',
+    priceZAR: 0,
+    turnaroundHours: 24,
+    requiresColdChain: false,
+    requiredTempMinC: '',
+    requiredTempMaxC: '',
+    maxTransitMins: '',
+    prepNotes: '',
+  };
+}
+
+function resetPanelDraft(): PanelDraft {
+  return {
+    code: '',
+    name: '',
+    description: '',
+    localCodes: '',
+    priceZAR: '',
+    turnaroundHours: '',
+  };
+}
+
+function offerSummary(raw: any) {
+  const data = raw?.data || raw || {};
+  return {
+    canFulfil:
+      data.canFulfil ??
+      data.canFulfill ??
+      data.fulfillable ??
+      data.ok ??
+      false,
+    missingTests:
+      data.missingTests ||
+      data.missing ||
+      data.unmatchedTests ||
+      [],
+    priceCents:
+      data.totalPriceCents ||
+      data.priceCents ||
+      data.estimatedPriceCents ||
+      data.finance?.subtotalCents ||
+      null,
+    turnaroundHours:
+      data.turnaroundHours ||
+      data.etaHours ||
+      data.estimatedTurnaroundHours ||
+      null,
+    requiresColdChain:
+      data.requiresColdChain ||
+      data.coldChainRequired ||
+      false,
+    raw: data,
+  };
+}
 
 export default function LabTestsPage() {
   const params = useParams<{ labId: string }>();
   const labId = params.labId;
 
-  const [tests, setTests] = useState<LabTest[]>([]);
+  const [tests, setTests] = useState<OfferedTest[]>([]);
+  const [panels, setPanels] = useState<LabPanel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingTest, setSavingTest] = useState(false);
+  const [savingPanel, setSavingPanel] = useState(false);
+  const [checkingOffer, setCheckingOffer] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const [draft, setDraft] = useState<Partial<LabTest>>({
-    code: '',
-    name: '',
-    category: '',
-    sampleType: '',
-    priceZAR: 0,
-    etaDays: 1,
-    instructions: '',
-    referenceRange: '',
-  });
+  const [testDraft, setTestDraft] = useState<TestDraft>(() => resetTestDraft());
+  const [panelDraft, setPanelDraft] = useState<PanelDraft>(() => resetPanelDraft());
+  const [offerCodes, setOfferCodes] = useState('');
+  const [offerPanelCodes, setOfferPanelCodes] = useState('');
+  const [offerResult, setOfferResult] = useState<any | null>(null);
 
   const niceLabName =
     labId
@@ -34,280 +208,734 @@ export default function LabTestsPage() {
   async function load() {
     setLoading(true);
     setErr(null);
+
     try {
-      const res = await fetch(`/api/lab-tests?labId=${encodeURIComponent(labId)}`, {
-        cache: 'no-store',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { labId: string; tests: LabTest[] };
-      setTests(data.tests || []);
+      const [testRes, panelRes] = await Promise.all([
+        fetch(`/api/lab-tests?labId=${encodeURIComponent(labId)}&limit=300`, {
+          cache: 'no-store',
+        }),
+        fetch(`/api/lab-panels?labId=${encodeURIComponent(labId)}&limit=300`, {
+          cache: 'no-store',
+        }),
+      ]);
+
+      const testJson = await testRes.json().catch(() => null);
+      const panelJson = await panelRes.json().catch(() => null);
+
+      if (!testRes.ok || testJson?.ok === false) {
+        throw new Error(testJson?.error || `Tests HTTP ${testRes.status}`);
+      }
+
+      if (!panelRes.ok || panelJson?.ok === false) {
+        throw new Error(panelJson?.error || `Panels HTTP ${panelRes.status}`);
+      }
+
+      setTests(asArray(testJson));
+      setPanels(asArray(panelJson));
     } catch (e: any) {
-      setErr(e?.message || 'Unable to load tests');
+      setErr(e?.message || 'Unable to load tests and panels');
+      setTests([]);
+      setPanels([]);
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      if (!mounted) return;
-      await load();
-    })();
-    return () => {
-      mounted = false;
-    };
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labId]);
 
-  async function handleAddOrUpdate() {
-    if (!draft.code || !draft.name) {
-      alert('Code and name are required.');
+  const coldChainCount = useMemo(
+    () => tests.filter((test) => test.requiresColdChain).length,
+    [tests],
+  );
+
+  async function handleSaveTest() {
+    if (!testDraft.code.trim() || !testDraft.name.trim()) {
+      setErr('Test code and name are required.');
       return;
     }
 
-    setSaving(true);
+    setSavingTest(true);
     setErr(null);
+
     try {
+      const body = {
+        labId,
+        code: testDraft.code.trim().toUpperCase(),
+        localCode: testDraft.code.trim().toUpperCase(),
+        name: testDraft.name.trim(),
+        localName: testDraft.name.trim(),
+        category: testDraft.category.trim() || null,
+        specimenType: testDraft.specimenType.trim() || 'Blood',
+        sampleType: testDraft.specimenType.trim() || 'Blood',
+        containerType: testDraft.containerType.trim() || null,
+        priceZAR: Number(testDraft.priceZAR || 0),
+        turnaroundHours: Number(testDraft.turnaroundHours || 24),
+        requiresColdChain: testDraft.requiresColdChain,
+        requiredTempMinC: testDraft.requiredTempMinC
+          ? Number(testDraft.requiredTempMinC)
+          : null,
+        requiredTempMaxC: testDraft.requiredTempMaxC
+          ? Number(testDraft.requiredTempMaxC)
+          : null,
+        maxTransitMins: testDraft.maxTransitMins
+          ? Number(testDraft.maxTransitMins)
+          : null,
+        prepNotes: testDraft.prepNotes.trim() || null,
+        instructions: testDraft.prepNotes.trim() || '',
+        active: true,
+      };
+
       const res = await fetch('/api/lab-tests', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...draft, labId }),
+        body: JSON.stringify(body),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as { labId: string; tests: LabTest[] };
-      setTests(data.tests || []);
-      setDraft({
-        code: '',
-        name: '',
-        category: '',
-        sampleType: '',
-        priceZAR: 0,
-        etaDays: 1,
-        instructions: '',
-        referenceRange: '',
-      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+
+      setTestDraft(resetTestDraft());
+      await load();
     } catch (e: any) {
       setErr(e?.message || 'Unable to save test');
     } finally {
-      setSaving(false);
+      setSavingTest(false);
     }
   }
 
-  if (loading) {
-    return (
-      <main className="max-w-5xl mx-auto px-4 py-8 text-sm text-gray-500">
-        Loading test catalogue…
-      </main>
-    );
+  async function handleToggleTest(test: OfferedTest) {
+    const id = test.id;
+    const code = testCode(test);
+
+    if (!id && !code) return;
+
+    setErr(null);
+
+    try {
+      const res = await fetch('/api/lab-tests', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          labId,
+          id,
+          localCode: code,
+          code,
+          active: test.active === false,
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || 'Unable to update test');
+    }
   }
 
-  if (err) {
-    return (
-      <main className="max-w-5xl mx-auto px-4 py-8 text-sm text-red-600">
-        {err}
-      </main>
-    );
+  async function handleSavePanel() {
+    if (!panelDraft.code.trim() || !panelDraft.name.trim()) {
+      setErr('Panel code and name are required.');
+      return;
+    }
+
+    const localCodes = splitCsv(panelDraft.localCodes);
+
+    if (!localCodes.length) {
+      setErr('Add at least one local test code to create a panel.');
+      return;
+    }
+
+    setSavingPanel(true);
+    setErr(null);
+
+    try {
+      const body = {
+        labId,
+        code: panelDraft.code.trim().toUpperCase(),
+        name: panelDraft.name.trim(),
+        description: panelDraft.description.trim() || null,
+        localCodes,
+        priceZAR: panelDraft.priceZAR ? Number(panelDraft.priceZAR) : null,
+        turnaroundHours: panelDraft.turnaroundHours
+          ? Number(panelDraft.turnaroundHours)
+          : null,
+        active: true,
+      };
+
+      const res = await fetch('/api/lab-panels', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+
+      setPanelDraft(resetPanelDraft());
+      await load();
+    } catch (e: any) {
+      setErr(e?.message || 'Unable to save panel');
+    } finally {
+      setSavingPanel(false);
+    }
   }
+
+  async function handleOfferPreview() {
+    const testsRequested = splitCsv(offerCodes).map((code) => ({
+      code: code.toUpperCase(),
+      localCode: code.toUpperCase(),
+    }));
+
+    const panelsRequested = splitCsv(offerPanelCodes).map((code) => ({
+      code: code.toUpperCase(),
+    }));
+
+    if (!testsRequested.length && !panelsRequested.length) {
+      setErr('Enter at least one test or panel code to preview an offer.');
+      return;
+    }
+
+    setCheckingOffer(true);
+    setErr(null);
+    setOfferResult(null);
+
+    try {
+      const res = await fetch('/api/lab-offers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          labId,
+          tests: testsRequested,
+          panels: panelsRequested,
+          fulfillmentMode: 'HOME_DRAW',
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+
+      setOfferResult(json);
+    } catch (e: any) {
+      setErr(e?.message || 'Unable to preview offer');
+    } finally {
+      setCheckingOffer(false);
+    }
+  }
+
+  const offer = offerSummary(offerResult);
 
   return (
-    <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
-      <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+    <main className="mx-auto max-w-7xl space-y-8 px-4 py-8">
+      <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">
-            {niceLabName} — Test Catalogue
+          <h1 className="text-xl font-semibold text-gray-950">
+            {niceLabName} — Tests, Panels & Offers
           </h1>
-          <p className="text-xs text-gray-500 mt-1">
-            Configure tests offered by this lab, including categories, sample types,
-            turnaround times, and pricing.
+          <p className="mt-1 max-w-3xl text-sm text-gray-600">
+            Configure lab-offered tests, build panels, and preview whether this lab can
+            fulfil a requested MedReach order with price, ETA and cold-chain implications.
           </p>
+        </div>
+
+        <div className="flex flex-wrap gap-2 text-xs">
+          <Link
+            href={`/lab/${encodeURIComponent(labId)}`}
+            className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
+          >
+            Workspace
+          </Link>
+          <Link
+            href={`/lab/${encodeURIComponent(labId)}/dashboard`}
+            className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
+          >
+            Dashboard
+          </Link>
+          <Link
+            href={`/lab/${encodeURIComponent(labId)}/settings`}
+            className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
+          >
+            Settings
+          </Link>
         </div>
       </header>
 
-      {/* Add / update test form */}
-      <section className="bg-white border rounded-xl p-6 shadow-sm space-y-4 text-sm">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Test Code
-            </label>
-            <input
-              type="text"
-              className="w-full border rounded px-3 py-2"
-              value={draft.code || ''}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))
-              }
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Test Name
-            </label>
-            <input
-              type="text"
-              className="w-full border rounded px-3 py-2"
-              value={draft.name || ''}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, name: e.target.value }))
-              }
-            />
+      {err ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          {err}
+        </section>
+      ) : null}
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <div className="rounded-xl border bg-white p-4 shadow-sm">
+          <div className="text-xs text-gray-500">Offered tests</div>
+          <div className="mt-1 text-2xl font-semibold">{loading ? '...' : tests.length}</div>
+        </div>
+        <div className="rounded-xl border bg-white p-4 shadow-sm">
+          <div className="text-xs text-gray-500">Active tests</div>
+          <div className="mt-1 text-2xl font-semibold">
+            {loading ? '...' : tests.filter((test) => test.active !== false).length}
           </div>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Category
-            </label>
-            <input
-              type="text"
-              className="w-full border rounded px-3 py-2"
-              placeholder="Haematology, Virology, etc."
-              value={draft.category || ''}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, category: e.target.value }))
-              }
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Sample Type
-            </label>
-            <input
-              type="text"
-              className="w-full border rounded px-3 py-2"
-              placeholder="Serum, whole blood, swab, etc."
-              value={draft.sampleType || ''}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, sampleType: e.target.value }))
-              }
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              ETA (days)
-            </label>
-            <input
-              type="number"
-              className="w-full border rounded px-3 py-2"
-              value={draft.etaDays ?? 1}
-              onChange={(e) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  etaDays: Number(e.target.value) || 1,
-                }))
-              }
-            />
-          </div>
+        <div className="rounded-xl border bg-white p-4 shadow-sm">
+          <div className="text-xs text-gray-500">Panels</div>
+          <div className="mt-1 text-2xl font-semibold">{loading ? '...' : panels.length}</div>
         </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Price (ZAR)
-            </label>
-            <input
-              type="number"
-              className="w-full border rounded px-3 py-2"
-              value={draft.priceZAR ?? 0}
-              onChange={(e) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  priceZAR: Number(e.target.value) || 0,
-                }))
-              }
-            />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs font-medium text-gray-700 mb-1">
-              Reference Range (if applicable)
-            </label>
-            <input
-              type="text"
-              className="w-full border rounded px-3 py-2"
-              placeholder="e.g. 4.0 – 6.0 mmol/L"
-              value={draft.referenceRange || ''}
-              onChange={(e) =>
-                setDraft((prev) => ({
-                  ...prev,
-                  referenceRange: e.target.value,
-                }))
-              }
-            />
-          </div>
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-gray-700 mb-1">
-            Patient / Collection Instructions
-          </label>
-          <textarea
-            className="w-full border rounded px-3 py-2 min-h-[60px]"
-            placeholder="Fasting, early morning urine, no water before sample, etc."
-            value={draft.instructions || ''}
-            onChange={(e) =>
-              setDraft((prev) => ({
-                ...prev,
-                instructions: e.target.value,
-              }))
-            }
-          />
-        </div>
-
-        <div className="flex justify-end">
-          <button
-            type="button"
-            onClick={handleAddOrUpdate}
-            disabled={saving}
-            className={
-              'px-4 py-2 rounded border text-sm ' +
-              (saving
-                ? 'bg-gray-200 text-gray-500 cursor-not-allowed'
-                : 'bg-black text-white hover:bg-gray-900')
-            }
-          >
-            {saving ? 'Saving…' : 'Add / Update Test'}
-          </button>
+        <div className="rounded-xl border bg-white p-4 shadow-sm">
+          <div className="text-xs text-gray-500">Cold-chain tests</div>
+          <div className="mt-1 text-2xl font-semibold">{loading ? '...' : coldChainCount}</div>
         </div>
       </section>
 
-      {/* Existing tests */}
-      <section className="bg-white border rounded-xl p-6 shadow-sm text-sm space-y-3">
-        <h2 className="text-sm font-semibold text-gray-900">Configured Tests</h2>
-        {tests.length === 0 ? (
-          <div className="text-xs text-gray-500">
-            No tests configured yet. Add the first test using the form above.
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-950">Add or update offered test</h2>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <input
+              value={testDraft.code}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Code e.g. FBC"
+            />
+            <input
+              value={testDraft.name}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, name: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Name e.g. Full blood count"
+            />
+            <input
+              value={testDraft.category}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, category: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Category e.g. Haematology"
+            />
+            <input
+              value={testDraft.specimenType}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, specimenType: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Specimen e.g. Blood"
+            />
+            <input
+              value={testDraft.containerType}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, containerType: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Container e.g. EDTA"
+            />
+            <input
+              type="number"
+              value={testDraft.priceZAR}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, priceZAR: Number(e.target.value) }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Price ZAR"
+            />
+            <input
+              type="number"
+              value={testDraft.turnaroundHours}
+              onChange={(e) =>
+                setTestDraft((prev) => ({
+                  ...prev,
+                  turnaroundHours: Number(e.target.value),
+                }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Turnaround hours"
+            />
+            <input
+              value={testDraft.maxTransitMins}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, maxTransitMins: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Max transit mins"
+            />
           </div>
-        ) : (
-          <div className="border rounded overflow-hidden">
-            <table className="w-full text-xs">
-              <thead className="bg-gray-50 border-b">
-                <tr>
-                  <th className="px-2 py-1 text-left">Code</th>
-                  <th className="px-2 py-1 text-left">Name</th>
-                  <th className="px-2 py-1 text-left">Category</th>
-                  <th className="px-2 py-1 text-left">Sample</th>
-                  <th className="px-2 py-1 text-left">Price (ZAR)</th>
-                  <th className="px-2 py-1 text-left">ETA (days)</th>
-                  <th className="px-2 py-1 text-left">Ref. Range</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tests.map((t) => (
-                  <tr key={t.code} className="border-t">
-                    <td className="px-2 py-1 font-mono text-[11px]">{t.code}</td>
-                    <td className="px-2 py-1">{t.name}</td>
-                    <td className="px-2 py-1">{t.category || '—'}</td>
-                    <td className="px-2 py-1">{t.sampleType || '—'}</td>
-                    <td className="px-2 py-1">R {t.priceZAR.toFixed(2)}</td>
-                    <td className="px-2 py-1">{t.etaDays}</td>
-                    <td className="px-2 py-1">{t.referenceRange || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <label className="inline-flex items-center gap-2 text-xs">
+              <input
+                type="checkbox"
+                checked={testDraft.requiresColdChain}
+                onChange={(e) =>
+                  setTestDraft((prev) => ({
+                    ...prev,
+                    requiresColdChain: e.target.checked,
+                  }))
+                }
+              />
+              Requires cold chain
+            </label>
+            <input
+              value={testDraft.requiredTempMinC}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, requiredTempMinC: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Min temp C"
+            />
+            <input
+              value={testDraft.requiredTempMaxC}
+              onChange={(e) =>
+                setTestDraft((prev) => ({ ...prev, requiredTempMaxC: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Max temp C"
+            />
           </div>
-        )}
+
+          <textarea
+            value={testDraft.prepNotes}
+            onChange={(e) =>
+              setTestDraft((prev) => ({ ...prev, prepNotes: e.target.value }))
+            }
+            className="mt-3 w-full rounded border px-3 py-2 text-sm"
+            rows={3}
+            placeholder="Preparation notes, fasting rules, transport notes"
+          />
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={handleSaveTest}
+              disabled={savingTest}
+              className={`rounded border px-4 py-2 text-sm ${
+                savingTest
+                  ? 'bg-gray-200 text-gray-500'
+                  : 'bg-gray-900 text-white hover:bg-black'
+              }`}
+            >
+              {savingTest ? 'Saving...' : 'Save offered test'}
+            </button>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-950">Panel builder</h2>
+          <p className="mt-1 text-xs text-gray-500">
+            Build panels from existing lab local test codes. Example: FBC, CRP, UEC.
+          </p>
+
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <input
+              value={panelDraft.code}
+              onChange={(e) =>
+                setPanelDraft((prev) => ({ ...prev, code: e.target.value.toUpperCase() }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Panel code e.g. WELLNESS"
+            />
+            <input
+              value={panelDraft.name}
+              onChange={(e) =>
+                setPanelDraft((prev) => ({ ...prev, name: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Panel name"
+            />
+            <input
+              value={panelDraft.priceZAR}
+              onChange={(e) =>
+                setPanelDraft((prev) => ({ ...prev, priceZAR: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Optional panel price ZAR"
+            />
+            <input
+              value={panelDraft.turnaroundHours}
+              onChange={(e) =>
+                setPanelDraft((prev) => ({ ...prev, turnaroundHours: e.target.value }))
+              }
+              className="rounded border px-3 py-2 text-sm"
+              placeholder="Optional panel TAT hours"
+            />
+          </div>
+
+          <input
+            value={panelDraft.localCodes}
+            onChange={(e) =>
+              setPanelDraft((prev) => ({ ...prev, localCodes: e.target.value }))
+            }
+            className="mt-3 w-full rounded border px-3 py-2 text-sm"
+            placeholder="Local codes: FBC, CRP, UEC"
+          />
+
+          <textarea
+            value={panelDraft.description}
+            onChange={(e) =>
+              setPanelDraft((prev) => ({ ...prev, description: e.target.value }))
+            }
+            className="mt-3 w-full rounded border px-3 py-2 text-sm"
+            rows={3}
+            placeholder="Panel description"
+          />
+
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={handleSavePanel}
+              disabled={savingPanel}
+              className={`rounded border px-4 py-2 text-sm ${
+                savingPanel
+                  ? 'bg-gray-200 text-gray-500'
+                  : 'bg-gray-900 text-white hover:bg-black'
+              }`}
+            >
+              {savingPanel ? 'Saving...' : 'Save panel'}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-gray-950">Offer preview</h2>
+        <p className="mt-1 text-xs text-gray-500">
+          Test whether this lab can fulfil an incoming order. This checks availability,
+          missing tests/panels, price, ETA, cold-chain and specimen implications.
+        </p>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+          <input
+            value={offerCodes}
+            onChange={(e) => setOfferCodes(e.target.value)}
+            className="rounded border px-3 py-2 text-sm"
+            placeholder="Requested test codes: FBC, CRP"
+          />
+          <input
+            value={offerPanelCodes}
+            onChange={(e) => setOfferPanelCodes(e.target.value)}
+            className="rounded border px-3 py-2 text-sm"
+            placeholder="Requested panel codes: WELLNESS"
+          />
+        </div>
+
+        <div className="mt-4 flex justify-end">
+          <button
+            type="button"
+            onClick={handleOfferPreview}
+            disabled={checkingOffer}
+            className={`rounded border px-4 py-2 text-sm ${
+              checkingOffer
+                ? 'bg-gray-200 text-gray-500'
+                : 'bg-indigo-700 text-white hover:bg-indigo-800'
+            }`}
+          >
+            {checkingOffer ? 'Checking...' : 'Preview fulfilment offer'}
+          </button>
+        </div>
+
+        {offerResult ? (
+          <div className="mt-4 rounded-xl border bg-gray-50 p-4 text-xs">
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+              <div>
+                <div className="text-gray-500">Can fulfil</div>
+                <div className="font-semibold">
+                  {offer.canFulfil ? 'Yes' : 'Needs review'}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500">Estimated price</div>
+                <div className="font-semibold">
+                  {offer.priceCents == null ? '-' : money(offer.priceCents)}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500">Turnaround</div>
+                <div className="font-semibold">
+                  {offer.turnaroundHours ? `${offer.turnaroundHours}h` : '-'}
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-500">Cold-chain</div>
+                <div className="font-semibold">
+                  {offer.requiresColdChain ? 'Required' : 'Not required'}
+                </div>
+              </div>
+            </div>
+
+            {Array.isArray(offer.missingTests) && offer.missingTests.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900">
+                Missing: {offer.missingTests.map(String).join(', ')}
+              </div>
+            ) : null}
+
+            <details className="mt-3">
+              <summary className="cursor-pointer text-gray-600">Raw gateway offer payload</summary>
+              <pre className="mt-2 max-h-80 overflow-auto rounded bg-white p-3 text-[11px] text-gray-700">
+                {JSON.stringify(offer.raw, null, 2)}
+              </pre>
+            </details>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-950">Offered tests</h2>
+          <div className="mt-4 space-y-3">
+            {loading ? (
+              <div className="text-sm text-gray-500">Loading tests...</div>
+            ) : tests.length === 0 ? (
+              <div className="text-sm text-gray-500">
+                No tests published yet. Add at least one test before this lab can safely
+                respond to marketplace orders.
+              </div>
+            ) : (
+              tests.map((test) => (
+                <article key={test.id || testCode(test)} className="rounded-xl border p-4">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-950">
+                        {testName(test)}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {testCode(test) || 'No code'} / {test.category || 'Uncategorised'} /{' '}
+                        {test.specimenType || test.sampleType || 'Specimen not set'}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleToggleTest(test)}
+                      className={`rounded-full border px-3 py-1 text-xs ${
+                        test.active === false
+                          ? 'bg-gray-100 text-gray-700 hover:bg-gray-50'
+                          : 'bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+                      }`}
+                    >
+                      {test.active === false ? 'Inactive' : 'Active'}
+                    </button>
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
+                    <div>
+                      <div className="text-gray-500">Price</div>
+                      <div className="font-semibold">
+                        {test.priceCents != null
+                          ? money(test.priceCents)
+                          : money(test.priceZAR, true)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">ETA</div>
+                      <div className="font-semibold">
+                        {test.turnaroundHours || test.etaDays
+                          ? test.turnaroundHours
+                            ? `${test.turnaroundHours}h`
+                            : `${test.etaDays}d`
+                          : '-'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">Container</div>
+                      <div className="font-semibold">{test.containerType || '-'}</div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">Cold chain</div>
+                      <div className="font-semibold">
+                        {test.requiresColdChain ? 'Yes' : 'No'}
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-950">Panels</h2>
+          <div className="mt-4 space-y-3">
+            {loading ? (
+              <div className="text-sm text-gray-500">Loading panels...</div>
+            ) : panels.length === 0 ? (
+              <div className="text-sm text-gray-500">
+                No panels configured yet. Panels improve marketplace offer matching and
+                simplify common order bundles.
+              </div>
+            ) : (
+              panels.map((panel) => (
+                <article key={panel.id || panelCode(panel)} className="rounded-xl border p-4">
+                  <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                    <div>
+                      <div className="text-sm font-semibold text-gray-950">
+                        {panelName(panel)}
+                      </div>
+                      <div className="mt-1 text-xs text-gray-500">
+                        {panelCode(panel)} / {panel.itemCount || panel.tests?.length || 0} tests
+                      </div>
+                    </div>
+
+                    <span
+                      className={`rounded-full border px-3 py-1 text-xs ${
+                        panel.active === false
+                          ? 'bg-gray-100 text-gray-700'
+                          : 'bg-emerald-50 text-emerald-700'
+                      }`}
+                    >
+                      {panel.active === false ? 'Inactive' : 'Active'}
+                    </span>
+                  </div>
+
+                  {panel.description ? (
+                    <p className="mt-2 text-xs text-gray-600">{panel.description}</p>
+                  ) : null}
+
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs md:grid-cols-3">
+                    <div>
+                      <div className="text-gray-500">Price</div>
+                      <div className="font-semibold">
+                        {panel.priceCents != null
+                          ? money(panel.priceCents)
+                          : money(panel.priceZAR, true)}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">ETA</div>
+                      <div className="font-semibold">
+                        {panel.turnaroundHours || panel.etaDays
+                          ? panel.turnaroundHours
+                            ? `${panel.turnaroundHours}h`
+                            : `${panel.etaDays}d`
+                          : '-'}
+                      </div>
+                    </div>
+                    <div>
+                      <div className="text-gray-500">Currency</div>
+                      <div className="font-semibold">{panel.currency || 'ZAR'}</div>
+                    </div>
+                  </div>
+                </article>
+              ))
+            )}
+          </div>
+        </div>
       </section>
     </main>
   );

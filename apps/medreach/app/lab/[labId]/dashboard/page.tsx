@@ -5,26 +5,70 @@ import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 
-type LabMetricsResponse = {
-  scope: 'lab';
-  labId: string;
-  summary: {
-    ordersToday: number;
-    ordersThisWeek: number;
-    ordersThisMonth: number;
-    marketplaceOpen: number;
-    deliveredToLab: number;
-    resultsPending: number;
-    resultsReady: number;
-    resultsSent: number;
+type MetricsResponse = {
+  ok?: boolean;
+  error?: string;
+  summary?: Record<string, number>;
+  registry?: Record<string, number>;
+  marketplace?: Record<string, any>;
+  specimens?: Record<string, any>;
+  finance?: Record<string, number>;
+  operations?: Record<string, number>;
+  data?: {
+    registry?: Record<string, number>;
+    marketplace?: Record<string, any>;
+    specimens?: Record<string, any>;
+    finance?: Record<string, number>;
+    operations?: Record<string, number>;
   };
 };
+
+type WindowDays = '7' | '30' | '90';
+
+function n(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function money(cents: unknown) {
+  return `R ${(n(cents) / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function payload(metrics: MetricsResponse | null) {
+  return metrics?.data || metrics || {};
+}
+
+function statusRows(counts: Record<string, any> | undefined) {
+  return Object.entries(counts || {}).sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+}
+
+function Card({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="text-xs font-medium text-gray-500">{label}</div>
+      <div className="mt-1 text-2xl font-semibold text-gray-950">{value}</div>
+      {hint ? <div className="mt-1 text-[11px] text-gray-500">{hint}</div> : null}
+    </div>
+  );
+}
 
 export default function LabDashboardPage() {
   const params = useParams<{ labId: string }>();
   const labId = params.labId;
 
-  const [metrics, setMetrics] = useState<LabMetricsResponse | null>(null);
+  const [days, setDays] = useState<WindowDays>('30');
+  const [metrics, setMetrics] = useState<MetricsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
 
@@ -34,135 +78,178 @@ export default function LabDashboardPage() {
       .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
       .join(' ');
 
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        const res = await fetch(
-          `/api/metrics?scope=lab&id=${encodeURIComponent(labId)}`,
-          { cache: 'no-store' },
-        );
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as LabMetricsResponse;
-        if (!mounted) return;
-        setMetrics(data);
-      } catch (e: any) {
-        if (!mounted) return;
-        setErr(e?.message || 'Unable to load metrics');
-      } finally {
-        if (mounted) setLoading(false);
+  async function load() {
+    setLoading(true);
+    setErr(null);
+
+    try {
+      const res = await fetch(
+        `/api/metrics?scope=lab&id=${encodeURIComponent(labId)}&days=${days}`,
+        { cache: 'no-store' },
+      );
+
+      const json = (await res.json().catch(() => null)) as MetricsResponse | null;
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
       }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [labId]);
 
-  if (loading) {
-    return (
-      <main className="max-w-5xl mx-auto px-4 py-8 text-sm text-gray-500">
-        Loading lab dashboard…
-      </main>
-    );
+      setMetrics(json);
+    } catch (e: any) {
+      setErr(e?.message || 'Unable to load lab metrics');
+      setMetrics(null);
+    } finally {
+      setLoading(false);
+    }
   }
 
-  if (err || !metrics) {
-    return (
-      <main className="max-w-5xl mx-auto px-4 py-8 text-sm text-red-600">
-        {err || 'Unable to load lab dashboard.'}
-      </main>
-    );
-  }
+  useEffect(() => {
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [labId, days]);
 
-  const s = metrics.summary;
+  const p = payload(metrics);
+  const registry = p.registry || {};
+  const marketplace = p.marketplace || {};
+  const specimens = p.specimens || {};
+  const finance = p.finance || {};
+  const operations = p.operations || {};
+  const drawStatusCounts = marketplace.drawStatusCounts || {};
+  const bundleStatusCounts = specimens.bundleStatusCounts || {};
 
   return (
-    <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
-      <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-3">
+    <main className="mx-auto max-w-7xl space-y-8 px-4 py-8">
+      <header className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-gray-900">
-            {niceLabName} — Dashboard
+          <h1 className="text-xl font-semibold text-gray-950">
+            {niceLabName} — Lab Command Dashboard
           </h1>
-          <p className="text-xs text-gray-500 mt-1">
-            Volume and results status overview for this lab. Backed by the same order
-            stream as the lab workspace.
+          <p className="mt-1 max-w-3xl text-sm text-gray-600">
+            Operational, specimen, result and financial visibility for this lab. This is
+            backed by the MedReach gateway metrics route, not local mock data.
           </p>
         </div>
+
         <div className="flex flex-wrap gap-2 text-xs">
           <Link
             href={`/lab/${encodeURIComponent(labId)}`}
-            className="px-3 py-1 rounded-full border bg-white hover:bg-gray-50"
+            className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
           >
-            Open workspace
+            Workspace
           </Link>
           <Link
             href={`/lab/${encodeURIComponent(labId)}/tests`}
-            className="px-3 py-1 rounded-full border bg-white hover:bg-gray-50"
+            className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
           >
-            Test catalogue
+            Tests & panels
           </Link>
           <Link
             href={`/lab/${encodeURIComponent(labId)}/settings`}
-            className="px-3 py-1 rounded-full border bg-white hover:bg-gray-50"
+            className="rounded-full border bg-white px-3 py-1 hover:bg-gray-50"
           >
-            Lab settings
+            Settings
           </Link>
         </div>
       </header>
 
-      {/* Orders volume */}
-      <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="rounded-xl bg-white border p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Orders Today</div>
-          <div className="text-2xl font-semibold mt-1">
-            {s.ordersToday}
+      <section className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-gray-500">Window:</span>
+        {(['7', '30', '90'] as WindowDays[]).map((option) => (
+          <button
+            key={option}
+            type="button"
+            onClick={() => setDays(option)}
+            className={`rounded-full border px-3 py-1 ${
+              days === option
+                ? 'border-gray-900 bg-gray-900 text-white'
+                : 'bg-white text-gray-700 hover:bg-gray-50'
+            }`}
+          >
+            Last {option} days
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={load}
+          className="rounded-full border bg-white px-3 py-1 text-gray-700 hover:bg-gray-50"
+        >
+          Refresh
+        </button>
+      </section>
+
+      {err ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="font-semibold">Unable to load live lab metrics</div>
+          <div className="mt-1">{err}</div>
+        </section>
+      ) : null}
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <Card label="Draws" value={loading ? '...' : n(marketplace.draws)} />
+        <Card
+          label="Eligible lab rows"
+          value={loading ? '...' : n(marketplace.eligibleLabRows)}
+        />
+        <Card label="Specimen bundles" value={loading ? '...' : n(specimens.bundles)} />
+        <Card
+          label="Location pings"
+          value={loading ? '...' : n(operations.locationPings)}
+        />
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <Card
+          label="Published tests"
+          value={loading ? '...' : n(registry.activeOfferedTests)}
+        />
+        <Card label="Active panels" value={loading ? '...' : n(registry.activePanels)} />
+        <Card label="Lab gross" value={loading ? '...' : money(finance.labGrossCents)} />
+        <Card label="Lab net" value={loading ? '...' : money(finance.labNetCents)} />
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-950">Draw status distribution</h2>
+          <div className="mt-4 space-y-2 text-xs">
+            {statusRows(drawStatusCounts).length === 0 ? (
+              <div className="text-gray-500">No draw statuses in this window.</div>
+            ) : (
+              statusRows(drawStatusCounts).map(([status, count]) => (
+                <div key={status} className="flex items-center justify-between border-b pb-2">
+                  <span className="font-mono text-gray-700">{status}</span>
+                  <span className="font-semibold">{String(count)}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
-        <div className="rounded-xl bg-white border p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Orders This Week</div>
-          <div className="text-2xl font-semibold mt-1">
-            {s.ordersThisWeek}
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Orders This Month</div>
-          <div className="text-2xl font-semibold mt-1">
-            {s.ordersThisMonth}
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Marketplace Open</div>
-          <div className="text-2xl font-semibold mt-1">
-            {s.marketplaceOpen}
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-950">
+            Specimen bundle distribution
+          </h2>
+          <div className="mt-4 space-y-2 text-xs">
+            {statusRows(bundleStatusCounts).length === 0 ? (
+              <div className="text-gray-500">No specimen bundle statuses in this window.</div>
+            ) : (
+              statusRows(bundleStatusCounts).map(([status, count]) => (
+                <div key={status} className="flex items-center justify-between border-b pb-2">
+                  <span className="font-mono text-gray-700">{status}</span>
+                  <span className="font-semibold">{String(count)}</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </section>
 
-      {/* Results status */}
-      <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="rounded-xl bg-white border p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Delivered to Lab</div>
-          <div className="text-2xl font-semibold mt-1">
-            {s.deliveredToLab}
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Results Pending</div>
-          <div className="text-2xl font-semibold mt-1">
-            {s.resultsPending}
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Results Ready</div>
-          <div className="text-2xl font-semibold mt-1">
-            {s.resultsReady}
-          </div>
-        </div>
-        <div className="rounded-xl bg-white border p-4 shadow-sm">
-          <div className="text-xs text-gray-500">Results Sent</div>
-          <div className="text-2xl font-semibold mt-1">
-            {s.resultsSent}
-          </div>
+      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+        <h2 className="text-sm font-semibold text-gray-950">Financial routing</h2>
+        <div className="mt-4 grid grid-cols-1 gap-3 text-xs md:grid-cols-4">
+          <Card label="Subtotal" value={money(finance.subtotalCents)} />
+          <Card label="Logistics fee" value={money(finance.logisticsFeeCents)} />
+          <Card label="Cold-chain surcharge" value={money(finance.coldChainSurchargeCents)} />
+          <Card label="Platform fee" value={money(finance.platformFeeCents)} />
         </div>
       </section>
     </main>

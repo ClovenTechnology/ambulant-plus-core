@@ -1,34 +1,8 @@
-// apps/medreach/app/api/lab-tests/route.ts
+// apps/medreach/app/api/lab-panels/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-export type LabTest = {
-  id?: string;
-  labId?: string;
-  catalogTestId?: string | null;
-  code: string;
-  localCode?: string | null;
-  name: string;
-  localName?: string;
-  category?: string | null;
-  specimenType?: string | null;
-  sampleType?: string | null;
-  containerType?: string | null;
-  priceCents?: number;
-  priceZAR?: number;
-  currency?: string;
-  turnaroundHours?: number;
-  etaDays?: number;
-  requiresColdChain?: boolean;
-  requiredTempMinC?: number | null;
-  requiredTempMaxC?: number | null;
-  maxTransitMins?: number | null;
-  prepNotes?: string | null;
-  instructions?: string;
-  active?: boolean;
-};
 
 function clean(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -74,8 +48,8 @@ function copyHeaders(req: NextRequest, labId: string) {
   return headers;
 }
 
-function normalizeTests(raw: any): LabTest[] {
-  const data = raw?.data || raw?.tests || raw?.items || [];
+function normalizePanels(raw: any) {
+  const data = raw?.data || raw?.panels || raw?.items || [];
 
   return Array.isArray(data) ? data : [];
 }
@@ -100,15 +74,14 @@ async function proxy(req: NextRequest, method: 'GET' | 'POST' | 'PATCH') {
     return NextResponse.json({ ok: false, error: 'missing_labId' }, { status: 400 });
   }
 
-  const search = method === 'GET' ? url.search : '';
   const upstreamUrl = gatewayUrl(
-    `/api/medreach/labs/${encodeURIComponent(labId)}/tests`,
-    search,
+    `/api/medreach/labs/${encodeURIComponent(labId)}/panels`,
+    method === 'GET' ? url.search : '',
   );
 
   if (!upstreamUrl) {
     return NextResponse.json(
-      { ok: false, error: 'api_gateway_not_configured', tests: [] },
+      { ok: false, error: 'api_gateway_not_configured', panels: [] },
       { status: 503 },
     );
   }
@@ -132,21 +105,21 @@ async function proxy(req: NextRequest, method: 'GET' | 'POST' | 'PATCH') {
     return NextResponse.json(
       {
         ok: false,
-        error: json?.error || 'lab_tests_upstream_failed',
+        error: json?.error || 'lab_panels_upstream_failed',
         detail: json,
-        tests: [],
+        panels: [],
       },
       { status: upstream.status },
     );
   }
 
-  const tests = normalizeTests(json);
+  const panels = normalizePanels(json);
 
   return NextResponse.json({
     ok: true,
-    data: tests,
-    tests,
-    meta: json?.meta || { labId, count: tests.length },
+    data: panels,
+    panels,
+    meta: json?.meta || { labId, count: panels.length },
     upstream: json,
   });
 }

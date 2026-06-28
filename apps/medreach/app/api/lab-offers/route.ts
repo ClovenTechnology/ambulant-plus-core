@@ -1,4 +1,4 @@
-// apps/medreach/app/api/labs/[labId]/route.ts
+// apps/medreach/app/api/lab-offers/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -18,7 +18,7 @@ function gatewayBase() {
   ).replace(/\/+$/, '');
 }
 
-function gatewayUrl(path: string, search = '') {
+function gatewayUrl(path: string) {
   const base = gatewayBase();
   if (!base) return null;
 
@@ -28,7 +28,7 @@ function gatewayUrl(path: string, search = '') {
       ? cleanPath.slice(4)
       : cleanPath;
 
-  return `${base}/${finalPath}${search}`;
+  return `${base}/${finalPath}`;
 }
 
 function copyHeaders(req: NextRequest, labId: string) {
@@ -43,15 +43,31 @@ function copyHeaders(req: NextRequest, labId: string) {
   }
 
   headers.set('accept', 'application/json');
+  headers.set('content-type', req.headers.get('content-type') || 'application/json');
   headers.set('x-lab-id', headers.get('x-lab-id') || labId);
 
   return headers;
 }
 
-async function proxy(req: NextRequest, labId: string, method: 'GET' | 'PATCH') {
+export async function POST(req: NextRequest) {
+  const bodyText = await req.text();
+
+  let body: any;
+
+  try {
+    body = JSON.parse(bodyText || '{}');
+  } catch {
+    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
+
+  const labId = clean(body.labId);
+
+  if (!labId) {
+    return NextResponse.json({ ok: false, error: 'missing_labId' }, { status: 400 });
+  }
+
   const upstreamUrl = gatewayUrl(
-    `/api/medreach/labs/${encodeURIComponent(labId)}`,
-    new URL(req.url).search,
+    `/api/medreach/labs/${encodeURIComponent(labId)}/offers`,
   );
 
   if (!upstreamUrl) {
@@ -61,17 +77,10 @@ async function proxy(req: NextRequest, labId: string, method: 'GET' | 'PATCH') {
     );
   }
 
-  const body = method === 'PATCH' ? await req.text() : undefined;
-  const headers = copyHeaders(req, labId);
-
-  if (method === 'PATCH') {
-    headers.set('content-type', req.headers.get('content-type') || 'application/json');
-  }
-
   const upstream = await fetch(upstreamUrl, {
-    method,
-    headers,
-    body,
+    method: 'POST',
+    headers: copyHeaders(req, labId),
+    body: bodyText,
     cache: 'no-store',
   });
 
@@ -80,30 +89,4 @@ async function proxy(req: NextRequest, labId: string, method: 'GET' | 'PATCH') {
   return NextResponse.json(json || { ok: upstream.ok }, {
     status: upstream.status,
   });
-}
-
-export async function GET(
-  req: NextRequest,
-  { params }: { params: { labId: string } },
-) {
-  const labId = clean(params.labId);
-
-  if (!labId) {
-    return NextResponse.json({ ok: false, error: 'missing_labId' }, { status: 400 });
-  }
-
-  return proxy(req, labId, 'GET');
-}
-
-export async function PATCH(
-  req: NextRequest,
-  { params }: { params: { labId: string } },
-) {
-  const labId = clean(params.labId);
-
-  if (!labId) {
-    return NextResponse.json({ ok: false, error: 'missing_labId' }, { status: 400 });
-  }
-
-  return proxy(req, labId, 'PATCH');
 }
