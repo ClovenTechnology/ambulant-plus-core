@@ -1,4 +1,4 @@
-// apps/medreach/app/api/phlebs/route.ts
+// apps/medreach/app/api/labs/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -46,15 +46,15 @@ function copyHeaders(req: NextRequest) {
   return headers;
 }
 
-function normalizePhlebs(raw: any) {
-  const data = raw?.data || raw?.phlebs || raw?.items || [];
+function normalizeLabs(raw: any) {
+  const data = raw?.data || raw?.labs || raw?.items || [];
 
   return Array.isArray(data) ? data : [];
 }
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const upstreamUrl = gatewayUrl('/api/medreach/phlebs', url.search);
+  const upstreamUrl = gatewayUrl('/api/medreach/labs', url.search);
 
   if (!upstreamUrl) {
     return NextResponse.json(
@@ -62,7 +62,7 @@ export async function GET(req: NextRequest) {
         ok: false,
         error: 'api_gateway_not_configured',
         data: [],
-        phlebs: [],
+        labs: [],
       },
       { status: 503 },
     );
@@ -80,53 +80,24 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: json?.error || 'phlebs_upstream_failed',
+        error: json?.error || 'labs_upstream_failed',
         detail: json,
         data: [],
-        phlebs: [],
+        labs: [],
       },
       { status: upstream.status },
     );
   }
 
-  const phlebs = normalizePhlebs(json);
+  const labs = normalizeLabs(json);
 
   return NextResponse.json({
     ok: true,
-    data: phlebs,
-    phlebs,
+    data: labs,
+    labs,
     meta: json?.meta || {
-      count: phlebs.length,
+      count: labs.length,
     },
     upstream: json,
-  });
-}
-
-export async function POST(req: NextRequest) {
-  const upstreamUrl = gatewayUrl('/api/medreach/phlebs');
-
-  if (!upstreamUrl) {
-    return NextResponse.json(
-      { ok: false, error: 'api_gateway_not_configured' },
-      { status: 503 },
-    );
-  }
-
-  const body = await req.text();
-
-  const upstream = await fetch(upstreamUrl, {
-    method: 'POST',
-    headers: {
-      ...Object.fromEntries(copyHeaders(req).entries()),
-      'content-type': req.headers.get('content-type') || 'application/json',
-    },
-    body,
-    cache: 'no-store',
-  });
-
-  const json = await upstream.json().catch(() => null);
-
-  return NextResponse.json(json || { ok: upstream.ok }, {
-    status: upstream.status,
   });
 }

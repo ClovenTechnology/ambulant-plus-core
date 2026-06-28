@@ -1,194 +1,325 @@
 // apps/medreach/app/page.tsx
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRightIcon,
   BeakerIcon,
+  ShieldCheckIcon,
+  TruckIcon,
   UserGroupIcon,
 } from '@heroicons/react/24/outline';
 
-import ChartSample from '@/components/ChartSample';
-import { UserProvider } from '@/context/UserContext';
-import RoleGuard from '@/components/RoleGuard';
-import FiltersBar, { DashboardFilters } from '@/components/FiltersBar';
+import { UserProvider, useUserContext } from '@/context/UserContext';
 
-type Metrics = {
-  scope: 'admin';
-  surface: 'medreach';
-  jobsToday: number;
-  pendingCollections: number;
-  completedLabs: number;
-  chart?: {
-    labels: string[];
-    values: number[];
+type MetricsPayload = {
+  ok?: boolean;
+  data?: {
+    scope?: any;
+    registry?: Record<string, number>;
+    marketplace?: Record<string, any>;
+    specimens?: Record<string, any>;
+    finance?: Record<string, number>;
+    operations?: Record<string, number>;
   };
+  registry?: Record<string, number>;
+  marketplace?: Record<string, any>;
+  specimens?: Record<string, any>;
+  finance?: Record<string, number>;
+  operations?: Record<string, number>;
+  error?: string;
 };
 
-export default function MedReachHome() {
-  const [filters, setFilters] = useState<DashboardFilters>({ range: '7d' });
-  const [metrics, setMetrics] = useState<Metrics | null>(null);
+type Range = '7' | '30' | '90';
+
+function n(value: unknown) {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function money(cents: unknown) {
+  return `R ${(n(cents) / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function dataOf(metrics: MetricsPayload | null) {
+  return metrics?.data || metrics || {};
+}
+
+function readinessTone(done: boolean) {
+  return done
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : 'border-amber-200 bg-amber-50 text-amber-800';
+}
+
+function MetricCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string | number;
+  hint?: string;
+}) {
+  return (
+    <div className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="text-xs font-medium text-gray-500">{label}</div>
+      <div className="mt-1 text-2xl font-semibold text-gray-950">{value}</div>
+      {hint ? <div className="mt-1 text-[11px] text-gray-500">{hint}</div> : null}
+    </div>
+  );
+}
+
+function MedReachHomeInner() {
+  const { user, isLoading: identityLoading } = useUserContext();
+
+  const [range, setRange] = useState<Range>('30');
+  const [metrics, setMetrics] = useState<MetricsPayload | null>(null);
   const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function load() {
+    setLoading(true);
+    setErr(null);
+
+    try {
+      const res = await fetch(`/api/metrics?scope=admin&days=${range}`, {
+        cache: 'no-store',
+      });
+
+      const json = (await res.json().catch(() => null)) as MetricsPayload | null;
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `HTTP ${res.status}`);
+      }
+
+      setMetrics(json);
+    } catch (e: any) {
+      setMetrics(null);
+      setErr(e?.message || 'Unable to load MedReach metrics');
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    let cancelled = false;
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [range]);
 
-    async function load() {
-      setLoading(true);
-      try {
-        const params = new URLSearchParams({
-          scope: 'admin',
-          surface: 'medreach',
-          range: filters.range,
-        });
-        const res = await fetch(`/api/metrics?${params.toString()}`, {
-          cache: 'no-store',
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const json = (await res.json()) as Metrics;
-        if (!cancelled) {
-          setMetrics(json);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          console.error(error);
-          setMetrics(null);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
+  const payload = dataOf(metrics);
+  const registry = payload.registry || {};
+  const marketplace = payload.marketplace || {};
+  const specimens = payload.specimens || {};
+  const finance = payload.finance || {};
+  const operations = payload.operations || {};
 
-    load();
-    return () => {
-      cancelled = true;
+  const readiness = useMemo(() => {
+    const activeLabs = n(registry.activeLabs);
+    const activePhlebs = n(registry.activePhlebs);
+    const offeredTests = n(registry.activeOfferedTests);
+    const panels = n(registry.activePanels);
+
+    return {
+      labsReady: activeLabs > 0,
+      phlebsReady: activePhlebs > 0,
+      inventoryReady: offeredTests > 0,
+      panelsReady: panels > 0,
     };
-  }, [filters]);
-
-  const labels = metrics?.chart?.labels ?? [];
-  const values = metrics?.chart?.values ?? [];
+  }, [registry]);
 
   return (
-    <UserProvider>
-      <main className="max-w-5xl mx-auto px-4 py-8 space-y-8">
-        {/* Welcome Message */}
-        <section className="bg-white border rounded-xl p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-gray-900">Welcome to MedReach</h2>
-          <p className="text-sm text-gray-600 mt-2">
-            Lab marketplace &amp; phlebotomy dispatch. This surface is for{' '}
-            <strong>lab partners and field teams</strong> (phlebs), not patients.
+    <main className="mx-auto max-w-7xl space-y-8 px-4 py-8">
+      <section className="rounded-2xl border bg-white p-6 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="inline-flex items-center rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-800">
+              MedReach Command Centre
+            </div>
+            <h1 className="mt-3 text-2xl font-semibold text-gray-950">
+              Lab marketplace and phlebotomy operations
+            </h1>
+            <p className="mt-2 max-w-3xl text-sm text-gray-600">
+              Enterprise control surface for lab partners, lab staff, field phlebotomists,
+              specimen custody, result readiness, operational metrics and financial routing.
+            </p>
+          </div>
+
+          <div className="rounded-xl border bg-gray-50 p-3 text-xs text-gray-700">
+            <div className="font-semibold text-gray-900">Runtime identity</div>
+            <div className="mt-1">
+              {identityLoading ? 'Loading identity...' : user.role}
+              {user.labId ? ` / lab ${user.labId}` : ''}
+              {user.phlebId ? ` / phleb ${user.phlebId}` : ''}
+            </div>
+            {!user.isAuthenticated ? (
+              <div className="mt-1 text-amber-700">
+                No authenticated MedReach identity detected.
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-4">
+        <MetricCard
+          label="Active labs"
+          value={loading ? '...' : n(registry.activeLabs)}
+          hint={`${n(registry.labs)} total registered`}
+        />
+        <MetricCard
+          label="Active phlebs"
+          value={loading ? '...' : n(registry.activePhlebs)}
+          hint={`${n(registry.phlebs)} total registered`}
+        />
+        <MetricCard
+          label="Open draws"
+          value={loading ? '...' : n(marketplace.draws)}
+          hint={`${range} day operational window`}
+        />
+        <MetricCard
+          label="Platform fees"
+          value={loading ? '...' : money(finance.platformFeeCents)}
+          hint="Gateway-derived, no local mock"
+        />
+      </section>
+
+      {err ? (
+        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="font-semibold">Gateway metrics unavailable</div>
+          <div className="mt-1">{err}</div>
+          <div className="mt-1 text-xs">
+            MedReach mock metrics are disabled. Configure the API Gateway base URL before live use.
+          </div>
+        </section>
+      ) : null}
+
+      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Link
+          href="/lab"
+          className="group rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+        >
+          <BeakerIcon className="h-7 w-7 text-teal-700" />
+          <h2 className="mt-3 text-sm font-semibold text-gray-950">Lab operations</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Registry, onboarding readiness, test inventory, panels, offers and lab workspaces.
           </p>
-        </section>
+          <div className="mt-4 inline-flex items-center text-xs font-medium text-teal-700">
+            Open lab directory <ArrowRightIcon className="ml-1 h-4 w-4" />
+          </div>
+        </Link>
 
-        {/* Filters + Overview (admin only, but can be relaxed) */}
-        <RoleGuard allowed={['admin']}>
-          <FiltersBar value={filters} onChange={setFilters} />
-        </RoleGuard>
+        <Link
+          href="/phleb"
+          className="group rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
+        >
+          <UserGroupIcon className="h-7 w-7 text-indigo-700" />
+          <h2 className="mt-3 text-sm font-semibold text-gray-950">Phleb operations</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Field readiness, job assignment, phleb profile state, payout visibility and performance.
+          </p>
+          <div className="mt-4 inline-flex items-center text-xs font-medium text-indigo-700">
+            Open phleb registry <ArrowRightIcon className="ml-1 h-4 w-4" />
+          </div>
+        </Link>
 
-        {/* Functional Console Links */}
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Link
-            href="/phleb"
-            className="group bg-white border rounded-xl p-6 hover:shadow-md transition transform hover:-translate-y-1 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-            aria-label="Open phlebotomist console"
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <ShieldCheckIcon className="h-7 w-7 text-emerald-700" />
+          <h2 className="mt-3 text-sm font-semibold text-gray-950">Enterprise readiness</h2>
+          <div className="mt-3 space-y-2 text-xs">
+            <div className={`rounded-lg border px-3 py-2 ${readinessTone(readiness.labsReady)}`}>
+              Lab partner readiness: {readiness.labsReady ? 'available' : 'not ready'}
+            </div>
+            <div className={`rounded-lg border px-3 py-2 ${readinessTone(readiness.phlebsReady)}`}>
+              Phleb network readiness: {readiness.phlebsReady ? 'available' : 'not ready'}
+            </div>
+            <div className={`rounded-lg border px-3 py-2 ${readinessTone(readiness.inventoryReady)}`}>
+              Test inventory: {readiness.inventoryReady ? 'published' : 'missing'}
+            </div>
+            <div className={`rounded-lg border px-3 py-2 ${readinessTone(readiness.panelsReady)}`}>
+              Lab panels: {readiness.panelsReady ? 'configured' : 'not configured'}
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-950">Marketplace</h2>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <MetricCard label="Eligible lab rows" value={n(marketplace.eligibleLabRows)} />
+            <MetricCard label="Draws" value={n(marketplace.draws)} />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="text-sm font-semibold text-gray-950">Specimens</h2>
+          <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+            <MetricCard label="Bundles" value={n(specimens.bundles)} />
+            <MetricCard
+              label="Location pings"
+              value={n(operations.locationPings)}
+            />
+          </div>
+        </div>
+
+        <div className="rounded-2xl border bg-white p-5 shadow-sm">
+          <h2 className="flex items-center gap-2 text-sm font-semibold text-gray-950">
+            <TruckIcon className="h-4 w-4" />
+            Finance
+          </h2>
+          <div className="mt-3 space-y-2 text-xs text-gray-700">
+            <div className="flex justify-between">
+              <span>Lab gross</span>
+              <span className="font-semibold">{money(finance.labGrossCents)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Phleb gross</span>
+              <span className="font-semibold">{money(finance.phlebGrossCents)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Patient co-pay</span>
+              <span className="font-semibold">{money(finance.patientCopayMinor)}</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="flex flex-wrap items-center gap-3 text-xs">
+        <span className="text-gray-500">Window:</span>
+        {(['7', '30', '90'] as Range[]).map((days) => (
+          <button
+            key={days}
+            type="button"
+            onClick={() => setRange(days)}
+            className={`rounded-full border px-3 py-1 ${
+              range === days
+                ? 'border-gray-900 bg-gray-900 text-white'
+                : 'bg-white text-gray-700 hover:bg-gray-50'
+            }`}
           >
-            <div className="flex items-start gap-4">
-              <UserGroupIcon className="w-6 h-6 text-indigo-600 group-hover:text-indigo-700" />
-              <div>
-                <h3 className="text-md font-semibold text-gray-900">
-                  Phlebotomist Console
-                </h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  View your assigned jobs, update statuses, and sync with patient tracking in
-                  real time.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex items-center text-sm text-indigo-600 group-hover:text-indigo-700">
-              Open phleb jobs <ArrowRightIcon className="w-4 h-4 ml-1" />
-            </div>
-          </Link>
+            Last {days} days
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={load}
+          className="rounded-full border bg-white px-3 py-1 text-gray-700 hover:bg-gray-50"
+        >
+          Refresh
+        </button>
+      </section>
+    </main>
+  );
+}
 
-          <Link
-            href="/lab/demo-lab-1"
-            className="group bg-white border rounded-xl p-6 hover:shadow-md transition transform hover:-translate-y-1 focus:outline-none focus:ring-2 focus:ring-teal-500"
-            aria-label="Open lab workspace"
-          >
-            <div className="flex items-start gap-4">
-              <BeakerIcon className="w-6 h-6 text-teal-600 group-hover:text-teal-700" />
-              <div>
-                <h3 className="text-md font-semibold text-gray-900">Lab Workspace</h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  Review incoming lab orders, monitor collections, and track result statuses.
-                </p>
-              </div>
-            </div>
-            <div className="mt-4 flex items-center text-sm text-teal-600 group-hover:text-teal-700">
-              Open demo lab <ArrowRightIcon className="w-4 h-4 ml-1" />
-            </div>
-          </Link>
-        </section>
-
-        {/* Demo Deep Links (admin only) */}
-        <RoleGuard allowed={['admin']}>
-          <section className="space-y-2">
-            <h4 className="text-sm text-gray-600">Demo Links</h4>
-            <Link
-              href="/lab/lancet-cresta/dashboard"
-              className="text-indigo-600 underline text-sm"
-            >
-              Lancet Cresta Dashboard
-            </Link>
-            <br />
-            <Link
-              href="/phleb/thabo-m/dashboard"
-              className="text-teal-600 underline text-sm"
-            >
-              Thabo M. Dashboard
-            </Link>
-          </section>
-        </RoleGuard>
-
-        {/* Dashboard Metrics (from API) */}
-        <section className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div className="rounded-xl bg-white border p-6 shadow-sm">
-            <h4 className="text-sm font-medium text-gray-500">Jobs Today</h4>
-            <p className="text-3xl font-bold text-indigo-600 mt-2">
-              {loading ? '…' : metrics?.jobsToday ?? '–'}
-            </p>
-          </div>
-          <div className="rounded-xl bg-white border p-6 shadow-sm">
-            <h4 className="text-sm font-medium text-gray-500">Pending Collections</h4>
-            <p className="text-3xl font-bold text-orange-500 mt-2">
-              {loading ? '…' : metrics?.pendingCollections ?? '–'}
-            </p>
-          </div>
-          <div className="rounded-xl bg-white border p-6 shadow-sm">
-            <h4 className="text-sm font-medium text-gray-500">Completed Labs</h4>
-            <p className="text-3xl font-bold text-emerald-600 mt-2">
-              {loading ? '…' : metrics?.completedLabs ?? '–'}
-            </p>
-          </div>
-        </section>
-
-        {/* Orders Chart (from API) */}
-        <section>
-          <ChartSample
-            labels={labels}
-            values={values}
-            title={
-              filters.range === 'today'
-                ? 'Orders Today'
-                : filters.range === '7d'
-                ? 'Orders (Last 7 Days)'
-                : 'Orders (Last 30 Days)'
-            }
-          />
-        </section>
-      </main>
+export default function MedReachHome() {
+  return (
+    <UserProvider>
+      <MedReachHomeInner />
     </UserProvider>
   );
 }
