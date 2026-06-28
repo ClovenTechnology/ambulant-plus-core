@@ -1,16 +1,17 @@
 // apps/api-gateway/app/api/medreach/assign/route.ts
-import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/src/lib/db";
-import { emitEvent } from "@/src/lib/events";
-import { readIdentity } from "@/src/lib/identity";
-import { push, sseKeys } from "@/src/lib/sse";
-import { ensureMedReachFinancialRecord } from "@ambulant/client-core/src/medreach";
+import { NextRequest, NextResponse } from 'next/server';
+import { prisma } from '@/src/lib/db';
+import { emitEvent } from '@/src/lib/events';
+import { readIdentity } from '@/src/lib/identity';
+import { push, sseKeys } from '@/src/lib/sse';
+import { ensureMedReachFinancialRecord } from '@ambulant/client-core/src/medreach';
+import { MEDREACH_DRAW_STATUSES } from '@shared/medreach';
 
-export const runtime = "nodejs";
-export const dynamic = "force-dynamic";
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
 
 function cleanString(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function parseOptionalDate(value: unknown): Date | null {
@@ -21,11 +22,15 @@ function parseOptionalDate(value: unknown): Date | null {
   return Number.isFinite(parsed.getTime()) ? parsed : null;
 }
 
+function nowIso() {
+  return new Date().toISOString();
+}
+
 export async function POST(req: NextRequest) {
   const who = readIdentity(req.headers);
 
-  if (who.role !== "admin") {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  if (who.role !== 'admin') {
+    return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   }
 
   const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -39,15 +44,29 @@ export async function POST(req: NextRequest) {
   const scheduledAt = parseOptionalDate(body.scheduledAt);
 
   if (!orderId || !encounterId || !patientId || !phlebId) {
-    return NextResponse.json({ error: "bad_request" }, { status: 400 });
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'bad_request',
+        detail: 'orderId, encounterId, patientId and phlebId are required.',
+      },
+      { status: 400 },
+    );
   }
 
   const existing = await prisma.draw.findFirst({
     where: { orderId },
+    orderBy: { createdAt: 'desc' },
   });
 
-  const nextStatus = scheduledAt ? "scheduled" : "assigned";
   const now = new Date();
+
+  /**
+   * Important:
+   * scheduledAt is scheduling metadata.
+   * It must not become a separate lower-case workflow status.
+   */
+  const nextStatus = MEDREACH_DRAW_STATUSES.ASSIGNED;
 
   const wasReassigned =
     Boolean(existing?.phlebId) && existing?.phlebId !== phlebId;
@@ -63,6 +82,7 @@ export async function POST(req: NextRequest) {
           phlebId,
           status: nextStatus,
           scheduledAt,
+          assignedAt: existing.assignedAt ?? now,
           updatedAt: now,
         },
       })
@@ -76,6 +96,8 @@ export async function POST(req: NextRequest) {
           phlebId,
           status: nextStatus,
           scheduledAt,
+          assignedAt: now,
+          updatedAt: now,
         },
       });
 
@@ -84,14 +106,14 @@ export async function POST(req: NextRequest) {
     drawId: row.id,
     labId: partnerId,
     phlebId: row.phlebId ?? null,
-    orgId: "org-default",
+    orgId: 'org-default',
   }).catch(() => null);
 
   const auditKind = existing
     ? wasReassigned
-      ? "draw_reassigned"
-      : "draw_updated"
-    : "draw_assigned";
+      ? 'draw_reassigned'
+      : 'draw_updated'
+    : 'draw_assigned';
 
   await prisma.auditEvent.create({
     data: {
@@ -100,6 +122,7 @@ export async function POST(req: NextRequest) {
       actorRole: who.role,
       subjectId: orderId,
       meta: {
+        orderId,
         drawId: row.id,
         encounterId,
         patientId,
@@ -108,7 +131,7 @@ export async function POST(req: NextRequest) {
         phlebId,
         scheduledAt: row.scheduledAt,
         previousPhlebId: existing?.phlebId ?? null,
-        nextStatus,
+        status: row.status,
       },
     },
   });
@@ -121,7 +144,7 @@ export async function POST(req: NextRequest) {
     payload: {
       orderId,
       drawId: row.id,
-      channel: "medreach",
+      channel: 'medreach',
       phlebId,
       partnerId,
       status: row.status,
@@ -136,14 +159,11 @@ export async function POST(req: NextRequest) {
 
   const evt = {
     kind: auditKind,
-    at: new Date().toISOString(),
+    at: nowIso(),
     orderId,
     drawId: row.id,
-    encounterId,
-    patientId,
-    clinicianId,
-    partnerId,
     phlebId,
+    partnerId,
     status: row.status,
     scheduledAt: row.scheduledAt,
   };
@@ -151,29 +171,18 @@ export async function POST(req: NextRequest) {
   await Promise.allSettled([
     push(sseKeys.order(orderId), evt),
     push(sseKeys.draw(row.id), evt),
+    partnerId ? push(sseKeys.lab(partnerId), evt) : Promise.resolve(),
   ]);
 
   return NextResponse.json({
-    assignment: {
-      drawId: row.id,
-      orderId,
-      phlebId: row.phlebId,
-      partnerId: row.partnerId,
-      status: row.status,
-      scheduledAt: row.scheduledAt,
-      updatedAt: row.updatedAt,
-    },
-    warning: null,
+    ok: true,
+    data: row,
     meta: {
+      action: auditKind,
       orderId,
-      action: existing
-        ? wasReassigned
-          ? "reassign"
-          : "update_assignment"
-        : "assign",
-      actorRole: who.role,
-      actorId: who.uid ?? null,
-      at: new Date().toISOString(),
+      drawId: row.id,
+      status: row.status,
+      at: nowIso(),
     },
   });
 }
