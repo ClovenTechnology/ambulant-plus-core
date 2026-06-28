@@ -1614,6 +1614,27 @@ export class NexRingSession {
     add(
       maybeRegisterListener(
         this.sdk,
+        ['registerExerciseVitalSignsHistoryListener', 'registerExerciseVitalSignsHistoryListeners'],
+        (raw: any) => {
+          emitMetrics(bestMetricsFromListener('health', raw), 'history', 'registerExerciseVitalSignsHistoryListener', raw, 'algorithm_history');
+        },
+      ),
+    );
+
+    add(
+      maybeRegisterListener(
+        this.sdk,
+        ['registerReportingExerciseListener', 'registerReportingExerciseListeners'],
+        (raw: any) => {
+          emitMetrics(bestMetricsFromListener('activity', raw), 'history', 'registerReportingExerciseListener', raw, 'daily_activity_history');
+          emitMetrics(bestMetricsFromListener('health', raw), 'history', 'registerReportingExerciseListener.health', raw, 'algorithm_history');
+        },
+      ),
+    );
+
+    add(
+      maybeRegisterListener(
+        this.sdk,
         ['registerTemperatureHistoryDataListener', 'registerTemperatureHistoryDataListeners'],
         (raw: any) => {
           emitMetrics(bestMetricsFromListener('temperature', raw), 'history', 'registerTemperatureHistoryListener', raw, 'temperature_history');
