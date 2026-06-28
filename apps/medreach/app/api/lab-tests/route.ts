@@ -1,5 +1,10 @@
 // apps/medreach/app/api/lab-tests/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import {
+  badRequest,
+  proxyToGateway,
+  upstreamNotImplemented,
+} from '../_apigw';
 
 export type LabTest = {
   labId: string;
@@ -13,60 +18,102 @@ export type LabTest = {
   referenceRange?: string;
 };
 
-const store: Record<string, LabTest[]> = {};
+function cleanString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function toMinorUnits(value: unknown) {
+  const n = Number(value);
+
+  if (!Number.isFinite(n)) return 0;
+
+  return Math.round(n * 100);
+}
+
+function toTurnaroundHours(etaDays: unknown) {
+  const n = Number(etaDays);
+
+  if (!Number.isFinite(n) || n <= 0) return 24;
+
+  return Math.round(n * 24);
+}
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const labId = searchParams.get('labId');
+  const url = new URL(req.url);
+  const labId = cleanString(url.searchParams.get('labId'));
+
   if (!labId) {
-    return NextResponse.json({ error: 'Missing labId' }, { status: 400 });
+    return badRequest('missing_labId');
   }
-  const tests = store[labId] || [];
-  return NextResponse.json({ labId, tests });
+
+  const forwardedSearch = new URLSearchParams(url.searchParams);
+  forwardedSearch.delete('labId');
+
+  const path = `/api/medreach/labs/${encodeURIComponent(labId)}/tests`;
+
+  const response = await proxyToGateway(req, {
+    method: 'GET',
+    path,
+    searchParams: forwardedSearch,
+    headers: {
+      'x-lab-id': labId,
+    },
+  });
+
+  if (response.status === 501) {
+    return upstreamNotImplemented(path, 404);
+  }
+
+  return response;
 }
 
 export async function POST(req: NextRequest) {
-  const body = (await req.json()) as Partial<LabTest>;
-  const labId = body.labId;
+  let body: Partial<LabTest>;
+
+  try {
+    body = (await req.json()) as Partial<LabTest>;
+  } catch {
+    return badRequest('invalid_json');
+  }
+
+  const labId = cleanString(body.labId);
+  const code = cleanString(body.code);
+  const name = cleanString(body.name);
+
   if (!labId) {
-    return NextResponse.json({ error: 'Missing labId' }, { status: 400 });
+    return badRequest('missing_labId');
   }
-  if (!store[labId]) store[labId] = [];
 
-  const code = (body.code || '').trim();
-  const name = (body.name || '').trim();
   if (!code || !name) {
-    return NextResponse.json(
-      { error: 'Missing code or name' },
-      { status: 400 },
-    );
+    return badRequest('missing_code_or_name');
   }
 
-  const priceZAR = Number.isFinite(body.priceZAR)
-    ? Number(body.priceZAR)
-    : 0;
-  const etaDays = Number.isFinite(body.etaDays)
-    ? Number(body.etaDays)
-    : 1;
+  const path = `/api/medreach/labs/${encodeURIComponent(labId)}/tests`;
 
-  const existingIndex = store[labId].findIndex((t) => t.code === code);
-  const payload: LabTest = {
-    labId,
-    code,
-    name,
-    category: body.category || '',
-    sampleType: body.sampleType || '',
-    priceZAR,
-    etaDays,
-    instructions: body.instructions || '',
-    referenceRange: body.referenceRange || '',
-  };
+  const response = await proxyToGateway(req, {
+    method: 'POST',
+    path,
+    body: {
+      code,
+      name,
+      category: cleanString(body.category) || undefined,
+      specimenType: cleanString(body.sampleType) || undefined,
+      sampleType: cleanString(body.sampleType) || undefined,
+      priceMinor: toMinorUnits(body.priceZAR),
+      currency: 'ZAR',
+      turnaroundHours: toTurnaroundHours(body.etaDays),
+      instructions: cleanString(body.instructions) || undefined,
+      referenceRange: cleanString(body.referenceRange) || undefined,
+      active: true,
+    },
+    headers: {
+      'x-lab-id': labId,
+    },
+  });
 
-  if (existingIndex >= 0) {
-    store[labId][existingIndex] = payload;
-  } else {
-    store[labId].push(payload);
+  if (response.status === 501) {
+    return upstreamNotImplemented(path, 404);
   }
 
-  return NextResponse.json({ labId, tests: store[labId] });
+  return response;
 }

@@ -1,9 +1,68 @@
+// apps/medreach/app/lab/[labId]/orders/[orderId]/result/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import type { LabOrder, LabTestResult, LabResultStatus } from '@/app/api/lab-orders/route';
-import { getStatusLabel, getStatusClasses } from '@shared/fsm';
+import {
+  getStatusLabel,
+  getStatusClasses,
+  type JobStatus,
+} from '@shared/fsm';
+
+type LabTestResultFlag =
+  | 'LOW'
+  | 'NORMAL'
+  | 'HIGH'
+  | 'ABNORMAL'
+  | 'UNSPECIFIED';
+
+type LabTestResult = {
+  code: string;
+  name: string;
+  category?: string;
+  sampleType?: string;
+  value?: string;
+  units?: string;
+  referenceRange?: string;
+  flag?: LabTestResultFlag;
+  comments?: string;
+};
+
+type LabResultStatus = 'PENDING' | 'IN_PROGRESS' | 'READY' | 'SENT';
+
+type LabOrder = {
+  id: string;
+  displayId: string;
+  labId?: string | null;
+  eligibleLabs: string[];
+  declinedByLabs: string[];
+  status: JobStatus;
+  rawStatus?: string;
+  resultStatus: LabResultStatus;
+  resultSummary?: string;
+  resultPdfUrl?: string;
+  testResults?: LabTestResult[];
+  patientId?: string;
+  encounterId?: string;
+  patientName: string;
+  patientDob: string;
+  patientGender?: string;
+  patientIdentifier?: string;
+  patientAddress: string;
+  patientArea: string;
+  labNameHint?: string;
+  labCityHint?: string;
+  phlebId?: string;
+  phlebName?: string;
+  tests: { code: string; name: string }[];
+  createdAt: string;
+  collectionTime?: string;
+  deliveredToLabAt?: string;
+  receivedAtLabAt?: string;
+  resultReadyAt?: string;
+  resultSentAt?: string;
+  specimenBundleId?: string;
+};
 
 type LabOrdersResponse = {
   labId: string;
@@ -11,9 +70,174 @@ type LabOrdersResponse = {
   marketplace: LabOrder[];
 };
 
+function unwrapGatewayData(value: any) {
+  if (value && typeof value === 'object' && 'data' in value) {
+    return value.data;
+  }
+
+  return value;
+}
+
+function asArray(value: unknown): any[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function normalizeResultStatus(value: unknown): LabResultStatus {
+  const status = String(value || '').toUpperCase();
+
+  if (
+    status === 'PENDING' ||
+    status === 'IN_PROGRESS' ||
+    status === 'READY' ||
+    status === 'SENT'
+  ) {
+    return status;
+  }
+
+  return 'PENDING';
+}
+
+function normalizeJobStatus(value: unknown): JobStatus {
+  const status = String(value || '').trim();
+
+  const map: Record<string, JobStatus> = {
+    WAITING_LAB_SELECTION: 'WAITING_LAB_SELECTION',
+    MARKETPLACE_OPEN: 'WAITING_LAB_SELECTION',
+    pending_lab: 'WAITING_LAB_SELECTION',
+
+    WAITING_PHLEB: 'WAITING_PHLEB',
+    ASSIGNED: 'WAITING_PHLEB',
+    assigned: 'WAITING_PHLEB',
+    waiting_phleb: 'WAITING_PHLEB',
+
+    PHLEB_EN_ROUTE_TO_PATIENT: 'PHLEB_EN_ROUTE_TO_PATIENT',
+    EN_ROUTE: 'PHLEB_EN_ROUTE_TO_PATIENT',
+    phleb_en_route: 'PHLEB_EN_ROUTE_TO_PATIENT',
+
+    PHLEB_ARRIVED: 'PHLEB_ARRIVED',
+    ARRIVED: 'PHLEB_ARRIVED',
+    phleb_arrived: 'PHLEB_ARRIVED',
+
+    SAMPLING_IN_PROGRESS: 'SAMPLING_IN_PROGRESS',
+    SPECIMEN_COLLECTED: 'SAMPLING_IN_PROGRESS',
+    collected: 'SAMPLING_IN_PROGRESS',
+
+    PHLEB_EN_ROUTE_TO_LAB: 'PHLEB_EN_ROUTE_TO_LAB',
+    IN_TRANSIT_TO_LAB: 'PHLEB_EN_ROUTE_TO_LAB',
+    IN_TRANSIT: 'PHLEB_EN_ROUTE_TO_LAB',
+
+    DELIVERED_TO_LAB: 'DELIVERED_TO_LAB',
+    RECEIVED_AT_LAB: 'DELIVERED_TO_LAB',
+    received_at_lab: 'DELIVERED_TO_LAB',
+  };
+
+  return map[status] || 'WAITING_LAB_SELECTION';
+}
+
+function normalizeTest(raw: any): { code: string; name: string } {
+  return {
+    code: String(raw?.code || raw?.loincCode || raw?.name || '').trim(),
+    name: String(raw?.name || raw?.code || raw?.loincCode || 'Unnamed test').trim(),
+  };
+}
+
+function normalizeTestResult(raw: any): LabTestResult {
+  return {
+    code: String(raw?.code || raw?.loincCode || raw?.name || '').trim(),
+    name: String(raw?.name || raw?.code || raw?.loincCode || 'Unnamed test').trim(),
+    category: String(raw?.category || '').trim(),
+    sampleType: String(raw?.sampleType || raw?.specimenType || '').trim(),
+    value:
+      raw?.value != null
+        ? String(raw.value)
+        : raw?.valueNum != null
+          ? String(raw.valueNum)
+          : '',
+    units: String(raw?.units || raw?.unit || '').trim(),
+    referenceRange: String(raw?.referenceRange || '').trim(),
+    flag: normalizeResultFlag(raw?.flag),
+    comments: String(raw?.comments || raw?.comment || '').trim(),
+  };
+}
+
+function normalizeResultFlag(value: unknown): LabTestResultFlag {
+  const flag = String(value || '').toUpperCase();
+
+  if (
+    flag === 'LOW' ||
+    flag === 'NORMAL' ||
+    flag === 'HIGH' ||
+    flag === 'ABNORMAL'
+  ) {
+    return flag;
+  }
+
+  return 'UNSPECIFIED';
+}
+
+function normalizeOrder(raw: any): LabOrder {
+  const tests = asArray(raw?.tests).map(normalizeTest);
+  const testResults = asArray(raw?.testResults).map(normalizeTestResult);
+  const status = normalizeJobStatus(raw?.status);
+
+  return {
+    id: String(raw?.id || raw?.orderId || raw?.displayId || '').trim(),
+    displayId: String(raw?.displayId || raw?.id || raw?.orderId || '').trim(),
+    labId: raw?.labId ?? null,
+    eligibleLabs: asArray(raw?.eligibleLabs).map(String),
+    declinedByLabs: asArray(raw?.declinedByLabs).map(String),
+    status,
+    rawStatus: String(raw?.status || ''),
+    resultStatus: normalizeResultStatus(raw?.resultStatus),
+    resultSummary: raw?.resultSummary || undefined,
+    resultPdfUrl: raw?.resultPdfUrl || undefined,
+    testResults,
+    patientId: raw?.patientId || undefined,
+    encounterId: raw?.encounterId || undefined,
+    patientName: String(raw?.patientName || '').trim(),
+    patientDob: String(raw?.patientDob || '').trim(),
+    patientGender: raw?.patientGender || undefined,
+    patientIdentifier: raw?.patientIdentifier || undefined,
+    patientAddress: String(raw?.patientAddress || '').trim(),
+    patientArea: String(raw?.patientArea || '').trim(),
+    labNameHint: raw?.labNameHint || raw?.labName || undefined,
+    labCityHint: raw?.labCityHint || undefined,
+    phlebId: raw?.phlebId || undefined,
+    phlebName: raw?.phlebName || undefined,
+    tests,
+    createdAt: raw?.createdAt || new Date().toISOString(),
+    collectionTime: raw?.collectionTime || undefined,
+    deliveredToLabAt:
+      raw?.deliveredToLabAt || raw?.receivedAtLabAt || raw?.acceptedAt || undefined,
+    receivedAtLabAt: raw?.receivedAtLabAt || undefined,
+    resultReadyAt: raw?.resultReadyAt || undefined,
+    resultSentAt: raw?.resultSentAt || undefined,
+    specimenBundleId: raw?.specimenBundleId || undefined,
+  };
+}
+
+function normalizeLabOrdersResponse(raw: any, labId: string): LabOrdersResponse {
+  const payload = unwrapGatewayData(raw);
+
+  return {
+    labId: String(payload?.labId || labId),
+    assigned: asArray(payload?.assigned || payload?.items || payload?.orders)
+      .map(normalizeOrder)
+      .filter((order) => Boolean(order.id)),
+    marketplace: asArray(payload?.marketplace)
+      .map(normalizeOrder)
+      .filter((order) => Boolean(order.id)),
+  };
+}
+
+function normalizePatchResponse(raw: any): LabOrder {
+  return normalizeOrder(unwrapGatewayData(raw));
+}
+
 export default function LabResultReportPage() {
   const params = useParams<{ labId: string; orderId: string }>();
   const router = useRouter();
+
   const labId = params.labId;
   const orderId = params.orderId;
 
@@ -40,22 +264,27 @@ export default function LabResultReportPage() {
   async function load() {
     setLoading(true);
     setErr(null);
+
     try {
       const res = await fetch(`/api/lab-orders?labId=${encodeURIComponent(labId)}`, {
         cache: 'no-store',
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = (await res.json()) as LabOrdersResponse;
+
+      if (!res.ok) {
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `HTTP ${res.status}`);
+      }
+
+      const data = normalizeLabOrdersResponse(await res.json(), labId);
 
       const found =
-        data.assigned.find((o) => o.id === orderId) ||
-        data.marketplace.find((o) => o.id === orderId) ||
+        data.assigned.find((o) => o.id === orderId || o.displayId === orderId) ||
+        data.marketplace.find((o) => o.id === orderId || o.displayId === orderId) ||
         null;
 
       if (!found) {
         setErr('Order not found for this lab.');
         setOrder(null);
-        setLoading(false);
         return;
       }
 
@@ -66,6 +295,7 @@ export default function LabResultReportPage() {
       const existing = found.testResults || [];
       const merged: LabTestResult[] = found.tests.map((t) => {
         const match = existing.find((r) => r.code === t.code) || null;
+
         return {
           code: t.code,
           name: t.name,
@@ -79,7 +309,7 @@ export default function LabResultReportPage() {
         };
       });
 
-      setTestResults(merged);
+      setTestResults(merged.length ? merged : existing);
     } catch (e: any) {
       setErr(e?.message || 'Unable to load order');
       setOrder(null);
@@ -90,10 +320,12 @@ export default function LabResultReportPage() {
 
   useEffect(() => {
     let mounted = true;
+
     (async () => {
       if (!mounted) return;
       await load();
     })();
+
     return () => {
       mounted = false;
     };
@@ -103,7 +335,12 @@ export default function LabResultReportPage() {
   function updateTestResult(index: number, patch: Partial<LabTestResult>) {
     setTestResults((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], ...patch };
+
+      next[index] = {
+        ...next[index],
+        ...patch,
+      };
+
       return next;
     });
   }
@@ -126,19 +363,21 @@ export default function LabResultReportPage() {
           resultStatus: finalStatus,
           resultSummary,
           testResults,
+          labId,
         }),
       });
 
       if (!res.ok) {
-        console.error('updateResult failed', await res.text());
-        throw new Error(`HTTP ${res.status}`);
+        const text = await res.text().catch(() => '');
+        throw new Error(text || `HTTP ${res.status}`);
       }
 
-      const updated = (await res.json()) as LabOrder;
+      const updated = normalizePatchResponse(await res.json());
+
       setOrder(updated);
       setResultStatus(updated.resultStatus);
       setResultSummary(updated.resultSummary || '');
-      setTestResults(updated.testResults || testResults);
+      setTestResults(updated.testResults?.length ? updated.testResults : testResults);
       alert('Results saved.');
     } catch (e: any) {
       setErr(e?.message || 'Unable to save results');
@@ -168,11 +407,12 @@ export default function LabResultReportPage() {
   }
 
   const createdAt = new Date(order.createdAt);
-  const deliveredAt = order.deliveredToLabAt ? new Date(order.deliveredToLabAt) : null;
+  const deliveredAt = order.deliveredToLabAt
+    ? new Date(order.deliveredToLabAt)
+    : null;
 
   return (
     <>
-      {/* Print styles */}
       <style jsx>{`
         @media print {
           .no-print {
@@ -193,7 +433,6 @@ export default function LabResultReportPage() {
       `}</style>
 
       <main className="max-w-3xl mx-auto px-4 py-6">
-        {/* Top action bar (only shows on-screen) */}
         <div className="no-print mb-4 flex items-center justify-between gap-3 text-xs">
           <button
             type="button"
@@ -202,6 +441,7 @@ export default function LabResultReportPage() {
           >
             ← Back to lab workspace
           </button>
+
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -217,6 +457,7 @@ export default function LabResultReportPage() {
             >
               {saving ? 'Saving…' : 'Save draft'}
             </button>
+
             <button
               type="button"
               onClick={() => handleSave('READY')}
@@ -231,6 +472,7 @@ export default function LabResultReportPage() {
             >
               Mark results ready
             </button>
+
             <button
               type="button"
               onClick={handlePrint}
@@ -241,23 +483,21 @@ export default function LabResultReportPage() {
           </div>
         </div>
 
-        {order.status !== 'DELIVERED_TO_LAB' && (
+        {order.status !== 'DELIVERED_TO_LAB' ? (
           <div className="no-print mb-4 text-[11px] text-amber-700 bg-amber-50 border border-amber-200 px-3 py-2 rounded">
-            Sample has <strong>not yet been marked as delivered</strong>. Results are
-            shown in read-only mode. Once the phlebotomist marks the job as{' '}
-            <code>DELIVERED_TO_LAB</code>, you can edit and finalise this report.
+            Sample has <strong>not yet been marked as delivered</strong>.
+            Results are shown in read-only mode. Once the specimen is received
+            at the lab, you can edit and finalise this report.
           </div>
-        )}
+        ) : null}
 
-        {err && (
+        {err ? (
           <div className="no-print mb-4 text-[11px] text-red-700 bg-red-50 border border-red-200 px-3 py-2 rounded">
             {err}
           </div>
-        )}
+        ) : null}
 
-        {/* Report shell */}
         <div className="report-shell bg-white border rounded-xl shadow-sm p-6 space-y-6">
-          {/* Header */}
           <header className="flex items-start justify-between gap-4 border-b pb-4">
             <div className="flex items-center gap-3">
               <img
@@ -265,6 +505,7 @@ export default function LabResultReportPage() {
                 alt="MedReach"
                 className="w-10 h-10 object-contain"
               />
+
               <div>
                 <div className="font-semibold text-gray-900 text-sm">
                   MedReach Labs &amp; Diagnostics
@@ -272,21 +513,25 @@ export default function LabResultReportPage() {
                 <div className="text-[11px] text-gray-600">
                   0B Meadowbrook Ln, Bryanston 2021
                 </div>
-                <div className="text-[11px] text-gray-600">Tel: 078 552 6420</div>
+                <div className="text-[11px] text-gray-600">
+                  Tel: 078 552 6420
+                </div>
               </div>
             </div>
+
             <div className="text-right text-[11px] text-gray-600 space-y-1">
               <div className="font-semibold text-gray-900">
                 Laboratory Report
               </div>
               <div>Report ID: {order.displayId}</div>
               <div>Created: {createdAt.toLocaleString()}</div>
-              {order.resultReadyAt && (
+
+              {order.resultReadyAt ? (
                 <div>
-                  Results ready:{' '}
-                  {new Date(order.resultReadyAt).toLocaleString()}
+                  Results ready: {new Date(order.resultReadyAt).toLocaleString()}
                 </div>
-              )}
+              ) : null}
+
               <div className="mt-1">
                 <span
                   className={
@@ -300,14 +545,11 @@ export default function LabResultReportPage() {
             </div>
           </header>
 
-          {/* Patient / lab / phleb details */}
           <section className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
             <div className="space-y-1">
               <div className="font-semibold text-gray-800">Patient</div>
-              <div className="text-gray-700">{order.patientName}</div>
-              <div className="text-gray-600">
-                DOB: {order.patientDob || '—'}
-              </div>
+              <div className="text-gray-700">{order.patientName || '—'}</div>
+              <div className="text-gray-600">DOB: {order.patientDob || '—'}</div>
               <div className="text-gray-600">
                 ID / Identifier: {order.patientIdentifier || '—'}
               </div>
@@ -315,9 +557,11 @@ export default function LabResultReportPage() {
                 Gender: {order.patientGender || '—'}
               </div>
               <div className="text-gray-600">
-                Address: {order.patientAddress} ({order.patientArea})
+                Address: {order.patientAddress || '—'}{' '}
+                {order.patientArea ? `(${order.patientArea})` : ''}
               </div>
             </div>
+
             <div className="space-y-1">
               <div className="font-semibold text-gray-800">Laboratory</div>
               <div className="text-gray-700">{niceLabName}</div>
@@ -327,31 +571,34 @@ export default function LabResultReportPage() {
               <div className="text-gray-600">
                 Lab city: {order.labCityHint || '—'}
               </div>
-              {deliveredAt && (
+
+              {deliveredAt ? (
                 <div className="text-gray-600">
                   Sample received: {deliveredAt.toLocaleString()}
                 </div>
-              )}
+              ) : null}
             </div>
+
             <div className="space-y-1">
               <div className="font-semibold text-gray-800">Phlebotomist</div>
-              <div className="text-gray-700">
-                {order.phlebName || '—'}
-              </div>
+              <div className="text-gray-700">{order.phlebName || '—'}</div>
               <div className="text-gray-600">
                 Phleb ID: {order.phlebId || '—'}
               </div>
               <div className="text-gray-600">
                 Encounter ID: {order.encounterId || '—'}
               </div>
+              <div className="text-gray-600">
+                Bundle ID: {order.specimenBundleId || '—'}
+              </div>
             </div>
           </section>
 
-          {/* Tests table */}
           <section>
             <div className="font-semibold text-gray-800 text-sm mb-2">
               Test Results
             </div>
+
             <div className="border rounded overflow-hidden">
               <table className="w-full text-[11px]">
                 <thead className="bg-gray-50 border-b">
@@ -382,14 +629,13 @@ export default function LabResultReportPage() {
                     </th>
                   </tr>
                 </thead>
+
                 <tbody>
                   {testResults.map((tr, idx) => {
                     const editable = canEdit;
+
                     return (
-                      <tr
-                        key={tr.code}
-                        className="border-t align-top"
-                      >
+                      <tr key={`${tr.code}-${idx}`} className="border-t align-top">
                         <td className="px-2 py-1">
                           {editable ? (
                             <input
@@ -397,15 +643,14 @@ export default function LabResultReportPage() {
                               className="w-full border rounded px-1 py-0.5"
                               value={tr.category || ''}
                               onChange={(e) =>
-                                updateTestResult(idx, {
-                                  category: e.target.value,
-                                })
+                                updateTestResult(idx, { category: e.target.value })
                               }
                             />
                           ) : (
                             <span>{tr.category || '—'}</span>
                           )}
                         </td>
+
                         <td className="px-2 py-1">
                           <div className="font-medium text-gray-800">
                             {tr.name}
@@ -414,6 +659,7 @@ export default function LabResultReportPage() {
                             {tr.code}
                           </div>
                         </td>
+
                         <td className="px-2 py-1">
                           {editable ? (
                             <input
@@ -421,15 +667,14 @@ export default function LabResultReportPage() {
                               className="w-full border rounded px-1 py-0.5"
                               value={tr.value || ''}
                               onChange={(e) =>
-                                updateTestResult(idx, {
-                                  value: e.target.value,
-                                })
+                                updateTestResult(idx, { value: e.target.value })
                               }
                             />
                           ) : (
                             <span>{tr.value || '—'}</span>
                           )}
                         </td>
+
                         <td className="px-2 py-1">
                           {editable ? (
                             <input
@@ -437,15 +682,14 @@ export default function LabResultReportPage() {
                               className="w-full border rounded px-1 py-0.5"
                               value={tr.units || ''}
                               onChange={(e) =>
-                                updateTestResult(idx, {
-                                  units: e.target.value,
-                                })
+                                updateTestResult(idx, { units: e.target.value })
                               }
                             />
                           ) : (
                             <span>{tr.units || '—'}</span>
                           )}
                         </td>
+
                         <td className="px-2 py-1">
                           {editable ? (
                             <input
@@ -462,6 +706,7 @@ export default function LabResultReportPage() {
                             <span>{tr.referenceRange || '—'}</span>
                           )}
                         </td>
+
                         <td className="px-2 py-1">
                           {editable ? (
                             <select
@@ -469,7 +714,7 @@ export default function LabResultReportPage() {
                               value={tr.flag || 'UNSPECIFIED'}
                               onChange={(e) =>
                                 updateTestResult(idx, {
-                                  flag: e.target.value as LabTestResult['flag'],
+                                  flag: e.target.value as LabTestResultFlag,
                                 })
                               }
                             >
@@ -485,12 +730,11 @@ export default function LabResultReportPage() {
                               {tr.flag === 'NORMAL' && 'Normal'}
                               {tr.flag === 'HIGH' && 'High'}
                               {tr.flag === 'ABNORMAL' && 'Abnormal'}
-                              {!tr.flag || tr.flag === 'UNSPECIFIED'
-                                ? '—'
-                                : ''}
+                              {!tr.flag || tr.flag === 'UNSPECIFIED' ? '—' : ''}
                             </span>
                           )}
                         </td>
+
                         <td className="px-2 py-1">
                           {editable ? (
                             <input
@@ -507,6 +751,7 @@ export default function LabResultReportPage() {
                             <span>{tr.sampleType || '—'}</span>
                           )}
                         </td>
+
                         <td className="px-2 py-1">
                           {editable ? (
                             <textarea
@@ -525,7 +770,8 @@ export default function LabResultReportPage() {
                       </tr>
                     );
                   })}
-                  {testResults.length === 0 && (
+
+                  {testResults.length === 0 ? (
                     <tr>
                       <td
                         colSpan={8}
@@ -534,17 +780,17 @@ export default function LabResultReportPage() {
                         No tests defined for this order.
                       </td>
                     </tr>
-                  )}
+                  ) : null}
                 </tbody>
               </table>
             </div>
           </section>
 
-          {/* Overall comments / interpretation */}
           <section className="space-y-1 text-xs">
             <div className="font-semibold text-gray-800">
               Comments / Interpretation
             </div>
+
             {canEdit ? (
               <textarea
                 className="w-full border rounded px-2 py-1 min-h-[80px] text-xs"
@@ -558,15 +804,16 @@ export default function LabResultReportPage() {
             )}
           </section>
 
-          {/* Footer */}
           <footer className="pt-4 border-t text-[10px] text-gray-500 flex flex-col md:flex-row justify-between gap-2">
             <div>
-              Results prepared by <span className="font-semibold">{niceLabName}</span>{' '}
-              on MedReach Labs and Diagnostic Network via Ambulant+ © 2025
+              Results prepared by{' '}
+              <span className="font-semibold">{niceLabName}</span> on MedReach
+              Labs and Diagnostic Network via Ambulant+ © 2025
             </div>
+
             <div className="text-right">
-              This report is intended for medical use only. Please correlate with
-              clinical findings.
+              This report is intended for medical use only. Please correlate
+              with clinical findings.
             </div>
           </footer>
         </div>

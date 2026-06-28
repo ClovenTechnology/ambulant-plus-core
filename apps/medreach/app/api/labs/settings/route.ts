@@ -1,5 +1,10 @@
 // apps/medreach/app/api/labs/settings/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import {
+  badRequest,
+  proxyToGateway,
+  upstreamNotImplemented,
+} from '../../_apigw';
 
 export type LabSettings = {
   labId: string;
@@ -16,50 +21,80 @@ export type LabSettings = {
   logoUrl?: string;
 };
 
-const store: Record<string, LabSettings> = {};
+function cleanString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const labId = searchParams.get('labId');
+  const url = new URL(req.url);
+  const labId = cleanString(url.searchParams.get('labId'));
+
   if (!labId) {
-    return NextResponse.json({ error: 'Missing labId' }, { status: 400 });
+    return badRequest('missing_labId');
   }
 
-  if (!store[labId]) {
-    store[labId] = {
-      labId,
-      name: labId
-        .split('-')
-        .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-        .join(' '),
-    };
+  const path = `/api/medreach/labs/${encodeURIComponent(labId)}`;
+
+  const response = await proxyToGateway(req, {
+    method: 'GET',
+    path,
+    headers: {
+      'x-lab-id': labId,
+    },
+  });
+
+  if (response.status === 501) {
+    return upstreamNotImplemented(path, 404);
   }
 
-  return NextResponse.json(store[labId]);
+  return response;
 }
 
 export async function PATCH(req: NextRequest) {
-  const body = (await req.json()) as Partial<LabSettings> & { labId?: string };
-  const labId = body.labId;
+  let body: Partial<LabSettings> & { labId?: string };
+
+  try {
+    body = (await req.json()) as Partial<LabSettings> & { labId?: string };
+  } catch {
+    return badRequest('invalid_json');
+  }
+
+  const labId = cleanString(body.labId);
+
   if (!labId) {
-    return NextResponse.json({ error: 'Missing labId in body' }, { status: 400 });
+    return badRequest('missing_labId');
   }
 
-  if (!store[labId]) {
-    store[labId] = {
-      labId,
-      name: labId
-        .split('-')
-        .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-        .join(' '),
-    };
+  const path = `/api/medreach/labs/${encodeURIComponent(labId)}`;
+
+  const response = await proxyToGateway(req, {
+    method: 'PATCH',
+    path,
+    body: {
+      name: cleanString(body.name) || undefined,
+      primaryPhone: cleanString(body.primaryPhone) || undefined,
+      additionalPhones: Array.isArray(body.additionalPhones)
+        ? body.additionalPhones
+        : [],
+      primaryEmail: cleanString(body.primaryEmail) || undefined,
+      additionalEmails: Array.isArray(body.additionalEmails)
+        ? body.additionalEmails
+        : [],
+      addressLine1: cleanString(body.addressLine1) || undefined,
+      addressLine2: cleanString(body.addressLine2) || undefined,
+      city: cleanString(body.city) || undefined,
+      province: cleanString(body.province) || undefined,
+      postalCode: cleanString(body.postalCode) || undefined,
+      logoUrl: cleanString(body.logoUrl) || undefined,
+    },
+    headers: {
+      'x-lab-id': labId,
+    },
+  });
+
+  if (response.status === 501) {
+    return upstreamNotImplemented(path, 404);
   }
 
-  store[labId] = {
-    ...store[labId],
-    ...body,
-    labId,
-  };
-
-  return NextResponse.json(store[labId]);
+  return response;
 }

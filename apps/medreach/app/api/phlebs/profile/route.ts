@@ -1,5 +1,10 @@
 // apps/medreach/app/api/phlebs/profile/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import {
+  badRequest,
+  proxyToGateway,
+  upstreamNotImplemented,
+} from '../../_apigw';
 
 export type PhlebProfile = {
   phlebId: string;
@@ -11,36 +16,31 @@ export type PhlebProfile = {
   basePhone?: string;
 };
 
-const profiles: Record<string, PhlebProfile> = {
-  'thabo-m': {
-    phlebId: 'thabo-m',
-    fullName: 'Thabo Mokoena',
-    dob: '1990-03-15',
-    gender: 'Male',
-    qualification: 'Registered Phlebotomist',
-    email: 'thabo.m@example.com',
-    basePhone: '+27 82 000 0000',
-  },
-};
+function cleanString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const phlebId = searchParams.get('phlebId');
+  const url = new URL(req.url);
+  const phlebId = cleanString(url.searchParams.get('phlebId'));
+
   if (!phlebId) {
-    return NextResponse.json({ error: 'Missing phlebId' }, { status: 400 });
+    return badRequest('missing_phlebId');
   }
 
-  if (!profiles[phlebId]) {
-    profiles[phlebId] = {
-      phlebId,
-      fullName: phlebId
-        .split('-')
-        .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
-        .join(' '),
-      dob: '1990-01-01',
-      email: `${phlebId}@example.com`,
-    };
+  const path = `/api/medreach/phlebs/${encodeURIComponent(phlebId)}/profile`;
+
+  const response = await proxyToGateway(req, {
+    method: 'GET',
+    path,
+    headers: {
+      'x-actor-ref-id': phlebId,
+    },
+  });
+
+  if (response.status === 501) {
+    return upstreamNotImplemented(path, 404);
   }
 
-  return NextResponse.json(profiles[phlebId]);
+  return response;
 }

@@ -1,5 +1,10 @@
 // apps/medreach/app/api/phlebs/preferences/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest } from 'next/server';
+import {
+  badRequest,
+  proxyToGateway,
+  upstreamNotImplemented,
+} from '../../_apigw';
 
 export type PhlebPreferences = {
   phlebId: string;
@@ -17,96 +22,78 @@ export type PhlebPreferences = {
   };
 };
 
-const prefs: Record<string, PhlebPreferences> = {
-  'thabo-m': {
-    phlebId: 'thabo-m',
-    avatarUrl: '',
-    contactPhone: '+27 82 000 0000',
-    serviceAreas: ['Randburg', 'Rosebank'],
-    preferredLabIds: ['lancet-cresta'],
-    vehicle: {
-      make: 'Toyota',
-      model: 'Etios',
-      registration: 'XYZ 123 GP',
-      color: 'White',
-      type: 'Car',
-      changePending: false,
-    },
-  },
-};
+function cleanString(value: unknown) {
+  return typeof value === 'string' ? value.trim() : '';
+}
 
 export async function GET(req: NextRequest) {
-  const { searchParams } = new URL(req.url);
-  const phlebId = searchParams.get('phlebId');
+  const url = new URL(req.url);
+  const phlebId = cleanString(url.searchParams.get('phlebId'));
+
   if (!phlebId) {
-    return NextResponse.json({ error: 'Missing phlebId' }, { status: 400 });
+    return badRequest('missing_phlebId');
   }
 
-  if (!prefs[phlebId]) {
-    prefs[phlebId] = {
-      phlebId,
-      serviceAreas: [],
-      preferredLabIds: [],
-      vehicle: {
-        make: '',
-        model: '',
-        registration: '',
-        changePending: false,
-      },
-    };
+  const path = `/api/medreach/phlebs/${encodeURIComponent(
+    phlebId,
+  )}/preferences`;
+
+  const response = await proxyToGateway(req, {
+    method: 'GET',
+    path,
+    headers: {
+      'x-actor-ref-id': phlebId,
+    },
+  });
+
+  if (response.status === 501) {
+    return upstreamNotImplemented(path, 404);
   }
 
-  return NextResponse.json(prefs[phlebId]);
+  return response;
 }
 
 export async function PATCH(req: NextRequest) {
-  const body = (await req.json()) as Partial<PhlebPreferences> & { phlebId?: string };
-  const phlebId = body.phlebId;
+  let body: Partial<PhlebPreferences> & { phlebId?: string };
+
+  try {
+    body = (await req.json()) as Partial<PhlebPreferences> & {
+      phlebId?: string;
+    };
+  } catch {
+    return badRequest('invalid_json');
+  }
+
+  const phlebId = cleanString(body.phlebId);
+
   if (!phlebId) {
-    return NextResponse.json({ error: 'Missing phlebId in body' }, { status: 400 });
+    return badRequest('missing_phlebId');
   }
 
-  if (!prefs[phlebId]) {
-    prefs[phlebId] = {
-      phlebId,
-      serviceAreas: [],
-      preferredLabIds: [],
-      vehicle: {
-        make: '',
-        model: '',
-        registration: '',
-        changePending: false,
-      },
-    };
-  }
-
-  const current = prefs[phlebId];
-
-  let vehicle = current.vehicle;
-  if (body.vehicle) {
-    vehicle = {
-      ...vehicle,
-      ...body.vehicle,
-    };
-    if (
-      body.vehicle.make ||
-      body.vehicle.model ||
-      body.vehicle.registration ||
-      body.vehicle.color ||
-      body.vehicle.type
-    ) {
-      vehicle.changePending = true;
-    }
-  }
-
-  prefs[phlebId] = {
-    ...current,
-    ...body,
+  const path = `/api/medreach/phlebs/${encodeURIComponent(
     phlebId,
-    vehicle,
-    serviceAreas: body.serviceAreas ?? current.serviceAreas,
-    preferredLabIds: body.preferredLabIds ?? current.preferredLabIds,
-  };
+  )}/preferences`;
 
-  return NextResponse.json(prefs[phlebId]);
+  const response = await proxyToGateway(req, {
+    method: 'PATCH',
+    path,
+    body: {
+      avatarUrl: cleanString(body.avatarUrl) || undefined,
+      contactPhone: cleanString(body.contactPhone) || undefined,
+      serviceAreas: Array.isArray(body.serviceAreas) ? body.serviceAreas : [],
+      preferredLabIds: Array.isArray(body.preferredLabIds)
+        ? body.preferredLabIds
+        : [],
+      vehicle: body.vehicle || undefined,
+    },
+    headers: {
+      'x-actor-ref-id': phlebId,
+    },
+  });
+
+  if (response.status === 501) {
+    return upstreamNotImplemented(path, 404);
+  }
+
+  return response;
 }
