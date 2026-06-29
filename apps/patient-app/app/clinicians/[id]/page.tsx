@@ -166,6 +166,36 @@ function normalizeQualification(q: Qualification): { title: string; meta: string
   };
 }
 
+function isPlatformTrainingQualification(q: Qualification, normalized: { title: string; meta: string; notes?: string | null }) {
+  const haystack = [
+    q.type,
+    q.degree,
+    q.title,
+    q.institution,
+    q.notes,
+    q.certificateNumber,
+    normalized.title,
+    normalized.meta,
+    normalized.notes,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  // Ambulant+/Cloven training is platform-readiness training, not a clinical qualification.
+  // It must not be rendered under patient-facing clinical credentials.
+  if (haystack.includes('ambulant+') || haystack.includes('cloven technology')) return true;
+  if (haystack.includes('contactless medicine')) return true;
+  if (haystack.includes('onboarding') || haystack.includes('platform training')) return true;
+
+  const title = String(normalized.title || '').toLowerCase();
+  const institution = String(q.institution || '').toLowerCase();
+
+  if (title === 'clinical qualification' && !institution) return true;
+
+  return false;
+}
+
 function qualificationList(c: BookingProfile['clinician']) {
   const rows = [
     ...(Array.isArray(c.verifiedQualifications) ? c.verifiedQualifications : []),
@@ -176,7 +206,9 @@ function qualificationList(c: BookingProfile['clinician']) {
   const seen = new Set<string>();
 
   return rows
-    .map(normalizeQualification)
+    .map((raw) => ({ raw, normalized: normalizeQualification(raw) }))
+    .filter(({ raw, normalized }) => !isPlatformTrainingQualification(raw, normalized))
+    .map(({ normalized }) => normalized)
     .filter((q) => {
       const key = `${q.title}|${q.meta}`;
       if (seen.has(key)) return false;

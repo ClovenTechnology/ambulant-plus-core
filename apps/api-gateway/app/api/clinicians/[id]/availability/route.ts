@@ -287,7 +287,6 @@ async function buildAvailabilityContract(clinician: any, consultType: ConsultTyp
   const timezone =
     cleanStr(schedule.timezone) ||
     cleanStr(profile.timezone) ||
-    cleanStr(clinician.timezone) ||
     'Africa/Johannesburg';
 
   const template = normalizeTemplate(schedule.template);
@@ -499,7 +498,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         trainingCompleted: true,
         feeCents: true,
         currency: true,
-        timezone: true,
         meta: true,
       },
     });
