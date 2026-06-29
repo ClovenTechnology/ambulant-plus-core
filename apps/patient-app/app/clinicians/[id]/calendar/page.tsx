@@ -9,7 +9,9 @@ import RefundPolicyPanel from '@/components/RefundPolicyPanel';
 
 type SlotStatus = 'available' | 'limited' | 'blocked' | 'booked' | 'past';
 type ConsultType = 'standard' | 'followup';
-type DayPhase = 'morning' | 'afternoon' | 'evening';
+type DayPhase = 'overnight' | 'morning' | 'afternoon' | 'evening' | 'night';
+
+const DAY_PHASES: DayPhase[] = ['overnight', 'morning', 'afternoon', 'evening', 'night'];
 
 type Slot = {
   start: string;
@@ -275,15 +277,20 @@ function normalizeSlot(raw: Slot, fee: FeeProfile, consultType: ConsultType): No
 
 function phaseOfSlot(slot: NormalizedSlot): DayPhase {
   const h = new Date(slot.start).getHours();
+
+  if (h < 5) return 'overnight';
   if (h < 12) return 'morning';
   if (h < 17) return 'afternoon';
-  return 'evening';
+  if (h < 21) return 'evening';
+  return 'night';
 }
 
 function phaseLabel(phase: DayPhase) {
+  if (phase === 'overnight') return 'Overnight';
   if (phase === 'morning') return 'Morning';
   if (phase === 'afternoon') return 'Afternoon';
-  return 'Evening';
+  if (phase === 'evening') return 'Evening';
+  return 'Night';
 }
 
 function dayKey(iso: string) {
@@ -379,7 +386,7 @@ function statusClasses(status: SlotStatus, selected: boolean) {
 }
 
 function groupSlots(slots: NormalizedSlot[]) {
-  const phases: DayPhase[] = ['morning', 'afternoon', 'evening'];
+  const phases = DAY_PHASES;
   const map = new Map<
     string,
     {
@@ -400,7 +407,7 @@ function groupSlots(slots: NormalizedSlot[]) {
         label: dayLabel(slot.start),
         fullLabel: fullDayLabel(slot.start),
         slots: [],
-        groups: { morning: [], afternoon: [], evening: [] },
+        groups: { overnight: [], morning: [], afternoon: [], evening: [], night: [] },
         counts: { available: 0, limited: 0, blocked: 0, booked: 0, past: 0 },
       });
     }
@@ -1041,7 +1048,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                       </div>
 
                       <div className="space-y-5 p-4">
-                        {(['morning', 'afternoon', 'evening'] as DayPhase[]).map((phase) => {
+                        {DAY_PHASES.map((phase) => {
                           const phaseSlots = day.groups[phase];
 
                           return (

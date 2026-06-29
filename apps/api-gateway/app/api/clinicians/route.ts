@@ -1,4 +1,4 @@
-﻿// apps/api-gateway/app/api/clinicians/route.ts
+// apps/api-gateway/app/api/clinicians/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { sendEmail, sendSms } from '@/src/lib/mailer';
@@ -263,11 +263,29 @@ function publicAcceptsMedicalAid(row: any, meta: any) {
   );
 }
 
+function hasInlineAvatar(meta: any) {
+  const direct =
+    meta?.avatarDataUrl ??
+    meta?.photoDataUrl ??
+    meta?.rawProfile?.avatarDataUrl ??
+    meta?.rawProfile?.photoDataUrl ??
+    meta?.submittedProfile?.avatarDataUrl ??
+    meta?.submittedProfile?.photoDataUrl;
+
+  const s = typeof direct === 'string' ? direct.trim() : '';
+  return s.startsWith('data:image/');
+}
+
 function publicAvatarUrl(row: any, meta: any) {
-  return (
-    cleanStr(row.avatarUrl ?? row.photoUrl ?? meta.avatarUrl ?? meta.photoUrl) ||
-    null
-  );
+  const direct = cleanStr(row.avatarUrl ?? row.photoUrl ?? meta.avatarUrl ?? meta.photoUrl);
+  if (direct) return direct;
+
+  const id = cleanStr(row.id);
+  if (id && hasInlineAvatar(meta)) {
+    return `/api/clinicians/${encodeURIComponent(id)}/avatar`;
+  }
+
+  return null;
 }
 
 

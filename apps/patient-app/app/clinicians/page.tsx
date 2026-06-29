@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/clinicians/page.tsx
+// apps/patient-app/app/clinicians/page.tsx
 'use client';
 
 import React, { useCallback, useEffect, useId, useMemo, useRef, useState, Suspense } from 'react';
@@ -29,6 +29,7 @@ type UIClass = (typeof UI_CLASSES)[number];
 const PAGE_SIZE = 10;
 const ENCOUNTER_KEY = 'clinician.encounters.v1';
 const COMPARE_KEY = 'clinician.compare.v1';
+const FAVOURITES_KEY = 'clinician.favourites.v1';
 
 // ✅ ratings bump channels (non-SSE path)
 const RATINGS_BC_NAME = 'ambulant_ratings';
@@ -59,6 +60,9 @@ type ClinicianItem = {
   ratingCount?: number;
   online?: boolean;
   status?: 'active' | 'pending' | 'disabled' | 'disciplinary' | string;
+  photoUrl?: string | null;
+  avatarUrl?: string | null;
+  avatarDataUrl?: string | null;
 
   // fields required for fairness
   lastBookedAt?: number | null;
@@ -194,22 +198,52 @@ function authHeaders(): Record<string, string> {
   return uid ? { 'x-role': 'patient', 'x-uid': uid } : { 'x-role': 'patient' };
 }
 
+function uniqueIds(ids: string[]) {
+  return Array.from(new Set(ids.map(String).map((x) => x.trim()).filter(Boolean)));
+}
+
+function readLocalFavouriteIds(): string[] {
+  if (typeof window === 'undefined') return [];
+
+  try {
+    const parsed = JSON.parse(localStorage.getItem(FAVOURITES_KEY) || '[]');
+    return Array.isArray(parsed) ? uniqueIds(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalFavouriteIds(ids: string[]) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    localStorage.setItem(FAVOURITES_KEY, JSON.stringify(uniqueIds(ids)));
+  } catch {}
+}
+
 async function fetchFavouritesFromApi(): Promise<string[]> {
+  const localIds = readLocalFavouriteIds();
+
   try {
     const r = await fetch('/api/favourites', {
       cache: 'no-store',
       headers: authHeaders(),
     });
     const j = await readJsonSafe(r);
-    if (!r.ok) return [];
+
+    if (!r.ok) return localIds;
+
     const ids = Array.isArray(j?.ids)
       ? j.ids
       : Array.isArray(j?.favourites)
         ? j.favourites
         : [];
-    return ids.map((x: any) => String(x)).filter(Boolean);
+
+    const merged = uniqueIds([...localIds, ...ids.map((x: any) => String(x))]);
+    writeLocalFavouriteIds(merged);
+    return merged;
   } catch {
-    return [];
+    return localIds;
   }
 }
 
@@ -802,8 +836,10 @@ function CliniciansPageContent() {
 
   const toggleFav = useCallback(async (id: string) => {
     const currentlyFav = favs.includes(id);
+    const nextFavs = currentlyFav ? favs.filter((f) => f !== id) : uniqueIds([...favs, id]);
 
-    setFavs((prev) => (currentlyFav ? prev.filter((f) => f !== id) : [...prev, id]));
+    setFavs(nextFavs);
+    writeLocalFavouriteIds(nextFavs);
 
     try {
       if (currentlyFav) {
@@ -812,7 +848,9 @@ function CliniciansPageContent() {
         await saveFavouriteToApi(id);
       }
     } catch (e: any) {
-      setFavs((prev) => (currentlyFav ? [...prev, id] : prev.filter((f) => f !== id)));
+      const reverted = currentlyFav ? uniqueIds([...favs, id]) : favs.filter((f) => f !== id);
+      setFavs(reverted);
+      writeLocalFavouriteIds(reverted);
       toast(e?.message || 'Failed to update favourites', 'error');
     }
   }, [favs]);
