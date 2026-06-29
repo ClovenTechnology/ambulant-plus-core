@@ -1,14 +1,28 @@
 import { cookies, headers } from 'next/headers';
 
-export async function getUserId(): Promise<string | null> {
-  // If you have auth (e.g. NextAuth), return that user id here.
-  // Example later: const session = await getServerSession(authOptions); return session?.user?.id ?? null;
+function cleanId(value: string | null | undefined): string | null {
+  const s = String(value ?? '').trim();
+  return s.length ? s : null;
+}
 
-  // Dev fallback: read header or cookie; replace once auth lands.
+export async function getUserId(): Promise<string | null> {
+  // Primary future path: replace this with the platform session helper once all
+  // patient routes share the same signed session identity reader.
   const h = headers();
-  const headerUid = h.get('x-user-id');
+
+  const headerUid =
+    cleanId(h.get('x-user-id')) ||
+    cleanId(h.get('x-uid')) ||
+    cleanId(h.get('x-patient-id')) ||
+    cleanId(h.get('x-actor-ref-id'));
+
   if (headerUid) return headerUid;
 
-  const c = cookies().get('uid')?.value;
-  return c ?? null; // null => treat as guest (localStorage)
+  const jar = cookies();
+  const cookieUid =
+    cleanId(jar.get('uid')?.value) ||
+    cleanId(jar.get('ambulant_uid')?.value) ||
+    cleanId(jar.get('ambulant.uid')?.value);
+
+  return cookieUid;
 }

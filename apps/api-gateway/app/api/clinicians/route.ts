@@ -270,19 +270,6 @@ function publicAvatarUrl(row: any, meta: any) {
   );
 }
 
-function publicAvatarDataUrl(row: any, meta: any) {
-  const value = row.avatarDataUrl ?? meta.avatarDataUrl;
-  const s = typeof value === 'string' ? value.trim() : '';
-
-  if (!s) return null;
-  if (!s.startsWith('data:image/')) return null;
-
-  // Temporary list-card support until avatarUrl is stored in object storage.
-  // Keep a ceiling so one malformed profile cannot bloat the directory response.
-  if (s.length > 750000) return null;
-
-  return s;
-}
 
 function publicMapClinician(row: any) {
   const meta = safeParseJson(row.meta);
@@ -293,7 +280,6 @@ function publicMapClinician(row: any) {
 
   return {
     id: String(row.id ?? ''),
-    userId: row.userId ?? null,
     name: publicClinicianName(row, mergedMeta),
     displayName: publicClinicianName(row, mergedMeta),
     specialty: cleanStr(row.specialty ?? mergedMeta.specialty) || 'General Practice',
@@ -328,9 +314,6 @@ function publicMapClinician(row: any) {
     status: row.status ?? null,
     photoUrl: publicAvatarUrl(row, mergedMeta),
     avatarUrl: publicAvatarUrl(row, mergedMeta),
-    avatarDataUrl: publicAvatarDataUrl(row, mergedMeta),
-    disabled: Boolean(row.disabled),
-    archived: Boolean(row.archived),
     acceptsMedicalAid: publicAcceptsMedicalAid(row, mergedMeta),
     acceptedSchemes: publicAcceptedSchemes(row, mergedMeta),
     practiceName: row.practiceName ?? mergedMeta.practiceName ?? undefined,
@@ -348,9 +331,6 @@ function publicMapClinician(row: any) {
       prescribingMode: 'no',
       allowedWorkspaces: ['televisit', 'encounters', 'referrals', 'certificates'],
       patientCategory: cls === 'Wellness' ? 'wellness' : 'clinical',
-      blockers: [],
-      riskFlags: [],
-      ambulantId: mergedMeta.ambulantId ?? mergedMeta.smartId?.ambulantId ?? null,
     },
   };
 }
@@ -391,6 +371,32 @@ async function publicClinicianDirectory(req: NextRequest) {
       { displayName: 'asc' },
     ],
     take: 500,
+    select: {
+      id: true,
+      displayName: true,
+      specialty: true,
+      gender: true,
+      photoUrl: true,
+      city: true,
+      country: true,
+      feeCents: true,
+      currency: true,
+      status: true,
+      disabled: true,
+      archived: true,
+      meta: true,
+      createdAt: true,
+      lastBookedAt: true,
+      lastSeenAt: true,
+      online: true,
+      onlineSeq: true,
+      recentBookedCount: true,
+      acceptedSchemes: true,
+      acceptsMedicalAid: true,
+      practiceName: true,
+      ratingAvg: true,
+      ratingCount: true,
+    },
   });
 
   const now = Date.now();
@@ -408,7 +414,6 @@ async function publicClinicianDirectory(req: NextRequest) {
     .map(publicMapClinician)
     .filter((item: any) => {
       if (!item.id) return false;
-      if (item.disabled || item.archived) return false;
 
       if (country && String(item.country || '').toUpperCase() !== country) return false;
       if (gender && String(item.gender || '').toLowerCase() !== gender) return false;

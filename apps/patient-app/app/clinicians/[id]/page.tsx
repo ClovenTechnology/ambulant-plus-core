@@ -26,6 +26,13 @@ type FeeProfile = {
   bufferMin: number; // buffer added around consult slots
 };
 
+type Testimonial = {
+  id?: string;
+  stars?: number;
+  comment: string;
+  createdAt?: string | null;
+};
+
 type BookingProfile = {
   clinician: {
     id: string;
@@ -62,6 +69,7 @@ type BookingProfile = {
     followUpRequiresOpenCase?: boolean;
     followUpFromCaseContextOnly?: boolean;
   };
+  testimonials?: Testimonial[];
 };
 
 function formatZar(cents: number) {
@@ -231,6 +239,19 @@ export default function ClinicianBioPage({
   const clinicianStatus = (c.status ?? (c as any).clinicianStatus ?? 'active') as string;
   const isDisabledClinician = clinicianStatus === 'disabled' || clinicianStatus === 'archived';
   const isDisciplinaryClinician = clinicianStatus === 'disciplinary';
+
+  const testimonials: Testimonial[] = Array.isArray(profile.testimonials)
+    ? profile.testimonials
+        .filter((t): t is Testimonial => {
+          const comment = String((t as any)?.comment ?? '').trim();
+          return comment.length > 0;
+        })
+        .map((t) => ({
+          ...t,
+          comment: String(t.comment).trim(),
+        }))
+        .slice(0, 3)
+    : [];
 
   const allQualifications: Qualification[] = (() => {
     const q1 = Array.isArray((c as any).qualifications)
@@ -480,14 +501,26 @@ export default function ClinicianBioPage({
           </ul>
         </section>
       )}
-
-      <section className="bg-white rounded-2xl border p-5">
-        <h2 className="text-lg font-semibold mb-3">Testimonials</h2>
-        <ul className="space-y-3 text-sm text-gray-700">
-          <li>“Great manners and charisma but still very thorough, made virtual interaction feel physical and indulgingly immersive.”</li>
-          <li>“Explained everything clearly. Highly recommended.”</li>
-        </ul>
-      </section>
+      {testimonials.length > 0 && (
+        <section className="bg-white rounded-2xl border p-5">
+          <h2 className="text-lg font-semibold mb-3">Patient comments</h2>
+          <ul className="space-y-3 text-sm text-gray-700">
+            {testimonials.map((t, idx) => (
+              <li
+                key={t.id ?? `testimonial-${idx}`}
+                className="rounded-xl border border-slate-100 bg-slate-50/70 px-3 py-2"
+              >
+                <p className="leading-relaxed">"{t.comment}"</p>
+                {typeof t.stars === 'number' && (
+                  <p className="mt-1 text-[11px] text-amber-700">
+                    {'Rating '} {Math.max(0, Math.min(5, t.stars)).toFixed(1)}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
     </main>
   );
 }

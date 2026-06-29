@@ -80,6 +80,12 @@ function normalizeCountryCode(value: unknown) {
   return raw.toUpperCase();
 }
 
+function cleanComment(value: unknown, max = 360): string | null {
+  const s = String(value ?? '').replace(/\s+/g, ' ').trim();
+  if (!s) return null;
+  return s.length > max ? `${s.slice(0, max).trim()}...` : s;
+}
+
 function splitSchemes(value: unknown): string[] {
   if (Array.isArray(value)) {
     return value.map(String).map((s) => s.trim()).filter(Boolean);
@@ -211,6 +217,36 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
       checks,
     });
 
+    const testimonialRows = await (prisma as any).clinicianRating.findMany({
+      where: {
+        clinicianUserId: clinician.userId,
+        stars: { gte: 4 },
+        comment: { not: null },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 6,
+      select: {
+        id: true,
+        stars: true,
+        comment: true,
+        createdAt: true,
+      },
+    });
+
+    const testimonials = testimonialRows
+      .map((row: any) => {
+        const comment = cleanComment(row.comment);
+        if (!comment) return null;
+        return {
+          id: String(row.id),
+          stars: typeof row.stars === 'number' ? row.stars : undefined,
+          comment,
+          createdAt: row.createdAt ? new Date(row.createdAt).toISOString() : null,
+        };
+      })
+      .filter(Boolean)
+      .slice(0, 3);
+
     const { meta, profile } = readProfileJson(clinician);
     const fees = buildFeeProfile(clinician, profile);
 
@@ -274,7 +310,6 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
       status: clinician.status ?? null,
       photoUrl: clinician.photoUrl ?? profile.photoUrl ?? profile.avatarUrl ?? null,
       avatarUrl: clinician.avatarUrl ?? profile.avatarUrl ?? profile.photoUrl ?? null,
-      avatarDataUrl: profile.avatarDataUrl ?? null,
       acceptsMedicalAid,
       acceptedSchemes: Array.from(new Set(acceptedSchemes)),
       practiceName,
@@ -310,9 +345,6 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
         prescribingMode: operational.prescribingMode,
         allowedWorkspaces: operational.allowedWorkspaces,
         patientCategory: operational.patientCategory,
-        blockers: operational.blockers,
-        riskFlags: operational.riskFlags,
-        ambulantId: operational.credentialing?.ambulantId ?? null,
       },
     };
 
@@ -325,6 +357,7 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
         followUpRequiresOpenCase: true,
         followUpFromCaseContextOnly: true,
       },
+      testimonials,
       meta: {
         source: 'api_gateway_booking_profile',
         realPatientApprovedAt:

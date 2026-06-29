@@ -7,7 +7,33 @@ import { useEffect, useMemo, useState } from 'react';
 import { usePlan } from '@/components/context/PlanContext';
 import RefundPolicyPanel from '@/components/RefundPolicyPanel';
 
-type Slot = { start: string; end?: string };
+type SlotStatus = 'available' | 'limited' | 'blocked' | 'booked' | 'past';
+type ConsultType = 'standard' | 'followup';
+type DayPhase = 'morning' | 'afternoon' | 'evening';
+
+type Slot = {
+  start: string;
+  end?: string;
+  status?: SlotStatus;
+  reason?: string;
+  consultType?: ConsultType;
+  feeCents?: number;
+  currency?: string;
+  durationMin?: number;
+  bufferMin?: number;
+};
+
+type NormalizedSlot = {
+  start: string;
+  end: string;
+  status: SlotStatus;
+  reason?: string;
+  consultType: ConsultType;
+  feeCents: number;
+  currency: string;
+  durationMin: number;
+  bufferMin: number;
+};
 
 type RefundPolicy = {
   within24hPercent: number;
@@ -29,11 +55,8 @@ type BookingProfile = {
     name: string;
     specialty?: string;
     timezone?: string;
-
-    // ✅ optional rating fields for header consistency
     rating?: number;
     ratingCount?: number;
-
     operational?: {
       canBeListed?: boolean;
       canBeBooked?: boolean;
@@ -57,9 +80,11 @@ type BookingProfile = {
   };
 };
 
-type ConsultType = 'standard' | 'followup';
+type Toast = { id: string; text: string; tone?: 'info' | 'success' | 'error' };
 
-/* ----------------- UID + tiny toasts (no deps) ----------------- */
+function cx(...items: Array<string | false | null | undefined>) {
+  return items.filter(Boolean).join(' ');
+}
 
 function getUid() {
   if (typeof window === 'undefined') return 'server-user';
@@ -72,40 +97,44 @@ function getUid() {
   return v;
 }
 
-type Toast = { id: string; text: string; tone?: 'info' | 'success' | 'error' };
 function useToasts() {
   const [toasts, setToasts] = useState<Toast[]>([]);
+
   function push(text: string, tone: Toast['tone'] = 'info', ttl = 5000) {
     const id = String(Date.now()) + Math.random().toString(36).slice(2, 6);
     setToasts((t) => [...t, { id, text, tone }]);
     setTimeout(() => setToasts((t) => t.filter((x) => x.id !== id)), ttl);
   }
+
   function remove(id: string) {
     setToasts((t) => t.filter((x) => x.id !== id));
   }
+
   const Toasts = () => (
-    <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 1200 }} aria-live="polite">
+    <div className="fixed bottom-4 right-4 z-[1200]" aria-live="polite">
       <div className="flex flex-col gap-2">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`px-3 py-2 rounded shadow text-sm ${
-              t.tone === 'success'
-                ? 'bg-green-50 text-green-800'
-                : t.tone === 'error'
-                  ? 'bg-red-50 text-red-800'
-                  : 'bg-white text-gray-800'
-            }`}
+            className={cx(
+              'max-w-sm rounded-2xl border px-3 py-2 text-sm shadow-lg backdrop-blur',
+              t.tone === 'success' && 'border-emerald-200 bg-emerald-50 text-emerald-900',
+              t.tone === 'error' && 'border-rose-200 bg-rose-50 text-rose-900',
+              (!t.tone || t.tone === 'info') && 'border-slate-200 bg-white text-slate-800',
+            )}
           >
-            {t.text}
-            <button onClick={() => remove(t.id)} className="ml-3 text-xs text-gray-500">
-              ×
-            </button>
+            <div className="flex items-start gap-3">
+              <div className="flex-1">{t.text}</div>
+              <button onClick={() => remove(t.id)} className="text-xs text-slate-500">
+                x
+              </button>
+            </div>
           </div>
         ))}
       </div>
     </div>
   );
+
   return { push, Toasts };
 }
 
@@ -114,15 +143,20 @@ function formatMoney(cents: number, currency: string) {
   try {
     return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(v);
   } catch {
-    const rands = v.toFixed(2);
-    return currency === 'ZAR' ? `R ${rands}` : `${currency} ${rands}`;
+    const amount = v.toFixed(2);
+    return currency === 'ZAR' ? `R ${amount}` : `${currency} ${amount}`;
   }
 }
 
-function addMinutes(iso: string, mins: number) {
+function addMinutesIso(iso: string, mins: number) {
   const d = new Date(iso);
   d.setMinutes(d.getMinutes() + mins);
   return d.toISOString();
+}
+
+function safeNum(v: any): number | undefined {
+  const n = typeof v === 'number' ? v : Number(v);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 function localApiUrl(path: string) {
@@ -133,18 +167,11 @@ async function readJsonSafe(r: Response) {
   return r.json().catch(() => null);
 }
 
-function safeNum(v: any): number | undefined {
-  const n = typeof v === 'number' ? v : Number(v);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-/* ----------------- normalizers (robust to partial API payloads) ----------------- */
-
 function normalizeFeeProfile(p: Partial<FeeProfile> | null | undefined, fallback: FeeProfile): FeeProfile {
   const priceCents = Number.isFinite(Number(p?.priceCents)) ? Number(p!.priceCents) : fallback.priceCents;
   const durationMin = Number.isFinite(Number(p?.durationMin)) ? Number(p!.durationMin) : fallback.durationMin;
   const bufferMin = Number.isFinite(Number(p?.bufferMin)) ? Number(p!.bufferMin) : fallback.bufferMin;
-  const currency = (p?.currency || fallback.currency || 'ZAR') as string;
+  const currency = String(p?.currency || fallback.currency || 'ZAR').toUpperCase();
 
   return { priceCents, durationMin, bufferMin, currency };
 }
@@ -155,8 +182,6 @@ function normalizeBookingProfile(p: any, fallback: BookingProfile): BookingProfi
     name: String(p?.clinician?.name || fallback.clinician.name),
     specialty: p?.clinician?.specialty ?? fallback.clinician.specialty,
     timezone: p?.clinician?.timezone ?? fallback.clinician.timezone,
-
-    // ✅ tolerate different field names
     rating:
       safeNum(p?.clinician?.rating) ??
       safeNum(p?.clinician?.ratingAvg) ??
@@ -168,7 +193,6 @@ function normalizeBookingProfile(p: any, fallback: BookingProfile): BookingProfi
       safeNum(p?.clinician?.reviewCount) ??
       safeNum(p?.clinician?.totalRatings) ??
       fallback.clinician.ratingCount,
-
     operational:
       p?.clinician?.operational && typeof p.clinician.operational === 'object'
         ? {
@@ -226,28 +250,257 @@ function normalizeBookingProfile(p: any, fallback: BookingProfile): BookingProfi
   return { clinician, fees, refundPolicy, rules };
 }
 
+function normalizeSlot(raw: Slot, fee: FeeProfile, consultType: ConsultType): NormalizedSlot {
+  const allowed: SlotStatus[] = ['available', 'limited', 'blocked', 'booked', 'past'];
+  const rawStatus = String(raw?.status || '').toLowerCase() as SlotStatus;
+  const status = allowed.includes(rawStatus) ? rawStatus : 'available';
+
+  const start = String(raw.start);
+  const durationMin = Number.isFinite(Number(raw.durationMin)) ? Number(raw.durationMin) : fee.durationMin;
+  const bufferMin = Number.isFinite(Number(raw.bufferMin)) ? Number(raw.bufferMin) : fee.bufferMin;
+  const end = raw.end ? String(raw.end) : addMinutesIso(start, durationMin);
+
+  return {
+    start,
+    end,
+    status,
+    reason: raw.reason ? String(raw.reason) : undefined,
+    consultType: raw.consultType === 'followup' ? 'followup' : consultType,
+    feeCents: Number.isFinite(Number(raw.feeCents)) ? Number(raw.feeCents) : fee.priceCents,
+    currency: String(raw.currency || fee.currency || 'ZAR').toUpperCase(),
+    durationMin,
+    bufferMin,
+  };
+}
+
+function phaseOfSlot(slot: NormalizedSlot): DayPhase {
+  const h = new Date(slot.start).getHours();
+  if (h < 12) return 'morning';
+  if (h < 17) return 'afternoon';
+  return 'evening';
+}
+
+function phaseLabel(phase: DayPhase) {
+  if (phase === 'morning') return 'Morning';
+  if (phase === 'afternoon') return 'Afternoon';
+  return 'Evening';
+}
+
+function dayKey(iso: string) {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function dayLabel(iso: string) {
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+  }).format(d);
+}
+
+function fullDayLabel(iso: string) {
+  const d = new Date(iso);
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    day: '2-digit',
+    month: 'long',
+  }).format(d);
+}
+
+function timeLabel(iso: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(iso));
+}
+
+function shortDateTime(iso: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(new Date(iso));
+}
+
+function isSelectableSlot(slot: NormalizedSlot, apiEnabled: boolean, canBeBooked: boolean) {
+  return apiEnabled && canBeBooked && (slot.status === 'available' || slot.status === 'limited');
+}
+
+function statusLabel(status: SlotStatus) {
+  if (status === 'available') return 'Available';
+  if (status === 'limited') return 'Limited';
+  if (status === 'blocked') return 'Blocked';
+  if (status === 'booked') return 'Booked';
+  return 'Past';
+}
+
+function statusExplanation(status: SlotStatus) {
+  if (status === 'available') return 'Open clinical window.';
+  if (status === 'limited') return 'Bookable, but there is a timing or pathway warning.';
+  if (status === 'blocked') return 'Not bookable because of clinician or pathway state.';
+  if (status === 'booked') return 'Already reserved or booked.';
+  return 'Elapsed time.';
+}
+
+function statusClasses(status: SlotStatus, selected: boolean) {
+  const base =
+    'w-full rounded-2xl border px-3 py-3 text-left text-xs transition focus:outline-none focus:ring-2 focus:ring-slate-900/10';
+  const selectedCls = selected ? 'ring-2 ring-slate-900 ring-offset-1' : '';
+
+  if (status === 'available') {
+    return cx(
+      base,
+      selectedCls,
+      'border-emerald-200 bg-emerald-50 text-emerald-950 hover:border-emerald-400 hover:bg-emerald-100',
+    );
+  }
+
+  if (status === 'limited') {
+    return cx(
+      base,
+      selectedCls,
+      'border-amber-200 bg-amber-50 text-amber-950 hover:border-amber-400 hover:bg-amber-100',
+    );
+  }
+
+  if (status === 'blocked') {
+    return cx(base, selectedCls, 'cursor-not-allowed border-slate-200 bg-slate-100 text-slate-500');
+  }
+
+  if (status === 'booked') {
+    return cx(base, selectedCls, 'cursor-not-allowed border-rose-200 bg-rose-50 text-rose-800');
+  }
+
+  return cx(base, selectedCls, 'cursor-not-allowed border-slate-200 bg-white text-slate-400 opacity-75');
+}
+
+function groupSlots(slots: NormalizedSlot[]) {
+  const phases: DayPhase[] = ['morning', 'afternoon', 'evening'];
+  const map = new Map<
+    string,
+    {
+      key: string;
+      label: string;
+      fullLabel: string;
+      slots: NormalizedSlot[];
+      groups: Record<DayPhase, NormalizedSlot[]>;
+      counts: Record<SlotStatus, number>;
+    }
+  >();
+
+  for (const slot of slots) {
+    const key = dayKey(slot.start);
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        label: dayLabel(slot.start),
+        fullLabel: fullDayLabel(slot.start),
+        slots: [],
+        groups: { morning: [], afternoon: [], evening: [] },
+        counts: { available: 0, limited: 0, blocked: 0, booked: 0, past: 0 },
+      });
+    }
+
+    const day = map.get(key)!;
+    day.slots.push(slot);
+    day.groups[phaseOfSlot(slot)].push(slot);
+    day.counts[slot.status] += 1;
+  }
+
+  const days = Array.from(map.values()).sort((a, b) => a.key.localeCompare(b.key));
+
+  for (const day of days) {
+    day.slots.sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    for (const phase of phases) {
+      day.groups[phase].sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime());
+    }
+  }
+
+  return days;
+}
+
+function bestNextSlot(slots: NormalizedSlot[], apiEnabled: boolean, canBeBooked: boolean) {
+  return slots
+    .filter((s) => isSelectableSlot(s, apiEnabled, canBeBooked))
+    .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
+}
+
+function quietestWindow(slots: NormalizedSlot[], apiEnabled: boolean, canBeBooked: boolean) {
+  const buckets = new Map<
+    string,
+    {
+      label: string;
+      first: string;
+      selectable: number;
+      limited: number;
+      blocked: number;
+      booked: number;
+      past: number;
+    }
+  >();
+
+  for (const slot of slots) {
+    const phase = phaseOfSlot(slot);
+    const key = `${dayKey(slot.start)}:${phase}`;
+    if (!buckets.has(key)) {
+      buckets.set(key, {
+        label: `${dayLabel(slot.start)} - ${phaseLabel(phase)}`,
+        first: slot.start,
+        selectable: 0,
+        limited: 0,
+        blocked: 0,
+        booked: 0,
+        past: 0,
+      });
+    }
+
+    const row = buckets.get(key)!;
+    if (isSelectableSlot(slot, apiEnabled, canBeBooked)) row.selectable += 1;
+    if (slot.status === 'limited') row.limited += 1;
+    if (slot.status === 'blocked') row.blocked += 1;
+    if (slot.status === 'booked') row.booked += 1;
+    if (slot.status === 'past') row.past += 1;
+  }
+
+  return Array.from(buckets.values())
+    .filter((b) => b.selectable > 0)
+    .sort((a, b) => {
+      if (b.selectable !== a.selectable) return b.selectable - a.selectable;
+      if (a.limited !== b.limited) return a.limited - b.limited;
+      return new Date(a.first).getTime() - new Date(b.first).getTime();
+    })[0];
+}
+
+function availabilityLoad(day: ReturnType<typeof groupSlots>[number]) {
+  const bookable = day.counts.available + day.counts.limited;
+  const constrained = day.counts.booked + day.counts.blocked;
+  const total = Math.max(1, bookable + constrained);
+  return Math.round((bookable / total) * 100);
+}
+
 export default function ClinicianCalendar({ params }: { params: { id: string } }) {
   const { isPremium } = usePlan();
   const router = useRouter();
   const sp = useSearchParams();
-  const qs = sp ?? new URLSearchParams();
   const { push, Toasts } = useToasts();
 
-  const country = (qs.get('country') || 'ZA').toUpperCase();
+  const country = String(sp?.get('country') || 'ZA').toUpperCase();
   const apiEnabled = country === 'ZA';
+  const caseId = sp?.get('caseId') || undefined;
 
-  // Optional: case context supplied by Encounter/Case pages for follow-ups
-  const caseId = qs.get('caseId') || undefined;
-
-  const qpType = (qs.get('type') as ConsultType | null) ?? 'standard';
-  const [consultType, setConsultType] = useState<ConsultType>(qpType === 'followup' && !caseId ? 'standard' : qpType);
+  const queryType = sp?.get('type') === 'followup' ? 'followup' : 'standard';
+  const [consultType, setConsultType] = useState<ConsultType>(queryType === 'followup' && !caseId ? 'standard' : queryType);
+  const [showUnavailable, setShowUnavailable] = useState(true);
 
   const [profile, setProfile] = useState<BookingProfile | null>(null);
-  const [slots, setSlots] = useState<Slot[]>([]);
+  const [slots, setSlots] = useState<NormalizedSlot[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-
-  const [confirm, setConfirm] = useState<{ open: boolean; start?: string }>({ open: false });
+  const [selectedSlot, setSelectedSlot] = useState<NormalizedSlot | null>(null);
 
   const fallbackProfile = useMemo<BookingProfile>(
     () => ({
@@ -278,8 +531,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
   useEffect(() => {
     if (consultType === 'followup' && !followUpAllowed) setConsultType('standard');
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [followUpAllowed]);
+  }, [consultType, followUpAllowed]);
 
   const normalizedForUi = useMemo(() => {
     const src = profile ?? fallbackProfile;
@@ -292,8 +544,6 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
   }, [normalizedForUi, consultType]);
 
   const tileMinutes = useMemo(() => Math.max(10, (fee.durationMin ?? 0) + (fee.bufferMin ?? 0)), [fee]);
-
-  /* ----------------- load booking profile ----------------- */
 
   useEffect(() => {
     let canceled = false;
@@ -338,12 +588,11 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     }
 
     loadProfile();
+
     return () => {
       canceled = true;
     };
   }, [params.id, apiEnabled, fallbackProfile]);
-
-  /* ----------------- header display helpers (✅ rating in header) ----------------- */
 
   const c = normalizedForUi.clinician;
   const operational = c.operational ?? null;
@@ -351,22 +600,14 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
   const ratingValue = typeof c.rating === 'number' && Number.isFinite(c.rating) ? c.rating : null;
   const ratingCount = typeof c.ratingCount === 'number' && Number.isFinite(c.ratingCount) ? c.ratingCount : null;
 
-  /* ----------------- load slots ----------------- */
-
   useEffect(() => {
     let canceled = false;
 
     async function loadSlots() {
       try {
         setBusy(true);
-        setErr((prev) => prev);
 
         if (!apiEnabled) {
-          if (!canceled) setSlots([]);
-          return;
-        }
-
-        if (!canBeBooked) {
           if (!canceled) setSlots([]);
           return;
         }
@@ -377,6 +618,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
           days: '14',
           slot: String(tileMinutes),
           type: consultType,
+          includeUnavailable: '1',
         });
         if (caseId) q.set('caseId', caseId);
 
@@ -390,7 +632,9 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         if (!r.ok) throw new Error(j?.error || `Failed to load availability (HTTP ${r.status})`);
 
         const out = Array.isArray(j?.slots) ? (j.slots as Slot[]) : [];
-        if (!canceled) setSlots(out);
+        const normalized = out.map((slot) => normalizeSlot(slot, fee, consultType));
+
+        if (!canceled) setSlots(normalized);
       } catch (e: any) {
         if (!canceled) {
           setErr(e?.message || 'Failed to load availability');
@@ -402,42 +646,56 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     }
 
     loadSlots();
+
     return () => {
       canceled = true;
     };
-  }, [params.id, consultType, caseId, tileMinutes, apiEnabled, canBeBooked]);
+  }, [params.id, consultType, caseId, tileMinutes, apiEnabled, fee]);
 
-  /* ----------------- create appointment with committed price ----------------- */
+  useEffect(() => {
+    if (!selectedSlot) return;
+    const stillExists = slots.some((slot) => slot.start === selectedSlot.start && slot.status === selectedSlot.status);
+    if (!stillExists) setSelectedSlot(null);
+  }, [slots, selectedSlot]);
 
-  const selectedStart = confirm.start;
-  const selectedEndsAt = selectedStart ? addMinutes(selectedStart, fee.durationMin) : undefined;
+  const visibleSlots = useMemo(() => {
+    if (showUnavailable) return slots;
+    return slots.filter((slot) => slot.status === 'available' || slot.status === 'limited');
+  }, [slots, showUnavailable]);
+
+  const days = useMemo(() => groupSlots(visibleSlots), [visibleSlots]);
+  const bestSlot = useMemo(() => bestNextSlot(slots, apiEnabled, canBeBooked), [slots, apiEnabled, canBeBooked]);
+  const quietWindow = useMemo(() => quietestWindow(slots, apiEnabled, canBeBooked), [slots, apiEnabled, canBeBooked]);
+
+  const title = consultType === 'followup' ? 'Follow-up booking command' : 'New consultation booking command';
+  const helperText =
+    consultType === 'followup'
+      ? `Follow-up for Case: ${caseId ?? 'case context missing'}`
+      : 'This creates a first consultation for a new case.';
+
+  const selectedEndsAt = selectedSlot?.end;
 
   async function confirmBooking() {
-    if (!canBeBooked) {
-      push('This clinician is not currently bookable on Ambulant+.', 'error');
-      setConfirm({ open: false });
+    if (!selectedSlot || !selectedEndsAt) {
+      push('Choose a slot first.', 'error');
       return;
     }
 
-    if (!selectedStart || !selectedEndsAt) return;
-
-    if (!apiEnabled) {
-      push('Live booking is currently available for South Africa (ZA) only.', 'error');
-      setConfirm({ open: false });
+    if (!isSelectableSlot(selectedSlot, apiEnabled, canBeBooked)) {
+      push(selectedSlot.reason || 'This slot is not bookable.', 'error');
       return;
     }
 
     if (consultType === 'followup' && !followUpAllowed) {
       push('Follow-ups require an active case context.', 'error');
-      setConfirm({ open: false });
       return;
     }
 
     try {
       const payload: any = {
         clinicianId: params.id,
-        startsAt: selectedStart,
-        endsAt: selectedEndsAt,
+        startsAt: selectedSlot.start,
+        endsAt: selectedSlot.end,
         reason: consultType === 'followup' ? 'Follow-up consultation' : 'New consultation',
         kind: consultType,
         visitMode: 'televisit',
@@ -462,7 +720,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
       if (r.status === 409 && j?.error === 'PRECHECK_REQUIRED') {
         const warningText = Array.isArray(j?.preflight?.warnings)
-          ? j.preflight.warnings.map((w: any) => w?.title || w?.message).filter(Boolean).join(' • ')
+          ? j.preflight.warnings.map((w: any) => w?.title || w?.message).filter(Boolean).join(' - ')
           : 'Booking needs confirmation before proceeding.';
         push(warningText || 'Booking needs confirmation before proceeding.', 'error');
         return;
@@ -472,7 +730,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         throw new Error(j?.error || `Booking failed (HTTP ${r.status})`);
       }
 
-      setConfirm({ open: false });
+      setSelectedSlot(null);
 
       if (j?.redirectUrl) {
         try {
@@ -481,11 +739,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
             JSON.stringify({
               appointmentId: j.appointmentId ?? j.appointment_id ?? '',
               encounterId: j.encounterId ?? j.encounter_id ?? '',
-              paymentRef:
-                j.payment?.ref ??
-                j.paymentRef ??
-                j.payment_ref ??
-                '',
+              paymentRef: j.payment?.ref ?? j.paymentRef ?? j.payment_ref ?? '',
               redirectUrl: j.redirectUrl,
               clinicianId: params.id,
               createdAt: new Date().toISOString(),
@@ -493,7 +747,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
           );
         } catch {}
 
-        push('Redirecting to secure payment…', 'info');
+        push('Redirecting to secure payment...', 'info');
         window.location.href = j.redirectUrl;
         return;
       }
@@ -505,246 +759,471 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
       }
 
       if (j?.sponsor?.decision === 'COVERED') {
-        push('Appointment booked and covered ✔️', 'success');
+        push('Appointment booked and covered.', 'success');
         router.push('/appointments');
         return;
       }
 
-      push('Appointment booked ✔️', 'success');
+      push('Appointment booked.', 'success');
       router.push('/appointments');
     } catch (e: any) {
       push(e?.message || 'Failed to book appointment', 'error');
     }
   }
 
-  const title = consultType === 'followup' ? 'Follow-up — Calendar' : 'New consultation — Calendar';
-  const helperText =
-    consultType === 'followup' ? `Follow-up for Case: ${caseId ?? '—'}` : 'This booking creates a first consultation for a new case.';
+  function selectSlot(slot: NormalizedSlot) {
+    if (!isSelectableSlot(slot, apiEnabled, canBeBooked)) {
+      push(slot.reason || statusExplanation(slot.status), 'error');
+      return;
+    }
+
+    setSelectedSlot(slot);
+  }
+
+  const totalBookable = slots.filter((slot) => isSelectableSlot(slot, apiEnabled, canBeBooked)).length;
 
   return (
-    <main className="p-6 max-w-6xl mx-auto space-y-4">
+    <main className="min-h-screen bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
       <Toasts />
 
-      <div className="flex items-center justify-between">
-        <button onClick={() => router.back()} className="text-sm text-teal-700 hover:underline">
-          ← Back
-        </button>
+      <div className="mx-auto max-w-7xl space-y-5 pb-28 lg:pb-8">
+        <header className="overflow-hidden rounded-[2rem] border border-slate-200 bg-white shadow-sm">
+          <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-emerald-950 px-5 py-5 text-white sm:px-7">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <button
+                onClick={() => router.back()}
+                className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs text-white/90 hover:bg-white/15"
+              >
+                Back
+              </button>
 
-        <div className="text-center">
-          <div className="flex items-center justify-center gap-2">
-            <div className="text-lg font-semibold">{c.name}</div>
-            <div className="text-xs text-amber-700">
-              ★ {ratingValue != null ? ratingValue.toFixed(1) : '—'}
-              {ratingCount != null ? <span className="text-gray-500"> · {ratingCount.toLocaleString()} rated</span> : null}
-            </div>
-          </div>
-          <h1 className="text-xl font-semibold mt-1">{title}</h1>
-          <div className="text-xs text-gray-600 mt-1">{helperText}</div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <Link href="/clinicians" className="text-sm text-gray-600 hover:underline">
-            Clinicians
-          </Link>
-        </div>
-      </div>
-
-      {!apiEnabled && (
-        <div className="text-sm text-amber-800 border border-amber-200 bg-amber-50 px-3 py-2 rounded">
-          Live booking is currently available for <b>South Africa (ZA)</b> only. You can still view the clinician calendar
-          layout and fee profile.
-        </div>
-      )}
-
-      {!canBeBooked && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          Booking is temporarily unavailable for this clinician.
-          {Array.isArray(operational?.blockers) && operational.blockers.length ? (
-            <div className="mt-1 text-xs">
-              Reason: <b>{operational.blockers.join(', ')}</b>
-            </div>
-          ) : null}
-        </div>
-      )}
-
-      <div className="grid lg:grid-cols-[2fr_1fr] gap-4">
-        <div className="space-y-4">
-          <section className="bg-white border rounded-lg p-4">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">Booking type</div>
-                <div className="text-xs text-gray-600">Follow-ups can only be booked from an active Case/Encounter context.</div>
+              <div className="min-w-0 flex-1 text-center">
+                <div className="text-xs uppercase tracking-[0.25em] text-emerald-200">Ambulant+ clinical booking command</div>
+                <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
+                <p className="mt-1 text-sm text-slate-200">{helperText}</p>
               </div>
 
-              <div className="flex items-center gap-2">
-                <select
-                  className="text-sm border rounded px-3 py-2"
-                  value={consultType}
-                  onChange={(e) => {
-                    const v = e.target.value as ConsultType;
-                    if (v === 'followup' && !followUpAllowed) {
-                      push('Follow-up requires a caseId (from your Cases/Encounters page).', 'error');
-                      return;
-                    }
-                    setConsultType(v);
-                  }}
-                  disabled={!canBeBooked}
-                >
-                  <option value="standard">Standard (new case)</option>
-                  <option value="followup" disabled={!followUpAllowed}>
-                    Follow-up (case required)
-                  </option>
-                </select>
-
-                {consultType === 'followup' && !followUpAllowed && <span className="text-xs text-rose-600">caseId missing</span>}
-              </div>
+              <Link
+                href="/clinicians"
+                className="rounded-full border border-white/20 bg-white/10 px-3 py-1.5 text-xs text-white/90 hover:bg-white/15"
+              >
+                Clinicians
+              </Link>
             </div>
 
-            <div className="mt-3 grid sm:grid-cols-3 gap-3">
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">Fee (committed at booking)</div>
-                <div className="text-lg font-semibold">{formatMoney(fee.priceCents, fee.currency)}</div>
-                <div className="text-xs text-gray-500">{fee.currency}</div>
+            <div className="mt-5 grid gap-3 md:grid-cols-4">
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                <div className="text-xs text-slate-300">Clinician</div>
+                <div className="mt-1 truncate text-lg font-semibold">{c.name}</div>
+                <div className="text-xs text-slate-300">{c.specialty ?? 'Clinical consultation'}</div>
               </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">Consult duration</div>
-                <div className="text-lg font-semibold">{fee.durationMin} min</div>
-                <div className="text-xs text-gray-500">EndsAt = StartsAt + {fee.durationMin} min</div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                <div className="text-xs text-slate-300">Trust signal</div>
+                <div className="mt-1 text-lg font-semibold">
+                  {ratingValue != null ? ratingValue.toFixed(1) : 'Not rated yet'}
+                </div>
+                <div className="text-xs text-slate-300">
+                  {ratingCount != null ? `${ratingCount.toLocaleString()} ratings` : 'Rating appears when available'}
+                </div>
               </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-xs text-gray-500">Slot tile size</div>
-                <div className="text-lg font-semibold">{tileMinutes} min</div>
-                <div className="text-xs text-gray-500">
-                  {fee.durationMin} consult + {fee.bufferMin} buffer
+
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                <div className="text-xs text-slate-300">Best next slot</div>
+                <div className="mt-1 text-lg font-semibold">{bestSlot ? timeLabel(bestSlot.start) : 'None open'}</div>
+                <div className="text-xs text-slate-300">{bestSlot ? dayLabel(bestSlot.start) : 'Try another window later'}</div>
+              </div>
+
+              <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
+                <div className="text-xs text-slate-300">Quietest window</div>
+                <div className="mt-1 text-lg font-semibold">{quietWindow ? quietWindow.label : 'Not enough data'}</div>
+                <div className="text-xs text-slate-300">
+                  {quietWindow ? `${quietWindow.selectable} bookable options` : 'Calculated from open slots'}
                 </div>
               </div>
             </div>
+          </div>
 
-            {consultType === 'followup' && followUpAllowed && (
-              <div className="mt-3 text-sm text-gray-700">
-                Follow-up will be attached to <b>Case {caseId}</b>.
-              </div>
-            )}
+          <div className="grid gap-4 p-5 sm:p-7 lg:grid-cols-[1.4fr_1fr]">
+            <section className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900">Consultation pathway</div>
+                  <p className="mt-1 text-xs text-slate-600">
+                    New consultations start a new case. Follow-ups must come from an active case context.
+                  </p>
+                </div>
 
-            {consultType === 'standard' && (
-              <div className="mt-3 text-xs text-gray-600">
-                This calendar is for a <b>first consultation</b>. For follow-ups, go to your Case/Encounter page and book
-                from the case context.
+                {consultType === 'followup' && !followUpAllowed && (
+                  <span className="rounded-full border border-rose-200 bg-rose-50 px-3 py-1 text-xs font-medium text-rose-800">
+                    Case required
+                  </span>
+                )}
               </div>
-            )}
-          </section>
-          <section className="bg-white border rounded-lg p-4">
-            <div className="flex items-center justify-between gap-2">
-              <div>
-                <div className="font-medium mb-1">Available slots (next 14 days)</div>
-                <p className="text-xs text-gray-600">
-                  Tiles match clinician’s effective slot size ({tileMinutes} min). Click a tile to confirm booking.
-                </p>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setConsultType('standard')}
+                  disabled={!canBeBooked}
+                  className={cx(
+                    'rounded-2xl border p-4 text-left transition',
+                    consultType === 'standard'
+                      ? 'border-slate-950 bg-white shadow-sm'
+                      : 'border-slate-200 bg-white/70 hover:bg-white',
+                    !canBeBooked && 'cursor-not-allowed opacity-60',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-semibold text-slate-900">New consultation</div>
+                    <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] text-white">New case</span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600">Best for a new concern, fresh assessment, or first visit.</p>
+                  <div className="mt-3 text-sm font-semibold text-slate-900">
+                    {formatMoney(normalizedForUi.fees.standard.priceCents, normalizedForUi.fees.standard.currency)}
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!followUpAllowed) {
+                      push('Follow-up requires a caseId from your Cases or Encounters page.', 'error');
+                      return;
+                    }
+                    setConsultType('followup');
+                  }}
+                  disabled={!canBeBooked}
+                  className={cx(
+                    'rounded-2xl border p-4 text-left transition',
+                    consultType === 'followup'
+                      ? 'border-emerald-700 bg-white shadow-sm'
+                      : 'border-slate-200 bg-white/70 hover:bg-white',
+                    !followUpAllowed && 'border-dashed bg-slate-100 text-slate-500',
+                    !canBeBooked && 'cursor-not-allowed opacity-60',
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="font-semibold">Follow-up</div>
+                    <span
+                      className={cx(
+                        'rounded-full px-2 py-0.5 text-[11px]',
+                        followUpAllowed ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-600',
+                      )}
+                    >
+                      {followUpAllowed ? 'Case linked' : 'Locked'}
+                    </span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600">
+                    {followUpAllowed ? `Linked to Case ${caseId}.` : 'Open an active case first, then book follow-up from there.'}
+                  </p>
+                  <div className="mt-3 text-sm font-semibold">
+                    {formatMoney(normalizedForUi.fees.followUp.priceCents, normalizedForUi.fees.followUp.currency)}
+                  </div>
+                </button>
               </div>
-              <div className="text-xs text-gray-600">
-                {isPremium ? 'Premium can instant-book when online.' : 'Choose a time to book.'}
+            </section>
+
+            <section className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
+              <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                <div className="text-xs text-slate-500">Committed fee</div>
+                <div className="mt-1 text-xl font-semibold text-slate-950">{formatMoney(fee.priceCents, fee.currency)}</div>
+                <div className="text-xs text-slate-500">{fee.currency} locked at booking</div>
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                <div className="text-xs text-slate-500">Consult duration</div>
+                <div className="mt-1 text-xl font-semibold text-slate-950">{fee.durationMin} min</div>
+                <div className="text-xs text-slate-500">Clinical time with clinician</div>
+              </div>
+              <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                <div className="text-xs text-slate-500">Buffer protected</div>
+                <div className="mt-1 text-xl font-semibold text-slate-950">{fee.bufferMin} min</div>
+                <div className="text-xs text-slate-500">Tile size {tileMinutes} min</div>
+              </div>
+            </section>
+          </div>
+        </header>
+
+        {!apiEnabled && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Live booking is currently available for South Africa (ZA) only. You can still view the booking layout.
+          </div>
+        )}
+
+        {!canBeBooked && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            Booking is temporarily unavailable for this clinician.
+            {Array.isArray(operational?.blockers) && operational.blockers.length ? (
+              <div className="mt-1 text-xs">
+                Reason: <b>{operational.blockers.join(', ')}</b>
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_380px]">
+          <section className="space-y-4">
+            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-950">Availability intelligence</h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Showing clinical windows, constraints, booking pressure, fees, duration and buffer context.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowUnavailable((v) => !v)}
+                    className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    {showUnavailable ? 'Hide closed slots' : 'Show closed slots'}
+                  </button>
+                  <span className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white">
+                    {totalBookable} bookable
+                  </span>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-2 sm:grid-cols-5">
+                {(['available', 'limited', 'blocked', 'booked', 'past'] as SlotStatus[]).map((status) => (
+                  <div key={status} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs font-semibold text-slate-900">{statusLabel(status)}</div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-slate-600">{statusExplanation(status)}</div>
+                  </div>
+                ))}
               </div>
             </div>
 
             {busy ? (
-              <div className="text-sm text-gray-500 mt-3">Loading…</div>
+              <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+                Loading clinical availability...
+              </div>
             ) : err ? (
-              <div className="text-sm text-rose-600 mt-3">{err}</div>
-            ) : slots.length === 0 ? (
-              <div className="text-sm text-gray-500 mt-3">
-                {apiEnabled ? 'No open slots in this window.' : 'Live availability is not available for this country.'}
+              <div className="rounded-3xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-900">{err}</div>
+            ) : days.length === 0 ? (
+              <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+                {apiEnabled ? 'No slots in this window.' : 'Live availability is not available for this country.'}
               </div>
             ) : (
-              <ul className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-2 mt-3">
-                {slots.map((s) => {
-                  const start = s.start;
-                  const displayEnd = addMinutes(start, fee.durationMin);
+              <div className="space-y-4">
+                {days.map((day) => {
+                  const load = availabilityLoad(day);
+                  const dayFirstBookable = day.slots.find((slot) => isSelectableSlot(slot, apiEnabled, canBeBooked));
+
                   return (
-                    <li key={start}>
-                      <button
-                        className="w-full text-left block text-xs px-3 py-2 border rounded hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        onClick={() => setConfirm({ open: true, start })}
-                        title="Select this slot"
-                        disabled={!apiEnabled || !canBeBooked}
-                      >
-                        <div className="font-medium">{new Date(start).toLocaleString()}</div>
-                        <div className="text-[11px] text-gray-600">
-                          Ends {new Date(displayEnd).toLocaleTimeString()} · {fee.durationMin} min ·{' '}
-                          {formatMoney(fee.priceCents, fee.currency)}
+                    <article key={day.key} className="overflow-hidden rounded-[1.75rem] border border-slate-200 bg-white shadow-sm">
+                      <div className="border-b border-slate-100 bg-slate-50 px-4 py-4">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <div className="text-sm font-semibold text-slate-950">{day.fullLabel}</div>
+                            <div className="mt-1 text-xs text-slate-600">
+                              {day.counts.available} available - {day.counts.limited} limited - {day.counts.booked} booked
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-2">
+                            {bestSlot && dayFirstBookable?.start === bestSlot.start && (
+                              <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800">
+                                Best next
+                              </span>
+                            )}
+                            <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700">
+                              Load {load}%
+                            </span>
+                          </div>
                         </div>
-                        <div className="text-[11px] text-gray-500">Tile: {tileMinutes} min</div>
-                      </button>
-                    </li>
+
+                        <div className="mt-3 h-2 overflow-hidden rounded-full bg-slate-200">
+                          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${load}%` }} />
+                        </div>
+                      </div>
+
+                      <div className="space-y-5 p-4">
+                        {(['morning', 'afternoon', 'evening'] as DayPhase[]).map((phase) => {
+                          const phaseSlots = day.groups[phase];
+
+                          return (
+                            <section key={phase}>
+                              <div className="mb-2 flex items-center justify-between gap-2">
+                                <div className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                  {phaseLabel(phase)}
+                                </div>
+                                <div className="text-xs text-slate-500">{phaseSlots.length} windows</div>
+                              </div>
+
+                              {phaseSlots.length === 0 ? (
+                                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs text-slate-500">
+                                  No windows in this period.
+                                </div>
+                              ) : (
+                                <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                                  {phaseSlots.map((slot) => {
+                                    const selected = selectedSlot?.start === slot.start;
+                                    const selectable = isSelectableSlot(slot, apiEnabled, canBeBooked);
+
+                                    return (
+                                      <li key={`${slot.start}-${slot.status}`}>
+                                        <button
+                                          type="button"
+                                          className={statusClasses(slot.status, selected)}
+                                          onClick={() => selectSlot(slot)}
+                                          disabled={!selectable}
+                                          title={slot.reason || statusExplanation(slot.status)}
+                                        >
+                                          <div className="flex items-start justify-between gap-2">
+                                            <div>
+                                              <div className="text-base font-semibold">{timeLabel(slot.start)}</div>
+                                              <div className="mt-0.5 text-[11px] opacity-80">
+                                                Ends {timeLabel(slot.end)} - {slot.durationMin} min
+                                              </div>
+                                            </div>
+                                            <span className="rounded-full bg-white/75 px-2 py-0.5 text-[10px] font-semibold">
+                                              {statusLabel(slot.status)}
+                                            </span>
+                                          </div>
+
+                                          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                                            <div className="rounded-xl bg-white/60 px-2 py-1">
+                                              Fee: {formatMoney(slot.feeCents, slot.currency)}
+                                            </div>
+                                            <div className="rounded-xl bg-white/60 px-2 py-1">Buffer: {slot.bufferMin} min</div>
+                                          </div>
+
+                                          {slot.reason && (
+                                            <div className="mt-2 line-clamp-2 text-[11px] opacity-80">{slot.reason}</div>
+                                          )}
+                                        </button>
+                                      </li>
+                                    );
+                                  })}
+                                </ul>
+                              )}
+                            </section>
+                          );
+                        })}
+                      </div>
+                    </article>
                   );
                 })}
-              </ul>
+              </div>
             )}
           </section>
-        </div>
 
-        <aside className="bg-white border rounded-lg p-4 h-fit space-y-3">
-          <div>
-            <div className="font-medium mb-1">Refund policy</div>
-            <p className="text-xs text-gray-600 mb-2">
-              This clinician’s policy applies to this booking. Please read before confirming.
-            </p>
-            <RefundPolicyPanel clinicianId={params.id} />
-          </div>
+          <aside className="space-y-4 lg:sticky lg:top-5 lg:h-fit">
+            <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Booking command</div>
+              <h2 className="mt-1 text-xl font-semibold text-slate-950">
+                {selectedSlot ? 'Review selected slot' : 'Select a clinical window'}
+              </h2>
 
-          <div className="border-t pt-3">
-            <div className="font-medium mb-1">Rules</div>
-            <ul className="text-xs text-gray-700 space-y-1">
-              <li>• Standard bookings = new case first consultation.</li>
-              <li>• Follow-ups require an open case and must be booked from encounter/case context.</li>
-              <li>• Appointment price is committed at booking time (fee changes won’t affect existing bookings).</li>
-            </ul>
-          </div>
-        </aside>
-      </div>
+              {selectedSlot ? (
+                <div className="mt-4 space-y-3 text-sm">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs text-slate-500">Selected window</div>
+                    <div className="mt-1 font-semibold text-slate-950">{shortDateTime(selectedSlot.start)}</div>
+                    <div className="text-xs text-slate-600">Ends {shortDateTime(selectedSlot.end)}</div>
+                  </div>
 
-      {confirm.open && selectedStart && selectedEndsAt && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-          <div className="bg-white rounded p-4 w-full max-w-md">
-            <h2 className="text-lg font-semibold">Confirm booking</h2>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="rounded-2xl border border-slate-200 p-3">
+                      <div className="text-xs text-slate-500">Fee</div>
+                      <div className="font-semibold">{formatMoney(selectedSlot.feeCents, selectedSlot.currency)}</div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 p-3">
+                      <div className="text-xs text-slate-500">Type</div>
+                      <div className="font-semibold">{consultType === 'followup' ? 'Follow-up' : 'New case'}</div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 p-3">
+                      <div className="text-xs text-slate-500">Duration</div>
+                      <div className="font-semibold">{selectedSlot.durationMin} min</div>
+                    </div>
+                    <div className="rounded-2xl border border-slate-200 p-3">
+                      <div className="text-xs text-slate-500">Buffer</div>
+                      <div className="font-semibold">{selectedSlot.bufferMin} min</div>
+                    </div>
+                  </div>
 
-            <div className="mt-2 text-sm text-gray-700">
-              <div>
-                <span className="text-gray-500">Type:</span>{' '}
-                <b>{consultType === 'followup' ? 'Follow-up' : 'Standard (new case)'}</b>
-              </div>
-              {consultType === 'followup' && (
-                <div className="mt-1">
-                  <span className="text-gray-500">Case:</span> <b>{caseId ?? '—'}</b>
+                  {selectedSlot.status === 'limited' && (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                      {selectedSlot.reason || 'This slot has a timing or pathway warning.'}
+                    </div>
+                  )}
+
+                  {consultType === 'followup' && (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900">
+                      Follow-up case: <b>{caseId ?? 'case context missing'}</b>
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={confirmBooking}
+                    disabled={!isSelectableSlot(selectedSlot, apiEnabled, canBeBooked)}
+                    className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    Confirm and book
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedSlot(null)}
+                    className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
+                  Choose an available or limited slot. The booking command will lock the selected time, price, duration,
+                  and buffer before checkout.
                 </div>
               )}
-              <div className="mt-2">
-                <span className="text-gray-500">Starts:</span> <b>{new Date(selectedStart).toLocaleString()}</b>
-              </div>
-              <div>
-                <span className="text-gray-500">Ends:</span> <b>{new Date(selectedEndsAt).toLocaleString()}</b>
-              </div>
-              <div className="mt-2">
-                <span className="text-gray-500">Fee (committed):</span>{' '}
-                <b>{formatMoney(fee.priceCents, fee.currency)}</b>
-              </div>
-              <div className="text-xs text-gray-500 mt-2">
-                Slot tile size: {tileMinutes} min (includes clinician’s buffer). Appointment endsAt is based on consult
-                duration only.
-              </div>
-            </div>
+            </section>
 
-            <div className="mt-4 flex justify-end gap-2">
-              <button className="px-3 py-1 rounded border" onClick={() => setConfirm({ open: false })}>
-                Cancel
-              </button>
-              <button
-                className="px-3 py-1 rounded bg-blue-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                onClick={confirmBooking}
-                disabled={!apiEnabled || !canBeBooked}
-              >
-                Confirm &amp; book
-              </button>
+            <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="font-semibold text-slate-950">Refund policy</div>
+              <p className="mt-1 text-xs text-slate-600">
+                This clinician's policy applies to the selected booking. Review before confirming.
+              </p>
+              <div className="mt-3">
+                <RefundPolicyPanel clinicianId={params.id} />
+              </div>
+            </section>
+
+            <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="font-semibold text-slate-950">Clinical rules</div>
+              <ul className="mt-3 space-y-2 text-xs text-slate-700">
+                <li>- Standard bookings create a new case first consultation.</li>
+                <li>- Follow-ups require an active case and must be launched from case context.</li>
+                <li>- Appointment price is committed at booking time.</li>
+                <li>- Buffer time protects clinician transition and documentation time.</li>
+                <li>- {isPremium ? 'Premium account detected.' : 'Upgrade benefits can be surfaced at checkout where applicable.'}</li>
+              </ul>
+            </section>
+          </aside>
+        </div>
+      </div>
+
+      {selectedSlot && (
+        <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 shadow-2xl backdrop-blur lg:hidden">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold text-slate-950">{shortDateTime(selectedSlot.start)}</div>
+              <div className="text-xs text-slate-600">
+                {formatMoney(selectedSlot.feeCents, selectedSlot.currency)} - {selectedSlot.durationMin} min - buffer{' '}
+                {selectedSlot.bufferMin} min
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={confirmBooking}
+              disabled={!isSelectableSlot(selectedSlot, apiEnabled, canBeBooked)}
+              className="shrink-0 rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
+            >
+              Book
+            </button>
           </div>
         </div>
       )}
