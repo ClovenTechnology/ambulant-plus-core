@@ -16,6 +16,13 @@ const DAY_PHASES: DayPhase[] = ['overnight', 'morning', 'afternoon', 'evening', 
 type Slot = {
   start: string;
   end?: string;
+  localStart?: string | null;
+  localEnd?: string | null;
+  localDate?: string | null;
+  localStartTime?: string | null;
+  localEndTime?: string | null;
+  localTimeLabel?: string | null;
+  timezone?: string | null;
   status?: SlotStatus;
   reason?: string;
   consultType?: ConsultType;
@@ -28,6 +35,13 @@ type Slot = {
 type NormalizedSlot = {
   start: string;
   end: string;
+  localStart?: string;
+  localEnd?: string;
+  localDate?: string;
+  localStartTime?: string;
+  localEndTime?: string;
+  localTimeLabel?: string;
+  timezone?: string;
   status: SlotStatus;
   reason?: string;
   consultType: ConsultType;
@@ -262,9 +276,24 @@ function normalizeSlot(raw: Slot, fee: FeeProfile, consultType: ConsultType): No
   const bufferMin = Number.isFinite(Number(raw.bufferMin)) ? Number(raw.bufferMin) : fee.bufferMin;
   const end = raw.end ? String(raw.end) : addMinutesIso(start, durationMin);
 
+  const localStart = raw.localStart ? String(raw.localStart) : undefined;
+  const localEnd = raw.localEnd ? String(raw.localEnd) : undefined;
+  const localDate = raw.localDate ? String(raw.localDate) : undefined;
+  const localStartTime = raw.localStartTime ? String(raw.localStartTime) : undefined;
+  const localEndTime = raw.localEndTime ? String(raw.localEndTime) : undefined;
+  const localTimeLabel = raw.localTimeLabel ? String(raw.localTimeLabel) : undefined;
+  const timezone = raw.timezone ? String(raw.timezone) : undefined;
+
   return {
     start,
     end,
+    localStart,
+    localEnd,
+    localDate,
+    localStartTime,
+    localEndTime,
+    localTimeLabel,
+    timezone,
     status,
     reason: raw.reason ? String(raw.reason) : undefined,
     consultType: raw.consultType === 'followup' ? 'followup' : consultType,
@@ -276,7 +305,8 @@ function normalizeSlot(raw: Slot, fee: FeeProfile, consultType: ConsultType): No
 }
 
 function phaseOfSlot(slot: NormalizedSlot): DayPhase {
-  const h = new Date(slot.start).getHours();
+  const localHourRaw = String(slot.localStartTime || slot.localStart?.slice(11, 16) || '').slice(0, 2);
+  const h = /^\d{2}$/.test(localHourRaw) ? Number(localHourRaw) : new Date(slot.start).getHours();
 
   if (h < 5) return 'overnight';
   if (h < 12) return 'morning';
@@ -331,6 +361,41 @@ function shortDateTime(iso: string) {
     hour: '2-digit',
     minute: '2-digit',
   }).format(new Date(iso));
+}
+
+function localDateLabel(localDate?: string) {
+  if (!localDate) return '';
+
+  const [yRaw, mRaw, dRaw] = localDate.split('-').map(Number);
+  if (!Number.isFinite(yRaw) || !Number.isFinite(mRaw) || !Number.isFinite(dRaw)) return '';
+
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+  }).format(new Date(yRaw, (mRaw || 1) - 1, dRaw || 1));
+}
+
+function slotStartLabel(slot: NormalizedSlot) {
+  return slot.localStartTime || timeLabel(slot.start);
+}
+
+function slotEndLabel(slot: NormalizedSlot) {
+  return slot.localEndTime || timeLabel(slot.end);
+}
+
+function slotWindowLabel(slot: NormalizedSlot) {
+  return slot.localTimeLabel || `${slotStartLabel(slot)} - ${slotEndLabel(slot)}`;
+}
+
+function slotDateTimeLabel(slot: NormalizedSlot) {
+  const date = localDateLabel(slot.localDate);
+  return date ? `${date}, ${slotStartLabel(slot)}` : shortDateTime(slot.start);
+}
+
+function slotEndDateTimeLabel(slot: NormalizedSlot) {
+  const date = localDateLabel(slot.localDate);
+  return date ? `${date}, ${slotEndLabel(slot)}` : shortDateTime(slot.end);
 }
 
 function isSelectableSlot(slot: NormalizedSlot, apiEnabled: boolean, canBeBooked: boolean) {
@@ -1081,9 +1146,9 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                                         >
                                           <div className="flex items-start justify-between gap-2">
                                             <div>
-                                              <div className="text-base font-semibold">{timeLabel(slot.start)}</div>
+                                              <div className="text-base font-semibold">{slotStartLabel(slot)}</div>
                                               <div className="mt-0.5 text-[11px] opacity-80">
-                                                Ends {timeLabel(slot.end)} - {slot.durationMin} min
+                                                Ends {slotEndLabel(slot)} - {slot.durationMin} min
                                               </div>
                                             </div>
                                             <span className="rounded-full bg-white/75 px-2 py-0.5 text-[10px] font-semibold">
@@ -1129,8 +1194,8 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                 <div className="mt-4 space-y-3 text-sm">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
                     <div className="text-xs text-slate-500">Selected window</div>
-                    <div className="mt-1 font-semibold text-slate-950">{shortDateTime(selectedSlot.start)}</div>
-                    <div className="text-xs text-slate-600">Ends {shortDateTime(selectedSlot.end)}</div>
+                    <div className="mt-1 font-semibold text-slate-950">{slotDateTimeLabel(selectedSlot)}</div>
+                    <div className="text-xs text-slate-600">Ends {slotEndDateTimeLabel(selectedSlot)}</div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
@@ -1217,7 +1282,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         <div className="fixed inset-x-0 bottom-0 z-40 border-t border-slate-200 bg-white/95 p-3 shadow-2xl backdrop-blur lg:hidden">
           <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="truncate text-sm font-semibold text-slate-950">{shortDateTime(selectedSlot.start)}</div>
+              <div className="truncate text-sm font-semibold text-slate-950">{slotDateTimeLabel(selectedSlot)}</div>
               <div className="text-xs text-slate-600">
                 {formatMoney(selectedSlot.feeCents, selectedSlot.currency)} - {selectedSlot.durationMin} min - buffer{' '}
                 {selectedSlot.bufferMin} min

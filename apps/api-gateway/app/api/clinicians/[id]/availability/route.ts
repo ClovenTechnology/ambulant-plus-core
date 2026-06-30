@@ -1,7 +1,6 @@
 // apps/api-gateway/app/api/clinicians/[id]/availability/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-import { getSchedule } from '@/src/store/schedule';
 import { getAdminPolicy, getClinicianConsult } from '@/src/store/consult';
 
 export const runtime = 'nodejs';
@@ -14,6 +13,13 @@ type DayKey = 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
 type Slot = {
   start: string;
   end: string;
+  localStart?: string;
+  localEnd?: string;
+  localDate?: string;
+  localStartTime?: string;
+  localEndTime?: string;
+  localTimeLabel?: string;
+  timezone?: string;
   status: SlotStatus;
   reason?: string;
   consultType: ConsultType;
@@ -173,6 +179,43 @@ function localDateTimeToUtc(ymd: string, hhmm: string, timeZone: string) {
   return utc;
 }
 
+function localPartsInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).formatToParts(date);
+
+  const bag: Record<string, string> = {};
+  for (const part of parts) {
+    if (part.type !== 'literal') bag[part.type] = part.value;
+  }
+
+  return {
+    ymd: `${bag.year}-${bag.month}-${bag.day}`,
+    hhmm: `${bag.hour}:${bag.minute}`,
+  };
+}
+
+function localSlotDisplay(start: Date, end: Date, timeZone: string) {
+  const s = localPartsInTimeZone(start, timeZone);
+  const e = localPartsInTimeZone(end, timeZone);
+
+  return {
+    localStart: `${s.ymd}T${s.hhmm}`,
+    localEnd: `${e.ymd}T${e.hhmm}`,
+    localDate: s.ymd,
+    localStartTime: s.hhmm,
+    localEndTime: e.hhmm,
+    localTimeLabel: `${s.hhmm} - ${e.hhmm}`,
+    timezone: timeZone,
+  };
+}
+
 function overlaps(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date) {
   return aStart < bEnd && aEnd > bStart;
 }
@@ -243,6 +286,94 @@ function isExceptionDate(exceptions: Array<{ date: string }>, ymd: string) {
   return exceptions.some((x) => x.date === ymd);
 }
 
+function clinicianIdentityKeys(clinician: any) {
+  return Array.from(
+    new Set(
+      [
+        clinician?.userId,
+        clinician?.id,
+        clinician?.email,
+      ]
+        .map((x) => String(x || '').trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
+async function getScheduleForClinician(clinician: any) {
+  const keys = clinicianIdentityKeys(clinician);
+
+  if (!keys.length) {
+    return {
+      schedule: {
+        country: 'ZA',
+        timezone: 'Africa/Johannesburg',
+        template: DEFAULT_TEMPLATE,
+        exceptions: [],
+        slotMin: '00:00',
+        slotMax: '23:59',
+      },
+      source: 'fallback_default_schedule',
+      matchedUserId: null,
+    };
+  }
+
+  try {
+    const row = await (prisma as any).clinicianSchedule.findFirst({
+      where: { userId: { in: keys } },
+      select: {
+        userId: true,
+        country: true,
+        timezone: true,
+        template: true,
+        exceptions: true,
+      },
+    });
+
+    if (!row) {
+      return {
+        schedule: {
+          country: 'ZA',
+          timezone: 'Africa/Johannesburg',
+          template: DEFAULT_TEMPLATE,
+          exceptions: [],
+          slotMin: '00:00',
+          slotMax: '23:59',
+        },
+        source: 'fallback_default_schedule',
+        matchedUserId: null,
+      };
+    }
+
+    return {
+      schedule: {
+        country: cleanStr(row.country) || 'ZA',
+        timezone: cleanStr(row.timezone) || 'Africa/Johannesburg',
+        template: safeParseJson(row.template),
+        exceptions: safeParseJson(row.exceptions),
+        slotMin: '00:00',
+        slotMax: '23:59',
+      },
+      source: 'clinician_settings_schedule',
+      matchedUserId: row.userId || null,
+    };
+  } catch (err: any) {
+    console.error('[api-gateway] clinician schedule lookup failed; using default schedule', err);
+    return {
+      schedule: {
+        country: 'ZA',
+        timezone: 'Africa/Johannesburg',
+        template: DEFAULT_TEMPLATE,
+        exceptions: [],
+        slotMin: '00:00',
+        slotMax: '23:59',
+      },
+      source: 'fallback_default_schedule',
+      matchedUserId: null,
+    };
+  }
+}
+
 async function getActiveFees(clinician: any) {
   try {
     const rows = await (prisma as any).clinicianFee.findMany({
@@ -273,16 +404,16 @@ async function buildAvailabilityContract(clinician: any, consultType: ConsultTyp
 
   const userId = clinician.userId || clinician.id;
 
-  const [scheduleRaw, adminPolicy, consultSettings, fees] = await Promise.all([
-    getSchedule(userId).catch(() => null),
+  const [scheduleResult, adminPolicy, consultSettings, fees] = await Promise.all([
+    getScheduleForClinician(clinician),
     getAdminPolicy().catch(() => null),
     getClinicianConsult(userId).catch(() => null),
     getActiveFees(clinician),
   ]);
 
   const schedule: Record<string, any> =
-    scheduleRaw && typeof scheduleRaw === 'object'
-      ? (scheduleRaw as Record<string, any>)
+    scheduleResult?.schedule && typeof scheduleResult.schedule === 'object'
+      ? (scheduleResult.schedule as Record<string, any>)
       : {};
   const timezone =
     cleanStr(schedule.timezone) ||
@@ -396,8 +527,9 @@ async function buildAvailabilityContract(clinician: any, consultType: ConsultTyp
       bufferMin,
     },
     selected,
+    scheduleMatchedUserId: scheduleResult?.matchedUserId || null,
     sources: {
-      scheduleSource: scheduleRaw ? 'clinician_settings_schedule' : 'fallback_default_schedule',
+      scheduleSource: scheduleResult?.source || 'fallback_default_schedule',
       consultSource: consultSettings ? 'clinician_settings_consult' : 'profile_or_default_consult',
       feeSource: fees.standard || fees.followup ? 'clinician_fee_engine' : 'clinician_profile_fee',
       bufferSource:
@@ -498,6 +630,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         trainingCompleted: true,
         feeCents: true,
         currency: true,
+        email: true,
         meta: true,
       },
     });
@@ -582,9 +715,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
             continue;
           }
 
+          const display = localSlotDisplay(start, end, contract.timezone);
+
           slots.push({
             start: start.toISOString(),
             end: end.toISOString(),
+            localStart: display.localStart,
+            localEnd: display.localEnd,
+            localDate: display.localDate,
+            localStartTime: display.localStartTime,
+            localEndTime: display.localEndTime,
+            localTimeLabel: display.localTimeLabel,
+            timezone: display.timezone,
             status: state.status,
             reason: state.reason,
             consultType,
@@ -624,7 +766,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           templateDays: Object.entries(contract.template)
             .filter(([, value]) => value?.enabled)
             .map(([key]) => key),
+          windows: Object.fromEntries(
+            Object.entries(contract.template)
+              .filter(([, value]) => value?.enabled)
+              .map(([key, value]) => [key, value?.ranges || []]),
+          ),
           exceptionsCount: contract.exceptions.length,
+          matched: Boolean(contract.scheduleMatchedUserId),
         },
         sources: contract.sources,
         statusLegend: {
