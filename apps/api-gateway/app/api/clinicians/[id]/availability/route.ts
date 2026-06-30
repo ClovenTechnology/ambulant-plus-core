@@ -319,7 +319,7 @@ async function getScheduleForClinician(clinician: any) {
   }
 
   try {
-    const row = await (prisma as any).clinicianSchedule.findFirst({
+    const rows = await (prisma as any).clinicianSchedule.findMany({
       where: { userId: { in: keys } },
       select: {
         userId: true,
@@ -329,6 +329,16 @@ async function getScheduleForClinician(clinician: any) {
         exceptions: true,
       },
     });
+
+    const preferred = clinicianIdentityKeys({
+      userId: clinician?.userId,
+      email: clinician?.email,
+      id: clinician?.id,
+    });
+
+    const row = rows
+      .slice()
+      .sort((a: any, b: any) => preferred.indexOf(a.userId) - preferred.indexOf(b.userId))[0];
 
     if (!row) {
       return {
@@ -773,6 +783,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
           ),
           exceptionsCount: contract.exceptions.length,
           matched: Boolean(contract.scheduleMatchedUserId),
+          matchedUserId: contract.scheduleMatchedUserId,
         },
         sources: contract.sources,
         statusLegend: {
