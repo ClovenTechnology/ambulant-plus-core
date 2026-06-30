@@ -5,12 +5,12 @@ plugins {
 apply from: "../variables.gradle"
 
 def MIN_SDK     = (rootProject.hasProperty('ext') && rootProject.ext.has('minSdkVersion'))       ? rootProject.ext.minSdkVersion    : 24
-def COMPILE_SDK = (rootProject.hasProperty('ext') && rootProject.ext.has('compileSdkVersion'))   ? rootProject.ext.compileSdkVersion: 34
+def COMPILE_SDK = 35
 def TARGET_SDK  = (rootProject.hasProperty('ext') && rootProject.ext.has('targetSdkVersion'))    ? rootProject.ext.targetSdkVersion : 34
 
 android {
   namespace "com.ambulant.patient"
-  compileSdkVersion COMPILE_SDK
+  compileSdkVersion 35
 
   defaultConfig {
     applicationId "com.ambulant.patient"

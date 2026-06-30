@@ -1,7 +1,7 @@
 // Centralized Android versions for the project
 ext {
   minSdkVersion = 24
-  compileSdkVersion = 34
+  compileSdkVersion = 35
   targetSdkVersion  = 34
 
   // Common AndroidX/material deps used by Capacitor template(s)

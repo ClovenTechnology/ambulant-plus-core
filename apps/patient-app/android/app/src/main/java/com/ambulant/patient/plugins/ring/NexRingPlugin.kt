@@ -19,11 +19,13 @@ class NexRingPlugin: Plugin() {
 
   @PluginMethod
   fun askPermissions(call: com.getcapacitor.PluginCall) {
-    requestAllPermissions(object: PermissionCallback {
-      override fun onPermissionResult(result: com.getcapacitor.PermissionState) {
-        call.resolve()
-      }
-    })
+    bridge.saveCall(call)
+    requestAllPermissions(call, "permissionsCallback")
+  }
+
+  @PermissionCallback
+  private fun permissionsCallback(call: com.getcapacitor.PluginCall) {
+    call.resolve()
   }
 
   @PluginMethod fun startScan(call: com.getcapacitor.PluginCall) { Log.d("NexRing","startScan()"); call.resolve() }

@@ -18,7 +18,7 @@
     "@aws-sdk/client-s3": "^3.919.0",
     "@aws-sdk/lib-storage": "^3.919.0",
     "@aws-sdk/s3-request-presigner": "^3.919.0",
-    "@capacitor/android": "^5.7.8",
+    "@capacitor/android": "^7.4.4",
     "@capacitor/core": "^7.4.4",
     "@capacitor/ios": "^7.4.4",
     "@react-three/fiber": "^8.18.0",

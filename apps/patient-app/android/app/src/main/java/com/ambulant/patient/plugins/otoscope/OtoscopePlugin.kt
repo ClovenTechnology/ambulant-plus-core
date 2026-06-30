@@ -11,6 +11,8 @@ import com.getcapacitor.annotation.CapacitorPlugin
 import org.json.JSONObject
 import java.io.File
 
+private const val USB_CLASS_MISC = 239
+
 @CapacitorPlugin(name = "Otoscope")
 class OtoscopePlugin : Plugin() {
 
@@ -90,7 +92,7 @@ class OtoscopePlugin : Plugin() {
     // Prefer UVC (class 239, subclass 2, protocol 1) but fall back to first
     // Many SDKs rely on device_filter.xml anyway.
     val pref = map.values.firstOrNull {
-      it.deviceClass == 239 || it.deviceClass == UsbConstants.USB_CLASS_MISC
+      it.deviceClass == 239 || it.deviceClass == USB_CLASS_MISC
     }
     return pref ?: map.values.firstOrNull()
   }

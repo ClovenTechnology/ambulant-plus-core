@@ -6,7 +6,7 @@ import com.getcapacitor.JSObject
 import com.getcapacitor.PermissionState
 import com.getcapacitor.Plugin
 import com.getcapacitor.PluginCall
-import com.getcapacitor.PluginMethod   // correct import (not the annotation pkg)
+import com.getcapacitor.PluginMethod
 import com.getcapacitor.annotation.CapacitorPlugin
 import com.getcapacitor.annotation.Permission
 import com.getcapacitor.annotation.PermissionCallback
@@ -28,11 +28,10 @@ class HealthMonitorPlugin : Plugin() {
         manager = HealthMonitorSdkWrapper(activity.applicationContext) { event, data ->
             val payload = JSObject()
             payload.put("data", JSONObject.wrap(data))
-            notifyListeners(event, payload)
+            notifyListeners(event, payload, true)
         }
     }
 
-    // Use a different name so we don't hide Plugin.requestPermissions(...)
     @PluginMethod
     fun askPermissions(call: PluginCall) {
         bridge.saveCall(call)
@@ -76,19 +75,32 @@ class HealthMonitorPlugin : Plugin() {
             call.reject("mac is required")
             return
         }
+
         manager.connect(mac)
         call.resolve()
     }
 
     @PluginMethod
     fun startMeasurements(call: PluginCall) {
-        manager.startMeasurements()
+        manager.startMeasurement(call.getString("type"))
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun startMeasurement(call: PluginCall) {
+        manager.startMeasurement(call.getString("type"))
         call.resolve()
     }
 
     @PluginMethod
     fun stopMeasurements(call: PluginCall) {
         manager.stopMeasurements()
+        call.resolve()
+    }
+
+    @PluginMethod
+    fun disconnect(call: PluginCall) {
+        manager.disconnect()
         call.resolve()
     }
 }
