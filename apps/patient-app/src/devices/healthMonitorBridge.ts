@@ -1,7 +1,8 @@
 // apps/patient-app/src/devices/healthMonitorBridge.ts
 'use client';
 
-import { Capacitor, registerPlugin, type PluginListenerHandle } from '@capacitor/core';
+import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
+import { NativeHealthMonitor, type NativeHealthMonitorPlugin } from './nativeHealthMonitorPlugin';
 import { connectDevice } from './connect';
 import {
   buildLinktopCtrl,
@@ -117,23 +118,6 @@ type BridgeOpts = {
   onStatus?: (s: BridgeStatus) => void;
   onDeviceEvent?: (evt: BridgeDeviceEvent) => void;
 };
-
-type NativeHealthMonitorPlugin = {
-  askPermissions(): Promise<void>;
-  startScan(): Promise<void>;
-  stopScan(): Promise<void>;
-  connect(opts: { mac: string }): Promise<void>;
-  disconnect(): Promise<void>;
-  setMeasurePosition(opts: { wrist: boolean }): Promise<void>;
-  startMeasurements(): Promise<void>;
-  stopMeasurements(): Promise<void>;
-  addListener(
-    eventName: string,
-    listenerFunc: (data: any) => void,
-  ): Promise<PluginListenerHandle>;
-};
-
-const NativeHealthMonitor = registerPlugin<NativeHealthMonitorPlugin>('HealthMonitor');
 
 type ConnLike = Awaited<ReturnType<typeof connectDevice>>;
 
