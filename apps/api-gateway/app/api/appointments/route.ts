@@ -41,6 +41,140 @@ function dateFrom(value: unknown) {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
+function addUtcDaysYmd(ymd: string, days: number) {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  dt.setUTCDate(dt.getUTCDate() + days);
+  return dt.toISOString().slice(0, 10);
+}
+
+function sameInstant(a: unknown, b: Date) {
+  const ms = Date.parse(String(a || ''));
+  return Number.isFinite(ms) && ms === b.getTime();
+}
+
+function bookableSlotStatus(status: unknown) {
+  const s = String(status || '').toLowerCase();
+  return s === 'available' || s === 'limited';
+}
+
+function pickConsultType(value: unknown) {
+  const s = String(value || '').trim().toLowerCase();
+  return s === 'followup' || s === 'follow-up' ? 'followup' : 'standard';
+}
+
+async function readJsonSafe(res: Response) {
+  const text = await res.text();
+  if (!text) return null;
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { raw: text };
+  }
+}
+
+async function revalidateSelectedAvailabilitySlot(args: {
+  req: NextRequest;
+  clinicianId: string;
+  patientId: string;
+  hostUserId: string;
+  startsAt: Date;
+  endsAt: Date;
+  kind: string;
+  caseId: string;
+}) {
+  const from = addUtcDaysYmd(args.startsAt.toISOString().slice(0, 10), -1);
+  const type = pickConsultType(args.kind);
+  const url = new URL(
+    `/api/clinicians/${encodeURIComponent(args.clinicianId)}/availability`,
+    args.req.url,
+  );
+
+  url.searchParams.set('from', from);
+  url.searchParams.set('days', '3');
+  url.searchParams.set('includeUnavailable', '1');
+  url.searchParams.set('type', type);
+  if (args.caseId) url.searchParams.set('caseId', args.caseId);
+
+  const res = await fetch(url.toString(), {
+    method: 'GET',
+    cache: 'no-store',
+    headers: {
+      accept: 'application/json',
+      'x-role': 'patient',
+      'x-uid': args.hostUserId || args.patientId,
+      'x-user-id': args.hostUserId || args.patientId,
+      'x-actor-ref-id': args.patientId,
+      'x-patient-id': args.patientId,
+      'x-current-patient-id': args.patientId,
+    },
+  });
+
+  const data: any = await readJsonSafe(res);
+
+  if (!res.ok || !data || data.ok === false) {
+    return {
+      ok: false,
+      status: res.status || 502,
+      error: data?.error || 'availability_revalidation_failed',
+      details: data,
+    };
+  }
+
+  const slots = Array.isArray(data.slots) ? data.slots : [];
+  const slot = slots.find(
+    (s: any) => sameInstant(s?.start, args.startsAt) && sameInstant(s?.end, args.endsAt),
+  );
+
+  if (!slot) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'selected_slot_not_in_current_availability',
+      details: {
+        requested: {
+          startsAt: args.startsAt.toISOString(),
+          endsAt: args.endsAt.toISOString(),
+          consultType: type,
+        },
+        availabilityMeta: data.meta || null,
+      },
+    };
+  }
+
+  if (!bookableSlotStatus(slot.status)) {
+    return {
+      ok: false,
+      status: 409,
+      error: 'selected_slot_not_bookable',
+      details: {
+        slot,
+        availabilityMeta: data.meta || null,
+      },
+    };
+  }
+
+  if (type === 'followup' && !args.caseId) {
+    return {
+      ok: false,
+      status: 400,
+      error: 'followup_case_required',
+      details: {
+        slot,
+        availabilityMeta: data.meta || null,
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    status: 200,
+    slot,
+    availabilityMeta: data.meta || null,
+  };
+}
+
 function isSimulationAppointment(item: any) {
   const ids = [item?.id, item?.encounterId, item?.patientId, item?.roomId];
   if (ids.filter(Boolean).some((v) => String(v).startsWith('sim-') || String(v).startsWith('simulation-'))) {
@@ -342,6 +476,13 @@ export async function POST(req: NextRequest) {
 
     if (endsAt <= startsAt) return json({ ok: false, error: 'invalid_time_range' }, 400);
 
+    const appointmentKind = clean(body.kind).toUpperCase() === 'FOLLOWUP' ? 'FOLLOWUP' : 'STANDARD';
+    const requestedCaseId = clean(body.caseId || body.case_id);
+
+    if (appointmentKind === 'FOLLOWUP' && !requestedCaseId) {
+      return json({ ok: false, error: 'followup_case_required' }, 400);
+    }
+
     const joinClosesAtPreview = new Date(endsAt.getTime() + 60 * 60 * 1000);
 
     if (joinClosesAtPreview.getTime() <= Date.now() + 30_000) {
@@ -393,6 +534,31 @@ export async function POST(req: NextRequest) {
     ) {
       return json({ ok: false, error: 'clinician_not_bookable' }, 409);
     }
+
+    const slotRevalidation: any = await revalidateSelectedAvailabilitySlot({
+      req,
+      clinicianId: clinician.id,
+      patientId,
+      hostUserId,
+      startsAt,
+      endsAt,
+      kind: appointmentKind,
+      caseId: requestedCaseId,
+    });
+
+    if (!slotRevalidation.ok) {
+      return json(
+        {
+          ok: false,
+          error: slotRevalidation.error,
+          details: slotRevalidation.details || null,
+        },
+        slotRevalidation.status || 409,
+      );
+    }
+
+    const validatedSlot = slotRevalidation.slot || {};
+    const availabilityMeta = slotRevalidation.availabilityMeta || null;
 
     const patientProfile = subjectPatientId
       ? await prisma.patientProfile.findFirst({
@@ -458,14 +624,17 @@ export async function POST(req: NextRequest) {
 
     const appointmentId = clean(body.id || body.appointmentId) || 'appt-' + crypto.randomUUID();
     const encounterId = clean(body.encounterId || body.encounter_id) || 'enc-' + crypto.randomUUID();
-    const caseId = clean(body.caseId || body.case_id) || 'case-' + crypto.randomUUID();
+    const caseId = requestedCaseId || 'case-' + crypto.randomUUID();
     const roomId = clean(body.roomId || body.room_id) || 'room-' + crypto.randomUUID();
 
     const patientParticipantId = 'pat-' + patientId;
     const clinicianParticipantId = 'clin-' + clinician.id;
 
-    const priceCents = cents(body.priceCents ?? body.price_cents ?? body.amountMinor, clinician.feeCents || 0);
-    const currency = clean(body.currency, 3) || clinician.currency || 'ZAR';
+    const priceCents = cents(
+      validatedSlot.feeCents ?? body.priceCents ?? body.price_cents ?? body.amountMinor,
+      clinician.feeCents || 0,
+    );
+    const currency = clean(validatedSlot.currency || body.currency, 3) || clinician.currency || 'ZAR';
     const platformFeeCents = Math.round(priceCents * 0.2);
     const clinicianTakeCents = Math.max(0, priceCents - platformFeeCents);
 
@@ -511,6 +680,25 @@ export async function POST(req: NextRequest) {
       clinicianSpecialty: clinician.specialty || null,
       clinicianGender: clinician.gender || null,
       clinicianLocation: clean(clinician.city) || clean(clinician.practiceName) || clean(clinician.country) || null,
+      slotContract: {
+        source: 'server_revalidated_availability',
+        status: validatedSlot.status || null,
+        utcStart: startsAt.toISOString(),
+        utcEnd: endsAt.toISOString(),
+        localStart: validatedSlot.localStart || null,
+        localEnd: validatedSlot.localEnd || null,
+        localDate: validatedSlot.localDate || null,
+        localStartTime: validatedSlot.localStartTime || null,
+        localEndTime: validatedSlot.localEndTime || null,
+        localTimeLabel: validatedSlot.localTimeLabel || null,
+        timezone: validatedSlot.timezone || availabilityMeta?.timezone || null,
+        durationMin: validatedSlot.durationMin || null,
+        bufferMin: validatedSlot.bufferMin || null,
+        feeCents: validatedSlot.feeCents ?? null,
+        currency: validatedSlot.currency || currency,
+        availabilitySource: availabilityMeta?.source || null,
+        scheduleMatchedUserId: availabilityMeta?.schedule?.matchedUserId || null,
+      },
       participants: [
         {
           partyId: clinicianParticipantId,
@@ -559,6 +747,36 @@ export async function POST(req: NextRequest) {
         } as any,
       });
 
+      const finalClinicianConflict = await tx.appointment.findFirst({
+        where: {
+          clinicianId: clinician.id,
+          startsAt: { lt: endsAt },
+          endsAt: { gt: startsAt },
+          status: { notIn: activeStatuses },
+        },
+        select: { id: true },
+      });
+
+      if (finalClinicianConflict) {
+        throw new Error('clinician_conflict');
+      }
+
+      const finalPatientConflict = patientConflictOr.length
+        ? await tx.appointment.findFirst({
+            where: {
+              OR: patientConflictOr,
+              startsAt: { lt: endsAt },
+              endsAt: { gt: startsAt },
+              status: { notIn: activeStatuses },
+            },
+            select: { id: true },
+          })
+        : null;
+
+      if (finalPatientConflict) {
+        throw new Error('patient_conflict');
+      }
+
       const appointment = await tx.appointment.create({
         data: {
           id: appointmentId,
@@ -571,7 +789,7 @@ export async function POST(req: NextRequest) {
           subjectPatientId,
           roomId,
           reason: clean(body.reason || body.title || body.notes) || 'Televisit consultation',
-          kind: clean(body.kind).toUpperCase() === 'FOLLOWUP' ? 'FOLLOWUP' : 'STANDARD',
+          kind: appointmentKind,
           visitMode: 'TELEVISIT',
           startsAt,
           endsAt,
@@ -775,6 +993,8 @@ export async function POST(req: NextRequest) {
     const msg = String(err?.message || 'appointment_create_failed');
     const status =
       msg.includes('Unique constraint') ? 409 :
+      msg.includes('clinician_conflict') ? 409 :
+      msg.includes('patient_conflict') ? 409 :
       msg.includes('unauthorized') ? 401 :
       500;
 
