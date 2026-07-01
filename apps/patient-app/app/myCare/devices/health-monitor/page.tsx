@@ -256,16 +256,16 @@ function StickyHeader({
   const primaryConditions: string =
     Array.isArray(profile?.chronicConditions) && profile.chronicConditions.length
       ? profile.chronicConditions.slice(0, 3).join(', ')
-      : profile?.primaryConditionsText ?? 'â€”';
+      : profile?.primaryConditionsText ?? 'None recorded';
   return (
     <motion.header
       initial={{ opacity: 0, y: -6 }}
       animate={{ opacity: 1, y: 0 }}
       className="sticky top-0 z-40 border-b border-white/60 bg-[linear-gradient(180deg,rgba(248,250,252,0.94),rgba(255,255,255,0.82))] backdrop-blur-xl supports-[backdrop-filter]:bg-white/55"
     >
-      <div className="mx-auto grid max-w-6xl grid-cols-1 gap-2 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3 rounded-[28px] border border-white/60 bg-white/70 px-3 py-2 shadow-[0_20px_60px_-30px_rgba(15,23,42,0.35)] backdrop-blur-xl">
-          <div className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border-4 border-white bg-gradient-to-br from-slate-900 via-indigo-700 to-cyan-600 text-sm font-semibold text-white shadow md:h-12 md:w-12">
+      <div className="mx-auto grid max-w-6xl grid-cols-1 gap-2 px-3 py-2">
+        <div className="flex min-w-0 items-center gap-3 rounded-3xl border border-white/60 bg-white/70 px-3 py-2 shadow-[0_20px_60px_-30px_rgba(15,23,42,0.35)] backdrop-blur-xl">
+          <div className="relative grid h-10 w-10 shrink-0 place-items-center overflow-hidden rounded-full border-4 border-white bg-gradient-to-br from-slate-900 via-indigo-700 to-cyan-600 text-sm font-semibold text-white shadow md:h-10 md:w-10">
             {typeof profile?.avatarUrl === 'string' && profile.avatarUrl.trim() ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -284,7 +284,7 @@ function StickyHeader({
               </span>
               <span className="text-xs md:text-sm text-gray-600">
                 {profile?.age ? `${profile.age} yrs` : ''}
-                {profile?.gender ? ` â€¢ ${profile.gender}` : ''}
+                {profile?.gender ? ` • ${profile.gender}` : ''}
               </span>
               <LiveBadge />
             </div>
@@ -293,8 +293,8 @@ function StickyHeader({
             </div>
             <div className="text-xxs md:text-xs text-gray-500 flex items-center gap-1">
               <Clock className="w-3.5 h-3.5" aria-hidden />
-              <span>Last sync: {lastSyncHuman ?? 'â€”'}</span>
-              <span className="mx-1">â€¢</span>
+              <span>Last sync: {lastSyncHuman ?? 'Not yet synced'}</span>
+              <span className="mx-1">•</span>
               <span>ID {profile?.patientId ?? patientId}</span>
             </div>
           </div>
@@ -341,7 +341,7 @@ function KPIStat({
     red: 'bg-red-50',
   };
   return (
-    <div className={cn('group relative overflow-hidden rounded-[28px] border border-white/70 p-4 shadow-[0_20px_50px_-35px_rgba(15,23,42,0.45)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_60px_-32px_rgba(15,23,42,0.5)]', tones[tone])} role="group" aria-label={`${label} summary`}>
+    <div className={cn('group relative overflow-hidden rounded-3xl border border-white/70 p-4 shadow-[0_20px_50px_-35px_rgba(15,23,42,0.45)] transition hover:-translate-y-0.5 hover:shadow-[0_24px_60px_-32px_rgba(15,23,42,0.5)]', tones[tone])} role="group" aria-label={`${label} summary`}>
       <div className="text-[10px] uppercase tracking-[0.24em] text-slate-500/90">{label}</div>
       <div className="flex items-end justify-between gap-2">
         <div className="text-lg font-semibold tracking-tight text-slate-900 md:text-[1.35rem]">{value}</div>
@@ -485,7 +485,7 @@ function AlertDrawer({
               />
               <div className="min-w-0">
                 <div className="text-sm font-medium">
-                  {a.vital} â€” {a.value}
+                  {a.vital} — {a.value}
                 </div>
                 <div className="text-xs text-gray-500">{a.when}</div>
                 <div className="mt-2 flex items-center gap-2">
@@ -519,7 +519,7 @@ function ReportHelp({ open, onClose }: { open: boolean; onClose: () => void }) {
         </div>
         <div className="mt-3 space-y-3 text-sm text-slate-700">
           <p>
-            Reports include selected sections (e.g., Glucose, BP, SpOâ‚‚, Temp, HR, ECG), branding style, and
+            Reports include selected sections (e.g., Glucose, BP, SpO₂, Temp, HR, ECG), branding style, and
             optional clinician sign-off.
           </p>
           <ul className="list-disc pl-4 space-y-1">
@@ -650,7 +650,7 @@ function ExportComposer({
               value={fromDate}
               onChange={(e) => setFromDate(e.target.value)}
             />
-            <span className="text-xs text-gray-500">â†’</span>
+            <span className="text-xs text-gray-500">→</span>
             <input
               type="date"
               className="p-1 border rounded text-sm w-full"
@@ -685,7 +685,7 @@ function ExportComposer({
                   checked={includeSections[k as keyof typeof includeSections]}
                   onChange={() => toggle(k)}
                 />
-                <span className="capitalize">{k.replace('spo2', 'SpOâ‚‚')}</span>
+                <span className="capitalize">{k.replace('spo2', 'SpO₂')}</span>
               </label>
             ))}
           </div>
@@ -700,7 +700,7 @@ function ExportComposer({
           disabled={downloading}
           onClick={downloadServerPdf}
         >
-          {downloading ? 'Preparingâ€¦' : 'Download PDF (server)'}
+          {downloading ? 'Preparing...' : 'Download PDF (server)'}
         </button>
       </div>
       <ReportHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
@@ -751,7 +751,7 @@ function SavedExports({ patientId }: { patientId: string }) {
             {loading && (
               <tr>
                 <td colSpan={6} className="py-4 text-center text-slate-500">
-                  Loadingâ€¦
+                  Loading...
                 </td>
               </tr>
             )}
@@ -766,7 +766,7 @@ function SavedExports({ patientId }: { patientId: string }) {
               <tr key={r.id} className="border-b">
                 <td className="py-2 pr-3">{new Date(r.createdAt).toLocaleString()}</td>
                 <td className="py-2 pr-3">
-                  {r.fromDate?.slice(0, 10)} â†’ {r.toDate?.slice(0, 10)}
+                  {r.fromDate?.slice(0, 10)} → {r.toDate?.slice(0, 10)}
                 </td>
                 <td className="py-2 pr-3">{r.brand}</td>
                 <td className="py-2 pr-3">
@@ -775,12 +775,12 @@ function SavedExports({ patientId }: { patientId: string }) {
                       .filter(([, v]) => v)
                       .map(([k]) => (
                         <span key={k} className="px-2 py-0.5 rounded-full border text-xs">
-                          {String(k).replace('spo2', 'SpOâ‚‚')}
+                          {String(k).replace('spo2', 'SpO₂')}
                         </span>
                       ))}
                   </div>
                 </td>
-                <td className="py-2 pr-3">{r.fileBytes ? `${Math.round(r.fileBytes / 1024)} KB` : 'â€”'}</td>
+                <td className="py-2 pr-3">{r.fileBytes ? `${Math.round(r.fileBytes / 1024)} KB` : '—'}</td>
                 <td className="py-2 pr-3">
                   <div className="flex gap-2">
                     {r.fileUrl && (
@@ -961,7 +961,7 @@ function HeatGrid({ matrix }: { matrix: (number | null)[][] }) {
                   className="text-white text-xxs rounded p-1 text-center"
                   style={{ background: v == null ? '#e5e7eb' : '#64748b' }}
                 >
-                  {v == null ? 'â€”' : v}
+                  {v == null ? '—' : v}
                 </div>
               ))}
             </div>
@@ -980,7 +980,7 @@ function HeatGrid({ matrix }: { matrix: (number | null)[][] }) {
                   className="text-white text-xxs rounded p-1 text-center"
                   style={{ background: v == null ? '#e5e7eb' : '#64748b' }}
                 >
-                  {v == null ? 'â€”' : v}
+                  {v == null ? '—' : v}
                 </div>
               ))}
             </div>
@@ -1044,13 +1044,13 @@ function BPAnalytics({ items }: { items: BPRec[] }) {
   const heat = useMemo(() => heatmapAvg(ptsS), [items]);
 
   return (
-    <SectionCard title="Blood Pressure â€” Analytics" subtitle="Zones, trend, and time-of-day">
+    <SectionCard title="Blood Pressure — Analytics" subtitle="Zones, trend, and time-of-day">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
           <div className="text-sm font-medium mb-1">Trend (Systolic/Diastolic)</div>
           <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.systolic)} />
           <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.diastolic)} />
-          <div className="text-xs text-slate-600 mt-1">Slope/day â€” Systolic {sS} â€¢ Diastolic {sD}</div>
+          <div className="text-xs text-slate-600 mt-1">Slope/day — Systolic {sS} • Diastolic {sD}</div>
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">Out-of-range breakdown</div>
@@ -1061,13 +1061,13 @@ function BPAnalytics({ items }: { items: BPRec[] }) {
 
       <div className="mt-3 p-3 border rounded bg-white">
         <div className="text-sm font-medium mb-1">Daily heatmap (avg Systolic)</div>
-        <div className="text-xxs text-slate-500 mb-2">Each cell â‰ˆ 4h block</div>
+        <div className="text-xxs text-slate-500 mb-2">Each cell ~ 4h block</div>
         <HeatGrid matrix={heat} />
       </div>
 
       <div className="mt-3">
         <Collapsible title="Targets & notes" defaultOpen={false}>
-          Zones: Normal &lt;120/&lt;80 â€¢ Elevated 120â€“129/&lt;80 â€¢ Stage1 130â€“139 or 80â€“89 â€¢ Stage2 â‰¥140 or â‰¥90.
+          Zones: Normal &lt;120/&lt;80 • Elevated 120–129/&lt;80 • Stage1 130–139 or 80–89 • Stage2 &gt;=140 or &gt;=90.
         </Collapsible>
       </div>
     </SectionCard>
@@ -1092,7 +1092,7 @@ function SpO2Analytics({ items }: { items: SpO2Rec[] }) {
   const heat = useMemo(() => heatmapAvg(pts), [items]);
 
   return (
-    <SectionCard title="SpOâ‚‚ â€” Analytics" subtitle="Distribution, trend, time-of-day">
+    <SectionCard title="SpO₂ — Analytics" subtitle="Distribution, trend, time-of-day">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
           <div className="text-sm font-medium mb-1">Trend</div>
@@ -1101,22 +1101,22 @@ function SpO2Analytics({ items }: { items: SpO2Rec[] }) {
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">Distribution</div>
-          <BarsMini labels={['â‰¥95', '90â€“94', '<90']} values={[dist.green, dist.amber, dist.red]} />
+          <BarsMini labels={['>=95', '90–94', '<90']} values={[dist.green, dist.amber, dist.red]} />
           <div className="text-xs text-slate-600 mt-1">
-            In-range â‰¥95%: {dist.inRangePct}% â€¢ T90 (&lt;90%) {dist.t90}%
+            In-range &gt;=95%: {dist.inRangePct}% • T90 (&lt;90%) {dist.t90}%
           </div>
         </div>
       </div>
 
       <div className="mt-3 p-3 border rounded bg-white">
         <div className="text-sm font-medium mb-1">Daily heatmap (avg %)</div>
-        <div className="text-xxs text-slate-500 mb-2">Each cell â‰ˆ 4h block</div>
+        <div className="text-xxs text-slate-500 mb-2">Each cell ~ 4h block</div>
         <HeatGrid matrix={heat} />
       </div>
 
       <div className="mt-3">
         <Collapsible title="Targets & notes" defaultOpen={false}>
-          Targets: Green â‰¥{SPO2.green}% â€¢ Amber {SPO2.amber}â€“{SPO2.green - 1}% â€¢ Red &lt;{SPO2.amber}%.
+          Targets: Green &gt;={SPO2.green}% • Amber {SPO2.amber}–{SPO2.green - 1}% • Red &lt;{SPO2.amber}%.
         </Collapsible>
       </div>
     </SectionCard>
@@ -1140,11 +1140,11 @@ function TempAnalytics({ items }: { items: TempRec[] }) {
   }, [items]);
 
   return (
-    <SectionCard title="Temperature â€” Analytics" subtitle="Trend & thresholds">
+    <SectionCard title="Temperature — Analytics" subtitle="Trend & thresholds">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
           <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.celsius)} />
-          <div className="text-xs text-slate-600 mt-1">Slope/day: {slope} Â°C</div>
+          <div className="text-xs text-slate-600 mt-1">Slope/day: {slope} °C</div>
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">In-range</div>
@@ -1154,7 +1154,7 @@ function TempAnalytics({ items }: { items: TempRec[] }) {
       </div>
       <div className="mt-3">
         <Collapsible title="Targets & notes" defaultOpen={false}>
-          Defaults: Low &lt; {TEMP.low}Â°C â€¢ High â‰¥ {TEMP.high}Â°C.
+          Defaults: Low &lt; {TEMP.low}°C • High &gt;= {TEMP.high}°C.
         </Collapsible>
       </div>
     </SectionCard>
@@ -1177,7 +1177,7 @@ function HRAnalytics({ items }: { items: HRRec[] }) {
   }, [items]);
 
   return (
-    <SectionCard title="Heart Rate â€” Analytics" subtitle="Trend & brady/tachy breakdown">
+    <SectionCard title="Heart Rate — Analytics" subtitle="Trend & brady/tachy breakdown">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
           <LineMini labels={items.map((r) => r.timestamp)} values={items.map((r) => r.hr)} />
@@ -1190,7 +1190,7 @@ function HRAnalytics({ items }: { items: HRRec[] }) {
       </div>
       <div className="mt-3">
         <Collapsible title="Targets & notes" defaultOpen={false}>
-          Defaults: Brady &lt; {HRTH.brady} bpm â€¢ Tachy â‰¥ {HRTH.tachy} bpm.
+          Defaults: Brady &lt; {HRTH.brady} bpm • Tachy &gt;= {HRTH.tachy} bpm.
         </Collapsible>
       </div>
     </SectionCard>
@@ -1228,19 +1228,19 @@ function GlucoseAnalytics({ items }: { items: GluRec[] }) {
   const values = byDay.map(([, c]) => c);
 
   return (
-    <SectionCard title="Glucose â€” Analytics" subtitle="Trend, stats, and episodes per day">
+    <SectionCard title="Glucose — Analytics" subtitle="Trend, stats, and episodes per day">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         <div className="p-3 border rounded bg-white md:col-span-2">
           <div className="text-sm font-medium mb-1">Trend (mg/dL)</div>
           <LineMini labels={ptsMg.map((p) => p.t)} values={ptsMg.map((p) => +p.v.toFixed(1))} />
           <div className="text-xs text-slate-600 mt-1">
-            Slope/day: {slope} mg/dL â€¢ Min {min.toFixed(0)} â€¢ Avg {avg.toFixed(0)} â€¢ Max {max.toFixed(0)}
+            Slope/day: {slope} mg/dL • Min {min.toFixed(0)} • Avg {avg.toFixed(0)} • Max {max.toFixed(0)}
           </div>
         </div>
         <div className="p-3 border rounded bg-white">
           <div className="text-sm font-medium mb-1">Zones (mg/dL)</div>
           <BarsMini
-            labels={['Hypo<70', '80â€“180', '>180', '>250']}
+            labels={['Hypo<70', '80–180', '>180', '>250']}
             values={[dist.hypo, dist.target, dist.hyper, dist.veryHigh]}
           />
           <div className="text-xs text-slate-600 mt-1">Total {dist.total} readings</div>
@@ -1255,7 +1255,7 @@ function GlucoseAnalytics({ items }: { items: GluRec[] }) {
 
       <div className="mt-3">
         <Collapsible title="Notes" defaultOpen={false}>
-          Analytics use mg/dL thresholds (70 / 80â€“180 / &gt;180 / &gt;250). Values sent as mmol/L are converted.
+          Analytics use mg/dL thresholds (70 / 80–180 / &gt;180 / &gt;250). Values sent as mmol/L are converted.
         </Collapsible>
       </div>
     </SectionCard>
@@ -1274,7 +1274,7 @@ function ECGAnalytics({ sessions }: { sessions: ECGSess[] }) {
   const slope = slopePerDay(pts).toFixed(2);
 
   return (
-    <SectionCard title="ECG â€” Session analytics" subtitle="Counts, total duration, and episodes per day">
+    <SectionCard title="ECG — Session analytics" subtitle="Counts, total duration, and episodes per day">
       <div className="grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
         <div className="p-2 border rounded bg-white">
           <div className="font-medium">Sessions</div>
@@ -1302,7 +1302,7 @@ function ECGAnalytics({ sessions }: { sessions: ECGSess[] }) {
 
       <div className="mt-3">
         <Collapsible title="Notes" defaultOpen={false}>
-          Sessions are derived from ECG start/end times. If the API omits <code>durationSec</code>, itâ€™s computed from timestamps.
+          Sessions are derived from ECG start/end times. If the API omits <code>durationSec</code>, it’s computed from timestamps.
         </Collapsible>
       </div>
     </SectionCard>
@@ -1356,7 +1356,7 @@ function AnalyticsDashboard({ patientId }: { patientId: string }) {
       <SectionCard
         title="Analytics"
         subtitle="Cross-vital trends for the selected date range"
-        status={<Badge tone="slate">{loading ? 'Loadingâ€¦' : 'Ready'}</Badge>}
+        status={<Badge tone="slate">{loading ? 'Loading...' : 'Ready'}</Badge>}
         menu={
           <div className="flex items-center gap-2">
             <label className="text-xs text-gray-600">Range</label>
@@ -1377,32 +1377,32 @@ function AnalyticsDashboard({ patientId }: { patientId: string }) {
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">BP readings</div>
             <div className="text-base">{bp.length}</div>
-            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
+            <div className="text-xxs text-gray-500">{from} → {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
-            <div className="font-medium">SpOâ‚‚ readings</div>
+            <div className="font-medium">SpO₂ readings</div>
             <div className="text-base">{spo2.length}</div>
-            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
+            <div className="text-xxs text-gray-500">{from} → {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">Temp readings</div>
             <div className="text-base">{temp.length}</div>
-            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
+            <div className="text-xxs text-gray-500">{from} → {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">HR readings</div>
             <div className="text-base">{hr.length}</div>
-            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
+            <div className="text-xxs text-gray-500">{from} → {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">Glucose readings</div>
             <div className="text-base">{glu.length}</div>
-            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
+            <div className="text-xxs text-gray-500">{from} → {to}</div>
           </div>
           <div className="p-2 border rounded bg-white">
             <div className="font-medium">ECG sessions</div>
             <div className="text-base">{ecg.length}</div>
-            <div className="text-xxs text-gray-500">{from} â†’ {to}</div>
+            <div className="text-xxs text-gray-500">{from} → {to}</div>
           </div>
         </div>
       </SectionCard>
@@ -1522,12 +1522,12 @@ function TabbedVitals({
   stopMeasurement: () => Promise<void>;
 }) {
   const tabs: Array<{ key: VitalPanelKey; label: string; hint?: string }> = [
-    { key: 'bp', label: 'Blood Pressure', hint: 'mmHg + pulse' },
-    { key: 'spo2', label: 'SpOâ‚‚', hint: 'oxygen + HR' },
-    { key: 'temp', label: 'Temperature', hint: 'C/F' },
-    { key: 'glu', label: 'Glucose', hint: 'trend & export' },
-    { key: 'hr', label: 'Heart Rate' },
-    { key: 'ecg', label: 'ECG', hint: 'lead preview' },
+    { key: 'bp', label: 'BP', hint: 'mmHg + pulse' },
+    { key: 'spo2', label: 'SpO₂', hint: 'oxygen + HR' },
+    { key: 'temp', label: 'Temp', hint: '°C/°F' },
+    { key: 'glu', label: 'Glucose', hint: 'trend' },
+    { key: 'hr', label: 'HR' },
+    { key: 'ecg', label: 'ECG' },
   ];
 
   return (
@@ -1552,7 +1552,7 @@ function TabbedVitals({
             )}
           >
             {t.label}
-            {t.hint ? <span className="opacity-70"> â€” {t.hint}</span> : null}
+            {t.hint ? <span className="opacity-70"> — {t.hint}</span> : null}
           </button>
         ))}
         </div>
@@ -2253,10 +2253,10 @@ function HealthMonitorPageInner() {
     const c = hmSessionState.lastSpo2CycleComplete;
     if (!c) return;
     if (c.reason === 'signal_detected_no_result') {
-      pushToast('SpOâ‚‚ signal was detected, but no final saturation value was decoded.', 'default');
+      pushToast('SpO₂ signal was detected, but no final saturation value was decoded.', 'default');
     }
     if (c.reason === 'timeout') {
-      pushToast('SpOâ‚‚ measurement timed out.', 'error');
+      pushToast('SpO₂ measurement timed out.', 'error');
     }
   }, [hmSessionState.lastSpo2CycleComplete, pushToast]);
 
@@ -2309,7 +2309,7 @@ function HealthMonitorPageInner() {
   }, []);
 
   function shareSummary() {
-    const text = `Ambulant+ Health Monitor â€” Patient ${patientId} on ${new Date().toLocaleString(locale)}`;
+    const text = `Ambulant+ Health Monitor — Patient ${patientId} on ${new Date().toLocaleString(locale)}`;
     if (navigator.share) {
       navigator.share({ title: 'Health summary', text }).catch(() => {});
     } else {
@@ -2392,7 +2392,7 @@ function HealthMonitorPageInner() {
       case 'bp':
         return 'Blood Pressure';
       case 'spo2':
-        return 'SpOâ‚‚';
+        return 'SpO₂';
       case 'temp':
         return 'Temperature';
       case 'glu':
@@ -2429,7 +2429,7 @@ function HealthMonitorPageInner() {
   if (!patientId) {
     return (
       <main className="mx-auto max-w-3xl p-6">
-        <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
             <Bluetooth className="h-3.5 w-3.5" />
             Health Monitor
@@ -2479,7 +2479,7 @@ function HealthMonitorPageInner() {
     <>
       <StickyHeader
         profile={profile ?? undefined}
-        patientId={patientId || 'â€”'}
+        patientId={patientId || 'Patient'}
         lastSyncHuman={vitalsSummary?.lastSyncHuman}
         onExport={() => setTab('reports')}
         onShare={shareSummary}
@@ -2526,13 +2526,13 @@ function HealthMonitorPageInner() {
                     <div className="grid min-w-[220px] gap-2 sm:grid-cols-2">
                       <div className="rounded-2xl border border-white/10 bg-white/10 p-3">
                         <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Connection</div>
-                        <div className="mt-1 text-lg font-semibold">{hmSessionState.connected ? 'Connected' : hmSessionState.connecting ? 'Connectingâ€¦' : 'Offline'}</div>
+                        <div className="mt-1 text-lg font-semibold">{hmSessionState.connected ? 'Connected' : hmSessionState.connecting ? 'Connecting...' : 'Offline'}</div>
                         <div className="mt-1 text-xs text-slate-300">Mode: {hmSessionState.mode === 'idle' ? 'Standby' : hmSessionState.mode.toUpperCase()}</div>
                       </div>
                       <div className="rounded-2xl border border-white/10 bg-white/10 p-3">
                         <div className="text-[11px] uppercase tracking-[0.16em] text-slate-300">Telemetry</div>
-                        <div className="mt-1 text-lg font-semibold">{hmSessionState.batteryPct ?? 'â€”'}%</div>
-                        <div className="mt-1 text-xs text-slate-300">RSSI {hmSessionState.rssi ?? 'â€”'} dBm</div>
+                        <div className="mt-1 text-lg font-semibold">{hmSessionState.batteryPct ?? '—'}%</div>
+                        <div className="mt-1 text-xs text-slate-300">RSSI {hmSessionState.rssi ?? '—'} dBm</div>
                       </div>
                     </div>
                   </div>
@@ -2560,14 +2560,14 @@ function HealthMonitorPageInner() {
             <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
               <KPIStat
                 label="Heart Rate"
-                value={<span>{vitalsSummary?.hrNow ?? "â€”"} bpm</span>}
-                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.hrTs)}`}
+                value={<span>{vitalsSummary?.hrNow ?? "—"} bpm</span>}
+                hint={`Latest • ${fmtTime(vitalsSummary?.hrTs)}`}
                 series={hrSeries}
               />
               <KPIStat
-                label="SpOâ‚‚"
-                value={<span>{vitalsSummary?.spo2Now ?? "â€”"}%</span>}
-                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.spo2Ts)}`}
+                label="SpO₂"
+                value={<span>{vitalsSummary?.spo2Now ?? "—"}%</span>}
+                hint={`Latest • ${fmtTime(vitalsSummary?.spo2Ts)}`}
                 series={spo2Series}
                 tone={spo2Tone(vitalsSummary?.spo2Now)}
               />
@@ -2575,27 +2575,27 @@ function HealthMonitorPageInner() {
                 label="Blood Pressure"
                 value={
                   <span>
-                    {vitalsSummary?.bpNow ? `${vitalsSummary.bpNow.s}/${vitalsSummary.bpNow.d}` : 'â€”'}{' '}
+                    {vitalsSummary?.bpNow ? `${vitalsSummary.bpNow.s}/${vitalsSummary.bpNow.d}` : '—'}{' '}
                     mmHg
                   </span>
                 }
-                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.bpTs)}`}
+                hint={`Latest • ${fmtTime(vitalsSummary?.bpTs)}`}
                 series={bpSeries}
               />
               <KPIStat
                 label="Temperature"
-                value={<span>{vitalsSummary?.tempNow ?? "â€”"}Â°C</span>}
-                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.tempTs)}`}
+                value={<span>{vitalsSummary?.tempNow ?? "—"}°C</span>}
+                hint={`Latest • ${fmtTime(vitalsSummary?.tempTs)}`}
                 series={tempSeries}
               />
               <KPIStat
                 label="Glucose"
                 value={
                   <span>
-                    {vitalsSummary?.gluNow ?? "â€”"} {vitalsSummary?.gluUnit ?? ''}
+                    {vitalsSummary?.gluNow ?? "—"} {vitalsSummary?.gluUnit ?? ''}
                   </span>
                 }
-                hint={`Latest â€¢ ${fmtTime(vitalsSummary?.gluTs)}`}
+                hint={`Latest • ${fmtTime(vitalsSummary?.gluTs)}`}
                 series={gluSeries}
                 tone={gluTone(vitalsSummary?.gluNow, vitalsSummary?.gluUnit)}
               />
@@ -2645,7 +2645,7 @@ function HealthMonitorPageInner() {
                       <div className={cn('h-2 w-2 rounded-full mt-1', a.level === 'red' ? 'bg-red-500' : 'bg-amber-500')} />
                       <div className="text-xs">
                         <div className="font-medium">
-                          {a.vital} â€” {a.value}
+                          {a.vital} — {a.value}
                         </div>
                         <div className="text-[11px] text-slate-500">{a.when}</div>
                       </div>
@@ -2666,7 +2666,7 @@ function HealthMonitorPageInner() {
           <>
             <SectionCard
               title="Health Monitor device"
-              subtitle="Bridge-driven BLE connection for BP, SpOâ‚‚, Temperature, Glucose, HR and ECG."
+              subtitle="Bridge-driven BLE connection for BP, SpO₂, Temperature, Glucose, HR and ECG."
               status={
                 <span
                   className={cn(
@@ -2676,10 +2676,10 @@ function HealthMonitorPageInner() {
                 >
                   {hmSessionState.connected
                     ? hmSessionState.streaming
-                      ? `Connected â€¢ Streaming â€¢ ${hmSessionState.mode.toUpperCase()}`
+                      ? `Connected • Streaming • ${hmSessionState.mode.toUpperCase()}`
                       : 'Connected'
                     : hmSessionState.connecting
-                      ? 'Connectingâ€¦'
+                      ? 'Connecting...'
                       : 'Disconnected'}
                 </span>
               }
@@ -2693,7 +2693,7 @@ function HealthMonitorPageInner() {
                         disabled={hmSessionState.connecting}
                         className="rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-medium text-white shadow-sm shadow-slate-900/20 transition hover:-translate-y-0.5 disabled:opacity-60"
                       >
-                        {hmSessionState.connecting ? 'Connectingâ€¦' : 'Connect monitor'}
+                        {hmSessionState.connecting ? 'Connecting...' : 'Connect monitor'}
                       </button>
                     ) : (
                       <>
@@ -2723,7 +2723,7 @@ function HealthMonitorPageInner() {
                     )}
 
                     <div className="text-xs text-slate-500">
-                      Battery: {hmSessionState.batteryPct ?? 'â€”'}% â€¢ RSSI: {hmSessionState.rssi ?? 'â€”'}
+                      Battery: {hmSessionState.batteryPct ?? '—'}% • RSSI: {hmSessionState.rssi ?? '—'}
                     </div>
                   </div>
 
@@ -2745,11 +2745,11 @@ function HealthMonitorPageInner() {
                     <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
                       <div className="rounded-2xl border border-white bg-white p-3">
                         <div className="text-slate-500">Battery</div>
-                        <div className="mt-1 text-lg font-semibold text-slate-900">{hmSessionState.batteryPct ?? 'â€”'}%</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-900">{hmSessionState.batteryPct ?? '—'}%</div>
                       </div>
                       <div className="rounded-2xl border border-white bg-white p-3">
                         <div className="text-slate-500">RSSI</div>
-                        <div className="mt-1 text-lg font-semibold text-slate-900">{hmSessionState.rssi ?? 'â€”'}</div>
+                        <div className="mt-1 text-lg font-semibold text-slate-900">{hmSessionState.rssi ?? '—'}</div>
                       </div>
                     </div>
                   </div>

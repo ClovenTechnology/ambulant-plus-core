@@ -14,8 +14,7 @@ import {
   ChevronRight,
   Circle,
   Cpu,
-  FileText,
-  HeartPulse,
+    HeartPulse,
   Info,
   Loader2,
   RefreshCw,
@@ -32,7 +31,7 @@ import {
 import { toast } from '@/components/ToastMount';
 import { useAuthMe } from '@/src/hooks/useAuthMe';
 import type { IomtDeviceKey } from '@/src/lib/consent/iomt';
-import { consentPdfUrl, readIomtConsent } from '@/src/lib/consent/iomt';
+import { readIomtConsent } from '@/src/lib/consent/iomt';
 
 // ⬇️ bring the same BLE driver used by the Stethoscope console
 import { StethoscopeNUS, type StethoscopeTelemetry } from '@/src/devices/decoders/stethoscopeNUS';
@@ -46,6 +45,7 @@ type Device = {
   paired?: boolean;
   lastSeenAt?: string | null;
   status?: 'disconnected' | 'connected' | 'streaming';
+  connected?: boolean;
 };
 
 type ListResp = { devices: Device[] } | Device[];
@@ -57,6 +57,12 @@ function cx(...parts: Array<string | false | null | undefined>) {
 function safeDeviceName(d: Device) {
   const display = String(d.displayName || '').trim();
   if (display) return display;
+
+  if (d.kind === 'monitor') return 'Health Monitor';
+  if (d.kind === 'ring') return 'NexRing';
+  if (d.kind === 'stethoscope') return 'Stethoscope';
+  if (d.kind === 'otoscope') return 'HD Otoscope';
+
   const built = [d.vendor, d.model].filter(Boolean).join(' ').trim();
   return built || d.id;
 }
@@ -377,17 +383,17 @@ export default function DevicesPage() {
   }, [load]);
 
   const consentByDeviceId = useMemo(() => {
-    const map = new Map<string, { iomt: IomtDeviceKey; ok: boolean; pdfUrl: string; version: string }>();
+    const map = new Map<string, { iomt: IomtDeviceKey; ok: boolean; version: string }>();
     for (const d of devices) {
       const iomt = kindToIomt(d.kind);
       if (!iomt) continue;
       if (!userId) {
-        map.set(d.id, { iomt, ok: false, pdfUrl: consentPdfUrl(iomt), version: 'unavailable' });
+        map.set(d.id, { iomt, ok: false, version: 'unavailable' });
         continue;
       }
 
       const rec = readIomtConsent(userId, iomt);
-      map.set(d.id, { iomt, ok: !!rec.ok, pdfUrl: consentPdfUrl(iomt), version: rec.version });
+      map.set(d.id, { iomt, ok: !!rec.ok, version: rec.version });
     }
     // eslint-disable-next-line @typescript-eslint/no-unused-expressions
     consentTick;
@@ -403,7 +409,7 @@ export default function DevicesPage() {
         const bt = stethById[d.id];
         if (bt?.connected) return true;
       }
-      const status = d.status || (d.paired ? 'connected' : 'disconnected');
+      const status = d.status || ((d as any).connected || d.paired ? 'connected' : 'disconnected');
       return status !== 'disconnected';
     }).length;
 
@@ -858,20 +864,6 @@ export default function DevicesPage() {
                     ) : (
                       <div className="text-xs text-slate-400">—</div>
                     )}
-
-                    {consent ? (
-                      <a
-                        href={consent.pdfUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-                        title="Open consent PDF"
-                      >
-                        <FileText className="h-4 w-4 text-slate-500" />
-                        PDF
-                        <ArrowUpRight className="h-3.5 w-3.5 text-slate-400" />
-                      </a>
-                    ) : null}
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
@@ -890,7 +882,7 @@ export default function DevicesPage() {
                             title={stHasInstance ? 'Reconnect to last selected stethoscope (this tab)' : 'Connect stethoscope via Web Bluetooth'}
                           >
                             {stConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bluetooth className="h-4 w-4 text-slate-500" />}
-                            {stConnecting ? 'Connecting…' : stHasInstance ? 'Reconnect' : 'Connect'}
+                            {stConnecting ? 'Connecting...' : stHasInstance ? 'Reconnect' : 'Connect'}
                           </button>
                         ) : (
                           <button
@@ -904,7 +896,7 @@ export default function DevicesPage() {
                             title="Disconnect stethoscope (this tab)"
                           >
                             {stConnecting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4 text-slate-500" />}
-                            {stConnecting ? 'Disconnecting…' : 'Disconnect'}
+                            {stConnecting ? 'Disconnecting...' : 'Disconnect'}
                           </button>
                         )}
 
@@ -919,25 +911,11 @@ export default function DevicesPage() {
                           title="Open stethoscope console"
                         >
                           {streamingId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Stethoscope className="h-4 w-4" />}
-                          {streamingId === d.id ? 'Opening…' : 'Console'}
+                          {streamingId === d.id ? 'Opening...' : 'Console'}
                         </button>
                       </>
                     ) : (
                       <>
-                        <button
-                          onClick={() => onPair(d.id)}
-                          disabled={pairingId === d.id || loading}
-                          className={cx(
-                            'inline-flex items-center gap-2 rounded-full border px-3 py-2 text-sm font-medium transition',
-                            pairingId === d.id ? 'border-slate-200 bg-slate-100 text-slate-600' : 'border-slate-200 bg-white text-slate-800 hover:bg-slate-50',
-                            (pairingId === d.id || loading) && 'opacity-70',
-                          )}
-                          title="Pair / bind over BLE"
-                        >
-                          {pairingId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bluetooth className="h-4 w-4 text-slate-500" />}
-                          {pairingId === d.id ? 'Pairing…' : 'Pair'}
-                        </button>
-
                         <button
                           onClick={() => void onStream(d.id, d.kind)}
                           disabled={streamingId === d.id || loading}
@@ -946,10 +924,10 @@ export default function DevicesPage() {
                             streamingId === d.id ? 'bg-slate-200 text-slate-700' : 'bg-slate-900 text-white hover:bg-slate-800',
                             (streamingId === d.id || loading) && 'opacity-70',
                           )}
-                          title="Start streaming session"
+                          title="Open device workflow"
                         >
                           {streamingId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cable className="h-4 w-4" />}
-                          {streamingId === d.id ? 'Starting…' : 'Stream'}
+                          {streamingId === d.id ? 'Starting…' : 'Open'}
                         </button>
                       </>
                     )}
@@ -1001,26 +979,6 @@ export default function DevicesPage() {
               </div>
             </div>
           )}
-        </section>
-
-        {/* FOOTNOTE */}
-        <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-semibold text-slate-900">Device consoles</div>
-              <p className="mt-1 text-sm text-slate-600">
-                Otoscope, Stethoscope, Health Monitor and NexRing open dedicated consoles. Unknown devices fall back to the generic console.
-                <span className="block mt-1 text-xs text-slate-500">
-                  Note: Stethoscope “Connected” is tab-scoped (Web Bluetooth). It won’t persist across tabs/devices.
-                </span>
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2 text-xs text-slate-600">
-              <ShieldCheck className="h-4 w-4 text-slate-500" />
-              Consent is version-locked via local PDF naming.
-            </div>
-          </div>
         </section>
       </div>
     </main>

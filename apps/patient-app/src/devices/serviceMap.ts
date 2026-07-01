@@ -25,7 +25,7 @@ export type DeviceSpec = {
 export const serviceMap: Record<string, DeviceSpec> = {
   'duecare.stethoscope': {
     id: 'duecare.stethoscope',
-    label: 'Stethoscope (HC-21)',
+    label: 'Stethoscope',
     vendor: 'DueCare/Linktop',
     transport: 'ble',
     category: 'Stethoscope',
@@ -160,7 +160,7 @@ export const serviceMap: Record<string, DeviceSpec> = {
     id: 'duecare.nexring',
     label: 'NexRing',
     vendor: 'DueCare',
-    transport: 'ble',
+    transport: 'usb',
     category: 'Wearable Ring',
     filters: {
       services: [

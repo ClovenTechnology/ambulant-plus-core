@@ -11,7 +11,7 @@ type DeviceCatalogItem = {
   name: string;
   model: string;
   category: 'iomt' | 'wearable';
-  kind: 'vitals' | 'stethoscope' | 'otoscope' | 'ring';
+  kind: 'monitor' | 'stethoscope' | 'otoscope' | 'ring';
   summary: string;
   href: string;
   status: 'supported';
@@ -24,9 +24,9 @@ const CATALOG: DeviceCatalogItem[] = [
     slug: 'health-monitor',
     vendor: 'DueCare',
     name: 'Health Monitor',
-    model: 'Vitals360',
+    model: 'Health Monitor',
     category: 'iomt',
-    kind: 'vitals',
+    kind: 'monitor',
     summary:
       'Multi-parameter health monitor for body temperature, blood oxygen, blood pressure, blood glucose, heart rate and ECG workflows.',
     href: '/myCare/devices/health-monitor',
@@ -45,7 +45,7 @@ const CATALOG: DeviceCatalogItem[] = [
     slug: 'digital-stethoscope',
     vendor: 'DueCare',
     name: 'Digital Stethoscope',
-    model: 'HC21',
+    model: 'Stethoscope',
     category: 'iomt',
     kind: 'stethoscope',
     summary:
@@ -64,7 +64,7 @@ const CATALOG: DeviceCatalogItem[] = [
     slug: 'hd-otoscope',
     vendor: 'DueCare',
     name: 'HD Otoscope',
-    model: 'HD-Pro',
+    model: 'HD Otoscope',
     category: 'iomt',
     kind: 'otoscope',
     summary:
@@ -83,11 +83,11 @@ const CATALOG: DeviceCatalogItem[] = [
     slug: 'nexring',
     vendor: 'DueCare',
     name: 'NexRing',
-    model: 'PPG/ECG',
+    model: 'NexRing',
     category: 'wearable',
     kind: 'ring',
     summary:
-      'Ring-based wearable insights for pulse, SpO₂, HRV, sleep, recovery and longitudinal wellness signals.',
+      'NexRing wearable insights for pulse, SpO₂, HRV, sleep, recovery and longitudinal wellness signals.',
     href: '/myCare/devices/nexring',
     status: 'supported',
     capabilities: [

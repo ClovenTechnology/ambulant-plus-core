@@ -63,7 +63,7 @@ function DevicesConsoleContent() {
   const startStream = async () => {
     if (!spec) return;
     if (spec.transport === 'ble' && conn) {
-      startHeartbeat(); // ðŸ‘ˆ kick off keepalive
+      startHeartbeat(); // Start keepalive
 
       if (spec.console.panels.includes('pcm') && spec.characteristics?.pcm_stream) {
         await conn.write?.('ctrl', spec.commands?.start ?? new Uint8Array([1]));
@@ -99,7 +99,7 @@ function DevicesConsoleContent() {
       unsubRef.current?.();
     } catch {}
     unsubRef.current = null;
-    stopHeartbeat(); // ðŸ‘ˆ stop keepalive
+    stopHeartbeat(); // Stop keepalive
 
     if (spec.transport === 'ble' && conn && spec.commands?.stop) {
       await conn.write?.('ctrl', spec.commands.stop);
@@ -107,8 +107,20 @@ function DevicesConsoleContent() {
   };
 
   return (
-    <main className="p-6 space-y-4">
-      {/* ... header + panels unchanged ... */}
+    <main className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
+      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Generic device console</p>
+        <h1 className="mt-2 text-xl font-semibold text-slate-950">Device console</h1>
+        <p className="mt-2 text-sm text-slate-600">
+          This fallback console is reserved for devices without a dedicated patient workflow.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <a href="/myCare/devices/health-monitor" className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Health Monitor</a>
+          <a href="/myCare/devices/stethoscope" className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">Stethoscope</a>
+          <a href="/myCare/devices/otoscope" className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">HD Otoscope</a>
+          <a href="/myCare/devices/nexring" className="rounded-full border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700">NexRing</a>
+        </div>
+      </section>
     </main>
   );
 }

@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 // Decides *where* the console/stream should open based on modality.
 // In future you can mint SFU rooms or direct to clinician join links here.
 const MAP: Record<string, { url: string }> = {
-  'duecare-stethoscope': { url: '/myCare/devices/console?deviceId=duecare-stethoscope' }, // PCM page
-  'duecare-otoscope': { url: '/myCare/devices/console?deviceId=duecare-otoscope' },       // video + capture
-  'duecare-health-monitor': { url: '/myCare/devices/console?deviceId=duecare-health-monitor' }, // vitals spot
-  'duecare-nexring': { url: '/myCare/devices/console?deviceId=duecare-nexring' },         // PPG/ECG spot
+  'duecare-stethoscope': { url: '/myCare/devices/stethoscope' }, // PCM page
+  'duecare-otoscope': { url: '/myCare/devices/otoscope' },       // video + capture
+  'duecare-health-monitor': { url: '/myCare/devices/health-monitor' }, // vitals spot
+  'duecare-nexring': { url: '/myCare/devices/nexring' },         // PPG/ECG spot
   'duecare-smart-band': { url: '/myCare/devices/console?deviceId=duecare-smart-band' },   // reuse ring panel
   'duecare-scale': { url: '/myCare/devices/console?deviceId=duecare-scale' },             // body comp reading
 };
