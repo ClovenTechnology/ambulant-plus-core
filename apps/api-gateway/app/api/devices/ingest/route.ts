@@ -16,6 +16,8 @@ import { pushToRoom } from '@/src/lib/televisit-hub';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+type DeviceMode = 'home' | 'televisit' | 'debug';
+
 type NormalisedVitalEvent = {
   patient_id?: string;
   device_id: string;
@@ -24,6 +26,19 @@ type NormalisedVitalEvent = {
   value: number;
   unit?: string | null;
   room_id?: string | null;
+  mode: DeviceMode;
+  status?: string | null;
+  quality?: Record<string, unknown> | null;
+};
+
+type DbVitalRow = {
+  patientId: string;
+  deviceId: string;
+  t: Date;
+  vType: string;
+  valueNum: number;
+  unit?: string | null;
+  roomId?: string | null;
 };
 
 function verifyHmac(raw: Buffer, signatureHex: string, secret: string) {
@@ -38,10 +53,7 @@ function verifyHmac(raw: Buffer, signatureHex: string, secret: string) {
     return false;
   }
 
-  const calc = nodeCrypto
-    .createHmac('sha256', secret)
-    .update(raw)
-    .digest();
+  const calc = nodeCrypto.createHmac('sha256', secret).update(raw).digest();
 
   if (sig.length !== calc.length) return false;
 
@@ -52,26 +64,8 @@ function verifyHmac(raw: Buffer, signatureHex: string, secret: string) {
   }
 }
 
-type DbVitalRow = {
-  patientId: string;
-  deviceId: string;
-  t: Date;
-  vType: string;
-  valueNum: number;
-  unit?: string | null;
-  roomId?: string | null;
-};
-
-function toDbRow(e: NormalisedVitalEvent & { patient_id: string }): DbVitalRow {
-  return {
-    patientId: e.patient_id,
-    deviceId: e.device_id,
-    t: new Date(e.t),
-    vType: e.type,
-    valueNum: Number(e.value),
-    unit: e.unit ?? null,
-    roomId: e.room_id ?? null,
-  };
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 function firstString(...values: unknown[]) {
@@ -83,7 +77,48 @@ function firstString(...values: unknown[]) {
   return '';
 }
 
-function eventFromRaw(raw: any, deviceId: string): NormalisedVitalEvent | null {
+function finiteNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+
+  return null;
+}
+
+function normalizeMode(value: unknown, fallback: DeviceMode): DeviceMode {
+  const raw = firstString(value).toLowerCase();
+
+  if (raw === 'home' || raw === 'televisit' || raw === 'debug') {
+    return raw;
+  }
+
+  return fallback;
+}
+
+function safeDate(value: unknown) {
+  const d = value ? new Date(value as any) : new Date();
+  if (Number.isNaN(d.getTime())) return new Date();
+  return d;
+}
+
+function toDbRow(e: NormalisedVitalEvent & { patient_id: string }): DbVitalRow {
+  return {
+    patientId: e.patient_id,
+    deviceId: e.device_id,
+    t: safeDate(e.t),
+    vType: e.type,
+    valueNum: Number(e.value),
+    unit: e.unit ?? null,
+    roomId: e.room_id ?? null,
+  };
+}
+
+function eventFromRaw(
+  raw: any,
+  deviceId: string,
+  fallbackMode: DeviceMode = 'home',
+): NormalisedVitalEvent | null {
   if (!raw || typeof raw !== 'object') return null;
 
   const type = firstString(
@@ -94,14 +129,17 @@ function eventFromRaw(raw: any, deviceId: string): NormalisedVitalEvent | null {
     raw.name,
   );
 
-  const value = Number(
-    raw.value ??
-      raw.valueNum ??
-      raw.numericValue ??
-      raw.measurement,
+  const value = finiteNumber(
+    raw.value,
+    raw.valueNum,
+    raw.numericValue,
+    raw.measurement,
   );
 
-  if (!type || !Number.isFinite(value)) return null;
+  if (!type || value == null) return null;
+
+  const roomId = firstString(raw.room_id, raw.roomId) || null;
+  const mode = normalizeMode(raw.mode, roomId ? 'televisit' : fallbackMode);
 
   return {
     patient_id: firstString(raw.patient_id, raw.patientId, raw.patient),
@@ -110,7 +148,10 @@ function eventFromRaw(raw: any, deviceId: string): NormalisedVitalEvent | null {
     type,
     value,
     unit: raw.unit ?? null,
-    room_id: firstString(raw.room_id, raw.roomId) || null,
+    room_id: roomId,
+    mode,
+    status: firstString(raw.status) || null,
+    quality: isRecord(raw.quality) ? raw.quality : null,
   };
 }
 
@@ -125,6 +166,9 @@ function pushVital(
   const n = Number(value);
   if (!Number.isFinite(n)) return;
 
+  const roomId = firstString(payload.room_id, payload.roomId) || null;
+  const mode = normalizeMode(payload.mode, roomId ? 'televisit' : 'home');
+
   out.push({
     patient_id: firstString(payload.patient_id, payload.patientId, payload.patient),
     device_id: firstString(payload.device_id, payload.deviceId, deviceId),
@@ -132,7 +176,10 @@ function pushVital(
     type,
     value: n,
     unit: unit ?? null,
-    room_id: firstString(payload.room_id, payload.roomId) || null,
+    room_id: roomId,
+    mode,
+    status: firstString(payload.status) || null,
+    quality: isRecord(payload.quality) ? payload.quality : null,
   });
 }
 
@@ -171,7 +218,117 @@ function eventsFromVitalsObject(payload: any, deviceId: string): NormalisedVital
   return out;
 }
 
+function unitFor(unitMap: Record<string, unknown>, key: string, fallback: string) {
+  return firstString(unitMap[key], fallback);
+}
+
+function pushAdpValue(
+  out: NormalisedVitalEvent[],
+  base: Omit<NormalisedVitalEvent, 'type' | 'value' | 'unit'>,
+  type: string,
+  value: unknown,
+  unit: string,
+) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return;
+
+  out.push({
+    ...base,
+    type,
+    value: n,
+    unit,
+  });
+}
+
+function eventsFromAdpReading(reading: any, fallbackDeviceId: string): NormalisedVitalEvent[] {
+  if (!isRecord(reading)) return [];
+  if (reading.protocolVersion !== 'ADP-1') return [];
+
+  const status = firstString(reading.status) || 'complete';
+
+  if (
+    status !== 'complete' &&
+    status !== 'partial'
+  ) {
+    return [];
+  }
+
+  const values = isRecord(reading.values) ? reading.values : {};
+  const unitMap = isRecord(reading.unitMap) ? reading.unitMap : {};
+  const roomId = firstString(reading.roomId, reading.room_id) || null;
+  const mode = normalizeMode(reading.mode, roomId ? 'televisit' : 'home');
+
+  const base: Omit<NormalisedVitalEvent, 'type' | 'value' | 'unit'> = {
+    patient_id: firstString(reading.patientId, reading.patient_id),
+    device_id: firstString(reading.deviceId, reading.device_id, fallbackDeviceId),
+    t: firstString(reading.recordedAt, reading.t, reading.timestamp, new Date().toISOString()),
+    room_id: roomId,
+    mode,
+    status,
+    quality: isRecord(reading.quality) ? reading.quality : null,
+  };
+
+  const out: NormalisedVitalEvent[] = [];
+  const measurement = firstString(reading.measurement);
+
+  switch (measurement) {
+    case 'blood_pressure': {
+      pushAdpValue(out, base, 'blood_pressure_systolic', values.systolic, unitFor(unitMap, 'systolic', 'mmHg'));
+      pushAdpValue(out, base, 'blood_pressure_diastolic', values.diastolic, unitFor(unitMap, 'diastolic', 'mmHg'));
+      pushAdpValue(out, base, 'mean_arterial_pressure', values.map, unitFor(unitMap, 'map', 'mmHg'));
+      pushAdpValue(out, base, 'heart_rate', values.pulse ?? values.hr ?? values.heartRate, unitFor(unitMap, 'pulse', 'bpm'));
+      break;
+    }
+
+    case 'spo2': {
+      pushAdpValue(out, base, 'spo2', values.spo2 ?? values.SpO2 ?? values.oxygenSaturation, unitFor(unitMap, 'spo2', '%'));
+      pushAdpValue(out, base, 'heart_rate', values.pulse ?? values.hr ?? values.heartRate, unitFor(unitMap, 'pulse', 'bpm'));
+      break;
+    }
+
+    case 'temperature': {
+      pushAdpValue(out, base, 'temperature', values.celsius ?? values.temperature ?? values.temp, unitFor(unitMap, 'celsius', '°C'));
+      break;
+    }
+
+    case 'heart_rate': {
+      pushAdpValue(out, base, 'heart_rate', values.hr ?? values.heartRate ?? values.pulse, unitFor(unitMap, 'hr', 'bpm'));
+      break;
+    }
+
+    case 'glucose': {
+      pushAdpValue(out, base, 'blood_glucose', values.glucose ?? values.bloodGlucose, unitFor(unitMap, 'glucose', 'mmol/L'));
+      break;
+    }
+
+    case 'ecg': {
+      pushAdpValue(out, base, 'heart_rate', values.hr ?? values.heartRate, unitFor(unitMap, 'heartRate', 'bpm'));
+      break;
+    }
+
+    default:
+      break;
+  }
+
+  return out;
+}
+
+function eventsFromAdpPayload(payload: any, fallbackDeviceId: string): NormalisedVitalEvent[] {
+  if (!isRecord(payload)) return [];
+
+  const readings = Array.isArray(payload.readings)
+    ? payload.readings
+    : payload.protocolVersion === 'ADP-1'
+      ? [payload]
+      : [];
+
+  return readings.flatMap((reading) => eventsFromAdpReading(reading, fallbackDeviceId));
+}
+
 function normalizeEvents(mapped: any, originalPayload: any, deviceId: string): NormalisedVitalEvent[] {
+  const adpEvents = eventsFromAdpPayload(originalPayload, deviceId);
+  if (adpEvents.length > 0) return adpEvents;
+
   const candidates = [
     mapped,
     mapped?.events,
@@ -307,6 +464,7 @@ export async function POST(req: NextRequest) {
   const dbRows = events
     .filter(
       (e): e is NormalisedVitalEvent & { patient_id: string } =>
+        e.mode !== 'debug' &&
         typeof e.patient_id === 'string' &&
         e.patient_id.trim().length > 0 &&
         typeof e.value === 'number' &&
@@ -324,12 +482,15 @@ export async function POST(req: NextRequest) {
   }
 
   for (const e of events) {
-    if (e.room_id) {
+    if (e.mode === 'televisit' && e.room_id) {
       await pushToRoom(e.room_id, {
         t: e.t,
         type: e.type,
         value: e.value,
         unit: e.unit,
+        device_id: e.device_id,
+        mode: e.mode,
+        status: e.status ?? undefined,
       });
     }
   }
@@ -338,5 +499,10 @@ export async function POST(req: NextRequest) {
     ok: true,
     count: events.length,
     stored: dbRows.length,
+    mode_counts: {
+      home: events.filter((e) => e.mode === 'home').length,
+      televisit: events.filter((e) => e.mode === 'televisit').length,
+      debug: events.filter((e) => e.mode === 'debug').length,
+    },
   });
 }
