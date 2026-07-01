@@ -59,6 +59,78 @@ function readSteps(vital: Vital): number | null {
   );
 }
 
+function normaliseVitalIso(value: unknown): string {
+  const raw = typeof value === 'string' || value instanceof Date ? value : '';
+  const time = raw ? new Date(raw).getTime() : NaN;
+  if (!Number.isFinite(time)) return '';
+
+  // Round to nearest second so API and live SSE copies of the same reading collapse.
+  return new Date(Math.round(time / 1000) * 1000).toISOString();
+}
+
+function normaliseDeviceName(value: unknown): string {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/\/live$/i, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+function vitalValueFingerprint(vital: Vital): string {
+  const row = vital as Vital & Record<string, unknown>;
+
+  const values = [
+    readNumber(row.sys),
+    readNumber(row.dia),
+    readNumber(row.hr),
+    readNumber(row.spo2),
+    readNumber(row.temp_c),
+    readNumber(row.temperature),
+    readNumber(row.glucose_mg_dl),
+    readNumber(row.glucose_mmol_l),
+    readNumber(row.glucose),
+    readSteps(vital),
+    // NexRing reports temperature variation/deviation, not actual body temperature.
+    readNumber(row.temperatureVariation),
+    readNumber(row.temperature_variation),
+    readNumber(row.tempDeviation),
+    readNumber(row.temp_deviation),
+    readNumber(row.temp_delta_c),
+  ];
+
+  return values.map((value) => (value == null ? '' : Number(value).toFixed(3))).join('|');
+}
+
+function vitalDedupeKey(vital: Vital): string {
+  const row = vital as Vital & Record<string, unknown>;
+  const id = String(row.id || '').trim();
+
+  // Backend IDs are authoritative when repeated exactly.
+  if (id && !id.startsWith('live-')) return `id:${id}`;
+
+  const ts = normaliseVitalIso(row.ts ?? row.recordedAt ?? row.timestamp);
+  const device = normaliseDeviceName(row.device ?? row.deviceId ?? row.source);
+  const valueKey = vitalValueFingerprint(vital);
+
+  return `reading:${ts}:${device}:${valueKey}`;
+}
+
+function dedupeVitals(rows: Vital[]): Vital[] {
+  const seen = new Set<string>();
+  const out: Vital[] = [];
+
+  for (const row of rows) {
+    const key = vitalDedupeKey(row);
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    out.push(row);
+  }
+
+  return out;
+}
+
 function normaliseVitalsPayload(json: unknown): Vital[] {
   if (Array.isArray(json)) return json as Vital[];
 
@@ -214,7 +286,7 @@ export default function VitalsPanel(props: VitalsPanelProps) {
       }
 
       const json = await response.json().catch(() => []);
-      return normaliseVitalsPayload(json);
+      return dedupeVitals(normaliseVitalsPayload(json));
     },
     refetchOnWindowFocus: false,
   });
@@ -239,13 +311,12 @@ export default function VitalsPanel(props: VitalsPanelProps) {
 
     qc.setQueryData(['vitals', rangeKey], (old: unknown) => {
       const prev = Array.isArray(old) ? (old as Vital[]) : [];
-      if (prev.find((x) => x.id === v.id)) return prev;
-      return [v, ...prev].slice(0, 4000);
+      return dedupeVitals([v, ...prev]).slice(0, 4000);
     });
   }, [latest, qc, range, rangeKey, customEnd]);
 
   const sorted = useMemo(() => {
-    return [...rows].sort(
+    return dedupeVitals(rows).sort(
       (a, b) => new Date(b.ts).getTime() - new Date(a.ts).getTime(),
     );
   }, [rows]);
