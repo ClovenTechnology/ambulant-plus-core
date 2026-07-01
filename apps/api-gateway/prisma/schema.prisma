@@ -1659,6 +1659,7 @@ model VitalSample {
   valueNum  Float
   unit      String?
   roomId    String?
+  metadata  Json?
 
   @@index([patientId, t])
   @@index([roomId, t])

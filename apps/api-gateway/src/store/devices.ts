@@ -20,7 +20,7 @@ export function asDeviceKey(row: any) {
 }
 
 export async function storeVitals(v: Array<{
-  patientId: string; deviceId: string; t: Date; vType: string; valueNum: number; unit?: string|null; roomId?: string|null;
+  patientId: string; deviceId: string; t: Date; vType: string; valueNum: number; unit?: string|null; roomId?: string|null; metadata?: any|null;
 }>) {
   if (!v.length) return;
   await prisma.vitalSample.createMany({
@@ -32,6 +32,7 @@ export async function storeVitals(v: Array<{
       valueNum: e.valueNum,
       unit: e.unit ?? null,
       roomId: e.roomId ?? null,
+      metadata: (e as any).metadata ?? null,
     })),
   });
 }

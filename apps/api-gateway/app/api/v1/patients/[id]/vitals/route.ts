@@ -290,6 +290,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           valueNum: metric.valueNum,
           unit: metric.unit || null,
           roomId,
+          metadata: meta,
         },
       }),
     ),

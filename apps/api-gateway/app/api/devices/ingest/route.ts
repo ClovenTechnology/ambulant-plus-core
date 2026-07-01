@@ -29,6 +29,7 @@ type NormalisedVitalEvent = {
   mode: DeviceMode;
   status?: string | null;
   quality?: Record<string, unknown> | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 type DbVitalRow = {
@@ -39,6 +40,7 @@ type DbVitalRow = {
   valueNum: number;
   unit?: string | null;
   roomId?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 function verifyHmac(raw: Buffer, signatureHex: string, secret: string) {
@@ -111,6 +113,7 @@ function toDbRow(e: NormalisedVitalEvent & { patient_id: string }): DbVitalRow {
     valueNum: Number(e.value),
     unit: e.unit ?? null,
     roomId: e.room_id ?? null,
+    metadata: e.metadata ?? null,
   };
 }
 
@@ -266,6 +269,14 @@ function eventsFromAdpReading(reading: any, fallbackDeviceId: string): Normalise
     mode,
     status,
     quality: isRecord(reading.quality) ? reading.quality : null,
+    metadata: {
+      source_protocol: 'ADP-1',
+      adp: reading,
+      measurement: firstString(reading.measurement) || null,
+      source: firstString(reading.source) || null,
+      deviceKind: firstString(reading.deviceKind) || null,
+      vendor: firstString(reading.vendor) || null,
+    },
   };
 
   const out: NormalisedVitalEvent[] = [];
