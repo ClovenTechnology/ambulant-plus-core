@@ -6,7 +6,6 @@ import Link from 'next/link';
 import {
   Activity,
   ArrowRight,
-  Bluetooth,
   Eye,
   Stethoscope,
   Waves,
@@ -52,8 +51,8 @@ const TABS: TabMeta[] = [
     id: 'wearable',
     title: 'NexRing',
     shortTitle: 'Wearable',
-    eyebrow: 'CRM / RPM',
-    description: 'Continuous wearable telemetry, trends, and passive patient insight.',
+    eyebrow: 'Ring',
+    description: 'Wearable trends and activity.',
     icon: Waves,
     href: '/myCare/devices/nexring',
     tone: {
@@ -69,9 +68,9 @@ const TABS: TabMeta[] = [
   {
     id: 'hm',
     title: 'Health Monitor',
-    shortTitle: 'Vitals',
-    eyebrow: 'Spot-check vitals',
-    description: 'Blood pressure, SpO₂, temperature, glucose, ECG, and heart rate.',
+    shortTitle: 'Health',
+    eyebrow: 'Vitals',
+    description: 'Blood pressure, SpO2, temperature, glucose, ECG, and heart rate.',
     icon: Activity,
     href: '/myCare/devices/health-monitor',
     tone: {
@@ -88,8 +87,8 @@ const TABS: TabMeta[] = [
     id: 'stetho',
     title: 'Digital Stethoscope',
     shortTitle: 'Stethoscope',
-    eyebrow: 'Auscultation',
-    description: 'Record, review, and export heart and lung audio quickly.',
+    eyebrow: 'Audio',
+    description: 'Heart and lung sounds.',
     icon: Stethoscope,
     href: '/myCare/devices/stethoscope',
     tone: {
@@ -106,8 +105,8 @@ const TABS: TabMeta[] = [
     id: 'oto',
     title: 'HD Otoscope',
     shortTitle: 'Otoscope',
-    eyebrow: 'Imaging',
-    description: 'Preview and capture otoscopy media for review and documentation.',
+    eyebrow: 'Camera',
+    description: 'Ear imaging capture.',
     icon: Eye,
     href: '/myCare/devices/otoscope',
     tone: {
@@ -138,62 +137,39 @@ function ConsoleTabCard({
       type="button"
       onClick={onClick}
       className={cx(
-        'group relative overflow-hidden rounded-[24px] border p-4 text-left transition-all duration-200',
+        'group flex min-h-[64px] min-w-0 items-center gap-2 rounded-2xl border px-3 py-2.5 text-left transition',
         active
-          ? `${meta.tone.activeShell} ${meta.tone.glow}`
-          : `${meta.tone.shell} hover:-translate-y-0.5 hover:shadow-md`,
+          ? 'border-slate-900 bg-slate-900 text-white shadow-sm shadow-slate-900/15'
+          : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
       )}
       aria-pressed={active}
     >
-      <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(15,23,42,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(15,23,42,0.05)_1px,transparent_1px)] [background-size:20px_20px]" />
+      <span
+        className={cx(
+          'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border',
+          active ? 'border-white/15 bg-white/10' : meta.tone.iconWrap,
+        )}
+      >
+        <Icon className={cx('h-4 w-4', active ? 'text-white' : meta.tone.icon)} />
+      </span>
 
-      <div className="relative">
-        <div className="flex items-start justify-between gap-3">
-          <div
-            className={cx(
-              'rounded-2xl border p-3 shadow-sm transition-transform duration-200',
-              meta.tone.iconWrap,
-              active ? 'scale-105' : 'group-hover:scale-105',
-            )}
-          >
-            <Icon className={cx('h-5 w-5', meta.tone.icon)} />
-          </div>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold">
+          {meta.title}
+        </span>
+        <span className={cx('mt-0.5 block truncate text-[11px]', active ? 'text-slate-300' : 'text-slate-500')}>
+          {meta.eyebrow}
+        </span>
+      </span>
 
-          <span
-            className={cx(
-              'inline-flex items-center rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.2em]',
-              meta.tone.badge,
-            )}
-          >
-            {meta.eyebrow}
-          </span>
-        </div>
-
-        <div className="mt-4">
-          <div className="text-base font-semibold tracking-tight text-slate-900">
-            {meta.title}
-          </div>
-          <p className="mt-1.5 text-sm leading-6 text-slate-600">{meta.description}</p>
-        </div>
-
-        <div className="mt-4 flex items-center justify-between">
-          <div className="inline-flex items-center gap-2 text-xs text-slate-500">
-            <Bluetooth className="h-3.5 w-3.5" />
-            Integrated device
-          </div>
-
-          {active ? (
-            <div className="inline-flex items-center gap-1 text-sm font-medium text-slate-900">
-              Active panel
-            </div>
-          ) : (
-            <div className="inline-flex items-center gap-1 text-sm font-medium text-slate-500 transition group-hover:text-slate-800">
-              Switch
-              <ArrowRight className="h-4 w-4" />
-            </div>
-          )}
-        </div>
-      </div>
+      <span
+        className={cx(
+          'hidden rounded-full px-2 py-0.5 text-[10px] font-semibold sm:inline-flex',
+          active ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-500',
+        )}
+      >
+        {active ? 'Selected' : 'Open'}
+      </span>
     </button>
   );
 }
@@ -212,22 +188,22 @@ function ActiveSurface({
   onHealthMonitorResult?: (result: unknown) => void;
 }) {
   return (
-    <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+    <section className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-lg font-semibold tracking-tight text-slate-900">
-            Active device surface
+            Device workflow
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Use the quick console here, or open the dedicated page for the fuller workflow.
+            Use the selected device below, or open its dedicated page for the full workflow.
           </p>
         </div>
 
         <Link
           href={href}
-          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+          className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100 sm:w-auto"
         >
-          Open dedicated page
+          Open full page
           <ArrowRight className="h-4 w-4" />
         </Link>
       </div>
@@ -249,18 +225,18 @@ export default function IoMTPane({ roomId, patientId, onHealthMonitorResult }: I
   );
 
   return (
-    <div className="space-y-5">
-      <section className="rounded-[28px] border border-slate-200 bg-white p-4 shadow-sm md:p-5">
-        <div className="mb-4">
+    <div className="space-y-4">
+      <section className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4">
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           <h2 className="text-lg font-semibold tracking-tight text-slate-900">
-            Quick device switching
+            Choose device
           </h2>
           <p className="mt-1 text-sm text-slate-500">
-            Switch cleanly between integrated device surfaces without stacked ribbons or duplicate wrappers.
+            Select one device. The workflow opens below.
           </p>
         </div>
 
-        <div className="grid gap-3 xl:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           {TABS.map((meta) => (
             <ConsoleTabCard
               key={meta.id}
