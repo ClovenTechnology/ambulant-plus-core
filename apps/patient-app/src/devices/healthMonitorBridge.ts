@@ -6,6 +6,7 @@ import { NativeHealthMonitor, type NativeHealthMonitorPlugin } from './nativeHea
 import {
   buildAmbulantDeviceReading,
   buildHealthMonitorBpReading,
+  type AmbulantConfidence,
   type AmbulantDeviceMode,
   type AmbulantDeviceSource,
   type AmbulantMeasurement,
@@ -267,6 +268,50 @@ function bridgeAdpMeasurement(type: string): AmbulantMeasurement | null {
       return null;
   }
 }
+function bridgeAdpConfidence(
+  source: AmbulantDeviceSource,
+  meta: any,
+  fallback: AmbulantConfidence = 'protocol_final',
+): AmbulantConfidence {
+  const raw = bridgeStringFrom(meta?.confidence, meta?.quality?.confidence).toLowerCase();
+
+  if (source === 'native_android') {
+    if (meta?.authoritative === false) return 'protocol_final';
+    return raw === 'debug' ? 'debug' : 'manufacturer_final';
+  }
+
+  if (raw === 'threshold') return 'threshold';
+  if (raw === 'partial_threshold_fallback') return 'partial_threshold_fallback';
+  if (raw === 'partial') return 'partial';
+  if (raw === 'estimated') return 'estimated';
+  if (raw === 'debug') return 'debug';
+
+  // Never allow browser/Web BLE metadata to promote itself to manufacturer_final.
+  return fallback === 'manufacturer_final' ? 'protocol_final' : fallback;
+}
+
+function bridgeAdpReason(
+  source: AmbulantDeviceSource,
+  meta: any,
+  fallback?: string | null,
+): string | null {
+  const explicit = bridgeStringFrom(meta?.fallbackReason, meta?.reason, meta?.quality?.reason);
+  if (explicit) return explicit;
+
+  if (
+    source !== 'native_android' &&
+    bridgeStringFrom(meta?.confidence).toLowerCase() === 'manufacturer_final'
+  ) {
+    return 'web_bluetooth_metadata_not_manufacturer_final';
+  }
+
+  if (source !== 'native_android' && meta?.authoritative === false) {
+    return fallback ?? 'web_bluetooth_protocol_derived';
+  }
+
+  return fallback ?? null;
+}
+
 export class HealthMonitorBridge {
   private readonly bpRuntimeSignature = 'BP_PATCH_SIG_2026_04_02_A';
 
@@ -378,10 +423,9 @@ export class HealthMonitorBridge {
     const patientId = this.opts?.patientId;
     const roomId = bridgeStringFrom(meta?.roomId, meta?.room_id) || undefined;
     const recordedAt = input.recorded_at ?? new Date().toISOString();
-    const manufacturerFinal =
-      meta?.authoritative === true ||
-      source === 'native_android' ||
-      meta?.confidence === 'manufacturer_final';
+    const manufacturerFinal = source === 'native_android' && meta?.authoritative !== false;
+    const confidence = bridgeAdpConfidence(source, meta);
+    const provenanceReason = bridgeAdpReason(source, meta);
 
     if (type === 'blood_pressure') {
       const systolic = bridgeNumberFrom(payload.systolic, payload.sys, payload.bloodPressureSystolic);
@@ -429,8 +473,8 @@ export class HealthMonitorBridge {
         unitMap: { hr: 'bpm' },
         quality: {
           signal: 'unknown',
-          confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
-          reason: meta?.parent ? `derived_from_${meta.parent}` : null,
+          confidence,
+          reason: meta?.parent ? `derived_from_${meta.parent}` : provenanceReason,
         },
         recordedAt,
         raw: { type, payload, meta },
@@ -462,8 +506,8 @@ export class HealthMonitorBridge {
         },
         quality: {
           signal: 'unknown',
-          confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
-          reason: null,
+          confidence,
+          reason: provenanceReason,
         },
         recordedAt,
         raw: { type, payload, meta },
@@ -493,8 +537,8 @@ export class HealthMonitorBridge {
         },
         quality: {
           signal: 'unknown',
-          confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
-          reason: meta?.authoritative === false ? 'estimated_or_protocol_derived' : null,
+          confidence,
+          reason: bridgeAdpReason(source, meta, 'estimated_or_protocol_derived'),
         },
         recordedAt,
         raw: { type, payload, meta },
@@ -520,8 +564,8 @@ export class HealthMonitorBridge {
         },
         quality: {
           signal: 'unknown',
-          confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
-          reason: null,
+          confidence,
+          reason: provenanceReason,
         },
         recordedAt,
         raw: { type, payload, meta },
@@ -1413,6 +1457,7 @@ export class HealthMonitorBridge {
           authoritative: false,
           algorithm: result.algorithm,
           confidence: result.confidence,
+          provenance: 'web_bluetooth_protocol_derived',
           fallbackReason: result.fallbackReason ?? null,
           beatCount: result.beatCount,
           mapPressure: result.mapPressure,
@@ -1434,7 +1479,9 @@ export class HealthMonitorBridge {
             parent: 'blood_pressure',
             authoritative: false,
             algorithm: result.algorithm,
+            confidence: result.confidence,
             parentConfidence: result.confidence,
+            provenance: 'web_bluetooth_protocol_derived',
           },
           dedupeKey: 'hr',
         });

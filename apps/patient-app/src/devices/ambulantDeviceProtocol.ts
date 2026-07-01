@@ -40,6 +40,8 @@ export type AmbulantSignalQuality = 'good' | 'fair' | 'poor' | 'unknown';
 export type AmbulantConfidence =
   | 'manufacturer_final'
   | 'protocol_final'
+  | 'threshold'
+  | 'partial_threshold_fallback'
   | 'partial'
   | 'estimated'
   | 'debug';
@@ -123,6 +125,8 @@ export function buildHealthMonitorBpReading(input: {
   mode?: AmbulantDeviceMode;
   recordedAt?: string;
   manufacturerFinal?: boolean;
+  confidence?: AmbulantConfidence;
+  reason?: string | null;
   raw?: unknown;
 }): AmbulantDeviceReading {
   return buildAmbulantDeviceReading({
@@ -149,8 +153,10 @@ export function buildHealthMonitorBpReading(input: {
     },
     quality: {
       signal: 'unknown',
-      confidence: input.manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
-      reason: null,
+      confidence: input.manufacturerFinal
+        ? 'manufacturer_final'
+        : input.confidence ?? 'protocol_final',
+      reason: input.reason ?? null,
     },
     recordedAt: input.recordedAt,
     raw: input.raw,
