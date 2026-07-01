@@ -2,7 +2,12 @@
 'use client';
 
 import { HealthMonitorBridge } from '@/src/devices/healthMonitorBridge';
-import type { EmitVitalInput } from '@/src/lib/vitals';
+import {
+  buildAmbulantDeviceReading,
+  buildHealthMonitorBpReading,
+  type AmbulantDeviceMode,
+  type AmbulantDeviceSource,
+} from '@/src/devices/ambulantDeviceProtocol';import type { EmitVitalInput } from '@/src/lib/vitals';
 import { emitVital as postVital } from '@/src/lib/vitals';
 
 export type HealthMonitorMode =
@@ -240,6 +245,252 @@ export type HealthMonitorSessionState = {
   } | null;
 };
 
+type HealthMonitorVitalEmission = Omit<EmitVitalInput, 'patientId'>;
+
+function numberFrom(...values: unknown[]): number | null {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+
+  return null;
+}
+
+function stringFrom(...values: unknown[]): string {
+  for (const value of values) {
+    const s = String(value ?? '').trim();
+    if (s) return s;
+  }
+
+  return '';
+}
+
+function inferAdpSource(meta: any): AmbulantDeviceSource {
+  const source = stringFrom(meta?.source).toLowerCase();
+
+  if (source.includes('native')) return 'native_android';
+  if (source.includes('ios')) return 'ios_native';
+  if (source.includes('desktop')) return 'desktop_bridge';
+
+  return 'web_bluetooth';
+}
+
+function inferAdpMode(meta: any): AmbulantDeviceMode {
+  const mode = stringFrom(meta?.mode, meta?.deviceMode, meta?.ambulant_mode).toLowerCase();
+
+  if (mode === 'home' || mode === 'televisit' || mode === 'debug') {
+    return mode;
+  }
+
+  return stringFrom(meta?.roomId, meta?.room_id) ? 'televisit' : 'home';
+}
+
+function buildHealthMonitorAdpReading(
+  input: HealthMonitorVitalEmission,
+  patientId: string,
+) {
+  const payload: any = input.payload ?? {};
+  const meta: any = input.meta ?? {};
+  const recordedAt = input.recorded_at ?? new Date().toISOString();
+  const source = inferAdpSource(meta);
+  const mode = inferAdpMode(meta);
+  const roomId = stringFrom(meta?.roomId, meta?.room_id) || undefined;
+  const deviceId = stringFrom(input.deviceId, 'duecare.health-monitor');
+  const manufacturerFinal =
+    meta?.authoritative === true ||
+    source === 'native_android' ||
+    meta?.confidence === 'manufacturer_final';
+  const vitalType = String(input.type);
+
+  if (vitalType === 'blood_pressure') {
+    const systolic = numberFrom(payload.systolic, payload.sys, payload.bloodPressureSystolic);
+    const diastolic = numberFrom(payload.diastolic, payload.dia, payload.bloodPressureDiastolic);
+
+    if (systolic == null || diastolic == null) return null;
+
+    return buildHealthMonitorBpReading({
+      source,
+      deviceId,
+      patientId,
+      roomId,
+      mode,
+      recordedAt,
+      systolic,
+      diastolic,
+      pulse: numberFrom(payload.pulse, payload.hr, payload.heartRate),
+      map: numberFrom(payload.map, payload.meanArterialPressure),
+      manufacturerFinal,
+      raw: {
+        type: input.type,
+        payload,
+        meta,
+      },
+    });
+  }
+
+  if (vitalType === 'heart_rate') {
+    const hr = numberFrom(payload.hr, payload.bpm, payload.pulse, payload.heartRate);
+    if (hr == null) return null;
+
+    return buildAmbulantDeviceReading({
+      source,
+      vendor: 'linktop',
+      deviceKind: 'health_monitor',
+      deviceId,
+      patientId,
+      roomId,
+      mode,
+      measurement: 'heart_rate',
+      status: 'complete',
+      values: { hr },
+      unitMap: { hr: 'bpm' },
+      quality: {
+        signal: 'unknown',
+        confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
+        reason: meta?.parent ? `derived_from_${meta.parent}` : null,
+      },
+      recordedAt,
+      raw: {
+        type: input.type,
+        payload,
+        meta,
+      },
+    });
+  }
+
+  if (vitalType === 'spo2') {
+    const spo2 = numberFrom(payload.spo2, payload.SpO2, payload.pct, payload.oxygenSaturation);
+    if (spo2 == null) return null;
+
+    return buildAmbulantDeviceReading({
+      source,
+      vendor: 'linktop',
+      deviceKind: 'health_monitor',
+      deviceId,
+      patientId,
+      roomId,
+      mode,
+      measurement: 'spo2',
+      status: 'complete',
+      values: {
+        spo2,
+        pulse: numberFrom(payload.pulse, payload.hr, payload.heartRate),
+        pi: numberFrom(payload.pi),
+      },
+      unitMap: {
+        spo2: '%',
+        pulse: 'bpm',
+        pi: '%',
+      },
+      quality: {
+        signal: 'unknown',
+        confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
+        reason: null,
+      },
+      recordedAt,
+      raw: {
+        type: input.type,
+        payload,
+        meta,
+      },
+    });
+  }
+
+  if (vitalType === 'temperature') {
+    const celsius = numberFrom(payload.celsius, payload.temperature, payload.temp);
+    if (celsius == null) return null;
+
+    return buildAmbulantDeviceReading({
+      source,
+      vendor: 'linktop',
+      deviceKind: 'health_monitor',
+      deviceId,
+      patientId,
+      roomId,
+      mode,
+      measurement: 'temperature',
+      status: 'complete',
+      values: {
+        celsius,
+        fahrenheit: numberFrom(payload.fahrenheit),
+      },
+      unitMap: {
+        celsius: '°C',
+        fahrenheit: '°F',
+      },
+      quality: {
+        signal: 'unknown',
+        confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
+        reason: meta?.authoritative === false ? 'estimated_or_protocol_derived' : null,
+      },
+      recordedAt,
+      raw: {
+        type: input.type,
+        payload,
+        meta,
+      },
+    });
+  }
+
+  if (vitalType === 'blood_glucose' || vitalType === 'glucose') {
+    const glucose = numberFrom(payload.glucose, payload.bloodGlucose);
+    if (glucose == null) return null;
+
+    return buildAmbulantDeviceReading({
+      source,
+      vendor: 'linktop',
+      deviceKind: 'health_monitor',
+      deviceId,
+      patientId,
+      roomId,
+      mode,
+      measurement: 'glucose',
+      status: 'complete',
+      values: { glucose },
+      unitMap: {
+        glucose: stringFrom(payload.unit, 'mmol/L'),
+      },
+      quality: {
+        signal: 'unknown',
+        confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
+        reason: null,
+      },
+      recordedAt,
+      raw: {
+        type: input.type,
+        payload,
+        meta,
+      },
+    });
+  }
+
+  return null;
+}
+
+function withHealthMonitorAdpMeta(
+  input: HealthMonitorVitalEmission,
+  patientId: string,
+) {
+  const meta = { ...(input.meta ?? {}) };
+  const existingAdp = (meta as any).adp;
+
+  if (existingAdp?.protocolVersion === 'ADP-1') {
+    return meta;
+  }
+
+  const adp = buildHealthMonitorAdpReading(input, patientId);
+
+  if (!adp) return meta;
+
+  return {
+    ...meta,
+    adp,
+    ambulant_protocol_version: adp.protocolVersion,
+    ambulant_device_mode: adp.mode,
+    ambulant_device_source: adp.source,
+    ambulant_measurement: adp.measurement,
+  };
+}
 export type HealthMonitorSession = {
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
