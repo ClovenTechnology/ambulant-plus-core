@@ -1,15 +1,607 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8"/>
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1, viewport-fit=cover"
-    />
-    <title>Ambulant Patient (Capacitor)</title>
-  </head>
-  <body>
-    <h1>Ambulant Patient</h1>
-    <p>Placeholder web assets for Capacitor sync. Native builds will load the Capacitor WebView.</p>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1, viewport-fit=cover"
+  />
+  <title>Ambulant+ Health Monitor Test</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #020617;
+      color: #e5f7ff;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at top left, rgba(34, 211, 238, 0.18), transparent 35%),
+        radial-gradient(circle at bottom right, rgba(16, 185, 129, 0.13), transparent 38%),
+        #020617;
+      padding: 20px;
+    }
+
+    .shell {
+      max-width: 1120px;
+      margin: 0 auto;
+      display: grid;
+      gap: 18px;
+    }
+
+    .hero,
+    .card,
+    .log-card {
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(15, 23, 42, 0.88);
+      border-radius: 26px;
+      box-shadow: 0 18px 60px rgba(0, 0, 0, 0.28);
+    }
+
+    .hero {
+      padding: 24px;
+    }
+
+    .eyebrow {
+      color: #67e8f9;
+      font-size: 12px;
+      font-weight: 800;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+    }
+
+    h1 {
+      margin-top: 10px;
+      font-size: clamp(26px, 4vw, 42px);
+      line-height: 1.05;
+    }
+
+    p {
+      color: #b6c7d7;
+      line-height: 1.65;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: rgba(16, 185, 129, 0.12);
+      color: #6ee7b7;
+      border: 1px solid rgba(110, 231, 183, 0.22);
+      font-size: 13px;
+      font-weight: 700;
+      margin-top: 10px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 18px;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    }
+
+    @media (max-width: 900px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .card {
+      padding: 20px;
+    }
+
+    .controls {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 16px;
+      padding: 14px 16px;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+      color: #04111d;
+      background: #22d3ee;
+    }
+
+    button.secondary {
+      background: #334155;
+      color: #e5f7ff;
+    }
+
+    button.green {
+      background: #34d399;
+    }
+
+    button.purple {
+      background: #8b5cf6;
+      color: #fff;
+    }
+
+    button.red {
+      background: #fb7185;
+    }
+
+    button.small {
+      padding: 10px 12px;
+      font-size: 13px;
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    input {
+      width: 100%;
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      background: rgba(2, 6, 23, 0.55);
+      color: #fff;
+      border-radius: 16px;
+      padding: 14px 16px;
+      font-size: 15px;
+      outline: none;
+    }
+
+    label {
+      display: grid;
+      gap: 8px;
+      color: #cbd5e1;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
+    .measurements {
+      border: 1px solid rgba(148, 163, 184, 0.14);
+      background: rgba(2, 6, 23, 0.32);
+      border-radius: 18px;
+      padding: 14px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .device-list,
+    .events {
+      display: grid;
+      gap: 12px;
+      margin-top: 16px;
+      max-height: 430px;
+      overflow: auto;
+      padding-right: 4px;
+    }
+
+    .device {
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(2, 6, 23, 0.38);
+      border-radius: 18px;
+      padding: 14px;
+      text-align: left;
+      color: #e2e8f0;
+      cursor: pointer;
+    }
+
+    .device strong {
+      display: block;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    .device span {
+      color: #67e8f9;
+      font-size: 13px;
+    }
+
+    .empty,
+    .error {
+      border: 1px dashed rgba(148, 163, 184, 0.24);
+      border-radius: 18px;
+      padding: 16px;
+      color: #94a3b8;
+      background: rgba(2, 6, 23, 0.24);
+    }
+
+    .error {
+      border-style: solid;
+      border-color: rgba(251, 113, 133, 0.35);
+      color: #fecdd3;
+      background: rgba(127, 29, 29, 0.22);
+    }
+
+    .event {
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(2, 6, 23, 0.52);
+      border-radius: 18px;
+      padding: 14px;
+    }
+
+    .event-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      color: #67e8f9;
+      font-weight: 800;
+      font-size: 13px;
+    }
+
+    pre {
+      margin: 10px 0 0;
+      background: rgba(0, 0, 0, 0.38);
+      color: #cbd5e1;
+      border-radius: 14px;
+      padding: 12px;
+      overflow: auto;
+      max-height: 220px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .log-card {
+      padding: 20px;
+    }
+
+    .topline {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <section class="hero">
+      <div class="eyebrow">Ambulant+ Internal Device Test</div>
+      <h1>Health Monitor Native SDK Console</h1>
+      <p>
+        This screen is loaded from the installed Android app. Use it to test Bluetooth
+        permissions, scanning, connection, and raw Health Monitor measurements before
+        we build final patient-facing flows.
+      </p>
+      <div id="platformBadge" class="badge">Checking native bridge...</div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Controls</h2>
+
+        <div class="controls">
+          <button id="permissionsBtn">Ask permissions</button>
+
+          <div class="row">
+            <button id="scanBtn" class="green">Start scan</button>
+            <button id="stopScanBtn" class="secondary">Stop scan</button>
+          </div>
+
+          <label>
+            Device MAC / address
+            <input id="macInput" placeholder="Tap a discovered device or paste MAC" />
+          </label>
+
+          <button id="connectBtn" class="purple">Connect</button>
+
+          <div class="measurements">
+            <h3>Start measurement</h3>
+            <div class="row">
+              <button class="small secondary measureBtn" data-type="bp">Blood pressure</button>
+              <button class="small secondary measureBtn" data-type="spo2">SpO₂</button>
+              <button class="small secondary measureBtn" data-type="temperature">Temperature</button>
+              <button class="small secondary measureBtn" data-type="ecg">ECG</button>
+            </div>
+            <button class="small secondary measureBtn" data-type="all">All / SDK default</button>
+          </div>
+
+          <button id="stopMeasureBtn" class="red">Stop measurements</button>
+
+          <div id="lastError" class="error" style="display:none;"></div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="topline">
+          <h2>Discovered devices</h2>
+          <button id="clearDevicesBtn" class="small secondary" style="width:auto;">Clear</button>
+        </div>
+        <div id="deviceList" class="device-list">
+          <div class="empty">No devices discovered yet. Press “Start scan”.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="log-card">
+      <div class="topline">
+        <div>
+          <h2>Raw native event log</h2>
+          <p>Screenshot or copy this output for SDK payload mapping and manufacturer-app comparison.</p>
+        </div>
+        <button id="clearLogBtn" class="small secondary" style="width:auto;">Clear log</button>
+      </div>
+      <div id="events" class="events"></div>
+    </section>
+  </main>
+
+  <script>
+    const eventsEl = document.getElementById('events');
+    const deviceListEl = document.getElementById('deviceList');
+    const badgeEl = document.getElementById('platformBadge');
+    const errorEl = document.getElementById('lastError');
+    const macInput = document.getElementById('macInput');
+
+    const eventNames = [
+      'scanResult',
+      'device',
+      'devices',
+      'status',
+      'telemetry',
+      'measurement',
+      'measure',
+      'blood_pressure',
+      'bloodPressure',
+      'bp',
+      'spo2',
+      'spO2',
+      'temperature',
+      'bodyTemperature',
+      'ecg',
+      'battery',
+      'error'
+    ];
+
+    let eventCount = 0;
+    const devices = new Map();
+
+    function now() {
+      return new Date().toLocaleTimeString();
+    }
+
+    function safeJson(value) {
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch {
+        return String(value);
+      }
+    }
+
+    function getPlugin() {
+      return window.Capacitor &&
+        window.Capacitor.Plugins &&
+        window.Capacitor.Plugins.HealthMonitor;
+    }
+
+    function appendEvent(name, payload) {
+      eventCount += 1;
+
+      const article = document.createElement('article');
+      article.className = 'event';
+      article.innerHTML = `
+        <div class="event-head">
+          <span>${name}</span>
+          <span>${now()}</span>
+        </div>
+        <pre>${escapeHtml(safeJson(payload))}</pre>
+      `;
+
+      eventsEl.prepend(article);
+
+      while (eventsEl.children.length > 120) {
+        eventsEl.removeChild(eventsEl.lastChild);
+      }
+
+      collectDevices(name, payload);
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;');
+    }
+
+    function unwrap(value) {
+      return value && typeof value === 'object'
+        ? (value.data || value.payload || value.result || value)
+        : value;
+    }
+
+    function collectDevices(eventName, payload) {
+      const seen = [];
+
+      function walk(value) {
+        if (!value || typeof value !== 'object') return;
+        if (Array.isArray(value)) {
+          value.forEach(walk);
+          return;
+        }
+
+        const mac =
+          value.mac ||
+          value.address ||
+          value.deviceAddress ||
+          value.bleAddress ||
+          value.id ||
+          value.deviceId ||
+          '';
+
+        const name =
+          value.name ||
+          value.deviceName ||
+          value.localName ||
+          value.bluetoothName ||
+          value.label ||
+          '';
+
+        if (mac || name || eventName.toLowerCase().includes('scan')) {
+          seen.push({ mac: String(mac || ''), name: String(name || ''), raw: value });
+        }
+
+        ['device', 'devices', 'data', 'payload', 'result', 'results'].forEach((key) => {
+          if (value[key]) walk(value[key]);
+        });
+      }
+
+      walk(unwrap(payload));
+
+      seen.forEach((device, index) => {
+        const key = device.mac || device.name || `${eventName}-${index}`;
+        if (!devices.has(key)) devices.set(key, device);
+      });
+
+      renderDevices();
+    }
+
+    function renderDevices() {
+      deviceListEl.innerHTML = '';
+
+      if (devices.size === 0) {
+        deviceListEl.innerHTML = '<div class="empty">No devices discovered yet. Press “Start scan”.</div>';
+        return;
+      }
+
+      Array.from(devices.entries()).forEach(([key, device]) => {
+        const button = document.createElement('button');
+        button.className = 'device';
+        button.innerHTML = `
+          <strong>${escapeHtml(device.name || 'Unnamed device')}</strong>
+          <span>${escapeHtml(device.mac || 'No MAC/address in event')}</span>
+          <pre>${escapeHtml(safeJson(device.raw))}</pre>
+        `;
+        button.addEventListener('click', () => {
+          if (device.mac) macInput.value = device.mac;
+        });
+        deviceListEl.appendChild(button);
+      });
+    }
+
+    function showError(message) {
+      errorEl.style.display = message ? 'block' : 'none';
+      errorEl.textContent = message || '';
+    }
+
+    async function callPlugin(label, fn) {
+      const plugin = getPlugin();
+
+      appendEvent(`command:${label}:start`, {});
+
+      if (!plugin) {
+        const message = 'HealthMonitor native plugin not found. This must run inside the installed Android Capacitor app.';
+        showError(message);
+        appendEvent(`command:${label}:error`, { message });
+        return;
+      }
+
+      showError('');
+
+      try {
+        const result = await fn(plugin);
+        appendEvent(`command:${label}:ok`, result || {});
+      } catch (error) {
+        const message = error && error.message ? error.message : String(error);
+        showError(message);
+        appendEvent(`command:${label}:error`, { message, error });
+      }
+    }
+
+    function init() {
+      const platform =
+        window.Capacitor && typeof window.Capacitor.getPlatform === 'function'
+          ? window.Capacitor.getPlatform()
+          : 'unknown';
+
+      const plugin = getPlugin();
+
+      if (plugin) {
+        badgeEl.textContent = `Native bridge detected: ${platform}`;
+        badgeEl.style.color = '#6ee7b7';
+        appendEvent('platform', { platform, hasHealthMonitorPlugin: true });
+      } else {
+        badgeEl.textContent = `Native bridge not detected: ${platform}`;
+        badgeEl.style.color = '#fde68a';
+        appendEvent('platform', { platform, hasHealthMonitorPlugin: false });
+      }
+
+      if (plugin && typeof plugin.addListener === 'function') {
+        eventNames.forEach((eventName) => {
+          try {
+            plugin.addListener(eventName, (payload) => appendEvent(eventName, payload));
+          } catch (error) {
+            appendEvent(`listener:${eventName}:error`, {
+              message: error && error.message ? error.message : String(error)
+            });
+          }
+        });
+      }
+
+      document.getElementById('permissionsBtn').addEventListener('click', () => {
+        callPlugin('permissions', (plugin) => plugin.askPermissions());
+      });
+
+      document.getElementById('scanBtn').addEventListener('click', () => {
+        callPlugin('startScan', (plugin) => plugin.startScan());
+      });
+
+      document.getElementById('stopScanBtn').addEventListener('click', () => {
+        callPlugin('stopScan', (plugin) => plugin.stopScan());
+      });
+
+      document.getElementById('connectBtn').addEventListener('click', () => {
+        const mac = macInput.value.trim();
+        if (!mac) {
+          showError('Paste or select a MAC/address first.');
+          return;
+        }
+        callPlugin('connect', (plugin) => plugin.connect({ mac }));
+      });
+
+      document.querySelectorAll('.measureBtn').forEach((button) => {
+        button.addEventListener('click', () => {
+          const type = button.getAttribute('data-type');
+          callPlugin(`start:${type}`, (plugin) => {
+            const payload = type === 'all' ? {} : { type };
+            if (typeof plugin.startMeasurement === 'function') {
+              return plugin.startMeasurement(payload);
+            }
+            return plugin.startMeasurements(payload);
+          });
+        });
+      });
+
+      document.getElementById('stopMeasureBtn').addEventListener('click', () => {
+        callPlugin('stopMeasurements', (plugin) => plugin.stopMeasurements());
+      });
+
+      document.getElementById('clearLogBtn').addEventListener('click', () => {
+        eventsEl.innerHTML = '';
+      });
+
+      document.getElementById('clearDevicesBtn').addEventListener('click', () => {
+        devices.clear();
+        renderDevices();
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', init);
+  </script>
+</body>
 </html>

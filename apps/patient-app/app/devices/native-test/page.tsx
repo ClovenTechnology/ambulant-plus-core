@@ -269,9 +269,7 @@ export default function NativeDeviceTestPage() {
 
         {!isNative ? (
           <section className="rounded-3xl border border-amber-400/30 bg-amber-500/10 p-5 text-amber-100">
-            This console is visible on web, but the native SDK only runs inside the
-            installed Android app. Build/sync the app, install the debug APK, then
-            open this route in the Android WebView.
+            This console is visible on web for layout review only. Native SDK controls are disabled here because the HealthMonitor bridge only exists inside the installed Android app. Build/sync the app, install the debug APK, then open this route in the Android WebView.
           </section>
         ) : null}
 
@@ -282,7 +280,7 @@ export default function NativeDeviceTestPage() {
             <div className="mt-4 grid gap-3">
               <button
                 className="rounded-2xl bg-cyan-400 px-4 py-3 font-semibold text-slate-950 disabled:opacity-50"
-                disabled={!!busy}
+                disabled={!!busy || !isNative}
                 onClick={() => callNative('permissions', () => HealthMonitor.askPermissions())}
               >
                 Ask permissions
@@ -291,14 +289,14 @@ export default function NativeDeviceTestPage() {
               <div className="grid grid-cols-2 gap-3">
                 <button
                   className="rounded-2xl bg-emerald-400 px-4 py-3 font-semibold text-slate-950 disabled:opacity-50"
-                  disabled={!!busy}
+                  disabled={!!busy || !isNative}
                   onClick={() => callNative('startScan', () => HealthMonitor.startScan())}
                 >
                   Start scan
                 </button>
                 <button
                   className="rounded-2xl bg-slate-700 px-4 py-3 font-semibold text-white disabled:opacity-50"
-                  disabled={!!busy}
+                  disabled={!!busy || !isNative}
                   onClick={() => callNative('stopScan', () => HealthMonitor.stopScan())}
                 >
                   Stop scan
@@ -317,7 +315,7 @@ export default function NativeDeviceTestPage() {
 
               <button
                 className="rounded-2xl bg-violet-400 px-4 py-3 font-semibold text-slate-950 disabled:opacity-50"
-                disabled={!!busy || !mac.trim()}
+                disabled={!!busy || !isNative || !mac.trim()}
                 onClick={() => callNative('connect', () => HealthMonitor.connect({ mac: mac.trim() }))}
               >
                 Connect
@@ -330,7 +328,7 @@ export default function NativeDeviceTestPage() {
                     <button
                       key={type.key}
                       className="rounded-xl bg-white/10 px-3 py-2 text-left text-sm font-medium text-white hover:bg-white/20 disabled:opacity-50"
-                      disabled={!!busy}
+                      disabled={!!busy || !isNative}
                       onClick={() => startMeasurement(type.key)}
                     >
                       {type.label}
@@ -341,7 +339,7 @@ export default function NativeDeviceTestPage() {
 
               <button
                 className="rounded-2xl bg-rose-400 px-4 py-3 font-semibold text-slate-950 disabled:opacity-50"
-                disabled={!!busy}
+                disabled={!!busy || !isNative}
                 onClick={() => callNative('stopMeasurements', () => HealthMonitor.stopMeasurements())}
               >
                 Stop measurements
