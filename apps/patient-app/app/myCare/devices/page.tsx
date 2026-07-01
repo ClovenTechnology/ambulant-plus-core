@@ -10,7 +10,6 @@ import {
   BadgeCheck,
   Bluetooth,
   Cable,
-  CheckCircle2,
   ChevronRight,
   Circle,
   Cpu,
@@ -20,18 +19,13 @@ import {
   RefreshCw,
   RotateCw,
   Search,
-  ShieldCheck,
   Sparkles,
   Stethoscope,
   Video,
   Watch,
-  XCircle,
 } from 'lucide-react';
 
 import { toast } from '@/components/ToastMount';
-import { useAuthMe } from '@/src/hooks/useAuthMe';
-import type { IomtDeviceKey } from '@/src/lib/consent/iomt';
-import { readIomtConsent } from '@/src/lib/consent/iomt';
 
 // ⬇️ bring the same BLE driver used by the Stethoscope console
 import { StethoscopeNUS, type StethoscopeTelemetry } from '@/src/devices/decoders/stethoscopeNUS';
@@ -49,6 +43,8 @@ type Device = {
 };
 
 type ListResp = { devices: Device[] } | Device[];
+
+type LocalIomtDeviceKey = 'stethoscope' | 'otoscope' | 'monitor' | 'nexring';
 
 function cx(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ');
@@ -87,7 +83,7 @@ function kindLabel(k: Device['kind']) {
   );
 }
 
-function kindToIomt(k: Device['kind']): IomtDeviceKey | null {
+function kindToIomt(k: Device['kind']): LocalIomtDeviceKey | null {
   if (k === 'stethoscope') return 'stethoscope';
   if (k === 'otoscope') return 'otoscope';
   if (k === 'monitor') return 'monitor';
@@ -118,12 +114,6 @@ function statusTone(s?: Device['status'], paired?: boolean) {
   if (v === 'streaming') return { label: 'Streaming', pill: 'bg-emerald-600 text-white', dot: 'bg-emerald-500' };
   if (v === 'connected') return { label: 'Connected', pill: 'bg-indigo-600 text-white', dot: 'bg-indigo-500' };
   return { label: 'Disconnected', pill: 'bg-slate-100 text-slate-700', dot: 'bg-slate-300' };
-}
-
-function consentTone(ok: boolean) {
-  return ok
-    ? { label: 'Accepted', pill: 'bg-emerald-50 text-emerald-800 border-emerald-200', icon: <CheckCircle2 className="h-4 w-4" /> }
-    : { label: 'Pending', pill: 'bg-amber-50 text-amber-900 border-amber-200', icon: <XCircle className="h-4 w-4" /> };
 }
 
 function classifyBtError(e: unknown): { title: string; detail: string } {
@@ -161,15 +151,12 @@ function stethStateInit(): StethBtState {
 }
 
 export default function DevicesPage() {
-  const { user } = useAuthMe();
-  const userId = user?.id ? String(user.id) : '';
 
   const [loading, setLoading] = useState(false);
   const [pairingId, setPairingId] = useState<string | null>(null);
   const [streamingId, setStreamingId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [devices, setDevices] = useState<Device[]>([]);
-  const [consentTick, setConsentTick] = useState(0);
 
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<'all' | 'iomt' | 'wearables' | 'connected' | 'disconnected'>('all');
@@ -334,19 +321,6 @@ export default function DevicesPage() {
     };
   }, []);
 
-  // Recompute consent indicators when coming back / other tab updates.
-  useEffect(() => {
-    const bump = () => setConsentTick((x) => x + 1);
-    window.addEventListener('focus', bump);
-    window.addEventListener('visibilitychange', bump);
-    window.addEventListener('storage', bump);
-    return () => {
-      window.removeEventListener('focus', bump);
-      window.removeEventListener('visibilitychange', bump);
-      window.removeEventListener('storage', bump);
-    };
-  }, []);
-
   const load = useCallback(async () => {
     setLoading(true);
     setErr(null);
@@ -382,24 +356,6 @@ export default function DevicesPage() {
     void load();
   }, [load]);
 
-  const consentByDeviceId = useMemo(() => {
-    const map = new Map<string, { iomt: IomtDeviceKey; ok: boolean; version: string }>();
-    for (const d of devices) {
-      const iomt = kindToIomt(d.kind);
-      if (!iomt) continue;
-      if (!userId) {
-        map.set(d.id, { iomt, ok: false, version: 'unavailable' });
-        continue;
-      }
-
-      const rec = readIomtConsent(userId, iomt);
-      map.set(d.id, { iomt, ok: !!rec.ok, version: rec.version });
-    }
-    // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-    consentTick;
-    return map;
-  }, [devices, userId, consentTick]);
-
   const stats = useMemo(() => {
     const total = devices.length;
     const iomt = devices.filter((d) => !!kindToIomt(d.kind)).length;
@@ -415,17 +371,8 @@ export default function DevicesPage() {
 
     const streaming = devices.filter((d) => (d.status || '') === 'streaming').length;
 
-    let consentAccepted = 0;
-    let consentPending = 0;
-    for (const d of devices) {
-      const c = consentByDeviceId.get(d.id);
-      if (!c) continue;
-      if (c.ok) consentAccepted += 1;
-      else consentPending += 1;
-    }
-
-    return { total, iomt, connected, streaming, consentAccepted, consentPending };
-  }, [devices, consentByDeviceId, stethById]);
+    return { total, iomt, connected, streaming };
+  }, [devices, stethById]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -523,15 +470,14 @@ export default function DevicesPage() {
                 <Sparkles className="h-4 w-4 text-slate-500" />
                 IoMT & Wearables Hub
                 <span className="text-slate-300">•</span>
-                Consent-aware
+                Patient devices
                 <span className="text-slate-300">•</span>
-                Device consoles
+                Dedicated device pages
               </div>
 
               <h1 className="mt-3 text-2xl font-semibold tracking-tight text-slate-900">My Devices</h1>
               <p className="mt-1 max-w-2xl text-sm text-slate-600">
-                Pair your wearables and IoMT devices, review consent PDFs (version-locked), open consoles — and now you can also connect the
-                stethoscope directly from here via Web Bluetooth.
+                Open your Health Monitor, NexRing, stethoscope, and otoscope from one place. Use each dedicated page to connect, measure, review, and save readings.
               </p>
 
               {!supportsBluetooth ? (
@@ -557,16 +503,11 @@ export default function DevicesPage() {
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
                 {loading ? 'Refreshing…' : 'Refresh'}
               </button>
-
-              <div className="hidden sm:flex items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-700">
-                <ShieldCheck className="h-4 w-4 text-slate-500" />
-                Consent is stored locally per user + device + version
-              </div>
             </div>
           </div>
 
           {/* STAT STRIP */}
-          <div className="relative mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+          <div className="relative mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
               <div className="text-xs text-slate-500">Total</div>
               <div className="mt-1 flex items-baseline justify-between">
@@ -596,18 +537,6 @@ export default function DevicesPage() {
               <div className="mt-1 flex items-baseline justify-between">
                 <div className="text-2xl font-semibold text-slate-900">{stats.streaming}</div>
                 <div className="text-xs text-slate-500">active</div>
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-white/70 p-4 backdrop-blur">
-              <div className="text-xs text-slate-500">Consent</div>
-              <div className="mt-1 flex items-baseline justify-between">
-                <div className="text-2xl font-semibold text-slate-900">
-                  {stats.consentAccepted}
-                  <span className="text-slate-400">/</span>
-                  {stats.consentAccepted + stats.consentPending}
-                </div>
-                <div className="text-xs text-slate-500">accepted</div>
               </div>
             </div>
           </div>
@@ -678,8 +607,6 @@ export default function DevicesPage() {
 
             const status = statusTone(displayStatus, d.paired);
 
-            const consent = consentByDeviceId.get(d.id) || null;
-            const consentUi = consent ? consentTone(consent.ok) : null;
 
             const consoleHref = deviceConsoleHref(d);
 
@@ -749,7 +676,7 @@ export default function DevicesPage() {
                                 'inline-flex items-center gap-1 rounded-full border px-2 py-0.5',
                                 stConnected ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600',
                               )}
-                              title="Stethoscope connection is per-browser-tab (Web Bluetooth)"
+                              title="Bluetooth connection is active only while this browser tab remains open"
                             >
                               <Bluetooth className="h-4 w-4" />
                               {stConnected ? 'BLE connected' : 'BLE idle'}
@@ -779,9 +706,9 @@ export default function DevicesPage() {
                         <div className="flex flex-wrap items-center justify-between gap-2">
                           <div className="inline-flex items-center gap-2 text-xs text-slate-600">
                             <Stethoscope className="h-4 w-4 text-slate-500" />
-                            Stethoscope quick connect
+                            Stethoscope connection
                             <span className="text-slate-300">•</span>
-                            <span className="text-slate-500">tab-scoped</span>
+                            <span className="text-slate-500">this tab only</span>
                           </div>
 
                           <button
@@ -842,30 +769,8 @@ export default function DevicesPage() {
                     <ChevronRight className="h-4 w-4" />
                   </Link>
                 </div>
-
-                {/* Consent row */}
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="inline-flex items-center gap-2 text-xs text-slate-600">
-                      <ShieldCheck className="h-4 w-4 text-slate-500" />
-                      Consent
-                    </div>
-
-                    {consentUi ? (
-                      <div
-                        className={cx('inline-flex items-center gap-1 rounded-full border px-2 py-1 text-xs', consentUi.pill)}
-                        title={consent ? `Version: ${consent.version}` : undefined}
-                      >
-                        {consentUi.icon}
-                        {consentUi.label}
-                        {consent ? <span className="text-slate-400">•</span> : null}
-                        {consent ? <span className="text-[11px]">{consent.version}</span> : null}
-                      </div>
-                    ) : (
-                      <div className="text-xs text-slate-400">—</div>
-                    )}
-                  </div>
-
+                {/* Actions */}
+                <div className="mt-4 flex flex-wrap items-center justify-end gap-2">
                   <div className="flex flex-wrap items-center gap-2">
                     {/* Pair button: for stethoscope we do Web Bluetooth connect/reconnect */}
                     {d.kind === 'stethoscope' ? (
@@ -927,7 +832,7 @@ export default function DevicesPage() {
                           title="Open device workflow"
                         >
                           {streamingId === d.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Cable className="h-4 w-4" />}
-                          {streamingId === d.id ? 'Starting…' : 'Open'}
+                          {streamingId === d.id ? 'Opening...' : 'Open'}
                         </button>
                       </>
                     )}

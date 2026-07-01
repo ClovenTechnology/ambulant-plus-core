@@ -229,11 +229,10 @@ export default function VitalsPage() {
                   Experience
                 </div>
                 <h2 className="mt-2 text-base font-semibold text-slate-900">
-                  Calm, premium health UI
+                  Reading summary
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  This shell adds softer depth, glassmorphism, cleaner spacing, and stronger
-                  hierarchy without breaking your current vitals workflow.
+                  This panel summarises your recent readings and wearable trends in one patient-facing view.
                 </p>
 
                 <div className="mt-4 flex flex-wrap gap-2">

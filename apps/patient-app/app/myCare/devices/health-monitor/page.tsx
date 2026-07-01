@@ -9,6 +9,7 @@ import React, {
   Suspense,
 } from 'react';
 import dynamic from 'next/dynamic';
+import { Capacitor } from '@capacitor/core';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { motion } from 'framer-motion';
 import {
@@ -1976,7 +1977,7 @@ function HealthMonitorPageInner() {
   const [devices, setDevices] = useState<DeviceInfo[]>([
     {
       id: 'duecare-health-monitor',
-      name: 'HealthMonitor-001',
+      name: 'Health Monitor',
       transport: 'ble',
       connected: false,
       batteryPct: null,
@@ -2008,7 +2009,7 @@ function HealthMonitorPageInner() {
 
         upsertDevice({
           id: 'duecare-health-monitor',
-          name: 'HealthMonitor-001',
+          name: 'Health Monitor',
           transport: 'ble',
           connected: s.connected,
           batteryPct: s.batteryPct,
@@ -2042,7 +2043,7 @@ function HealthMonitorPageInner() {
       void hmSessionRef.current?.disconnect();
       hmSessionRef.current = null;
     };
-  }, [patientId, upsertDevice]);
+  }, [patientId, upsertDevice, refreshOverview]);
 
   const { push: pushToast, Toasts } = useToasts();
 
@@ -2050,7 +2051,7 @@ function HealthMonitorPageInner() {
     const bt = typeof navigator !== 'undefined' ? (navigator as any).bluetooth : undefined;
 
     if (!bt?.requestDevice) {
-      const msg = 'Bluetooth is not available in this browser. Use Chrome or Edge on desktop/Android over HTTPS, or connect through the supported native bridge.';
+      const msg = 'Bluetooth is not available in this browser. On mobile, turn on Bluetooth and Location, then use the installed Ambulant+ app or Chrome/Edge over HTTPS.';
       setHmSessionState((prev) => ({ ...prev, connecting: false, error: msg }));
       pushToast(msg);
       return;
@@ -2309,7 +2310,7 @@ function HealthMonitorPageInner() {
   }, []);
 
   function shareSummary() {
-    const text = `Ambulant+ Health Monitor — Patient ${patientId} on ${new Date().toLocaleString(locale)}`;
+    const text = `Ambulant+ Health Monitor summary for patient ${patientId} on ${new Date().toLocaleString(locale)}`;
     if (navigator.share) {
       navigator.share({ title: 'Health summary', text }).catch(() => {});
     } else {
@@ -2514,12 +2515,12 @@ function HealthMonitorPageInner() {
                     <div className="space-y-3">
                       <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] uppercase tracking-[0.18em] text-slate-200">
                         <span className="h-2 w-2 rounded-full bg-emerald-400" />
-                        Contactless Medicine Console
+                        Health Monitor
                       </div>
                       <div>
                         <div className="text-2xl font-semibold tracking-tight md:text-3xl">{profile?.name ?? 'Patient'}</div>
                         <div className="mt-1 max-w-2xl text-sm text-slate-300">
-                          Unified capture for blood pressure, oxygen saturation, temperature, glucose, pulse, and ECG with stable page-owned device control.
+                          Connect once, choose a vital sign, and keep this page open until the reading is captured and saved.
                         </div>
                       </div>
                     </div>
@@ -2539,9 +2540,9 @@ function HealthMonitorPageInner() {
                 </div>
                 <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
                   <div className="rounded-[24px] border border-slate-200/70 bg-white/90 p-4">
-                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Capture focus</div>
+                    <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Before you measure</div>
                     <div className="mt-2 text-lg font-semibold text-slate-900">{currentMeasurementLabel}</div>
-                    <div className="mt-1 text-sm text-slate-500">The current panel determines the active device workflow and keeps session control centralized on this page.</div>
+                    <div className="mt-1 text-sm text-slate-500">Keep Bluetooth on, sit still during measurement, and wait for the captured result before switching tabs.</div>
                   </div>
                   <div className="rounded-[24px] border border-slate-200/70 bg-white/90 p-4">
                     <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Recent timeline</div>
@@ -2738,7 +2739,7 @@ function HealthMonitorPageInner() {
                   <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/80 p-4">
                     <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Session status</div>
                     <div className="mt-2 text-lg font-semibold text-slate-900">{hmSessionState.streaming ? 'Measurement active' : hmSessionState.connected ? 'Ready for capture' : 'Waiting for connection'}</div>
-                    <div className="mt-1 text-sm text-slate-500">{hmSessionState.mode === 'idle' ? 'Select a vital tab and start from the page-owned bridge.' : `Current device mode: ${hmSessionState.mode.toUpperCase()}`}</div>
+                    <div className="mt-1 text-sm text-slate-500">{hmSessionState.mode === 'idle' ? 'Select a vital sign, connect the monitor, then start the reading.' : `Current device mode: ${hmSessionState.mode.toUpperCase()}`}</div>
                   </div>
                   <div className="rounded-[24px] border border-slate-200/70 bg-slate-50/80 p-4">
                     <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Signal telemetry</div>
@@ -2759,9 +2760,9 @@ function HealthMonitorPageInner() {
                         <div className="text-[11px] uppercase tracking-[0.16em] text-slate-500">Capture focus</div>
                         <div className="mt-1 text-base font-semibold text-slate-900">{currentMeasurementLabel}</div>
                       </div>
-                      <span className="rounded-full border border-white bg-white px-3 py-1 text-xs font-medium text-slate-600">Page-owned device orchestration</span>
+                      <span className="rounded-full border border-white bg-white px-3 py-1 text-xs font-medium text-slate-600">Bluetooth guidance</span>
                     </div>
-                    <div className="mt-3 text-sm text-slate-500">Tabs no longer open their own Bluetooth sessions. This page remains the single source of truth for connection, battery, measurement mode, and live telemetry.</div>
+                    <div className="mt-3 text-sm text-slate-500">Use this same page for the full reading. On Android or iOS, Bluetooth and Location should both be switched on for device discovery.</div>
                   </div>
                 </div>
               </div>
