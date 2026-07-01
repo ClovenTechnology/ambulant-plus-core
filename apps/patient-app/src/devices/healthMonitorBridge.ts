@@ -3,6 +3,13 @@
 
 import { Capacitor, type PluginListenerHandle } from '@capacitor/core';
 import { NativeHealthMonitor, type NativeHealthMonitorPlugin } from './nativeHealthMonitorPlugin';
+import {
+  buildAmbulantDeviceReading,
+  buildHealthMonitorBpReading,
+  type AmbulantDeviceMode,
+  type AmbulantDeviceSource,
+  type AmbulantMeasurement,
+} from './ambulantDeviceProtocol';
 import { connectDevice } from './connect';
 import {
   buildLinktopCtrl,
@@ -25,6 +32,8 @@ type VitalEmitter = (opts: {
   meta?: any;
   dedupeKey?: string;
 }) => Promise<void>;
+
+type BridgeVitalEmission = Parameters<VitalEmitter>[0];
 
 type BridgeStatus = {
   connected: boolean;
@@ -202,6 +211,62 @@ type BpAlgorithmState = {
   finalized: boolean;
 };
 
+
+function bridgeNumberFrom(...values: unknown[]): number | null {
+  for (const value of values) {
+    const n = Number(value);
+    if (Number.isFinite(n)) return n;
+  }
+
+  return null;
+}
+
+function bridgeStringFrom(...values: unknown[]): string {
+  for (const value of values) {
+    const s = String(value ?? '').trim();
+    if (s) return s;
+  }
+
+  return '';
+}
+
+function bridgeAdpSource(meta: any): AmbulantDeviceSource {
+  const source = bridgeStringFrom(meta?.source).toLowerCase();
+
+  if (source.includes('native')) return 'native_android';
+  if (source.includes('ios')) return 'ios_native';
+  if (source.includes('desktop')) return 'desktop_bridge';
+
+  return 'web_bluetooth';
+}
+
+function bridgeAdpMode(meta: any): AmbulantDeviceMode {
+  const mode = bridgeStringFrom(meta?.mode, meta?.deviceMode, meta?.ambulant_mode).toLowerCase();
+
+  if (mode === 'home' || mode === 'televisit' || mode === 'debug') {
+    return mode;
+  }
+
+  return bridgeStringFrom(meta?.roomId, meta?.room_id) ? 'televisit' : 'home';
+}
+
+function bridgeAdpMeasurement(type: string): AmbulantMeasurement | null {
+  switch (type) {
+    case 'blood_pressure':
+      return 'blood_pressure';
+    case 'heart_rate':
+      return 'heart_rate';
+    case 'spo2':
+      return 'spo2';
+    case 'temperature':
+      return 'temperature';
+    case 'blood_glucose':
+    case 'glucose':
+      return 'glucose';
+    default:
+      return null;
+  }
+}
 export class HealthMonitorBridge {
   private readonly bpRuntimeSignature = 'BP_PATCH_SIG_2026_04_02_A';
 
@@ -303,6 +368,189 @@ export class HealthMonitorBridge {
     return new Promise<void>((resolve) => setTimeout(resolve, ms));
   }
 
+  private buildAdpReading(input: BridgeVitalEmission) {
+    const type = String(input.type);
+    const payload: any = input.payload ?? {};
+    const meta: any = input.meta ?? {};
+    const source = bridgeAdpSource(meta);
+    const mode = bridgeAdpMode(meta);
+    const deviceId = bridgeStringFrom(input.deviceId, DEVICE_ID);
+    const patientId = this.opts?.patientId;
+    const roomId = bridgeStringFrom(meta?.roomId, meta?.room_id) || undefined;
+    const recordedAt = input.recorded_at ?? new Date().toISOString();
+    const manufacturerFinal =
+      meta?.authoritative === true ||
+      source === 'native_android' ||
+      meta?.confidence === 'manufacturer_final';
+
+    if (type === 'blood_pressure') {
+      const systolic = bridgeNumberFrom(payload.systolic, payload.sys, payload.bloodPressureSystolic);
+      const diastolic = bridgeNumberFrom(payload.diastolic, payload.dia, payload.bloodPressureDiastolic);
+
+      if (systolic == null || diastolic == null) return null;
+
+      return buildHealthMonitorBpReading({
+        source,
+        deviceId,
+        patientId,
+        roomId,
+        mode,
+        recordedAt,
+        systolic,
+        diastolic,
+        pulse: bridgeNumberFrom(payload.pulse, payload.hr, payload.heartRate),
+        map: bridgeNumberFrom(payload.map, payload.meanArterialPressure),
+        manufacturerFinal,
+        raw: {
+          type,
+          payload,
+          meta,
+        },
+      });
+    }
+
+    const measurement = bridgeAdpMeasurement(type);
+    if (!measurement) return null;
+
+    if (measurement === 'heart_rate') {
+      const hr = bridgeNumberFrom(payload.hr, payload.bpm, payload.pulse, payload.heartRate);
+      if (hr == null) return null;
+
+      return buildAmbulantDeviceReading({
+        source,
+        vendor: 'linktop',
+        deviceKind: 'health_monitor',
+        deviceId,
+        patientId,
+        roomId,
+        mode,
+        measurement,
+        values: { hr },
+        unitMap: { hr: 'bpm' },
+        quality: {
+          signal: 'unknown',
+          confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
+          reason: meta?.parent ? `derived_from_${meta.parent}` : null,
+        },
+        recordedAt,
+        raw: { type, payload, meta },
+      });
+    }
+
+    if (measurement === 'spo2') {
+      const spo2 = bridgeNumberFrom(payload.spo2, payload.SpO2, payload.pct, payload.oxygenSaturation);
+      if (spo2 == null) return null;
+
+      return buildAmbulantDeviceReading({
+        source,
+        vendor: 'linktop',
+        deviceKind: 'health_monitor',
+        deviceId,
+        patientId,
+        roomId,
+        mode,
+        measurement,
+        values: {
+          spo2,
+          pulse: bridgeNumberFrom(payload.pulse, payload.hr, payload.heartRate),
+          pi: bridgeNumberFrom(payload.pi),
+        },
+        unitMap: {
+          spo2: '%',
+          pulse: 'bpm',
+          pi: '%',
+        },
+        quality: {
+          signal: 'unknown',
+          confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
+          reason: null,
+        },
+        recordedAt,
+        raw: { type, payload, meta },
+      });
+    }
+
+    if (measurement === 'temperature') {
+      const celsius = bridgeNumberFrom(payload.celsius, payload.temperature, payload.temp);
+      if (celsius == null) return null;
+
+      return buildAmbulantDeviceReading({
+        source,
+        vendor: 'linktop',
+        deviceKind: 'health_monitor',
+        deviceId,
+        patientId,
+        roomId,
+        mode,
+        measurement,
+        values: {
+          celsius,
+          fahrenheit: bridgeNumberFrom(payload.fahrenheit),
+        },
+        unitMap: {
+          celsius: '°C',
+          fahrenheit: '°F',
+        },
+        quality: {
+          signal: 'unknown',
+          confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
+          reason: meta?.authoritative === false ? 'estimated_or_protocol_derived' : null,
+        },
+        recordedAt,
+        raw: { type, payload, meta },
+      });
+    }
+
+    if (measurement === 'glucose') {
+      const glucose = bridgeNumberFrom(payload.glucose, payload.bloodGlucose);
+      if (glucose == null) return null;
+
+      return buildAmbulantDeviceReading({
+        source,
+        vendor: 'linktop',
+        deviceKind: 'health_monitor',
+        deviceId,
+        patientId,
+        roomId,
+        mode,
+        measurement,
+        values: { glucose },
+        unitMap: {
+          glucose: bridgeStringFrom(payload.unit, 'mmol/L'),
+        },
+        quality: {
+          signal: 'unknown',
+          confidence: manufacturerFinal ? 'manufacturer_final' : 'protocol_final',
+          reason: null,
+        },
+        recordedAt,
+        raw: { type, payload, meta },
+      });
+    }
+
+    return null;
+  }
+
+  private async emitVitalWithAdp(input: BridgeVitalEmission) {
+    const meta = { ...(input.meta ?? {}) };
+
+    if (!meta.adp || meta.adp?.protocolVersion !== 'ADP-1') {
+      const adp = this.buildAdpReading(input);
+
+      if (adp) {
+        meta.adp = adp;
+        meta.ambulant_protocol_version = adp.protocolVersion;
+        meta.ambulant_device_mode = adp.mode;
+        meta.ambulant_device_source = adp.source;
+        meta.ambulant_measurement = adp.measurement;
+      }
+    }
+
+    await this.opts.emitVital({
+      ...input,
+      meta,
+    });
+  }
   private assertNativeSupports(mode: 'bp' | 'spo2' | 'temp' | 'glucose' | 'ecg') {
     if (!this.nativeMode) return;
     if (mode === 'bp') return;
@@ -977,7 +1225,7 @@ export class HealthMonitorBridge {
 
     const recordedAt = new Date().toISOString();
 
-    await this.opts.emitVital({
+    await this.emitVitalWithAdp({
       type: 'temperature',
       recorded_at: recordedAt,
       deviceId: DEVICE_ID,
@@ -1148,7 +1396,7 @@ export class HealthMonitorBridge {
     if (result) {
       const recordedAt = new Date().toISOString();
 
-      await this.opts.emitVital({
+      await this.emitVitalWithAdp({
         type: 'blood_pressure',
         recorded_at: recordedAt,
         deviceId: DEVICE_ID,
@@ -1173,7 +1421,7 @@ export class HealthMonitorBridge {
       });
 
       if (typeof result.pulse === 'number') {
-        await this.opts.emitVital({
+        await this.emitVitalWithAdp({
           type: 'heart_rate',
           recorded_at: recordedAt,
           deviceId: DEVICE_ID,
@@ -1466,7 +1714,7 @@ export class HealthMonitorBridge {
 
       const recordedAt = new Date().toISOString();
 
-      await this.opts.emitVital({
+      await this.emitVitalWithAdp({
         type: 'blood_pressure',
         recorded_at: recordedAt,
         deviceId: DEVICE_ID,
@@ -1484,7 +1732,7 @@ export class HealthMonitorBridge {
       });
 
       if (Number.isFinite(pulse)) {
-        await this.opts.emitVital({
+        await this.emitVitalWithAdp({
           type: 'heart_rate',
           recorded_at: recordedAt,
           deviceId: DEVICE_ID,
@@ -2220,7 +2468,7 @@ export class HealthMonitorBridge {
 
     switch (result.kind) {
       case 'bp_result': {
-        await this.opts.emitVital({
+        await this.emitVitalWithAdp({
           type: 'blood_pressure',
           recorded_at: recordedAt,
           deviceId: DEVICE_ID,
@@ -2239,7 +2487,7 @@ export class HealthMonitorBridge {
         });
 
         if (typeof result.pulse === 'number') {
-          await this.opts.emitVital({
+          await this.emitVitalWithAdp({
             type: 'heart_rate',
             recorded_at: recordedAt,
             deviceId: DEVICE_ID,
@@ -2286,7 +2534,7 @@ const validPulse = pulseValue !== null;
 this.spo2LastSpo2 = validSpo2 ? result.spo2 : null;
 this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
 
-        await this.opts.emitVital({
+        await this.emitVitalWithAdp({
           type: 'spo2',
           recorded_at: recordedAt,
           deviceId: DEVICE_ID,
@@ -2302,7 +2550,7 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
         });
 
         if (validPulse) {
-          await this.opts.emitVital({
+          await this.emitVitalWithAdp({
             type: 'heart_rate',
             recorded_at: recordedAt,
             deviceId: DEVICE_ID,
@@ -2338,7 +2586,7 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
         this.tempLastCelsius = result.celsius;
         this.tempLastFahrenheit = result.fahrenheit ?? null;
 
-        await this.opts.emitVital({
+        await this.emitVitalWithAdp({
           type: 'temperature',
           recorded_at: recordedAt,
           deviceId: DEVICE_ID,
@@ -2368,7 +2616,7 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
         this.glucoseLastValue = result.glucose;
         this.glucoseLastUnit = result.unit;
 
-        await this.opts.emitVital({
+        await this.emitVitalWithAdp({
           type: 'blood_glucose',
           recorded_at: recordedAt,
           deviceId: DEVICE_ID,
