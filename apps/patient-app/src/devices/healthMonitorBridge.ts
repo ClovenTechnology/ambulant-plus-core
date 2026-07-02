@@ -578,6 +578,45 @@ export class HealthMonitorBridge {
     return null;
   }
 
+  private shouldPersistClinicalVital(input: BridgeVitalEmission, meta: any) {
+    const type = String(input.type || '').toLowerCase();
+    const source = bridgeAdpSource(meta);
+    const confidence = bridgeStringFrom(
+      meta?.confidence,
+      meta?.quality?.confidence,
+      meta?.adp?.quality?.confidence,
+    ).toLowerCase();
+
+    const manufacturerFinal =
+      source === 'native_android' ||
+      meta?.authoritative === true ||
+      confidence === 'manufacturer_final';
+
+    if (manufacturerFinal) return true;
+
+    const webBleDerived =
+      source === 'web_bluetooth' ||
+      bridgeStringFrom(meta?.source).toLowerCase() === 'ble' ||
+      bridgeStringFrom(meta?.provenance).toLowerCase().includes('web_bluetooth') ||
+      bridgeStringFrom(meta?.route).toLowerCase().includes('vendor_notify');
+
+    if (!webBleDerived) return true;
+
+    // Safety gate:
+    // Web BLE BP/SpO2/derived pulse are calibration outputs until manufacturer
+    // parity is proven. They must not enter clinical vitals or patient-plan logic.
+    if (
+      type === 'blood_pressure' ||
+      type === 'spo2' ||
+      (type === 'heart_rate' &&
+        ['blood_pressure', 'spo2'].includes(bridgeStringFrom(meta?.parent).toLowerCase()))
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
   private async emitVitalWithAdp(input: BridgeVitalEmission) {
     const meta = { ...(input.meta ?? {}) };
 
@@ -591,6 +630,18 @@ export class HealthMonitorBridge {
         meta.ambulant_device_source = adp.source;
         meta.ambulant_measurement = adp.measurement;
       }
+    }
+
+    if (!this.shouldPersistClinicalVital(input, meta)) {
+      this.emitCalibrationEvent('clinical_persist_skipped', {
+        type: input.type,
+        measurement: meta?.ambulant_measurement,
+        reason: 'web_ble_estimate_not_manufacturer_final',
+        source: meta?.ambulant_device_source,
+        confidence: meta?.adp?.quality?.confidence ?? meta?.confidence ?? null,
+        payload: input.payload ?? null,
+      });
+      return;
     }
 
     await this.opts.emitVital({
