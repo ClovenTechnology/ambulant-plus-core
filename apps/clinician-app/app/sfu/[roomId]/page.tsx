@@ -15,7 +15,7 @@ import {
   type Participant,
 } from 'livekit-client';
 
-import { connectRoom, getOrCreateUid } from '@ambulant/rtc';
+import { connectRoom, getOrCreateUid, RTC_TOPIC_CAPTIONS, coerceCaptionEvent, type CaptionEvent } from '@ambulant/rtc';
 
 // Shared atoms
 import { Field } from '@/components/shared/Field';
@@ -113,6 +113,8 @@ type ControlKey =
   | 'export';
 
 type ControlValue = boolean | string;
+
+type CaptionTranscriptEvent = CaptionEvent & { receivedAt: number };
 
 function isControlKey(v: unknown): v is ControlKey {
   return (
@@ -313,6 +315,13 @@ function fmtBP(sys?: number, dia?: number) {
 }
 
 // Helper: read join JWT from session (visitId/roomId variants)
+function isCompactJws(value: unknown) {
+  const s = String(value ?? '').trim();
+  if (!s) return false;
+  const parts = s.split('.');
+  return parts.length === 3 && parts.every(Boolean);
+}
+
 function readJoinJwtFromSession(visitId: string, roomId: string) {
   if (typeof window === 'undefined') return '';
   const keys = [
@@ -560,6 +569,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   // In-call toggles
   const [showOverlay, setShowOverlay] = useState(true);
   const [captionsOn, setCaptionsOn] = useState(false);
+  const [captionTranscript, setCaptionTranscript] = useState<CaptionTranscriptEvent[]>([]);
   const [showVitals, setShowVitals] = useState(true);
   const [showVitalsOverlay, setShowVitalsOverlay] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
@@ -1088,7 +1098,28 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
      - no duplication on reconnect/join
      - cleanup on leave/unmount
   ---------------------------------- */
-  const detachRoomEventsRef = useRef<null | (() => void)>(null);
+    const appendCaptionEvent = useCallback((event: CaptionEvent) => {
+    setCaptionTranscript((prev) => {
+      const stamped: CaptionTranscriptEvent = { ...event, receivedAt: Date.now() };
+      const sameSpeaker = (line: CaptionTranscriptEvent) =>
+        (line.speakerIdentity || line.speakerDisplay) === (event.speakerIdentity || event.speakerDisplay);
+
+      if (!event.final) {
+        const next = prev.filter((line) => line.final || !sameSpeaker(line));
+        return [...next, stamped].slice(-500);
+      }
+
+      const next = prev.filter((line) => {
+        if (!sameSpeaker(line)) return true;
+        if (!line.final) return false;
+        return !(line.sequence === event.sequence && line.timestamp === event.timestamp);
+      });
+
+      return [...next, stamped].slice(-500);
+    });
+  }, []);
+
+const detachRoomEventsRef = useRef<null | (() => void)>(null);
 
   const detachRoomEvents = useCallback(() => {
     try {
@@ -1152,6 +1183,24 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
         const text = TEXT_DECODER.decode(payload);
         const parsed = safeJsonParse(text) ?? text;
         const t = typeof topic === 'string' ? topic : '';
+
+        const captionEvent = coerceCaptionEvent(parsed, {
+          roomId,
+          encounterId,
+          appointmentId,
+          speakerRole: 'patient',
+          speakerName: profile.name || 'Patient',
+          speakerDisplay: profile.name || 'Patient',
+          source: 'unknown',
+        });
+
+        if (t === RTC_TOPIC_CAPTIONS || captionEvent) {
+          if (captionEvent) {
+            appendCaptionEvent(captionEvent);
+            if (!togglesRef.current.captionsOn) setCaptionsOn(true);
+          }
+          return;
+        }
 
         if (t === TOPIC_VITALS) {
           try {
@@ -1929,6 +1978,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       showVitals={showVitals}
       showVitalsOverlay={showVitalsOverlay}
       captionsOn={captionsOn}
+      captionLines={captionTranscript}
       isRecording={isRecording}
       xrEnabled={xrEnabled}
       pip={pip}

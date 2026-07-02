@@ -1,6 +1,7 @@
 'use client';
 
-import type { RefObject } from 'react';
+import { useState, type RefObject } from 'react';
+import type { CaptionEvent } from '@ambulant/rtc';
 
 import HoloVitalsOverlay from '@/components/HoloVitalsOverlay';
 import { Badge, IconBtn } from '@/components/ui';
@@ -32,6 +33,7 @@ type Props = {
   showControls?: boolean;
   hudVitals?: HudVital[];
   hudDevices?: HudDevice[];
+  captionLines?: CaptionEvent[];
   onKickTouchUi?: () => void;
   onToggleMic: () => void;
   onToggleCam: () => void;
@@ -74,6 +76,7 @@ export default function PatientVideoStage({
   showControls = false,
   hudVitals = [],
   hudDevices = [],
+  captionLines = [],
   onKickTouchUi,
   onToggleMic,
   onToggleCam,
@@ -109,6 +112,8 @@ export default function PatientVideoStage({
     : undefined;
 
   const controlsOpacity = showControls ? 'opacity-100' : 'opacity-0 group-hover:opacity-100';
+  const [transcriptOpen, setTranscriptOpen] = useState(false);
+  const visibleCaptions = captionLines.slice(-3);
 
   const setVideoCardNode = (node: HTMLDivElement | null) => {
     if (!videoCardRef) return;
@@ -195,6 +200,23 @@ export default function PatientVideoStage({
         />
         <audio ref={setAudioSinkNode} autoPlay />
 
+
+        {captionsOn && visibleCaptions.length > 0 ? (
+          <div className="pointer-events-none absolute inset-x-3 bottom-20 z-20 flex flex-col items-center gap-1 sm:bottom-24">
+            {visibleCaptions.map((line) => (
+              <div
+                key={[line.speakerIdentity || line.speakerDisplay, line.sequence, line.timestamp].join(':')}
+                className="max-w-[94%] rounded-2xl bg-black/75 px-3 py-2 text-center text-xs font-medium leading-snug text-white shadow-lg backdrop-blur sm:text-sm"
+              >
+                <span className="mr-2 rounded-full bg-white/15 px-2 py-0.5 text-[10px] uppercase tracking-[0.12em] text-white/80">
+                  {line.speakerDisplay || line.speakerName || 'Speaker'}
+                </span>
+                <span>{line.text}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
         <div className="pointer-events-none absolute right-3 top-3 z-10 flex gap-1">
           <Badge className={showVitals ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-white text-slate-600'}>
             Vitals
@@ -241,6 +263,16 @@ export default function PatientVideoStage({
             <span className="text-base">CC</span>
           </IconBtn>
 
+          <button
+            type="button"
+            onClick={() => setTranscriptOpen(true)}
+            className="rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            disabled={captionLines.length === 0}
+            title="Open full transcript"
+          >
+            Transcript
+          </button>
+
           <IconBtn onClick={onToggleOverlay} title={showOverlay ? 'Disable overlay' : 'Enable overlay'}>
             <span className="text-base">🧩</span>
           </IconBtn>
@@ -278,6 +310,46 @@ export default function PatientVideoStage({
           </button>
         </div>
       </div>
+
+      {transcriptOpen ? (
+        <div className="fixed inset-0 z-[70] bg-slate-950/55 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true">
+          <div className="ml-auto flex h-full w-full max-w-xl flex-col rounded-3xl bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">Consultation transcript</div>
+                <div className="text-xs text-slate-500">Live caption transcript. Clinician review is still required before clinical filing.</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setTranscriptOpen(false)}
+                className="rounded-full border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+            <div className="flex-1 space-y-3 overflow-y-auto px-4 py-3">
+              {captionLines.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                  No transcript segments have arrived yet.
+                </div>
+              ) : (
+                captionLines.map((line) => (
+                  <div key={[line.speakerIdentity || line.speakerDisplay, line.sequence, line.timestamp].join(':')} className="rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                    <div className="mb-1 flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      <span>{line.speakerDisplay || line.speakerName || 'Speaker'}</span>
+                      <span>{new Date(line.timestamp).toLocaleTimeString()}</span>
+                      {!line.final ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-amber-700">Partial</span> : null}
+                    </div>
+                    <div className="whitespace-pre-wrap text-sm leading-relaxed text-slate-800">{line.text}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+
 
       {showOverlay ? (
         <HoloVitalsOverlay

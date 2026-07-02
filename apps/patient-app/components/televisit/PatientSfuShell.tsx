@@ -11,7 +11,7 @@ import {
   type RemoteParticipant,
 } from 'livekit-client';
 
-import { connectRoom } from '@ambulant/rtc';
+import { connectRoom, RTC_TOPIC_CAPTIONS, coerceCaptionEvent, type CaptionEvent } from '@ambulant/rtc';
 
 import { ToastProvider, useToast } from '@/components/ToastMount';
 import useVitalsSSE from '@/components/useVitalsSSE';
@@ -71,6 +71,8 @@ type PatientChatMessage = {
   text: string;
   ts: number;
 };
+
+type CaptionTranscriptEvent = CaptionEvent & { receivedAt: number };
 
 function chatSenderLabel(from: PatientChatMessage['from']) {
   if (from === 'patient') return 'You';
@@ -267,6 +269,7 @@ function InnerPatientSfuShell({ params }: Props) {
   const [camOn, setCamOn] = useState(false);
   const [showVitals, setShowVitals] = useState(true);
   const [captionsOn, setCaptionsOn] = useState(false);
+  const [captionTranscript, setCaptionTranscript] = useState<CaptionTranscriptEvent[]>([]);
   const [showOverlay, setShowOverlay] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [screenOn, setScreenOn] = useState(false);
@@ -605,6 +608,27 @@ function InnerPatientSfuShell({ params }: Props) {
   const [patientChatDraft, setPatientChatDraft] = useState('');
   const [clinicianTyping, setClinicianTyping] = useState(false);
   const patientChatEndRef = useRef<HTMLDivElement | null>(null);
+
+  const appendCaptionEvent = useCallback((event: CaptionEvent) => {
+    setCaptionTranscript((prev) => {
+      const stamped: CaptionTranscriptEvent = { ...event, receivedAt: Date.now() };
+      const sameSpeaker = (line: CaptionTranscriptEvent) =>
+        (line.speakerIdentity || line.speakerDisplay) === (event.speakerIdentity || event.speakerDisplay);
+
+      if (!event.final) {
+        const next = prev.filter((line) => line.final || !sameSpeaker(line));
+        return [...next, stamped].slice(-500);
+      }
+
+      const next = prev.filter((line) => {
+        if (!sameSpeaker(line)) return true;
+        if (!line.final) return false;
+        return !(line.sequence === event.sequence && line.timestamp === event.timestamp);
+      });
+
+      return [...next, stamped].slice(-500);
+    });
+  }, []);
   const clinicianTypingTimerRef = useRef<number | null>(null);
 
   const appendIncomingChat = useCallback((message: PatientChatMessage) => {
@@ -765,6 +789,24 @@ function InnerPatientSfuShell({ params }: Props) {
 
         const t = topic || '';
 
+        const captionEvent = coerceCaptionEvent(parsed, {
+          roomId,
+          encounterId,
+          appointmentId,
+          speakerRole: 'guest',
+          speakerName: 'Speaker',
+          speakerDisplay: 'Speaker',
+          source: 'unknown',
+        });
+
+        if (t === RTC_TOPIC_CAPTIONS || captionEvent) {
+          if (captionEvent) {
+            appendCaptionEvent(captionEvent);
+            setCaptionsOn(true);
+          }
+          return;
+        }
+
         if (t === TOPIC_CHAT) {
           if (payment.handleIncomingChatPayload(parsed)) return;
           if (handleIncomingChatPayload(parsed)) return;
@@ -821,7 +863,7 @@ function InnerPatientSfuShell({ params }: Props) {
         r.off(RoomEvent.DataReceived, onData);
       };
     },
-    [attachTracks, dec, handleIncomingChatPayload, payment, toast],
+    [appendCaptionEvent, attachTracks, dec, encounterId, handleIncomingChatPayload, payment, appointmentId, roomId, toast],
   );
 
   const join = useCallback(async () => {
@@ -1127,6 +1169,7 @@ function InnerPatientSfuShell({ params }: Props) {
           camOn={camOn}
           showVitals={showVitals}
           captionsOn={captionsOn}
+          captionLines={captionTranscript}
           showOverlay={showOverlay}
           isRecording={isRecording}
           screenOn={screenOn}
@@ -1191,6 +1234,7 @@ function InnerPatientSfuShell({ params }: Props) {
                   camOn={camOn}
                   showVitals={showVitals}
                   captionsOn={captionsOn}
+                  captionLines={captionTranscript}
                   showOverlay={showOverlay}
                   isRecording={isRecording}
                   screenOn={screenOn}

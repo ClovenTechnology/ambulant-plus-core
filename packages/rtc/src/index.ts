@@ -154,3 +154,4 @@ export { DeviceSettings } from "./components/DeviceSettings";
 export { MonitorPanel } from "./components/MonitorPanel";
 export { CaptionsOverlay } from "./components/CaptionsOverlay";
 export { startWearableDemo } from "./iomt";
+export * from "./captionTypes";
