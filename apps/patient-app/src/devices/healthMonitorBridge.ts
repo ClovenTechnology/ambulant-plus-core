@@ -372,6 +372,8 @@ export class HealthMonitorBridge {
   private spo2OxRemainder: number[] = [];
   private spo2IrSamples: number[] = [];
   private spo2RedSamples: number[] = [];
+  private spo2RawPpgBuffer: number[] = [];
+  private spo2RawPpgFrameKeys = new Set<string>();
   private spo2SampleIndex = 0;
   private spo2PeakIndices: number[] = [];
   private spo2AcSign = 0;
@@ -635,6 +637,8 @@ export class HealthMonitorBridge {
     this.spo2OxRemainder = [];
     this.spo2IrSamples = [];
     this.spo2RedSamples = [];
+    this.spo2RawPpgBuffer = [];
+    this.spo2RawPpgFrameKeys.clear();
     this.spo2SampleIndex = 0;
     this.spo2PeakIndices = [];
     this.spo2AcSign = 0;
@@ -1103,6 +1107,114 @@ export class HealthMonitorBridge {
     return count;
   }
 
+  private readU24beFromBytes(bytes: number[], offset: number): number | null {
+    if (offset < 0 || offset + 2 >= bytes.length) return null;
+
+    const a = bytes[offset];
+    const b = bytes[offset + 1];
+    const c = bytes[offset + 2];
+
+    if (![a, b, c].every((value) => Number.isInteger(value) && value >= 0 && value <= 255)) {
+      return null;
+    }
+
+    return (a << 16) | (b << 8) | c;
+  }
+
+  private extractSpo2RawPayload(rawBytes: number[]): number[] {
+    if (!Array.isArray(rawBytes) || rawBytes.length < 8) return [];
+
+    // Complete/end frame, not PPG data.
+    if (
+      rawBytes.length >= 11 &&
+      rawBytes[0] === 2 &&
+      rawBytes[1] === 2 &&
+      rawBytes[4] === 16 &&
+      rawBytes[5] === 20
+    ) {
+      return [];
+    }
+
+    // First chunk of a split SpO2 PPG packet.
+    if (
+      rawBytes.length >= 8 &&
+      rawBytes[0] === 2 &&
+      rawBytes[1] === 31 &&
+      rawBytes[2] === 0 &&
+      rawBytes[3] === 4 &&
+      rawBytes[4] === 132
+    ) {
+      // Keep the byte immediately after the module marker. In captures this is
+      // the first byte of the first 3-byte red channel sample.
+      return rawBytes.slice(5);
+    }
+
+    // Continuation chunk. Drop trailing checksum/end bytes.
+    if (rawBytes[rawBytes.length - 1] === 255 && rawBytes.length >= 6) {
+      return rawBytes.slice(0, -3);
+    }
+
+    return [];
+  }
+
+  private processSpo2RawPpgBytes(rawBytes: number[], recordedAt: string) {
+    if (this.nativeMode || this.mode !== 'spo2') return;
+
+    const payload = this.extractSpo2RawPayload(rawBytes);
+    if (payload.length === 0) return;
+
+    const frameKey = rawBytes.map((value) => value.toString(16).padStart(2, '0')).join('');
+    if (this.spo2RawPpgFrameKeys.has(frameKey)) return;
+
+    this.spo2RawPpgFrameKeys.add(frameKey);
+    if (this.spo2RawPpgFrameKeys.size > 2400) {
+      this.spo2RawPpgFrameKeys = new Set(Array.from(this.spo2RawPpgFrameKeys).slice(-1200));
+    }
+
+    this.spo2RawPpgBuffer.push(...payload);
+
+    const emittedIrSamples: number[] = [];
+
+    while (this.spo2RawPpgBuffer.length >= 6) {
+      const red = this.readU24beFromBytes(this.spo2RawPpgBuffer, 0);
+      const ir = this.readU24beFromBytes(this.spo2RawPpgBuffer, 3);
+
+      this.spo2RawPpgBuffer.splice(0, 6);
+
+      if (red == null || ir == null) continue;
+
+      // Observed Linktop Web BLE ranges:
+      // red around 580k-620k, IR around 170k-200k with finger signal.
+      // Keep broad bounds to avoid dropping legitimate values.
+      if (red < 20000 || red > 1200000 || ir < 20000 || ir > 600000) {
+        continue;
+      }
+
+      this.ingestSpo2Sample(red, ir, recordedAt);
+      emittedIrSamples.push(ir);
+    }
+
+    if (emittedIrSamples.length > 0 && typeof window !== 'undefined') {
+      window.dispatchEvent(
+        new CustomEvent('iomt:ppg', {
+          detail: {
+            deviceId: DEVICE_ID,
+            timestamp: recordedAt,
+            samples: emittedIrSamples,
+            source: 'web_bluetooth_raw_notify',
+          },
+        }),
+      );
+
+      this.emitCalibrationEvent('spo2_raw_ppg_samples', {
+        sampleCount: emittedIrSamples.length,
+        redSampleCount: this.spo2RedSamples.length,
+        irSampleCount: this.spo2IrSamples.length,
+        latestIrSamples: emittedIrSamples.slice(-20),
+      });
+    }
+  }
+
   private median(values: number[]): number | null {
     if (!values.length) return null;
 
@@ -1197,21 +1309,22 @@ export class HealthMonitorBridge {
 
       const ratio = redAcDc / irAcDc;
 
-      // Keep the physiological/observed Linktop range conservative.
-      if (!Number.isFinite(ratio) || ratio < 0.2 || ratio > 0.9) continue;
+      // Keep broad observed Linktop range. Web BLE is protocol-derived, so
+      // we estimate conservatively and mark provenance as estimated.
+      if (!Number.isFinite(ratio) || ratio < 0.05 || ratio > 1.6) continue;
 
-      // Empirically aligned against the manufacturer app capture:
-      // the uploaded same-session captures around SpO2 97% cluster close to this curve.
-      const spo2 = 104 - 17 * ratio;
+      // Practical red/IR ratio approximation for Linktop Web BLE capture.
+      // This is not manufacturer-final; it is deliberately labelled estimated.
+      const spo2 = 110 - 25 * ratio;
 
-      if (!Number.isFinite(spo2) || spo2 < 85 || spo2 > 100) continue;
+      if (!Number.isFinite(spo2) || spo2 < 70 || spo2 > 100) continue;
 
       estimates.push(spo2);
       ratios.push(ratio);
       perfusion.push(irAcDc * 100);
     }
 
-    if (estimates.length < 3) return null;
+    if (estimates.length < 2) return null;
 
     const sortedEstimates = estimates.slice().sort((a, b) => a - b);
     const trimmed =
@@ -1245,12 +1358,18 @@ export class HealthMonitorBridge {
     this.ingestSpo2IrSample(ir, recordedAt);
   }
 
+  private hasUsableSpo2Value(value: unknown): value is number {
+    return typeof value === 'number' && Number.isFinite(value) && value >= 70 && value <= 100;
+  }
+
   private async finalizeWebSpo2Estimate(recordedAt: string): Promise<boolean> {
     if (this.nativeMode) return false;
     if (this.spo2LastSpo2 != null) return true;
 
     const estimate = this.computeSpo2FromRedIr();
     if (!estimate) return false;
+
+    if (!this.hasUsableSpo2Value(estimate.spo2)) return false;
 
     this.spo2LastSpo2 = estimate.spo2;
 
@@ -1668,6 +1787,20 @@ export class HealthMonitorBridge {
     });
   }
 
+  private isUnstableWebBpResult(systolic: number, diastolic: number, result: BpComputedResult) {
+    const pulsePressure = systolic - diastolic;
+
+    return (
+      systolic <= diastolic ||
+      pulsePressure < 35 ||
+      diastolic >= 105 ||
+      systolic >= 170 ||
+      result.beatCount < 30 ||
+      !Number.isFinite(result.peakAmplitude) ||
+      result.peakAmplitude < 10
+    );
+  }
+
   private stabilizeWebBpResult(result: BpComputedResult): BpComputedResult | null {
     const systolic = Math.round(result.systolic);
     let diastolic = Math.round(result.diastolic);
@@ -1700,17 +1833,13 @@ export class HealthMonitorBridge {
       }
     }
 
-    // Large partial-threshold outputs are safer as "retake" than as saved readings.
-    // Example from calibration: 180/144 generated by partial threshold fallback while
-    // paired manufacturer readings were much lower.
-    if (
-      result.confidence === 'partial_threshold_fallback' &&
-      (systolic >= 170 || diastolic >= 115)
-    ) {
+    // Web BLE BP remains protocol-derived. If the envelope is unstable, reject it
+    // rather than saving a clinically misleading value.
+    if (this.isUnstableWebBpResult(systolic, diastolic, result)) {
       return null;
     }
 
-    if (systolic <= diastolic || systolic - diastolic < 25) return null;
+    if (systolic <= diastolic || systolic - diastolic < 35) return null;
 
     const map = Math.round((systolic + 2 * diastolic) / 3);
     const adjusted = reasons.length > 0;
@@ -1830,7 +1959,7 @@ export class HealthMonitorBridge {
 
     this.emitCalibrationEvent('web_result_failed', {
       measurement: 'blood_pressure',
-      reason: 'bp_finalize_failed',
+      reason: 'bp_unstable_web_ble_estimate_retake_required',
       bp: {
         rawSamples: this.bpAlgo.rawSamples.slice(),
         scaledPressures: this.bpAlgo.scaledPressures.slice(),
@@ -3433,6 +3562,7 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
     const raw = this.dvToU8(dv);
     const rawBytes = Array.from(raw);
     const rawHex = rawBytes.map((value) => value.toString(16).padStart(2, '0')).join('');
+    const recordedAt = new Date().toISOString();
 
     console.info('[HealthMonitorBridge] notify', {
       charKey,
@@ -3447,6 +3577,8 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
       raw: rawBytes,
       rawHex,
     });
+
+    this.processSpo2RawPpgBytes(rawBytes, recordedAt);
 
     // Linktop Ox/SpO2 packets must be consumed before generic frame parsing.
     // The Android SDK routes these 20-byte packets into OxTask before normal
