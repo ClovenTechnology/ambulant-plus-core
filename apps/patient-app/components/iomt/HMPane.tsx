@@ -1100,14 +1100,8 @@ export default function HMPane({
 
     onResult?.(reading);
 
-    void postVital({
-      patientId: resolvedPatientId,
-      kind: reading.kind,
-      payload: reading.payload,
-      recordedAt: reading.at,
-      roomId: resolvedRoomId,
-    });
-
+    // Persistence is handled once by the HealthMonitorSession/Bridge layer.
+    // Keep this pane responsible for display, local snapshot, and history only.
     setActionNote(`${reading.label} captured.`);
   }
 

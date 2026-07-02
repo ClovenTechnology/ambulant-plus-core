@@ -597,10 +597,10 @@ export class HealthMonitorBridge {
   }
   private assertNativeSupports(mode: 'bp' | 'spo2' | 'temp' | 'glucose' | 'ecg') {
     if (!this.nativeMode) return;
-    if (mode === 'bp') return;
+    if (mode === 'bp' || mode === 'spo2' || mode === 'temp' || mode === 'ecg') return;
 
     throw new Error(
-      `Native Android HealthMonitor plugin currently supports blood pressure only. ${mode.toUpperCase()} must use the BLE bridge path until native lifecycle support is implemented.`,
+      'Native Android HealthMonitor plugin does not yet expose a confirmed glucose final-result callback. Use the Web/BLE fallback until native glucose support is verified.',
     );
   }
 
@@ -1717,6 +1717,304 @@ export class HealthMonitorBridge {
       this.nativeConnected = false;
       this.telemetry({ connected: false });
       console.info('[HealthMonitorBridge/native] disconnected', data);
+    });
+
+    const nativeRecordedAt = () => new Date().toISOString();
+
+    const emitNativeHeartRate = async (
+      recordedAt: string,
+      pulse: number | null,
+      parent: 'blood_pressure' | 'spo2',
+    ) => {
+      if (!Number.isFinite(pulse ?? NaN)) return;
+
+      await this.emitVitalWithAdp({
+        type: 'heart_rate',
+        recorded_at: recordedAt,
+        deviceId: DEVICE_ID,
+        payload: {
+          hr: pulse,
+          unit: 'bpm',
+        },
+        meta: {
+          source: 'native-android',
+          parent,
+          authoritative: false,
+          confidence: 'manufacturer_final',
+          route: 'linktop_native_sdk',
+        },
+        dedupeKey: 'hr',
+      });
+    };
+
+    const handleNativeBloodPressure = async (payload: any) => {
+      const data = this.unwrapNativeData(payload);
+      const systolic = Number(data?.systolic);
+      const diastolic = Number(data?.diastolic);
+      const pulse = bridgeNumberFrom(data?.pulse, data?.heartRate, data?.hr);
+
+      if (!Number.isFinite(systolic) || !Number.isFinite(diastolic)) return;
+
+      const recordedAt = nativeRecordedAt();
+
+      await this.emitVitalWithAdp({
+        type: 'blood_pressure',
+        recorded_at: recordedAt,
+        deviceId: DEVICE_ID,
+        payload: {
+          systolic,
+          diastolic,
+          pulse,
+          unit: 'mmHg',
+        },
+        meta: {
+          source: 'native-android',
+          route: 'linktop_native_sdk',
+          authoritative: true,
+          confidence: 'manufacturer_final',
+        },
+      });
+
+      await emitNativeHeartRate(recordedAt, pulse, 'blood_pressure');
+
+      this.opts?.onDeviceEvent?.({
+        type: 'bp_result',
+        systolic,
+        diastolic,
+        pulse,
+        map: null,
+      });
+
+      if (this.mode === 'bp') {
+        await this.finishBpCycle('bp_result_received');
+      }
+    };
+
+    const handleNativeBpPressure = (payload: any) => {
+      const data = this.unwrapNativeData(payload);
+      const pressure = Number(data?.pressure);
+      if (!Number.isFinite(pressure)) return;
+
+      this.bpLatestPressure = pressure;
+      if (this.bpPeakPressure == null || pressure > this.bpPeakPressure) {
+        this.bpPeakPressure = pressure;
+      }
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('iomt:bp_pressure', {
+            detail: {
+              deviceId: DEVICE_ID,
+              timestamp: nativeRecordedAt(),
+              latestPressure: pressure,
+              peakPressure: this.bpPeakPressure,
+              samples: [pressure],
+              raw: [],
+              pressureFrames: this.bpPressureFrames,
+              pressureSamplesSeen: this.bpPressureSamplesSeen + 1,
+              stage: 'native-android',
+            },
+          }),
+        );
+      }
+
+      this.bpPressureFrames += 1;
+      this.bpPressureSamplesSeen += 1;
+    };
+
+    const handleNativeSpo2 = async (payload: any) => {
+      const data = this.unwrapNativeData(payload);
+      const spo2 = bridgeNumberFrom(data?.spo2, data?.oxygenSaturation, data?.pct);
+      const pulse = bridgeNumberFrom(data?.pulse, data?.heartRate, data?.hr);
+      const pi = bridgeNumberFrom(data?.pi, data?.perfusionIndex);
+
+      if (!Number.isFinite(spo2 ?? NaN)) return;
+
+      this.spo2LastSpo2 = spo2;
+      this.spo2LastPulse = Number.isFinite(pulse ?? NaN) ? pulse : this.spo2LastPulse;
+      this.noteGenericSignal(this.spo2State);
+
+      const recordedAt = nativeRecordedAt();
+
+      await this.emitVitalWithAdp({
+        type: 'spo2',
+        recorded_at: recordedAt,
+        deviceId: DEVICE_ID,
+        payload: {
+          spo2,
+          pulse,
+          pi,
+          unit: '%',
+        },
+        meta: {
+          source: 'native-android',
+          route: 'linktop_native_sdk',
+          authoritative: true,
+          confidence: 'manufacturer_final',
+        },
+      });
+
+      await emitNativeHeartRate(recordedAt, Number.isFinite(pulse ?? NaN) ? pulse : null, 'spo2');
+
+      this.opts?.onDeviceEvent?.({
+        type: 'spo2_result',
+        spo2,
+        pulse: Number.isFinite(pulse ?? NaN) ? pulse : null,
+        pi: Number.isFinite(pi ?? NaN) ? pi : null,
+      });
+
+      if (this.mode === 'spo2') {
+        await this.finishSpo2Cycle('result_received');
+      }
+    };
+
+    const handleNativePpg = (payload: any) => {
+      const data = this.unwrapNativeData(payload);
+      const sample = bridgeNumberFrom(data?.value, data?.sample);
+      if (!Number.isFinite(sample ?? NaN)) return;
+
+      this.noteGenericSignal(this.spo2State);
+      this.spo2PpgFrames += 1;
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('iomt:ppg', {
+            detail: {
+              deviceId: DEVICE_ID,
+              timestamp: nativeRecordedAt(),
+              samples: [sample],
+              source: 'native-android',
+            },
+          }),
+        );
+      }
+    };
+
+    const handleNativeTemperature = async (payload: any) => {
+      const data = this.unwrapNativeData(payload);
+      const rawCelsius = bridgeNumberFrom(data?.celsius, data?.temp, data?.temperature);
+      if (!Number.isFinite(rawCelsius ?? NaN)) return;
+
+      const celsius = Number(rawCelsius);
+      const fahrenheit = (celsius * 9) / 5 + 32;
+      const recordedAt = nativeRecordedAt();
+
+      this.tempLastCelsius = celsius;
+      this.tempLastFahrenheit = fahrenheit;
+      this.noteGenericSignal(this.tempState);
+
+      await this.emitVitalWithAdp({
+        type: 'temperature',
+        recorded_at: recordedAt,
+        deviceId: DEVICE_ID,
+        payload: {
+          celsius,
+          fahrenheit,
+          unit: 'C',
+        },
+        meta: {
+          source: 'native-android',
+          route: 'linktop_native_sdk',
+          authoritative: true,
+          confidence: 'manufacturer_final',
+        },
+      });
+
+      this.opts?.onDeviceEvent?.({
+        type: 'temp_result',
+        celsius,
+        fahrenheit,
+      });
+
+      if (this.mode === 'temp') {
+        await this.finishTempCycle('result_received');
+      }
+    };
+
+    const handleNativeEcg = (payload: any) => {
+      const data = this.unwrapNativeData(payload);
+      const samples = Array.isArray(data?.samples)
+        ? data.samples.map(Number).filter(Number.isFinite)
+        : Number.isFinite(Number(data?.value))
+          ? [Number(data.value)]
+          : [];
+
+      if (samples.length === 0) return;
+
+      this.noteGenericSignal(this.ecgState);
+      this.ecgSampleCount += samples.length;
+      this.ecgLastSampleAt = Date.now();
+      this.ecgSampleHz = bridgeNumberFrom(data?.sampleHz, data?.hz) ?? this.ecgSampleHz;
+      this.ecgSamples.push(...samples);
+      this.ecgSamples = this.ecgSamples.slice(-1500);
+
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(
+          new CustomEvent('iomt:ecg', {
+            detail: {
+              deviceId: DEVICE_ID,
+              timestamp: nativeRecordedAt(),
+              samples,
+              sampleHz: this.ecgSampleHz,
+              source: 'native-android',
+            },
+          }),
+        );
+      }
+    };
+
+    const handleNativeMeasurementEnd = async (payload: any) => {
+      const data = this.unwrapNativeData(payload);
+      const type = bridgeStringFrom(data?.type).toLowerCase();
+
+      if ((type === 'spo2' || this.mode === 'spo2') && this.mode === 'spo2') {
+        await this.finishSpo2Cycle(this.spo2LastSpo2 != null ? 'result_received' : 'signal_detected_no_result');
+        return;
+      }
+
+      if ((type === 'temperature' || type === 'temp' || this.mode === 'temp') && this.mode === 'temp') {
+        await this.finishTempCycle(this.tempLastCelsius != null ? 'result_received' : 'signal_detected_no_result');
+        return;
+      }
+
+      if ((type === 'ecg' || this.mode === 'ecg') && this.mode === 'ecg') {
+        await this.finishEcgCycle(this.ecgSampleCount > 0 ? 'result_received' : 'signal_detected_no_result');
+      }
+    };
+
+    await on('telemetry', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      const connected = Boolean(data?.connected);
+      this.nativeConnected = connected;
+      this.telemetry({
+        connected,
+        batteryPct: typeof data?.batteryPct === 'number' ? data.batteryPct : undefined,
+        rssi: typeof data?.rssi === 'number' ? data.rssi : undefined,
+      });
+    });
+
+    await on('measurementError', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      console.warn('[HealthMonitorBridge/native] measurementError', data);
+      this.opts?.onDeviceEvent?.({
+        type: 'bp_error',
+        reason: data?.message || 'native_measurement_error',
+      });
+    });
+
+    await on('blood_pressure_progress', handleNativeBpPressure);
+    await on('blood_pressure', handleNativeBloodPressure);
+    await on('spo2', handleNativeSpo2);
+    await on('ppg', handleNativePpg);
+    await on('temperature', handleNativeTemperature);
+    await on('ecg', handleNativeEcg);
+    await on('ecgSignalQuality', (payload) => {
+      const data = this.unwrapNativeData(payload);
+      const quality = bridgeNumberFrom(data?.quality);
+      if (Number.isFinite(quality ?? NaN)) this.ecgSignalQuality = quality;
+    });
+    await on('measurementEnd', (payload) => {
+      void handleNativeMeasurementEnd(payload);
     });
 
     await on('bpPressure', (payload) => {
@@ -2885,7 +3183,7 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
       this.mode = 'bp';
       this.resetBpBootstrap();
       await NativeHealthMonitor.setMeasurePosition({ wrist: this.bpMeasureWrist });
-      await NativeHealthMonitor.startMeasurements();
+      await NativeHealthMonitor.startMeasurements({ type: 'bp' });
       return;
     }
 
@@ -2911,6 +3209,14 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
   async startSpo2() {
     this.assertNativeSupports('spo2');
 
+    if (this.nativeMode) {
+      await this.prepareForModeStart('spo2');
+      this.mode = 'spo2';
+      this.resetSpo2State();
+      await NativeHealthMonitor.startMeasurements({ type: 'spo2' });
+      return;
+    }
+
     await this.prepareForModeStart('spo2');
 
     this.mode = 'spo2';
@@ -2934,6 +3240,14 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
   async startEcg() {
     this.assertNativeSupports('ecg');
 
+    if (this.nativeMode) {
+      await this.prepareForModeStart('ecg');
+      this.mode = 'ecg';
+      this.resetEcgState();
+      await NativeHealthMonitor.startMeasurements({ type: 'ecg' });
+      return;
+    }
+
     await this.prepareForModeStart('ecg');
 
     this.mode = 'ecg';
@@ -2950,6 +3264,14 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
 
   async startTemperature() {
     this.assertNativeSupports('temp');
+
+    if (this.nativeMode) {
+      await this.prepareForModeStart('temp');
+      this.mode = 'temp';
+      this.resetTempState();
+      await NativeHealthMonitor.startMeasurements({ type: 'temp' });
+      return;
+    }
 
     await this.prepareForModeStart('temp');
 

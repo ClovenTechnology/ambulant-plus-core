@@ -2049,8 +2049,10 @@ function HealthMonitorPageInner() {
 
   const connectHealthMonitor = useCallback(async () => {
     const bt = typeof navigator !== 'undefined' ? (navigator as any).bluetooth : undefined;
+    const nativeHealthMonitorBridge =
+      Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android';
 
-    if (!bt?.requestDevice) {
+    if (!nativeHealthMonitorBridge && !bt?.requestDevice) {
       const msg = 'Bluetooth is not available in this browser. On mobile, turn on Bluetooth and Location, then use the installed Ambulant+ app or Chrome/Edge over HTTPS.';
       setHmSessionState((prev) => ({ ...prev, connecting: false, error: msg }));
       pushToast(msg);
