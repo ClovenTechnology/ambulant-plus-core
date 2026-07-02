@@ -7,6 +7,7 @@ import {
   Bluetooth,
   CheckCircle2,
   CircleStop,
+  Download,
   Cpu,
   Droplets,
   HeartPulse,
@@ -720,6 +721,24 @@ function snapshotPatchFromReading(reading: HealthMonitorReading) {
   return {};
 }
 
+function downloadJsonFile(filename: string, data: unknown) {
+  if (typeof window === 'undefined') return;
+
+  const blob = new Blob([JSON.stringify(data, null, 2)], {
+    type: 'application/json',
+  });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+
+  URL.revokeObjectURL(url);
+}
+
 function formatTime(value: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
@@ -1002,7 +1021,9 @@ export default function HMPane({
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [liveEcgSamples, setLiveEcgSamples] = useState<number[]>([]);
   const [livePpgSamples, setLivePpgSamples] = useState<number[]>([]);
+  const [calibrationEventCount, setCalibrationEventCount] = useState(0);
 
+  const calibrationEventsRef = useRef<any[]>([]);
   const sessionRef = useRef<ReturnType<typeof createHealthMonitorSession> | null>(
     null,
   );
@@ -1021,6 +1042,30 @@ export default function HMPane({
       : selected === 'spo2' || selected === 'hr'
         ? livePpgSamples
         : [];
+
+  useEffect(() => {
+    const onCalibration = (event: Event) => {
+      const detail = (event as CustomEvent).detail;
+      if (!detail) return;
+
+      calibrationEventsRef.current.push(detail);
+
+      if (calibrationEventsRef.current.length > 12000) {
+        calibrationEventsRef.current = calibrationEventsRef.current.slice(-12000);
+      }
+
+      const nextCount = calibrationEventsRef.current.length;
+      if (nextCount <= 10 || nextCount % 50 === 0) {
+        setCalibrationEventCount(nextCount);
+      }
+    };
+
+    window.addEventListener('iomt:hm_calibration', onCalibration as EventListener);
+
+    return () => {
+      window.removeEventListener('iomt:hm_calibration', onCalibration as EventListener);
+    };
+  }, []);
 
   useEffect(() => {
     if (directPatientId) {
@@ -1192,6 +1237,9 @@ export default function HMPane({
         await connect();
       }
 
+      calibrationEventsRef.current = [];
+      setCalibrationEventCount(0);
+
       if (selected === 'ecg') setLiveEcgSamples([]);
       if (selected === 'spo2' || selected === 'hr') setLivePpgSamples([]);
 
@@ -1202,6 +1250,65 @@ export default function HMPane({
     } catch (err: any) {
       setActionNote(err?.message || `Could not start ${selectedMeta.label}.`);
     }
+  }
+
+  function downloadCalibrationCapture() {
+    const generatedAt = new Date().toISOString();
+    const safeKind = selected.replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
+    const filename = `health-monitor-web-ble-calibration-${safeKind}-${Date.now()}.json`;
+
+    downloadJsonFile(filename, {
+      schema: 'ambulant.health_monitor.web_ble_calibration.v1',
+      generatedAt,
+      device: {
+        id: 'duecare.health-monitor',
+        label: 'Health Monitor',
+        vendor: 'linktop',
+      },
+      capture: {
+        selected,
+        selectedSessionKind,
+        patientId: resolvedPatientId || null,
+        roomId: resolvedRoomId || null,
+        source: 'web_bluetooth_or_native_bridge',
+        note: 'Enter same-session manufacturer/native SDK result under manufacturerReference before analysis.',
+      },
+      manufacturerReference: {
+        bloodPressure: {
+          systolic: null,
+          diastolic: null,
+          pulse: null,
+          measuredAt: null,
+        },
+        spo2: {
+          spo2: null,
+          pulse: null,
+          measuredAt: null,
+        },
+        temperature: {
+          celsius: null,
+          fahrenheit: null,
+          measuredAt: null,
+        },
+        ecg: {
+          heartRate: null,
+          interpretation: null,
+          measuredAt: null,
+        },
+      },
+      sessionState,
+      latest,
+      latestForSelected,
+      historyForSelected: history.filter((item) => item.kind === selected).slice(0, 10),
+      liveSamples: {
+        ppg: livePpgSamples.slice(),
+        ecg: liveEcgSamples.slice(),
+      },
+      events: calibrationEventsRef.current.slice(),
+    });
+
+    setCalibrationEventCount(calibrationEventsRef.current.length);
+    setActionNote(`Calibration capture exported with ${calibrationEventsRef.current.length} events.`);
   }
 
   async function stop() {
@@ -1321,7 +1428,7 @@ export default function HMPane({
         state={sessionState}
       />
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-4">
         <button
           type="button"
           onClick={connect}
@@ -1369,6 +1476,20 @@ export default function HMPane({
           className="inline-flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
         >
           Disconnect
+        </button>
+
+        <button
+          type="button"
+          onClick={downloadCalibrationCapture}
+          className="inline-flex items-center justify-center gap-2 rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-3 text-sm font-semibold text-cyan-800 transition hover:bg-cyan-100"
+        >
+          <Download className="h-4 w-4" />
+          Export calibration
+          {calibrationEventCount > 0 ? (
+            <span className="rounded-full bg-white px-2 py-0.5 text-[10px] text-cyan-700">
+              {calibrationEventCount}
+            </span>
+          ) : null}
         </button>
       </div>
 

@@ -1186,6 +1186,23 @@ export class HealthMonitorBridge {
 
     if (changed || elapsed > 2000) {
       this.spo2PulseLastEmittedAt = nowMs;
+
+      this.emitCalibrationEvent('web_result', {
+        measurement: 'spo2_pulse_only',
+        result: {
+          spo2: this.spo2LastSpo2,
+          pulse,
+          pi: null,
+          estimatedFrom: 'ppg_wave',
+        },
+        spo2: {
+          ppgFrames: this.spo2PpgFrames,
+          irSampleCount: this.spo2IrSamples.length,
+          peakIndices: this.spo2PeakIndices.slice(),
+          latestIrSamples: this.spo2IrSamples.slice(-250),
+        },
+      });
+
       this.opts?.onDeviceEvent?.({
         type: 'spo2_result',
         spo2: this.spo2LastSpo2,
@@ -1268,6 +1285,21 @@ export class HealthMonitorBridge {
     this.tempLastFahrenheit = (estimatedBodyC * 9) / 5 + 32;
 
     const recordedAt = new Date().toISOString();
+
+    this.emitCalibrationEvent('web_result', {
+      measurement: 'temperature',
+      result: {
+        celsius: this.tempLastCelsius,
+        fahrenheit: this.tempLastFahrenheit,
+        algorithm: 'bt-js-shaped',
+      },
+      temperature: {
+        ambientRaw: this.tempBtAlgo.ambientRaw.slice(),
+        bodyRaw: this.tempBtAlgo.bodyRaw.slice(),
+        ambientC,
+        objectC,
+      },
+    });
 
     await this.emitVitalWithAdp({
       type: 'temperature',
@@ -1440,6 +1472,22 @@ export class HealthMonitorBridge {
     if (result) {
       const recordedAt = new Date().toISOString();
 
+      this.emitCalibrationEvent('web_result', {
+        measurement: 'blood_pressure',
+        result,
+        bp: {
+          rawSamples: this.bpAlgo.rawSamples.slice(),
+          scaledPressures: this.bpAlgo.scaledPressures.slice(),
+          beatIndices: this.bpAlgo.beatIndices.slice(),
+          beatPressures: this.bpAlgo.beatPressures.slice(),
+          beatAmplitudes: this.bpAlgo.beatAmplitudes.slice(),
+          calibration: this.bpAlgo.calibration,
+          tempCompRaw: this.bpAlgo.tempCompRaw,
+          rawBaseline: this.bpRawBaseline,
+          rawDeltaPeak: this.bpRawDeltaPeak,
+        },
+      });
+
       await this.emitVitalWithAdp({
         type: 'blood_pressure',
         recorded_at: recordedAt,
@@ -1512,6 +1560,22 @@ export class HealthMonitorBridge {
       beatAmplitudes: this.bpAlgo.beatAmplitudes.slice(0, 20),
       rawHead: this.bpAlgo.rawSamples.slice(0, 20),
       rawTail: this.bpAlgo.rawSamples.slice(-20),
+    });
+
+    this.emitCalibrationEvent('web_result_failed', {
+      measurement: 'blood_pressure',
+      reason: 'bp_finalize_failed',
+      bp: {
+        rawSamples: this.bpAlgo.rawSamples.slice(),
+        scaledPressures: this.bpAlgo.scaledPressures.slice(),
+        beatIndices: this.bpAlgo.beatIndices.slice(),
+        beatPressures: this.bpAlgo.beatPressures.slice(),
+        beatAmplitudes: this.bpAlgo.beatAmplitudes.slice(),
+        calibration: this.bpAlgo.calibration,
+        tempCompRaw: this.bpAlgo.tempCompRaw,
+        rawBaseline: this.bpRawBaseline,
+        rawDeltaPeak: this.bpRawDeltaPeak,
+      },
     });
 
     this.opts?.onDeviceEvent?.({
@@ -2245,6 +2309,27 @@ export class HealthMonitorBridge {
 
   private u8ToDv(u8: Uint8Array): DataView {
     return new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+  }
+
+  private emitCalibrationEvent(kind: string, detail: Record<string, any> = {}) {
+    if (typeof window === 'undefined') return;
+
+    try {
+      window.dispatchEvent(
+        new CustomEvent('iomt:hm_calibration', {
+          detail: {
+            kind,
+            deviceId: DEVICE_ID,
+            mode: this.mode,
+            recordedAt: new Date().toISOString(),
+            nativeMode: this.nativeMode,
+            ...detail,
+          },
+        }),
+      );
+    } catch {
+      // Calibration capture must never interrupt measurement flow.
+    }
   }
 
   private clearBpSilenceTimer() {
@@ -3071,11 +3156,21 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
 
   private async handleIncoming(charKey: string, dv: DataView) {
     const raw = this.dvToU8(dv);
+    const rawBytes = Array.from(raw);
+    const rawHex = rawBytes.map((value) => value.toString(16).padStart(2, '0')).join('');
 
     console.info('[HealthMonitorBridge] notify', {
       charKey,
       len: raw.length,
-      raw: Array.from(raw),
+      raw: rawBytes,
+    });
+
+    this.emitCalibrationEvent('raw_notify', {
+      transport: this.nativeMode ? 'native_android' : 'web_bluetooth',
+      charKey,
+      len: raw.length,
+      raw: rawBytes,
+      rawHex,
     });
 
     // Linktop Ox/SpO2 packets must be consumed before generic frame parsing.
@@ -3121,6 +3216,14 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
         moduleId: exact.moduleId,
         payload: Array.from(exact.payload),
       });
+      this.emitCalibrationEvent('parsed_exact_frame', {
+        charKey,
+        offset: exact.offset,
+        frameStart: exact.frameStart,
+        rawModuleId: exact.rawModuleId,
+        moduleId: exact.moduleId,
+        payload: Array.from(exact.payload),
+      });
       await this.routeOnePayload(charKey, exact.payload, exact.moduleId);
       return;
     }
@@ -3138,6 +3241,17 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
           payload: Array.from(frame.payload),
         })),
       );
+
+      this.emitCalibrationEvent('scanned_frames', {
+        charKey,
+        frames: scanned.map((frame) => ({
+          offset: frame.offset,
+          frameStart: frame.frameStart,
+          rawModuleId: frame.rawModuleId,
+          moduleId: frame.moduleId,
+          payload: Array.from(frame.payload),
+        })),
+      });
 
       for (const frame of scanned) {
         await this.routeOnePayload(charKey, frame.payload, frame.moduleId);
@@ -3165,6 +3279,12 @@ this.spo2LastPulse = validPulse ? pulseValue : this.spo2LastPulse;
       op,
       controlCharKey: this.controlCharKey,
       mode: this.mode,
+      bytes: Array.from(bytes),
+    });
+
+    this.emitCalibrationEvent('control_write', {
+      op,
+      controlCharKey: this.controlCharKey,
       bytes: Array.from(bytes),
     });
 
