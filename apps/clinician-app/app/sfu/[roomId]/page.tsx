@@ -116,6 +116,26 @@ type ControlValue = boolean | string;
 
 type CaptionTranscriptEvent = CaptionEvent & { receivedAt: number };
 
+type TranscriptNoteSection =
+  | 'symptoms'
+  | 'history'
+  | 'assessment'
+  | 'plan'
+  | 'safetyNetting'
+  | 'followUp';
+
+type TranscriptNoteSuggestion = {
+  id: string;
+  section: TranscriptNoteSection | string;
+  suggestedText: string;
+  source?: string;
+  confidence?: number | null;
+  duplicateOf?: string[];
+  action?: string;
+  createdAt?: string;
+  applied?: boolean;
+};
+
 function isControlKey(v: unknown): v is ControlKey {
   return (
     v === 'overlay' ||
@@ -724,6 +744,9 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const [soap, setSoap] = useState<SoapState>({ s: '', o: '', a: '', p: '', icd10Code: undefined });
   const [currentMeds, setCurrentMeds] = useState<string>('');
   const [patientEducation, setPatientEducation] = useState<string>('');
+  const [transcriptNoteSuggestions, setTranscriptNoteSuggestions] = useState<TranscriptNoteSuggestion[]>([]);
+  const [transcriptDraftLoading, setTranscriptDraftLoading] = useState(false);
+  const [transcriptDraftError, setTranscriptDraftError] = useState<string | null>(null);
 
   // eRx summary (meds + labs) from ErxComposer
   const [erxSummary, setErxSummary] = useState<ErxSummary>({ meds: [], labs: [] });
@@ -1868,6 +1891,129 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
     }
   };
 
+  function appendUniqueSoapText(existing: string | undefined, text: string) {
+    const current = String(existing || '').trim();
+    const incoming = String(text || '').trim();
+    if (!incoming) return current;
+
+    const normalize = (value: string) => value.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (current && normalize(current).includes(normalize(incoming))) return current;
+    return current ? `${current}\n\n${incoming}` : incoming;
+  }
+
+  function noteSuggestionLabel(section: string) {
+    switch (section) {
+      case 'symptoms':
+        return 'Symptoms';
+      case 'history':
+        return 'History / HPI';
+      case 'assessment':
+        return 'Assessment';
+      case 'plan':
+        return 'Plan';
+      case 'safetyNetting':
+        return 'Safety-netting';
+      case 'followUp':
+        return 'Follow-up';
+      default:
+        return 'Transcript note';
+    }
+  }
+
+  function soapKeyForSuggestion(section: string): 's' | 'a' | 'p' {
+    switch (section) {
+      case 'symptoms':
+        return 's';
+      case 'assessment':
+        return 'a';
+      case 'history':
+      case 'plan':
+      case 'safetyNetting':
+      case 'followUp':
+      default:
+        return 'p';
+    }
+  }
+
+  function applyTranscriptSuggestion(suggestion: TranscriptNoteSuggestion) {
+    const text = String(suggestion.suggestedText || '').trim();
+    if (!text) return;
+
+    const key = soapKeyForSuggestion(String(suggestion.section || 'history'));
+
+    setSoap((prev) => ({
+      ...prev,
+      [key]: appendUniqueSoapText(String(prev[key] || ''), text),
+    }));
+
+    setTranscriptNoteSuggestions((prev) =>
+      prev.map((item) => (item.id === suggestion.id ? { ...item, applied: true } : item)),
+    );
+
+    pushToast(
+      `Added transcript suggestion to ${noteSuggestionLabel(String(suggestion.section || 'history'))}.`,
+      'success',
+      'Transcript reviewed',
+    );
+  }
+
+  async function generateTranscriptNoteDraft() {
+    if (!encounterId) {
+      pushToast('No encounter is attached to this call yet.', 'warning', 'Transcript draft unavailable');
+      return;
+    }
+
+    setTranscriptDraftLoading(true);
+    setTranscriptDraftError(null);
+
+    try {
+      const res = await fetch(`/api/encounters/${encodeURIComponent(encounterId)}/transcript/note-draft`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          soap,
+          existingSoap: {
+            subjective: soap.s,
+            objective: soap.o,
+            assessment: soap.a,
+            plan: soap.p,
+          },
+          existingNote: patientEducation,
+          localTranscriptSegmentCount: captionTranscript.length,
+        }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || `note_draft_failed_${res.status}`);
+      }
+
+      const suggestions = Array.isArray(json.suggestions) ? json.suggestions : [];
+      setTranscriptNoteSuggestions(suggestions);
+
+      if (suggestions.length) {
+        pushToast(
+          `${suggestions.length} reviewed transcript suggestion${suggestions.length === 1 ? '' : 's'} ready.`,
+          'success',
+          'Transcript draft ready',
+        );
+      } else {
+        pushToast(
+          'No new transcript suggestions were found. Existing SOAP may already contain the content.',
+          'info',
+          'Transcript reviewed',
+        );
+      }
+    } catch (err: any) {
+      const message = err?.message || 'Failed to generate transcript note draft.';
+      setTranscriptDraftError(message);
+      pushToast(message, 'error', 'Transcript draft failed');
+    } finally {
+      setTranscriptDraftLoading(false);
+    }
+  }
+
   // -------------------------
   // Encounter summary (used in referral email/SMS)
   // -------------------------
@@ -2417,6 +2563,71 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                     <Card title="Clerk Desk" dense={dense} gradient>
                       <div className="text-xs text-gray-500 mb-2">
                         Quickly capture symptoms, allergies, HPI and codes. Free text always allowed.
+                      </div>
+
+                      <div className="mb-3 rounded-xl border border-sky-100 bg-sky-50/70 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-xs font-semibold text-sky-900">Transcript-assisted note draft</div>
+                            <div className="mt-0.5 text-[11px] leading-relaxed text-sky-700">
+                              Generates append-only suggestions from persisted final transcript segments. Review each item before adding it to SOAP.
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={generateTranscriptNoteDraft}
+                            disabled={transcriptDraftLoading || !encounterId}
+                            className="rounded-full border border-sky-200 bg-white px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            title="Generate note suggestions from transcript"
+                          >
+                            {transcriptDraftLoading ? 'Reviewing...' : 'Generate note suggestions from transcript'}
+                          </button>
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-700">
+                          <span className="rounded-full bg-white/80 px-2 py-0.5">Local live segments: {captionTranscript.length}</span>
+                          <span className="rounded-full bg-white/80 px-2 py-0.5">Mode: review required</span>
+                          <span className="rounded-full bg-white/80 px-2 py-0.5">Action: append only</span>
+                        </div>
+
+                        {transcriptDraftError ? (
+                          <div className="mt-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700">
+                            {transcriptDraftError}
+                          </div>
+                        ) : null}
+
+                        {transcriptNoteSuggestions.length > 0 ? (
+                          <div className="mt-3 space-y-2">
+                            {transcriptNoteSuggestions.map((suggestion) => (
+                              <div
+                                key={suggestion.id}
+                                className="rounded-lg border border-sky-100 bg-white p-2 shadow-sm"
+                              >
+                                <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-sky-800">
+                                      {noteSuggestionLabel(String(suggestion.section || 'history'))}
+                                    </span>
+                                    {suggestion.applied ? (
+                                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Applied</span>
+                                    ) : null}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => applyTranscriptSuggestion(suggestion)}
+                                    disabled={!!suggestion.applied}
+                                    className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {suggestion.applied ? 'Added' : 'Append to SOAP'}
+                                  </button>
+                                </div>
+                                <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
+                                  {suggestion.suggestedText}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
                       </div>
 
                       <div className="mb-2 border rounded bg-white">
