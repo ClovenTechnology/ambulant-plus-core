@@ -24,6 +24,7 @@ class CaptionWorkerConfig:
     bot_name: str
     medical_specialty: str
     medical_type: str
+    internal_identity_secret: str
 
     @classmethod
     def from_env(cls) -> "CaptionWorkerConfig":
@@ -41,6 +42,7 @@ class CaptionWorkerConfig:
             bot_name=os.getenv("CAPTION_BOT_NAME", "AmbulantCaptionWorker"),
             medical_specialty=os.getenv("CAPTION_MEDICAL_SPECIALTY", "PRIMARYCARE"),
             medical_type=os.getenv("CAPTION_MEDICAL_TYPE", "CONVERSATION"),
+            internal_identity_secret=os.getenv("AMBULANT_INTERNAL_IDENTITY_SECRET", ""),
         )
         cfg.validate()
         return cfg
