@@ -11,9 +11,9 @@
   <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
   <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
 
-  <!-- Some OEMs require location for BLE scan pre-12 -->
-  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
-  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="30" />
+  <!-- BLE scan compatibility: Capacitor plugin declares location as a runtime permission. -->
+  <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+  <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
   <!-- USB/UVC Otoscope -->
   <uses-permission android:name="android.permission.CAMERA" />
