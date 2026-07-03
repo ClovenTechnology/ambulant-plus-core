@@ -84,7 +84,7 @@ type TrainingContext = {
   pricing?: {
     currency: string;
     trainingFeeCents: number;
-    paymentProvider: 'mock' | 'stripe' | 'paystack' | 'ozow' | 'unknown';
+    paymentProvider: 'stripe' | 'paystack' | 'payfast' | 'ozow' | 'unknown';
     cardPaymentEnabled?: boolean | null;
     manualPaymentEnabled?: boolean | null;
     minimumInitialPaymentCents?: number | null;

@@ -13,7 +13,7 @@ export type ClinicianOnboardingSettings = {
   balanceRecoveryMode: BalanceRecoveryMode;
   balanceRecoveryNotes: string | null;
   currency: string;
-  paymentProvider: 'paystack' | 'payfast' | 'mock';
+  paymentProvider: 'paystack' | 'payfast';
   cardPaymentEnabled: boolean;
   manualPaymentEnabled: boolean;
   starterKitItems: string[];
@@ -29,12 +29,12 @@ function cleanStr(value: unknown, max = 500): string | null {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-function normaliseProvider(value: unknown): 'paystack' | 'payfast' | 'mock' {
+function normaliseProvider(value: unknown): 'paystack' | 'payfast' {
   const v = String(value || process.env.CARD_PAYMENT_PROVIDER || process.env.PAYMENT_PROVIDER || 'paystack')
     .trim()
     .toLowerCase();
 
-  if (v === 'paystack' || v === 'payfast' || v === 'mock') return v;
+  if (v === 'paystack' || v === 'payfast') return v;
   return 'paystack';
 }
 

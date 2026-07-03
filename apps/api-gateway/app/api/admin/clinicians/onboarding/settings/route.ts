@@ -34,7 +34,7 @@ function provider(value: unknown): string {
     .trim()
     .toLowerCase();
 
-  return ['paystack', 'payfast', 'mock'].includes(s) ? s : 'paystack';
+  return ['paystack', 'payfast'].includes(s) ? (s as any) : 'paystack';
 }
 
 function balanceRecoveryMode(value: unknown): 'manual' | 'payout_deduction' | 'disabled' {

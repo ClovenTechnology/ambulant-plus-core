@@ -61,7 +61,7 @@ type BoardResponse = {
 };
 
 function gatewayBase() {
-  return (
+  const raw =
     process.env.APIGW_BASE ||
     process.env.APIGW_BASE_URL ||
     process.env.API_GATEWAY_BASE_URL ||
@@ -71,12 +71,44 @@ function gatewayBase() {
     process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
     process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
     process.env.NEXT_PUBLIC_PATIENT_BASE ||
-    'http://localhost:3010'
-  ).replace(/\/+$/, '');
+    '';
+
+  return raw.trim().replace(/\/+$/, '');
+}
+
+function simulationPatientConfig() {
+  const id =
+    process.env.ADMIN_SIMULATION_PATIENT_ID ||
+    process.env.SIMULATION_PATIENT_ID ||
+    '';
+  const email =
+    process.env.ADMIN_SIMULATION_PATIENT_EMAIL ||
+    process.env.SIMULATION_PATIENT_EMAIL ||
+    '';
+  const name =
+    process.env.ADMIN_SIMULATION_PATIENT_NAME ||
+    process.env.SIMULATION_PATIENT_NAME ||
+    '';
+
+  if (!id.trim() || !email.trim() || !name.trim()) return null;
+
+  return {
+    id: id.trim(),
+    email: email.trim(),
+    name: name.trim(),
+  };
 }
 
 async function fetchOnboardingBoard(): Promise<BoardResponse> {
   const gateway = gatewayBase();
+  if (!gateway) {
+    return {
+      ok: false,
+      rows: [],
+      error: 'gateway_base_not_configured',
+    };
+  }
+
   const url = `${gateway}/api/admin/clinicians/onboarding-board`;
   const adminKey = process.env.ADMIN_API_KEY ?? '';
 
@@ -134,6 +166,7 @@ export default async function AdminClinicianOnboardingPage() {
   }
 
   const board = await fetchOnboardingBoard();
+  const simulationPatient = simulationPatientConfig();
 
   return (
     <main className="mx-auto max-w-6xl space-y-6 p-6">
@@ -161,7 +194,7 @@ export default async function AdminClinicianOnboardingPage() {
             Signed in as {session.user?.email || 'admin'}
             <div>
               <span className="font-mono text-[11px]">
-                Gateway: {gatewayBase()}
+                Gateway: {gatewayBase() || 'not configured'}
               </span>
             </div>
           </div>
@@ -186,7 +219,11 @@ export default async function AdminClinicianOnboardingPage() {
         </div>
       )}
 
-      <OnboardingDispatchBoard rows={board.rows} starterKitItems={board.settings?.publicSettings?.starterKitItems || []} />
+      <OnboardingDispatchBoard
+        rows={board.rows}
+        starterKitItems={board.settings?.publicSettings?.starterKitItems || []}
+        simulationPatient={simulationPatient}
+      />
     </main>
   );
 }

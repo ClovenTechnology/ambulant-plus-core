@@ -132,6 +132,21 @@ type SimulationState = {
   statusError?: string | null;
 };
 
+type SimulationPatientConfig = {
+  id: string;
+  email: string;
+  name: string;
+} | null;
+
+function normaliseSimulationPatient(config?: SimulationPatientConfig) {
+  const id = String(config?.id || '').trim();
+  const email = String(config?.email || '').trim();
+  const name = String(config?.name || '').trim();
+
+  if (!id || !email || !name) return null;
+  return { id, email, name };
+}
+
 function kitKey(label: string, index: number) {
   const slug = String(label || '')
     .toLowerCase()
@@ -367,15 +382,21 @@ function Field({
 export default function OnboardingDispatchBoard({
   rows,
   starterKitItems = [],
+  simulationPatient = null,
 }: {
   rows: OnboardingBoardRow[];
   starterKitItems?: string[];
+  simulationPatient?: SimulationPatientConfig;
 }) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [simulationByClinician, setSimulationByClinician] = useState<Record<string, SimulationState>>({});
   const starterKitCatalog = useMemo(() => starterKitCatalogFromItems(starterKitItems), [starterKitItems]);
+  const configuredSimulationPatient = useMemo(
+    () => normaliseSimulationPatient(simulationPatient),
+    [simulationPatient],
+  );
 
   // schedule modal
   const [schedOpen, setSchedOpen] = useState(false);
@@ -570,6 +591,14 @@ export default function OnboardingDispatchBoard({
       return;
     }
 
+    if (!configuredSimulationPatient) {
+      setNotice({
+        tone: 'err',
+        text: 'Simulation patient is not configured. Set ADMIN_SIMULATION_PATIENT_ID, ADMIN_SIMULATION_PATIENT_EMAIL and ADMIN_SIMULATION_PATIENT_NAME before creating simulation sessions.',
+      });
+      return;
+    }
+
     setBusyId(row.clinicianId);
     setNotice(null);
 
@@ -584,9 +613,9 @@ export default function OnboardingDispatchBoard({
           startsAt,
           durationMinutes: 30,
           sessionNumber,
-          patientId: 'cmo5tesbf0003bhucefbxvm19',
-          patientEmail: 'ambulant@cloventechnology.com',
-          patientName: 'Ambulant Test Patient',
+          patientId: configuredSimulationPatient.id,
+          patientEmail: configuredSimulationPatient.email,
+          patientName: configuredSimulationPatient.name,
           reason:
             sessionNumber <= 3
               ? 'Supervised onboarding simulation consultation ' + sessionNumber + ' of 3'
@@ -629,7 +658,7 @@ export default function OnboardingDispatchBoard({
             : ' extra') +
           ' created for ' +
           row.displayName +
-          '. Copy the clinician and test patient URLs from the card.',
+          '. Copy the clinician and simulation patient URLs from the card.',
       });
     } catch (err: any) {
       setNotice({
@@ -1269,12 +1298,12 @@ setBusyId(schedRow.clinicianId);
                       onClick={() =>
                         copySimulationUrl(
                           simulationState?.latest?.join?.testPatient?.url,
-                          'Test patient',
+                          'Simulation patient',
                         )
                       }
                       className="rounded border bg-white px-3 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
                     >
-                      Copy test patient URL
+                      Copy simulation patient URL
                     </button>
 
                     {(simulationState?.latest?.televisit?.roomId || latestSimulationSession?.roomId) && (

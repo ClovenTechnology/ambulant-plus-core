@@ -4,15 +4,22 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function gatewayBase() {
-  return (
+  const raw =
     process.env.APIGW_BASE ||
     process.env.APIGW_BASE_URL ||
     process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
     process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
     process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
-    'http://localhost:3010'
-  ).replace(/\/+$/, '');
+    '';
+
+  const gateway = raw.trim().replace(/\/+$/, '');
+  if (!gateway) {
+    throw new Error('gateway_base_not_configured');
+  }
+
+  return gateway;
 }
 
 function buildForwardHeaders(req: NextRequest, hasBody = false) {

@@ -150,9 +150,9 @@ function jsonFromText(text: string) {
 }
 
 
-function normaliseProvider(value: unknown): 'mock' | 'stripe' | 'paystack' | 'ozow' | 'unknown' {
+function normaliseProvider(value: unknown): 'stripe' | 'paystack' | 'payfast' | 'ozow' | 'unknown' {
   const p = String(value || process.env.CARD_PAYMENT_PROVIDER || process.env.PAYMENT_PROVIDER || 'paystack').toLowerCase();
-  if (['mock', 'stripe', 'paystack', 'ozow'].includes(p)) return p as any;
+  if (['stripe', 'paystack', 'payfast', 'ozow'].includes(p)) return p as any;
   return 'unknown';
 }
 

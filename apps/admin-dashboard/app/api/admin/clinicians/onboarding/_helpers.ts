@@ -2,14 +2,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export function gatewayBaseFromEnv() {
-  return (
+  const raw =
     process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
     process.env.APIGW_BASE ??
     process.env.GATEWAY_URL ??
+    process.env.API_GATEWAY_BASE_URL ??
+    process.env.API_GATEWAY_URL ??
     process.env.NEXT_PUBLIC_APIGW_BASE ??
     process.env.NEXT_PUBLIC_PATIENT_BASE ??
-    'http://localhost:3010'
-  );
+    '';
+
+  const gateway = raw.trim().replace(/\/+$/, '');
+  if (!gateway) {
+    throw new Error('gateway_base_not_configured');
+  }
+
+  return gateway;
 }
 
 export async function readJson(req: NextRequest) {

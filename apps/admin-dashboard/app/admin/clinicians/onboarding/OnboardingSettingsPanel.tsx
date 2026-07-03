@@ -22,7 +22,7 @@ type OnboardingSettings = {
   balanceRecoveryMode: BalanceRecoveryMode;
   balanceRecoveryNotes: string | null;
   currency: string;
-  paymentProvider: 'paystack' | 'payfast' | 'mock';
+  paymentProvider: 'paystack' | 'payfast';
   cardPaymentEnabled: boolean;
   manualPaymentEnabled: boolean;
   starterKitItems: string[];
@@ -94,7 +94,7 @@ export default function OnboardingSettingsPanel() {
   const [balanceRecoveryNotes, setBalanceRecoveryNotes] = useState('');
 
   const [currency, setCurrency] = useState('ZAR');
-  const [paymentProvider, setPaymentProvider] = useState<'paystack' | 'payfast' | 'mock'>('paystack');
+  const [paymentProvider, setPaymentProvider] = useState<'paystack' | 'payfast'>('paystack');
   const [cardPaymentEnabled, setCardPaymentEnabled] = useState(true);
   const [manualPaymentEnabled, setManualPaymentEnabled] = useState(true);
   const [starterKitText, setStarterKitText] = useState(DEFAULT_STARTER_KIT_TEXT);
@@ -140,7 +140,7 @@ export default function OnboardingSettingsPanel() {
       setBalanceRecoveryNotes(s.balanceRecoveryNotes || '');
 
       setCurrency(s.currency || 'ZAR');
-      setPaymentProvider(s.paymentProvider || 'paystack');
+      setPaymentProvider(s.paymentProvider === 'payfast' ? 'payfast' : 'paystack');
       setCardPaymentEnabled(s.cardPaymentEnabled !== false);
       setManualPaymentEnabled(s.manualPaymentEnabled !== false);
       setStarterKitText((s.starterKitItems || []).length ? s.starterKitItems.join('\n') : DEFAULT_STARTER_KIT_TEXT);
@@ -371,12 +371,11 @@ export default function OnboardingSettingsPanel() {
                   <span className="text-[11px] font-semibold text-gray-700">Card provider</span>
                   <select
                     value={paymentProvider}
-                    onChange={(e) => setPaymentProvider(e.target.value as 'paystack' | 'payfast' | 'mock')}
+                    onChange={(e) => setPaymentProvider(e.target.value as 'paystack' | 'payfast')}
                     className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
                   >
                     <option value="paystack">Paystack</option>
                     <option value="payfast">PayFast</option>
-                    <option value="mock">Mock / disabled sandbox</option>
                   </select>
                 </label>
 
