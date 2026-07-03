@@ -156,24 +156,11 @@ function normaliseProvider(value: unknown): 'mock' | 'stripe' | 'paystack' | 'oz
   return 'unknown';
 }
 
-const DEFAULT_STARTER_KIT_ITEMS = [
-  '6-in-1 Health Monitor (IoMT)',
-  'NexRing (IoMT)',
-  'Digital Stethoscope (IoMT)',
-  'HD Otoscope (IoMT)',
-  'Clinician Handbook',
-  'Consumables pack',
-  'Ambulant+ formal shirt (Black)',
-  'Ambulant+ formal shirt (White)',
-  'Ambulant+ Mug',
-  'Ambulant+ Thermo Bottle',
-  'Smart ID + card holder + lanyard',
-];
-
 function stringArray(value: unknown): string[] {
-  if (!Array.isArray(value)) return DEFAULT_STARTER_KIT_ITEMS;
-  const out = value.map((x) => String(typeof x === 'string' ? x : x?.label || '').trim()).filter(Boolean);
-  return out.length > 0 ? out : DEFAULT_STARTER_KIT_ITEMS;
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((x) => String(typeof x === 'string' ? x : x?.label || '').trim())
+    .filter(Boolean);
 }
 
 async function localOnboardingSettings() {
@@ -183,6 +170,10 @@ async function localOnboardingSettings() {
 
   return {
     trainingFeeCents: Math.max(0, Math.round(Number(row?.trainingFeeCents || 0))),
+    minimumInitialPaymentCents: Math.max(0, Math.round(Number(row?.minimumInitialPaymentCents || row?.trainingFeeCents || 0))),
+    allowPartialPayment: row?.allowPartialPayment === true,
+    balanceRecoveryMode: String(row?.balanceRecoveryMode || 'manual'),
+    balanceRecoveryNotes: row?.balanceRecoveryNotes ? String(row.balanceRecoveryNotes) : null,
     currency: String(row?.currency || 'ZAR').toUpperCase(),
     paymentProvider: normaliseProvider(row?.paymentProvider),
     cardPaymentEnabled: row?.cardPaymentEnabled !== false,
@@ -232,6 +223,15 @@ async function localTrainingContext(clinicianId: string) {
   const scheduled = !!trainingSlot;
   const settings = await localOnboardingSettings();
 
+  const paymentPlan = String((onboarding as any)?.paymentPlan || '').trim();
+  const waiverActive = paymentPlan === 'WAIVER_TRAIN_NOW_PAY_LATER';
+  const minimumInitialPaymentCents = settings.allowPartialPayment
+    ? Math.min(settings.trainingFeeCents, settings.minimumInitialPaymentCents)
+    : settings.trainingFeeCents;
+  const amountPaidCents = onboarding?.depositPaid === true ? minimumInitialPaymentCents : 0;
+  const outstandingCents = Math.max(0, settings.trainingFeeCents - amountPaidCents);
+  const trainingAccessGranted = onboarding?.depositPaid === true || waiverActive;
+
   return json({
     ok: true,
     clinician: {
@@ -246,6 +246,14 @@ async function localTrainingContext(clinicianId: string) {
       ? {
           stage: completed ? 'training_completed' : (onboarding.status ?? null),
           notes: onboarding.trainingNotes ?? null,
+          depositPaid: onboarding.depositPaid ?? false,
+          paymentPlan,
+          paymentStatus: waiverActive ? 'waiver' : onboarding.depositPaid ? 'deposit_paid' : 'unpaid',
+          amountPaidCents,
+          outstandingCents,
+          initialRequirementMet: onboarding.depositPaid === true,
+          nextPaymentAt: (onboarding as any).nextPaymentAt?.toISOString?.() ?? null,
+          waiverActive,
         }
       : {
           stage: completed ? 'training_completed' : (clinician.status ?? 'pending'),
@@ -257,7 +265,7 @@ async function localTrainingContext(clinicianId: string) {
       endAt: trainingSlot?.endsAt?.toISOString?.() ?? null,
       mode: trainingSlot?.mode ?? null,
       joinUrl: trainingSlot?.meetingUrl ?? null,
-      paid: onboarding?.depositPaid === true,
+      paid: trainingAccessGranted,
       currency: settings.currency,
       feeCents: settings.trainingFeeCents,
       certificateNumber: certificate.certificateNumber ?? null,
@@ -282,6 +290,20 @@ async function localTrainingContext(clinicianId: string) {
       paymentProvider: settings.paymentProvider,
       cardPaymentEnabled: settings.cardPaymentEnabled,
       manualPaymentEnabled: settings.manualPaymentEnabled,
+      minimumInitialPaymentCents,
+      allowPartialPayment: settings.allowPartialPayment,
+      balanceRecoveryMode: settings.balanceRecoveryMode,
+      balanceRecoveryNotes: settings.balanceRecoveryNotes,
+      amountPaidCents,
+      outstandingCents,
+      initialPaymentDueCents: minimumInitialPaymentCents,
+      paymentStatus: waiverActive ? 'waiver' : onboarding?.depositPaid ? 'deposit_paid' : 'unpaid',
+      initialRequirementMet: onboarding?.depositPaid === true,
+      fullyPaid: amountPaidCents >= settings.trainingFeeCents && settings.trainingFeeCents > 0,
+      paymentPlan,
+      waiverActive,
+      temporaryTrainingDevicesAllowed: waiverActive,
+      permanentStarterKitRequiresDepositOrFullPayment: true,
       configured: settings.configured,
     },
     bankInstructions: settings.bankInstructions,

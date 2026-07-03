@@ -21,19 +21,7 @@ export type ClinicianOnboardingSettings = {
   notes: string | null;
 };
 
-export const DEFAULT_STARTER_KIT_ITEMS = [
-  'DueCare 6-in-1 Health Monitor (IoMT)',
-  'NexRing (IoMT)',
-  'Digital Stethoscope (IoMT)',
-  'HD Otoscope (IoMT)',
-  'Clinician Handbook',
-  'Consumables pack',
-  'Ambulant+ formal shirt (Black)',
-  'Ambulant+ formal shirt (White)',
-  'Ambulant+ Mug',
-  'Ambulant+ Thermo Bottle',
-  'Smart ID + card holder + lanyard',
-];
+export const DEFAULT_STARTER_KIT_ITEMS: string[] = [];
 
 function cleanStr(value: unknown, max = 500): string | null {
   const s = String(value ?? '').trim();
@@ -143,7 +131,7 @@ export async function getClinicianOnboardingSettings(db: DbLike = prisma): Promi
       manualPaymentEnabled: true,
       starterKitItems: DEFAULT_STARTER_KIT_ITEMS,
       bankInstructions: null,
-      notes: 'Configure clinician onboarding training fee, payment rules and starter-kit contents from Admin Dashboard.',
+      notes: 'Configure clinician onboarding training fee, payment rules and C-Med StarterKit contents from Admin Dashboard.',
     },
   });
 

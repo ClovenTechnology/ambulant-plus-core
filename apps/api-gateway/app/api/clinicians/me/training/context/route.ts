@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { readIdentity } from '@/src/lib/identity';
+import {
+  calculateOnboardingPaymentState,
+  getClinicianOnboardingSettings,
+  publicClinicianOnboardingSettings,
+} from '@/src/clinicians/onboarding/settings';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -146,36 +151,47 @@ export async function GET(req: NextRequest) {
     const certificateAvailable = Boolean(trainingCert.certificateNumber && trainingCert.completedAt);
     const certificateUrl = certificateAvailable ? '/api/clinicians/me/training/certificate' : null;
 
-    const starterKitItems =
-      Array.isArray(rawProfile?.starterKitItems)
-        ? rawProfile.starterKitItems.map(String)
-        : [
-            '6-in-1 Health Monitor (IoMT)',
-            'NexRing (IoMT)',
-            'Digital Stethoscope (IoMT)',
-            'HD Otoscope (IoMT)',
-            'Clinician Handbook',
-            'Consumables pack',
-            'Ambulant+ formal shirt (Black)',
-            'Ambulant+ formal shirt (White)',
-            'Ambulant+ Mug',
-            'Ambulant+ Thermo Bottle',
-            'Smart ID + card holder + lanyard',
-          ];
+    const settings = await getClinicianOnboardingSettings();
+    const publicSettings = publicClinicianOnboardingSettings(settings);
 
-    const trainingFeeCents =
-      typeof rawProfile?.pricing?.trainingFeeCents === 'number'
-        ? rawProfile.pricing.trainingFeeCents
-        : 0;
+    const confirmedPayments = await prisma.clinicianOnboardingPayment
+      .findMany({
+        where: {
+          clinicianId: String(clinician.id),
+          status: { in: ['confirmed', 'paid', 'captured'] as any },
+        } as any,
+        orderBy: { createdAt: 'desc' },
+      })
+      .catch(() => []);
 
-    const currency =
-      cleanStr(rawProfile?.pricing?.currency, 8) ||
-      cleanStr(rawProfile?.currency, 8) ||
-      'ZAR';
+    const amountPaidCents = (confirmedPayments || []).reduce((sum: number, payment: any) => {
+      const provider = String(payment?.provider || '').toLowerCase();
+      if (provider === 'waiver' || provider === 'deferred') return sum;
+      return sum + Math.max(0, Math.round(Number(payment?.amountCents || 0)));
+    }, 0);
 
-    const paymentProvider =
-      cleanStr(rawProfile?.pricing?.paymentProvider, 40) ||
-      'unknown';
+    const paymentState = calculateOnboardingPaymentState({
+      trainingFeeCents: settings.trainingFeeCents,
+      minimumInitialPaymentCents: settings.minimumInitialPaymentCents,
+      amountPaidCents,
+    });
+
+    const paymentPlan = cleanStr((onboarding as any)?.paymentPlan, 120);
+    const waiverActive =
+      paymentPlan === 'WAIVER_TRAIN_NOW_PAY_LATER' ||
+      (confirmedPayments || []).some((payment: any) =>
+        ['waiver', 'deferred'].includes(String(payment?.provider || '').toLowerCase()),
+      );
+
+    const trainingAccessGranted =
+      onboarding?.depositPaid === true ||
+      paymentState.initialRequirementMet ||
+      waiverActive;
+
+    const starterKitItems = publicSettings.starterKitItems;
+    const currency = publicSettings.currency;
+    const trainingFeeCents = publicSettings.trainingFeeCents;
+    const paymentProvider = publicSettings.paymentProvider;
 
     return NextResponse.json(
       {
@@ -192,6 +208,14 @@ export async function GET(req: NextRequest) {
           ? {
               stage: trainingCompleted ? 'training_completed' : outwardStage(onboarding.status),
               notes: cleanStr(onboarding.trainingNotes, 2000),
+              depositPaid: onboarding.depositPaid,
+              paymentPlan: paymentPlan,
+              paymentStatus: paymentState.paymentStatus,
+              amountPaidCents: paymentState.amountPaidCents,
+              outstandingCents: paymentState.outstandingCents,
+              initialRequirementMet: paymentState.initialRequirementMet,
+              nextPaymentAt: asIso((onboarding as any).nextPaymentAt),
+              waiverActive,
             }
           : null,
         training: trainingSlot
@@ -204,7 +228,7 @@ export async function GET(req: NextRequest) {
                   ? 'in_person'
                   : 'virtual',
               joinUrl: cleanStr(trainingSlot.meetingUrl, 1000),
-              paid: !!onboarding?.depositPaid,
+              paid: trainingAccessGranted,
               currency,
               feeCents: trainingFeeCents,
               certificateNumber: trainingCert.certificateNumber,
@@ -219,7 +243,7 @@ export async function GET(req: NextRequest) {
               endAt: null,
               mode: null,
               joinUrl: null,
-              paid: !!onboarding?.depositPaid,
+              paid: trainingAccessGranted,
               currency,
               feeCents: trainingFeeCents,
               certificateNumber: trainingCert.certificateNumber,
@@ -239,16 +263,27 @@ export async function GET(req: NextRequest) {
             }
           : null,
         pricing: {
+          ...publicSettings,
           currency,
           trainingFeeCents,
           paymentProvider:
-            paymentProvider === 'stripe' ||
             paymentProvider === 'paystack' ||
-            paymentProvider === 'ozow' ||
+            paymentProvider === 'payfast' ||
             paymentProvider === 'mock'
               ? paymentProvider
               : 'unknown',
+          amountPaidCents: paymentState.amountPaidCents,
+          outstandingCents: paymentState.outstandingCents,
+          initialPaymentDueCents: publicSettings.minimumInitialPaymentCents,
+          paymentStatus: paymentState.paymentStatus,
+          initialRequirementMet: paymentState.initialRequirementMet,
+          fullyPaid: paymentState.fullyPaid,
+          paymentPlan,
+          waiverActive,
+          temporaryTrainingDevicesAllowed: waiverActive,
+          permanentStarterKitRequiresDepositOrFullPayment: true,
         },
+        bankInstructions: publicSettings.bankInstructions,
         starterKitItems,
       },
       {
