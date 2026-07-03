@@ -1,8 +1,9 @@
+import { gatewayBase } from '@/src/lib/env';
 import RolloutEditorClient from './RolloutEditorClient';
 
 async function getRollouts() {
   try {
-    const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+    const base = gatewayBase();
     const [modelsRes, experimentsRes] = await Promise.all([
       fetch(`${base}/api/insightcore/studio/models/rollout`, { cache: 'no-store' }),
       fetch(`${base}/api/insightcore/studio/experiments/active`, { cache: 'no-store' }),
@@ -45,7 +46,7 @@ export default async function RolloutPage() {
                       <div className="text-sm text-slate-300">{item.trafficPercent}%</div>
                     </div>
                     <div className="mt-1 text-sm text-slate-300">
-                      v{item.version} · {item.audience}
+                      v{item.version} Â· {item.audience}
                     </div>
                   </div>
                 ))
@@ -66,7 +67,7 @@ export default async function RolloutPage() {
                   >
                     <div className="font-medium">{item.title}</div>
                     <div className="mt-1 text-sm text-slate-300">
-                      {item.family} · v{item.version}
+                      {item.family} Â· v{item.version}
                     </div>
                   </div>
                 ))

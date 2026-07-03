@@ -1,6 +1,7 @@
+import { gatewayBase } from '@/src/lib/env';
 async function getFhir() {
   try {
-    const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+    const base = gatewayBase();
     const r = await fetch(`${base}/api/insightcore/studio/fhir/episode?patientId=pt-za-001`, {
       cache: 'no-store',
     });

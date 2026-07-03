@@ -1,6 +1,7 @@
+import { gatewayBase } from '@/src/lib/env';
 async function getEpisodes() {
   try {
-    const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+    const base = gatewayBase();
     const r = await fetch(`${base}/api/insightcore/studio/episodes`, { cache: 'no-store' });
     if (!r.ok) return [];
     const j = await r.json().catch(() => ({ items: [] }));
@@ -47,7 +48,7 @@ export default async function EpisodesPage() {
                 <div className="mt-1 text-2xl font-semibold">{item.riskScore}</div>
 
                 <div className="mt-4 text-xs text-slate-500">
-                  Updated {item.updatedAt || '—'}
+                  Updated {item.updatedAt || 'â€”'}
                 </div>
               </div>
             ))

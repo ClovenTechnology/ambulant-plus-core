@@ -1,6 +1,7 @@
+import { gatewayBase } from '@/src/lib/env';
 async function getBias() {
   try {
-    const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+    const base = gatewayBase();
     const r = await fetch(`${base}/api/insightcore/studio/provenance/bias`, {
       cache: 'no-store',
     });
@@ -34,7 +35,7 @@ export default async function ProvenanceBiasPage() {
               <div key={item.code} className="rounded-[24px] border border-white/10 bg-white/5 p-5">
                 <div className="text-lg font-semibold">{item.label}</div>
                 <div className="mt-2 text-sm text-slate-300">
-                  {item.code} · {item.severity}
+                  {item.code} Â· {item.severity}
                 </div>
               </div>
             ))

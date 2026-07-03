@@ -1,6 +1,7 @@
+import { gatewayBase } from '@/src/lib/env';
 async function getModels() {
   try {
-    const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+    const base = gatewayBase();
     const r = await fetch(`${base}/api/insightcore/studio/evaluation/models`, {
       cache: 'no-store',
     });

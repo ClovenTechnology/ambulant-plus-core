@@ -1,6 +1,7 @@
+import { gatewayBase } from '@/src/lib/env';
 async function getLineage() {
   try {
-    const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+    const base = gatewayBase();
     const r = await fetch(`${base}/api/insightcore/studio/lineage?patientId=pt-za-001`, {
       cache: 'no-store',
     });
@@ -74,7 +75,7 @@ export default async function LineagePage() {
                   <div key={engine.id} className="rounded-[18px] border border-white/10 bg-black/10 p-4">
                     <div className="font-medium">{engine.title}</div>
                     <div className="mt-1 text-sm text-slate-300">{engine.id}</div>
-                    <div className="mt-2 text-xs text-slate-500">{engine.category} · v{engine.version}</div>
+                    <div className="mt-2 text-xs text-slate-500">{engine.category} Â· v{engine.version}</div>
                   </div>
                 ))}
               </div>
@@ -88,7 +89,7 @@ export default async function LineagePage() {
                     <div className="font-medium">{rule.title}</div>
                     <div className="mt-1 text-sm text-slate-300">{rule.id}</div>
                     <div className="mt-2 text-xs text-slate-500">
-                      {rule.family} · {rule.source} · v{rule.version}
+                      {rule.family} Â· {rule.source} Â· v{rule.version}
                     </div>
                   </div>
                 ))}

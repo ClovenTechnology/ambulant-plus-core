@@ -1,6 +1,7 @@
+import { gatewayBase } from '@/src/lib/env';
 async function getFamilies() {
   try {
-    const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+    const base = gatewayBase();
     const r = await fetch(`${base}/api/insightcore/studio/pathways/families`, {
       cache: 'no-store',
     });
@@ -40,7 +41,7 @@ export default async function PathwaysPage() {
                       key={member.id}
                       className="rounded-full border border-white/10 px-3 py-1 text-sm text-slate-200"
                     >
-                      {member.title} · {member.kind}
+                      {member.title} Â· {member.kind}
                     </span>
                   ))}
                 </div>

@@ -1,8 +1,9 @@
+import { gatewayBase } from '@/src/lib/env';
 import GovernanceEditorClient from './GovernanceEditorClient';
 
 async function getGovernance() {
   try {
-    const base = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+    const base = gatewayBase();
     const [weightsRes, pathwaysRes] = await Promise.all([
       fetch(`${base}/api/insightcore/studio/governance/weights`, { cache: 'no-store' }),
       fetch(`${base}/api/insightcore/studio/governance/pathways`, { cache: 'no-store' }),
