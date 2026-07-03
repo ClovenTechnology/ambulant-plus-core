@@ -13,8 +13,10 @@ export async function connectRoom(
 }
 
 /** Identity headers expected by api-gateway + your patient-app /api/rtc/token route */
+export type RTCAuthRole = "patient" | "clinician" | "staff" | "observer" | "admin";
+
 export type RTCWho = {
-  role: "patient" | "clinician" | "admin";
+  role: RTCAuthRole;
   uid: string;
 };
 
@@ -26,6 +28,18 @@ export type RTCTokenRequest = {
   who?: RTCWho;            // required in secure mode
   joinToken?: string;      // x-join-token (Televisit ticket token)
   endpoint?: string;       // default: "/api/rtc/token" (same-origin)
+
+  /**
+   * Clinical participant metadata. Do not confuse this with auth role.
+   * Auth role controls LiveKit permissions; participantRole labels who is speaking.
+   */
+  participantRole?: string;
+  relationshipToPatient?: string | null;
+  participantName?: string | null;
+  displayName?: string | null;
+  encounterId?: string | null;
+  appointmentId?: string | null;
+  metadata?: Record<string, unknown> | null;
 };
 
 /** Response shape from /api/rtc/token */
@@ -56,7 +70,18 @@ export async function fetchRtcToken(req: RTCTokenRequest): Promise<RTCTokenRespo
     method: "POST",
     headers,
     cache: "no-store",
-    body: JSON.stringify({ roomId, visitId, identity }),
+    body: JSON.stringify({
+      roomId,
+      visitId,
+      identity,
+      participantRole: req.participantRole,
+      relationshipToPatient: req.relationshipToPatient ?? undefined,
+      participantName: req.participantName ?? undefined,
+      displayName: req.displayName ?? undefined,
+      encounterId: req.encounterId ?? undefined,
+      appointmentId: req.appointmentId ?? undefined,
+      metadata: req.metadata ?? undefined,
+    }),
   });
 
   if (!r.ok) {
@@ -124,6 +149,13 @@ export async function mintRtcToken(input: {
   uid?: string;
   joinToken?: string;
   endpoint?: string;
+  participantRole?: string;
+  relationshipToPatient?: string | null;
+  participantName?: string | null;
+  displayName?: string | null;
+  encounterId?: string | null;
+  appointmentId?: string | null;
+  metadata?: Record<string, unknown> | null;
 }) {
   const uid = input.uid ?? input.identity ?? getOrCreateUid(input.role ?? "clinician");
 
@@ -137,6 +169,13 @@ export async function mintRtcToken(input: {
     },
     joinToken: input.joinToken,
     endpoint: input.endpoint,
+    participantRole: input.participantRole,
+    relationshipToPatient: input.relationshipToPatient,
+    participantName: input.participantName,
+    displayName: input.displayName,
+    encounterId: input.encounterId,
+    appointmentId: input.appointmentId,
+    metadata: input.metadata,
   });
 
   return result.token;

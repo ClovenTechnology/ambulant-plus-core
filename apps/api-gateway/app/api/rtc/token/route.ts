@@ -90,6 +90,110 @@ function mustRole(role: string) {
   return r as 'patient' | 'clinician' | 'staff' | 'observer' | 'admin';
 }
 
+function normaliseParticipantRoleForAuth(raw: unknown, authRole: string) {
+  const value = String(raw || '').trim().toLowerCase().replace(/_/g, '-');
+
+  if (authRole === 'clinician' || authRole === 'staff' || authRole === 'admin') {
+    return 'clinician';
+  }
+
+  const allowedPatientSide = new Set([
+    'patient',
+    'parent',
+    'mother',
+    'father',
+    'mum',
+    'mom',
+    'dad',
+    'guardian',
+    'legal-guardian',
+    'caregiver',
+    'carer',
+    'care-ally',
+    'care-giver',
+    'partner',
+    'spouse',
+    'wife',
+    'husband',
+    'couple',
+    'interpreter',
+    'translator',
+    'guest',
+    'observer',
+  ]);
+
+  if (!allowedPatientSide.has(value)) {
+    return authRole === 'observer' ? 'observer' : 'patient';
+  }
+
+  if (['mother', 'father', 'mum', 'mom', 'dad'].includes(value)) return 'parent';
+  if (value === 'legal-guardian') return 'guardian';
+  if (['carer', 'care-ally', 'care-giver'].includes(value)) return 'caregiver';
+  if (['spouse', 'wife', 'husband', 'couple'].includes(value)) return 'partner';
+  if (value === 'translator') return 'interpreter';
+
+  return value || (authRole === 'observer' ? 'observer' : 'patient');
+}
+
+function pickBodyString(body: any, keys: string[]) {
+  for (const key of keys) {
+    const value = body?.[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function buildParticipantMetadata(body: any, args: {
+  uid: string;
+  roomId: string;
+  visitId: string;
+  role: string;
+  orgId: string;
+}) {
+  const supplied =
+    body?.metadata && typeof body.metadata === 'object' && !Array.isArray(body.metadata)
+      ? body.metadata
+      : {};
+
+  const participantRole = normaliseParticipantRoleForAuth(
+    pickBodyString(body, ['participantRole', 'speakerRole', 'relationshipToPatient', 'relationship']) ||
+      pickBodyString(supplied, ['participantRole', 'speakerRole', 'relationshipToPatient', 'relationship']),
+    args.role,
+  );
+
+  const displayName =
+    pickBodyString(body, ['displayName', 'participantName', 'speakerName', 'name']) ||
+    pickBodyString(supplied, ['displayName', 'participantName', 'speakerName', 'name']) ||
+    args.uid;
+
+  const encounterId =
+    pickBodyString(body, ['encounterId', 'encounter', 'enc']) ||
+    pickBodyString(supplied, ['encounterId', 'encounter', 'enc']);
+
+  const appointmentId =
+    pickBodyString(body, ['appointmentId', 'appointment', 'appt']) ||
+    pickBodyString(supplied, ['appointmentId', 'appointment', 'appt']);
+
+  return {
+    participantRole,
+    speakerRole: participantRole,
+    displayName,
+    participantName: displayName,
+    speakerName: displayName,
+    relationshipToPatient:
+      pickBodyString(body, ['relationshipToPatient', 'relationship']) ||
+      pickBodyString(supplied, ['relationshipToPatient', 'relationship']) ||
+      (participantRole === 'patient' || participantRole === 'clinician' ? undefined : participantRole),
+    encounterId: encounterId || undefined,
+    appointmentId: appointmentId || undefined,
+    visitId: args.visitId,
+    roomId: args.roomId,
+    orgId: args.orgId || undefined,
+    authRole: args.role,
+    uid: args.uid,
+  };
+}
+
 // -----------------------------
 // POST /api/rtc/token
 // Requires: x-join-token (JWT join ticket)
@@ -99,7 +203,21 @@ export async function POST(req: NextRequest) {
   const h = cors(req);
 
   try {
+    let body: any = {};
+
+    try {
+
+      body = await req.json();
+
+    } catch {
+
+      body = {};
+
+    }
+
+
     const joinJwt = (req.headers.get('x-join-token') || '').trim();
+
     if (!joinJwt) {
       return NextResponse.json(
         { ok: false, error: 'missing_join_token', message: 'Missing x-join-token' },
@@ -132,11 +250,11 @@ export async function POST(req: NextRequest) {
       ...(audience ? { audience } : {}),
     });
 
-    // Flexible claim mapping (so you don’t brick older tokens if you rename keys)
+    // Flexible claim mapping (so you donâ€™t brick older tokens if you rename keys)
     const uid = pickClaim(payload, ['uid', 'sub', 'userId', 'u']);
     const roomId = pickClaim(payload, ['roomId', 'rid', 'room', 'r']);
     const visitId = pickClaim(payload, ['visitId', 'vid', 'visit', 'v']);
-    const orgId = pickClaim(payload, ['orgId', 'org', 'tenant']) || 'org-default';
+    const orgId = pickClaim(payload, ['orgId', 'org', 'tenant']) || '';
     const role = mustRole(pickClaim(payload, ['role', 'televisitRole', 'rRole'])) || 'patient';
 
     if (!uid || !roomId || !visitId) {
@@ -197,7 +315,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Tenant guard (optional but recommended)
-    if ((ticket.orgId || 'org-default') !== (orgId || 'org-default')) {
+    if ((ticket.orgId || '') !== (orgId || '')) {
       return NextResponse.json(
         { ok: false, error: 'tenant_mismatch', message: 'Join ticket tenant mismatch' },
         { status: 403, headers: h },
@@ -238,11 +356,61 @@ export async function POST(req: NextRequest) {
     const canPublishData = role !== 'observer';
     const canSubscribe = true;
 
+    const participantMetadata = buildParticipantMetadata(body, {
+
+
+      uid,
+
+
+      roomId,
+
+
+      visitId,
+
+
+      role,
+
+
+      orgId,
+
+
+    });
+
+
+
     const at = new AccessToken(livekitKey, livekitSecret, {
+
+
       identity: uid,
-      name: uid, // optionally override from client body later
+
+
+      name: participantMetadata.displayName || uid,
+
+
+      metadata: JSON.stringify(participantMetadata),
+
+
+      attributes: {
+
+
+        participantRole: String(participantMetadata.participantRole || role),
+
+
+        authRole: role,
+
+
+        ...(participantMetadata.encounterId ? { encounterId: String(participantMetadata.encounterId) } : {}),
+
+
+        ...(participantMetadata.appointmentId ? { appointmentId: String(participantMetadata.appointmentId) } : {}),
+
+
+      },
+
+
       // TTL is optional; ticket expiry already gates.
-      // If you want: ttl: Math.max(60, Math.floor((ticket.expiresAt.getTime() - now.getTime()) / 1000))
+
+
     });
 
     at.addGrant({
@@ -266,7 +434,13 @@ export async function POST(req: NextRequest) {
         roomId,
         identity: uid,
         role,
+
+        participantRole: participantMetadata.participantRole,
+
+        metadata: participantMetadata,
+
         visitId,
+
         orgId,
         ticketExpiresAt: new Date(ticket.expiresAt).toISOString(),
       },

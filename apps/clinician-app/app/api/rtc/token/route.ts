@@ -82,6 +82,86 @@ function forwardHeaders(req: NextRequest) {
   return h;
 }
 
+function readRefererContext(req: NextRequest) {
+  try {
+    const ref = req.headers.get('referer') || '';
+    if (!ref) return {} as Record<string, string>;
+    const u = new URL(ref);
+    const get = (...keys: string[]) => {
+      for (const key of keys) {
+        const v = u.searchParams.get(key);
+        if (v && v.trim()) return v.trim();
+      }
+      return '';
+    };
+
+    return {
+      participantRole: get('participantRole', 'speakerRole', 'role'),
+      relationshipToPatient: get('relationshipToPatient', 'relationship'),
+      participantName: get('participantName', 'displayName', 'name', 'clinicianName'),
+      encounterId: get('encounterId', 'encounter', 'enc'),
+      appointmentId: get('appointmentId', 'appointment', 'appt'),
+      visitId: get('visitId', 'visit'),
+    };
+  } catch {
+    return {} as Record<string, string>;
+  }
+}
+
+function buildRtcParticipantMetadata(req: NextRequest, body: any, fallbackRole: string) {
+  const ref = readRefererContext(req);
+  const participantRole = String(
+    body?.participantRole ||
+      body?.speakerRole ||
+      ref.participantRole ||
+      fallbackRole ||
+      'clinician',
+  ).trim();
+
+  const displayName = String(
+    body?.displayName ||
+      body?.participantName ||
+      body?.name ||
+      ref.participantName ||
+      body?.identity ||
+      body?.uid ||
+      '',
+  ).trim();
+
+  const encounterId = String(body?.encounterId || body?.encounter || body?.enc || ref.encounterId || '').trim();
+  const appointmentId = String(body?.appointmentId || body?.appointment || body?.appt || ref.appointmentId || '').trim();
+  const visitId = String(body?.visitId || body?.visit || ref.visitId || body?.roomId || body?.room || '').trim();
+
+  return {
+    participantRole,
+    speakerRole: participantRole,
+    displayName,
+    participantName: displayName,
+    speakerName: displayName,
+    relationshipToPatient: String(body?.relationshipToPatient || body?.relationship || ref.relationshipToPatient || '').trim() || undefined,
+    encounterId: encounterId || undefined,
+    appointmentId: appointmentId || undefined,
+    visitId: visitId || undefined,
+    authRole: fallbackRole,
+  };
+}
+
+function attachRtcParticipantMetadata(req: NextRequest, body: any, fallbackRole: string) {
+  const metadata = buildRtcParticipantMetadata(req, body, fallbackRole);
+  return {
+    ...body,
+    participantRole: metadata.participantRole,
+    speakerRole: metadata.speakerRole,
+    displayName: metadata.displayName || body?.displayName,
+    participantName: metadata.participantName || body?.participantName,
+    relationshipToPatient: metadata.relationshipToPatient || body?.relationshipToPatient,
+    encounterId: metadata.encounterId || body?.encounterId,
+    appointmentId: metadata.appointmentId || body?.appointmentId,
+    visitId: metadata.visitId || body?.visitId,
+    metadata,
+  };
+}
+
 function bodyFromQuery(req: NextRequest) {
   const roomId =
     req.nextUrl.searchParams.get('roomId') ||
