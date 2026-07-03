@@ -48,14 +48,14 @@ export async function POST(req: NextRequest) {
             clinicianId: clinicianId || undefined,
             paymentReference: paymentReference || undefined,
             status: 'confirmed',
-            provider: { in: ['eft', 'manual'] },
+            provider: { in: ['eft', 'manual', 'waiver', 'deferred'] },
           },
           orderBy: { confirmedAt: 'desc' },
         });
 
     if (!payment) return NextResponse.json({ ok: false, error: 'confirmed_payment_not_found' }, { status: 404 });
-    if (!['eft', 'manual'].includes(String(payment.provider))) {
-      return NextResponse.json({ ok: false, error: 'authorisation_only_for_manual_or_eft' }, { status: 409 });
+    if (!['eft', 'manual', 'waiver', 'deferred'].includes(String(payment.provider))) {
+      return NextResponse.json({ ok: false, error: 'authorisation_only_for_manual_eft_or_approved_waiver' }, { status: 409 });
     }
     if (payment.status !== 'confirmed') {
       return NextResponse.json({ ok: false, error: 'payment_not_confirmed' }, { status: 409 });

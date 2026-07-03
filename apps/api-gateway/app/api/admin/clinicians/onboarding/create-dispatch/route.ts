@@ -59,11 +59,53 @@ export async function POST(req: NextRequest) {
     const onboarding = await prisma.clinicianOnboarding.findUnique({ where: { clinicianId } });
     if (!onboarding) return NextResponse.json({ ok: false, error: 'onboarding_not_found' }, { status: 404 });
 
+    const dispatchKind =
+      cleanStr(body.dispatchKind || body.dispatchType || body.kitType || 'starter_kit', 80) ||
+      'starter_kit';
+
+    const isTemporaryTrainingKit = [
+      'temporary_training_kit',
+      'training_loan_kit',
+      'loaner_training_kit',
+      'temporary',
+      'loaner',
+    ].includes(dispatchKind);
+
+    const itemsIn = Array.isArray(body.items)
+      ? (body.items as any[])
+      : Array.isArray(body.kitItems)
+        ? (body.kitItems as any[]).map((x) =>
+            typeof x === 'string'
+              ? { label: x, quantity: 1, kind: x.toLowerCase().includes('device') || x.toLowerCase().includes('iomt') || x.toLowerCase().includes('monitor') ? 'device' : 'other' }
+              : x,
+          )
+        : [];
+
+    if (!onboarding.depositPaid && !isTemporaryTrainingKit) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'deposit_required_for_permanent_starter_kit',
+          message:
+            'Permanent starter kit/device dispatch requires minimum deposit or full payment. Use dispatchKind=temporary_training_kit for waiver/pay-later training devices.',
+          paymentPlan: onboarding.paymentPlan ?? null,
+          depositPaid: onboarding.depositPaid,
+        },
+        { status: 409 },
+      );
+    }
+
     const trackingUrl = cleanStr(body.trackingUrl, 600);
     const etaDate = parseDateMaybe(body.etaDate);
-    const notes = cleanStr(body.notes, 2000);
-
-    const itemsIn = Array.isArray(body.items) ? (body.items as any[]) : [];
+    const notes = [
+      cleanStr(body.notes, 2000),
+      `Dispatch kind: ${dispatchKind}`,
+      isTemporaryTrainingKit
+        ? 'Temporary training/loan devices only; must be retrieved after training. Permanent kit blocked until deposit/full payment.'
+        : null,
+    ]
+      .filter(Boolean)
+      .join('\n');
 
     const created = await prisma.clinicianDispatch.create({
       data: {
@@ -93,7 +135,17 @@ export async function POST(req: NextRequest) {
     // Nudge onboarding status
     await prisma.clinicianOnboarding.update({
       where: { id: onboarding.id },
-      data: { status: 'kit_prepared' },
+      data: {
+        status: isTemporaryTrainingKit ? onboarding.status : 'kit_prepared',
+        trainingNotes: [
+          cleanStr(onboarding.trainingNotes, 4000),
+          isTemporaryTrainingKit
+            ? `Temporary training kit prepared ${new Date().toISOString()}`
+            : `Permanent starter kit prepared ${new Date().toISOString()}`,
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      },
     });
 
     return NextResponse.json({ ok: true, dispatch: created }, { status: 201 });
