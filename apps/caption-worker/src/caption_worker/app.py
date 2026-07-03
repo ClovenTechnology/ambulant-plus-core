@@ -1,111 +1,313 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
-from typing import Optional
+from typing import Any, Mapping
 
-import numpy as np
-
-from livekit.agents import AutoSubscribe, WorkerOptions, cli, JobContext
-from livekit.agents.audio import AudioBuffer
-from livekit.agents.pipeline import vad
 from livekit import rtc
+from livekit.agents import AutoSubscribe, WorkerOptions, cli, JobContext
 
 from .config import CaptionWorkerConfig
-from .events import CaptionEvent, display_name, infer_role, utc_now_iso
+from .events import CaptionEvent, display_name, infer_role
 from .persistence import persist_caption_segment
 
 
 TARGET_SAMPLE_RATE = 16000
+TARGET_CHANNELS = 1
+BYTES_PER_SAMPLE = 2
 MAX_BUFFER_SECONDS = 8.0
-
-CFG = CaptionWorkerConfig.from_env()
-VAD = vad.SileroVAD(sample_rate=TARGET_SAMPLE_RATE)
+FLUSH_SECONDS = 3.0
 
 
-async def publish_caption(room: rtc.Room, event: CaptionEvent) -> None:
-    payload = json.dumps(event.to_payload(), separators=(",", ":")).encode("utf-8")
-    kind = rtc.DataPacketKind.RELIABLE if event.final else rtc.DataPacketKind.LOSSY
-    await room.local_participant.publish_data(payload, kind=kind, topic="captions")
+class PcmSegmentBuffer:
+    def __init__(self, sample_rate: int = TARGET_SAMPLE_RATE, channels: int = TARGET_CHANNELS) -> None:
+        self.sample_rate = sample_rate
+        self.channels = channels
+        self._chunks: list[bytes] = []
+        self._bytes = 0
+        self._max_bytes = int(sample_rate * channels * BYTES_PER_SAMPLE * MAX_BUFFER_SECONDS)
+
+    @property
+    def duration(self) -> float:
+        if self.sample_rate <= 0 or self.channels <= 0:
+            return 0.0
+        return self._bytes / float(self.sample_rate * self.channels * BYTES_PER_SAMPLE)
+
+    def push_frame(self, frame: rtc.AudioFrame) -> None:
+        data = bytes(frame.data)
+        if not data:
+            return
+
+        self._chunks.append(data)
+        self._bytes += len(data)
+
+        while self._bytes > self._max_bytes and self._chunks:
+            removed = self._chunks.pop(0)
+            self._bytes -= len(removed)
+
+    def pop_all(self) -> bytes:
+        if not self._chunks:
+            return b""
+        joined = b"".join(self._chunks)
+        self._chunks.clear()
+        self._bytes = 0
+        return joined
+
+
+async def _maybe_await(value: Any) -> Any:
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
+
+def _participant_metadata(participant: rtc.RemoteParticipant) -> dict[str, Any]:
+    raw = getattr(participant, "metadata", None)
+    if not raw:
+        return {}
+
+    if isinstance(raw, Mapping):
+        return dict(raw)
+
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+
+    return {}
+
+
+def _participant_identity(participant: rtc.RemoteParticipant) -> str:
+    return str(getattr(participant, "identity", "") or "")
+
+
+def _room_name_from_ctx(ctx: JobContext) -> str:
+    room = getattr(ctx, "room", None)
+    room_name = str(getattr(room, "name", "") or "")
+    if room_name:
+        return room_name
+
+    job = getattr(ctx, "job", None)
+    job_room = getattr(job, "room", None)
+    job_room_name = str(getattr(job_room, "name", "") or "")
+    if job_room_name:
+        return job_room_name
+
+    info = getattr(ctx, "info", None)
+    info_room = getattr(info, "room", None)
+    info_room_name = str(getattr(info_room, "name", "") or "")
+    if info_room_name:
+        return info_room_name
+
+    return "unknown-room"
+
+
+async def publish_caption(cfg: CaptionWorkerConfig, room: rtc.Room, event: CaptionEvent) -> None:
+    payload = json.dumps(event.to_payload(), separators=(",", ":"))
+    await _maybe_await(
+        room.local_participant.publish_data(
+            payload,
+            reliable=bool(event.final),
+            topic="captions",
+        )
+    )
+
     if event.final:
-        await persist_caption_segment(CFG, event)
+        await persist_caption_segment(cfg, event)
 
 
-async def handle_track(room: rtc.Room, track: rtc.RemoteAudioTrack, participant: rtc.RemoteParticipant, room_name: str) -> None:
-    identity = participant.identity or ""
-    role = infer_role(identity)
-    name = display_name(identity, role)
-    print(f"[caption-worker] subscribed audio: room={room_name} participant={identity} role={role}")
+async def handle_audio_segment(
+    cfg: CaptionWorkerConfig,
+    room: rtc.Room,
+    room_name: str,
+    participant: rtc.RemoteParticipant,
+    role: str,
+    speaker_name: str,
+    sequence: int,
+    pcm: bytes,
+) -> None:
+    if not pcm:
+        return
 
-    resampler = rtc.AudioResampler(TARGET_SAMPLE_RATE, 1)
-    buffer = AudioBuffer(TARGET_SAMPLE_RATE, 1, max_duration=MAX_BUFFER_SECONDS)
+    seconds = len(pcm) / float(TARGET_SAMPLE_RATE * TARGET_CHANNELS * BYTES_PER_SAMPLE)
+    print(
+        "[caption-worker] audio segment ready",
+        json.dumps(
+            {
+                "room": room_name,
+                "speaker": speaker_name,
+                "speakerRole": role,
+                "speakerIdentity": _participant_identity(participant),
+                "sequence": sequence,
+                "seconds": round(seconds, 3),
+                "bytes": len(pcm),
+                "provider": cfg.provider,
+            },
+            separators=(",", ":"),
+        ),
+    )
+
+    # Real transcription is intentionally not faked here.
+    # The next patch wires this PCM segment into AWS Transcribe Medical and then
+    # calls publish_caption(...) with actual transcript text returned by AWS.
+
+
+async def handle_track(
+    cfg: CaptionWorkerConfig,
+    room: rtc.Room,
+    track: rtc.RemoteAudioTrack,
+    participant: rtc.RemoteParticipant,
+    room_name: str,
+) -> None:
+    identity = _participant_identity(participant)
+    metadata = _participant_metadata(participant)
+    role = infer_role(identity, metadata)
+    name = display_name(identity, role, metadata)
+
+    print(
+        "[caption-worker] subscribed audio",
+        json.dumps(
+            {
+                "room": room_name,
+                "participant": identity,
+                "speakerRole": role,
+                "speakerName": name,
+            },
+            separators=(",", ":"),
+        ),
+    )
+
+    stream = rtc.AudioStream(
+        track,
+        sample_rate=TARGET_SAMPLE_RATE,
+        num_channels=TARGET_CHANNELS,
+        frame_size_ms=100,
+    )
+    buffer = PcmSegmentBuffer(TARGET_SAMPLE_RATE, TARGET_CHANNELS)
     sequence = 0
 
-    async def flush_buffer(final: bool) -> None:
-        nonlocal sequence
-        if buffer.duration < 0.5:
+    try:
+        async for audio_event in stream:
+            frame = getattr(audio_event, "frame", audio_event)
+            if not isinstance(frame, rtc.AudioFrame):
+                continue
+
+            buffer.push_frame(frame)
+
+            if buffer.duration >= FLUSH_SECONDS:
+                sequence += 1
+                pcm = buffer.pop_all()
+                await handle_audio_segment(cfg, room, room_name, participant, role, name, sequence, pcm)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        print(
+            "[caption-worker] audio track handler failed",
+            json.dumps(
+                {
+                    "room": room_name,
+                    "participant": identity,
+                    "error": str(exc),
+                },
+                separators=(",", ":"),
+            ),
+        )
+    finally:
+        try:
+            await _maybe_await(stream.aclose())
+        except Exception:
+            pass
+
+
+async def _connect_job_context(ctx: JobContext) -> None:
+    audio_only = getattr(AutoSubscribe, "AUDIO_ONLY", None)
+    if audio_only is not None:
+        try:
+            await _maybe_await(ctx.connect(auto_subscribe=audio_only))
             return
+        except TypeError:
+            pass
 
-        pcm = buffer.pop_all()
-        pcm = np.clip(pcm, -1.0, 1.0)
-
-        # Sweep 5B2 will send pcm to AWS Transcribe Medical and publish the
-        # returned transcript text. This foundation event proves the route,
-        # topic, participant attribution, and persistence shape without fake
-        # medical transcription text.
-        sequence += 1
-        if final:
-            print(f"[caption-worker] audio segment ready for AWS: room={room_name} speaker={name} seq={sequence}")
-
-    @track.on("audio_frame")
-    def on_audio_frame(frame: rtc.AudioFrame) -> None:
-        pcm = resampler.process(frame)
-        buffer.push(pcm)
-
-        if not VAD.is_speech(pcm):
-            if buffer.duration > 0.8:
-                asyncio.create_task(flush_buffer(final=True))
-            return
-
-        if buffer.duration >= 3.0:
-            asyncio.create_task(flush_buffer(final=False))
+    await _maybe_await(ctx.connect())
 
 
 async def entrypoint(ctx: JobContext) -> None:
-    print("[caption-worker] starting")
-    print(f"[caption-worker] provider={CFG.provider} language={CFG.language} medical={CFG.enable_medical} persist={CFG.persist}")
+    cfg = CaptionWorkerConfig.from_env()
+    room = ctx.room
+    room_name = _room_name_from_ctx(ctx)
+    active_tasks: set[asyncio.Task[None]] = set()
+    stop_future: asyncio.Future[None] = asyncio.Future()
 
-    room_name = ctx.room_name
-    token = (
-        rtc.AccessToken(CFG.livekit_api_key, CFG.livekit_api_secret)
-        .with_identity(CFG.bot_name)
-        .with_grants(
-            rtc.VideoGrants(
-                room_join=True,
-                room=room_name,
-                can_subscribe=True,
-                can_publish=False,
-                can_publish_data=True,
-            )
-        )
-        .to_jwt()
+    print("[caption-worker] starting")
+    print(
+        "[caption-worker] config",
+        json.dumps(
+            {
+                "provider": cfg.provider,
+                "language": cfg.language,
+                "medical": cfg.enable_medical,
+                "persist": cfg.persist,
+                "botName": cfg.bot_name,
+            },
+            separators=(",", ":"),
+        ),
     )
 
-    room = await rtc.connect(CFG.livekit_url, token=token)
+    def register_task(task: asyncio.Task[None]) -> None:
+        active_tasks.add(task)
+        task.add_done_callback(lambda done: active_tasks.discard(done))
 
     @room.on("track_subscribed")
-    def on_track_subscribed(track: rtc.Track, publication: rtc.RemoteTrackPublication, participant: rtc.RemoteParticipant) -> None:
+    def on_track_subscribed(
+        track: rtc.Track,
+        publication: rtc.RemoteTrackPublication,
+        participant: rtc.RemoteParticipant,
+    ) -> None:
         if isinstance(track, rtc.RemoteAudioTrack):
-            asyncio.create_task(handle_track(room, track, participant, room_name))
+            register_task(asyncio.create_task(handle_track(cfg, room, track, participant, room_name)))
 
-    print(f"[caption-worker] joined room={room_name} as {CFG.bot_name}")
-    await ctx.wait_for_stop()
-    await room.disconnect()
-    print("[caption-worker] stopped")
+    def stop_job(reason: str = "") -> None:
+        if not stop_future.done():
+            print("[caption-worker] shutdown requested", reason)
+            stop_future.set_result(None)
+
+    try:
+        ctx.add_shutdown_callback(stop_job)
+    except Exception:
+        pass
+
+    await _connect_job_context(ctx)
+    room_name = _room_name_from_ctx(ctx)
+    print(f"[caption-worker] joined room={room_name} as {cfg.bot_name}")
+
+    try:
+        await stop_future
+    except asyncio.CancelledError:
+        pass
+    finally:
+        for task in list(active_tasks):
+            task.cancel()
+        if active_tasks:
+            await asyncio.gather(*active_tasks, return_exceptions=True)
+
+        try:
+            await _maybe_await(room.disconnect())
+        except Exception:
+            pass
+
+        print("[caption-worker] stopped")
 
 
 if __name__ == "__main__":
+    cfg = CaptionWorkerConfig.from_env()
     cli.run_app(
-        entrypoint,
-        WorkerOptions(auto_subscribe=AutoSubscribe.AUDIO_ONLY),
+        WorkerOptions(
+            entrypoint_fnc=entrypoint,
+            ws_url=cfg.livekit_url,
+            api_key=cfg.livekit_api_key,
+            api_secret=cfg.livekit_api_secret,
+            agent_name=cfg.bot_name,
+        )
     )
