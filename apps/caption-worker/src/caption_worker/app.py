@@ -3,56 +3,70 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
-from typing import Any, Mapping
+from typing import Any, AsyncIterator, Mapping
 
 from livekit import rtc
 from livekit.agents import AutoSubscribe, WorkerOptions, cli, JobContext
 
+from .aws_transcribe import AwsTranscribeMedicalProvider
 from .config import CaptionWorkerConfig
-from .events import CaptionEvent, display_name, infer_role
+from .events import CaptionEvent, display_name, infer_role, utc_now_iso
 from .persistence import persist_caption_segment
 
 
 TARGET_SAMPLE_RATE = 16000
 TARGET_CHANNELS = 1
 BYTES_PER_SAMPLE = 2
-MAX_BUFFER_SECONDS = 8.0
-FLUSH_SECONDS = 3.0
+MAX_QUEUE_CHUNKS = 240
 
 
-class PcmSegmentBuffer:
-    def __init__(self, sample_rate: int = TARGET_SAMPLE_RATE, channels: int = TARGET_CHANNELS) -> None:
-        self.sample_rate = sample_rate
-        self.channels = channels
-        self._chunks: list[bytes] = []
-        self._bytes = 0
-        self._max_bytes = int(sample_rate * channels * BYTES_PER_SAMPLE * MAX_BUFFER_SECONDS)
+class PcmChunkQueue:
+    def __init__(self, maxsize: int = MAX_QUEUE_CHUNKS) -> None:
+        self._queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=maxsize)
+        self._closed = False
 
-    @property
-    def duration(self) -> float:
-        if self.sample_rate <= 0 or self.channels <= 0:
-            return 0.0
-        return self._bytes / float(self.sample_rate * self.channels * BYTES_PER_SAMPLE)
-
-    def push_frame(self, frame: rtc.AudioFrame) -> None:
-        data = bytes(frame.data)
-        if not data:
+    async def push(self, data: bytes) -> None:
+        if self._closed or not data:
             return
 
-        self._chunks.append(data)
-        self._bytes += len(data)
+        try:
+            self._queue.put_nowait(data)
+            return
+        except asyncio.QueueFull:
+            # Keep the stream live by dropping the oldest queued chunk rather
+            # than letting a slow STT provider block LiveKit audio handling.
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
 
-        while self._bytes > self._max_bytes and self._chunks:
-            removed = self._chunks.pop(0)
-            self._bytes -= len(removed)
+        try:
+            self._queue.put_nowait(data)
+        except asyncio.QueueFull:
+            pass
 
-    def pop_all(self) -> bytes:
-        if not self._chunks:
-            return b""
-        joined = b"".join(self._chunks)
-        self._chunks.clear()
-        self._bytes = 0
-        return joined
+    async def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            self._queue.put_nowait(None)
+        except asyncio.QueueFull:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            await self._queue.put(None)
+
+    def __aiter__(self) -> AsyncIterator[bytes]:
+        return self._iterate()
+
+    async def _iterate(self) -> AsyncIterator[bytes]:
+        while True:
+            item = await self._queue.get()
+            if item is None:
+                break
+            yield item
 
 
 async def _maybe_await(value: Any) -> Any:
@@ -77,6 +91,18 @@ def _participant_metadata(participant: rtc.RemoteParticipant) -> dict[str, Any]:
             return {}
 
     return {}
+
+
+def _metadata_text(metadata: Mapping[str, Any] | None, *keys: str) -> str:
+    if not metadata:
+        return ""
+    for key in keys:
+        value = metadata.get(key)
+        if value is not None:
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
 
 
 def _participant_identity(participant: rtc.RemoteParticipant) -> str:
@@ -118,40 +144,58 @@ async def publish_caption(cfg: CaptionWorkerConfig, room: rtc.Room, event: Capti
         await persist_caption_segment(cfg, event)
 
 
-async def handle_audio_segment(
+async def handle_transcription_results(
     cfg: CaptionWorkerConfig,
     room: rtc.Room,
     room_name: str,
     participant: rtc.RemoteParticipant,
+    metadata: Mapping[str, Any],
     role: str,
     speaker_name: str,
-    sequence: int,
-    pcm: bytes,
+    pcm_queue: PcmChunkQueue,
 ) -> None:
-    if not pcm:
-        return
+    provider = AwsTranscribeMedicalProvider(cfg)
+    identity = _participant_identity(participant)
+    encounter_id = _metadata_text(metadata, "encounterId", "encounter", "encounter_id")
+    appointment_id = _metadata_text(metadata, "appointmentId", "appointment", "appointment_id", "appt")
+    sequence = 0
 
-    seconds = len(pcm) / float(TARGET_SAMPLE_RATE * TARGET_CHANNELS * BYTES_PER_SAMPLE)
-    print(
-        "[caption-worker] audio segment ready",
-        json.dumps(
-            {
-                "room": room_name,
-                "speaker": speaker_name,
-                "speakerRole": role,
-                "speakerIdentity": _participant_identity(participant),
-                "sequence": sequence,
-                "seconds": round(seconds, 3),
-                "bytes": len(pcm),
-                "provider": cfg.provider,
-            },
-            separators=(",", ":"),
-        ),
-    )
+    async for result in provider.transcribe_pcm_stream(pcm_queue):
+        text = str(result.get("text") or "").strip()
+        if not text:
+            continue
 
-    # Real transcription is intentionally not faked here.
-    # The next patch wires this PCM segment into AWS Transcribe Medical and then
-    # calls publish_caption(...) with actual transcript text returned by AWS.
+        sequence += 1
+        final = bool(result.get("final"))
+        now = utc_now_iso()
+
+        confidence = result.get("confidence")
+        try:
+            confidence_value = float(confidence) if confidence is not None else None
+        except Exception:
+            confidence_value = None
+
+        event = CaptionEvent(
+            type="caption.final" if final else "caption.partial",
+            roomId=room_name,
+            encounterId=encounter_id or None,
+            appointmentId=appointment_id or None,
+            speakerRole=role,  # type: ignore[arg-type]
+            speakerIdentity=identity,
+            speakerName=speaker_name,
+            speakerDisplay=speaker_name,
+            text=text,
+            final=final,
+            source=cfg.provider,  # type: ignore[arg-type]
+            language=str(result.get("language") or cfg.language or ""),
+            confidence=confidence_value,
+            sequence=sequence,
+            timestamp=now,
+            startedAt=now,
+            endedAt=now,
+        )
+
+        await publish_caption(cfg, room, event)
 
 
 async def handle_track(
@@ -174,6 +218,7 @@ async def handle_track(
                 "participant": identity,
                 "speakerRole": role,
                 "speakerName": name,
+                "provider": cfg.provider,
             },
             separators=(",", ":"),
         ),
@@ -185,8 +230,20 @@ async def handle_track(
         num_channels=TARGET_CHANNELS,
         frame_size_ms=100,
     )
-    buffer = PcmSegmentBuffer(TARGET_SAMPLE_RATE, TARGET_CHANNELS)
-    sequence = 0
+    pcm_queue = PcmChunkQueue()
+
+    transcription_task = asyncio.create_task(
+        handle_transcription_results(
+            cfg,
+            room,
+            room_name,
+            participant,
+            metadata,
+            role,
+            name,
+            pcm_queue,
+        )
+    )
 
     try:
         async for audio_event in stream:
@@ -194,12 +251,8 @@ async def handle_track(
             if not isinstance(frame, rtc.AudioFrame):
                 continue
 
-            buffer.push_frame(frame)
+            await pcm_queue.push(bytes(frame.data))
 
-            if buffer.duration >= FLUSH_SECONDS:
-                sequence += 1
-                pcm = buffer.pop_all()
-                await handle_audio_segment(cfg, room, room_name, participant, role, name, sequence, pcm)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -215,10 +268,30 @@ async def handle_track(
             ),
         )
     finally:
+        await pcm_queue.close()
+
         try:
             await _maybe_await(stream.aclose())
         except Exception:
             pass
+
+        try:
+            await asyncio.wait_for(transcription_task, timeout=12)
+        except asyncio.TimeoutError:
+            transcription_task.cancel()
+            await asyncio.gather(transcription_task, return_exceptions=True)
+        except Exception as exc:
+            print(
+                "[caption-worker] transcription task failed",
+                json.dumps(
+                    {
+                        "room": room_name,
+                        "participant": identity,
+                        "error": str(exc),
+                    },
+                    separators=(",", ":"),
+                ),
+            )
 
 
 async def _connect_job_context(ctx: JobContext) -> None:
@@ -250,6 +323,8 @@ async def entrypoint(ctx: JobContext) -> None:
                 "medical": cfg.enable_medical,
                 "persist": cfg.persist,
                 "botName": cfg.bot_name,
+                "medicalSpecialty": cfg.medical_specialty,
+                "medicalType": cfg.medical_type,
             },
             separators=(",", ":"),
         ),
