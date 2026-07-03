@@ -1,4 +1,3 @@
-// apps/api-gateway/app/_lib/index.ts
 import crypto from 'node:crypto';
 
 export function sha256Hex(input: string) {
@@ -15,8 +14,28 @@ export function requireEnv(name: string) {
   return v;
 }
 
+function envFirst(names: string[]) {
+  for (const name of names) {
+    const value = process.env[name];
+    if (value && value.trim()) return value.trim();
+  }
+  return '';
+}
+
 export function issueRtcToken(payload: Record<string, any>) {
-  const secret = process.env.RTC_SIGNING_SECRET || 'dev-secret';
+  const secret = envFirst([
+    'RTC_SIGNING_SECRET',
+    'TELEVISIT_JOIN_JWT_SECRET',
+    'RTC_JOIN_JWT_SECRET',
+    'JOIN_TICKET_JWT_SECRET',
+  ]);
+
+  if (!secret) {
+    throw new Error(
+      'Missing RTC_SIGNING_SECRET or TELEVISIT_JOIN_JWT_SECRET for RTC token signing.',
+    );
+  }
+
   const body = JSON.stringify({ ...payload, iat: Date.now() });
   const sig = crypto.createHmac('sha256', secret).update(body).digest('hex');
   return Buffer.from(`${body}.${sig}`).toString('base64url');
