@@ -15,7 +15,17 @@ import {
   type Participant,
 } from 'livekit-client';
 
-import { connectRoom, getOrCreateUid, RTC_TOPIC_CAPTIONS, coerceCaptionEvent, type CaptionEvent } from '@ambulant/rtc';
+import {
+  connectRoom,
+  getOrCreateUid,
+  RTC_TOPIC_CAPTIONS,
+  coerceCaptionEvent,
+  formatRtcParticipantLabel,
+  normalizeRtcParticipantRole,
+  type CaptionEvent,
+  type RtcChatMessage,
+  type RtcParticipantRole,
+} from '@ambulant/rtc';
 
 // Shared atoms
 import { Field } from '@/components/shared/Field';
@@ -135,6 +145,39 @@ type TranscriptNoteSuggestion = {
   createdAt?: string;
   applied?: boolean;
 };
+
+type ClinicianRoomChatMessage = RtcChatMessage & {
+  from: string;
+  text: string;
+  ts?: number;
+};
+
+function chatMessageLabel(message: ClinicianRoomChatMessage | Partial<RtcChatMessage>) {
+  if (typeof message.senderDisplay === 'string' && message.senderDisplay.trim()) {
+    return message.senderDisplay.trim();
+  }
+
+  return formatRtcParticipantLabel({
+    role: message.senderRole || message.participantRole || message.from || 'guest',
+    senderName: message.senderName,
+    displayName: typeof message.from === 'string' ? message.from : null,
+  });
+}
+
+function chatPayloadLabel(parsed: Record<string, unknown>, fallbackFrom = 'guest') {
+  const from = typeof parsed.from === 'string' ? parsed.from : fallbackFrom;
+  return formatRtcParticipantLabel({
+    role:
+      parsed.senderRole ||
+      parsed.participantRole ||
+      parsed.relationshipToPatient ||
+      from ||
+      fallbackFrom,
+    senderDisplay: typeof parsed.senderDisplay === 'string' ? parsed.senderDisplay : null,
+    senderName: typeof parsed.senderName === 'string' ? parsed.senderName : null,
+    displayName: typeof parsed.displayName === 'string' ? parsed.displayName : null,
+  });
+}
 
 function isControlKey(v: unknown): v is ControlKey {
   return (
@@ -467,6 +510,19 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     [roomId, patientId, patientName, searchParams]
   );
 
+  const clinicianChatIdentity = useMemo(
+    () => `clinician-${clinicianIdParam || 'local'}`,
+    [clinicianIdParam],
+  );
+
+  const clinicianChatDisplay = useMemo(() => {
+    const name = appt.clinicianName || 'Clinician';
+    return formatRtcParticipantLabel({
+      role: 'clinician',
+      displayName: name,
+    });
+  }, [appt.clinicianName]);
+
   // Derived allergy views
   const allergySummary = useMemo(() => {
     if (!patientAllergies || patientAllergies.length === 0) return 'No allergies recorded';
@@ -729,7 +785,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const chatBoxRef = useRef<HTMLDivElement | null>(null);
 
   // Chat
-  const [chat, setChat] = useState<{ from: string; text: string }[]>([]);
+  const [chat, setChat] = useState<ClinicianRoomChatMessage[]>([]);
   const [msg, setMsg] = useState('');
   const [msgSending, setMsgSending] = useState(false);
   const [unread, setUnread] = useState(0);
@@ -1086,12 +1142,35 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   );
 
   const publishTyping = useCallback(async () => {
-    await publishTopic(TOPIC_CHAT, { type: 'typing', from: 'clinician' }, DataPacket_Kind.RELIABLE);
+    await publishTopic(
+      TOPIC_CHAT,
+      {
+        type: 'typing',
+        from: 'clinician',
+        senderRole: 'clinician',
+        senderIdentity: clinicianChatIdentity,
+        senderDisplay: clinicianChatDisplay,
+        ts: Date.now(),
+      },
+      DataPacket_Kind.RELIABLE,
+    );
   }, [publishTopic]);
 
   const publishChat = useCallback(
     async (text: string) => {
-      await publishTopic(TOPIC_CHAT, { from: 'clinician', text }, DataPacket_Kind.RELIABLE);
+      await publishTopic(
+        TOPIC_CHAT,
+        {
+          id: `clinician-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          from: 'clinician',
+          senderRole: 'clinician',
+          senderIdentity: clinicianChatIdentity,
+          senderDisplay: clinicianChatDisplay,
+          text,
+          ts: Date.now(),
+        },
+        DataPacket_Kind.RELIABLE,
+      );
     },
     [publishTopic]
   );
@@ -1245,7 +1324,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             await specialistInvite.handleIncomingChatPayload(parsed);
 
             if (parsed.type === 'typing') {
-              setTypingNote('Patient is typing”¦');
+              setTypingNote(`${chatPayloadLabel(parsed, 'patient')} is typing...`);
               if (typingTimerRef.current && typeof window !== 'undefined') window.clearTimeout(typingTimerRef.current);
               if (typeof window !== 'undefined') {
                 typingTimerRef.current = window.setTimeout(() => setTypingNote(null), 3000);

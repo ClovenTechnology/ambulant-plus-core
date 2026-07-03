@@ -11,7 +11,16 @@ import {
   type RemoteParticipant,
 } from 'livekit-client';
 
-import { connectRoom, RTC_TOPIC_CAPTIONS, coerceCaptionEvent, type CaptionEvent } from '@ambulant/rtc';
+import {
+  connectRoom,
+  RTC_TOPIC_CAPTIONS,
+  coerceCaptionEvent,
+  formatRtcParticipantLabel,
+  normalizeRtcParticipantRole,
+  type CaptionEvent,
+  type RtcChatMessage,
+  type RtcParticipantRole,
+} from '@ambulant/rtc';
 
 import { ToastProvider, useToast } from '@/components/ToastMount';
 import useVitalsSSE from '@/components/useVitalsSSE';
@@ -65,19 +74,30 @@ type AppointmentMeta = {
   coupon?: { applied: boolean; code: string; percent?: number };
 };
 
-type PatientChatMessage = {
+type PatientChatMessage = RtcChatMessage & {
   id: string;
-  from: 'patient' | 'clinician' | 'system';
+  from: RtcParticipantRole | string;
   text: string;
   ts: number;
 };
 
 type CaptionTranscriptEvent = CaptionEvent & { receivedAt: number };
 
-function chatSenderLabel(from: PatientChatMessage['from']) {
-  if (from === 'patient') return 'You';
-  if (from === 'clinician') return 'Clinician';
-  return 'System';
+function chatSenderLabel(message: PatientChatMessage | PatientChatMessage['from']) {
+  if (typeof message === 'string') {
+    if (message === 'patient') return 'You';
+    if (message === 'clinician') return 'Clinician';
+    if (message === 'system') return 'System';
+    return message;
+  }
+
+  if (message.senderDisplay) return message.senderDisplay;
+
+  return formatRtcParticipantLabel({
+    role: message.senderRole || message.participantRole || message.from,
+    senderDisplay: message.senderDisplay,
+    senderName: message.senderName,
+  });
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -345,6 +365,42 @@ function InnerPatientSfuShell({ params }: Props) {
         : undefined,
     }),
     [appointmentId, roomId, scheduledStartAt, search, state],
+  );
+
+  const localParticipantRole = useMemo<RtcParticipantRole>(() => {
+    return normalizeRtcParticipantRole(
+      search.get('participantRole') ||
+        search.get('relationshipToPatient') ||
+        search.get('role') ||
+        'patient',
+    );
+  }, [search]);
+
+  const localRelationshipToPatient = useMemo(
+    () =>
+      search.get('relationshipToPatient') ||
+      search.get('relationship') ||
+      (localParticipantRole === 'patient' ? null : localParticipantRole),
+    [search, localParticipantRole],
+  );
+
+  const localParticipantDisplay = useMemo(() => {
+    return (
+      search.get('participantName') ||
+      search.get('displayName') ||
+      search.get('name') ||
+      (localParticipantRole === 'patient' ? appt.patientName : '')
+    );
+  }, [search, localParticipantRole, appt.patientName]);
+
+  const localParticipantLabel = useMemo(
+    () =>
+      formatRtcParticipantLabel({
+        role: localParticipantRole,
+        displayName: localParticipantDisplay,
+        self: true,
+      }),
+    [localParticipantRole, localParticipantDisplay],
   );
 
   const { samples } = useVitalsSSE(roomId, 240);
@@ -642,8 +698,19 @@ function InnerPatientSfuShell({ params }: Props) {
     (parsed: Record<string, unknown>) => {
       const fromRaw = typeof parsed.from === 'string' ? parsed.from : '';
       const from = fromRaw.toLowerCase();
+      const senderIdentity =
+        typeof parsed.senderIdentity === 'string' ? parsed.senderIdentity.trim() : '';
+      const senderRole = normalizeRtcParticipantRole(
+        parsed.senderRole || parsed.participantRole || parsed.relationshipToPatient || from || 'guest',
+      );
+      const senderDisplay = formatRtcParticipantLabel({
+        role: senderRole,
+        senderDisplay: typeof parsed.senderDisplay === 'string' ? parsed.senderDisplay : null,
+        senderName: typeof parsed.senderName === 'string' ? parsed.senderName : null,
+        displayName: typeof parsed.displayName === 'string' ? parsed.displayName : null,
+      });
 
-      if (from === 'patient') return true;
+      if (senderIdentity && senderIdentity === identity) return true;
 
       const type = typeof parsed.type === 'string' ? parsed.type : 'message';
 
@@ -671,27 +738,36 @@ function InnerPatientSfuShell({ params }: Props) {
       const id =
         typeof parsed.id === 'string' && parsed.id.trim()
           ? parsed.id.trim()
-          : `clinician-${ts}-${Math.random().toString(36).slice(2, 8)}`;
+          : `${senderRole}-${ts}-${Math.random().toString(36).slice(2, 8)}`;
 
       appendIncomingChat({
         id,
-        from: 'clinician',
+        from: senderDisplay,
+        senderRole,
+        senderIdentity: senderIdentity || null,
+        senderDisplay,
+        relationshipToPatient:
+          typeof parsed.relationshipToPatient === 'string' ? parsed.relationshipToPatient : null,
         text,
         ts,
       });
 
       return true;
     },
-    [appendIncomingChat],
+    [appendIncomingChat, identity],
   );
 
   const sendPatientTyping = useCallback(() => {
     void publishJson(TOPIC_CHAT, {
       type: 'typing',
       from: 'patient',
+      senderRole: localParticipantRole,
+      senderIdentity: identity,
+      senderDisplay: localParticipantLabel,
+      relationshipToPatient: localRelationshipToPatient,
       ts: Date.now(),
     });
-  }, [publishJson]);
+  }, [identity, localParticipantLabel, localParticipantRole, localRelationshipToPatient, publishJson]);
 
   const sendPatientChat = useCallback(async () => {
     const clean = patientChatDraft.trim();
@@ -699,8 +775,12 @@ function InnerPatientSfuShell({ params }: Props) {
 
     const ts = Date.now();
     const message: PatientChatMessage = {
-      id: `patient-${ts}-${Math.random().toString(36).slice(2, 8)}`,
+      id: `${localParticipantRole}-${ts}-${Math.random().toString(36).slice(2, 8)}`,
       from: 'patient',
+      senderRole: localParticipantRole,
+      senderIdentity: identity,
+      senderDisplay: localParticipantLabel,
+      relationshipToPatient: localRelationshipToPatient,
       text: clean,
       ts,
     };
@@ -713,7 +793,7 @@ function InnerPatientSfuShell({ params }: Props) {
     } catch {
       toast.error?.('Message could not be sent.');
     }
-  }, [patientChatDraft, publishJson, toast]);
+  }, [identity, localParticipantLabel, localParticipantRole, localRelationshipToPatient, patientChatDraft, publishJson, toast]);
 
   useEffect(() => {
     patientChatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
