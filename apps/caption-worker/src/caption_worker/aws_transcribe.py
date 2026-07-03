@@ -99,48 +99,65 @@ def _confidence_from_items(items: list[Any]) -> float | None:
     return sum(values) / len(values)
 
 
-def _result_to_dict(result: Any) -> dict[str, Any] | None:
-    alternatives = getattr(result, "alternatives", None)
-    if alternatives is None and isinstance(result, Mapping):
-        alternatives = result.get("Alternatives") or result.get("alternatives")
-
-    alternatives = alternatives or []
-    if not alternatives:
+def _mapping_value(value: Any, *keys: str) -> Any:
+    if not isinstance(value, Mapping):
         return None
 
-    alternative = alternatives[0]
-    transcript = getattr(alternative, "transcript", None)
-    if transcript is None and isinstance(alternative, Mapping):
-        transcript = alternative.get("Transcript") or alternative.get("transcript")
+    for key in keys:
+        if key in value:
+            return value.get(key)
+
+    return None
+
+
+def _object_or_mapping_value(value: Any, attr: str, *keys: str) -> Any:
+    if isinstance(value, Mapping):
+        return _mapping_value(value, *keys)
+
+    return getattr(value, attr, None)
+
+
+def _coerce_list(value: Any) -> list[Any]:
+    if value is None:
+        return []
+
+    if callable(value):
+        return []
+
+    if isinstance(value, list):
+        return value
+
+    if isinstance(value, tuple):
+        return list(value)
+
+    try:
+        return list(value)
+    except Exception:
+        return []
+
+
+def _result_to_dict(result: Any) -> dict[str, Any] | None:
+    alternatives = _object_or_mapping_value(result, "alternatives", "Alternatives", "alternatives")
+    alternatives_list = _coerce_list(alternatives)
+
+    if not alternatives_list:
+        return None
+
+    alternative = alternatives_list[0]
+    transcript = _object_or_mapping_value(alternative, "transcript", "Transcript", "transcript")
 
     text = str(transcript or "").strip()
     if not text:
         return None
 
-    items = getattr(alternative, "items", None)
-    if items is None and isinstance(alternative, Mapping):
-        items = alternative.get("Items") or alternative.get("items")
-    items = items or []
+    items = _object_or_mapping_value(alternative, "items", "Items", "items")
+    items_list = _coerce_list(items)
 
-    is_partial = getattr(result, "is_partial", None)
-    if is_partial is None and isinstance(result, Mapping):
-        is_partial = result.get("IsPartial") if "IsPartial" in result else result.get("is_partial")
-
-    start_time = getattr(result, "start_time", None)
-    if start_time is None and isinstance(result, Mapping):
-        start_time = result.get("StartTime") or result.get("start_time")
-
-    end_time = getattr(result, "end_time", None)
-    if end_time is None and isinstance(result, Mapping):
-        end_time = result.get("EndTime") or result.get("end_time")
-
-    result_id = getattr(result, "result_id", None)
-    if result_id is None and isinstance(result, Mapping):
-        result_id = result.get("ResultId") or result.get("result_id")
-
-    language_code = getattr(result, "language_code", None)
-    if language_code is None and isinstance(result, Mapping):
-        language_code = result.get("LanguageCode") or result.get("language_code")
+    is_partial = _object_or_mapping_value(result, "is_partial", "IsPartial", "is_partial")
+    start_time = _object_or_mapping_value(result, "start_time", "StartTime", "start_time")
+    end_time = _object_or_mapping_value(result, "end_time", "EndTime", "end_time")
+    result_id = _object_or_mapping_value(result, "result_id", "ResultId", "result_id")
+    language_code = _object_or_mapping_value(result, "language_code", "LanguageCode", "language_code")
 
     return {
         "text": text,
@@ -149,7 +166,7 @@ def _result_to_dict(result: Any) -> dict[str, Any] | None:
         "startTime": start_time,
         "endTime": end_time,
         "language": language_code,
-        "confidence": _confidence_from_items(list(items)),
+        "confidence": _confidence_from_items(items_list),
     }
 
 

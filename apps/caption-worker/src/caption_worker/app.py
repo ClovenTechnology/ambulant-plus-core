@@ -48,24 +48,35 @@ class PcmChunkQueue:
     async def close(self) -> None:
         if self._closed:
             return
+
         self._closed = True
+
+        # Wake a waiting consumer when there is space, but do not discard queued
+        # audio just to insert a sentinel. If the queue is full, the iterator
+        # will drain what remains and then stop when closed + empty.
         try:
             self._queue.put_nowait(None)
         except asyncio.QueueFull:
-            try:
-                self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                pass
-            await self._queue.put(None)
+            pass
 
     def __aiter__(self) -> AsyncIterator[bytes]:
         return self._iterate()
 
     async def _iterate(self) -> AsyncIterator[bytes]:
         while True:
-            item = await self._queue.get()
+            if self._closed and self._queue.empty():
+                break
+
+            try:
+                item = await asyncio.wait_for(self._queue.get(), timeout=0.1)
+            except asyncio.TimeoutError:
+                if self._closed and self._queue.empty():
+                    break
+                continue
+
             if item is None:
                 break
+
             yield item
 
 
