@@ -132,14 +132,26 @@ type SimulationState = {
   statusError?: string | null;
 };
 
-const STARTER_KIT: { key: string; label: string }[] = [
-  { key: 'duecare_health_monitor', label: 'DueCare 6-in-1 Health Monitor' },
-  { key: 'nexring', label: 'NexRing (sleep/stress/vitals)' },
-  { key: 'digital_stethoscope', label: 'Digital Stethoscope' },
-  { key: 'hd_otoscope', label: 'HD Otoscope' },
-  { key: 'cables_chargers', label: 'Cables, chargers & adapters' },
-  { key: 'quickstart_pack', label: 'Quick-start pack (QR + guides)' },
-];
+function kitKey(label: string, index: number) {
+  const slug = String(label || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 80);
+
+  return slug || `cmed_item_${index + 1}`;
+}
+
+function starterKitCatalogFromItems(items?: string[] | null): { key: string; label: string }[] {
+  return Array.isArray(items)
+    ? items
+        .map((item, index) => {
+          const label = String(item || '').trim();
+          return label ? { key: kitKey(label, index), label } : null;
+        })
+        .filter(Boolean) as { key: string; label: string }[]
+    : [];
+}
 
 function safeDate(s?: string | null) {
   if (!s) return null;
@@ -354,13 +366,16 @@ function Field({
 
 export default function OnboardingDispatchBoard({
   rows,
+  starterKitItems = [],
 }: {
   rows: OnboardingBoardRow[];
+  starterKitItems?: string[];
 }) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [simulationByClinician, setSimulationByClinician] = useState<Record<string, SimulationState>>({});
+  const starterKitCatalog = useMemo(() => starterKitCatalogFromItems(starterKitItems), [starterKitItems]);
 
   // schedule modal
   const [schedOpen, setSchedOpen] = useState(false);
@@ -379,7 +394,7 @@ export default function OnboardingDispatchBoard({
   const [dispTrackingUrl, setDispTrackingUrl] = useState('');
   const [dispKit, setDispKit] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
-    for (const it of STARTER_KIT) init[it.key] = true;
+    for (const it of starterKitCatalog) init[it.key] = true;
     return init;
   });
   const [dispNotifyNow, setDispNotifyNow] = useState(true);
@@ -700,7 +715,7 @@ setBusyId(schedRow.clinicianId);
     setDispNotifyNow(true);
     // default kit all checked
     const init: Record<string, boolean> = {};
-    for (const it of STARTER_KIT) init[it.key] = true;
+    for (const it of starterKitCatalog) init[it.key] = true;
     setDispKit(init);
     setDispOpen(true);
   };
@@ -712,7 +727,7 @@ setBusyId(schedRow.clinicianId);
       return;
     }
 
-    const kitItems = STARTER_KIT.filter((k) => !!dispKit[k.key]).map((k) => k.key);
+    const kitItems = starterKitCatalog.filter((k) => !!dispKit[k.key]).map((k) => k.label);
     if (kitItems.length === 0) {
       setNotice({ tone: 'err', text: 'Select at least one kit item.' });
       return;
@@ -727,6 +742,7 @@ setBusyId(schedRow.clinicianId);
         trackingCode: dispTrackingCode.trim() ? dispTrackingCode.trim() : null,
         trackingUrl: dispTrackingUrl.trim() ? dispTrackingUrl.trim() : null,
         kitItems,
+        dispatchKind: 'starter_kit',
         notifyClinician: !!dispNotifyNow,
       });
       if (ok) setDispOpen(false);
@@ -764,7 +780,7 @@ setBusyId(schedRow.clinicianId);
     }
 
     // kit items still included for notification payload (stable “full kit list”)
-    const kitItems = STARTER_KIT.map((k) => k.key);
+    const kitItems = starterKitCatalog.map((k) => k.key);
 
     setBusyId(trackRow.clinicianId);
     try {
@@ -1461,7 +1477,7 @@ setBusyId(schedRow.clinicianId);
           <div className="sm:col-span-2">
             <div className="text-[11px] font-semibold text-gray-700">Kit items</div>
             <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {STARTER_KIT.map((it) => (
+              {starterKitCatalog.map((it) => (
                 <label key={it.key} className="flex items-start gap-2 text-xs text-gray-700">
                   <input
                     type="checkbox"

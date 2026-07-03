@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { verifyAdminRequest } from '../../utils/auth';
+import {
+  calculateOnboardingPaymentState,
+  getClinicianOnboardingSettings,
+  publicClinicianOnboardingSettings,
+} from '@/src/clinicians/onboarding/settings';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -131,6 +136,27 @@ export async function GET(req: NextRequest) {
         })
       : [];
 
+    const payments = clinicianIds.length
+      ? await db.clinicianOnboardingPayment.findMany({
+          where: {
+            clinicianId: { in: clinicianIds },
+            status: { in: ['confirmed', 'paid', 'captured'] },
+          },
+          orderBy: [{ confirmedAt: 'desc' }, { createdAt: 'desc' }],
+        })
+      : [];
+
+    const paymentsByClinicianId = new Map<string, any[]>();
+    for (const payment of payments || []) {
+      const cid = String(payment.clinicianId);
+      const existing = paymentsByClinicianId.get(cid) || [];
+      existing.push(payment);
+      paymentsByClinicianId.set(cid, existing);
+    }
+
+    const settings = await getClinicianOnboardingSettings();
+    const publicSettings = publicClinicianOnboardingSettings(settings);
+
     const latestDispatchByClinicianId = new Map<string, any>();
     for (const d of dispatches || []) {
       const cid = String(d.clinicianId);
@@ -144,6 +170,24 @@ export async function GET(req: NextRequest) {
           ? trainingSlotById.get(String(onboarding.trainingSlotId)) || null
           : null;
       const dispatch = latestDispatchByClinicianId.get(String(clinician.id)) || null;
+      const confirmedPayments = paymentsByClinicianId.get(String(clinician.id)) || [];
+      const amountPaidCents = confirmedPayments.reduce((sum: number, payment: any) => {
+        const provider = String(payment?.provider || '').toLowerCase();
+        if (provider === 'waiver' || provider === 'deferred') return sum;
+        return sum + Math.max(0, Math.round(Number(payment?.amountCents || 0)));
+      }, 0);
+      const paymentState = calculateOnboardingPaymentState({
+        trainingFeeCents: settings.trainingFeeCents,
+        minimumInitialPaymentCents: settings.minimumInitialPaymentCents,
+        amountPaidCents,
+      });
+      const paymentPlan = cleanStr(onboarding?.paymentPlan, 120);
+      const waiverActive =
+        paymentPlan === 'WAIVER_TRAIN_NOW_PAY_LATER' ||
+        confirmedPayments.some((payment: any) =>
+          ['waiver', 'deferred'].includes(String(payment?.provider || '').toLowerCase()),
+        );
+      const latestPayment = confirmedPayments[0] || null;
 
       return {
         clinicianId: String(clinician.id),
@@ -159,6 +203,33 @@ export async function GET(req: NextRequest) {
             : `virtual-onboarding-${String(clinician.id)}`,
           stage: outwardStage(onboarding?.status),
           notes: cleanStr(onboarding?.trainingNotes, 2000),
+          depositPaid: onboarding?.depositPaid === true,
+          paymentPlan,
+          nextPaymentAt: asIso(onboarding?.nextPaymentAt),
+          waiverActive,
+        },
+
+        payment: {
+          amountPaidCents: paymentState.amountPaidCents,
+          outstandingCents: paymentState.outstandingCents,
+          initialRequirementMet: paymentState.initialRequirementMet,
+          fullyPaid: paymentState.fullyPaid,
+          paymentStatus: waiverActive ? 'waiver' : paymentState.paymentStatus,
+          waiverActive,
+          latestConfirmedPayment: latestPayment
+            ? {
+                id: String(latestPayment.id),
+                provider: cleanStr(latestPayment.provider, 80),
+                status: cleanStr(latestPayment.status, 80),
+                amountCents: Math.max(0, Math.round(Number(latestPayment.amountCents || 0))),
+                currency: cleanStr(latestPayment.currency, 8),
+                paymentReference: cleanStr(latestPayment.paymentReference, 180),
+                proofOfPaymentUrl: cleanStr(latestPayment.proofOfPaymentUrl, 1000),
+                authorisationCodeHint: cleanStr(latestPayment.authorisationCodeHint, 20),
+                authorisationExpiresAt: asIso(latestPayment.authorisationExpiresAt),
+                confirmedAt: asIso(latestPayment.confirmedAt),
+              }
+            : null,
         },
 
         trainingSlot: training
@@ -192,6 +263,9 @@ export async function GET(req: NextRequest) {
       {
         ok: true,
         rows,
+        settings: {
+          publicSettings,
+        },
       },
       {
         headers: {

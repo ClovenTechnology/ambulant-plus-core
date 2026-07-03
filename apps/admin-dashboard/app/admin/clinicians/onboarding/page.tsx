@@ -3,6 +3,7 @@ import React from 'react';
 import Link from 'next/link';
 import OnboardingDispatchBoard from './OnboardingDispatchBoard';
 import OnboardingSettingsPanel from './OnboardingSettingsPanel';
+import OnboardingPaymentActionsPanel from './OnboardingPaymentActionsPanel';
 import { getSessionFromGateway } from '@/src/lib/session';
 
 export const dynamic = 'force-dynamic';
@@ -50,6 +51,12 @@ type OnboardingBoardRow = {
 type BoardResponse = {
   ok: boolean;
   rows: OnboardingBoardRow[];
+  settings?: {
+    publicSettings?: {
+      currency?: string;
+      starterKitItems?: string[];
+    };
+  };
   error?: string;
 };
 
@@ -137,7 +144,7 @@ export default async function AdminClinicianOnboardingPage() {
           </h1>
           <p className="mt-1 text-sm text-gray-600">
             End-to-end view of clinician onboarding, mandatory training payment,
-            authorisation codes and Ambulant+ starter kit dispatch.
+            authorisation codes and C-Med StarterKit dispatch.
           </p>
         </div>
 
@@ -163,6 +170,12 @@ export default async function AdminClinicianOnboardingPage() {
 
       <OnboardingSettingsPanel />
 
+      <OnboardingPaymentActionsPanel
+        rows={board.rows as any}
+        starterKitItems={board.settings?.publicSettings?.starterKitItems || []}
+        currency={board.settings?.publicSettings?.currency || 'ZAR'}
+      />
+
       {!board.ok && (
         <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           Couldn&apos;t load onboarding board. Check{' '}
@@ -173,7 +186,7 @@ export default async function AdminClinicianOnboardingPage() {
         </div>
       )}
 
-      <OnboardingDispatchBoard rows={board.rows} />
+      <OnboardingDispatchBoard rows={board.rows} starterKitItems={board.settings?.publicSettings?.starterKitItems || []} />
     </main>
   );
 }

@@ -49,12 +49,11 @@ export async function POST(req: NextRequest) {
     const body = (await req.json().catch(() => ({}))) as any;
 
     const clinicianId = cleanStr(body.clinicianId, 80);
-    const courier = cleanStr(body.courier, 120);
-    const trackingCode = cleanStr(body.trackingCode, 120);
+    const courier = cleanStr(body.courier || body.courierName, 120);
+    const trackingCode = cleanStr(body.trackingCode, 120) || 'Pending';
 
     if (!clinicianId) return NextResponse.json({ ok: false, error: 'clinicianId required' }, { status: 400 });
     if (!courier) return NextResponse.json({ ok: false, error: 'courier required' }, { status: 400 });
-    if (!trackingCode) return NextResponse.json({ ok: false, error: 'trackingCode required' }, { status: 400 });
 
     const onboarding = await prisma.clinicianOnboarding.findUnique({ where: { clinicianId } });
     if (!onboarding) return NextResponse.json({ ok: false, error: 'onboarding_not_found' }, { status: 404 });

@@ -14,6 +14,7 @@ export async function POST(req: NextRequest) {
   const trackingUrl = body?.trackingUrl ? String(body.trackingUrl) : null;
   const kitItems = Array.isArray(body?.kitItems) ? body.kitItems.map(String) : [];
   const notifyClinician = body?.notifyClinician !== false;
+  const dispatchKind = body?.dispatchKind ? String(body.dispatchKind) : 'starter_kit';
 
   if (!clinicianId || !onboardingId || !courierName) {
     return new Response('clinicianId, onboardingId, courierName required', { status: 400 });
@@ -26,10 +27,12 @@ export async function POST(req: NextRequest) {
   const res = await forwardToGateway(req, '/api/admin/clinicians/onboarding/create-dispatch', {
     clinicianId,
     onboardingId,
+    courier: courierName,
     courierName,
     trackingCode,
     trackingUrl,
     kitItems,
+    dispatchKind,
   });
 
   // If gateway failed, forwardToGateway already returns JSON response
@@ -47,6 +50,7 @@ export async function POST(req: NextRequest) {
       trackingCode,
       trackingUrl,
       kitItems,
+      dispatchKind,
       // idempotency hint: gateway can use these to de-dupe
       idempotencyKey: `dispatch:${clinicianId}:${trackingCode || trackingUrl || 'no_tracking'}`,
     });
