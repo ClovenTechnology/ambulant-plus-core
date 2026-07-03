@@ -9,6 +9,14 @@ def _bool_env(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _env_first(*names: str) -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value and value.strip():
+            return value.strip()
+    return ""
+
+
 @dataclass(frozen=True)
 class CaptionWorkerConfig:
     livekit_url: str
@@ -29,11 +37,16 @@ class CaptionWorkerConfig:
     @classmethod
     def from_env(cls) -> "CaptionWorkerConfig":
         cfg = cls(
-            livekit_url=os.getenv("LIVEKIT_URL") or os.getenv("LIVEKIT_WS_URL") or "",
+            livekit_url=_env_first("LIVEKIT_URL", "LIVEKIT_WS_URL"),
             livekit_api_key=os.getenv("LIVEKIT_API_KEY", ""),
             livekit_api_secret=os.getenv("LIVEKIT_API_SECRET", ""),
             aws_region=os.getenv("AWS_REGION", "eu-west-1"),
-            api_gateway_url=os.getenv("API_GATEWAY_URL", "").rstrip("/"),
+            api_gateway_url=_env_first(
+                "API_GATEWAY_URL",
+                "APIGW_BASE_URL",
+                "APIGW_BASE",
+                "API_GATEWAY_BASE_URL",
+            ).rstrip("/"),
             worker_id=os.getenv("CAPTION_WORKER_ID", "caption-worker"),
             provider=os.getenv("CAPTION_PROVIDER", "aws-transcribe-medical"),
             language=os.getenv("CAPTION_LANGUAGE", "en-US"),
@@ -50,7 +63,7 @@ class CaptionWorkerConfig:
     def validate(self) -> None:
         missing = []
         if not self.livekit_url:
-            missing.append("LIVEKIT_URL")
+            missing.append("LIVEKIT_URL or LIVEKIT_WS_URL")
         if not self.livekit_api_key:
             missing.append("LIVEKIT_API_KEY")
         if not self.livekit_api_secret:
@@ -62,4 +75,4 @@ class CaptionWorkerConfig:
             raise RuntimeError("aws-transcribe-medical requires CAPTION_LANGUAGE=en-US")
 
         if self.persist and not self.api_gateway_url:
-            raise RuntimeError("CAPTION_PERSIST=true requires API_GATEWAY_URL")
+            raise RuntimeError("CAPTION_PERSIST=true requires API_GATEWAY_URL or APIGW_BASE_URL")
