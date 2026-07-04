@@ -141,11 +141,11 @@ function makeLinks(roomId: string, ctx: Ctx) {
   if (typeof window === 'undefined') {
     const patientOrigin =
       normalizeOrigin(process.env.NEXT_PUBLIC_PATIENT_APP_ORIGIN) ||
-      'http://localhost:3000';
+      (process.env.NODE_ENV === 'production' ? 'https://patient.ambulantplus.co.za' : 'http://localhost:3000');
 
     const clinicianOrigin =
       normalizeOrigin(process.env.NEXT_PUBLIC_CLINICIAN_APP_ORIGIN) ||
-      'http://localhost:3001';
+      (process.env.NODE_ENV === 'production' ? 'https://clinician.ambulantplus.co.za' : 'http://localhost:3001');
 
     return {
       patientSfu: buildUrl(patientOrigin, `/sfu/${cleanRoomId}`, {

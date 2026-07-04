@@ -13,7 +13,7 @@ import { useSearchParams } from 'next/navigation';
 import { formatDistanceToNow } from 'date-fns';
 
 const GATEWAY =
-  process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+  process.env.NEXT_PUBLIC_APIGW_BASE ?? (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
 const PAGE_SIZE = 10;
 

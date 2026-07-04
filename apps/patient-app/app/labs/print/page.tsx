@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 function baseUrl() {
   const h = headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'localhost:3002';
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? (process.env.NODE_ENV === 'production' ? 'patient.ambulantplus.co.za' : 'localhost:3000');
   const proto = h.get('x-forwarded-proto') ?? 'http';
   return `${proto}://${host}`;
 }
