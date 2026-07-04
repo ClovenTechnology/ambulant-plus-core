@@ -10,7 +10,7 @@ export const revalidate = 0;
 const CLIN = (
   process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL ||
   process.env.CLINICIAN_SERVICE_ORIGIN ||
-  'http://localhost:3010'
+  ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010')
 ).replace(/\/$/, '');
 
 function buildForwardHeaders(req: NextRequest, extra: HeadersInit = {}): HeadersInit {
