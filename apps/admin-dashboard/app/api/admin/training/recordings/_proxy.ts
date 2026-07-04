@@ -7,7 +7,7 @@ const APIGW =
   process.env.API_GATEWAY_URL ||
   process.env.NEXT_PUBLIC_APIGW_BASE ||
   process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
-  'http://localhost:3010';
+  ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
 function gatewayBase() {
   return APIGW.replace(/\/+$/, '');

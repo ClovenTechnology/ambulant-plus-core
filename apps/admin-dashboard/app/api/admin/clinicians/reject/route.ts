@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
       process.env.APIGW_BASE ??
       process.env.NEXT_PUBLIC_GATEWAY_BASE ??
       process.env.GATEWAY_URL ??
-      'http://localhost:3010';
+      ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
     const res = await fetch(`${gatewayBase}/api/clinicians`, {
       method: 'PATCH',
