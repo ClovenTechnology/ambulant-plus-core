@@ -114,7 +114,10 @@ export function getOrigin(req?: Request) {
 
   const h = headers();
   const proto = h.get('x-forwarded-proto') || 'http';
-  const host = h.get('x-forwarded-host') || h.get('host') || 'localhost:3000';
+  const host =
+    h.get('x-forwarded-host') ||
+    h.get('host') ||
+    (process.env.NODE_ENV === 'production' ? 'patient.ambulantplus.co.za' : 'localhost:3000');
   return `${proto}://${host}`;
 }
 
