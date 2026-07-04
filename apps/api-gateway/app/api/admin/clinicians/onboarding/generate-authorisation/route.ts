@@ -13,8 +13,26 @@ function cleanStr(value: unknown, max = 500): string | null {
   return s.length > max ? s.slice(0, max) : s;
 }
 
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+}
+
+function authCodeSalt() {
+  const salt = String(
+    process.env.CLINICIAN_PAYMENT_AUTH_CODE_SALT ||
+      process.env.NEXTAUTH_SECRET ||
+      '',
+  ).trim();
+
+  if (!salt && isProductionRuntime()) {
+    throw new Error('clinician_payment_auth_code_salt_not_configured');
+  }
+
+  return salt || 'ambulant-local-dev-salt';
+}
+
 function hashCode(code: string) {
-  const salt = process.env.CLINICIAN_PAYMENT_AUTH_CODE_SALT || process.env.NEXTAUTH_SECRET || 'ambulant-local-dev-salt';
+  const salt = authCodeSalt();
   return crypto.createHash('sha256').update(`${salt}:${code.trim().toUpperCase()}`).digest('hex');
 }
 

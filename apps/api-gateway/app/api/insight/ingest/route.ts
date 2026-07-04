@@ -3,24 +3,54 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export const dynamic = 'force-dynamic';
 
-// Prefer server-only env; fall back to NEXT_PUBLIC for back-compat
-const CORE =
-  process.env.INSIGHTCORE_URL ||
-  process.env.NEXT_PUBLIC_INSIGHTCORE_URL ||
-  'http://localhost:8788';
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+}
 
-const KEY =
-  process.env.INSIGHTCORE_KEY ||
-  process.env.NEXT_PUBLIC_INSIGHTCORE_KEY ||
-  '';
+function cleanBaseUrl(value: unknown) {
+  const s = String(value || '').trim();
+  if (!s) return '';
+  return s.replace(/\/+$/, '');
+}
+
+function resolveInsightCoreBase() {
+  const configured =
+    cleanBaseUrl(process.env.INSIGHTCORE_URL) ||
+    cleanBaseUrl(process.env.INSIGHTCORE_BASE_URL) ||
+    cleanBaseUrl(process.env.INSIGHTCORE_STUDIO_PUBLIC_URL) ||
+    cleanBaseUrl(process.env.NEXT_PUBLIC_INSIGHTCORE_URL);
+
+  if (configured) return configured;
+
+  if (isProductionRuntime()) return '';
+
+  return 'http://localhost:8788';
+}
+
+function resolveInsightCoreKey() {
+  return String(process.env.INSIGHTCORE_KEY || '').trim();
+}
 
 export async function POST(req: NextRequest) {
+  const core = resolveInsightCoreBase();
+
+  if (!core) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: 'insightcore_url_not_configured',
+        message: 'INSIGHTCORE_URL or INSIGHTCORE_BASE_URL must be configured in production.',
+      },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+
   const body = await req.json().catch(() => ({}));
+  const key = resolveInsightCoreKey();
 
-  // If caller sent its own Authorization, pass it through; else use KEY if present
-  const auth = req.headers.get('authorization') || (KEY ? `Bearer ${KEY}` : undefined);
+  const auth = req.headers.get('authorization') || (key ? `Bearer ${key}` : undefined);
 
-  const r = await fetch(`${CORE.replace(/\/+$/,'')}/ingest`, {
+  const r = await fetch(`${core}/ingest`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -34,10 +64,13 @@ export async function POST(req: NextRequest) {
     const text = await r.text().catch(() => '');
     return NextResponse.json(
       { ok: false, error: `InsightCore ${r.status}`, detail: text || undefined },
-      { status: 500 }
+      { status: 502, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 
   const j = await r.json().catch(() => ({}));
-  return NextResponse.json({ ok: true, ...j });
+  return NextResponse.json(
+    { ok: true, ...j },
+    { headers: { 'Cache-Control': 'no-store' } },
+  );
 }
