@@ -2,14 +2,14 @@
 // Centralized env reads for browser-safe URLs.
 // Only NEXT_PUBLIC_* values are safe to use in client components.
 
-export const PATIENT  = process.env.NEXT_PUBLIC_PATIENT_BASE_URL   || 'http://localhost:3000';
-export const CLIN     = process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || 'http://localhost:3001';
+export const PATIENT  = process.env.NEXT_PUBLIC_PATIENT_BASE_URL   || (process.env.NODE_ENV === 'production' ? 'https://patient.ambulantplus.co.za' : 'http://localhost:3000');
+export const CLIN     = process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || (process.env.NODE_ENV === 'production' ? 'https://clinician.ambulantplus.co.za' : 'http://localhost:3001');
 export const ADMIN    = process.env.NEXT_PUBLIC_ADMIN_BASE_URL     || 'http://localhost:3002';
 export const CAREPORT = process.env.NEXT_PUBLIC_CAREPORT_BASE_URL  || 'http://localhost:3003';
 export const MEDREACH = process.env.NEXT_PUBLIC_MEDREACH_BASE_URL  || 'http://localhost:3004';
 
 // Gateway (all admin auth/org APIs)
-export const APIGW    = process.env.NEXT_PUBLIC_APIGW_BASE         || 'http://localhost:3010';
+export const APIGW    = process.env.NEXT_PUBLIC_APIGW_BASE         || (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
 /**
  * Server-only configuration (do NOT import into client components).
@@ -31,5 +31,5 @@ export const serverConfig = {
   SENDGRID_FROM:    process.env.SENDGRID_FROM    || '',
 
   // Direct server-to-gateway base (useful for Route Handlers / server actions)
-  APIGW_BASE: process.env.APIGW_BASE || 'http://localhost:3010',
+  APIGW_BASE: process.env.APIGW_BASE || (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010'),
 } as const;
