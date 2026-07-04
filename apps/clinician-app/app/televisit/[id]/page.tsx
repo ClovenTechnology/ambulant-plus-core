@@ -43,7 +43,17 @@ const DeviceSettings = dynamic<any>(async () => {
 
 /** ---------- types & helpers ---------- */
 type Appt = {
-  id: string; when: string; patientId?: string; patientName: string; clinicianName: string; reason: string; status: string; roomId: string;
+  id: string;
+  when: string;
+  startsAt: string;
+  endsAt?: string;
+  durationMinutes?: number;
+  patientId?: string;
+  patientName: string;
+  clinicianName: string;
+  reason: string;
+  status: string;
+  roomId: string;
 };
 type InsightReply = { summary?: string; goals?: string[]; notes?: string };
 type VitalsPkt = { hr?: number; spo2?: number; tempC?: number; rr?: number; bpSys?: number; bpDia?: number; ts?: number };
@@ -51,9 +61,31 @@ type VitalsPkt = { hr?: number; spo2?: number; tempC?: number; rr?: number; bpSy
 function normalizeAppt(a: any): Appt {
   const statusRaw = (a?.status ?? 'Scheduled').toString().replace(/_/g, ' ').toLowerCase();
   const status = statusRaw.charAt(0).toUpperCase() + statusRaw.slice(1);
+
+  const startsAt =
+    parseMaybeDateIso(a?.startsAt) ||
+    parseMaybeDateIso(a?.start) ||
+    parseMaybeDateIso(a?.when) ||
+    parseMaybeDateIso(a?.whenISO) ||
+    parseMaybeDateIso(a?.date);
+
+  const endsAt =
+    parseMaybeDateIso(a?.endsAt) ||
+    parseMaybeDateIso(a?.end) ||
+    parseMaybeDateIso(a?.scheduledEnd) ||
+    parseMaybeDateIso(a?.scheduledEndAt);
+
   return {
     id: a?.id ?? '',
-    when: a?.when ?? a?.whenISO ?? a?.date ?? '',
+    when: startsAt,
+    startsAt,
+    endsAt: endsAt || undefined,
+    durationMinutes: parseMaybeDurationMinutes(
+      a?.durationMinutes ??
+        a?.slotDurationMinutes ??
+        a?.sessionDurationMinutes ??
+        a?.consultationDurationMinutes,
+    ),
     patientId: a?.patientId ?? a?.patient?.id ?? undefined,
     patientName: a?.patientName ?? a?.patient?.name ?? '—',
     clinicianName: a?.clinicianName ?? a?.clinician?.name ?? '—',
@@ -556,7 +588,11 @@ export default function TelevisitWorkspace({ params }: { params: { id: string } 
               <SessionConclusions
                 clinicianId={'clinician-local-001'}
                 encounterId={appt.id ? `enc-${appt.id}` : ''}
-                apptStartISO={appt.when}
+                appointmentId={appt.id}
+                apptStartISO={appt.startsAt || appt.when}
+                apptEndISO={appt.endsAt}
+                durationMinutes={appt.durationMinutes}
+                patientName={appt.patientName}
               />
             </div>
 
@@ -843,17 +879,78 @@ function RoomChat({ appt }: { appt: Appt }) {
   );
 }
 
+
+function parseMaybeDateIso(value: unknown) {
+  if (typeof value !== 'string' || !value.trim()) return '';
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? new Date(ms).toISOString() : '';
+}
+
+function parseMaybeDurationMinutes(value: unknown) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return undefined;
+  const minutes = Math.trunc(n);
+  return minutes > 0 && minutes <= 24 * 60 ? minutes : undefined;
+}
+
+function deriveAppointmentEndMs(
+  startMs: number,
+  apptEndISO?: string,
+  durationMinutes?: number,
+) {
+  const explicitEndMs =
+    typeof apptEndISO === 'string' && apptEndISO.trim()
+      ? Date.parse(apptEndISO)
+      : NaN;
+
+  if (Number.isFinite(explicitEndMs) && explicitEndMs > startMs) {
+    return explicitEndMs;
+  }
+
+  const duration = Number(durationMinutes);
+  if (Number.isFinite(duration) && duration > 0) {
+    return startMs + Math.trunc(duration) * 60 * 1000;
+  }
+
+  return null;
+}
+
 /* ----- Session Conclusions (parity with SFU) ----- */
-function SessionConclusions({ clinicianId, encounterId, apptStartISO }: { clinicianId: string; encounterId: string; apptStartISO: string }) {
+function SessionConclusions({
+  clinicianId,
+  encounterId,
+  appointmentId,
+  apptStartISO,
+  apptEndISO,
+  durationMinutes,
+  patientName,
+}: {
+  clinicianId: string;
+  encounterId: string;
+  appointmentId?: string;
+  apptStartISO: string;
+  apptEndISO?: string;
+  durationMinutes?: number;
+  patientName?: string;
+}) {
   type K = 'end' | 'follow' | 'ref';
   const [tab, setTab] = useState<K>('end');
   const [confirmEnd, setConfirmEnd] = useState<null | 'save' | 'discharge'>(null);
 
   const appointment = useMemo(() => {
-    const start = new Date(apptStartISO);
-    const end = new Date(start.getTime() + 15 * 60 * 1000);
-    return { id: 'appt-local', start: start.toISOString(), end: end.toISOString(), patient: { name: '—' } } as any;
-  }, [apptStartISO]);
+    const startMs = Date.parse(apptStartISO);
+    if (!Number.isFinite(startMs)) return null;
+
+    const endMs = deriveAppointmentEndMs(startMs, apptEndISO, durationMinutes);
+    if (endMs == null) return null;
+
+    return {
+      id: appointmentId || 'appt-local',
+      start: new Date(startMs).toISOString(),
+      end: new Date(endMs).toISOString(),
+      patient: { name: patientName || '—' },
+    } as any;
+  }, [appointmentId, apptStartISO, apptEndISO, durationMinutes, patientName]);
 
   return (
     <Card title="Session Conclusions" gradient>
@@ -871,7 +968,13 @@ function SessionConclusions({ clinicianId, encounterId, apptStartISO }: { clinic
 
       {tab === 'end' && (
         <div className="space-y-3">
-          <SessionCountdown appointment={appointment} loading={false} />
+          {appointment ? (
+            <SessionCountdown appointment={appointment} loading={false} />
+          ) : (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
+              Session duration unavailable. This appointment needs a real end time or configured slot duration before countdown can be shown.
+            </div>
+          )}
           <div className="flex items-center justify-end gap-2">
             <button className="px-3 py-2 rounded-md bg-white border hover:bg-gray-50" onClick={() => setConfirmEnd('save')} title="Save encounter">Save</button>
             <button className="px-3 py-2 rounded-md bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => setConfirmEnd('discharge')} title="Discharge patient">Discharge</button>

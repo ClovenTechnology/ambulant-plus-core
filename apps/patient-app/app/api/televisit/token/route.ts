@@ -64,10 +64,34 @@ export async function POST(req: NextRequest) {
 
     const s = parseISO(body?.startsAt);
     const e = parseISO(body?.endsAt);
-    const now = Date.now();
 
-    const startsAtISO = s ?? new Date(now + 12 * 60_000).toISOString();
-    const endsAtISO = e ?? new Date(now + (12 + 25) * 60_000).toISOString();
+    if (!s || !e) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'appointment_times_required',
+          message: 'Compatibility visit creation requires real appointment startsAt and endsAt.',
+        },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    const startMs = Date.parse(s);
+    const endMs = Date.parse(e);
+
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'invalid_appointment_window',
+          message: 'Televisit appointment window must have endsAt after startsAt.',
+        },
+        { status: 400, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    const startsAtISO = s;
+    const endsAtISO = e;
 
     const tv = (store as any)?.televisits;
     if (tv && typeof tv.set === 'function') {
