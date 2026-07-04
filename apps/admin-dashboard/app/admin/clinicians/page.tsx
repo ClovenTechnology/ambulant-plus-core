@@ -31,7 +31,7 @@ async function fetchClinicians(status?: string, adminKey?: string) {
     process.env.APIGW_BASE ??
     process.env.GATEWAY_URL ??
     process.env.NEXT_PUBLIC_PATIENT_BASE ??
-    'http://localhost:3010';
+    (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
   const url = new URL(`${gateway}/api/clinicians`);
   if (status) url.searchParams.set('status', status);

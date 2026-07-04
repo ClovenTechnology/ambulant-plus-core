@@ -2,7 +2,7 @@
 import { useState } from 'react';
 
 export default function SeedDevices() {
-  const base = process.env.NEXT_PUBLIC_GATEWAY_BASE || 'http://localhost:3010';
+  const base = process.env.NEXT_PUBLIC_GATEWAY_BASE || (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
   const [msg, setMsg] = useState<string>('');
 
   async function run() {

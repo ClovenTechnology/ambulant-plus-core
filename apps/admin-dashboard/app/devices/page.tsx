@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? 'http://localhost:3010';
+const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ?? (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
 export default function DevicesAdmin() {
   const [msg, setMsg] = useState<string>('');

@@ -81,7 +81,7 @@ const VISIT_MODES: VisitMode[] = ["TELEVISIT", "IN_PERSON", "HYBRID"];
 function baseUrl() {
   return (
     process.env.NEXT_PUBLIC_APIGW_BASE ||
-    "http://localhost:3010"
+    (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010')
   );
 }
 

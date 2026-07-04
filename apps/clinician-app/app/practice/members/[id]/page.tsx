@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 
-const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
 type PracticeRole =
   | 'owner'

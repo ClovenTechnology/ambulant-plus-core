@@ -179,7 +179,7 @@ export default async function AdminClinicianDetailPage({ params }: { params: { i
     process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
     process.env.APIGW_BASE ??
     process.env.GATEWAY_URL ??
-    'http://localhost:3010';
+    (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
   const adminKey = process.env.ADMIN_API_KEY ?? '';
 

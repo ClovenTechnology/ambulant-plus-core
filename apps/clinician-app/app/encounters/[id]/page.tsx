@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from 'react';
 
-const CLIN = (process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || 'http://localhost:3010').replace(/\/$/, '');
+const CLIN = (process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010')).replace(/\/$/, '');
 
 type Appt = {
   id: string;
