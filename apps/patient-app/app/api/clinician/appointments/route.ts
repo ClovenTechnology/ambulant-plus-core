@@ -5,7 +5,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const CLIN =
-  process.env.CLINICIAN_BASE_URL || 'http://localhost:3001';
+  process.env.CLINICIAN_BASE_URL || (process.env.NODE_ENV === 'production' ? 'https://clinician.ambulantplus.co.za' : 'http://localhost:3001');
 
 export async function GET() {
   try {

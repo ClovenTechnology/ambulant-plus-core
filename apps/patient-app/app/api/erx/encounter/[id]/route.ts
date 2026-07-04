@@ -5,7 +5,31 @@ import * as store from '../../../encounters/store';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const APIGW = process.env.NEXT_PUBLIC_APIGW_BASE || 'http://localhost:3010';
+const CANONICAL_API_GATEWAY = 'https://api-gateway.ambulantplus.co.za';
+
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+}
+
+function cleanBase(value: unknown) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function apiGatewayBase() {
+  const configured =
+    cleanBase(process.env.APIGW_BASE) ||
+    cleanBase(process.env.API_GATEWAY_BASE_URL) ||
+    cleanBase(process.env.API_GATEWAY_URL) ||
+    cleanBase(process.env.NEXT_PUBLIC_APIGW_BASE) ||
+    cleanBase(process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL) ||
+    cleanBase(process.env.NEXT_PUBLIC_API_GATEWAY_URL);
+
+  if (configured) return configured;
+
+  return isProductionRuntime() ? CANONICAL_API_GATEWAY : 'http://localhost:3010';
+}
+
+const APIGW = apiGatewayBase();
 
 type ErxMedOut = {
   id: string;
