@@ -295,9 +295,15 @@ function buildUnavailableStressReport(patientId: string, range: RangeKey): Stres
     trend: [],
     insights: {
       headline: 'Not enough persisted wearable data is available yet for stress interpretation.',
-      bullets: [
-        'No synthetic stress physiology is shown in production.',
-        'Persisted HRV, resting heart rate, sleep, activity, or direct stress readings are needed before interpretation is available.',
+      highlights: [
+        {
+          title: 'No synthetic production fallback',
+          detail: 'No synthetic stress physiology is shown in production.',
+        },
+        {
+          title: 'Persisted readings required',
+          detail: 'Persisted HRV, resting heart rate, sleep, activity, or direct stress readings are needed before interpretation is available.',
+        },
       ],
       recommendations: [
         {
