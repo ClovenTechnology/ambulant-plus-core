@@ -3,16 +3,18 @@
   "private": true,
   "type": "module",
   "version": "1.0.0",
-  "description": "Shared clinical code search (ICD-10, RxNorm) for all apps",
-  "engines": { "node": ">=20.11.0" },
-
+  "description": "Shared clinical code search (ICD-10, RxNorm, medicines, lab catalogue) for all apps",
+  "engines": {
+    "node": ">=20.11.0"
+  },
   "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.ts",
     "./icd10": "./src/icd10.ts",
-    "./rxnorm": "./src/rxnorm.ts"
+    "./rxnorm": "./src/rxnorm.ts",
+    "./medicine-catalog": "./src/medicine-catalog.ts",
+    "./lab-catalog": "./src/lab-catalog.ts"
   },
-
   "scripts": {
     "codes:icd10:seed": "node ./scripts/build-icd10.mjs --seed --out ./data/icd10.min.json.gz",
     "codes:rxnorm:seed": "node ./scripts/build-rxnorm.mjs --seed --out ./data/rxnorm.min.json.gz",
