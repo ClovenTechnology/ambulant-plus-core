@@ -9,8 +9,9 @@ import {
   icdSearch,
   rxnormSearch,
   sigsForRxCui,
+  labTestSearch,
 } from '@/src/hooks/useAutocomplete';
-import type { ICD10Hit, RxNormHit } from '@/src/hooks/useAutocomplete';
+import type { ICD10Hit, RxNormHit, LabTestHit } from '@/src/hooks/useAutocomplete';
 
 import type { PatientAllergyBrief, PatientProfile } from './patientContext';
 import type { BuildSendToPayerInput } from '@/lib/sendToPayer';
@@ -578,6 +579,8 @@ export default function ErxComposer({
     ? icd10Suggestions
     : LOCAL_ICD10_SUGGESTIONS;
 
+  const labTestAuto = useAutocomplete<LabTestHit>(labTestSearch);
+
   return (
     <Card
       title="eRx Composer"
@@ -805,17 +808,30 @@ export default function ErxComposer({
         Test name on its own line; then Priority, Specimen, ICD-10 on one row; optional instructions below.
       </div>
 
+      <datalist id="lab-test-catalog-suggest">
+        {(labTestAuto.opts as LabTestHit[]).map((hit) => (
+          <option
+            key={hit.code || hit.id || hit.name}
+            value={hit.name}
+            label={[hit.category, hit.specimen].filter(Boolean).join(' · ')}
+          />
+        ))}
+      </datalist>
+
       {labRows.map((r, i) => (
         <div key={i} className="mt-2 space-y-2 border rounded p-2 bg-white">
           <input
             className="border rounded px-2 py-1 w-full"
-            placeholder="Test name (e.g., CBC, CMP, SARS-CoV-2 PCR)"
+            placeholder="Test name (e.g. FBC, U&E, HbA1c, CRP)"
+            list="lab-test-catalog-suggest"
             value={r.test}
-            onChange={(e) =>
+            onChange={(e) => {
+              const value = e.target.value;
+              labTestAuto.setQ(value);
               setLabRows((x) =>
-                x.map((y, j) => (j === i ? { ...y, test: e.target.value } : y))
-              )
-            }
+                x.map((y, j) => (j === i ? { ...y, test: value } : y))
+              );
+            }}
           />
           <div className="grid md:grid-cols-4 gap-2 items-center">
             <select
@@ -924,7 +940,7 @@ export default function ErxComposer({
   );
 }
 
-/* ---------- RxNorm combobox for eRx drug field ---------- */
+/* ---------- Medicine catalogue combobox for eRx drug field ---------- */
 
 type RxDrugInputProps = {
   row: RxRow;
@@ -979,7 +995,7 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
         className="border rounded px-2 py-1 w-full"
         role="combobox"
         aria-expanded={open}
-        aria-controls="rxnorm-listbox"
+        aria-controls="medicine-listbox"
         aria-autocomplete="list"
         value={auto.q || row.drug}
         placeholder="Drug (start typing…)"
@@ -1028,7 +1044,7 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
 
       {open && flat.length > 0 && (
         <ul
-          id="rxnorm-listbox"
+          id="medicine-listbox"
           role="listbox"
           className="absolute z-20 mt-1 max-h-64 w-full overflow-auto rounded border bg-white shadow text-sm"
         >

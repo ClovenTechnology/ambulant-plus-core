@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -49,7 +49,7 @@ function suggestionLabel(row: any) {
 
 function suggestionCode(row: any) {
   return (
-    cleanString(row?.rxcui) ||
+    cleanString(row?.rxcui) || cleanString(row?.code) ||
     cleanString(row?.rxCui) ||
     cleanString(row?.code) ||
     cleanString(row?.id)
@@ -57,7 +57,7 @@ function suggestionCode(row: any) {
 }
 
 function suggestionSystem(row: any) {
-  return cleanString(row?.system) || 'rxnorm';
+  return cleanString(row?.system) || cleanString(row?.codeSystem) || 'local_sa';
 }
 
 function normalizeSuggestion(row: any): DrugSuggestion | null {
@@ -158,10 +158,10 @@ export default function ErxComposer() {
         const params = new URLSearchParams({
           q: term,
           limit: '10',
-          preferGeneric: 'true',
+          includeRxNorm: 'true',
         });
 
-        const res = await fetch(`/api/codes/rxnorm?${params.toString()}`, {
+        const res = await fetch(`/api/codes/medicines?${params.toString()}`, {
           cache: 'no-store',
           signal: controller.signal,
         });
@@ -169,7 +169,7 @@ export default function ErxComposer() {
         const json = await res.json().catch(() => null);
 
         if (!res.ok || json?.ok === false) {
-          throw new Error(json?.error || `RxNorm search failed (${res.status})`);
+          throw new Error(json?.error || `Medicine search failed (${res.status})`);
         }
 
         setChoices(normalizeSuggestionPayload(json));
