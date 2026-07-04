@@ -13,8 +13,8 @@ function clean(value: unknown, max = 500): string {
 function asBool(value: unknown, fallback = false): boolean {
   if (typeof value === 'boolean') return value;
   const raw = clean(value, 20).toLowerCase();
-  if (['true', '1', 'yes', 'y', 'active'].includes(raw)) return true;
-  if (['false', '0', 'no', 'n', 'inactive'].includes(raw)) return false;
+  if (['true', '1', 'yes', 'y', 'active', 'available'].includes(raw)) return true;
+  if (['false', '0', 'no', 'n', 'inactive', 'unavailable'].includes(raw)) return false;
   return fallback;
 }
 
@@ -24,6 +24,39 @@ function asPriceCents(value: unknown): number {
   const n = Number(raw);
   if (!Number.isFinite(n)) return 0;
   return raw.includes('.') ? Math.max(0, Math.round(n * 100)) : Math.max(0, Math.round(n));
+}
+
+function firstString(...values: unknown[]) {
+  for (const value of values) {
+    const s = clean(value, 160);
+    if (s) return s;
+  }
+  return '';
+}
+
+function parseSkuCodes(body: any) {
+  const skuCode = firstString(
+    body?.skuCode,
+    body?.sku_code,
+    body?.sku,
+    body?.pharmacySku,
+    body?.pharmacy_sku,
+    body?.localSku,
+    body?.local_sku,
+    body?.stockCode,
+    body?.stock_code,
+    body?.productCode,
+    body?.product_code,
+  ) || null;
+
+  const nappiCode = firstString(body?.nappiCode, body?.nappi_code, body?.nappi);
+  const rxnormCode = firstString(body?.rxnormCode, body?.rxnorm_code, body?.rxCui, body?.rxcui, body?.rxnorm);
+  const explicitDrugCode = firstString(body?.drugCode, body?.drug_code, body?.code, body?.medicineCode, body?.medicine_code);
+
+  const drugCode = nappiCode || rxnormCode || explicitDrugCode || null;
+  const codeSystem = nappiCode ? 'NAPPI' : rxnormCode ? 'RXNORM' : drugCode ? 'LOCAL_OR_UNKNOWN' : null;
+
+  return { skuCode, drugCode, codeSystem };
 }
 
 async function resolvePharmacyId(req: NextRequest, who: ReturnType<typeof readIdentity>) {
@@ -52,14 +85,16 @@ function json(data: any, status = 200) {
 }
 
 function normalizeSkuInput(body: any, pharmacyCurrency = 'ZAR') {
-  const name = clean(body?.name ?? body?.displayName ?? body?.drugName, 500);
-  const drugCode = clean(body?.drugCode ?? body?.code ?? body?.nappiCode ?? body?.rxnormCode, 120) || null;
+  const name = clean(body?.name ?? body?.displayName ?? body?.drugName ?? body?.medication ?? body?.label, 500);
+  const { skuCode, drugCode, codeSystem } = parseSkuCodes(body);
   const currency = clean(body?.currency, 10).toUpperCase() || pharmacyCurrency || 'ZAR';
-  const priceCents = asPriceCents(body?.priceCents ?? body?.price ?? body?.unitPriceCents);
+  const priceCents = asPriceCents(body?.priceCents ?? body?.price ?? body?.unitPriceCents ?? body?.unitPrice);
 
   return {
     name,
+    skuCode,
     drugCode,
+    codeSystem,
     priceCents,
     currency,
     isGeneric: asBool(body?.isGeneric ?? body?.generic, false),
@@ -93,6 +128,7 @@ export async function GET(req: NextRequest) {
       where.OR = [
         { name: { contains: q, mode: 'insensitive' } },
         { drugCode: { contains: q, mode: 'insensitive' } },
+        { skuCode: { contains: q, mode: 'insensitive' } },
       ];
     }
 
@@ -120,6 +156,7 @@ export async function POST(req: NextRequest) {
 
     const pharmacy = await (prisma as any).pharmacyPartner.findUnique({ where: { id: pharmacyId } });
     if (!pharmacy) return json({ ok: false, error: 'pharmacy_not_found' }, 404);
+    if (pharmacy.active === false) return json({ ok: false, error: 'pharmacy_inactive' }, 409);
 
     const body = await req.json().catch(() => ({}));
     const input = normalizeSkuInput(body, pharmacy.currency || 'ZAR');
@@ -131,30 +168,53 @@ export async function POST(req: NextRequest) {
       return json({ ok: false, error: 'currency_must_match_pharmacy_currency', pharmacyCurrency: pharmacy.currency }, 409);
     }
 
-    const created = await (prisma as any).carePortPharmacySku.create({
-      data: {
-        orgId,
-        pharmacyId,
-        name: input.name,
-        drugCode: input.drugCode,
-        priceCents: input.priceCents,
-        currency: input.currency,
-        isGeneric: input.isGeneric,
-        isActive: input.isActive,
-      },
-    });
+    const duplicateWhere: any[] = [];
+    if (input.skuCode) duplicateWhere.push({ skuCode: input.skuCode });
+    if (input.drugCode) duplicateWhere.push({ drugCode: input.drugCode, name: { equals: input.name, mode: 'insensitive' } });
+
+    const existing = duplicateWhere.length
+      ? await (prisma as any).carePortPharmacySku.findFirst({
+          where: { orgId, pharmacyId, OR: duplicateWhere },
+          orderBy: { updatedAt: 'desc' },
+        })
+      : null;
+
+    const data = {
+      orgId,
+      pharmacyId,
+      name: input.name,
+      skuCode: input.skuCode,
+      drugCode: input.drugCode,
+      priceCents: input.priceCents,
+      currency: input.currency,
+      isGeneric: input.isGeneric,
+      isActive: input.isActive,
+    };
+
+    const item = existing
+      ? await (prisma as any).carePortPharmacySku.update({ where: { id: existing.id }, data })
+      : await (prisma as any).carePortPharmacySku.create({ data });
 
     await (prisma as any).auditEvent.create({
       data: {
-        kind: 'careport_inventory_sku_created',
+        kind: existing ? 'careport_inventory_sku_upsert_updated' : 'careport_inventory_sku_created',
         actorId: who.uid ?? null,
         actorRole: who.role ?? null,
-        subjectId: created.id,
-        meta: { orgId, pharmacyId, name: input.name, drugCode: input.drugCode, isGeneric: input.isGeneric },
+        subjectId: item.id,
+        meta: {
+          orgId,
+          pharmacyId,
+          name: input.name,
+          skuCode: input.skuCode,
+          drugCode: input.drugCode,
+          codeSystem: input.codeSystem,
+          isGeneric: input.isGeneric,
+          duplicateMatched: Boolean(existing),
+        },
       },
     }).catch(() => null);
 
-    return json({ ok: true, item: created, sku: created }, 201);
+    return json({ ok: true, item, sku: item, updatedExisting: Boolean(existing) }, existing ? 200 : 201);
   } catch (error: any) {
     return json({ ok: false, error: error?.message || 'inventory_create_failed' }, error?.status || 500);
   }

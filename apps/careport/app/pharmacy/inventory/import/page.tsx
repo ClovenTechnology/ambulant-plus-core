@@ -47,7 +47,7 @@ function parsePreview(text: string) {
   });
 }
 
-const sample = `drugCode,name,price,currency,isGeneric,isActive\nNAPP12345,Amlodipine 5mg tablets,89.99,ZAR,false,true\nNAPP54321,Amlodipine generic 5mg tablets,54.99,ZAR,true,true`;
+const sample = `skuCode,nappiCode,rxnormCode,name,price,currency,isGeneric,isActive\nTOTLI-AMLO-ORIG-5,123456,,Amlodipine 5mg tablets,89.99,ZAR,false,true\nTOTLI-AMLO-GEN-5,654321,,Amlodipine generic 5mg tablets,54.99,ZAR,true,true`;
 
 export default function PharmacyInventoryImportPage() {
   const [csv, setCsv] = useState(sample);
@@ -84,7 +84,7 @@ export default function PharmacyInventoryImportPage() {
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Bulk import</p>
           <h1 className="text-2xl font-semibold text-slate-950">Upload pharmacy inventory</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
-            Paste CSV inventory. Required columns are name and price. Recommended columns: drugCode, name, price, currency, isGeneric, isActive.
+            Paste CSV inventory. Required columns are name and price. Recommended columns: skuCode, nappiCode, rxnormCode, drugCode, name, price, currency, isGeneric, isActive.
           </p>
         </div>
         <Link href="/pharmacy/inventory" className="rounded-xl border bg-white px-3 py-2 text-sm hover:bg-slate-50">
@@ -129,7 +129,8 @@ export default function PharmacyInventoryImportPage() {
             {preview.map((row, idx) => (
               <div key={idx} className="rounded-2xl border p-3 text-xs">
                 <div className="font-medium text-slate-900">{row.name || row.medication || 'Unnamed medicine'}</div>
-                <div className="mt-1 text-slate-500">Code: {row.drugcode || row.drug_code || '—'}</div>
+                <div className="mt-1 text-slate-500">Clinical code: {row.nappicode || row.nappi || row.rxnormcode || row.rxnorm || row.drugcode || row.drug_code || '—'}</div>
+                <div className="text-slate-500">SKU: {row.skucode || row.sku || row.pharmacysku || '—'}</div>
                 <div className="text-slate-500">Price: {row.price || row.pricecents || '—'} {row.currency || ''}</div>
                 <div className="text-slate-500">Type: {String(row.isgeneric || row.is_generic || '').toLowerCase() === 'true' ? 'Generic' : 'Original'}</div>
               </div>

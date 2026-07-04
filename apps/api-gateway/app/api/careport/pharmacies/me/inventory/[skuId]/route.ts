@@ -67,7 +67,23 @@ export async function PATCH(req: NextRequest, { params }: { params: { skuId: str
     const data: any = {};
 
     if (body.name !== undefined) data.name = clean(body.name, 500);
-    if (body.drugCode !== undefined || body.code !== undefined) data.drugCode = clean(body.drugCode ?? body.code, 120) || null;
+    if (body.skuCode !== undefined || body.sku !== undefined || body.localSku !== undefined) {
+      data.skuCode = clean(body.skuCode ?? body.sku ?? body.localSku, 120) || null;
+    }
+    if (
+      body.drugCode !== undefined ||
+      body.code !== undefined ||
+      body.nappiCode !== undefined ||
+      body.nappi !== undefined ||
+      body.rxnormCode !== undefined ||
+      body.rxCui !== undefined ||
+      body.rxcui !== undefined
+    ) {
+      data.drugCode = clean(
+        body.nappiCode ?? body.nappi ?? body.rxnormCode ?? body.rxCui ?? body.rxcui ?? body.drugCode ?? body.code,
+        120,
+      ) || null;
+    }
 
     if (body.priceCents !== undefined || body.price !== undefined) {
       const price = asPriceCents(body.priceCents ?? body.price);

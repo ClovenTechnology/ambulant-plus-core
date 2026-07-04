@@ -8,6 +8,7 @@ type Sku = {
   id: string;
   name: string;
   drugCode?: string | null;
+  skuCode?: string | null;
   priceCents: number;
   currency: string;
   isGeneric: boolean;
@@ -44,6 +45,7 @@ export default function PharmacyInventoryPage() {
   const [form, setForm] = useState({
     name: '',
     drugCode: '',
+    skuCode: '',
     price: '',
     currency: 'ZAR',
     isGeneric: false,
@@ -85,7 +87,7 @@ export default function PharmacyInventoryPage() {
     const needle = q.trim().toLowerCase();
     if (!needle) return items;
     return items.filter((item) =>
-      [item.name, item.drugCode, item.currency, item.isGeneric ? 'generic' : 'original', item.isActive ? 'active' : 'inactive']
+      [item.name, item.drugCode, item.skuCode, item.currency, item.isGeneric ? 'generic' : 'original', item.isActive ? 'active' : 'inactive']
         .filter(Boolean)
         .some((part) => String(part).toLowerCase().includes(needle)),
     );
@@ -102,6 +104,7 @@ export default function PharmacyInventoryPage() {
       const payload = {
         name: form.name.trim(),
         drugCode: form.drugCode.trim() || null,
+        skuCode: form.skuCode.trim() || null,
         priceCents: normalizePriceInput(form.price),
         currency: form.currency.trim().toUpperCase() || 'ZAR',
         isGeneric: form.isGeneric,
@@ -116,7 +119,7 @@ export default function PharmacyInventoryPage() {
       const data = await res.json().catch(() => ({}));
       if (!res.ok || !data?.ok) throw new Error(data?.error || `create_http_${res.status}`);
 
-      setForm({ name: '', drugCode: '', price: '', currency: payload.currency, isGeneric: false });
+      setForm({ name: '', drugCode: '', skuCode: '', price: '', currency: payload.currency, isGeneric: false });
       setMessage('SKU added.');
       await load();
     } catch (err: any) {
@@ -303,7 +306,8 @@ export default function PharmacyInventoryPage() {
             <h2 className="text-sm font-semibold text-slate-950">Add SKU</h2>
             <div className="mt-4 space-y-3">
               <input className="w-full rounded-xl border px-3 py-2 text-sm" placeholder="Medicine name" value={form.name} onChange={(e) => setForm((s) => ({ ...s, name: e.target.value }))} />
-              <input className="w-full rounded-xl border px-3 py-2 text-sm" placeholder="Drug code / NAPPI / RxNorm" value={form.drugCode} onChange={(e) => setForm((s) => ({ ...s, drugCode: e.target.value }))} />
+              <input className="w-full rounded-xl border px-3 py-2 text-sm" placeholder="Clinical code / NAPPI / RxNorm" value={form.drugCode} onChange={(e) => setForm((s) => ({ ...s, drugCode: e.target.value }))} />
+              <input className="w-full rounded-xl border px-3 py-2 text-sm" placeholder="Pharmacy SKU / stock code" value={form.skuCode} onChange={(e) => setForm((s) => ({ ...s, skuCode: e.target.value }))} />
               <div className="grid grid-cols-[1fr_90px] gap-2">
                 <input className="w-full rounded-xl border px-3 py-2 text-sm" placeholder="Price, e.g. 79.99" value={form.price} onChange={(e) => setForm((s) => ({ ...s, price: e.target.value }))} />
                 <input className="w-full rounded-xl border px-3 py-2 text-sm" value={form.currency} onChange={(e) => setForm((s) => ({ ...s, currency: e.target.value.toUpperCase().slice(0, 3) }))} />
