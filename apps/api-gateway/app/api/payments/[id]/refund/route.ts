@@ -19,6 +19,29 @@ function readMeta(value: unknown): Record<string, any> {
     : {};
 }
 
+type StoredPaymentProvider = 'paystack' | 'payfast' | 'mock' | 'internal';
+
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+}
+
+function cleanPaymentProvider(value: unknown): StoredPaymentProvider {
+  const s = String(value || '').trim().toLowerCase();
+  if (s === 'payfast') return 'payfast';
+  if (s === 'paystack') return 'paystack';
+  if (s === 'internal') return 'internal';
+  if (s === 'mock') return 'mock';
+  return 'paystack';
+}
+
+function isInternalProviderReference(provider: StoredPaymentProvider, reference: string | null | undefined) {
+  const ref = String(reference || '').trim();
+  return (
+    provider === 'internal' ||
+    (provider === 'mock' && /^(zero|voucher|medicalaid)_/.test(ref))
+  );
+}
+
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const who = readIdentity(req.headers);
 
@@ -32,11 +55,38 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const meta = readMeta(pay.meta);
-  const providerKind = String(meta.provider || 'mock') as 'paystack' | 'payfast' | 'mock';
-  const provider = getProvider(providerKind);
-  const ref = pay.providerRef || `mock_${pay.id}`;
+  const providerKind = cleanPaymentProvider(meta.provider || 'paystack');
+  const ref = pay.providerRef || String(meta.providerRef || '').trim();
 
-  const refund = await provider.refund(ref, pay.amountCents);
+  let refund: Awaited<ReturnType<ReturnType<typeof getProvider>['refund']>>;
+
+  if (isInternalProviderReference(providerKind, ref)) {
+    refund = {
+      providerRef: ref || `internal_${pay.id}`,
+      status: 'refunded',
+      meta: {
+        internal: true,
+        amountCents: pay.amountCents,
+      },
+    };
+  } else {
+    if (!ref) {
+      return NextResponse.json(
+        { ok: false, error: 'payment_provider_ref_required_for_refund' },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    if (providerKind === 'mock' && isProductionRuntime()) {
+      return NextResponse.json(
+        { ok: false, error: 'mock_payment_refund_disabled' },
+        { status: 409, headers: { 'Cache-Control': 'no-store' } },
+      );
+    }
+
+    const provider = getProvider(providerKind === 'payfast' ? 'payfast' : providerKind === 'mock' ? 'mock' : 'paystack');
+    refund = await provider.refund(ref, pay.amountCents);
+  }
 
   const updated = await prisma.payment.update({
     where: { id: pay.id },
@@ -83,6 +133,6 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   return NextResponse.json(
     { ok: true, payment: updated, refund },
-    { headers: { 'access-control-allow-origin': '*' } },
+    { headers: { 'Cache-Control': 'no-store' } },
   );
 }

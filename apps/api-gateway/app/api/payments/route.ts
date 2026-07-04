@@ -31,6 +31,36 @@ function paymentStatusFromCheckout(status: string) {
   return 'failed';
 }
 
+type StoredPaymentProvider = 'paystack' | 'payfast' | 'mock' | 'internal';
+
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+}
+
+function cleanPaymentProvider(value: unknown): StoredPaymentProvider {
+  const s = String(value || '').trim().toLowerCase();
+  if (s === 'payfast') return 'payfast';
+  if (s === 'paystack') return 'paystack';
+  if (s === 'internal') return 'internal';
+  if (s === 'mock') return 'mock';
+  return 'paystack';
+}
+
+function isInternalProviderReference(provider: StoredPaymentProvider, reference: string | null | undefined) {
+  const ref = String(reference || '').trim();
+  return (
+    provider === 'internal' ||
+    (provider === 'mock' && /^(zero|voucher|medicalaid)_/.test(ref))
+  );
+}
+
+function externalProviderOrNull(provider: StoredPaymentProvider) {
+  if (provider === 'payfast') return 'payfast' as const;
+  if (provider === 'paystack') return 'paystack' as const;
+  if (provider === 'mock' && !isProductionRuntime()) return 'mock' as const;
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   try {
     const who = readIdentity(req.headers);
@@ -56,11 +86,38 @@ export async function POST(req: NextRequest) {
       }
 
       const meta = readMeta(payment.meta);
-      const providerName = String(meta.provider || 'paystack') as 'paystack' | 'payfast' | 'mock';
+      const providerName = cleanPaymentProvider(meta.provider || 'paystack');
       const providerRef = payment.providerRef || paymentRef;
 
+      if (isInternalProviderReference(providerName, providerRef)) {
+        const updated = await prisma.payment.update({
+          where: { id: payment.id },
+          data: {
+            meta: jsonSafe({
+              ...meta,
+              provider: 'internal',
+              verification: { internal: true, providerRef },
+              verifiedAt: new Date().toISOString(),
+            }),
+          },
+        });
+
+        return NextResponse.json(
+          { ok: true, payment: updated, appointmentId: null, internal: true },
+          { status: 200, headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+
+      const externalProvider = externalProviderOrNull(providerName);
+      if (!externalProvider) {
+        return NextResponse.json(
+          { ok: false, error: 'mock_payment_provider_disabled' },
+          { status: 409, headers: { 'Cache-Control': 'no-store' } },
+        );
+      }
+
       const verified = await verifyCheckout({
-        provider: providerName === 'payfast' ? 'payfast' : providerName === 'mock' ? 'mock' : 'paystack',
+        provider: externalProvider,
         reference: providerRef,
         expectedAmountCents: payment.amountCents,
         expectedCurrency: payment.currency,
@@ -90,12 +147,7 @@ export async function POST(req: NextRequest) {
       try {
         const synced = await syncVerifiedPaymentToAppointment({
           reference: providerRef,
-          provider:
-            providerName === 'payfast'
-              ? 'payfast'
-              : providerName === 'mock'
-                ? 'mock'
-                : 'paystack',
+          provider: externalProvider,
           state:
             nextStatus === 'captured'
               ? 'captured'
@@ -169,7 +221,7 @@ export async function POST(req: NextRequest) {
           appointmentId,
           encounterId,
           caseId: b.caseId ?? null,
-          provider: checkout.provider === 'internal' ? 'mock' : checkout.provider,
+          provider: checkout.provider,
           providerRef: checkout.reference,
           paymentMethod,
           redirectUrl: checkout.redirectUrl,
@@ -181,7 +233,7 @@ export async function POST(req: NextRequest) {
     await prisma.appointment.update({
       where: { id: appointmentId },
       data: {
-        paymentProvider: checkout.provider === 'internal' ? 'mock' : checkout.provider,
+        paymentProvider: checkout.provider,
         paymentRef: checkout.reference,
         paymentStatus:
           payment.status === 'captured'
