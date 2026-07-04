@@ -78,32 +78,50 @@ function formatDateShort(iso: string) {
 }
 
 /* ---------- Invite link helpers (queue / waiting room) ---------- */
+function runtimeOrigin(
+  candidates: Array<string | undefined>,
+  productionOrigin: string,
+  developmentOrigin: string,
+) {
+  const configured = candidates
+    .map((value) => (value || '').trim())
+    .find(Boolean);
+
+  return (
+    configured ||
+    (process.env.NODE_ENV === 'production' ? productionOrigin : developmentOrigin)
+  ).replace(/\/+$/, '');
+}
+
 function makeLinks(roomId: string) {
   if (!roomId) {
     return { clinician: '', patient: '' };
   }
 
-  if (typeof window === 'undefined') {
-    return {
-      clinician: `http://localhost:3001/sfu/${encodeURIComponent(roomId)}`,
-      patient: `http://localhost:3000/sfu/${encodeURIComponent(roomId)}`,
-    };
-  }
+  const encodedRoomId = encodeURIComponent(roomId);
 
-  const here = new URL(window.location.href);
-  const clinician = `${here.origin.replace(
-    /\/lobby\/?$/,
-    '',
-  )}/sfu/${encodeURIComponent(roomId)}`;
+  const clinicianOrigin = runtimeOrigin(
+    [
+      process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL,
+      process.env.NEXT_PUBLIC_CLINICIAN_APP_URL,
+    ],
+    'https://clinician.ambulantplus.co.za',
+    'http://localhost:3001',
+  );
 
-  const patientURL = new URL(here.href);
-  patientURL.port = '3000';
-  patientURL.pathname = `/sfu/${encodeURIComponent(roomId)}`;
-  patientURL.search = '';
-  patientURL.hash = '';
-  const patient = patientURL.toString();
+  const patientOrigin = runtimeOrigin(
+    [
+      process.env.NEXT_PUBLIC_PATIENT_BASE_URL,
+      process.env.NEXT_PUBLIC_PATIENT_APP_URL,
+    ],
+    'https://patient.ambulantplus.co.za',
+    'http://localhost:3000',
+  );
 
-  return { clinician, patient };
+  return {
+    clinician: `${clinicianOrigin}/sfu/${encodedRoomId}`,
+    patient: `${patientOrigin}/sfu/${encodedRoomId}`,
+  };
 }
 
 async function copyToClipboard(txt: string) {
