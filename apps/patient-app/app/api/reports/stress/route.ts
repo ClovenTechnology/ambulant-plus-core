@@ -5,6 +5,10 @@ import { computeSleepQuality } from '@/src/analytics/sleep';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+}
+
 type RangeKey = '7d' | '30d' | '90d' | '1y';
 
 type VitalRow = {
@@ -264,6 +268,58 @@ function buildMockStressReport(patientId: string, range: RangeKey): StressReport
   };
 }
 
+function buildUnavailableStressReport(patientId: string, range: RangeKey): StressReportResponse {
+  return {
+    ok: true,
+    patientId,
+    range,
+    generatedAtISO: new Date().toISOString(),
+    mock: false,
+    summary: {
+      avgStressIndex: null,
+      avgHrv: null,
+      avgRestingHr: null,
+      avgSleepScore: null,
+      avgActivityLoad: null,
+      sampleCounts: {
+        hrv: 0,
+        restingHr: 0,
+        sleep: 0,
+        activity: 0,
+        directStress: 0,
+      },
+    },
+    latest: {
+      ts: null,
+    },
+    trend: [],
+    insights: {
+      headline: 'Not enough persisted wearable data is available yet for stress interpretation.',
+      bullets: [
+        'No synthetic stress physiology is shown in production.',
+        'Persisted HRV, resting heart rate, sleep, activity, or direct stress readings are needed before interpretation is available.',
+      ],
+      recommendations: [
+        {
+          title: 'Continue regular wearable checks',
+          detail: 'Stress interpretation improves when HRV, resting heart rate, sleep, and activity data are captured consistently.',
+        },
+        {
+          title: 'Prioritise recovery signals',
+          detail: 'Sleep regularity and recovery context make stress interpretation more reliable once persisted readings are available.',
+        },
+      ],
+    },
+    sources: {
+      stressIndex: { source: 'unavailable', recorded_at: null, inferred: false },
+      hrv: { source: 'unavailable', recorded_at: null, inferred: false },
+      restingHr: { source: 'unavailable', recorded_at: null, inferred: false },
+      sleepScore: { source: 'unavailable', recorded_at: null, inferred: false },
+      activityLoad: { source: 'unavailable', recorded_at: null, inferred: false },
+    },
+  } as StressReportResponse;
+}
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
 
@@ -389,6 +445,10 @@ export async function GET(req: NextRequest) {
     trend.some((t) => typeof t.restingHr === 'number');
 
   if (!meaningful) {
+    if (isProductionRuntime()) {
+      return NextResponse.json(buildUnavailableStressReport(patientId, range));
+    }
+
     return NextResponse.json(buildMockStressReport(patientId, range));
   }
 

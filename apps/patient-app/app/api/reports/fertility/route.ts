@@ -5,6 +5,10 @@ import { detectPregnancy, computeAnomalies, summarizeCycleChanges } from '@/src/
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+}
+
 type RangeKey = '7d' | '30d' | '90d' | '1y';
 
 type VitalRow = {
@@ -305,6 +309,61 @@ function buildMockFertilityReport(patientId: string, range: RangeKey, lmp?: stri
   };
 }
 
+function buildUnavailableFertilityReport(patientId: string, range: RangeKey): FertilityReportResponse {
+  return {
+    ok: true,
+    patientId,
+    range,
+    generatedAtISO: new Date().toISOString(),
+    mock: false,
+    summary: {
+      currentPhase: 'insufficient_data' as any,
+      confidence: 0,
+      baselineTempC: null,
+      latestTempDelta: null,
+      avgHrv: null,
+      avgRhr: null,
+      likelyPregnancy: false,
+      pregnancyConfidence: 0,
+      sampleCounts: {
+        temperature: 0,
+        temperatureDeviation: 0,
+        hrv: 0,
+        rhr: 0,
+        spo2: 0,
+      },
+    },
+    latest: {
+      date: null,
+    },
+    trend: [],
+    insights: {
+      headline: 'Not enough persisted wearable data is available yet for fertility interpretation.',
+      bullets: [
+        'No synthetic fertility physiology is shown in production.',
+        'Regular wearable readings and cycle anchors are needed before interpretation is available.',
+      ],
+      recommendations: [
+        {
+          title: 'Continue regular wearable checks',
+          detail: 'Fertility interpretation improves when temperature variation, HRV, and resting heart-rate data are captured consistently.',
+        },
+        {
+          title: 'Add cycle anchors',
+          detail: 'LMP, cycle length, period logs, and ovulation confirmations improve confidence when persisted readings are available.',
+        },
+      ],
+    },
+    sources: {
+      temperature: { source: 'unavailable', recorded_at: null, inferred: false },
+      temperature_deviation: { source: 'unavailable', recorded_at: null, inferred: false },
+      hrv: { source: 'unavailable', recorded_at: null, inferred: false },
+      rhr: { source: 'unavailable', recorded_at: null, inferred: false },
+      spo2: { source: 'unavailable', recorded_at: null, inferred: false },
+    },
+  } as FertilityReportResponse;
+}
+
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
 
@@ -443,6 +502,10 @@ export async function GET(req: NextRequest) {
     trend.some((t) => typeof t.rhr === 'number');
 
   if (!meaningful) {
+    if (isProductionRuntime()) {
+      return NextResponse.json(buildUnavailableFertilityReport(patientId, range));
+    }
+
     return NextResponse.json(buildMockFertilityReport(patientId, range, lmp, cycleDays));
   }
 
