@@ -1,11 +1,10 @@
-﻿// apps/patient-app/app/medreach/page.tsx
+// apps/patient-app/app/medreach/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 
 import StatusBadge from '../../components/StatusBadge';
-import { medReachMockData } from '../../components/fallbackMocks';
 import { toast } from '../../components/ToastMount';
 import PhlebContactSheet from '../../components/PhlebContactSheet';
 
@@ -16,7 +15,17 @@ import type {
 } from '../../components/PhlebMap';
 
 type MedReachStatus = 'Idle' | 'Preparing' | 'Out for delivery' | 'Collected';
-type Delivery = (typeof medReachMockData)[number];
+type Delivery = {
+  id: string;
+  patient?: string;
+  test?: string;
+  status?: MedReachStatus | string;
+  eta?: string;
+  collectionWindow?: string;
+  area?: string;
+  patientId?: string;
+  [key: string]: any;
+};
 type FilterKey = 'all' | 'pending' | 'today' | 'collected';
 
 /* ---------- small UI helpers ---------- */
@@ -162,24 +171,14 @@ function jobToCoords(job: Delivery): Coord[] {
     ].map((c, i) => ({ ...c, ts: Date.now() - (3 - i) * 3 * 60_000 }));
   }
 
-  // pure mock fallback around Joburg-ish
-  const baseLat = -26.1;
-  const baseLng = 28.0;
-  return [
-    { lat: baseLat, lng: baseLng, ts: Date.now() - 20 * 60_000 },
-    { lat: baseLat + 0.01, lng: baseLng + 0.01, ts: Date.now() - 10 * 60_000 },
-    {
-      lat: baseLat + 0.015,
-      lng: baseLng + 0.015,
-      ts: Date.now() - 2 * 60_000,
-    },
-  ];
+  // No synthetic route if live coordinates are unavailable.
+  return [];
 }
 
 /* ---------- component ---------- */
 
 export default function MedReachPage() {
-  const [deliveries, setDeliveries] = useState<Delivery[]>(medReachMockData);
+  const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loadingIds, setLoadingIds] = useState<string[]>([]);
 
   const [sseConnected, setSseConnected] = useState(false);
@@ -190,6 +189,36 @@ export default function MedReachPage() {
   // Contact state only (no map)
   const [activePhleb, setActivePhleb] = useState<PhlebProfile | null>(null);
   const [contactOpen, setContactOpen] = useState(false);
+
+  /* ---------- initial live jobs load ---------- */
+
+  useEffect(() => {
+    let abort = false;
+
+    (async () => {
+      try {
+        const res = await fetch('/api/medreach/jobs', { cache: 'no-store' });
+        const json = await res.json().catch(() => null);
+        const jobs = Array.isArray(json)
+          ? json
+          : Array.isArray(json?.jobs)
+            ? json.jobs
+            : Array.isArray(json?.items)
+              ? json.items
+              : Array.isArray(json?.data)
+                ? json.data
+                : [];
+
+        if (!abort) setDeliveries(jobs);
+      } catch {
+        if (!abort) setDeliveries([]);
+      }
+    })();
+
+    return () => {
+      abort = true;
+    };
+  }, []);
 
   /* ---------- SSE: jobs stream ---------- */
 
@@ -213,7 +242,7 @@ export default function MedReachPage() {
           if (!mounted) return;
           try {
             const updated = JSON.parse(e.data) as Delivery[];
-            if (Array.isArray(updated) && updated.length > 0) {
+            if (Array.isArray(updated)) {
               setDeliveries(updated);
             }
           } catch (err) {

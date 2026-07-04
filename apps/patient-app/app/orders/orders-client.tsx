@@ -1,7 +1,7 @@
-﻿// apps/patient-app/app/orders/orders-client.tsx
+// apps/patient-app/app/orders/orders-client.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useActiveEncounter } from '../../components/context/ActiveEncounterContext';
 import { useToast } from '../../components/ToastMount';
 
@@ -15,19 +15,6 @@ export default function OrdersClient() {
   const [sig, setSig] = useState('');
   const [saving, setSaving] = useState(false);
   const [orders, setOrders] = useState<Record<string, Order[]>>({});
-
-  // Seed some mock prescriptions when encounter first selected
-  useEffect(() => {
-    if (activeEncounter && !orders[activeEncounter.id]) {
-      setOrders((prev) => ({
-        ...prev,
-        [activeEncounter.id]: [
-          { id: 'mock1', drug: 'Paracetamol 500mg', sig: '1 tablet every 6 hours as needed' },
-          { id: 'mock2', drug: 'Amoxicillin 500mg', sig: '1 capsule three times daily for 7 days' },
-        ],
-      }));
-    }
-  }, [activeEncounter, orders]);
 
   if (!activeEncounter) {
     return (

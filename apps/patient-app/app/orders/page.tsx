@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/orders/page.tsx
+// apps/patient-app/app/orders/page.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -166,7 +166,7 @@ export default function OrdersListPage() {
   const apiPath = (path: string) => `${baseUrl}${path}`;
   const ordersUrl = apiPath('/api/orders');
 
-  // useSWR to fetch orders; fall back to mock if request fails
+  // useSWR to fetch orders; return an empty live state if the request fails
   const { data: orders = [], mutate } = useSWR<OrderRow[]>(ordersUrl, async (url) => {
     try {
       const res = await fetch(url, { cache: 'no-store' });
