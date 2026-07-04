@@ -4,6 +4,10 @@ import { NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function isProductionRuntime() {
+  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+}
+
 // Dev in-memory audit log (redacted, limited)
 const IN_MEMORY_TRIAGE_LOG: { t: string; vitals: Record<string, string | number>; symptoms: string[]; source?: string }[] = [];
 const MAX_LOG = 200;
@@ -134,23 +138,49 @@ export async function POST(req: Request) {
               backend: 'model',
             };
             return NextResponse.json(out);
-          } else {
-            // invalid shape -> fallback to mock
-            // eslint-disable-next-line no-console
-            console.warn('Model returned invalid schema, falling back to mock');
           }
-        } else {
+
+          if (isProductionRuntime()) {
+            return NextResponse.json(
+              { ok: false, error: 'triage_provider_invalid_response' },
+              { status: 503 },
+            );
+          }
+
+          // invalid shape -> dev fallback only
           // eslint-disable-next-line no-console
-          console.warn('Model fetch failed or non-200, falling back to mock', modelRes?.status);
+          console.warn('Model returned invalid schema, falling back to dev mock');
+        } else {
+          if (isProductionRuntime()) {
+            return NextResponse.json(
+              { ok: false, error: 'triage_provider_unavailable' },
+              { status: 503 },
+            );
+          }
+
+          // eslint-disable-next-line no-console
+          console.warn('Model fetch failed or non-200, falling back to dev mock', modelRes?.status);
         }
       } catch (err) {
-        // Model call timed out or network failure -> fallback
+        if (isProductionRuntime()) {
+          return NextResponse.json(
+            { ok: false, error: 'triage_provider_unavailable' },
+            { status: 503 },
+          );
+        }
+
+        // Model call timed out or network failure -> dev fallback only
         // eslint-disable-next-line no-console
-        console.warn('Model call error; falling back to mock', err);
+        console.warn('Model call error; falling back to dev mock', err);
       }
+    } else if (isProductionRuntime()) {
+      return NextResponse.json(
+        { ok: false, error: 'triage_provider_not_configured' },
+        { status: 503 },
+      );
     }
 
-    // fallback to built-in mock analyzer
+    // fallback to built-in mock analyzer in development only
     const out = await mockAnalyze(payload);
 
     // Fire-and-forget: request insight core if configured (non-blocking)
@@ -173,6 +203,10 @@ export async function POST(req: Request) {
 }
 
 export async function GET() {
-  // admin/dev-only peek at logs (redacted). Keep gated if needed.
+  if (isProductionRuntime()) {
+    return NextResponse.json({ ok: false, error: 'not_found' }, { status: 404 });
+  }
+
+  // Admin/dev-only peek at logs (redacted).
   return NextResponse.json({ ok: true, count: IN_MEMORY_TRIAGE_LOG.length, logs: IN_MEMORY_TRIAGE_LOG.slice(-50) });
 }

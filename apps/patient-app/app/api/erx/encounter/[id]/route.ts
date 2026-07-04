@@ -212,6 +212,12 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     });
   }
 
+  if (isProductionRuntime()) {
+    return NextResponse.json([], {
+      headers: { 'Cache-Control': 'no-store' },
+    });
+  }
+
   const mock = buildMockForEncounter(encounterId);
   return NextResponse.json(mock, {
     headers: { 'Cache-Control': 'no-store' },
