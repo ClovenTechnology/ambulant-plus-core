@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
       process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
       process.env.APIGW_BASE ??
       process.env.NEXT_PUBLIC_GATEWAY_BASE ??
-      'http://localhost:4000';
+      ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
     const url = `${gatewayBase}/api/clinicians`;
 
