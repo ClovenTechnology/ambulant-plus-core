@@ -407,9 +407,13 @@ function readJoinJwtFromSession(visitId: string, roomId: string) {
   return '';
 }
 
-// Dynamic DeviceSettings (with safe fallback)
+// Dynamic DeviceSettings with a polished runtime placeholder.
 function SafeDeviceSettings() {
-  return <div className="text-sm text-gray-600">Safe device settings (fallback)</div>;
+  return (
+    <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+      Device settings are unavailable in this browser session. Continue with the current microphone and camera defaults.
+    </div>
+  );
 }
 const DeviceSettings = dynamic(
   async () => {
@@ -1005,7 +1009,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     };
   }, [moveFloatDrag, endFloatDrag]);
 
-  // Persist SOAP + meds per-room (fallback / notes)
+  // Persist SOAP + meds per-room as a local draft cache.
   useEffect(() => {
     try {
       if (typeof window === 'undefined') return;
@@ -1062,7 +1066,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const [sympCode, setSympCode] = useState<string>('');
   const icdSympOptions = icdSympAuto.opts.map((h) => ({
     code: h.code,
-    text: `${h.code} ”” ${h.title}`,
+    text: `${h.code} \u2014 ${h.title}`,
   }));
   const icdSympOptionsFinal = icdSympOptions.length
     ? icdSympOptions
@@ -1070,7 +1074,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const [sympOpen, setSympOpen] = useState(false);
   const [sympActive, setSympActive] = useState(-1);
 
-  // Current meds list fallback
+  // Current medications entered during this room session.
   const currentMedsList = useMemo(
     () =>
       (currentMeds || '')
@@ -2520,7 +2524,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                             profile.gender ? `Sex: ${profile.gender}` : null,
                           ]
                             .filter(Boolean)
-                            .join(' · ') || '””'
+                            .join(' \u00b7 ') || '\u2014'
                         }
                       />
 
@@ -2572,7 +2576,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                           aria-label="Live vital signs from connected devices"
                         >
                           <Tile label="HR" value={`${num2(vitals.hr)} bpm`} />
-                          <Tile label="SpOâ‚‚" value={`${num2(vitals.spo2)} %`} />
+                          <Tile label="SpO\u2082" value={`${num2(vitals.spo2)} %`} />
                           <Tile label="Temp" value={`${num2(vitals.tempC)} °C`} />
                           <Tile label="RR" value={`${num2(vitals.rr)} /min`} />
                           <Tile label="BP" value={fmtBP(vitals.sys, vitals.dia)} />
@@ -2718,7 +2722,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                           <div className="flex items-center gap-2">
                             {medsError && (
                               <span className="text-[10px] text-amber-700 border border-amber-200 bg-amber-50 rounded-full px-2 py-0.5">
-                                Demo
+                                Source unavailable
                               </span>
                             )}
                             <button
@@ -2771,7 +2775,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                               </span>
                             ) : allergiesError ? (
                               <span className="text-[10px] text-amber-700 border border-amber-200 bg-amber-50 rounded-full px-2 py-0.5">
-                                Demo
+                                Source unavailable
                               </span>
                             ) : null}
                             <button
