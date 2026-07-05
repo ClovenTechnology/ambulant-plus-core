@@ -10,6 +10,7 @@ export async function POST(req: NextRequest) {
   const token = String(form.get("token") || "").trim();
   const name = String(form.get("name") || "").trim();
   const password = String(form.get("password") || "").trim();
+  const confirmPassword = String(form.get("confirmPassword") || "").trim();
 
   if (!token) {
     return NextResponse.redirect(new URL("/auth/login?error=missing_invite_token", req.url));
@@ -18,6 +19,12 @@ export async function POST(req: NextRequest) {
   if (!password || password.length < 8) {
     return NextResponse.redirect(
       new URL(`/auth/accept-invite?token=${encodeURIComponent(token)}&error=password_minimum_8_characters`, req.url),
+    );
+  }
+
+  if (confirmPassword && confirmPassword !== password) {
+    return NextResponse.redirect(
+      new URL(`/auth/accept-invite?token=${encodeURIComponent(token)}&error=passwords_do_not_match`, req.url),
     );
   }
 

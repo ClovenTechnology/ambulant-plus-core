@@ -1,6 +1,14 @@
 export const CANONICAL_APIGW_BASE = "https://api-gateway.ambulantplus.co.za";
 
 export function normaliseApigwOrigin(rawValue?: string | null, currentHost?: string | null) {
+  const isProduction =
+    process.env.NODE_ENV === "production" ||
+    process.env.VERCEL_ENV === "production";
+
+  if (isProduction) {
+    return CANONICAL_APIGW_BASE;
+  }
+
   const raw = String(rawValue || CANONICAL_APIGW_BASE).trim() || CANONICAL_APIGW_BASE;
 
   try {
@@ -11,6 +19,8 @@ export function normaliseApigwOrigin(rawValue?: string | null, currentHost?: str
     if (
       host === current ||
       host.includes("clients.ambulantplus.co.za") ||
+      host.includes("ambulant-plus-core-api-gateway") ||
+      host.endsWith(".vercel.app") ||
       host.startsWith("localhost") ||
       host.startsWith("127.0.0.1")
     ) {

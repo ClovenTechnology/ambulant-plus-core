@@ -1,9 +1,6 @@
-export const dynamic = "force-dynamic";
+import AcceptInviteForm from "./AcceptInviteForm";
 
-function errorText(value: string) {
-  if (!value) return "";
-  return decodeURIComponent(value).replace(/_/g, " ");
-}
+export const dynamic = "force-dynamic";
 
 export default async function AcceptInvitePage({
   searchParams,
@@ -61,90 +58,12 @@ export default async function AcceptInvitePage({
             </a>
           </>
         ) : (
-          <>
-            <p style={{ opacity: 0.82, lineHeight: 1.6 }}>
-              Create your password to activate your organization account. Ambulant+ will verify this invitation securely before access is granted.
-            </p>
-
-            {submitError ? (
-              <div
-                style={{
-                  marginTop: 14,
-                  background: "#3a1017",
-                  border: "1px solid #7f1d1d",
-                  color: "#fecaca",
-                  borderRadius: 12,
-                  padding: 12,
-                  fontSize: 14,
-                  lineHeight: 1.5,
-                }}
-              >
-                {errorText(submitError)}
-              </div>
-            ) : null}
-
-            <form
-              action="/auth/accept-invite/complete"
-              method="POST"
-              style={{ display: "grid", gap: 16, marginTop: 18 }}
-            >
-              <input type="hidden" name="token" value={token} />
-
-              <label style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 14, opacity: 0.84 }}>Full name</span>
-                <input
-                  name="name"
-                  placeholder="Your name"
-                  style={inputStyle}
-                  autoComplete="name"
-                />
-              </label>
-
-              <label style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 14, opacity: 0.84 }}>Password</span>
-                <input
-                  name="password"
-                  type="password"
-                  placeholder="Create password, minimum 8 characters"
-                  minLength={8}
-                  style={inputStyle}
-                  autoComplete="new-password"
-                  required
-                />
-              </label>
-
-              <button type="submit" style={primaryButton}>
-                Accept invite and set password
-              </button>
-            </form>
-          </>
+          <AcceptInviteForm token={token} submitError={submitError} />
         )}
       </div>
     </main>
   );
 }
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  background: "#0f1730",
-  border: "1px solid #1f2a4d",
-  color: "#e8ecf3",
-  borderRadius: 12,
-  padding: "12px 14px",
-  outline: "none",
-  boxSizing: "border-box",
-};
-
-const primaryButton: React.CSSProperties = {
-  background: "#2563eb",
-  border: "1px solid #1d4ed8",
-  color: "white",
-  borderRadius: 12,
-  padding: "12px 18px",
-  fontWeight: 700,
-  cursor: "pointer",
-  width: "fit-content",
-};
 
 const primaryLink: React.CSSProperties = {
   display: "inline-block",
