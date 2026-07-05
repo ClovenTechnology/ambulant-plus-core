@@ -26,12 +26,13 @@ function clean(value: unknown, max = 220) {
 
 function readRole(req: NextRequest) {
   const who = readIdentity(req.headers);
-  return String(
-    who.role ||
-      req.headers.get("x-ambulant-role") ||
-      req.headers.get("x-role") ||
-      "",
-  ).toUpperCase();
+  const headerRole =
+    req.headers.get("x-ambulant-role") ||
+    req.headers.get("x-role") ||
+    req.headers.get("x-admin-role") ||
+    req.headers.get("x-user-role") ||
+    "";
+  return String(headerRole || who.role || "").trim().toUpperCase();
 }
 
 function requireAdmin(req: NextRequest) {

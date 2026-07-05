@@ -68,7 +68,7 @@ function hasAny(scopes: string[], need?: string | string[]) {
 export default function AdminSidebar() {
   const pathname = usePathname();
 
-  // âœ… Hide sidebar on auth routes without changing app/layout.tsx
+  // Hide sidebar on auth routes without changing app/layout.tsx
   if (pathname?.startsWith('/auth')) return null;
 
   const [collapsed, setCollapsed] = useState(false);
@@ -140,7 +140,7 @@ export default function AdminSidebar() {
       { href: '/insurance', label: 'Insurance', icon: Shield, requires: 'finance' },
     { href: '/admin/medical-aids', label: 'Medical Aids', icon: Shield, requires: 'finance' },
 
-      // âœ… NEW: Forex (FX)
+      // NEW: Forex (FX)
       { href: '/finance/fx', label: 'Forex', icon: ArrowLeftRight, requires: 'finance' },
 
       { href: '/promotions', label: 'Promotions', icon: Sparkles /* public within admin */ },
@@ -228,7 +228,7 @@ export default function AdminSidebar() {
   function ItemRow(it: Item) {
     const gated = !!it.requires;
 
-    // âœ… Force-show mode: render everything
+    // Force-show mode: render everything
     const allowed = FORCE_SHOW_ALL ? true : scopes ? hasAny(scopes, it.requires) : !gated;
     if (!allowed) return null;
 
@@ -276,7 +276,7 @@ export default function AdminSidebar() {
             <g.icon className="h-4 w-4 text-black/50" />
             {!collapsed && <span className="font-medium">{g.label}</span>}
           </span>
-          {!collapsed && <span className="text-xs text-black/40">{expanded ? 'â–¾' : 'â–¸'}</span>}
+          {!collapsed && <span className="text-xs text-black/40">{expanded ? 'v' : '>'}</span>}
         </button>
 
         {!collapsed && expanded && (

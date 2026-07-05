@@ -120,7 +120,7 @@ export default function ClientLoginPage() {
             </a>
 
             <button type="submit" disabled={submitting} style={primaryButton}>
-              {submitting ? "Signing inâ€¦" : "Sign in"}
+              {submitting ? "Signing in..." : "Sign in"}
             </button>
           </div>
         </form>
