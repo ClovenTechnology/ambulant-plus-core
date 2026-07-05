@@ -362,19 +362,19 @@ type Vitals = {
 };
 
 const ICD10_SUGGESTIONS: string[] = [
-  'J20.9 ”” Acute bronchitis, unspecified',
-  'R50.9 ”” Fever, unspecified',
-  'R05.9 ”” Cough, unspecified',
-  'I10 ”” Essential (primary) hypertension',
-  'E11.9 ”” Type 2 diabetes mellitus without complications',
+  'J20.9 - Acute bronchitis, unspecified',
+  'R50.9 - Fever, unspecified',
+  'R05.9 - Cough, unspecified',
+  'I10 - Essential (primary) hypertension',
+  'E11.9 - Type 2 diabetes mellitus without complications',
 ];
 
 function num2(x?: number) {
-  return typeof x === 'number' && Number.isFinite(x) ? Number(x).toFixed(2) : '””';
+  return typeof x === 'number' && Number.isFinite(x) ? Number(x).toFixed(2) : '-';
 }
 function fmtBP(sys?: number, dia?: number) {
   const ok = Number.isFinite(sys as number) && Number.isFinite(dia as number);
-  return ok ? `${Math.round(sys!)} / ${Math.round(dia!)} mmHg` : '””/”” mmHg';
+  return ok ? `${Math.round(sys!)} / ${Math.round(dia!)} mmHg` : '-/- mmHg';
 }
 
 // Helper: read join JWT from session (visitId/roomId variants)
@@ -535,7 +535,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       .slice(0, 3)
       .map((a) => {
         const sev = a.severity ? ` (${a.severity})` : '';
-        const rxn = a.reaction ? ` ”” ${a.reaction}` : '';
+        const rxn = a.reaction ? ` - ${a.reaction}` : '';
         return `${a.substance}${sev}${rxn}`;
       });
     const base = top.join(', ');
@@ -1053,7 +1053,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
       const text = patientAllergies
         .map((a) => {
           const sev = a.severity ? ` [${a.severity}]` : '';
-          const rxn = a.reaction ? ` ”” ${a.reaction}` : '';
+          const rxn = a.reaction ? ` - ${a.reaction}` : '';
           return `${a.substance}${sev}${rxn}`;
         })
         .join('\n');
@@ -1451,12 +1451,10 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
           if (type === 'hand') {
             const next = asBool(value);
             if (handTimerRef.current && typeof window !== 'undefined') window.clearTimeout(handTimerRef.current);
+            handTimerRef.current = null;
             setHandRaised(next);
             if (next) {
-              pushToast('Patient raised their hand.', 'info');
-              if (typeof window !== 'undefined') {
-                handTimerRef.current = window.setTimeout(() => setHandRaised(false), 5000);
-              }
+              pushToast('Patient raised their hand.', 'warning', 'Patient needs attention', 10000);
             } else {
               pushToast('Patient lowered their hand.', 'info');
             }
@@ -2102,7 +2100,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
   // -------------------------
   const encounterSummary = useMemo(() => {
     const lines: string[] = [];
-    lines.push(`Reason for visit: ${appt.reason || '””'}`);
+    lines.push(`Reason for visit: ${appt.reason || '-'}`);
     if (soap.s) lines.push(`Subjective / Symptoms:\n${soap.s}`);
     if (soap.a) lines.push(`Assessment:\n${soap.a}`);
     if (soap.p) lines.push(`Plan / Treatment:\n${soap.p}`);
@@ -2115,7 +2113,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
           medsOrdered
             .map((r) => {
               const parts = [r.drug, r.dose, r.route, r.freq, r.duration].filter(Boolean).join(' · ');
-              return `”¢ ${parts}`;
+              return `- ${parts}`;
             })
             .join('\n')
       );
@@ -2128,7 +2126,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
           labsOrdered
             .map((l) => {
               const parts = [l.test, l.priority, l.specimen, l.icd].filter(Boolean).join(' · ');
-              return `”¢ ${parts}`;
+              return `- ${parts}`;
             })
             .join('\n')
       );
@@ -2139,8 +2137,8 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         .filter((a) => (a.status ?? '').toLowerCase() !== 'entered-in-error')
         .map((a) => {
           const sev = a.severity ? ` [${a.severity}]` : '';
-          const rxn = a.reaction ? ` ”” ${a.reaction}` : '';
-          return `”¢ ${a.substance}${sev}${rxn}`;
+          const rxn = a.reaction ? ` - ${a.reaction}` : '';
+          return `- ${a.substance}${sev}${rxn}`;
         });
       lines.push('Recorded allergies:\n' + algs.join('\n'));
     }
@@ -2201,6 +2199,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
       dense={dense}
       presentation={presentation}
       patientName={profile.name}
+      handRaised={handRaised}
       micOn={micOn}
       camOn={camOn}
       showOverlay={showOverlay}
@@ -2229,19 +2228,19 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
   // =========================
 
   return (
-    <div className="min-h-screen bg-gray-50" data-density={dense ? 'compact' : 'comfort'}>
-      <header className="sticky top-0 z-40 flex items-center justify-between p-4 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80 shadow-sm">
+    <div className="min-h-screen bg-slate-50" data-density={dense ? 'compact' : 'comfort'}>
+      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
         <div className="flex items-center gap-4">
           <div className="flex flex-col">
             <div className="flex items-center gap-4">
-              <h1 className="text-xl font-semibold">SFU Televisit ”” Room {roomId}</h1>
+              <h1 className="text-lg font-black tracking-tight text-slate-950">SFU Televisit <span className="text-slate-400">/</span> Room {roomId}</h1>
             </div>
 
             <ClinicianRosterChips roster={roster} />
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex max-w-full items-center gap-2 overflow-x-auto pb-1">
           <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border">
             <span
               className={`h-2 w-2 rounded-full ${
@@ -2291,7 +2290,14 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
 
           {sessionBusy ? (
             <span className="text-xs inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-700">
-              Resolving session”¦
+              Resolving session...
+            </span>
+          ) : null}
+
+          {handRaised ? (
+            <span className="inline-flex items-center gap-2 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-black text-amber-900 shadow-sm">
+              <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+              Patient hand raised
             </span>
           ) : null}
 
@@ -2301,7 +2307,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                 <>
                   <button
                     onClick={dockCenter}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                     title="Dock video (center)"
                   >
                     <Icon name="collapse" />
@@ -2309,18 +2315,18 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                   </button>
                   <button
                     onClick={dockLeft}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                     title="Dock video to left column"
                   >
                     <Icon name="collapse" />
-                    Dock Left
+                    Dock left
                   </button>
                 </>
               ) : (
                 <>
                   <button
                     onClick={undockVideo}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                     title="Undock video (floating)"
                   >
                     <Icon name="expand" />
@@ -2329,11 +2335,11 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
 
                   <button
                     onClick={() => (videoDockSide === 'left' ? dockCenter() : dockLeft())}
-                    className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+                    className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                     title={videoDockSide === 'left' ? 'Dock video to center column' : 'Dock video to left column'}
                   >
                     <Icon name={videoDockSide === 'left' ? 'expand' : 'collapse'} />
-                    {videoDockSide === 'left' ? 'Dock Center' : 'Dock Left'}
+                    {videoDockSide === 'left' ? 'Dock center' : 'Dock left'}
                   </button>
                 </>
               )}
@@ -2344,18 +2350,18 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             onClick={() => setUi('leftCollapsed', !leftCollapsed)}
             aria-pressed={leftCollapsed}
             aria-label={leftCollapsed ? 'Show left pane' : 'Hide left pane'}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             title={leftCollapsed ? 'Show left pane (L)' : 'Hide left pane (L)'}
           >
             <Icon name={leftCollapsed ? 'expand' : 'collapse'} />
-            {leftCollapsed ? 'Show Left' : 'Hide Left'}
+            {leftCollapsed ? 'Show left' : 'Hide left'}
           </button>
 
           <button
             onClick={() => setUi('dense', !dense)}
             aria-pressed={dense}
             aria-label={dense ? 'Use comfortable density' : 'Use compact density'}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             title="Toggle density"
           >
             {dense ? 'Comfort' : 'Compact'}
@@ -2365,40 +2371,40 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             onClick={() => setVideoNarrow((v) => !v)}
             aria-pressed={videoNarrow}
             aria-label={videoNarrow ? 'Use normal layout' : 'Narrow side column(s)'}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             title={videoNarrow ? 'Normal columns' : 'Wider center'}
           >
             <Icon name={videoNarrow ? 'collapse' : 'expand'} />
-            {videoNarrow ? 'Normal Layout' : 'Wider Center'}
+            {videoNarrow ? 'Normal layout' : 'Wider centre'}
           </button>
 
           <button
             onClick={() => (presentation ? exitPresentation() : enterPresentation())}
             aria-pressed={presentation}
             aria-label={presentation ? 'Exit full screen mode' : 'Enter full screen mode'}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
-            title={presentation ? 'Exit Full Screen (F)' : 'Enter Full Screen (F)'}
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+            title={presentation ? 'Exit full screen (F)' : 'Enter Full screen (F)'}
           >
             <Icon name={presentation ? 'collapse' : 'expand'} />
-            <span className="text-xs">{presentation ? 'Exit Full Screen' : 'Full Screen'}</span>
+            <span className="text-xs">{presentation ? 'Exit full screen' : 'Full screen'}</span>
           </button>
 
           <button
             onClick={() => setUi('rightCollapsed', !rightCollapsed)}
             aria-pressed={rightCollapsed}
             aria-label={rightCollapsed ? 'Show right pane' : 'Hide right pane'}
-            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full border border-gray-200 bg-white shadow-sm hover:bg-gray-50 text-xs"
+            className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
             title={rightCollapsed ? 'Show right pane (R)' : 'Hide right pane (R)'}
           >
             <Icon name={rightCollapsed ? 'expand' : 'collapse'} />
-            {rightCollapsed ? 'Show Right' : 'Hide Right'}
+            {rightCollapsed ? 'Show right' : 'Hide right'}
           </button>
 
           <button
             onClick={() => specialistInvite.openInviteDrawer()}
             className="px-3 py-1.5 rounded-full border border-violet-200 bg-violet-50 shadow-sm hover:bg-violet-100 text-sm text-violet-700"
           >
-            Invite Specialist
+            Invite specialist
           </button>
 
           <Link href="/appointments" className="text-sm text-blue-600 hover:underline">
@@ -2426,7 +2432,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
       {state === 'reconnecting' && (
         <div className="sticky top-14 z-40 mx-4 my-2 rounded border bg-amber-50 text-amber-900 px-3 py-2 flex items-center gap-2">
           <span className="h-3 w-3 rounded-full border-2 border-amber-400 border-t-transparent animate-spin" />
-          Reconnecting”¦
+          Reconnecting...
         </div>
       )}
 
@@ -2438,7 +2444,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
 
       {specialistInvite.loadingPersistedQuote && (
         <div className="mx-4 my-2 rounded border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-          Loading persisted specialist invite state”¦
+          Loading persisted specialist invite state...
         </div>
       )}
 
@@ -2629,13 +2635,13 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                     ]}
                   />
                   <button
-                    className="ml-2 px-2 py-1 text-xs border rounded"
+                    className="ml-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
                     onClick={() => setUi('rightCollapsed', rightPanelsOpen)}
                     aria-pressed={rightPanelsOpen}
-                    aria-label={rightPanelsOpen ? 'Collapse right panels' : 'Expand right panels'}
-                    title={rightPanelsOpen ? 'Collapse' : 'Expand'}
+                    aria-label={rightPanelsOpen ? 'Hide right panels' : 'Show right panels'}
+                    title={rightPanelsOpen ? 'Hide right panels' : 'Show right panels'}
                   >
-                    {rightPanelsOpen ? 'Collapse' : 'Expand'}
+                    {rightPanelsOpen ? 'Hide panels' : 'Show panels'}
                   </button>
                 </div>
               </div>
@@ -2903,7 +2909,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                                   }}
                                 >
                                   <span className="font-mono text-xs mr-1">{o.code}</span>
-                                  <span>{o.text.replace(/^([A-Z0-9.]+)\s+””\s*/, '')}</span>
+                                  <span>{o.text.replace(/^([A-Z0-9.]+)\s+-\s*/, '')}</span>
                                 </li>
                               ))}
                             </ul>
@@ -3078,7 +3084,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                       className="border rounded px-2 py-1 text-sm flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 resize-y"
                       placeholder={
                         state === 'connected'
-                          ? 'Type message”¦ (Enter to send, Shift+Enter for newline)'
+                          ? 'Type message... (Enter to send, Shift+Enter for newline)'
                           : 'Join the room to send messages'
                       }
                       aria-label="Type chat message"
@@ -3129,9 +3135,9 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             transform: 'translate(-50%, -50%)',
           }}
         >
-          <div className="rounded-xl shadow-2xl">
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
             <div
-              className="flex items-center justify-between px-3 py-2 rounded-t-xl border border-gray-200 bg-white cursor-move select-none"
+              className="flex cursor-move select-none items-center justify-between border-b border-slate-200 bg-white/95 px-3 py-2 backdrop-blur"
               onMouseDown={(e) => startFloatDrag(e.clientX, e.clientY)}
               onTouchStart={(e) => {
                 const t = e.touches?.[0];
@@ -3141,22 +3147,22 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
               title="Drag to move floating video"
             >
               <div className="text-xs text-gray-600">
-                Floating Video <span className="text-gray-400">· drag to move</span>
+                Floating video <span className="text-gray-400">- drag to move</span>
               </div>
               <div className="flex items-center gap-2">
                 <button
-                  className="text-xs px-2 py-1 rounded border bg-white hover:bg-gray-50"
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
                   onClick={dockCenter}
                   title="Dock to center"
                 >
                   Dock
                 </button>
                 <button
-                  className="text-xs px-2 py-1 rounded border bg-white hover:bg-gray-50"
+                  className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
                   onClick={dockLeft}
                   title="Dock to left"
                 >
-                  Dock Left
+                  Dock left
                 </button>
               </div>
             </div>
@@ -3184,43 +3190,43 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             </div>
             <ul className="text-sm space-y-1">
               <li>
-                <b>M</b> ”” Toggle mic
+                <b>M</b> - Toggle mic
               </li>
               <li>
-                <b>V</b> ”” Toggle camera
+                <b>V</b> - Toggle camera
               </li>
               <li>
-                <b>C</b> ”” Toggle captions
+                <b>C</b> - Toggle captions
               </li>
               <li>
-                <b>O</b> ”” Toggle overlay
+                <b>O</b> - Toggle overlay
               </li>
               <li>
-                <b>H</b> ”” Toggle vitals
+                <b>H</b> - Toggle vitals
               </li>
               <li>
-                <b>S</b> ”” Toggle vitals stream overlay
+                <b>S</b> - Toggle vitals stream overlay
               </li>
               <li>
-                <b>R</b> ”” Toggle recording
+                <b>R</b> - Toggle recording
               </li>
               <li>
-                <b>X</b> ”” Toggle XR broadcast
+                <b>X</b> - Toggle XR broadcast
               </li>
               <li>
-                <b>F</b> ”” Full screen
+                <b>F</b> - Full screen
               </li>
               <li>
-                <b>L</b> ”” Toggle left pane
+                <b>L</b> - Toggle left pane
               </li>
               <li>
-                <b>K</b> ”” Toggle right pane
+                <b>K</b> - Toggle right pane
               </li>
               <li>
-                <b>?</b> ”” Show this help
+                <b>?</b> - Show this help
               </li>
               <li>
-                <b>Esc</b> ”” Close this help
+                <b>Esc</b> - Close this help
               </li>
             </ul>
           </div>

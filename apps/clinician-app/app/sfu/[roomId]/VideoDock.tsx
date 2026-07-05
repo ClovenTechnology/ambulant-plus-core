@@ -21,7 +21,7 @@ type Vitals = {
 
   // support both names; clinician UI displays mmol/L
   glu?: number; // expected mmol/L
-  glucose?: number; // may arrive as mg/dL from demo sources
+  glucose?: number; // may arrive as mg/dL from connected device sources
 };
 
 function num2(x?: number) {
@@ -54,6 +54,8 @@ type VideoDockProps = {
   dense: boolean;
   presentation: boolean;
   patientName: string;
+
+  handRaised?: boolean;
 
   micOn: boolean;
   camOn: boolean;
@@ -109,6 +111,7 @@ export default function VideoDock({
   dense,
   presentation,
   patientName,
+  handRaised = false,
   micOn,
   camOn,
   showOverlay,
@@ -329,6 +332,13 @@ export default function VideoDock({
         <audio ref={audioSinkRef} autoPlay />
 
         <CaptionOverlay lines={captionLines} enabled={captionsOn} />
+
+        {handRaised ? (
+          <div className="absolute left-3 top-3 z-20 flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50/95 px-3 py-1.5 text-xs font-black text-amber-900 shadow-lg backdrop-blur">
+            <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
+            Patient hand raised
+          </div>
+        ) : null}
 
         {/* Controls bar */}
         <div
