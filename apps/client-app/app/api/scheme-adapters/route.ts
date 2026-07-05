@@ -26,14 +26,14 @@ function safeParseSession(value: string | undefined): SessionPayload | null {
 }
 
 function apiBase() {
-  return process.env.APIGW_BASE || process.env.NEXT_PUBLIC_APIGW_BASE || "http://localhost:3010";
+  return process.env.APIGW_BASE || process.env.NEXT_PUBLIC_APIGW_BASE || "";
 }
 
 function authHeaders(session: SessionPayload) {
   return {
     "content-type": "application/json",
     "x-ambulant-user-id": String(session.uid || session.email || ""),
-    "x-ambulant-org-id": String(session.orgId || "org-default"),
+    "x-ambulant-org-id": String(session.orgId || ""),
     "x-ambulant-role": String(session.role || "READ_ONLY"),
     "x-ambulant-workspace": String(session.workspace || "payer_ops"),
     "x-ambulant-trusted": "client-app-proxy",
