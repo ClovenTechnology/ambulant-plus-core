@@ -9,6 +9,18 @@ type SubmitState =
   | { status: "success"; message: string; reference?: string }
   | { status: "error"; message: string };
 
+function asMessage(value: unknown, fallback: string) {
+  if (!value) return fallback;
+  if (typeof value === "string") return value;
+
+  if (typeof value === "object") {
+    const record = value as Record<string, any>;
+    return String(record.message || record.code || JSON.stringify(record));
+  }
+
+  return String(value);
+}
+
 export default function RequestAccessPage() {
   const [state, setState] = useState<SubmitState>({ status: "idle" });
 
@@ -31,7 +43,7 @@ export default function RequestAccessPage() {
       if (!res.ok || !json?.ok) {
         setState({
           status: "error",
-          message: json?.error || "Could not submit request.",
+          message: asMessage(json?.error, "Could not submit request."),
         });
         return;
       }

@@ -1,9 +1,30 @@
+const CANONICAL_APIGW_BASE = "https://api-gateway.ambulantplus.co.za";
+
 function apigwBase() {
-  return (
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
+  const raw = String(
     process.env.APIGW_BASE ||
-    "http://localhost:3010"
-  );
+      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      CANONICAL_APIGW_BASE,
+  ).trim();
+
+  const candidate = raw.replace(/\/+$/, "") || CANONICAL_APIGW_BASE;
+
+  try {
+    const parsed = new URL(candidate);
+    const host = parsed.host.toLowerCase();
+
+    if (
+      host.includes("clients.ambulantplus.co.za") ||
+      host.startsWith("localhost") ||
+      host.startsWith("127.0.0.1")
+    ) {
+      return CANONICAL_APIGW_BASE;
+    }
+
+    return candidate;
+  } catch {
+    return CANONICAL_APIGW_BASE;
+  }
 }
 
 function workspaceLabel(workspace: string) {
@@ -13,31 +34,63 @@ function workspaceLabel(workspace: string) {
 }
 
 async function getInvite(token: string) {
-  if (!token) return null;
+  if (!token) {
+    return { invite: null, reason: "missing_token" };
+  }
 
-  const res = await fetch(
-    `${apigwBase()}/api/client/org-invitations/${encodeURIComponent(token)}`,
-    { cache: "no-store" }
-  );
+  try {
+    const res = await fetch(
+      `${apigwBase()}/api/client/org-invitations/${encodeURIComponent(token)}`,
+      { cache: "no-store" },
+    );
 
-  if (!res.ok) return null;
+    const json = await res.json().catch(() => null);
 
-  const json = await res.json().catch(() => null);
-  return json?.ok ? json.invitation : null;
+    if (!res.ok || !json?.ok) {
+      return {
+        invite: null,
+        reason: json?.error || `lookup_failed_${res.status}`,
+      };
+    }
+
+    return { invite: json.invitation, reason: "" };
+  } catch (error) {
+    return {
+      invite: null,
+      reason: error instanceof Error ? error.message : "lookup_failed",
+    };
+  }
+}
+
+function invalidMessage(reason: string) {
+  if (reason === "missing_token") return "This invitation link is missing its token.";
+  if (reason === "invitation_not_found") return "This invitation token was not found.";
+  if (reason === "invitation_expired") return "This invitation has expired.";
+  if (reason === "invitation_not_open") return "This invitation is already accepted or no longer open.";
+  return "This invitation is invalid, expired, or already accepted.";
 }
 
 export default async function AcceptInvitePage({
   searchParams,
 }: {
-  searchParams: { token?: string };
+  searchParams: { token?: string; error?: string };
 }) {
   const token = String(searchParams.token || "").trim();
-  const invite = await getInvite(token);
+  const result = await getInvite(token);
+  const invite = result.invite as any;
 
-  const invalid =
-    !invite ||
-    invite.status !== "INVITED" ||
-    new Date(invite.expiresAt).getTime() < Date.now();
+  let reason = result.reason;
+
+  if (invite?.status && invite.status !== "INVITED") {
+    reason = "invitation_not_open";
+  }
+
+  if (invite?.expiresAt && new Date(invite.expiresAt).getTime() < Date.now()) {
+    reason = "invitation_expired";
+  }
+
+  const invalid = !invite || Boolean(reason);
+  const submitError = String(searchParams.error || "").trim();
 
   return (
     <main
@@ -78,7 +131,7 @@ export default async function AcceptInvitePage({
         {invalid ? (
           <>
             <p style={{ opacity: 0.82, lineHeight: 1.6 }}>
-              This invitation is invalid, expired, or already accepted.
+              {invalidMessage(reason)}
             </p>
 
             <a href="/auth/login" style={primaryLink}>
@@ -91,14 +144,28 @@ export default async function AcceptInvitePage({
               You have been invited to join{" "}
               <strong>{invite.org.name}</strong> as{" "}
               <strong>{invite.role}</strong> in the{" "}
-              <strong>
-                {workspaceLabel(String(invite.defaultWorkspace))}
-              </strong>{" "}
+              <strong>{workspaceLabel(String(invite.defaultWorkspace))}</strong>{" "}
               workspace.
             </p>
 
+            {submitError ? (
+              <div
+                style={{
+                  marginTop: 14,
+                  background: "#3a1017",
+                  border: "1px solid #7f1d1d",
+                  color: "#fecaca",
+                  borderRadius: 12,
+                  padding: 12,
+                  fontSize: 14,
+                }}
+              >
+                {submitError}
+              </div>
+            ) : null}
+
             <form
-              action="/auth/accept-invite/submit"
+              action="/api/auth/accept-invite/submit"
               method="POST"
               style={{ display: "grid", gap: 16, marginTop: 18 }}
             >
@@ -106,12 +173,7 @@ export default async function AcceptInvitePage({
 
               <label style={{ display: "grid", gap: 8 }}>
                 <span style={{ fontSize: 14, opacity: 0.84 }}>Email</span>
-                <input
-                  name="email"
-                  value={invite.email}
-                  readOnly
-                  style={inputStyle}
-                />
+                <input name="email" value={invite.email} readOnly style={inputStyle} />
               </label>
 
               <label style={{ display: "grid", gap: 8 }}>
@@ -129,14 +191,15 @@ export default async function AcceptInvitePage({
                 <input
                   name="password"
                   type="password"
-                  placeholder="Create password"
+                  placeholder="Create password, minimum 8 characters"
+                  minLength={8}
                   style={inputStyle}
                   required
                 />
               </label>
 
               <button type="submit" style={primaryButton}>
-                Accept invite
+                Accept invite and set password
               </button>
             </form>
           </>
