@@ -68,8 +68,8 @@ export async function POST(req: NextRequest) {
   }
 
   /*
-   * Gateway does not expose patient-app's old /collect mock route.
-   * Use the real lab-order PATCH workflow when available.
+   * Use the gateway lab-order PATCH workflow so collection updates remain tied
+   * to the live MedReach order, custody, timeline, and result pipeline.
    */
   const upstream = new URL(`/api/medreach/labs/orders/${encodeURIComponent(id)}`, base);
 
