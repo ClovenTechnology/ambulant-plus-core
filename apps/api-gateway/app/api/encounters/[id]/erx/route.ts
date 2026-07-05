@@ -347,6 +347,232 @@ function findMedicationAllergyConflicts(
   return conflicts;
 }
 
+type NormalizedCurrentMedication = {
+  source: 'database';
+  id: string | null;
+  name: string;
+  dose: string | null;
+  frequency: string | null;
+  route: string | null;
+  status: string | null;
+  codes: string[];
+  updatedAt: string | null;
+};
+
+function isActiveMedicationStatus(value: unknown) {
+  const raw = normalizeForMatch(value);
+  if (!raw) return true;
+  if (raw.includes('completed') || raw.includes('stopped') || raw.includes('inactive')) return false;
+  if (raw.includes('cancelled') || raw.includes('canceled') || raw.includes('discontinued')) return false;
+  return true;
+}
+
+function medicationCodesFromRecord(raw: any) {
+  const codes = [
+    optionalString(raw?.dispenseCode, 120),
+    optionalString(raw?.rxnorm, 120),
+    optionalString(raw?.rxNorm, 120),
+    optionalString(raw?.rxNormCode, 120),
+    optionalString(raw?.nappi, 120),
+    optionalString(raw?.nappiCode, 120),
+    optionalString(raw?.code, 120),
+  ];
+
+  const coding = Array.isArray(raw?.coding)
+    ? raw.coding
+    : Array.isArray(raw?.codings)
+      ? raw.codings
+      : [];
+
+  for (const c of coding) {
+    codes.push(optionalString(c?.code, 120));
+    codes.push(optionalString(c?.display, 500));
+  }
+
+  return Array.from(new Set(codes.map((x) => clean(x, 500)).filter(Boolean)));
+}
+
+function normalizeCurrentMedicationRecord(raw: any): NormalizedCurrentMedication | null {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const name =
+    optionalString(raw?.name, 500) ||
+    optionalString(raw?.drug, 500) ||
+    optionalString(raw?.display, 500) ||
+    optionalString(raw?.title, 500);
+
+  if (!name) return null;
+
+  const status = optionalString(raw?.status, 80) || 'Active';
+  if (!isActiveMedicationStatus(status)) return null;
+
+  return {
+    source: 'database',
+    id: optionalString(raw?.id || raw?.medicationId || raw?.orderId, 120),
+    name,
+    dose: optionalString(raw?.dose, 200),
+    frequency: optionalString(raw?.frequency, 200),
+    route: optionalString(raw?.route, 120),
+    status,
+    codes: medicationCodesFromRecord(raw),
+    updatedAt:
+      optionalString(raw?.updatedAt, 80) ||
+      optionalString(raw?.createdAt, 80),
+  };
+}
+
+function medicationDisplayName(med: MedicationDto, medicationIndex: number) {
+  return (
+    optionalString((med as any).drug, 500) ||
+    optionalString((med as any).name, 500) ||
+    optionalString((med as any).display, 500) ||
+    optionalString(firstCoding(med.coding, ['nappi', 'rxnorm'])?.display, 500) ||
+    optionalString(firstCoding(med.coding, ['nappi', 'rxnorm'])?.code, 120) ||
+    `Medication ${medicationIndex + 1}`
+  );
+}
+
+function currentMedicationTerms(row: NormalizedCurrentMedication) {
+  return [
+    row.name,
+    ...row.codes,
+  ]
+    .map(meaningfulTerm)
+    .filter(Boolean);
+}
+
+function isMeaningfulMedicationNameMatch(a: string, b: string) {
+  if (!a || !b) return false;
+  if (a.length < 4 || b.length < 4) return false;
+
+  const genericTerms = new Set([
+    'tablet',
+    'tablets',
+    'capsule',
+    'capsules',
+    'daily',
+    'oral',
+    'mouth',
+    'dose',
+    'doses',
+    'take',
+    'directed',
+    'routine',
+  ]);
+
+  if (genericTerms.has(a) || genericTerms.has(b)) return false;
+  if (a === b) return true;
+
+  const min = Math.min(a.length, b.length);
+  if (min < 6) return false;
+
+  return a.includes(b) || b.includes(a);
+}
+
+function findCurrentMedicationAdvisories(
+  meds: MedicationDto[],
+  currentMeds: NormalizedCurrentMedication[],
+) {
+  const advisories: Array<{
+    medicationIndex: number;
+    medicationName: string;
+    currentMedicationId: string | null;
+    currentMedicationName: string;
+    currentDose: string | null;
+    currentFrequency: string | null;
+    currentRoute: string | null;
+    currentStatus: string | null;
+    matchedTerm: string;
+    advisory: 'possible_duplicate_or_continuation';
+  }> = [];
+
+  meds.forEach((med, medicationIndex) => {
+    const requestedTerms = medicationSearchTerms(med);
+    const requestedName = medicationDisplayName(med, medicationIndex);
+
+    for (const current of currentMeds) {
+      const currentTerms = currentMedicationTerms(current);
+      const matchedTerm = currentTerms.find((currentTerm) =>
+        requestedTerms.some((requestedTerm) =>
+          isMeaningfulMedicationNameMatch(requestedTerm, currentTerm),
+        ),
+      );
+
+      if (!matchedTerm) continue;
+
+      advisories.push({
+        medicationIndex,
+        medicationName: requestedName,
+        currentMedicationId: current.id,
+        currentMedicationName: current.name,
+        currentDose: current.dose,
+        currentFrequency: current.frequency,
+        currentRoute: current.route,
+        currentStatus: current.status,
+        matchedTerm,
+        advisory: 'possible_duplicate_or_continuation',
+      });
+      break;
+    }
+  });
+
+  return advisories;
+}
+
+async function loadCurrentMedicationSafety(patientId: string, meds: MedicationDto[]) {
+  const base = {
+    checked: false,
+    mode: 'advisory_only' as const,
+    blocked: false,
+    clinicianMayProceed: true,
+    activeMedicationCount: 0,
+    potentialDuplicateCount: 0,
+    advisories: [] as ReturnType<typeof findCurrentMedicationAdvisories>,
+    error: null as string | null,
+  };
+
+  try {
+    const prismaAny = prisma as any;
+    const delegate = prismaAny?.medication;
+
+    if (!delegate?.findMany) {
+      return {
+        ...base,
+        checked: false,
+        error: 'medication_model_unavailable',
+      };
+    }
+
+    const rows = await delegate.findMany({
+      where: { patientId },
+      take: 100,
+    });
+
+    const currentMeds = Array.isArray(rows)
+      ? rows.map(normalizeCurrentMedicationRecord).filter(Boolean) as NormalizedCurrentMedication[]
+      : [];
+
+    const advisories = findCurrentMedicationAdvisories(meds, currentMeds);
+
+    return {
+      checked: true,
+      mode: 'advisory_only' as const,
+      blocked: false,
+      clinicianMayProceed: true,
+      activeMedicationCount: currentMeds.length,
+      potentialDuplicateCount: advisories.length,
+      advisories,
+      error: null,
+    };
+  } catch (err: any) {
+    return {
+      ...base,
+      checked: false,
+      error: String(err?.message || 'current_medication_safety_unavailable'),
+    };
+  }
+}
+
 async function loadAllergiesForSafety(patientId: string, clientAllergies: unknown) {
   const normalized: NormalizedAllergy[] = [];
 
@@ -473,7 +699,7 @@ export async function POST(
 
     const checks = await loadClinicianComplianceChecks({
       clinicianId: clinician.id,
-      orgId: 'org-default',
+      orgId: clean((who as any).orgId || (encounter as any).orgId || '', 120),
     });
 
     const operational = computeClinicianOperationalState({
@@ -535,6 +761,28 @@ export async function POST(
     const severeAllergies = allergiesForSafety.filter((a) => isActiveAllergy(a) && isSevereAllergy(a));
     const recentReactions = recentAllergyReactions(allergiesForSafety, 30);
 
+    const currentMedicationSafety = await loadCurrentMedicationSafety(patientId, meds);
+
+    if (currentMedicationSafety.potentialDuplicateCount > 0) {
+      await prisma.auditEvent
+        .create({
+          data: {
+            kind: 'erx_current_medication_advisory_detected',
+            actorId: who.uid,
+            actorRole: who.role,
+            subjectId: encounterId,
+            meta: jsonSafe({
+              patientId,
+              clinicianId: clinician.id,
+              medicationCount: meds.length,
+              currentMedicationSafety,
+              action: 'advisory_only_prescription_not_blocked',
+            }) as any,
+          },
+        })
+        .catch(() => null);
+    }
+
     if (allergyConflicts.length > 0) {
       await prisma.auditEvent
         .create({
@@ -550,6 +798,7 @@ export async function POST(
               severeAllergyCount: severeAllergies.length,
               recentReactions,
               medicationCount: meds.length,
+              currentMedicationSafety,
             }) as any,
           },
         })
@@ -568,6 +817,7 @@ export async function POST(
             severeAllergyCount: severeAllergies.length,
             recentReactions,
           },
+          currentMedicationSafety,
         },
         { status: 409 },
       );
@@ -634,6 +884,7 @@ export async function POST(
                 recentReactions,
                 allergyCount: allergiesForSafety.length,
               },
+              currentMedicationSafety,
               clientAuthorization: body.authorization ?? null,
               authoredAt,
             }),
@@ -686,6 +937,7 @@ export async function POST(
                 blockers: operational.blockers,
                 riskFlags: operational.riskFlags,
               },
+              currentMedicationSafety,
               clientAuthorization: body.authorization ?? null,
             }) as any,
           },
@@ -711,6 +963,7 @@ export async function POST(
           recentReactions,
           allergyCount: allergiesForSafety.length,
         },
+        currentMedicationSafety,
         medications: createdOrders.erxOrders,
         labs: createdOrders.labOrders,
         operational: {
