@@ -339,6 +339,25 @@ function normalizeDocsFromEncounters(encounters: any[]) {
         viewHref: row?.viewHref || (encounterId ? `/encounters/${encodeURIComponent(encounterId)}` : undefined),
       });
     }
+
+    const erxOrders = Array.isArray(encounter?.erxOrders) ? encounter.erxOrders : [];
+    for (const rx of erxOrders) {
+      const id = clean(rx?.id, 180);
+      if (!id) continue;
+
+      docs.push({
+        id: `erx_${id}`,
+        date: toIso(rx?.createdAt || rx?.updatedAt || encounter?.primaryTime),
+        title: firstText(rx?.drug, 'ePrescription'),
+        type: 'prescription',
+        source: 'Ambulant+ eRx',
+        fileName: `ambulant-erx-${id}.pdf`,
+        mimeType: 'application/pdf',
+        sizeBytes: undefined,
+        downloadUrl: rx?.downloadUrl || rx?.pdfUrl || `/api/erx/${encodeURIComponent(id)}/pdf`,
+        viewHref: encounterId ? `/encounters/${encodeURIComponent(encounterId)}` : undefined,
+      });
+    }
   }
 
   return docs;
@@ -418,7 +437,7 @@ export async function GET(req: NextRequest) {
   });
 
   const [encountersRes, medsRes, allergiesRes, patientDocs, labResults, labOrders] = await Promise.all([
-    fetchJson(req, '/api/encounters?limit=100'),
+    fetchJson(req, '/api/encounters?limit=100&details=1'),
     fetchJson(req, `/api/medications?patientId=${encodeURIComponent(patientId)}`),
     fetchJson(req, `/api/allergies?patientId=${encodeURIComponent(patientId)}`),
     patientDocsPromise,

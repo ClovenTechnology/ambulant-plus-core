@@ -57,6 +57,8 @@ type Encounter = {
   appointment?: any;
   payment?: any;
   documents?: any[];
+  erxOrders?: any[];
+  labOrders?: any[];
   counts?: Record<string, number>;
   summaryPayload?: any;
   settlementSnapshot?: any;
@@ -295,6 +297,9 @@ function EncounterContent() {
   const counts = encounter.counts || {};
   const vitals = latestVitals(encounter);
   const docs = Array.isArray(encounter.documents) ? encounter.documents : [];
+  const erxOrders = Array.isArray(encounter.erxOrders) ? encounter.erxOrders : [];
+  const labOrders = Array.isArray(encounter.labOrders) ? encounter.labOrders : [];
+  const careOutputCount = docs.length + erxOrders.length + labOrders.length;
   const completed = statusIsCompleted(encounter.status);
   const payment = encounter.payment || null;
 
@@ -351,7 +356,7 @@ function EncounterContent() {
 
         <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
           <MetricCard label="Visit mode" value={modeLabel(encounter.visitMode || encounter.mode)} detail="Consultation channel" icon={Video} />
-          <MetricCard label="Prescriptions" value={String(Number(counts.erxOrders || 0))} detail="eRx orders linked" icon={Pill} />
+          <MetricCard label="Prescriptions" value={String(erxOrders.length || Number(counts.erxOrders || 0))} detail="eRx orders linked" icon={Pill} />
           <MetricCard label="Documents" value={String(Number(counts.documents || docs.length || 0))} detail="Clinical outputs" icon={FileText} />
           <MetricCard label="Payment" value={payment?.status || 'Not recorded'} detail={payment ? displayMoney(payment.amountMinor, payment.currency) : 'No payment record linked'} icon={ShieldCheck} />
         </section>
@@ -375,8 +380,46 @@ function EncounterContent() {
             </Section>
 
             <Section title="Care outputs" subtitle="Documents and orders generated from this encounter.">
-              {docs.length ? (
+              {careOutputCount ? (
                 <div className="grid gap-3">
+                  {erxOrders.slice(0, 8).map((rx: any) => {
+                    const href = rx.downloadUrl || rx.pdfUrl || `/api/erx/${encodeURIComponent(rx.id)}/pdf`;
+
+                    return (
+                      <div key={rx.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
+                        <div className="flex items-start gap-3">
+                          <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-emerald-100 text-emerald-800">
+                            <Pill className="h-5 w-5" />
+                          </div>
+                          <div>
+                            <div className="font-bold text-slate-900">ePrescription</div>
+                            <div className="mt-1 text-sm text-slate-700">{rx.drug || 'Medication'} · {rx.sig || 'Use as directed'}</div>
+                            <div className="mt-1 text-xs text-slate-500">Status: {rx.status || 'Queued'}{rx.dispenseCode ? ` · Code: ${rx.dispenseCode}` : ''} · {formatDateTime(rx.createdAt)}</div>
+                          </div>
+                        </div>
+                        <a href={href} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-white px-3 py-1.5 text-xs font-black text-emerald-800 hover:bg-emerald-50">
+                          <Download className="h-3.5 w-3.5" /> Download PDF
+                        </a>
+                      </div>
+                    );
+                  })}
+
+                  {labOrders.slice(0, 8).map((lab: any) => (
+                    <div key={lab.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-100 bg-cyan-50/40 p-4">
+                      <div className="flex items-start gap-3">
+                        <div className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-cyan-100 text-cyan-800">
+                          <ClipboardList className="h-5 w-5" />
+                        </div>
+                        <div>
+                          <div className="font-bold text-slate-900">Laboratory order</div>
+                          <div className="mt-1 text-sm text-slate-700">{lab.panel || lab.tests?.[0]?.testText || 'Lab request'}</div>
+                          <div className="mt-1 text-xs text-slate-500">Status: {lab.status || 'Queued'} · {formatDateTime(lab.createdAt)}</div>
+                        </div>
+                      </div>
+                      <span className="rounded-full border border-cyan-200 bg-white px-3 py-1 text-xs font-black text-cyan-800">MedReach ready</span>
+                    </div>
+                  ))}
+
                   {docs.slice(0, 8).map((doc: any) => (
                     <div key={doc.id || doc.fileName} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white p-4">
                       <div>
@@ -388,7 +431,7 @@ function EncounterContent() {
                   ))}
                 </div>
               ) : (
-                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-sm text-slate-500">No patient-facing documents are linked to this encounter yet.</div>
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-sm text-slate-500">No patient-facing documents or orders are linked to this encounter yet.</div>
               )}
             </Section>
 

@@ -96,6 +96,8 @@ function normalizeEncounter(row: any) {
     endedAt: row.endedAt || row.stop || row.consultationEndedAt || null,
     clinician: row.clinician || (row.clinicianId ? { id: row.clinicianId, name: row.clinicianName || 'Clinician' } : null),
     documents: Array.isArray(row.documents) ? row.documents : [],
+    erxOrders: Array.isArray(row.erxOrders) ? row.erxOrders : [],
+    labOrders: Array.isArray(row.labOrders) ? row.labOrders : [],
     counts: row.counts || {},
   };
 }

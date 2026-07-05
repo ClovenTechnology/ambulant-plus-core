@@ -113,6 +113,8 @@ function normalizeEncounter(row: any) {
     endedAt: row.endedAt || row.stop || row.consultationEndedAt || null,
     counts: row.counts || {},
     documents: Array.isArray(row.documents) ? row.documents : [],
+    erxOrders: Array.isArray(row.erxOrders) ? row.erxOrders : [],
+    labOrders: Array.isArray(row.labOrders) ? row.labOrders : [],
   };
 }
 

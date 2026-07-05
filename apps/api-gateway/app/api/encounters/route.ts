@@ -274,6 +274,53 @@ function shapeDocument(doc: any) {
   };
 }
 
+function parseJsonMaybe(value: unknown) {
+  if (!value) return null;
+  if (typeof value !== 'string') return value;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function shapeErxOrder(order: any) {
+  if (!order?.id) return null;
+  const notes = parseJsonMaybe(order.notes);
+
+  return {
+    id: order.id,
+    kind: order.kind ?? 'medication',
+    status: order.status ?? null,
+    drug: order.drug ?? null,
+    sig: order.sig ?? null,
+    dispenseCode: order.dispenseCode ?? null,
+    rxNumber: order.rxNumber ?? null,
+    signedAt: asIso(order.signedAt),
+    createdAt: asIso(order.createdAt),
+    updatedAt: asIso(order.updatedAt),
+    meds: order.meds ?? null,
+    labTests: order.labTests ?? null,
+    notes,
+    pdfUrl: `/api/erx/${encodeURIComponent(order.id)}/pdf`,
+    downloadUrl: `/api/erx/${encodeURIComponent(order.id)}/pdf`,
+  };
+}
+
+function shapeLabOrder(order: any) {
+  if (!order?.id) return null;
+
+  return {
+    id: order.id,
+    kind: order.kind ?? 'lab',
+    status: order.status ?? null,
+    panel: order.panel ?? null,
+    tests: order.tests ?? null,
+    createdAt: asIso(order.createdAt),
+    updatedAt: asIso(order.updatedAt),
+  };
+}
+
 function shapeEncounter(row: any, clinicianMap: Map<string, any>) {
   const clinician = row.clinicianId ? clinicianMap.get(String(row.clinicianId)) : null;
   const latestAppointment = Array.isArray(row.appointments) ? row.appointments[0] : null;
@@ -311,6 +358,8 @@ function shapeEncounter(row: any, clinicianMap: Map<string, any>) {
     appointment: shapeAppointment(latestAppointment),
     payment: shapePayment(latestPayment),
     documents: latestDocuments.map(shapeDocument).filter(Boolean),
+    erxOrders: Array.isArray(row.erxOrders) ? row.erxOrders.map(shapeErxOrder).filter(Boolean) : [],
+    labOrders: Array.isArray(row.labOrders) ? row.labOrders.map(shapeLabOrder).filter(Boolean) : [],
     summaryPayload: row.summaryPayload ?? null,
     settlementSnapshot: row.settlementSnapshot ?? null,
     sponsorSnapshot: row.sponsorSnapshot ?? null,
@@ -480,7 +529,7 @@ export async function POST(req: NextRequest) {
 
     const status = cleanStatus((body as any).status || 'open');
     const visitMode = normalizeVisitMode((body as any).visitMode || (body as any).mode);
-    const orgId = clean((body as any).orgId || ctx.who.orgId || 'org-default', 120);
+    const orgId = clean((body as any).orgId || ctx.who.orgId || '', 120);
     const id = requestedId || crypto.randomUUID();
 
     const row = await prisma.encounter.create({
