@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+export const runtime = "nodejs";
+
 type SessionPayload = {
   uid?: string | null;
   userId?: string | null;
@@ -9,12 +12,22 @@ type SessionPayload = {
   email?: string | null;
 };
 
-function apigwBase() {
-  return (
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
+function requiredApigwBase() {
+  const value = String(
     process.env.APIGW_BASE ||
-    "http://localhost:3010"
-  );
+      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      "",
+  )
+    .trim()
+    .replace(/\/+$/, "");
+
+  if (!value) {
+    const err = new Error("APIGW_BASE_required") as Error & { status?: number };
+    err.status = 503;
+    throw err;
+  }
+
+  return value;
 }
 
 function safeParseSession(value: string | undefined): SessionPayload | null {
@@ -35,7 +48,8 @@ function sessionUserId(session: SessionPayload | null) {
         session?.userId ||
         session?.id ||
         session?.sub ||
-        ""
+        session?.email ||
+        "",
     ).trim() || null
   );
 }
@@ -49,11 +63,10 @@ function backToPreflight(req: NextRequest, params: URLSearchParams, error: strin
 
 export async function POST(req: NextRequest) {
   const session = safeParseSession(
-    req.cookies.get("ambulant_client_session")?.value
+    req.cookies.get("ambulant_client_session")?.value,
   );
 
-    const actorUserId = sessionUserId(session);
-  const orgId = session?.orgId || "org-default";
+  const actorUserId = sessionUserId(session);
 
   if (!actorUserId) {
     return NextResponse.redirect(new URL("/auth/login", req.url), { status: 303 });
@@ -62,6 +75,7 @@ export async function POST(req: NextRequest) {
   const form = await req.formData();
   const originalParams = new URLSearchParams();
 
+  const orgId = String(session?.orgId || "").trim();
   const patientId = String(form.get("patientId") || "").trim();
   const clientId = String(form.get("clientId") || "").trim();
   const clinicianId = String(form.get("clinicianId") || "").trim();
@@ -78,8 +92,12 @@ export async function POST(req: NextRequest) {
   if (visitMode) originalParams.set("visitMode", visitMode);
   if (requestedAmountMinor) originalParams.set("requestedAmountMinor", requestedAmountMinor);
 
+  if (!orgId) {
+    return backToPreflight(req, originalParams, "client_org_context_required");
+  }
+
   try {
-    const res = await fetch(`${apigwBase()}/api/coverage/preflight/authorize`, {
+    const res = await fetch(`${requiredApigwBase()}/api/coverage/preflight/authorize`, {
       method: "POST",
       headers: {
         "content-type": "application/json",
@@ -94,7 +112,7 @@ export async function POST(req: NextRequest) {
           .join(":")
           .replace(/\s+/g, "-"),
         "x-ambulant-user-id": actorUserId,
-                "x-ambulant-org-id": orgId,
+        "x-ambulant-org-id": orgId,
       },
       body: JSON.stringify({
         orgId,
@@ -117,7 +135,7 @@ export async function POST(req: NextRequest) {
       return backToPreflight(
         req,
         originalParams,
-        json?.error || "authorization_create_failed"
+        json?.error || "authorization_create_failed",
       );
     }
 
