@@ -32,7 +32,7 @@ export default function RequestAccessPage() {
     const payload = Object.fromEntries(form.entries());
 
     try {
-      const res = await fetch("/api/auth/request-access", {
+      const res = await fetch("/auth/request-access/submit", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(payload),

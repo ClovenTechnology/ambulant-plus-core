@@ -1,74 +1,8 @@
-const CANONICAL_APIGW_BASE = "https://api-gateway.ambulantplus.co.za";
+export const dynamic = "force-dynamic";
 
-function normaliseApigwBase(rawValue: unknown) {
-  const raw = String(rawValue || CANONICAL_APIGW_BASE).trim() || CANONICAL_APIGW_BASE;
-
-  try {
-    const parsed = new URL(raw);
-    const host = parsed.host.toLowerCase();
-
-    if (
-      host.includes("clients.ambulantplus.co.za") ||
-      host.startsWith("localhost") ||
-      host.startsWith("127.0.0.1")
-    ) {
-      return CANONICAL_APIGW_BASE;
-    }
-
-    return parsed.origin.replace(/\/+$/, "");
-  } catch {
-    return CANONICAL_APIGW_BASE;
-  }
-}
-
-function apigwBase() {
-  return normaliseApigwBase(
-    process.env.APIGW_BASE || process.env.NEXT_PUBLIC_APIGW_BASE || CANONICAL_APIGW_BASE,
-  );
-}
-
-function workspaceLabel(workspace: string) {
-  if (workspace === "WELLNESS_PARTNER") return "Wellness Partner";
-  if (workspace === "CORPORATE_SPONSOR") return "Corporate Sponsor";
-  return "Payer Operations";
-}
-
-async function getInvite(token: string) {
-  if (!token) {
-    return { invite: null, reason: "missing_token" };
-  }
-
-  try {
-    const res = await fetch(
-      `${apigwBase()}/api/client/org-invitations/${encodeURIComponent(token)}`,
-      { cache: "no-store" },
-    );
-
-    const json = await res.json().catch(() => null);
-
-    if (!res.ok || !json?.ok) {
-      return {
-        invite: null,
-        reason: json?.error || `lookup_failed_${res.status}`,
-      };
-    }
-
-    return { invite: json.invitation, reason: "" };
-  } catch (error) {
-    return {
-      invite: null,
-      reason: error instanceof Error ? error.message : "lookup_failed",
-    };
-  }
-}
-
-function invalidMessage(reason: string) {
-  if (reason === "missing_token") return "This invitation link is missing its token.";
-  if (reason === "invitation_not_found") return "This invitation token was not found.";
-  if (reason === "invitation_expired") return "This invitation has expired.";
-  if (reason === "invitation_not_open") return "This invitation is already accepted or no longer open.";
-  if (reason.startsWith("lookup_failed_")) return `Invite lookup failed (${reason.replace("lookup_failed_", "")}). Please ask Ambulant+ admin to reissue the invite.`;
-  return "This invitation is invalid, expired, or already accepted.";
+function errorText(value: string) {
+  if (!value) return "";
+  return decodeURIComponent(value).replace(/_/g, " ");
 }
 
 export default async function AcceptInvitePage({
@@ -77,21 +11,8 @@ export default async function AcceptInvitePage({
   searchParams: { token?: string; error?: string };
 }) {
   const token = String(searchParams.token || "").trim();
-  const result = await getInvite(token);
-  const invite = result.invite as any;
-
-  let reason = result.reason;
-
-  if (invite?.status && invite.status !== "INVITED") {
-    reason = "invitation_not_open";
-  }
-
-  if (invite?.expiresAt && new Date(invite.expiresAt).getTime() < Date.now()) {
-    reason = "invitation_expired";
-  }
-
-  const invalid = !invite || Boolean(reason);
   const submitError = String(searchParams.error || "").trim();
+  const missingToken = !token;
 
   return (
     <main
@@ -129,10 +50,10 @@ export default async function AcceptInvitePage({
           Accept organization invite
         </h1>
 
-        {invalid ? (
+        {missingToken ? (
           <>
             <p style={{ opacity: 0.82, lineHeight: 1.6 }}>
-              {invalidMessage(reason)}
+              This invitation link is missing its token. Please ask Ambulant+ admin to reissue the invite.
             </p>
 
             <a href="/auth/login" style={primaryLink}>
@@ -142,11 +63,7 @@ export default async function AcceptInvitePage({
         ) : (
           <>
             <p style={{ opacity: 0.82, lineHeight: 1.6 }}>
-              You have been invited to join{" "}
-              <strong>{invite.org.name}</strong> as{" "}
-              <strong>{invite.role}</strong> in the{" "}
-              <strong>{workspaceLabel(String(invite.defaultWorkspace))}</strong>{" "}
-              workspace.
+              Create your password to activate your organization account. Ambulant+ will verify this invitation securely before access is granted.
             </p>
 
             {submitError ? (
@@ -159,31 +76,27 @@ export default async function AcceptInvitePage({
                   borderRadius: 12,
                   padding: 12,
                   fontSize: 14,
+                  lineHeight: 1.5,
                 }}
               >
-                {submitError}
+                {errorText(submitError)}
               </div>
             ) : null}
 
             <form
-              action="/api/auth/accept-invite/submit"
+              action="/auth/accept-invite/complete"
               method="POST"
               style={{ display: "grid", gap: 16, marginTop: 18 }}
             >
               <input type="hidden" name="token" value={token} />
 
               <label style={{ display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 14, opacity: 0.84 }}>Email</span>
-                <input name="email" value={invite.email} readOnly style={inputStyle} />
-              </label>
-
-              <label style={{ display: "grid", gap: 8 }}>
                 <span style={{ fontSize: 14, opacity: 0.84 }}>Full name</span>
                 <input
                   name="name"
-                  defaultValue={invite.name || ""}
                   placeholder="Your name"
                   style={inputStyle}
+                  autoComplete="name"
                 />
               </label>
 
@@ -195,6 +108,7 @@ export default async function AcceptInvitePage({
                   placeholder="Create password, minimum 8 characters"
                   minLength={8}
                   style={inputStyle}
+                  autoComplete="new-password"
                   required
                 />
               </label>

@@ -1,51 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { clientApigwOrigin, errorMessage } from "../../_gateway";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const CANONICAL_APIGW_BASE = "https://api-gateway.ambulantplus.co.za";
-
-function normaliseApigwBase(rawValue: unknown, currentHost?: string) {
-  const raw = String(rawValue || CANONICAL_APIGW_BASE).trim() || CANONICAL_APIGW_BASE;
-
-  try {
-    const parsed = new URL(raw);
-    const host = parsed.host.toLowerCase();
-    const current = String(currentHost || "").toLowerCase();
-
-    if (
-      host === current ||
-      host.includes("clients.ambulantplus.co.za") ||
-      host.startsWith("localhost") ||
-      host.startsWith("127.0.0.1")
-    ) {
-      return CANONICAL_APIGW_BASE;
-    }
-
-    return parsed.origin.replace(/\/+$/, "");
-  } catch {
-    return CANONICAL_APIGW_BASE;
-  }
-}
-
-function apigwBase(req: NextRequest) {
-  return normaliseApigwBase(
-    process.env.APIGW_BASE || process.env.NEXT_PUBLIC_APIGW_BASE || CANONICAL_APIGW_BASE,
-    new URL(req.url).host,
-  );
-}
-
-function errorMessage(value: unknown, fallback: string) {
-  if (!value) return fallback;
-  if (typeof value === "string") return value;
-
-  if (typeof value === "object") {
-    const record = value as Record<string, any>;
-    return String(record.message || record.code || JSON.stringify(record));
-  }
-
-  return String(value);
-}
 
 export async function POST(req: NextRequest) {
   try {
@@ -62,12 +19,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: false, error: "Password is required." }, { status: 400 });
     }
 
-    const res = await fetch(`${apigwBase(req)}/api/client/auth/login`, {
+    const target = `${clientApigwOrigin(req.url)}/api/client/auth/login`;
+
+    const res = await fetch(target, {
       method: "POST",
       headers: {
         "content-type": "application/json",
         accept: "application/json",
-        "x-ambulant-source": "client-app-login",
+        "x-ambulant-source": "client-app-auth-login-submit",
       },
       body: JSON.stringify({ email, password }),
       cache: "no-store",
