@@ -1,7 +1,64 @@
 import Link from "next/link";
+import { cookies, headers } from "next/headers";
 import type { CSSProperties } from "react";
 
-const ORG_ID = "org-default";
+type ClientPageSession = {
+  uid?: string | null;
+  orgId?: string | null;
+  email?: string | null;
+  role?: string | null;
+  workspace?: string | null;
+  clientId?: string | null;
+};
+
+function safeParseSession(value: string | undefined): ClientPageSession | null {
+  if (!value) return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? (parsed as ClientPageSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clientSession() {
+  return safeParseSession(cookies().get("ambulant_client_session")?.value);
+}
+
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
+
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders() {
+  return {
+    cookie: cookies().toString(),
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
+}
+
 const DAYS = 30;
 
 type DeviceMember = {
@@ -27,17 +84,12 @@ type DeviceMember = {
   };
 };
 
-function apiBase() {
-  return (
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.APIGW_BASE ||
-    "http://localhost:3010"
-  );
-}
-
-async function safeJson(url: string) {
+async function safeJson(url: string | URL) {
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url.toString(), {
+      cache: "no-store",
+      headers: internalRequestHeaders(),
+    });
     const json = await res.json().catch(() => null);
 
     if (!res.ok || !json) {
@@ -51,26 +103,44 @@ async function safeJson(url: string) {
 }
 
 async function getDashboardSummary() {
+  const session = clientSession();
+
+  if (!session?.orgId) {
+    return null;
+  }
+
   return safeJson(
-    `${apiBase()}/api/client/dashboard-summary?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&days=${DAYS}`
+    internalApiUrl("/api/client/dashboard-summary", {
+      days: DAYS,
+    }),
   );
 }
 
 async function getAdherenceOverview() {
+  const session = clientSession();
+
+  if (!session?.orgId) {
+    return null;
+  }
+
   return safeJson(
-    `${apiBase()}/api/client/adherence-overview?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&days=${DAYS}`
+    internalApiUrl("/api/client/adherence-overview", {
+      days: DAYS,
+    }),
   );
 }
 
 async function getMemberContext(memberId: string) {
+  const session = clientSession();
+
+  if (!session?.orgId) {
+    return null;
+  }
+
   return safeJson(
-    `${apiBase()}/api/client/members/${encodeURIComponent(
-      memberId
-    )}/profile-context?orgId=${encodeURIComponent(ORG_ID)}&days=${DAYS}`
+    internalApiUrl(`/api/client/members/${encodeURIComponent(memberId)}/profile-context`, {
+      days: DAYS,
+    }),
   );
 }
 
@@ -323,7 +393,7 @@ export default async function DevicesPage() {
         <div style={{ display: "grid", gap: 14 }}>
           {contextItems.length === 0 ? (
             <div style={{ opacity: 0.72 }}>
-              No member device context found yet. Seed demo data and ensure api-gateway is running.
+              No member device context found yet. Member device evidence will appear here once Health Monitor, wearable, consent and sponsor-plan context is available.
             </div>
           ) : (
             contextItems.map((ctx: any) => {

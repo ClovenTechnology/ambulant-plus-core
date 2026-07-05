@@ -1,27 +1,80 @@
+import { cookies, headers } from "next/headers";
 import type { CSSProperties } from "react";
 
-const ORG_ID = "org-default";
-const DEFAULT_CLIENT_ID = "client-demo-medical-aid";
+type ClientPageSession = {
+  uid?: string | null;
+  orgId?: string | null;
+  email?: string | null;
+  role?: string | null;
+  workspace?: string | null;
+  clientId?: string | null;
+};
 
-function clientId() {
-  return process.env.NEXT_PUBLIC_DEFAULT_CLIENT_ID || DEFAULT_CLIENT_ID;
+function safeParseSession(value: string | undefined): ClientPageSession | null {
+  if (!value) return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? (parsed as ClientPageSession) : null;
+  } catch {
+    return null;
+  }
 }
 
-function apiBase() {
-  return (
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.APIGW_BASE ||
-    "http://localhost:3010"
-  );
+function clientSession() {
+  return safeParseSession(cookies().get("ambulant_client_session")?.value);
+}
+
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
+
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders() {
+  return {
+    cookie: cookies().toString(),
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
 }
 
 async function getBillableEvents() {
   try {
+    const session = clientSession();
+
+    if (!session?.orgId) {
+      return [];
+    }
+
     const res = await fetch(
-      `${apiBase()}/api/billing/events?orgId=${encodeURIComponent(
-        ORG_ID
-      )}&clientId=${encodeURIComponent(clientId())}&take=500`,
-      { cache: "no-store" }
+      internalApiUrl("/api/billing/events", {
+        clientId: session.clientId || undefined,
+        take: 500,
+      }).toString(),
+      {
+        cache: "no-store",
+        headers: internalRequestHeaders(),
+      },
     );
 
     if (!res.ok) return [];
@@ -30,7 +83,7 @@ async function getBillableEvents() {
     const items = Array.isArray(json?.items) ? json.items : [];
 
     return items.filter((x: any) =>
-      ["PHARMACY_ITEM", "RIDER_DELIVERY", "ERX_ORDER"].includes(
+      ["PHARMACY_ITEM","RIDER_DELIVERY","ERX_ORDER"].includes(
         String(x.serviceType || "").toUpperCase()
       )
     );
@@ -150,7 +203,7 @@ export default async function CarePortPage() {
       <section style={{ display: "grid", gap: 14, marginTop: 20 }}>
         {items.length === 0 ? (
           <div style={{ opacity: 0.72 }}>
-            No CarePort billable events found yet. Seed demo claims or create pharmacy/delivery billables.
+            No CarePort billable events found yet. Pharmacy, eRx and delivery billable events will appear here once generated for this payer.
           </div>
         ) : (
           items.map((item: any) => {

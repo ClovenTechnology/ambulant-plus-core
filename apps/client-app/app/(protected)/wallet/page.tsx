@@ -1,8 +1,64 @@
 import Link from "next/link";
+import { cookies, headers } from "next/headers";
 import type { CSSProperties } from "react";
 
-const ORG_ID = "org-default";
-const DEFAULT_CLIENT_ID = "client-demo-medical-aid";
+type ClientPageSession = {
+  uid?: string | null;
+  orgId?: string | null;
+  email?: string | null;
+  role?: string | null;
+  workspace?: string | null;
+  clientId?: string | null;
+};
+
+function safeParseSession(value: string | undefined): ClientPageSession | null {
+  if (!value) return null;
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" ? (parsed as ClientPageSession) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clientSession() {
+  return safeParseSession(cookies().get("ambulant_client_session")?.value);
+}
+
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
+
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders() {
+  return {
+    cookie: cookies().toString(),
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
+}
+
 const DAYS = 30;
 
 type ApiEnvelope<T> = {
@@ -14,21 +70,12 @@ type ApiEnvelope<T> = {
   error?: string;
 };
 
-function apiBase() {
-  return (
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.APIGW_BASE ||
-    "http://localhost:3010"
-  );
-}
-
-function clientId() {
-  return process.env.NEXT_PUBLIC_DEFAULT_CLIENT_ID || DEFAULT_CLIENT_ID;
-}
-
-async function safeJson<T>(url: string): Promise<ApiEnvelope<T> | null> {
+async function safeJson<T>(url: string | URL): Promise<ApiEnvelope<T> | null> {
   try {
-    const res = await fetch(url, { cache: "no-store" });
+    const res = await fetch(url.toString(), {
+      cache: "no-store",
+      headers: internalRequestHeaders(),
+    });
     const json = await res.json().catch(() => null);
 
     if (!res.ok || !json) {
@@ -42,34 +89,59 @@ async function safeJson<T>(url: string): Promise<ApiEnvelope<T> | null> {
 }
 
 async function getWallet() {
+  const session = clientSession();
+
+  if (!session?.orgId || !session.clientId) {
+    return null;
+  }
+
   const data = await safeJson<any>(
-    `${apiBase()}/api/client-wallet/${encodeURIComponent(clientId())}`
+    internalApiUrl(`/api/client-wallet/${encodeURIComponent(session.clientId)}`),
   );
 
   return data?.item ?? null;
 }
 
 async function getAdherenceOverview() {
+  const session = clientSession();
+
+  if (!session?.orgId) {
+    return null;
+  }
+
   return safeJson<any>(
-    `${apiBase()}/api/client/adherence-overview?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&days=${DAYS}`
+    internalApiUrl("/api/client/adherence-overview", {
+      days: DAYS,
+    }),
   );
 }
 
 async function getDashboardSummary() {
+  const session = clientSession();
+
+  if (!session?.orgId) {
+    return null;
+  }
+
   return safeJson<any>(
-    `${apiBase()}/api/client/dashboard-summary?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&days=${DAYS}`
+    internalApiUrl("/api/client/dashboard-summary", {
+      days: DAYS,
+    }),
   );
 }
 
 async function getClaims() {
+  const session = clientSession();
+
+  if (!session?.orgId) {
+    return { items: [], summary: {} };
+  }
+
   const data = await safeJson<any>(
-    `${apiBase()}/api/claims?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&clientId=${encodeURIComponent(clientId())}&take=50`
+    internalApiUrl("/api/claims", {
+      clientId: session.clientId || undefined,
+      take: 50,
+    }),
   );
 
   return {
@@ -79,10 +151,16 @@ async function getClaims() {
 }
 
 async function getSettlements() {
+  const session = clientSession();
+
+  if (!session?.orgId) {
+    return { items: [], summary: {} };
+  }
+
   const data = await safeJson<any>(
-    `${apiBase()}/api/settlements?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&clientId=${encodeURIComponent(clientId())}`
+    internalApiUrl("/api/settlements", {
+      clientId: session.clientId || undefined,
+    }),
   );
 
   return {
@@ -106,9 +184,9 @@ function money(minor?: number | null, currency = "ZAR") {
 }
 
 function fmtDate(value?: string | null) {
-  if (!value) return "—";
+  if (!value) return "â€”";
   const d = new Date(value);
-  return Number.isFinite(d.getTime()) ? d.toLocaleString() : "—";
+  return Number.isFinite(d.getTime()) ? d.toLocaleString() : "â€”";
 }
 
 function asArray(value: unknown) {
@@ -252,7 +330,7 @@ export default async function WalletPage() {
             <div>
               <h2 style={{ marginTop: 0, marginBottom: 8 }}>Client wallet account</h2>
               <div style={{ opacity: 0.76, fontSize: 13 }}>
-                Client: {clientId()} · Currency: {currency}
+                Client: {wallet?.clientId || "Assigned client"} Â· Currency: {currency}
               </div>
             </div>
 
@@ -270,7 +348,7 @@ export default async function WalletPage() {
 
           {!wallet ? (
             <div style={{ marginTop: 16, opacity: 0.72 }}>
-              No wallet found yet. The wallet API should auto-create one when the api-gateway is running.
+              No wallet account is available yet. Wallet balance, reserve and transaction posture will appear here once configured for this client.
             </div>
           ) : (
             <div style={{ display: "grid", gap: 10, marginTop: 16 }}>
@@ -301,7 +379,7 @@ export default async function WalletPage() {
       </section>
 
       <section style={{ ...card, marginTop: 20 }}>
-        <h2 style={{ marginTop: 0 }}>Reward programme logic for demo</h2>
+        <h2 style={{ marginTop: 0 }}>Reward programme governance</h2>
 
         <div
           style={{
@@ -342,7 +420,7 @@ export default async function WalletPage() {
         >
           <h2 style={{ margin: 0 }}>Reward-ready members</h2>
           <Link href="/members" style={linkButton}>
-            Open members →
+            Open members â†’
           </Link>
         </div>
 
@@ -396,14 +474,14 @@ export default async function WalletPage() {
                       </div>
 
                       <div style={{ opacity: 0.72, fontSize: 13, marginTop: 8 }}>
-                        Plan: {member.coveragePlan?.name || "—"} · Points estimate:{" "}
+                        Plan: {member.coveragePlan?.name || "â€”"} Â· Points estimate:{" "}
                         {adherenceData.rewardPointsEstimate ?? 0}
                       </div>
 
                       <div style={contextBox}>
-                        Reward rationale: adherence {summary.weightedPct ?? 0}% ·
-                        confidence {summary.confidencePct ?? 0}% · verified ratio{" "}
-                        {summary.verifiedRatio ?? 0}% · missed-dose rate{" "}
+                        Reward rationale: adherence {summary.weightedPct ?? 0}% Â·
+                        confidence {summary.confidencePct ?? 0}% Â· verified ratio{" "}
+                        {summary.verifiedRatio ?? 0}% Â· missed-dose rate{" "}
                         {summary.missedDoseRate ?? 0}%.
                       </div>
                     </div>
@@ -428,7 +506,7 @@ export default async function WalletPage() {
         <div style={{ display: "grid", gap: 12 }}>
           {transactions.length === 0 ? (
             <div style={{ opacity: 0.72 }}>
-              No wallet transactions yet. Fund the wallet to demonstrate prefunding and reward liability.
+              No wallet transactions yet. Funding, reserve, capture and reward-liability transactions will appear here when available.
             </div>
           ) : (
             transactions.slice(0, 12).map((tx: any) => {
@@ -454,7 +532,7 @@ export default async function WalletPage() {
                       </div>
 
                       <div style={{ opacity: 0.7, fontSize: 13, marginTop: 5 }}>
-                        {tx.refType || "No ref type"} · {tx.refId || "No ref"} · {fmtDate(tx.createdAt)}
+                        {tx.refType || "No ref type"} Â· {tx.refId || "No ref"} Â· {fmtDate(tx.createdAt)}
                       </div>
                     </div>
 
