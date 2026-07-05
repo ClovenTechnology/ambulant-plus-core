@@ -361,7 +361,7 @@ export default function ErxComposer({
       onAudit('erx.send.blocked', {
         reason: 'ALLERGY_CONFLICT',
         conflicts: allergyConflicts,
-        allergySource: allergiesFromLive ? 'live' : 'demo',
+        allergySource: allergiesFromLive ? 'live' : 'manual',
       });
 
       return;
@@ -421,7 +421,7 @@ export default function ErxComposer({
           rxCount: medsToSend.length,
           labCount: labsToSend.length,
           allergyCollision: hasCollision,
-          allergySource: allergiesFromLive ? 'live' : 'demo',
+          allergySource: allergiesFromLive ? 'live' : 'manual',
           statusCode: res.status,
           message: msg,
         });
@@ -442,7 +442,7 @@ export default function ErxComposer({
         rxCount: medsToSend.length,
         labCount: labsToSend.length,
         allergyCollision: hasCollision,
-        allergySource: allergiesFromLive ? 'live' : 'demo',
+        allergySource: allergiesFromLive ? 'live' : 'manual',
         erxId: erx.id,
         status: erx.status,
         authorization: {
@@ -464,7 +464,7 @@ export default function ErxComposer({
         rxCount: rxRows.length,
         labCount: labRows.length,
         allergyCollision: hasCollision,
-        allergySource: allergiesFromLive ? 'live' : 'demo',
+        allergySource: allergiesFromLive ? 'live' : 'manual',
         message: msg,
       });
     } finally {

@@ -23,7 +23,8 @@ function apiGatewayBase() {
     cleanBase(process.env.NEXT_PUBLIC_API_GATEWAY_URL);
 
   if (configured) return configured;
-  return isProductionRuntime() ? CANONICAL_API_GATEWAY : 'http://localhost:3010';
+  if (isProductionRuntime()) return CANONICAL_API_GATEWAY;
+  throw new Error('APIGW_BASE_required');
 }
 
 function copyHeaders(req: NextRequest) {

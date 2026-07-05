@@ -21,7 +21,7 @@ function apigwBase() {
   return (
     process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.APIGW_BASE ||
-    ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010')
+    ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : '')
   );
 }
 
@@ -57,7 +57,7 @@ function identityHeaders(req: NextRequest, session: SessionPayload | null) {
       req.headers.get("x-idempotency-key") ||
       `client-auth-deny:${Date.now()}`,
     "x-ambulant-user-id": actorUserId || "dev-client-console-actor",
-    "x-ambulant-org-id": session?.orgId || "org-default",
+    "x-ambulant-org-id": session?.orgId || "",
     "x-ambulant-role": session?.role || "ORG_OWNER",
     "x-ambulant-workspace": session?.workspace || "payer_ops",
     "x-ambulant-trusted": "true",

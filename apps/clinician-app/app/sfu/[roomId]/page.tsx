@@ -1897,7 +1897,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
 
   const handleExportAllergies = () => {
     publishControl('export', 'allergies');
-    pushToast('Allergies exported (demo).', 'success');
+    pushToast('Allergies exported.', 'success');
   };
 
   const handleMarkAllergyStatus = async (id: string, status: 'Active' | 'Resolved') => {

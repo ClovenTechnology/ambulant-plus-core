@@ -17,7 +17,7 @@ let ERX_LIST: Rx[] = [];
 // helper to build absolute base URL (works behind proxies)
 function baseUrl() {
   const h = headers();
-  const host = h.get('x-forwarded-host') ?? h.get('host') ?? (process.env.NODE_ENV === 'production' ? 'patient.ambulantplus.co.za' : 'localhost:3000');
+  const host = h.get('x-forwarded-host') ?? h.get('host') ?? 'patient.ambulantplus.co.za';
   const proto = h.get('x-forwarded-proto') ?? 'http';
   return `${proto}://${host}`;
 }
