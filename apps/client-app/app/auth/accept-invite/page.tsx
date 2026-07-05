@@ -1,16 +1,10 @@
 const CANONICAL_APIGW_BASE = "https://api-gateway.ambulantplus.co.za";
 
-function apigwBase() {
-  const raw = String(
-    process.env.APIGW_BASE ||
-      process.env.NEXT_PUBLIC_APIGW_BASE ||
-      CANONICAL_APIGW_BASE,
-  ).trim();
-
-  const candidate = raw.replace(/\/+$/, "") || CANONICAL_APIGW_BASE;
+function normaliseApigwBase(rawValue: unknown) {
+  const raw = String(rawValue || CANONICAL_APIGW_BASE).trim() || CANONICAL_APIGW_BASE;
 
   try {
-    const parsed = new URL(candidate);
+    const parsed = new URL(raw);
     const host = parsed.host.toLowerCase();
 
     if (
@@ -21,10 +15,16 @@ function apigwBase() {
       return CANONICAL_APIGW_BASE;
     }
 
-    return candidate;
+    return parsed.origin.replace(/\/+$/, "");
   } catch {
     return CANONICAL_APIGW_BASE;
   }
+}
+
+function apigwBase() {
+  return normaliseApigwBase(
+    process.env.APIGW_BASE || process.env.NEXT_PUBLIC_APIGW_BASE || CANONICAL_APIGW_BASE,
+  );
 }
 
 function workspaceLabel(workspace: string) {
@@ -67,6 +67,7 @@ function invalidMessage(reason: string) {
   if (reason === "invitation_not_found") return "This invitation token was not found.";
   if (reason === "invitation_expired") return "This invitation has expired.";
   if (reason === "invitation_not_open") return "This invitation is already accepted or no longer open.";
+  if (reason.startsWith("lookup_failed_")) return `Invite lookup failed (${reason.replace("lookup_failed_", "")}). Please ask Ambulant+ admin to reissue the invite.`;
   return "This invitation is invalid, expired, or already accepted.";
 }
 

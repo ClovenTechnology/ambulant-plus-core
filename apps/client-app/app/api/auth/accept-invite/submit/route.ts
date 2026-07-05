@@ -5,22 +5,16 @@ export const dynamic = "force-dynamic";
 
 const CANONICAL_APIGW_BASE = "https://api-gateway.ambulantplus.co.za";
 
-function apigwBase(req: NextRequest) {
-  const raw = String(
-    process.env.APIGW_BASE ||
-      process.env.NEXT_PUBLIC_APIGW_BASE ||
-      CANONICAL_APIGW_BASE,
-  ).trim();
-
-  const candidate = raw.replace(/\/+$/, "") || CANONICAL_APIGW_BASE;
-  const currentHost = new URL(req.url).host.toLowerCase();
+function normaliseApigwBase(rawValue: unknown, currentHost?: string) {
+  const raw = String(rawValue || CANONICAL_APIGW_BASE).trim() || CANONICAL_APIGW_BASE;
 
   try {
-    const parsed = new URL(candidate);
+    const parsed = new URL(raw);
     const host = parsed.host.toLowerCase();
+    const current = String(currentHost || "").toLowerCase();
 
     if (
-      host === currentHost ||
+      host === current ||
       host.includes("clients.ambulantplus.co.za") ||
       host.startsWith("localhost") ||
       host.startsWith("127.0.0.1")
@@ -28,10 +22,17 @@ function apigwBase(req: NextRequest) {
       return CANONICAL_APIGW_BASE;
     }
 
-    return candidate;
+    return parsed.origin.replace(/\/+$/, "");
   } catch {
     return CANONICAL_APIGW_BASE;
   }
+}
+
+function apigwBase(req: NextRequest) {
+  return normaliseApigwBase(
+    process.env.APIGW_BASE || process.env.NEXT_PUBLIC_APIGW_BASE || CANONICAL_APIGW_BASE,
+    new URL(req.url).host,
+  );
 }
 
 function errorMessage(value: unknown, fallback: string) {
