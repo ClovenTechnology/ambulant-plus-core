@@ -22,6 +22,54 @@ type Draft = {
 
 type LocalLabRow = { test: string; priority: '' | 'Routine' | 'Urgent' | 'Stat'; specimen: string; icd: string; instructions?: string };
 
+type ClaimAutoSubmitOutcome =
+  | 'not_applicable'
+  | 'action_required'
+  | 'draft_created'
+  | 'ready_for_submission'
+  | 'submitted';
+
+type ClaimAutoSubmitResult = {
+  ok?: boolean;
+  outcome?: ClaimAutoSubmitOutcome;
+  missingFields?: string[];
+  claimNumber?: string | null;
+  claimId?: string | null;
+  error?: string;
+  reason?: string;
+  audit?: {
+    externalSubmissionPerformed?: boolean;
+  };
+};
+
+function formatClaimOutcomeMessage(result?: ClaimAutoSubmitResult | null): string {
+  if (!result) return 'Claim package check completed.';
+
+  const missing = Array.isArray(result.missingFields) && result.missingFields.length
+    ? `: ${result.missingFields.join(', ')}`
+    : '.';
+
+  switch (result.outcome) {
+    case 'not_applicable':
+      return 'No medical-aid claim is required for this payer.';
+    case 'action_required':
+      return `Medical-aid claim draft created; action required${missing}`;
+    case 'draft_created':
+      return 'Medical-aid claim draft created for review.';
+    case 'ready_for_submission':
+      return result.claimNumber
+        ? `Medical-aid claim package ${result.claimNumber} is ready for submission review.`
+        : 'Medical-aid claim package is ready for submission review.';
+    case 'submitted':
+      return result.audit?.externalSubmissionPerformed
+        ? 'Claim submitted to the payer.'
+        : 'Claim package marked submitted internally; no external payer submission was confirmed.';
+    default:
+      return 'Claim package check completed.';
+  }
+}
+
+
 /* Lazy-import shared MedicalDocs so Notes uses the same engine as old “Docs” */
 const MedicalDocs = dynamic(() => import('./MedicalDocs'), { ssr: false });
 
@@ -520,17 +568,19 @@ export default function SessionConclusions({
   };
 
   /**
-   * Finalizes the encounter on the server AND auto-submits a claim to the payer.
+   * Finalizes the encounter and prepares a medical-aid claim package when applicable.
    * Used by:
    *  - End / Save Session
    *  - Book Follow-up (confirm / recommend)
-   *  - (Later) Referral “Prefer referral, close session & send claim”
+   *  - (Later) Referral “Prefer referral, close session & prepare claim package”
    */
   const finalizeEncounterAndClaim = async (ctx?: {
     mode?: 'end' | 'followup-confirm' | 'followup-recommend' | 'referral';
     followupId?: string;
     slot?: { start: string; end: string };
   }) => {
+    let claimResult: ClaimAutoSubmitResult | null = null;
+
     // Always persist to localStorage one last time
     try {
       localStorage.setItem(storageKey, JSON.stringify(draft));
@@ -566,7 +616,7 @@ export default function SessionConclusions({
         console.warn('[SessionConclusions] end-session POST failed', err);
       }
 
-      // 2) Auto-submit claim to payer for this encounter
+      // 2) Ask backend to prepare the medical-aid claim package for this encounter
       try {
         const claimPayload: any = {
           encounterId,
@@ -580,23 +630,32 @@ export default function SessionConclusions({
         if (ctx?.followupId) claimPayload.followupId = ctx.followupId;
         if (ctx?.slot) claimPayload.followupSlot = ctx.slot;
 
-        await fetch('/api/claims/auto-submit', {
+        const claimRes = await fetch('/api/claims/auto-submit', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(claimPayload),
         });
+
+        const claimJson = (await claimRes.json().catch(() => null)) as ClaimAutoSubmitResult | null;
+
+        if (!claimRes.ok || claimJson?.ok === false) {
+          throw new Error(claimJson?.error || `HTTP ${claimRes.status}`);
+        }
+
+        claimResult = claimJson;
       } catch (err) {
-        console.warn('[SessionConclusions] auto-submit claim failed', err);
+        console.warn('[SessionConclusions] claim package preparation failed', err);
       }
     }
 
     // Let parent know the session has ended (for toasts, audit, etc.)
     onEnd?.();
+    return claimResult;
   };
 
   const handleEndSession = async () => {
-    await finalizeEncounterAndClaim({ mode: 'end' });
-    alert('Session concluded. Encounter closed and claim submitted to the payer.');
+    const claimResult = await finalizeEncounterAndClaim({ mode: 'end' });
+    alert(`Session concluded. Encounter closed. ${formatClaimOutcomeMessage(claimResult)}`);
   };
 
   const handleFollowupAction = async (
@@ -635,21 +694,21 @@ export default function SessionConclusions({
       const js = await res.json().catch(() => null);
       const followupId = js?.id ?? js?.followupId;
 
-      // Close encounter + auto-submit claim
-      await finalizeEncounterAndClaim({
+      // Close encounter + prepare claim package where applicable
+      const claimResult = await finalizeEncounterAndClaim({
         mode: mode === 'confirm' ? 'followup-confirm' : 'followup-recommend',
         followupId,
         slot,
       });
 
       if (mode === 'confirm') {
-        alert('Follow-up booked, encounter closed, and claim submitted to the payer.');
+        alert(`Follow-up booked and encounter closed. ${formatClaimOutcomeMessage(claimResult)}`);
       } else {
-        alert('Follow-up slot recommended (24h hold), encounter closed, and claim submitted to the payer.');
+        alert(`Follow-up slot recommended with 24-hour hold, and encounter closed. ${formatClaimOutcomeMessage(claimResult)}`);
       }
     } catch (err) {
       console.error('[SessionConclusions] handleFollowupAction failed', err);
-      alert('Failed to create follow-up or submit claim. Please try again or contact support.');
+      alert('Failed to create follow-up or prepare the claim package. Please try again or contact support.');
     }
   };
 
@@ -779,7 +838,7 @@ export default function SessionConclusions({
               <button
                 className="px-3 py-1.5 border rounded text-sm bg-emerald-50 hover:bg-emerald-100 border-emerald-200 text-emerald-900"
                 onClick={handleEndSession}
-                title="Finalize, discharge, and auto-submit claim"
+                title="Finalize, discharge, and prepare claim package if applicable"
               >
                 End Session / Discharge
               </button>

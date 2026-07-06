@@ -23,6 +23,54 @@ type Appt = {
 
 type PaymentMethod = 'self-pay-card' | 'medical-aid' | 'voucher-promo' | 'unknown';
 
+type ClaimAutoSubmitOutcome =
+  | 'not_applicable'
+  | 'action_required'
+  | 'draft_created'
+  | 'ready_for_submission'
+  | 'submitted';
+
+type ClaimAutoSubmitResult = {
+  ok?: boolean;
+  outcome?: ClaimAutoSubmitOutcome;
+  missingFields?: string[];
+  claimNumber?: string | null;
+  claimId?: string | null;
+  error?: string;
+  reason?: string;
+  audit?: {
+    externalSubmissionPerformed?: boolean;
+  };
+};
+
+function formatClaimOutcomeMessage(result?: ClaimAutoSubmitResult | null): string {
+  if (!result) return 'Claim package check completed.';
+
+  const missing = Array.isArray(result.missingFields) && result.missingFields.length
+    ? `: ${result.missingFields.join(', ')}`
+    : '.';
+
+  switch (result.outcome) {
+    case 'not_applicable':
+      return 'No medical-aid claim is required for this payer.';
+    case 'action_required':
+      return `Medical-aid claim draft created; action required${missing}`;
+    case 'draft_created':
+      return 'Medical-aid claim draft created for review.';
+    case 'ready_for_submission':
+      return result.claimNumber
+        ? `Medical-aid claim package ${result.claimNumber} is ready for submission review.`
+        : 'Medical-aid claim package is ready for submission review.';
+    case 'submitted':
+      return result.audit?.externalSubmissionPerformed
+        ? 'Claim submitted to the payer.'
+        : 'Claim package marked submitted internally; no external payer submission was confirmed.';
+    default:
+      return 'Claim package check completed.';
+  }
+}
+
+
 type ClaimPayment = {
   method: PaymentMethod;
   displayLabel?: string | null;
@@ -53,6 +101,7 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
   const [claim, setClaim] = useState<ClaimSummary | null>(null);
   const [claimLoading, setClaimLoading] = useState(false);
   const [claimErr, setClaimErr] = useState<string | null>(null);
+  const [claimOutcome, setClaimOutcome] = useState<string | null>(null);
   const [showVoucherCode, setShowVoucherCode] = useState(false);
 
   const load = async () => {
@@ -75,6 +124,7 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
   const loadClaim = async () => {
     setClaimLoading(true);
     setClaimErr(null);
+    setClaimOutcome(null);
     try {
       const r = await fetch(
         `${CLIN}/api/claims?encounterId=${encodeURIComponent(id)}`,
@@ -101,12 +151,13 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
     }
   };
 
-  // Auto-submit claim after completion
+  // Prepare medical-aid claim package after completion when applicable
   const autoSubmitClaim = async () => {
     // We rely on the clinician-app API route: /api/claims/auto-submit
     try {
       setClaimLoading(true);
       setClaimErr(null);
+      setClaimOutcome(null);
       const payload: any = {
         encounterId: id,
         patientName: a?.patientName,
@@ -119,19 +170,23 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
       else if (disp === 'refer') payload.mode = 'referral';
       else payload.mode = 'end';
 
-      const r = await fetch(`${CLIN}/api/claims/auto-submit`, {
+      const r = await fetch('/api/claims/auto-submit', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!r.ok) {
-        const txt = await r.text().catch(() => '');
-        throw new Error(txt || `HTTP ${r.status}`);
+      const data = (await r.json().catch(() => null)) as ClaimAutoSubmitResult | null;
+
+      if (!r.ok || data?.ok === false) {
+        throw new Error(data?.error || `HTTP ${r.status}`);
       }
-      // We don’t need the body for now; we’ll just refresh via loadClaim().
+
+      const message = formatClaimOutcomeMessage(data);
+      setClaimOutcome(message);
+      return data;
     } catch (e: any) {
       const msg = e?.message || 'auto-submit failed';
-      setClaimErr(`Claim auto-submit failed: ${msg}`);
+      setClaimErr(`Claim package check failed: ${msg}`);
       throw e;
     } finally {
       setClaimLoading(false);
@@ -168,14 +223,14 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
       // Refresh appointment locally
       await load();
 
-      // Auto-submit a claim for this encounter and then reload claim summary
+      // Prepare a claim package for this encounter and then reload claim summary if available
       try {
-        await autoSubmitClaim();
-        await loadClaim();
-        alert('Saved, claim submitted & marked completed');
+        const claimResult = await autoSubmitClaim();
+        await loadClaim().catch(() => undefined);
+        alert(`Encounter saved and completed. ${formatClaimOutcomeMessage(claimResult)}`);
       } catch {
         // Appointment save succeeded, but claim failed – surface nicely
-        alert('Encounter saved & completed, but claim submission failed. See banner for details.');
+        alert('Encounter saved and completed, but claim package preparation needs attention. See banner for details.');
       }
     } catch (e: any) {
       setErr(`Save failed: ${e?.message || 'error'}`);
@@ -361,7 +416,7 @@ export default function FinalizeEncounter({ params }: { params: { id: string } }
             disabled={busy}
             className="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50"
           >
-            Save &amp; Complete (auto-claim)
+            Save &amp; Complete (claim package check)
           </button>
           <button
             onClick={() => {
