@@ -1,4 +1,4 @@
-﻿// apps/clinician-app/app/appointments/page.tsx
+// apps/clinician-app/app/appointments/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';

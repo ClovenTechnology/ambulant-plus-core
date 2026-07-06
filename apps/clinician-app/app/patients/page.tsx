@@ -495,7 +495,7 @@ export default function PatientsPage() {
   const pageSize = 8;
   const totalPages = Math.max(1, Math.ceil(patients.length / pageSize));
 
-  // wire useLiveAppointments with refreshKey to force refetch when refreshKey changes
+  // useLiveAppointments refreshKey forces a refetch when the schedule changes
   const clinicianId = DEFAULT_CLINICIAN_ID;
   const clinicianHookArg = `${clinicianId}::${refreshKey}`;
   const live = useLiveAppointments?.(clinicianHookArg) ?? { appointments: [], progressMap: {} };
@@ -743,7 +743,7 @@ export default function PatientsPage() {
     refreshKeyBump();
   };
 
-  // Get appointments for a patient from live.appointments fallback to mock (presentation)
+  // Get appointments for a patient from live.appointments with presentation fallback
   const appointmentsForPatient = useCallback((pid: string) => {
     const liveA = (live && Array.isArray(live.appointments)) ? live.appointments.filter(a => appointmentPatientId(a) === pid) : [];
     if (liveA && liveA.length) return liveA;
