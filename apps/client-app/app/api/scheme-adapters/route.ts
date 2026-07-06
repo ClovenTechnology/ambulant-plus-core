@@ -25,8 +25,16 @@ function safeParseSession(value: string | undefined): SessionPayload | null {
   }
 }
 
-function apiBase() {
-  return process.env.APIGW_BASE || process.env.NEXT_PUBLIC_APIGW_BASE || "";
+function gatewayBase() {
+  const value = String(process.env.APIGW_BASE || "").trim();
+
+  if (!value) {
+    const err = new Error("APIGW_BASE_required") as Error & { status?: number };
+    err.status = 500;
+    throw err;
+  }
+
+  return value.replace(/\/+$/, "");
 }
 
 function authHeaders(session: SessionPayload) {
@@ -60,7 +68,7 @@ export async function GET(req: NextRequest) {
   const activeSession = session as SessionPayload;
 
   const incoming = new URL(req.url);
-  const target = new URL(`${apiBase()}/api/scheme-adapters`);
+  const target = new URL(`${gatewayBase()}/api/scheme-adapters`);
 
   incoming.searchParams.forEach((value, key) => {
     target.searchParams.set(key, value);
@@ -92,7 +100,7 @@ export async function POST(req: NextRequest) {
 
   const body = await req.text();
 
-  const res = await fetch(`${apiBase()}/api/scheme-adapters`, {
+  const res = await fetch(`${gatewayBase()}/api/scheme-adapters`, {
     method: "POST",
     headers: authHeaders(activeSession),
     body,

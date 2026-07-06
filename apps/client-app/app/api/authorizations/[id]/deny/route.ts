@@ -19,7 +19,6 @@ type Params = {
 
 function apigwBase() {
   return (
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.APIGW_BASE ||
     ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : '')
   );

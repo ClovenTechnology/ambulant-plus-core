@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 
-export async function GET() {
-  const res = NextResponse.redirect(new URL("/auth/login", "http://localhost"));
+export async function GET(req: Request) {
+  const res = NextResponse.redirect(new URL("/auth/login", req.url));
   res.cookies.set("ambulant_client_session", "", {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
