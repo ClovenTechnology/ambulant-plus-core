@@ -1,17 +1,6 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import type { CSSProperties } from "react";
-
-const ORG_ID = "org-default";
-const DEFAULT_CLIENT_ID = "client-demo-medical-aid";
-
-type SessionPayload = {
-  uid?: string | null;
-  email?: string | null;
-  orgId?: string | null;
-  role?: string | null;
-  workspace?: string | null;
-};
 
 type ProviderRow = {
   key: string;
@@ -57,51 +46,45 @@ type ProviderRow = {
   source?: string | null;
 };
 
-function readSession(): SessionPayload | null {
-  const raw = cookies().get("ambulant_client_session")?.value;
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
 
-  if (!raw) return null;
-
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === "object" ? parsed : null;
-  } catch {
-    return null;
+  if (!host) {
+    throw new Error("client_app_origin_required");
   }
+
+  return `${proto}://${host}`;
 }
 
-function authHeaders() {
-  const session = readSession();
-
-  const headers: Record<string, string> = {
-    "x-ambulant-trusted": "client-app-proxy",
-    "x-ambulant-org-id": session?.orgId || ORG_ID,
-    "x-ambulant-workspace": session?.workspace || "payer_ops",
-    "x-ambulant-role": session?.role || "ORG_OWNER",
-    "x-ambulant-user-id": session?.uid || session?.email || "admin@medicalaid.demo",
+function internalRequestHeaders(extra: Record<string, string> = {}) {
+  return {
+    cookie: cookies().toString(),
+    ...extra,
   };
-
-  return headers;
 }
 
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
 
-function apiBase() {
-  return (
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.APIGW_BASE ||
-    "http://localhost:3010"
-  );
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
 }
 
-function clientId() {
-  return process.env.NEXT_PUBLIC_DEFAULT_CLIENT_ID || DEFAULT_CLIENT_ID;
-}
-
-async function safeJson(url: string, headers?: Record<string, string>) {
+async function safeJson(url: URL | string, requestHeaders: Record<string, string> = internalRequestHeaders()) {
   try {
-    const res = await fetch(url, {
+    const res = await fetch(url.toString(), {
       cache: "no-store",
-      headers,
+      headers: requestHeaders,
     });
 
     const json = await res.json().catch(() => null);
@@ -118,7 +101,7 @@ async function safeJson(url: string, headers?: Record<string, string>) {
 
 async function getClinicians() {
   const json = await safeJson(
-    `${apiBase()}/api/clinicians?country=ZA&page=1&perPage=100`
+    internalApiUrl("/api/clinicians", { country: "ZA", page: 1, perPage: 100 })
   );
 
   return Array.isArray(json?.items)
@@ -130,9 +113,7 @@ async function getClinicians() {
 
 async function getSettlementProviders() {
   const json = await safeJson(
-    `${apiBase()}/api/settlements/providers?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&clientId=${encodeURIComponent(clientId())}`
+    internalApiUrl("/api/settlements/providers")
   );
 
   return {
@@ -143,9 +124,7 @@ async function getSettlementProviders() {
 
 async function getClaims() {
   const json = await safeJson(
-    `${apiBase()}/api/claims?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&clientId=${encodeURIComponent(clientId())}&take=100`
+    internalApiUrl("/api/claims", { take: 100 })
   );
 
   return Array.isArray(json?.items) ? json.items : [];
@@ -156,10 +135,7 @@ async function getProviderNetwork(): Promise<{
   summary: Record<string, unknown>;
 }> {
   const json = await safeJson(
-    `${apiBase()}/api/provider-network?orgId=${encodeURIComponent(
-      ORG_ID
-    )}&clientId=${encodeURIComponent(clientId())}`,
-    authHeaders()
+    internalApiUrl("/api/provider-network")
   );
 
   return {

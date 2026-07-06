@@ -2,17 +2,6 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 
-const ORG_ID = "org-default";
-const DEFAULT_CLIENT_ID = "client-demo-medical-aid";
-
-function apiBase() {
-  return "";
-}
-
-function clientId() {
-  return process.env.NEXT_PUBLIC_DEFAULT_CLIENT_ID || DEFAULT_CLIENT_ID;
-}
-
 type ExportResponse = {
   ok?: boolean;
   summary?: Record<string, number>;
@@ -96,11 +85,12 @@ function moneyBool(value?: boolean) {
 }
 
 function exportUrl(dataset: string, format: "json" | "csv") {
-  return `${apiBase()}/api/client/exports?orgId=${encodeURIComponent(
-    ORG_ID
-  )}&clientId=${encodeURIComponent(clientId())}&dataset=${encodeURIComponent(
-    dataset
-  )}&format=${format}`;
+  const params = new URLSearchParams({
+    dataset,
+    format,
+  });
+
+  return `/api/client/exports?${params.toString()}`;
 }
 
 export default function ClientExportsPage() {
@@ -116,7 +106,7 @@ export default function ClientExportsPage() {
     try {
       const [exportsRes, adaptersRes] = await Promise.all([
         fetch(exportUrl("all", "json"), { cache: "no-store" }),
-        fetch(`${apiBase()}/api/scheme-adapters?country=ZA`, {
+        fetch("/api/scheme-adapters?country=ZA", {
           cache: "no-store",
         }),
       ]);
@@ -317,7 +307,7 @@ export default function ClientExportsPage() {
         <div style={{ display: "grid", gap: 8, fontSize: 13, opacity: 0.8 }}>
           <div>Generated at: {exportsData?.audit?.generatedAt || "Not loaded"}</div>
           <div>Bundle hash: {exportsData?.audit?.bundleHash || "Not loaded"}</div>
-          <div>Client: {clientId()}</div>
+          <div>Client: Current client scope</div>
         </div>
       </section>
     </main>
