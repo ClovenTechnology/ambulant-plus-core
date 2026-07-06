@@ -44,8 +44,6 @@ export default function AuditPage() {
     setError("");
 
     const params = new URLSearchParams({
-      orgId: "org-default",
-      clientId: process.env.NEXT_PUBLIC_DEFAULT_CLIENT_ID || "client-demo-medical-aid",
       take: "150",
     });
 

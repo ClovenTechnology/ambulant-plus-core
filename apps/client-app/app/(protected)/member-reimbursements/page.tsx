@@ -33,10 +33,6 @@ type Claim = {
   remittanceRef?: string | null;
 };
 
-const ORG_ID = process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || "org-default";
-const CLIENT_ID =
-  process.env.NEXT_PUBLIC_DEFAULT_CLIENT_ID || "client-demo-medical-aid";
-
 function money(value: unknown, currency = "ZAR") {
   const n = Number(value || 0) / 100;
   return new Intl.NumberFormat("en-ZA", {
@@ -115,8 +111,6 @@ export default function MemberReimbursementsPage() {
 
     try {
       const params = new URLSearchParams({
-        orgId: ORG_ID,
-        clientId: CLIENT_ID,
         limit: "200",
       });
 
@@ -153,7 +147,6 @@ export default function MemberReimbursementsPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           id: claim.id,
-          orgId: claim.orgId || ORG_ID,
           status: nextStatus,
           ...extras,
         }),
