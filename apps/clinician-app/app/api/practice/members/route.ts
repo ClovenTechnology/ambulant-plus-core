@@ -1,155 +1,88 @@
 // apps/clinician-app/app/api/practice/members/route.ts
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from "next/server";
+import { apigwBase, forwardClinicianHeaders, jsonError, relayJsonResponse } from "../../_apigw";
 
-
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
-const CLIN = (
-  process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL ||
-  process.env.CLINICIAN_SERVICE_ORIGIN ||
-  'http://localhost:3010'
-).replace(/\/$/, '');
-
-function buildForwardHeaders(req: NextRequest, extra: HeadersInit = {}): HeadersInit {
-  const h = new Headers(extra);
-  const uid = req.headers.get('x-uid');
-  const role = req.headers.get('x-role');
-  if (uid) h.set('x-uid', uid);
-  if (role) h.set('x-role', role);
-  return h;
+function clean(value: unknown) {
+  return String(value ?? "").trim();
 }
 
-/**
- * GET /api/practice/members
- *
- * Returns current practice members (clinicians + admin staff).
- * Proxies → CLIN /api/clinicians/me/practice-members
- */
+function stripRouteOnlyKeys(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+
+  const source = value as Record<string, unknown>;
+  const { memberId: _memberId, id: _id, ...rest } = source;
+  return rest;
+}
+
 export async function GET(req: NextRequest) {
   try {
-    // Forward query params if any (e.g. ?role=admin, ?q=...)
     const url = new URL(req.url);
-    const upstreamUrl = new URL(
-      `${CLIN}/api/clinicians/me/practice-members`,
-    );
-    url.searchParams.forEach((v, k) => {
-      upstreamUrl.searchParams.set(k, v);
+    const upstreamUrl = new URL(`${apigwBase()}/api/practice/members`);
+
+    url.searchParams.forEach((value, key) => {
+      upstreamUrl.searchParams.set(key, value);
     });
 
-    const upstream = await fetch(upstreamUrl.toString(), {
-      cache: 'no-store',
-      headers: buildForwardHeaders(req),
+    const res = await fetch(upstreamUrl.toString(), {
+      method: "GET",
+      cache: "no-store",
+      headers: forwardClinicianHeaders(req),
     });
 
-    const text = await upstream.text();
-    let json: any = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      // ignore
-    }
-
-    if (!upstream.ok) {
-      const msg = json?.error || text || `Upstream HTTP ${upstream.status}`;
-      return NextResponse.json(
-        { ok: false, error: msg },
-        { status: upstream.status || 502 },
-      );
-    }
-
-    const items = Array.isArray(json?.items)
-      ? json.items
-      : Array.isArray(json?.members)
-      ? json.members
-      : Array.isArray(json)
-      ? json
-      : [];
-
-    return NextResponse.json(
-      {
-        ok: true,
-        items,
-      },
-      { status: 200 },
-    );
-  } catch (err: any) {
-    console.error('[practice/members][GET] error:', err);
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          err?.message ||
-          'Unable to load practice members. Check CLIN /api/clinicians/me/practice-members.',
-      },
-      { status: 500 },
-    );
+    return relayJsonResponse(res);
+  } catch (error) {
+    return jsonError(error, "practice_members_proxy_failed", 502);
   }
 }
 
-/**
- * POST /api/practice/members
- *
- * Creates / invites a new practice member.
- * Body is passed through untouched.
- * Proxies → CLIN /api/clinicians/me/practice-members
- *
- * Example payload your pages can send:
- * {
- *   "email": "admin@example.com",
- *   "role": "admin",            // or "clinician"
- *   "name": "Practice Admin",
- *   "notes": "Front desk"
- * }
- */
 export async function POST(req: NextRequest) {
   try {
     const body = await req.text();
-    const upstream = await fetch(`${CLIN}/api/clinicians/me/practice-members`, {
-      method: 'POST',
-      headers: buildForwardHeaders(req, {
-        'content-type': req.headers.get('content-type') || 'application/json',
-      }),
+
+    const res = await fetch(`${apigwBase()}/api/practice/members`, {
+      method: "POST",
+      cache: "no-store",
+      headers: forwardClinicianHeaders(req),
       body,
     });
 
-    const text = await upstream.text();
-    let json: any = null;
-    try {
-      json = text ? JSON.parse(text) : null;
-    } catch {
-      // ignore
-    }
+    return relayJsonResponse(res);
+  } catch (error) {
+    return jsonError(error, "practice_member_create_proxy_failed", 502);
+  }
+}
 
-    if (!upstream.ok || json?.ok === false) {
-      const msg = json?.error || text || `Upstream HTTP ${upstream.status}`;
+export async function PATCH(req: NextRequest) {
+  try {
+    const rawBody = await req.text();
+    const parsed = rawBody ? JSON.parse(rawBody) : {};
+    const memberId = clean(parsed?.memberId ?? parsed?.id);
+
+    if (!memberId) {
       return NextResponse.json(
-        { ok: false, error: msg },
-        { status: upstream.status || 502 },
+        { ok: false, error: "memberId_required" },
+        { status: 400, headers: { "cache-control": "no-store" } },
       );
     }
 
-    const member = json?.member ?? json?.data ?? json ?? null;
+    const body = JSON.stringify(stripRouteOnlyKeys(parsed));
 
-    return NextResponse.json(
+    const res = await fetch(
+      `${apigwBase()}/api/practice/members/${encodeURIComponent(memberId)}`,
       {
-        ok: true,
-        member,
+        method: "PATCH",
+        cache: "no-store",
+        headers: forwardClinicianHeaders(req),
+        body,
       },
-      { status: 200 },
     );
-  } catch (err: any) {
-    console.error('[practice/members][POST] error:', err);
-    return NextResponse.json(
-      {
-        ok: false,
-        error:
-          err?.message ||
-          'Unable to create / invite member. Check CLIN /api/clinicians/me/practice-members (POST).',
-      },
-      { status: 500 },
-    );
+
+    return relayJsonResponse(res);
+  } catch (error) {
+    return jsonError(error, "practice_member_update_proxy_failed", 502);
   }
 }
