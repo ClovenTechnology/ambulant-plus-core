@@ -3,8 +3,11 @@
 
 import { useEffect, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+const API = (process.env.NEXT_PUBLIC_APIGW_BASE ?? '').replace(/\/$/, '');
 
+function apiUrl(path: string) {
+  return API ? `${API}${path}` : path;
+}
 type MemberSplitRow = {
   clinicianId: string;
   clinicianName: string;
@@ -13,6 +16,14 @@ type MemberSplitRow = {
   facilityFeeFixedZarPerInPersonVisit?: number | null;
   last30dNetToPracticeCents?: number | null;
 };
+
+function cents(value: number | null | undefined, currency: string) {
+  const minor = typeof value === 'number' ? value : 0;
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency,
+  }).format(minor / 100);
+}
 
 type PracticePayoutSummary = {
   ok: boolean;
@@ -29,57 +40,6 @@ type PracticePayoutSummary = {
   memberSplits: MemberSplitRow[];
 };
 
-function fallbackPayoutSummary(): PracticePayoutSummary {
-  return {
-    ok: true,
-    currency: 'ZAR',
-    practiceName: 'Demo Multi-Clinic Practice',
-    practiceBankLast4: '1234',
-    lastPayoutAmountCents: 180_000_00,
-    lastPayoutAt: new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString(),
-    nextPayoutAmountCents: 210_000_00,
-    nextPayoutAt: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString(),
-    last30dGrossCents: 480_000_00,
-    last30dNetToPracticeCents: 210_000_00,
-    last30dNetToCliniciansCents: 270_000_00,
-    memberSplits: [
-      {
-        clinicianId: 'clin-1',
-        clinicianName: 'Dr A. Demo',
-        virtualSharePctToPractice: 0.2,
-        inPersonSharePctToPractice: 0.3,
-        facilityFeeFixedZarPerInPersonVisit: 150,
-        last30dNetToPracticeCents: 80_000_00,
-      },
-      {
-        clinicianId: 'clin-2',
-        clinicianName: 'Dr B. Demo',
-        virtualSharePctToPractice: 0.15,
-        inPersonSharePctToPractice: 0.25,
-        facilityFeeFixedZarPerInPersonVisit: 120,
-        last30dNetToPracticeCents: 60_000_00,
-      },
-      {
-        clinicianId: 'clin-3',
-        clinicianName: 'Dr C. Demo',
-        virtualSharePctToPractice: 0.18,
-        inPersonSharePctToPractice: 0.3,
-        facilityFeeFixedZarPerInPersonVisit: 140,
-        last30dNetToPracticeCents: 70_000_00,
-      },
-    ],
-  };
-}
-
-function cents(cents: number | null | undefined, currency: string) {
-  const v = typeof cents === 'number' ? cents : 0;
-  const num = v / 100;
-  return new Intl.NumberFormat(undefined, {
-    style: 'currency',
-    currency,
-  }).format(num);
-}
-
 export default function PracticePayoutPage() {
   const [summary, setSummary] = useState<PracticePayoutSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,7 +52,7 @@ export default function PracticePayoutPage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(`${API}/practice/payouts/summary`, {
+        const res = await fetch(apiUrl('/api/practice/payouts/summary'), {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',
@@ -102,12 +62,16 @@ export default function PracticePayoutPage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const js = (await res.json().catch(() => null)) as PracticePayoutSummary | null;
         if (cancelled) return;
-        setSummary(js ?? fallbackPayoutSummary());
+        if (!js) {
+          throw new Error('Practice payout response was empty.');
+        }
+
+        setSummary(js);
       } catch (e: any) {
         if (cancelled) return;
-        console.warn('[practice/payout] demo fallback', e?.message);
-        setErr('Using demo data; practice payout API not wired yet.');
-        setSummary(fallbackPayoutSummary());
+        console.error('[practice/payout] load error', e);
+        setSummary(null);
+        setErr(e?.message || 'Unable to load practice payout summary.');
       } finally {
         if (!cancelled) setLoading(false);
       }

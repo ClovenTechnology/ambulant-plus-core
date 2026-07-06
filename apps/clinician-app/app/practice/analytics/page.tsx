@@ -3,8 +3,11 @@
 
 import { useEffect, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+const API = (process.env.NEXT_PUBLIC_APIGW_BASE ?? '').replace(/\/$/, '');
 
+function apiUrl(path: string) {
+  return API ? `${API}${path}` : path;
+}
 type PracticeAnalyticsSummary = {
   ok: boolean;
   practiceName: string;
@@ -18,21 +21,6 @@ type PracticeAnalyticsSummary = {
   avgOverrunMinutes: number;
 };
 
-function fallbackSummary(): PracticeAnalyticsSummary {
-  return {
-    ok: true,
-    practiceName: 'Demo Multi-Clinic Practice',
-    planTier: 'host',
-    totalMembers: 18,
-    totalClinicians: 9,
-    totalNurses: 4,
-    totalAdmin: 5,
-    last30dSessions: 420,
-    avgPunctualityPct: 92,
-    avgOverrunMinutes: 4,
-  };
-}
-
 export default function PracticeAnalyticsPage() {
   const [summary, setSummary] = useState<PracticeAnalyticsSummary | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,7 +33,7 @@ export default function PracticeAnalyticsPage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(`${API}/practice/analytics/summary`, {
+        const res = await fetch(apiUrl('/api/practice/analytics/summary'), {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',
@@ -55,12 +43,16 @@ export default function PracticeAnalyticsPage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const js = (await res.json().catch(() => null)) as PracticeAnalyticsSummary | null;
         if (cancelled) return;
-        setSummary(js ?? fallbackSummary());
+        if (!js) {
+          throw new Error('Practice analytics response was empty.');
+        }
+
+        setSummary(js);
       } catch (e: any) {
         if (cancelled) return;
-        console.warn('[practice/analytics] demo fallback', e?.message);
-        setErr('Using demo data; practice analytics API not wired yet.');
-        setSummary(fallbackSummary());
+        console.error('[practice/analytics] load error', e);
+        setSummary(null);
+        setErr(e?.message || 'Unable to load practice analytics.');
       } finally {
         if (!cancelled) setLoading(false);
       }

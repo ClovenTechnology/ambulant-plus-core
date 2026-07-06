@@ -3,8 +3,6 @@
 
 import { useEffect, useState } from 'react';
 
-const CLIN = (process.env.NEXT_PUBLIC_CLINICIAN_BASE_URL || 'http://localhost:3010').replace(/\/$/, '');
-
 type Encounter = {
   id: string;
   caseId: string;
@@ -53,7 +51,7 @@ export default function Encounters() {
 
   const loadEncounters = async () => {
     try {
-      const r = await fetch(`${CLIN}/api/encounters`, { cache: 'no-store' });
+      const r = await fetch('/api/encounters', { cache: 'no-store' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const js = await r.json();
       setRows(Array.isArray(js) ? js : js.items ?? []);
@@ -99,7 +97,7 @@ export default function Encounters() {
   const start = async () => {
     setBusy('new');
     try {
-      const r = await fetch(`${CLIN}/api/encounters`, {
+      const r = await fetch('/api/encounters', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({}), // server will synthesize defaults
@@ -117,7 +115,7 @@ export default function Encounters() {
     setBusy(id);
     try {
       const r = await fetch(
-        `${CLIN}/api/encounters/${encodeURIComponent(id)}/close`,
+        `/api/encounters/${encodeURIComponent(id)}/close`,
         { method: 'PUT' },
       );
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
@@ -204,7 +202,7 @@ export default function Encounters() {
                       </span>
                       {info.hasVoucher && (
                         <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] text-emerald-700">
-                          Voucher ✅
+                          Voucher ✓
                         </span>
                       )}
                     </div>

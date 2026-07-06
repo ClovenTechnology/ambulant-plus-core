@@ -3,8 +3,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
-
 type CaseRow = {
   encounterId: string;
   caseId: string;
@@ -34,7 +32,6 @@ export default function PracticeCasesPage() {
   const [rows, setRows] = useState<CaseRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [demo, setDemo] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,7 +40,7 @@ export default function PracticeCasesPage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(`${API}/practice/cases?limit=100`, {
+        const res = await fetch('/api/practice/cases?limit=100', {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',
@@ -57,7 +54,6 @@ export default function PracticeCasesPage() {
         }
 
         setRows(js.items ?? []);
-        setDemo(!!js.demo);
       } catch (e: any) {
         console.error('[practice/cases] load error', e);
         if (!cancelled) setErr(e?.message || 'Failed to load practice cases');
@@ -106,7 +102,6 @@ export default function PracticeCasesPage() {
           </div>
           <div className="text-[11px] text-gray-400">
             Latest {rows.length} encounters
-            {demo ? ' (demo data)' : ''}
           </div>
         </div>
       </div>

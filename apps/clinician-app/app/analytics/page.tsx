@@ -5,8 +5,11 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+const API = (process.env.NEXT_PUBLIC_APIGW_BASE ?? '').replace(/\/$/, '');
 
+function apiUrl(path: string) {
+  return API ? `${API}${path}` : path;
+}
 type PlanTier = 'free' | 'basic' | 'pro' | 'host';
 
 type MePlanSummary = {
@@ -27,7 +30,7 @@ export default function ClinicianAnalyticsHubPage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(`${API}/analytics/clinicians/me/meta`, {
+        const res = await fetch(apiUrl('/api/analytics/clinicians/me/meta'), {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',
@@ -36,20 +39,12 @@ export default function ClinicianAnalyticsHubPage() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const js = (await res.json().catch(() => null)) as MePlanSummary | null;
         if (cancelled) return;
-        setPlan(
-          js || {
-            planTier: 'basic',
-            clinicianName: 'Demo clinician',
-          },
-        );
+        setPlan(js || null);
       } catch (e: any) {
-        console.error('[analytics hub] failed', e);
         if (cancelled) return;
-        setErr(e?.message || 'Failed to load analytics meta; using demo.');
-        setPlan({
-          planTier: 'basic',
-          clinicianName: 'Demo clinician',
-        });
+        console.error('[analytics] meta load error', e);
+        setPlan(null);
+        setErr(e?.message || 'Unable to load analytics plan metadata.');
       } finally {
         if (!cancelled) setLoading(false);
       }

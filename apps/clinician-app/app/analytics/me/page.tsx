@@ -3,8 +3,11 @@
 
 import { useEffect, useState, useMemo, type ReactNode } from 'react';
 
-const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
+const API = (process.env.NEXT_PUBLIC_APIGW_BASE ?? '').replace(/\/$/, '');
 
+function apiUrl(path: string) {
+  return API ? `${API}${path}` : path;
+}
 type RangeKey = '30d' | '90d' | '12m';
 type PlanTier = 'free' | 'basic' | 'pro' | 'host';
 
@@ -166,7 +169,7 @@ export default function ClinicianAnalyticsMePage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(`${API}/analytics/clinicians/me?range=${range}`, {
+        const res = await fetch(apiUrl(`/api/analytics/clinicians/me?range=${range}`), {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',
@@ -177,89 +180,15 @@ export default function ClinicianAnalyticsMePage() {
         if (cancelled) return;
 
         if (!js) {
-          // Fallback demo
-          setData({
-            clinicianId: 'cln-demo',
-            name: 'Demo Clinician',
-            classLabel: 'Class A — Doctors',
-            planTier: 'basic',
-            kpis: {
-              totalTelevisits: 82,
-              totalInPerson: 14,
-              totalPatients: 96,
-              newPatients: 23,
-              repeatRatePct: 76,
-              clinicianOnTimeJoinRatePct: 62,
-              patientOnTimeJoinRatePct: 71,
-              avgClinicianJoinDelayMin: 4.3,
-              overrunRatePct: 36,
-              avgOverrunMin: 6.7,
-              cancellations: 5,
-              noShows: 3,
-            },
-            lifecycleSummary: {
-              starterKitShippedBeforeTrainingAt: null,
-              starterKitShippedAfterApprovedAt: null,
-              firstConsultAt: new Date().toISOString(),
-              totalCompletedSessions: 96,
-              totalEarningsCents: 860000,
-              avgMonthlyEarningsCents: 430000,
-              totalConsultationMinutes: 2300,
-              avgWorkDaysPerMonth: 12.5,
-              avgWorkHoursPerMonth: 54,
-              avgWorkHoursPerDay: 4.3,
-              totalWorkDaysInRange: 22,
-              totalWorkDaysThisMonth: 8,
-              totalConsultationMinutesThisMonth: 680,
-              avgMonthlyPayCents: 410000,
-              totalPayThisMonthCents: 215000,
-              avgPatientsPerMonth: 40,
-              totalPatientsThisMonth: 18,
-              patientsThisMonthByAgeGender: {
-                male: 9,
-                female: 9,
-                other: 0,
-                paed: 4,
-                middleAge: 8,
-                elderly: 6,
-              },
-            },
-            badgeCounters: {
-              topRated: true,
-              avgRating: 4.6,
-              ratingsCount: 84,
-              suspendedCount: 0,
-              disciplinaryCount: 0,
-              inactiveCount: 0,
-            },
-            punctualityBucketsClinician: [
-              { label: 'On time (≤ grace)', sessions: 51, sharePct: 62 },
-              { label: '0–5 min late', sessions: 18, sharePct: 22 },
-              { label: '5–10 min late', sessions: 9, sharePct: 11 },
-              { label: '>10 min late', sessions: 4, sharePct: 5 },
-            ],
-            punctualityBucketsPatient: [
-              { label: 'On time (≤ grace)', sessions: 56, sharePct: 68 },
-              { label: '0–5 min late', sessions: 15, sharePct: 18 },
-              { label: '5–10 min late', sessions: 7, sharePct: 9 },
-              { label: '>10 min late', sessions: 4, sharePct: 5 },
-            ],
-            overrunBuckets: [
-              { label: 'On time / early', sessions: 40, sharePct: 49 },
-              { label: '0–25% over', sessions: 24, sharePct: 29 },
-              { label: '25–50% over', sessions: 11, sharePct: 13 },
-              { label: '>50% over', sessions: 7, sharePct: 9 },
-            ],
-            timeSeries: [],
-          });
-        } else {
-          setData(js);
+          throw new Error('Personal analytics response was empty.');
         }
+
+        setData(js);
       } catch (e: any) {
-        console.error('[analytics/me] failed', e);
         if (cancelled) return;
-        setErr(e?.message || 'Failed to load analytics; using demo.');
-        // demo fallback already handled above if js === null
+        console.error('[analytics/me] load error', e);
+        setData(null);
+        setErr(e?.message || 'Unable to load personal analytics.');
       } finally {
         if (!cancelled) setLoading(false);
       }
