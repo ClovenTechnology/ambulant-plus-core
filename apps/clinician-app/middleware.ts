@@ -1,4 +1,4 @@
-﻿import type { NextRequest } from 'next/server';
+import type { NextRequest } from 'next/server';
 import { NextResponse } from 'next/server';
 
 const CLINICIAN_SESSION_COOKIE =
@@ -11,6 +11,9 @@ const PUBLIC_PATHS = new Set([
   '/sitemap.xml',
   '/manifest.json',
   '/manifest.webmanifest',
+  '/terms',
+  '/privacy',
+  '/flexible-payment-and-pay-later',
 ]);
 
 const PUBLIC_PREFIXES = [

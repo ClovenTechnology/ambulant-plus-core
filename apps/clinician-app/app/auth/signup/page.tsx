@@ -266,7 +266,7 @@ function hpcsaRegistrationLooksValid(value: string) {
 }
 
 function practiceNumberLooksValid(value: string) {
-  return /^\d{13}$/.test(digitsOnly(value));
+  return digitsOnly(value).length > 0;
 }
 
 function passportNumberLooksValid(value: string) {
@@ -648,7 +648,7 @@ export default function ClinicianSignupPage() {
         if (!passportIssuingAuthority.trim()) return 'Enter passport issuing authority.';
         if (!isFutureDate(passportExpiry)) return 'Enter a future passport expiry date.';
       }
-      if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return 'BHF/PCNS practice number must contain exactly 13 digits.';
+      if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return 'Enter a valid BHF/PCNS practice number.';
       if (practiceNumber && (!bhfPcnsRenewalDate || !isTodayOrFuture(bhfPcnsRenewalDate))) return 'Enter the BHF/PCNS expiry or next renewal date.';
       if (practiceNumber && !bhfPcnsDocFile) return 'Upload BHF/PCNS proof for the supplied practice number.';
       if (!platformCover && hasInsurance === null) return 'Confirm whether you have professional indemnity cover.';
@@ -735,7 +735,7 @@ export default function ClinicianSignupPage() {
       if (!passportIssuingAuthority.trim()) return fail(2, 'Passport issuing authority is required.');
       if (!isFutureDate(passportExpiry)) return fail(2, 'Passport expiry must be a future date.');
     }
-    if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return fail(2, 'BHF/PCNS practice number must contain exactly 13 digits.');
+    if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) return fail(2, 'Enter a valid BHF/PCNS practice number.');
     if (practiceNumber && (!bhfPcnsRenewalDate || !isTodayOrFuture(bhfPcnsRenewalDate))) {
       return fail(2, 'BHF/PCNS expiry or next renewal date is required when BHF/PCNS number is supplied.');
     }
@@ -1098,6 +1098,11 @@ export default function ClinicianSignupPage() {
                   <div className="mt-2 space-y-2 text-[13px] leading-6">
                     <p>Training is mandatory before your profile can become visible to real patients. Training slots are set by Ambulant+ admin. If no admin slot is available, you may submit a preferred date and time for review.</p>
                     <p>Training payment and starter kit dispatch are part of onboarding. Your kit is dispatched after payment confirmation, and admin adds courier/tracking details.</p>
+                    <p>
+                      <Link href="/flexible-payment-and-pay-later" target="_blank" rel="noreferrer" className="font-extrabold text-indigo-700 hover:underline">
+                        Flexible instalments and pay later options available. T&amp;Cs apply.
+                      </Link>
+                    </p>
                   </div>
                 </details>
 
@@ -1502,7 +1507,7 @@ export default function ClinicianSignupPage() {
                             <input
                               value={practiceNumber}
                               onChange={(e) => {
-                                const next = digitsOnly(e.target.value).slice(0, 13);
+                                const next = digitsOnly(e.target.value);
                                 setPracticeNumber(next);
                                 if (!next) {
                                   setBhfPcnsRenewalDate('');
@@ -1510,9 +1515,8 @@ export default function ClinicianSignupPage() {
                                 }
                               }}
                               className={inputCls}
-                              placeholder="13-digit BHF/PCNS number"
+                              placeholder="BHF/PCNS practice number"
                               inputMode="numeric"
-                              maxLength={13}
                             />
                             <div className="mt-1 text-[11px] text-slate-500">
                               Optional. Required only if you want a billing/practice credential recorded.

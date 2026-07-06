@@ -1,11 +1,10 @@
-﻿// apps/clinician-app/app/auth/login/page.tsx
+// apps/clinician-app/app/auth/login/page.tsx
 'use client';
 
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import {
-  Sparkles,
   ShieldCheck,
   Lock,
   Mail,
@@ -229,7 +228,6 @@ function ClinicianLoginPageContent() {
         <div className="grid gap-8 lg:grid-cols-2 lg:items-center">
           <section className="order-2 lg:order-1">
             <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/70 px-3 py-1 text-xs font-black text-slate-700 backdrop-blur">
-              <Sparkles className="h-4 w-4 text-indigo-700" />
               Ambulant+ · Clinician
             </div>
 
@@ -492,7 +490,7 @@ function ClinicianLoginPageContent() {
               </div>
 
               <div className="mt-4 text-center text-[11px] text-slate-500">
-                By signing in you agree to your clinic’s terms and privacy policy.
+                By signing in you agree to Ambulant+’s <Link href="/terms" target="_blank" rel="noreferrer" className="font-bold text-slate-700 hover:underline">terms</Link> and <Link href="/privacy" target="_blank" rel="noreferrer" className="font-bold text-slate-700 hover:underline">privacy policy</Link>.
               </div>
             </div>
           </section>

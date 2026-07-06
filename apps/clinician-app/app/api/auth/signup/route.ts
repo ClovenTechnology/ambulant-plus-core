@@ -116,7 +116,7 @@ function hpcsaRegistrationLooksValid(value: any) {
 }
 
 function practiceNumberLooksValid(value: any) {
-  return /^\d{13}$/.test(digitsOnly(value));
+  return digitsOnly(value).length > 0;
 }
 
 function passportNumberLooksValid(value: any) {
@@ -610,7 +610,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (practiceNumber && !practiceNumberLooksValid(practiceNumber)) {
-      return badRequest('BHF/PCNS practice number must contain exactly 13 digits', 'practiceNumber');
+      return badRequest('Enter a valid BHF/PCNS practice number', 'practiceNumber');
     }
 
     if (practiceNumber) {
