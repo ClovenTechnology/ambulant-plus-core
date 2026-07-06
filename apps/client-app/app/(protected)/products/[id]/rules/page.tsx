@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import { useEffect, useMemo, useState } from "react";
 
@@ -78,11 +78,8 @@ const SERVICE_TYPES = [
 const LIMIT_PERIODS = ["DAY", "WEEK", "MONTH", "QUARTER", "YEAR", "LIFETIME"] as const;
 const VISIT_MODES: VisitMode[] = ["TELEVISIT", "IN_PERSON", "HYBRID"];
 
-function baseUrl() {
-  return (
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010')
-  );
+function apiPath(pathname: string) {
+  return pathname;
 }
 
 function emptyEditor(defaultServiceType = "CONSULT_STANDARD"): EditorState {
@@ -177,7 +174,6 @@ function toPayload(state: EditorState, coveragePlanId: string) {
   const isVisit = serviceType.includes("VISIT") || serviceType.includes("CONSULT");
 
   return {
-    orgId: "org-default",
     coveragePlanId,
     serviceType,
     enabled: state.enabled,
@@ -246,9 +242,9 @@ export default function CoverageRulesEditorPage({
 
     try {
       const [plansRes, rulesRes] = await Promise.all([
-        fetch(`${baseUrl()}/api/coverage/plans?orgId=org-default`, { cache: "no-store" }),
+        fetch(`/api/coverage/plans`, { cache: "no-store" }),
         fetch(
-          `${baseUrl()}/api/coverage/service-rules?coveragePlanId=${encodeURIComponent(
+          `/api/coverage/service-rules?coveragePlanId=${encodeURIComponent(
             coveragePlanId
           )}`,
           { cache: "no-store" }
@@ -312,7 +308,7 @@ export default function CoverageRulesEditorPage({
     setError(null);
 
     try {
-      const res = await fetch(`${baseUrl()}/api/coverage/service-rules`, {
+      const res = await fetch(`/api/coverage/service-rules`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
@@ -346,7 +342,7 @@ export default function CoverageRulesEditorPage({
     setError(null);
 
     try {
-      const res = await fetch(`${baseUrl()}/api/coverage/service-rules/${ruleId}`, {
+      const res = await fetch(`/api/coverage/service-rules/${encodeURIComponent(ruleId)}`, {
         method: "PATCH",
         headers: {
           "content-type": "application/json",
