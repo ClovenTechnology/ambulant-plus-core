@@ -55,6 +55,7 @@ function money(value: unknown) {
 }
 
 function settlementData(row: {
+  orgId: string;
   clientId?: string | null;
   providerLane: string;
   providerId?: string | null;
@@ -64,7 +65,7 @@ function settlementData(row: {
   billableEventIds: string[];
 }) {
   const data: Record<string, any> = {
-    orgId: row.clientId ? "org-default" : "org-default",
+    orgId: row.orgId,
     currency: row.currency || "ZAR",
     status: settlementStatusForCreate(),
     metadata: {
@@ -123,8 +124,8 @@ function settlementData(row: {
 
   if (modelHasField("SettlementRecord", "clinicianId")) {
     data.clinicianId =
-      row.providerLane === "CLINICIAN"
-        ? row.providerId || "clinician-demo-001"
+      row.providerLane === "CLINICIAN" && row.providerId
+        ? row.providerId
         : "system-settlement";
   }
 
@@ -138,19 +139,35 @@ function settlementData(row: {
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const orgId = body.orgId ?? "org-default";
+    const requestedOrgId = String(
+      body.orgId ||
+        body.org_id ||
+        req.headers.get("x-ambulant-org-id") ||
+        req.headers.get("x-org-id") ||
+        "",
+    ).trim();
 
-    const auth = requireApiClientRole(
-      req,
-      ["ORG_OWNER", "ORG_ADMIN", "FINANCE_MANAGER"],
-      { orgId }
-    );
+    const auth = requestedOrgId
+      ? requireApiClientRole(
+          req,
+          ["ORG_OWNER", "ORG_ADMIN", "FINANCE_MANAGER"],
+          { orgId: requestedOrgId },
+        )
+      : requireApiClientRole(req, ["ORG_OWNER", "ORG_ADMIN", "FINANCE_MANAGER"]);
 
     if (auth.ok === false) {
       return auth.response;
     }
 
     const actor = auth.actor;
+    const orgId = requestedOrgId || String((actor as any)?.orgId || "").trim();
+
+    if (!orgId) {
+      return NextResponse.json(
+        { ok: false, error: "orgId_required" },
+        { status: 400 },
+      );
+    }
     const clientId = body.clientId ?? undefined;
 
     const billableEvents = await prisma.billableEvent.findMany({
@@ -181,7 +198,7 @@ export async function POST(req: NextRequest) {
         createdCount: 0,
         created: [],
         message:
-          "No READY or CLAIMED billable events found for settlement batching. Rerun the demo seed if previous settlement runs already marked them SETTLED.",
+          "No READY or CLAIMED billable events found for settlement batching.",
       });
     }
 
@@ -229,6 +246,7 @@ export async function POST(req: NextRequest) {
       const settlement = await prisma.settlementRecord.create({
         data: settlementData({
           ...row,
+          orgId,
           clientId: row.clientId ?? clientId ?? null,
         }) as any,
       });
