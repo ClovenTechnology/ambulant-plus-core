@@ -1,5 +1,6 @@
 // apps/api-gateway/app/api/practice/claims/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
 
 
@@ -17,8 +18,12 @@ export async function GET(req: NextRequest) {
       200,
     );
 
-    // Try resolve clinician from headers
-    const uid = req.headers.get('x-uid') || undefined;
+    const cookieStore = cookies();
+    const uid =
+      req.headers.get('x-uid') ||
+      cookieStore.get('ambulant_uid')?.value ||
+      cookieStore.get('user_id')?.value ||
+      undefined;
     let clinicianProfile: { id: string; displayName: string | null } | null = null;
 
     if (uid) {
@@ -28,16 +33,23 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    // Base query: payments, newest first
+    if (!uid || !clinicianProfile) {
+      return NextResponse.json(
+        {
+          ok: true,
+          demo: false,
+          items: [],
+        },
+        { status: 200 },
+      );
+    }
+
     const payments = await prisma.payment.findMany({
       take: limit,
       orderBy: { createdAt: 'desc' },
-      where: clinicianProfile
-        ? {
-            // scope to encounters for this clinician
-            encounter: { clinicianId: clinicianProfile.id },
-          }
-        : undefined,
+      where: {
+        encounter: { clinicianId: clinicianProfile.id },
+      },
       select: {
         id: true,
         encounterId: true,
@@ -50,30 +62,6 @@ export async function GET(req: NextRequest) {
         meta: true,
       },
     });
-
-    if (!payments.length && !clinicianProfile) {
-      // Demo fallback so the UI shows *something* in local/dev
-      const demo = {
-        ok: true,
-        demo: true,
-        items: [
-          {
-            id: 'pay-demo-1',
-            encounterId: 'enc-demo-1',
-            caseId: 'CASE-001',
-            patientName: 'Demo Patient',
-            clinicianName: 'Demo Clinician',
-            status: 'captured' as ClaimStatus,
-            amountCents: 75000,
-            currency: 'ZAR',
-            fundingSource: 'card',
-            createdAt: new Date().toISOString(),
-            paidAt: new Date().toISOString(),
-          },
-        ],
-      };
-      return NextResponse.json(demo, { status: 200 });
-    }
 
     const encounterIds = Array.from(
       new Set(payments.map((p) => p.encounterId).filter(Boolean)),

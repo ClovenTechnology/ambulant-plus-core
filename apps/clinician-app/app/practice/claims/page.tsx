@@ -3,8 +3,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
-const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? 'http://localhost:3010';
-
 type ClaimRow = {
   id: string;
   encounterId: string;
@@ -44,12 +42,9 @@ export default function PracticeClaimsPage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(`${API}/practice/claims?limit=100`, {
+        const res = await fetch('/api/practice/claims?limit=100', {
           cache: 'no-store',
-          headers: {
-            'x-role': 'clinician',
-            // x-uid is optional — real auth will wire this
-          },
+
         });
         const js: ClaimsResponse = await res.json().catch(() => ({ ok: false, error: 'Bad JSON' }));
         if (cancelled) return;
@@ -102,7 +97,7 @@ export default function PracticeClaimsPage() {
           </div>
           <div className="text-[11px] text-gray-400">
             Showing latest {rows.length} claim lines
-            {demo ? ' (demo data)' : ''}
+            {demo ? ' (sample data)' : ''}
           </div>
         </div>
       </div>

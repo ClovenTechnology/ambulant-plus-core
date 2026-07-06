@@ -35,44 +35,6 @@ type InvitePayload = {
   fullName?: string;
 };
 
-const DEMO_MEMBERS: PracticeMember[] = [
-  {
-    id: 'm-owner',
-    userId: 'user-owner',
-    fullName: 'Dr Demo Owner',
-    email: 'owner@example.com',
-    role: 'owner',
-    status: 'active',
-    speciality: 'Family Medicine',
-    city: 'Johannesburg',
-    country: 'South Africa',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'm-gp',
-    userId: 'user-gp',
-    fullName: 'Dr Virtual GP',
-    email: 'gp@example.com',
-    role: 'clinician',
-    status: 'active',
-    speciality: 'General Practitioner',
-    city: 'Cape Town',
-    country: 'South Africa',
-    createdAt: new Date().toISOString(),
-  },
-  {
-    id: 'm-admin',
-    userId: 'user-admin',
-    fullName: 'Reception Admin',
-    email: 'admin@example.com',
-    role: 'admin',
-    status: 'pending',
-    city: 'Johannesburg',
-    country: 'South Africa',
-    createdAt: new Date().toISOString(),
-  },
-];
-
 function normalizeRole(rawRole: any): PracticeMemberRole {
   const s = String(rawRole ?? '').toLowerCase();
   if (s === 'owner' || s === 'practice_owner') return 'owner';
@@ -187,12 +149,12 @@ export default function PracticeMembersPage() {
         const pName = js.practice?.name ?? (js as any).practice?.practiceName ?? null;
         if (pName) setPracticeName(pName);
       } catch (e: any) {
-        console.warn('[practice/members] API failed, using demo set', e);
+        console.warn('[practice/members] API failed', e);
         if (cancelled) return;
-        setMembers(DEMO_MEMBERS);
-        setUsingDemo(true);
-        setErr(e?.message || 'Unable to load practice members; showing demo data.');
-        toast('Showing demo members (wire /api/practice/members to your gateway for real data).', 'info');
+        setMembers([]);
+        setUsingDemo(false);
+        setErr(e?.message || 'Unable to load practice members.');
+        toast('Unable to load live practice members. Please refresh or contact support.', 'error');
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -294,10 +256,10 @@ export default function PracticeMembersPage() {
   const updateMemberRole = async (memberId: string, nextRole: PracticeMemberRole) => {
     setRoleUpdating((prev) => ({ ...prev, [memberId]: true }));
     try {
-      const res = await fetch('/api/practice/members', {
+      const res = await fetch(`/api/practice/members/${encodeURIComponent(memberId)}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ memberId, role: nextRole }),
+        body: JSON.stringify({ role: nextRole }),
       });
       if (!res.ok) {
         const txt = await res.text().catch(() => '');
@@ -313,7 +275,7 @@ export default function PracticeMembersPage() {
       );
     } catch (err: any) {
       console.error('[practice/members] role update failed', err);
-      toast(err?.message || 'Failed to update role. Ensure PATCH /api/practice/members is implemented.', 'error');
+      toast(err?.message || 'Failed to update role.', 'error');
     } finally {
       setRoleUpdating((prev) => ({ ...prev, [memberId]: false }));
     }
@@ -322,10 +284,10 @@ export default function PracticeMembersPage() {
   const updateMemberStatus = async (memberId: string, nextStatus: PracticeMemberStatus) => {
     setStatusUpdating((prev) => ({ ...prev, [memberId]: true }));
     try {
-      const res = await fetch('/api/practice/members', {
+      const res = await fetch(`/api/practice/members/${encodeURIComponent(memberId)}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ memberId, status: nextStatus }),
+        body: JSON.stringify({ status: nextStatus }),
       });
       if (!res.ok) {
         const txt = await res.text().catch(() => '');
@@ -341,7 +303,7 @@ export default function PracticeMembersPage() {
       );
     } catch (err: any) {
       console.error('[practice/members] status update failed', err);
-      toast(err?.message || 'Failed to update member status. Check PATCH /api/practice/members.', 'error');
+      toast(err?.message || 'Failed to update member status.', 'error');
     } finally {
       setStatusUpdating((prev) => ({ ...prev, [memberId]: false }));
     }
@@ -358,12 +320,6 @@ export default function PracticeMembersPage() {
             reception/admin staff, billing and support roles.
           </p>
 
-          {usingDemo && (
-            <div className="mt-2 max-w-xl rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800">
-              Demo mode – real API not connected. Implement{' '}
-              <code className="font-mono">GET/POST/PATCH /api/practice/members</code> to fully enable this page.
-            </div>
-          )}
           {err && !usingDemo && (
             <div className="mt-2 max-w-xl rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800">
               {err}
@@ -553,7 +509,7 @@ export default function PracticeMembersPage() {
               onClick={() => setInviteOpen(false)}
               className="absolute right-2 top-2 text-sm text-gray-500 hover:text-gray-900"
             >
-              ✕
+              ×
             </button>
             <h2 className="mb-1 text-sm font-semibold text-gray-900">Invite practice member</h2>
             <p className="mb-3 text-[11px] text-gray-500">
@@ -618,7 +574,7 @@ export default function PracticeMembersPage() {
             </form>
 
             <div className="mt-3 border-t pt-2 text-[10px] text-gray-500">
-              The clinician-app route <code className="font-mono">POST /api/practice/members</code> should forward to your API gateway.
+              Invitations are sent through the secure practice-members gateway route.
             </div>
           </div>
         </div>
