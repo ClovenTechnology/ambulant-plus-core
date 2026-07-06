@@ -1,4 +1,39 @@
+import { cookies, headers } from "next/headers";
 import Link from "next/link";
+
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
+
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders(extra: Record<string, string> = {}) {
+  return {
+    cookie: cookies().toString(),
+    ...extra,
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
+}
 
 const tile: React.CSSProperties = {
   background: "#121931",
@@ -96,15 +131,15 @@ type DashboardSummary = {
   }>;
 };
 
-function apiBase() {
-  return process.env.NEXT_PUBLIC_APIGW_BASE || process.env.APIGW_BASE || "http://localhost:3010";
-}
-
 async function getOverview(): Promise<AdherenceOverview | null> {
   try {
-    const res = await fetch(`${apiBase()}/api/client/adherence-overview?orgId=org-default&days=30`, {
-      cache: "no-store",
-    });
+    const res = await fetch(
+      internalApiUrl("/api/client/adherence-overview", { days: 30 }).toString(),
+      {
+        cache: "no-store",
+        headers: internalRequestHeaders(),
+      },
+    );
 
     if (!res.ok) return null;
     return await res.json();
@@ -115,9 +150,13 @@ async function getOverview(): Promise<AdherenceOverview | null> {
 
 async function getDashboardSummary(): Promise<DashboardSummary | null> {
   try {
-    const res = await fetch(`${apiBase()}/api/client/dashboard-summary?orgId=org-default&days=30`, {
-      cache: "no-store",
-    });
+    const res = await fetch(
+      internalApiUrl("/api/client/dashboard-summary", { days: 30 }).toString(),
+      {
+        cache: "no-store",
+        headers: internalRequestHeaders(),
+      },
+    );
 
     if (!res.ok) return null;
     return await res.json();

@@ -1,9 +1,43 @@
-async function getClaims() {
-  const base = process.env.NEXT_PUBLIC_APIGW_BASE || "http://localhost:3010";
+import { cookies, headers } from "next/headers";
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
 
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders(extra: Record<string, string> = {}) {
+  return {
+    cookie: cookies().toString(),
+    ...extra,
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
+}
+
+async function getClaims() {
   try {
-    const res = await fetch(`${base}/api/claims?orgId=org-default`, {
+    const res = await fetch(internalApiUrl("/api/claims").toString(), {
       cache: "no-store",
+      headers: internalRequestHeaders(),
     });
 
     if (!res.ok) {
@@ -18,13 +52,12 @@ async function getClaims() {
 }
 
 async function getAdherenceOverview() {
-  const base = process.env.NEXT_PUBLIC_APIGW_BASE || "http://localhost:3010";
-
   try {
     const res = await fetch(
-      `${base}/api/client/adherence-overview?orgId=org-default&days=30`,
+      internalApiUrl("/api/client/adherence-overview", { days: 30 }).toString(),
       {
         cache: "no-store",
+        headers: internalRequestHeaders(),
       }
     );
 
@@ -39,22 +72,12 @@ async function getAdherenceOverview() {
 }
 
 async function getMemberReimbursementSummary() {
-  const base = process.env.NEXT_PUBLIC_APIGW_BASE || "http://localhost:3010";
-  const clientId =
-    process.env.NEXT_PUBLIC_DEFAULT_CLIENT_ID || "client-demo-medical-aid";
-
   try {
     const res = await fetch(
-      `${base}/api/member-reimbursement-claims?orgId=org-default&clientId=${clientId}&limit=100`,
+      internalApiUrl("/api/member-reimbursement-claims", { limit: 100 }).toString(),
       {
         cache: "no-store",
-        headers: {
-          "x-ambulant-user-id": "admin@medicalaid.demo",
-          "x-ambulant-org-id": "org-default",
-          "x-ambulant-role": "ORG_OWNER",
-          "x-ambulant-workspace": "payer_ops",
-          "x-ambulant-trusted": "client-app-proxy",
-        },
+        headers: internalRequestHeaders(),
       }
     );
 

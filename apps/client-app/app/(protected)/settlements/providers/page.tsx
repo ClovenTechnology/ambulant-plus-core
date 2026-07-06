@@ -1,5 +1,40 @@
+import { cookies, headers } from "next/headers";
 import Link from "next/link";
 import type { CSSProperties } from "react";
+
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
+
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders(extra: Record<string, string> = {}) {
+  return {
+    cookie: cookies().toString(),
+    ...extra,
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
+}
 
 type ProviderSummaryResponse = {
   ok?: boolean;
@@ -14,11 +49,10 @@ type ProviderSummaryResponse = {
 };
 
 async function getProviderSettlements(): Promise<ProviderSummaryResponse> {
-  const base = process.env.NEXT_PUBLIC_APIGW_BASE || "http://localhost:3010";
-
   try {
-    const res = await fetch(`${base}/api/settlements/providers?orgId=org-default`, {
+    const res = await fetch(internalApiUrl("/api/settlements/providers").toString(), {
       cache: "no-store",
+      headers: internalRequestHeaders(),
     });
 
     const json = await res.json().catch(() => null);
@@ -76,7 +110,7 @@ export default async function SettlementProvidersPage() {
   return (
     <main style={{ padding: 32, maxWidth: 1320 }}>
       <Link href="/settlements" style={{ color: "#93c5fd", textDecoration: "none" }}>
-        ← Back to settlements
+        â† Back to settlements
       </Link>
 
       <div style={{ marginTop: 18, marginBottom: 24 }}>
