@@ -1,3 +1,4 @@
+import { cookies, headers } from "next/headers";
 ﻿type ProfileContext = {
   ok?: boolean;
   item?: {
@@ -195,16 +196,49 @@
   };
 };
 
-async function getProfileContext(id: string): Promise<ProfileContext | null> {
-  const base =
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.APIGW_BASE ||
-    (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
 
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders() {
+  return {
+    cookie: cookies().toString(),
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
+}
+
+async function getProfileContext(id: string): Promise<ProfileContext | null> {
   try {
     const res = await fetch(
-      `${base}/api/client/members/${id}/profile-context?orgId=org-default&days=30`,
-      { cache: "no-store" }
+      internalApiUrl(`/api/client/members/${encodeURIComponent(id)}/profile-context`, {
+        days: 30,
+      }).toString(),
+      {
+        cache: "no-store",
+        headers: internalRequestHeaders(),
+      },
     );
 
     if (!res.ok) return null;

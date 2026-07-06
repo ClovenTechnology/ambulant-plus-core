@@ -21,9 +21,6 @@ type EligibilityRow = {
   metadata?: any;
 };
 
-const ORG_ID = process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default';
-const CLIENT_ID =
-  process.env.NEXT_PUBLIC_DEFAULT_CLIENT_ID || 'client-demo-medical-aid';
 
 function currentPeriodKey() {
   const d = new Date();
@@ -61,8 +58,8 @@ export default function EligibilityPage() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
 
-  const [memberId, setMemberId] = useState('member-demo-001');
-  const [patientId, setPatientId] = useState('patient-demo-001');
+  const [memberId, setMemberId] = useState('');
+  const [patientId, setPatientId] = useState('');
   const [eligibilityStatus, setEligibilityStatus] = useState('ELIGIBLE');
   const [premiumStatus, setPremiumStatus] = useState('PAID');
   const [reason, setReason] = useState('Monthly eligibility verified.');
@@ -72,10 +69,7 @@ export default function EligibilityPage() {
     setErr('');
 
     try {
-      const params = new URLSearchParams({
-        orgId: ORG_ID,
-        clientId: CLIENT_ID,
-        periodKey,
+      const params = new URLSearchParams({        periodKey,
         limit: '500',
       });
 
@@ -109,16 +103,25 @@ export default function EligibilityPage() {
     setErr('');
 
     try {
-      const body = {
-        orgId: ORG_ID,
-        clientId: CLIENT_ID,
-        periodKey,
+      const resolvedMemberId = String(next?.memberId || memberId || '').trim();
+
+      const resolvedPatientId = String(next?.patientId || patientId || '').trim();
+
+
+      if (!resolvedMemberId || !resolvedPatientId) {
+
+        throw new Error('Member link and patient identifier are required.');
+
+      }
+
+
+      const body = {        periodKey,
         source: 'PAYEROPS_MANUAL',
         adapterChannel: 'PAYEROPS_MANUAL',
         items: [
           {
-            patientSponsorLinkId: next?.memberId || memberId,
-            patientId: next?.patientId || patientId,
+            patientSponsorLinkId: resolvedMemberId,
+            patientId: resolvedPatientId,
             status:
               next?.eligibilityStatus === 'ELIGIBLE' ? 'ACTIVE' : next?.eligibilityStatus || eligibilityStatus,
             eligibilityStatus: next?.eligibilityStatus || eligibilityStatus,
