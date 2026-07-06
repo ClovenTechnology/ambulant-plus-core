@@ -1,4 +1,4 @@
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 
@@ -19,8 +19,38 @@ function safeParse(value: string | undefined): SessionPayload | null {
   }
 }
 
-function apigwBase() {
-  return process.env.NEXT_PUBLIC_APIGW_BASE || process.env.APIGW_BASE || "http://localhost:3010";
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
+
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders(extra: Record<string, string> = {}) {
+  return {
+    cookie: cookies().toString(),
+    ...extra,
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
 }
 
 function canManageUsers(session: SessionPayload) {
@@ -32,9 +62,13 @@ function canManageUsers(session: SessionPayload) {
 }
 
 async function getOrg(orgId: string) {
-  const res = await fetch(`${apigwBase()}/api/client/orgs?orgId=${encodeURIComponent(orgId)}`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    internalApiUrl("/api/client/orgs", { orgId }).toString(),
+    {
+      cache: "no-store",
+      headers: internalRequestHeaders(),
+    },
+  );
 
   if (!res.ok) return null;
   const json = await res.json().catch(() => null);
@@ -42,9 +76,13 @@ async function getOrg(orgId: string) {
 }
 
 async function getInvitations(orgId: string) {
-  const res = await fetch(`${apigwBase()}/api/client/orgs/${encodeURIComponent(orgId)}/invitations`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    internalApiUrl(`/api/client/orgs/${encodeURIComponent(orgId)}/invitations`).toString(),
+    {
+      cache: "no-store",
+      headers: internalRequestHeaders(),
+    },
+  );
 
   if (!res.ok) return [];
   const json = await res.json().catch(() => null);
@@ -84,16 +122,19 @@ async function inviteStaff(formData: FormData) {
     defaultWorkspace: String(formData.get("defaultWorkspace") || "PAYER_OPS").trim(),
   };
 
-  const res = await fetch(`${apigwBase()}/api/client/orgs/${encodeURIComponent(session.orgId)}/invitations`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-ambulant-user-id": session.uid || "",
-      "x-ambulant-org-id": session.orgId || "",
+  const res = await fetch(
+    internalApiUrl(`/api/client/orgs/${encodeURIComponent(session.orgId)}/invitations`).toString(),
+    {
+      method: "POST",
+      headers: internalRequestHeaders({
+        "content-type": "application/json",
+        "x-ambulant-user-id": session.uid || "",
+        "x-ambulant-org-id": session.orgId || "",
+      }),
+      body: JSON.stringify(body),
+      cache: "no-store",
     },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
+  );
 
   if (!res.ok) {
     const json = await res.json().catch(() => null);

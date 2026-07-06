@@ -85,12 +85,8 @@ type AuthorizationItem = {
   ruleSnapshot?: Record<string, any> | null;
 };
 
-function baseUrl() {
-  return process.env.NEXT_PUBLIC_APIGW_BASE || "http://localhost:3010";
-}
-
 async function fetchAuthorizations() {
-  const res = await fetch(`${baseUrl()}/api/authorizations?orgId=org-default`, {
+  const res = await fetch("/api/authorizations", {
     cache: "no-store",
     credentials: "include",
   });
@@ -105,7 +101,7 @@ async function fetchAuthorizations() {
 
 async function fetchAdherenceOverview() {
   const res = await fetch(
-    `${baseUrl()}/api/client/adherence-overview?orgId=org-default&days=30`,
+    "/api/client/adherence-overview?days=30",
     {
       cache: "no-store",
       credentials: "include",
@@ -253,7 +249,7 @@ function buildIdempotencyKey(prefix: string, id: string) {
 
 function friendlyActionError(message: string) {
   if (message.includes("Can't reach database server")) {
-    return "Database connection is temporarily unavailable. Please retry after the api-gateway reconnects.";
+    return "Database connection is temporarily unavailable. Please retry shortly.";
   }
 
   if (message.includes("actorUserId")) {

@@ -1,13 +1,47 @@
-async function getCoveragePlans() {
-  const base =
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.APIGW_BASE ||
-    "http://localhost:3010";
+import { cookies, headers } from "next/headers";
+function appOrigin() {
+  const h = headers();
+  const host = h.get("x-forwarded-host") || h.get("host");
+  const proto = h.get("x-forwarded-proto") || "https";
 
+  if (!host) {
+    throw new Error("client_app_origin_required");
+  }
+
+  return `${proto}://${host}`;
+}
+
+function internalRequestHeaders(extra: Record<string, string> = {}) {
+  return {
+    cookie: cookies().toString(),
+    ...extra,
+  };
+}
+
+function internalApiUrl(
+  pathname: string,
+  params: Record<string, string | number | undefined> = {},
+) {
+  const url = new URL(pathname, appOrigin());
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined && value !== "") {
+      url.searchParams.set(key, String(value));
+    }
+  }
+
+  return url;
+}
+
+async function getCoveragePlans() {
   try {
-    const res = await fetch(`${base}/api/coverage/plans?orgId=org-default`, {
-      cache: "no-store",
-    });
+    const res = await fetch(
+      internalApiUrl("/api/coverage/plans").toString(),
+      {
+        cache: "no-store",
+        headers: internalRequestHeaders(),
+      },
+    );
 
     if (!res.ok) return [];
     const json = await res.json();
@@ -18,15 +52,14 @@ async function getCoveragePlans() {
 }
 
 async function getMembers() {
-  const base =
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.APIGW_BASE ||
-    "http://localhost:3010";
-
   try {
-    const res = await fetch(`${base}/api/client-members?orgId=org-default`, {
-      cache: "no-store",
-    });
+    const res = await fetch(
+      internalApiUrl("/api/client-members").toString(),
+      {
+        cache: "no-store",
+        headers: internalRequestHeaders(),
+      },
+    );
 
     if (!res.ok) return [];
     const json = await res.json();
@@ -47,24 +80,18 @@ type SearchParams = {
 };
 
 async function runPreflight(searchParams: SearchParams) {
-  const base =
-    process.env.NEXT_PUBLIC_APIGW_BASE ||
-    process.env.APIGW_BASE ||
-    "http://localhost:3010";
-
   if (!searchParams.patientId || !searchParams.serviceType) {
     return null;
   }
 
   try {
-    const res = await fetch(`${base}/api/coverage/preflight`, {
+    const res = await fetch(internalApiUrl("/api/coverage/preflight").toString(), {
       method: "POST",
       cache: "no-store",
-      headers: {
+      headers: internalRequestHeaders({
         "content-type": "application/json",
-      },
+      }),
       body: JSON.stringify({
-        orgId: "org-default",
         patientId: searchParams.patientId,
         clientId: searchParams.clientId || undefined,
         clinicianId: searchParams.clinicianId || undefined,
@@ -88,7 +115,7 @@ async function runPreflight(searchParams: SearchParams) {
 
       return {
         ok: false,
-        error: `Preflight API returned HTTP ${res.status}. Please confirm api-gateway is running and /api/coverage/preflight exists.`,
+        error: `Preflight API returned HTTP ${res.status}. Please confirm the coverage preflight route is available.`,
       };
     }
 
