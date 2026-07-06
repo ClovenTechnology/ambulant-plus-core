@@ -8,6 +8,15 @@ import { COUNTRY_CONFIG, validateRiderKyi } from '@/src/lib/kyc';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+function resolveOrgId(req: NextRequest, who: ReturnType<typeof readIdentity>) {
+  return String(
+    who.orgId ||
+      req.headers.get('x-org-id') ||
+      req.headers.get('x-ambulant-org-id') ||
+      '',
+  ).trim();
+}
+
 export async function GET(req: NextRequest) {
   const who = readIdentity(req.headers);
   requireRole(who, ['admin', 'rider']);
@@ -27,6 +36,14 @@ export async function POST(req: NextRequest) {
 
   const userId = String(who.uid || '').trim();
   if (!userId) return NextResponse.json({ ok: false, error: 'missing_uid' }, { status: 409 });
+
+  const orgId = resolveOrgId(req, who);
+  if (!orgId) return NextResponse.json({ ok: false, error: 'orgId_required' }, { status: 400 });
+
+  const existing = await prisma.carePortRiderProfile.findUnique({ where: { userId } });
+  if (existing?.orgId && existing.orgId !== orgId) {
+    return NextResponse.json({ ok: false, error: 'cross_org_rider_profile_access_denied' }, { status: 403 });
+  }
 
   const body = await req.json().catch(() => ({}));
   const country = String(body?.country || 'ZA').toUpperCase() as keyof typeof COUNTRY_CONFIG;
@@ -52,7 +69,7 @@ export async function POST(req: NextRequest) {
       kyiStatus: 'PENDING_REVIEW',
     } as any,
     create: {
-      orgId: 'org-default',
+      orgId,
       userId,
       country,
       currency: cfg.currency,
