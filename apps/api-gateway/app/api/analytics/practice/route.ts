@@ -1,208 +1,277 @@
 // apps/api-gateway/app/api/analytics/practice/route.ts
-import { NextRequest, NextResponse } from 'next/server';
-import { type PlanTier, getViewerPlanTier } from '@/lib/planTier';
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
+import { getViewerPlanTier } from "@/lib/planTier";
 
-type RangeKey = '30d' | '90d' | '12m';
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
-type TeamRoleKey =
-  | 'clinician'
-  | 'admin_medical'
-  | 'admin_non_medical'
-  | 'nurse'
-  | 'assistant'
-  | 'other';
+type RangeKey = "30d" | "90d" | "12m";
+type PlanTier = "free" | "basic" | "pro" | "host";
+type TeamRoleKey = "clinician" | "admin_medical" | "admin_non_medical" | "nurse" | "assistant" | "other";
 
-type TeamKpis = {
-  totalStaff: number;
-  clinicians: number;
-  activeClinicians: number;
-  adminStaff: number;
-  nurses: number;
+function jsonError(message: string, status = 400) {
+  return NextResponse.json(
+    { ok: false, error: message },
+    { status, headers: { "cache-control": "no-store" } },
+  );
+}
 
-  totalSessionsRange: number;
-  totalConsultationMinutesRange: number;
-  totalPatientsRange: number;
+function normaliseRange(value: string | null): RangeKey {
+  if (value === "30d" || value === "90d" || value === "12m") return value;
+  return "90d";
+}
 
-  avgClinicianOnTimeJoinRatePct: number;
-  avgOverrunRatePct: number;
-};
+function sinceForRange(range: RangeKey) {
+  const days = range === "30d" ? 30 : range === "90d" ? 90 : 365;
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
 
-type RoleBreakdownRow = {
-  role: TeamRoleKey;
-  label: string;
-  headcount: number;
-  active: number;
-  sessions: number;
-  sharePct: number;
-};
+function planTierOf(value: unknown): PlanTier {
+  const raw = String(value || "basic").toLowerCase();
+  if (raw === "host" || raw === "pro" || raw === "free") return raw;
+  return "basic";
+}
 
-type BucketRow = {
-  label: string;
-  sessions: number;
-  sharePct: number;
-};
+function roleRaw(member: any) {
+  return String(member?.role || member?.membershipRole || member?.memberRole || "").toLowerCase();
+}
 
-type TeamMemberRow = {
-  memberId: string;
-  name: string;
-  roleLabel: string;
-  classLabel?: string | null;
-  planTier: PlanTier;
-  sessions: number;
-  consultationMinutes: number;
-  onTimeJoinRatePct: number;
-  overrunRatePct: number;
-  avgRating?: number | null;
-  lastActiveAt?: string | null;
-  isClinician: boolean;
-};
+function roleKey(member: any): TeamRoleKey {
+  const role = roleRaw(member);
+  if (role.includes("nurse")) return "nurse";
+  if (role.includes("assistant")) return "assistant";
+  if (role.includes("clinician") || role.includes("doctor") || role.includes("clinical_lead")) return "clinician";
+  if (role.includes("medical_admin") || role.includes("clinical_admin")) return "admin_medical";
+  if (role.includes("admin") || role.includes("manager") || role.includes("billing") || role.includes("support")) {
+    return "admin_non_medical";
+  }
+  return "other";
+}
 
-export type TeamAnalyticsPayload = {
-  planTier: PlanTier; // viewer tier
-  practiceName: string;
-  practiceId?: string | null;
+function roleLabel(key: TeamRoleKey) {
+  if (key === "clinician") return "Clinicians";
+  if (key === "nurse") return "Nurses";
+  if (key === "assistant") return "Assistants";
+  if (key === "admin_medical") return "Medical admin";
+  if (key === "admin_non_medical") return "Non-medical admin";
+  return "Other";
+}
 
-  kpis: TeamKpis;
-  roleBreakdown: RoleBreakdownRow[];
-  punctualityBucketsClinician: BucketRow[];
-  overrunBuckets: BucketRow[];
-  members: TeamMemberRow[];
-};
+function memberName(member: any) {
+  return (
+    member?.fullName ||
+    member?.name ||
+    member?.displayName ||
+    member?.email ||
+    member?.clinicianName ||
+    "Practice member"
+  );
+}
 
-function buildDemoTeamAnalytics(
-  planTier: PlanTier,
-  practiceName: string,
-  practiceId: string | null,
-): TeamAnalyticsPayload {
-  return {
-    planTier,
-    practiceName,
-    practiceId,
-    kpis: {
-      totalStaff: 12,
-      clinicians: 5,
-      activeClinicians: 4,
-      adminStaff: 4,
-      nurses: 3,
-      totalSessionsRange: 420,
-      totalConsultationMinutesRange: 9800,
-      totalPatientsRange: 320,
-      avgClinicianOnTimeJoinRatePct: 81,
-      avgOverrunRatePct: 23,
-    },
-    roleBreakdown: [
-      { role: 'clinician', label: 'Clinicians', headcount: 5, active: 4, sessions: 310, sharePct: 74 },
-      { role: 'nurse', label: 'Nurses', headcount: 3, active: 3, sessions: 60, sharePct: 14 },
-      { role: 'admin_medical', label: 'Medical admin', headcount: 2, active: 2, sessions: 30, sharePct: 7 },
-      { role: 'admin_non_medical', label: 'Non-medical admin', headcount: 2, active: 2, sessions: 20, sharePct: 5 },
-    ],
-    punctualityBucketsClinician: [
-      { label: 'On time (≤ grace)', sessions: 280, sharePct: 67 },
-      { label: '0–5 min late', sessions: 90, sharePct: 21 },
-      { label: '5–10 min late', sessions: 35, sharePct: 8 },
-      { label: '>10 min late', sessions: 15, sharePct: 4 },
-    ],
-    overrunBuckets: [
-      { label: 'On time / early', sessions: 220, sharePct: 52 },
-      { label: '0–25% over', sessions: 120, sharePct: 29 },
-      { label: '25–50% over', sessions: 50, sharePct: 12 },
-      { label: '>50% over', sessions: 30, sharePct: 7 },
-    ],
-    members: [
-      {
-        memberId: 'cln-001',
-        name: 'Dr N. Naidoo',
-        roleLabel: 'Clinician',
-        classLabel: 'Class A — Doctors',
-        planTier: 'host',
-        sessions: 160,
-        consultationMinutes: 4200,
-        onTimeJoinRatePct: 82,
-        overrunRatePct: 28,
-        avgRating: 4.7,
-        lastActiveAt: new Date().toISOString(),
-        isClinician: true,
+function memberIdOf(member: any) {
+  return String(member?.clinicianId || member?.id || member?.userId || "");
+}
+
+function isActive(member: any) {
+  const status = String(member?.status || "active").toLowerCase();
+  return !["inactive", "disabled", "suspended", "removed", "archived"].includes(status);
+}
+
+function dateValue(value: unknown): Date | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === "string" && value.trim()) {
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return null;
+}
+
+function durationMinutes(encounter: any) {
+  for (const key of ["durationMinutes", "durationMin", "consultationMinutes", "minutes"]) {
+    const value = Number(encounter?.[key]);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+
+  const started = dateValue(encounter?.startedAt || encounter?.startTime || encounter?.createdAt);
+  const ended = dateValue(encounter?.endedAt || encounter?.endTime || encounter?.completedAt);
+
+  if (started && ended && ended.getTime() > started.getTime()) {
+    return Math.round((ended.getTime() - started.getTime()) / 60000);
+  }
+
+  return 0;
+}
+
+async function loadPracticeMembers(practiceId: string) {
+  const db = prisma as any;
+  try {
+    return await db.practiceMember.findMany({
+      where: { practiceId },
+      orderBy: { createdAt: "asc" },
+    });
+  } catch {
+    return await db.practiceMember.findMany({ where: { practiceId } });
+  }
+}
+
+async function loadEncounters(clinicianIds: string[], since: Date) {
+  if (!clinicianIds.length) return [];
+
+  const db = prisma as any;
+  try {
+    return await db.encounter.findMany({
+      where: {
+        clinicianId: { in: clinicianIds },
+        createdAt: { gte: since },
       },
-      {
-        memberId: 'cln-002',
-        name: 'Dr P. Mbele',
-        roleLabel: 'Clinician',
-        classLabel: 'Class B — Allied',
-        planTier: 'host',
-        sessions: 95,
-        consultationMinutes: 2400,
-        onTimeJoinRatePct: 78,
-        overrunRatePct: 21,
-        avgRating: 4.4,
-        lastActiveAt: new Date().toISOString(),
-        isClinician: true,
-      },
-      {
-        memberId: 'nurse-01',
-        name: 'Nurse Khumalo',
-        roleLabel: 'Nurse',
-        classLabel: null,
-        planTier: 'host',
-        sessions: 60,
-        consultationMinutes: 1200,
-        onTimeJoinRatePct: 84,
-        overrunRatePct: 15,
-        avgRating: null,
-        lastActiveAt: new Date().toISOString(),
-        isClinician: false,
-      },
-      {
-        memberId: 'admin-01',
-        name: 'Thandi (Medical admin)',
-        roleLabel: 'Medical admin',
-        classLabel: null,
-        planTier: 'host',
-        sessions: 30,
-        consultationMinutes: 0,
-        onTimeJoinRatePct: 0,
-        overrunRatePct: 0,
-        avgRating: null,
-        lastActiveAt: new Date().toISOString(),
-        isClinician: false,
-      },
-    ],
-  };
+      orderBy: { createdAt: "desc" },
+      take: 2000,
+    });
+  } catch {
+    return [];
+  }
 }
 
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const rangeParam = (url.searchParams.get('range') as RangeKey | null) ?? '90d';
-  const range: RangeKey = ['30d', '90d', '12m'].includes(rangeParam) ? rangeParam : '90d';
+  const range = normaliseRange(url.searchParams.get("range"));
 
   try {
     const viewer = await getViewerPlanTier(req);
-    const payload = buildDemoTeamAnalytics(viewer.planTier, viewer.practiceName, viewer.practiceId);
+    const practiceId = String(viewer?.practiceId || "").trim();
 
-    return NextResponse.json({ ...payload, _range: range }, { status: 200 });
-  } catch (e: any) {
-    console.error('[analytics/practice] GET error', e);
+    if (!practiceId) return jsonError("No practice found for this user", 404);
 
-    const fallbackViewer = await getViewerPlanTier(req).catch(() => ({
-      planTier: 'host' as PlanTier,
-      practiceName: 'Demo Virtual Practice',
-      practiceId: 'prac-demo-001',
-      clinicianId: 'clin-demo-host',
-      planId: 'team' as const,
+    const members = await loadPracticeMembers(practiceId);
+    const clinicianIds = members
+      .map((member: any) => member?.clinicianId)
+      .filter((value: unknown): value is string => typeof value === "string" && value.length > 0);
+
+    const encounters = await loadEncounters(clinicianIds, sinceForRange(range));
+    const sessionsByClinician = new Map<string, any[]>();
+
+    for (const encounter of encounters) {
+      const clinicianId = String(encounter?.clinicianId || "");
+      if (!clinicianId) continue;
+      const existing = sessionsByClinician.get(clinicianId) || [];
+      existing.push(encounter);
+      sessionsByClinician.set(clinicianId, existing);
+    }
+
+    const totalSessionsRange = encounters.length;
+    const totalConsultationMinutesRange = encounters.reduce(
+      (sum: number, encounter: any) => sum + durationMinutes(encounter),
+      0,
+    );
+
+    const patientIds = new Set(
+      encounters
+        .map((encounter: any) => encounter?.patientId || encounter?.patient?.id)
+        .filter(Boolean)
+        .map(String),
+    );
+
+    const roleMap = new Map<TeamRoleKey, { role: TeamRoleKey; label: string; headcount: number; active: number; sessions: number; sharePct: number }>();
+
+    for (const member of members) {
+      const key = roleKey(member);
+      const current =
+        roleMap.get(key) ||
+        {
+          role: key,
+          label: roleLabel(key),
+          headcount: 0,
+          active: 0,
+          sessions: 0,
+          sharePct: 0,
+        };
+
+      current.headcount += 1;
+      if (isActive(member)) current.active += 1;
+
+      const clinicianId = String(member?.clinicianId || "");
+      current.sessions += clinicianId ? (sessionsByClinician.get(clinicianId) || []).length : 0;
+
+      roleMap.set(key, current);
+    }
+
+    const roleBreakdown = Array.from(roleMap.values()).map((row) => ({
+      ...row,
+      sharePct: totalSessionsRange ? (row.sessions / totalSessionsRange) * 100 : 0,
     }));
 
-    const payload = buildDemoTeamAnalytics(
-      fallbackViewer.planTier,
-      fallbackViewer.practiceName,
-      fallbackViewer.practiceId,
-    );
+    const clinicianMembers = members.filter((member: any) => roleKey(member) === "clinician");
+    const activeClinicians = clinicianMembers.filter(isActive).length;
+
+    const teamMembers = members.map((member: any) => {
+      const key = roleKey(member);
+      const clinicianId = String(member?.clinicianId || "");
+      const memberEncounters = clinicianId ? sessionsByClinician.get(clinicianId) || [] : [];
+
+      return {
+        memberId: memberIdOf(member),
+        name: memberName(member),
+        roleLabel: roleLabel(key).replace(/s$/, ""),
+        classLabel: member?.classLabel || member?.clinicianClass || null,
+        planTier: planTierOf(member?.planTier || viewer?.planTier),
+        sessions: memberEncounters.length,
+        consultationMinutes: memberEncounters.reduce(
+          (sum: number, encounter: any) => sum + durationMinutes(encounter),
+          0,
+        ),
+        onTimeJoinRatePct: 0,
+        overrunRatePct: 0,
+        avgRating:
+          typeof member?.avgRating === "number"
+            ? member.avgRating
+            : typeof member?.rating === "number"
+              ? member.rating
+              : null,
+        lastActiveAt:
+          dateValue(member?.lastActiveAt || member?.updatedAt || member?.createdAt)?.toISOString() || null,
+        isClinician: key === "clinician",
+      };
+    });
 
     return NextResponse.json(
       {
-        ...payload,
-        _range: '90d' as RangeKey,
-        _warning: 'Using demo practice analytics payload (real aggregation not wired yet).',
+        planTier: planTierOf(viewer?.planTier),
+        practiceName: viewer?.practiceName || "Practice",
+        practiceId,
+        kpis: {
+          totalStaff: members.length,
+          clinicians: clinicianMembers.length,
+          activeClinicians,
+          adminStaff: roleBreakdown
+            .filter((row) => row.role === "admin_medical" || row.role === "admin_non_medical")
+            .reduce((sum, row) => sum + row.headcount, 0),
+          nurses: roleBreakdown
+            .filter((row) => row.role === "nurse")
+            .reduce((sum, row) => sum + row.headcount, 0),
+          totalSessionsRange,
+          totalConsultationMinutesRange,
+          totalPatientsRange: patientIds.size,
+          avgClinicianOnTimeJoinRatePct: 0,
+          avgOverrunRatePct: 0,
+        },
+        roleBreakdown,
+        punctualityBucketsClinician: [
+          { label: "On time", sessions: 0, sharePct: 0 },
+          { label: "Late", sessions: 0, sharePct: 0 },
+        ],
+        overrunBuckets: [
+          { label: "On time / early", sessions: 0, sharePct: 0 },
+          { label: "Overrun", sessions: 0, sharePct: 0 },
+        ],
+        members: teamMembers,
+        _range: range,
       },
-      { status: 200 },
+      { headers: { "cache-control": "no-store" } },
     );
+  } catch (err: any) {
+    console.error("[analytics/practice] GET error", err);
+    return jsonError(err?.message || "Failed to load practice analytics", 500);
   }
 }

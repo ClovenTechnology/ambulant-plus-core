@@ -71,130 +71,6 @@ type TeamAnalyticsPayload = {
   members: TeamMemberRow[];
 };
 
-/* ----------- Local mock for fallback ----------- */
-
-const MOCK_TEAM_ANALYTICS: TeamAnalyticsPayload = {
-  planTier: 'host',
-  practiceName: 'Demo Virtual Practice',
-  practiceId: 'prac-demo-001',
-  kpis: {
-    totalStaff: 12,
-    clinicians: 5,
-    activeClinicians: 4,
-    adminStaff: 4,
-    nurses: 3,
-    totalSessionsRange: 420,
-    totalConsultationMinutesRange: 9800,
-    totalPatientsRange: 320,
-    avgClinicianOnTimeJoinRatePct: 81,
-    avgOverrunRatePct: 23,
-  },
-  roleBreakdown: [
-    {
-      role: 'clinician',
-      label: 'Clinicians',
-      headcount: 5,
-      active: 4,
-      sessions: 310,
-      sharePct: 74,
-    },
-    {
-      role: 'nurse',
-      label: 'Nurses',
-      headcount: 3,
-      active: 3,
-      sessions: 60,
-      sharePct: 14,
-    },
-    {
-      role: 'admin_medical',
-      label: 'Medical admin',
-      headcount: 2,
-      active: 2,
-      sessions: 30,
-      sharePct: 7,
-    },
-    {
-      role: 'admin_non_medical',
-      label: 'Non-medical admin',
-      headcount: 2,
-      active: 2,
-      sessions: 20,
-      sharePct: 5,
-    },
-  ],
-  punctualityBucketsClinician: [
-    { label: 'On time (≤ grace)', sessions: 280, sharePct: 67 },
-    { label: '0–5 min late', sessions: 90, sharePct: 21 },
-    { label: '5–10 min late', sessions: 35, sharePct: 8 },
-    { label: '>10 min late', sessions: 15, sharePct: 4 },
-  ],
-  overrunBuckets: [
-    { label: 'On time / early', sessions: 220, sharePct: 52 },
-    { label: '0–25% over', sessions: 120, sharePct: 29 },
-    { label: '25–50% over', sessions: 50, sharePct: 12 },
-    { label: '>50% over', sessions: 30, sharePct: 7 },
-  ],
-  members: [
-    {
-      memberId: 'cln-001',
-      name: 'Dr N. Naidoo',
-      roleLabel: 'Clinician',
-      classLabel: 'Class A — Doctors',
-      planTier: 'host',
-      sessions: 160,
-      consultationMinutes: 4200,
-      onTimeJoinRatePct: 82,
-      overrunRatePct: 28,
-      avgRating: 4.7,
-      lastActiveAt: new Date().toISOString(),
-      isClinician: true,
-    },
-    {
-      memberId: 'cln-002',
-      name: 'Dr P. Mbele',
-      roleLabel: 'Clinician',
-      classLabel: 'Class B — Allied',
-      planTier: 'host',
-      sessions: 95,
-      consultationMinutes: 2400,
-      onTimeJoinRatePct: 78,
-      overrunRatePct: 21,
-      avgRating: 4.4,
-      lastActiveAt: new Date().toISOString(),
-      isClinician: true,
-    },
-    {
-      memberId: 'nurse-01',
-      name: 'Nurse Khumalo',
-      roleLabel: 'Nurse',
-      classLabel: null,
-      planTier: 'host',
-      sessions: 60,
-      consultationMinutes: 1200,
-      onTimeJoinRatePct: 84,
-      overrunRatePct: 15,
-      avgRating: null,
-      lastActiveAt: new Date().toISOString(),
-      isClinician: false,
-    },
-    {
-      memberId: 'admin-01',
-      name: 'Thandi (Medical admin)',
-      roleLabel: 'Medical admin',
-      classLabel: null,
-      planTier: 'host',
-      sessions: 30,
-      consultationMinutes: 0,
-      onTimeJoinRatePct: 0,
-      overrunRatePct: 0,
-      avgRating: null,
-      lastActiveAt: new Date().toISOString(),
-      isClinician: false,
-    },
-  ],
-};
-
 /* ----------- Small UI bits ----------- */
 
 function StatCard({
@@ -319,14 +195,13 @@ export default function TeamAnalyticsPage() {
           | TeamAnalyticsPayload
           | null;
         if (cancelled) return;
-        setData(js || MOCK_TEAM_ANALYTICS);
+        if (!js) throw new Error('Team analytics response was empty.');
+        setData(js);
       } catch (e: any) {
         console.error('[team analytics] failed', e);
         if (cancelled) return;
-        setErr(
-          e?.message || 'Failed to load team analytics; using demo snapshot.',
-        );
-        setData(MOCK_TEAM_ANALYTICS);
+        setErr(e?.message || 'Failed to load team analytics.');
+        setData(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -341,7 +216,7 @@ export default function TeamAnalyticsPage() {
   if (!data) {
     return (
       <main className="max-w-5xl mx-auto p-6">
-        <p className="text-sm text-gray-600">Loading team analytics…</p>
+        <p className="text-sm text-gray-600">{loading ? "Loading team analytics…" : err || "Team analytics unavailable."}</p>
       </main>
     );
   }
