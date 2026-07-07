@@ -3,11 +3,6 @@
 
 import { useEffect, useState } from 'react';
 
-const API = (process.env.NEXT_PUBLIC_APIGW_BASE ?? '').replace(/\/$/, '');
-
-function apiUrl(path: string) {
-  return API ? `${API}${path}` : path;
-}
 type PracticeAnalyticsSummary = {
   ok: boolean;
   practiceName: string;
@@ -33,7 +28,7 @@ export default function PracticeAnalyticsPage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(apiUrl('/api/practice/analytics/summary'), {
+        const res = await fetch('/api/practice/analytics/summary', {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',

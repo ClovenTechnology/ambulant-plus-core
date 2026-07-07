@@ -3,11 +3,6 @@
 
 import { useEffect, useState } from 'react';
 
-const API = (process.env.NEXT_PUBLIC_APIGW_BASE ?? '').replace(/\/$/, '');
-
-function apiUrl(path: string) {
-  return API ? `${API}${path}` : path;
-}
 type MemberSplitRow = {
   clinicianId: string;
   clinicianName: string;
@@ -52,7 +47,7 @@ export default function PracticePayoutPage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(apiUrl('/api/practice/payouts/summary'), {
+        const res = await fetch('/api/practice/payouts/summary', {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',
@@ -84,7 +79,7 @@ export default function PracticePayoutPage() {
   }, []);
 
   if (!summary) {
-    return <main className="p-4">Loading…</main>;
+    return <main className="p-4">{loading ? 'Loading…' : err || 'Practice payout summary unavailable.'}</main>;
   }
 
   const cur = summary.currency || 'ZAR';
