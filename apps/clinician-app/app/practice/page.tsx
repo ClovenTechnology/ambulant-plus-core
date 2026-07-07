@@ -83,46 +83,6 @@ type PracticeApiResponse = {
   practiceMembers?: any[];
 };
 
-const DEMO_PRACTICE: PracticeOverview = {
-  id: 'practice-demo-001',
-  name: 'Ambulant+ Virtual Care Demo Practice',
-  practiceNumber: '1234567-001',
-  status: 'active',
-  createdAt: new Date().toISOString(),
-  ownerName: 'Dr Demo Owner',
-  acceptsMedicalAid: true,
-  acceptedSchemes: ['Discovery', 'Bonitas', 'Momentum'],
-  smartIdDispatch: 'collect',
-  locations: [
-    {
-      id: 'loc-1',
-      label: 'Primary virtual location',
-      addressLine1: '123 Demo Street',
-      addressLine2: 'Sandton',
-      city: 'Johannesburg',
-      province: 'Gauteng',
-      country: 'South Africa',
-      isPrimary: true,
-    },
-  ],
-  memberCounts: {
-    total: 9,
-    owners: 1,
-    clinicians: 6,
-    admins: 1,
-    billing: 0,
-    support: 0,
-    pendingInvites: 1,
-  },
-  sampleMembers: [
-    { id: 'm-owner', fullName: 'Dr Demo Owner', email: 'owner@example.com', role: 'owner', status: 'active' },
-    { id: 'm-clin-1', fullName: 'Dr Virtual GP', email: 'gp@example.com', role: 'clinician', status: 'active' },
-    { id: 'm-admin-1', fullName: 'Reception / Admin', email: 'admin@example.com', role: 'admin', status: 'pending' },
-    { id: 'm-clin-2', fullName: 'Dr Specialist', email: 'specialist@example.com', role: 'clinician', status: 'invited' },
-    { id: 'm-support-1', fullName: 'Support', email: 'support@example.com', role: 'support', status: 'active' },
-  ],
-};
-
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
 }
@@ -183,7 +143,7 @@ function memberStatusPill(s?: PracticeMemberSnapshot['status']) {
 }
 
 function normalizePractice(raw: any): PracticeOverview {
-  if (!raw) return DEMO_PRACTICE;
+  if (!raw) throw new Error('Practice response missing practice object');
 
   const root = raw.practice ?? raw.data ?? raw;
 
@@ -225,7 +185,7 @@ function normalizePractice(raw: any): PracticeOverview {
         country: l.country ?? l.countryCode ?? 'South Africa',
         isPrimary: !!l.isPrimary || idx === 0 || root.primaryLocationId === l.id,
       }))
-    : DEMO_PRACTICE.locations;
+    : [];
 
   const membersSrc: any[] = Array.isArray(raw.members)
     ? raw.members
@@ -284,7 +244,7 @@ function normalizePractice(raw: any): PracticeOverview {
     if (m.status === 'invited' || m.status === 'pending') pendingInvites++;
   }
 
-  const sampleMembers = (allMembers.length ? allMembers : DEMO_PRACTICE.sampleMembers).slice(0, 8);
+  const sampleMembers = allMembers.slice(0, 8);
 
   return {
     id,
@@ -298,7 +258,7 @@ function normalizePractice(raw: any): PracticeOverview {
     smartIdDispatch,
     locations,
     memberCounts: {
-      total: allMembers.length || sampleMembers.length,
+      total: allMembers.length,
       owners,
       clinicians,
       admins,
@@ -395,7 +355,6 @@ export default function PracticeOverviewPage() {
   const [practice, setPractice] = useState<PracticeOverview | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [usingDemo, setUsingDemo] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const [tab, setTab] = useState<TabKey>('overview');
@@ -409,7 +368,6 @@ export default function PracticeOverviewPage() {
     try {
       setBusy(true);
       if (mode === 'initial') {
-        setUsingDemo(false);
         setErr(null);
       }
 
@@ -433,10 +391,9 @@ export default function PracticeOverviewPage() {
       console.warn('[practice] /api/practice/me failed', e);
 
       if (mode === 'initial') {
-        setPractice(DEMO_PRACTICE);
-        setUsingDemo(true);
-        setErr(e?.message || 'Practice endpoint not available; showing demo overview.');
-        toast('Showing demo practice (wire /api/practice/me to load real data).', 'info');
+        setPractice(null);
+        setErr(e?.message || 'Practice data could not be loaded.');
+        toast('Practice overview could not be loaded.', 'error');
       } else {
         toast(e?.message || 'Could not refresh practice right now.', 'error');
       }
@@ -580,11 +537,6 @@ export default function PracticeOverviewPage() {
               <span>Workspace</span>
               <ChevronRight className="h-3 w-3" />
               <span className="text-slate-700">Practice</span>
-              {usingDemo ? (
-                <span className="ml-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-extrabold text-amber-800">
-                  Demo mode
-                </span>
-              ) : null}
             </div>
 
             <h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950">{practice.name}</h1>
