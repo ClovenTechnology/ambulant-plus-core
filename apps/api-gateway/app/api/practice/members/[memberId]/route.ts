@@ -2,6 +2,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 function jsonError(message: string, status = 400) {
   return NextResponse.json({ ok: false, error: message }, { status });
 }
@@ -13,6 +17,60 @@ async function getPracticeForUser(uid: string) {
   });
   if (!member || !member.practice) return null;
   return { practiceId: member.practiceId, member };
+}
+
+
+function memberPayload(member: any) {
+  const status = String(member?.status || 'active').toLowerCase();
+  const active = !['inactive', 'disabled', 'removed', 'deleted'].includes(status);
+
+  return {
+    id: String(member.id),
+    userId: member.userId || null,
+    clinicianId: member.clinicianId || null,
+    name: member.fullName || member.name || member.email || 'Practice member',
+    email: member.email || null,
+    phone: member.phone || null,
+    role: member.role || 'clinician',
+    active,
+    departmentNames: Array.isArray(member.departmentNames) ? member.departmentNames : [],
+    joinedAt: member.createdAt instanceof Date ? member.createdAt.toISOString() : member.createdAt || null,
+    lastSeenAt: member.updatedAt instanceof Date ? member.updatedAt.toISOString() : member.updatedAt || null,
+    virtualSharePctToPractice:
+      typeof member.virtualSharePctToPractice === 'number' ? member.virtualSharePctToPractice : null,
+    inPersonSharePctToPractice:
+      typeof member.inPersonSharePctToPractice === 'number' ? member.inPersonSharePctToPractice : null,
+    facilityFeeFixedZarPerInPersonVisit:
+      typeof member.facilityFeeFixedZarPerInPersonVisit === 'number'
+        ? member.facilityFeeFixedZarPerInPersonVisit
+        : null,
+  };
+}
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { memberId: string } },
+) {
+  try {
+    const uid = req.headers.get('x-uid');
+    if (!uid) return jsonError('Missing x-uid header', 401);
+
+    const ctx = await getPracticeForUser(uid);
+    if (!ctx) return jsonError('No practice found for this user', 404);
+
+    const memberId = params.memberId;
+
+    const member = await prisma.practiceMember.findFirst({
+      where: { id: memberId, practiceId: ctx.practiceId },
+    });
+
+    if (!member) return jsonError('Member not found', 404);
+
+    return NextResponse.json({ ok: true, member: memberPayload(member as any) });
+  } catch (err: any) {
+    console.error('[practice/members/:id] GET error', err);
+    return jsonError(err?.message || 'Failed to load member', 500);
+  }
 }
 
 export async function PATCH(

@@ -5,8 +5,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 
-const API = process.env.NEXT_PUBLIC_APIGW_BASE ?? (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
-
 type PracticeRole =
   | 'owner'
   | 'co_owner'
@@ -35,23 +33,6 @@ type MemberDetail = {
   inPersonSharePctToPractice?: number | null;
   facilityFeeFixedZarPerInPersonVisit?: number | null;
 };
-
-function fallbackMember(id: string): MemberDetail {
-  return {
-    id,
-    name: 'Demo Member',
-    role: 'clinician',
-    active: true,
-    email: 'demo.member@example.com',
-    phone: '+27 00 000 0000',
-    departmentNames: ['General Practice'],
-    joinedAt: new Date(Date.now() - 45 * 24 * 60 * 60 * 1000).toISOString(),
-    lastSeenAt: new Date().toISOString(),
-    virtualSharePctToPractice: 0.20,
-    inPersonSharePctToPractice: 0.30,
-    facilityFeeFixedZarPerInPersonVisit: 150,
-  };
-}
 
 function roleLabel(role: PracticeRole): string {
   switch (role) {
@@ -98,7 +79,7 @@ export default function PracticeMemberDetailPage() {
       setErr(null);
       try {
         const res = await fetch(
-          `${API}/practice/members/${encodeURIComponent(id)}`,
+          `/api/practice/members/${encodeURIComponent(id)}`,
           {
             cache: 'no-store',
             headers: {
@@ -108,14 +89,19 @@ export default function PracticeMemberDetailPage() {
           },
         );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const js = (await res.json().catch(() => null)) as MemberDetail | null;
+        const js = (await res.json().catch(() => null)) as any;
         if (cancelled) return;
-        setMember(js ?? fallbackMember(id));
+
+        const payload = js?.member ?? js;
+        if (!payload || typeof payload !== 'object') {
+          throw new Error('Invalid practice member response');
+        }
+
+        setMember(payload as MemberDetail);
       } catch (e: any) {
         if (cancelled) return;
-        console.warn('[practice/members/:id] demo fallback', e?.message);
-        setErr('Using demo data; practice member API not wired yet.');
-        setMember(fallbackMember(id));
+        setErr(e?.message ? 'Practice member could not be loaded: ' + e.message : 'Practice member could not be loaded.');
+        setMember(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -306,20 +292,11 @@ export default function PracticeMemberDetailPage() {
         </div>
 
         <p className="mt-3 text-[11px] text-gray-500">
-          When you wire the backend, this page should call a practice-scoped
-          endpoint (e.g.{' '}
+          This page reads the practice-scoped member endpoint ({' '}
           <code className="bg-gray-100 px-1 py-0.5">
             /practice/members/:id
           </code>
-          ) that joins{' '}
-          <code className="bg-gray-100 px-1 py-0.5">
-            PracticeMember
-          </code>{' '}
-          and{' '}
-          <code className="bg-gray-100 px-1 py-0.5">
-            PracticeClinicianSplit
-          </code>
-          .
+          ) backed by PracticeMember and, where configured, PracticeClinicianSplit.
         </p>
       </section>
     </main>

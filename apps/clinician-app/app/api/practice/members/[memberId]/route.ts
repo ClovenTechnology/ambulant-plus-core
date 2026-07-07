@@ -14,6 +14,33 @@ function clean(value: unknown) {
   return String(value ?? "").trim();
 }
 
+
+export async function GET(req: NextRequest, { params }: Params) {
+  const memberId = clean(params.memberId);
+
+  if (!memberId) {
+    return NextResponse.json(
+      { ok: false, error: "memberId_required" },
+      { status: 400, headers: { "cache-control": "no-store" } },
+    );
+  }
+
+  try {
+    const res = await fetch(
+      `${apigwBase()}/api/practice/members/${encodeURIComponent(memberId)}${req.nextUrl.search || ""}`,
+      {
+        method: "GET",
+        cache: "no-store",
+        headers: forwardClinicianHeaders(req),
+      },
+    );
+
+    return relayJsonResponse(res);
+  } catch (error) {
+    return jsonError(error, "practice_member_get_proxy_failed", 502);
+  }
+}
+
 export async function PATCH(req: NextRequest, { params }: Params) {
   const memberId = clean(params.memberId);
 
