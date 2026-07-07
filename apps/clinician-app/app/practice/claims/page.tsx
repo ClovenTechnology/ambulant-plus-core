@@ -19,7 +19,6 @@ type ClaimRow = {
 
 type ClaimsResponse = {
   ok: boolean;
-  demo?: boolean;
   items?: ClaimRow[];
   error?: string;
 };
@@ -33,7 +32,6 @@ export default function PracticeClaimsPage() {
   const [rows, setRows] = useState<ClaimRow[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [demo, setDemo] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +52,6 @@ export default function PracticeClaimsPage() {
         }
 
         setRows(js.items ?? []);
-        setDemo(!!js.demo);
       } catch (e: any) {
         console.error('[practice/claims] load error', e);
         if (!cancelled) {
@@ -97,7 +94,6 @@ export default function PracticeClaimsPage() {
           </div>
           <div className="text-[11px] text-gray-400">
             Showing latest {rows.length} claim lines
-            {demo ? ' (sample data)' : ''}
           </div>
         </div>
       </div>

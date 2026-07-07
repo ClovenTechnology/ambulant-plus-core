@@ -422,7 +422,7 @@ export default function PracticeSettingsPage() {
               <BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-600" />
               <div>
                 <div className="font-medium text-gray-900">Draft saved locally</div>
-                <div className="text-gray-600">Safe fallback until your practice settings API exists.</div>
+                <div className="text-gray-600">Practice settings are shown here when available.</div>
               </div>
             </div>
           ) : null}

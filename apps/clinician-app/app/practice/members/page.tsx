@@ -104,7 +104,6 @@ export default function PracticeMembersPage() {
   const [members, setMembers] = useState<PracticeMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
-  const [usingDemo, setUsingDemo] = useState(false);
 
   const [roleFilter, setRoleFilter] = useState<'all' | PracticeMemberRole>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | PracticeMemberStatus>('all');
@@ -127,7 +126,6 @@ export default function PracticeMembersPage() {
     (async () => {
       try {
         setLoading(true);
-        setUsingDemo(false);
         setErr(null);
 
         const res = await fetch('/api/practice/members', { cache: 'no-store' });
@@ -152,7 +150,6 @@ export default function PracticeMembersPage() {
         console.warn('[practice/members] API failed', e);
         if (cancelled) return;
         setMembers([]);
-        setUsingDemo(false);
         setErr(e?.message || 'Unable to load practice members.');
         toast('Unable to load live practice members. Please refresh or contact support.', 'error');
       } finally {
@@ -320,7 +317,7 @@ export default function PracticeMembersPage() {
             reception/admin staff, billing and support roles.
           </p>
 
-          {err && !usingDemo && (
+          {err && (
             <div className="mt-2 max-w-xl rounded border border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-800">
               {err}
             </div>

@@ -347,7 +347,7 @@ export default function PracticeProfilePage() {
               <BadgeCheck className="mt-0.5 h-4 w-4 text-emerald-600" />
               <div>
                 <div className="font-medium text-gray-900">Draft saved locally</div>
-                <div className="text-gray-600">Safe fallback until your Practice API endpoints are ready.</div>
+                <div className="text-gray-600">Practice profile fields are shown here when available.</div>
               </div>
             </div>
           ) : null}

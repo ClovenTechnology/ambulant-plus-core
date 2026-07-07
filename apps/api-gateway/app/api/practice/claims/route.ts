@@ -37,7 +37,6 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         {
           ok: true,
-          demo: false,
           items: [],
         },
         { status: 200 },
@@ -136,7 +135,6 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(
       {
         ok: true,
-        demo: false,
         items,
       },
       { status: 200 },
