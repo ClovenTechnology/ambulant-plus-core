@@ -209,7 +209,9 @@ export async function GET(
 
   return NextResponse.json({
     ok: true,
-    data: projectLab(lab),
+    data: projectLab(lab, {
+      includeVerifiedIdentity: ['admin', 'system', 'lab', 'lab_staff'].includes(role),
+    }),
   });
 }
 
@@ -243,7 +245,7 @@ export async function PATCH(
 
   const data: Record<string, any> = {};
 
-  if ('name' in body) data.name = cleanString(body.name);
+  if ('name' in body && admin) data.name = cleanString(body.name);
   if ('contact' in body) data.contact = cleanString(body.contact) || null;
   if ('active' in body && admin) data.active = cleanBoolean(body.active, true);
   if ('status' in body && admin) data.status = cleanString(body.status).toUpperCase() as any;
@@ -253,8 +255,8 @@ export async function PATCH(
   if ('ownerUserId' in body && admin) {
     data.ownerUserId = cleanString(body.ownerUserId) || null;
   }
-  if ('country' in body) data.country = cleanString(body.country).toUpperCase().slice(0, 2) || 'ZA';
-  if ('currency' in body) data.currency = cleanString(body.currency).toUpperCase().slice(0, 3) || 'ZAR';
+  if ('country' in body && admin) data.country = cleanString(body.country).toUpperCase().slice(0, 2) || 'ZA';
+  if ('currency' in body && admin) data.currency = cleanString(body.currency).toUpperCase().slice(0, 3) || 'ZAR';
   if ('canManageStaff' in body && admin) {
     data.canManageStaff = cleanBoolean(body.canManageStaff, true);
   }
@@ -349,6 +351,8 @@ export async function PATCH(
 
   return NextResponse.json({
     ok: true,
-    data: projectLab(lab),
+    data: projectLab(lab, {
+      includeVerifiedIdentity: ['admin', 'system', 'lab', 'lab_staff'].includes(role),
+    }),
   });
 }

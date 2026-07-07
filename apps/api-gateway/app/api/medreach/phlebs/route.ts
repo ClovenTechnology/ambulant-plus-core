@@ -47,6 +47,13 @@ function projectPhleb(row: any) {
   return {
     id: row.id,
     userId: row.userId,
+    displayName: row.displayName ?? null,
+    avatarUrl: row.avatarUrl ?? null,
+    phone: row.phone ?? null,
+    contactPhone: row.phone ?? null,
+    vehicleType: row.vehicleType ?? null,
+    serviceAreaMeta: row.serviceAreaMeta ?? null,
+    profileMeta: row.profileMeta ?? null,
 
     active: row.active,
     approvalStatus: row.approvalStatus,
@@ -64,6 +71,8 @@ function projectPhleb(row: any) {
       ? {
           id: row.defaultLab.id,
           name: row.defaultLab.name,
+          displayName: row.defaultLab.displayName ?? row.defaultLab.name,
+          logoUrl: row.defaultLab.logoUrl ?? null,
           active: row.defaultLab.active,
           status: row.defaultLab.status,
           country: row.defaultLab.country,
@@ -253,6 +262,17 @@ export async function POST(req: NextRequest) {
     where: { userId },
     create: {
       userId,
+      displayName: cleanString(body.displayName) || null,
+      avatarUrl: cleanString(body.avatarUrl) || null,
+      phone: cleanString(body.phone || body.contactPhone) || null,
+      vehicleType: cleanString(body.vehicleType) || null,
+      serviceAreaMeta: Array.isArray((body as any).serviceAreas)
+        ? { serviceAreas: (body as any).serviceAreas }
+        : undefined,
+      profileMeta:
+        body.profileMeta && typeof body.profileMeta === 'object' && !Array.isArray(body.profileMeta)
+          ? (body.profileMeta as any)
+          : undefined,
       active,
       approvalStatus: approvalStatus as any,
       country: cleanString(body.country).toUpperCase().slice(0, 2) || 'ZA',
@@ -271,6 +291,17 @@ export async function POST(req: NextRequest) {
           : null,
     },
     update: {
+      displayName: cleanString(body.displayName) || undefined,
+      avatarUrl: cleanString(body.avatarUrl) || undefined,
+      phone: cleanString(body.phone || body.contactPhone) || undefined,
+      vehicleType: cleanString(body.vehicleType) || undefined,
+      serviceAreaMeta: Array.isArray((body as any).serviceAreas)
+        ? { serviceAreas: (body as any).serviceAreas }
+        : undefined,
+      profileMeta:
+        body.profileMeta && typeof body.profileMeta === 'object' && !Array.isArray(body.profileMeta)
+          ? (body.profileMeta as any)
+          : undefined,
       active,
       approvalStatus: approvalStatus as any,
       country: cleanString(body.country).toUpperCase().slice(0, 2) || 'ZA',

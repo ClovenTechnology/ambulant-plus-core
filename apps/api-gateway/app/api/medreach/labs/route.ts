@@ -115,7 +115,9 @@ export async function GET(req: NextRequest) {
   if (q) {
     where.OR = [
       { name: { contains: q, mode: 'insensitive' } },
+      { displayName: { contains: q, mode: 'insensitive' } },
       { contact: { contains: q, mode: 'insensitive' } },
+      { website: { contains: q, mode: 'insensitive' } },
     ];
   }
 
@@ -201,7 +203,27 @@ export async function POST(req: NextRequest) {
   const lab = await prisma.labPartner.create({
     data: {
       name,
+      displayName: cleanString(body.displayName) || name,
       contact: contact || null,
+      logoUrl: cleanString(body.logoUrl) || null,
+      website: cleanString(body.website) || null,
+      operationalPhone: cleanString(body.operationalPhone) || null,
+      operationalEmail: cleanString(body.operationalEmail) || null,
+      addressLine1: cleanString(body.addressLine1) || null,
+      addressLine2: cleanString(body.addressLine2) || null,
+      city: cleanString(body.city) || null,
+      province: cleanString(body.province) || null,
+      postalCode: cleanString(body.postalCode) || null,
+      profileMeta:
+        body.profileMeta && typeof body.profileMeta === 'object' && !Array.isArray(body.profileMeta)
+          ? (body.profileMeta as any)
+          : undefined,
+      verifiedIdentityMeta:
+        body.verifiedIdentityMeta &&
+        typeof body.verifiedIdentityMeta === 'object' &&
+        !Array.isArray(body.verifiedIdentityMeta)
+          ? (body.verifiedIdentityMeta as any)
+          : undefined,
       active: cleanBoolean(body.active, true) ?? true,
       status: (cleanString(body.status) || 'ACTIVE') as any,
       onboardingStatus: cleanString(body.onboardingStatus) || null,

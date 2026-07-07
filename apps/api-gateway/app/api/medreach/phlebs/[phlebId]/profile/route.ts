@@ -27,10 +27,17 @@ function roleOf(who: any) {
   return String(who.role || '').toLowerCase();
 }
 
-function projectPhleb(row: any) {
-  return {
+function projectPhleb(row: any, options: { includeVerifiedIdentity?: boolean } = {}) {
+  const data: Record<string, any> = {
     id: row.id,
     userId: row.userId,
+    displayName: row.displayName ?? null,
+    avatarUrl: row.avatarUrl ?? null,
+    phone: row.phone ?? null,
+    contactPhone: row.phone ?? null,
+    vehicleType: row.vehicleType ?? null,
+    serviceAreaMeta: row.serviceAreaMeta ?? null,
+    profileMeta: row.profileMeta ?? null,
 
     active: row.active,
     approvalStatus: row.approvalStatus,
@@ -48,6 +55,8 @@ function projectPhleb(row: any) {
       ? {
           id: row.defaultLab.id,
           name: row.defaultLab.name,
+          displayName: row.defaultLab.displayName ?? row.defaultLab.name,
+          logoUrl: row.defaultLab.logoUrl ?? null,
           active: row.defaultLab.active,
           status: row.defaultLab.status,
           country: row.defaultLab.country,
@@ -69,6 +78,12 @@ function projectPhleb(row: any) {
     createdAt: row.createdAt?.toISOString?.() ?? null,
     updatedAt: row.updatedAt?.toISOString?.() ?? null,
   };
+
+  if (options.includeVerifiedIdentity) {
+    data.verifiedIdentityMeta = row.verifiedIdentityMeta ?? null;
+  }
+
+  return data;
 }
 
 async function findPhleb(phlebId: string) {
@@ -309,6 +324,8 @@ export async function PATCH(
 
   return NextResponse.json({
     ok: true,
-    data: projectPhleb(row),
+    data: projectPhleb(row, {
+      includeVerifiedIdentity: ['admin', 'system', 'phleb'].includes(role),
+    }),
   });
 }
