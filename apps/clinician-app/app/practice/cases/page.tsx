@@ -18,7 +18,6 @@ type CaseRow = {
 
 type CasesResponse = {
   ok: boolean;
-  demo?: boolean;
   items?: CaseRow[];
   error?: string;
 };
