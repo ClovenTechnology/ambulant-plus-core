@@ -286,16 +286,16 @@ const WORKSPACES: WorkspaceDef[] = [
   },
   {
     key: 'x-ray',
-    name: 'X-ray',
+    name: 'X-ray / Radiology',
     route: '/workspaces/x-ray',
-    description: 'Plain-film imaging review, reporting support and evidence capture.',
+    description: 'Radiology and plain-film imaging review, reporting support and evidence capture.',
     category: 'diagnostics',
     enabled: true,
     featured: true,
     supportsTelevisit: false,
     supportsInPerson: true,
-    tags: ['Imaging', 'Diagnostics', 'X-ray'],
-    keywords: ['xray', 'x-ray', 'radiograph', 'imaging', 'film'],
+    tags: ['Radiology', 'Imaging', 'X-ray'],
+    keywords: ['radiology', 'radiologist', 'xray', 'x-ray', 'radiograph', 'imaging', 'film'],
   },
 ];
 
