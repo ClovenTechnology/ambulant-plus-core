@@ -61,6 +61,14 @@ function errMsg(e: any) {
   return e?.message || e?.details?.message || 'Request failed';
 }
 
+function firstNonEmpty(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = String(v ?? '').trim();
+    if (t) return t;
+  }
+  return '';
+}
+
 function panelHint(panel: EndoPanel) {
   if (panel === 'GLUCOSE') return 'Fingerstick / CGM / HbA1c context';
   if (panel === 'THYROID') return 'Symptoms + exam + labs context';
@@ -71,20 +79,32 @@ function panelHint(panel: EndoPanel) {
 function EndocrinologyWorkspacePageContent() {
   const searchParams = useSearchParams();
 
-  const patientId =
-    searchParams?.get('patientId') ||
-    searchParams?.get('patient') ||
-    '';
+  const patientId = firstNonEmpty(
+    searchParams?.get('patientId'),
+    searchParams?.get('subjectPatientId'),
+    searchParams?.get('patient_id'),
+    searchParams?.get('patient')
+  );
 
-  const encounterId =
-    searchParams?.get('encounterId') ||
-    searchParams?.get('encounter') ||
-    '';
+  const encounterId = firstNonEmpty(
+    searchParams?.get('encounterId'),
+    searchParams?.get('caseId'),
+    searchParams?.get('encounter_id'),
+    searchParams?.get('encounter')
+  );
 
-  const clinicianId =
-    searchParams?.get('clinicianId') ||
-    searchParams?.get('clinician') ||
-    '';
+  const clinicianId = firstNonEmpty(
+    searchParams?.get('clinicianId'),
+    searchParams?.get('providerId'),
+    searchParams?.get('uid'),
+    searchParams?.get('clinician_id'),
+    searchParams?.get('clinician')
+  );
+
+  const contextReady = Boolean(patientId && encounterId && clinicianId);
+  const contextBanner = !contextReady
+    ? 'Missing consultation context. Open this workspace from the consultation flow so patient, encounter and clinician IDs are present.'
+    : null;
 
   const [panel, setPanel] = useState<EndoPanel>('GLUCOSE');
 
@@ -170,6 +190,11 @@ function EndocrinologyWorkspacePageContent() {
   const evidenceCountForFinding = (findingId: string) => evidence.filter((e) => e.findingId === findingId).length;
 
   const createManualFinding = async (type: FindingTypeKey, severity?: Finding['severity'], note?: string) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForPanel(panel);
 
@@ -230,6 +255,11 @@ function EndocrinologyWorkspacePageContent() {
   };
 
   const handleBookmark = async (payload: { findingTypeKey: string; severity?: Finding['severity']; note?: string }) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     const type = payload.findingTypeKey as FindingTypeKey;
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForPanel(panel);
@@ -329,6 +359,11 @@ function EndocrinologyWorkspacePageContent() {
   };
 
   const addPinAnnotation = async () => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     if (!selectedEvidence) {
       setBanner({ kind: 'info', text: 'Select an evidence item first.' });
       return;
@@ -353,7 +388,7 @@ function EndocrinologyWorkspacePageContent() {
         createdBy: clinicianId,
       });
 
-      setBanner({ kind: 'success', text: 'Annotation created (demo pin).' });
+      setBanner({ kind: 'success', text: 'Annotation created.' });
     } catch (e) {
       setBanner({ kind: 'error', text: `Failed to create annotation: ${errMsg(e)}` });
     } finally {
@@ -370,13 +405,19 @@ function EndocrinologyWorkspacePageContent() {
             <h1 className="text-lg font-semibold">Endocrinology Workspace</h1>
           </div>
           <div className="text-xs text-gray-600">
-            Patient: <span className="font-mono">{patientId}</span> · Encounter:{' '}
-            <span className="font-mono">{encounterId}</span>
+            Patient: <span className="font-mono">{patientId || '—'}</span> · Encounter:{' '}
+            <span className="font-mono">{encounterId || '—'}</span>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
+        {contextBanner ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {contextBanner}
+          </div>
+        ) : null}
+
         {banner ? (
           <div
             className={
@@ -452,7 +493,7 @@ function EndocrinologyWorkspacePageContent() {
               <button
                 className="rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800 disabled:opacity-50"
                 onClick={() => setBookmarkOpen(true)}
-                disabled={busy}
+                disabled={busy || !contextReady}
               >
                 Bookmark
               </button>
@@ -524,7 +565,7 @@ function EndocrinologyWorkspacePageContent() {
                 <button
                   className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
                   onClick={addPinAnnotation}
-                  disabled={busy}
+                  disabled={busy || !contextReady}
                   title="Creates a pin annotation for the selected evidence"
                 >
                   + Add pin
@@ -555,16 +596,16 @@ function EndocrinologyWorkspacePageContent() {
 
             <div className="p-4 space-y-4">
               {panel === 'GLUCOSE' ? (
-                <GlucosePanel glucose={glucose} setGlucose={setGlucose} disabled={busy} />
+                <GlucosePanel glucose={glucose} setGlucose={setGlucose} disabled={busy || !contextReady} />
               ) : panel === 'THYROID' ? (
-                <ThyroidPanel thyroid={thyroid} setThyroid={setThyroid} disabled={busy} />
+                <ThyroidPanel thyroid={thyroid} setThyroid={setThyroid} disabled={busy || !contextReady} />
               ) : panel === 'FOOT' ? (
-                <FootPanel foot={foot} setFoot={setFoot} disabled={busy} />
+                <FootPanel foot={foot} setFoot={setFoot} disabled={busy || !contextReady} />
               ) : (
-                <WeightPanel weight={weight} setWeight={setWeight} disabled={busy} />
+                <WeightPanel weight={weight} setWeight={setWeight} disabled={busy || !contextReady} />
               )}
 
-              <QuickFindingComposer onCreate={createManualFinding} disabled={busy} />
+              <QuickFindingComposer onCreate={createManualFinding} disabled={busy || !contextReady} />
 
               <div className="rounded-lg border p-3 bg-gray-50">
                 <div className="text-xs font-semibold text-gray-700">Plan (stub)</div>

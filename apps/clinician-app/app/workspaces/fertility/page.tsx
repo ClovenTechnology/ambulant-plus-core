@@ -81,23 +81,43 @@ function errMsg(e: unknown) {
   return 'Request failed';
 }
 
+function firstNonEmpty(...vals: Array<string | null | undefined>) {
+  for (const v of vals) {
+    const t = String(v ?? '').trim();
+    if (t) return t;
+  }
+  return '';
+}
+
 function FertilityWorkspacePageContent() {
   const searchParams = useSearchParams();
 
-  const patientId =
-    searchParams?.get('patientId') ||
-    searchParams?.get('patient') ||
-    '';
+  const patientId = firstNonEmpty(
+    searchParams?.get('patientId'),
+    searchParams?.get('subjectPatientId'),
+    searchParams?.get('patient_id'),
+    searchParams?.get('patient')
+  );
 
-  const encounterId =
-    searchParams?.get('encounterId') ||
-    searchParams?.get('encounter') ||
-    '';
+  const encounterId = firstNonEmpty(
+    searchParams?.get('encounterId'),
+    searchParams?.get('caseId'),
+    searchParams?.get('encounter_id'),
+    searchParams?.get('encounter')
+  );
 
-  const clinicianId =
-    searchParams?.get('clinicianId') ||
-    searchParams?.get('clinician') ||
-    '';
+  const clinicianId = firstNonEmpty(
+    searchParams?.get('clinicianId'),
+    searchParams?.get('providerId'),
+    searchParams?.get('uid'),
+    searchParams?.get('clinician_id'),
+    searchParams?.get('clinician')
+  );
+
+  const contextReady = Boolean(patientId && encounterId && clinicianId);
+  const contextBanner = !contextReady
+    ? 'Missing consultation context. Open this workspace from the consultation flow so patient, encounter and clinician IDs are present.'
+    : null;
 
   const [subject, setSubject] = useState<SubjectKey>('female');
 
@@ -191,6 +211,11 @@ function FertilityWorkspacePageContent() {
   const evidenceCountForFinding = (findingId: string) => evidence.filter((e) => e.findingId === findingId).length;
 
   const createManualFinding = async (type: FindingTypeKey, severity?: Finding['severity'], note?: string) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForSubject(subject);
 
@@ -239,6 +264,11 @@ function FertilityWorkspacePageContent() {
   };
 
   const handleBookmark = async (payload: { findingTypeKey: string; severity?: Finding['severity']; note?: string }) => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     const type = payload.findingTypeKey as FindingTypeKey;
     const title = FINDING_TYPES.find((x) => x.key === type)?.label ?? 'Finding';
     const location = locationForSubject(subject);
@@ -324,6 +354,11 @@ function FertilityWorkspacePageContent() {
   };
 
   const addPinAnnotation = async () => {
+    if (!contextReady) {
+      setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
+      return;
+    }
+
     if (!selectedEvidence) {
       setBanner({ kind: 'info', text: 'Select an evidence item first.' });
       return;
@@ -348,7 +383,7 @@ function FertilityWorkspacePageContent() {
         createdBy: clinicianId,
       });
 
-      setBanner({ kind: 'success', text: 'Annotation created (demo pin).' });
+      setBanner({ kind: 'success', text: 'Annotation created.' });
     } catch (e) {
       setBanner({ kind: 'error', text: `Failed to create annotation: ${errMsg(e)}` });
     } finally {
@@ -370,10 +405,10 @@ function FertilityWorkspacePageContent() {
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <span className="rounded-full border bg-white px-2 py-1 text-gray-700">
-              Patient: <span className="font-mono">{patientId}</span>
+              Patient: <span className="font-mono">{patientId || '—'}</span>
             </span>
             <span className="rounded-full border bg-white px-2 py-1 text-gray-700">
-              Encounter: <span className="font-mono">{encounterId}</span>
+              Encounter: <span className="font-mono">{encounterId || '—'}</span>
             </span>
             <span className="rounded-full border bg-gray-50 px-2 py-1 text-gray-700">
               Subject: <span className="font-mono font-semibold">{subject.toUpperCase()}</span>
@@ -383,6 +418,12 @@ function FertilityWorkspacePageContent() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-4">
+        {contextBanner ? (
+          <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {contextBanner}
+          </div>
+        ) : null}
+
         {banner ? (
           <div
             className={
@@ -588,7 +629,7 @@ function FertilityWorkspacePageContent() {
               <button
                 className="rounded-full border bg-blue-50 hover:bg-blue-100 px-3 py-1.5 text-xs font-medium text-blue-800 disabled:opacity-50"
                 onClick={() => setBookmarkOpen(true)}
-                disabled={busy}
+                disabled={busy || !contextReady}
                 type="button"
               >
                 Bookmark
@@ -659,7 +700,7 @@ function FertilityWorkspacePageContent() {
                 <button
                   className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
                   onClick={addPinAnnotation}
-                  disabled={busy}
+                  disabled={busy || !contextReady}
                   title="Creates a pin annotation for the selected evidence"
                   type="button"
                 >
@@ -693,7 +734,7 @@ function FertilityWorkspacePageContent() {
             </div>
 
             <div className="p-4 space-y-4">
-              <QuickFindingComposer onCreate={createManualFinding} disabled={busy} subject={subject} />
+              <QuickFindingComposer onCreate={createManualFinding} disabled={busy || !contextReady} subject={subject} />
 
               <div className="rounded-lg border bg-gray-50 p-3">
                 <div className="text-xs font-semibold text-gray-700">Next steps (stub)</div>
