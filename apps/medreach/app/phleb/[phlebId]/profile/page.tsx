@@ -123,6 +123,84 @@ function joinCsv(value: string[] | undefined) {
   return Array.isArray(value) ? value.join(', ') : '';
 }
 
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Could not read avatar image.'));
+    reader.readAsDataURL(blob);
+  });
+}
+
+function loadImageFromFile(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const img = new Image();
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      resolve(img);
+    };
+
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error('Could not load avatar image.'));
+    };
+
+    img.src = objectUrl;
+  });
+}
+
+async function prepareAvatarImage(file: File): Promise<string> {
+  const maxBytes = 900 * 1024;
+  const maxSide = 512;
+
+  if (!file.type.startsWith('image/')) {
+    throw new Error('Please choose an image file.');
+  }
+
+  const img = await loadImageFromFile(file);
+  const size = Math.min(img.naturalWidth, img.naturalHeight);
+  const sx = Math.max(0, Math.floor((img.naturalWidth - size) / 2));
+  const sy = Math.max(0, Math.floor((img.naturalHeight - size) / 2));
+
+  const canvas = document.createElement('canvas');
+  canvas.width = maxSide;
+  canvas.height = maxSide;
+
+  const ctx = canvas.getContext('2d');
+
+  if (!ctx) {
+    throw new Error('Avatar image processing is not available in this browser.');
+  }
+
+  ctx.drawImage(img, sx, sy, size, size, 0, 0, maxSide, maxSide);
+
+  let quality = 0.82;
+  let blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob(resolve, 'image/jpeg', quality),
+  );
+
+  while (blob && blob.size > maxBytes && quality > 0.55) {
+    quality -= 0.08;
+    blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob(resolve, 'image/jpeg', quality),
+    );
+  }
+
+  if (!blob) {
+    throw new Error('Could not prepare avatar image.');
+  }
+
+  if (blob.size > maxBytes) {
+    throw new Error('Please choose a smaller image.');
+  }
+
+  return blobToDataUrl(blob);
+}
+
 function displayName(profile: PhlebProfile | null, fallback: string) {
   return (
     clean(profile?.fullName) ||
@@ -158,6 +236,7 @@ export default function PhlebProfilePage() {
   const [preferredLabsText, setPreferredLabsText] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -209,6 +288,24 @@ export default function PhlebProfilePage() {
     void load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phlebId]);
+
+  async function handleAvatarFileChange(file: File | null) {
+    if (!file) return;
+
+    setUploadingAvatar(true);
+    setErr(null);
+    setNotice(null);
+
+    try {
+      const avatarUrl = await prepareAvatarImage(file);
+      setDraft((prev) => ({ ...prev, avatarUrl }));
+      setNotice('Avatar prepared. Save preferences to publish it.');
+    } catch (e: any) {
+      setErr(e?.message || 'Unable to prepare avatar image');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  }
 
   const readiness = useMemo(() => {
     const approved =
@@ -427,17 +524,38 @@ export default function PhlebProfilePage() {
         </p>
 
         <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-          <label className="block text-sm">
-            <span className="text-xs font-medium text-gray-600">Avatar URL</span>
-            <input
-              value={draft.avatarUrl || ''}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, avatarUrl: e.target.value }))
-              }
-              className="mt-1 w-full rounded border px-3 py-2 text-sm"
-              placeholder="https://..."
-            />
-          </label>
+                    <div className="rounded-xl border bg-gray-50 p-4">
+            <span className="text-xs font-medium text-gray-600">Profile avatar</span>
+
+            <div className="mt-3 flex items-center gap-4">
+              <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-2xl border bg-white">
+                {draft.avatarUrl ? (
+                  <img
+                    src={draft.avatarUrl}
+                    alt="Phleb avatar preview"
+                    className="h-full w-full object-cover"
+                  />
+                ) : (
+                  <span className="text-lg font-semibold text-gray-400">
+                    {displayName(profile, phlebId).slice(0, 2).toUpperCase()}
+                  </span>
+                )}
+              </div>
+
+              <div className="min-w-0 flex-1">
+                <input
+                  type="file"
+                  accept="image/*"
+                  disabled={uploadingAvatar}
+                  onChange={(e) => void handleAvatarFileChange(e.target.files?.[0] || null)}
+                  className="block w-full text-xs text-gray-600 file:mr-3 file:rounded-full file:border-0 file:bg-gray-900 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-white"
+                />
+                <p className="mt-2 text-[11px] text-gray-500">
+                  Square photo preferred. The image is cropped and compressed in-browser.
+                </p>
+              </div>
+            </div>
+          </div>
 
           <label className="block text-sm">
             <span className="text-xs font-medium text-gray-600">Contact phone</span>
@@ -549,14 +667,14 @@ export default function PhlebProfilePage() {
           <button
             type="button"
             onClick={savePreferences}
-            disabled={saving}
+            disabled={saving || uploadingAvatar}
             className={`rounded border px-4 py-2 text-sm ${
               saving
                 ? 'bg-gray-200 text-gray-500'
                 : 'bg-gray-900 text-white hover:bg-black'
             }`}
           >
-            {saving ? 'Saving...' : 'Save preferences'}
+            {saving ? 'Saving...' : uploadingAvatar ? 'Preparing avatar...' : 'Save preferences'}
           </button>
         </div>
       </section>
