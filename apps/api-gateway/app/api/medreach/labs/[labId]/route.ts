@@ -154,7 +154,7 @@ async function assertLabWriteAccess(req: NextRequest, labId: string, who: any) {
         labId,
         active: true,
         status: 'ACTIVE',
-        role: { in: ['OWNER', 'ADMIN', 'MANAGER'] as any },
+        role: { in: ['OWNER', 'ADMIN'] as any },
       },
       select: { labId: true },
     });
