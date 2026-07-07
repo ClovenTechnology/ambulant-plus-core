@@ -20,6 +20,33 @@ function roleOf(who: any) {
   return String(who.role || '').toLowerCase();
 }
 
+function asObject(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as Record<string, any>) }
+    : {};
+}
+
+function cleanStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => cleanString(item))
+    .filter(Boolean);
+}
+
+function cleanVehicle(value: unknown): Record<string, any> {
+  const raw = asObject(value);
+
+  return {
+    make: cleanString(raw.make),
+    model: cleanString(raw.model),
+    registration: cleanString(raw.registration),
+    color: cleanString(raw.color),
+    type: cleanString(raw.type),
+    changePending: Boolean(raw.changePending),
+  };
+}
+
 async function findPhleb(phlebId: string) {
   return prisma.medReachPhlebProfile.findFirst({
     where: {
@@ -31,7 +58,7 @@ async function findPhleb(phlebId: string) {
   });
 }
 
-function canAccessPreferences(phleb: any, who: any) {
+async function canAccessPreferences(req: NextRequest, phleb: any, who: any) {
   const role = roleOf(who);
 
   if (['admin', 'system'].includes(role)) return true;
@@ -40,57 +67,77 @@ function canAccessPreferences(phleb: any, who: any) {
     return Boolean(who.uid && phleb.userId === who.uid);
   }
 
+  if (role === 'lab') {
+    const labId = cleanString(req.headers.get('x-lab-id'));
+    if (!labId || phleb.defaultLabId !== labId) return false;
+
+    const lab = await prisma.labPartner.findUnique({
+      where: { id: labId },
+      select: { active: true, status: true, ownerUserId: true },
+    });
+
+    return Boolean(
+      lab?.active &&
+        lab.status === 'ACTIVE' &&
+        (!lab.ownerUserId || !who.uid || lab.ownerUserId === who.uid),
+    );
+  }
+
+  if (role === 'lab_staff') {
+    const labId = cleanString(req.headers.get('x-staff-lab-id'));
+    if (!labId || !who.uid || phleb.defaultLabId !== labId) return false;
+
+    const staff = await prisma.medReachLabStaff.findFirst({
+      where: {
+        userId: who.uid,
+        labId,
+        active: true,
+        status: 'ACTIVE',
+      },
+      select: { labId: true },
+    });
+
+    return Boolean(staff?.labId);
+  }
+
   return false;
 }
 
-function projectPreferences(row: any, labs: any[]) {
+function projectPreferences(row: any, labs: any[] = []) {
+  const profileMeta = asObject(row.profileMeta);
+  const serviceAreaMeta = asObject(row.serviceAreaMeta);
+  const vehicle = asObject(profileMeta.vehicle);
+
   return {
-    phlebProfileId: row.id,
-    phlebId: row.userId,
+    phlebId: row.id,
     userId: row.userId,
-
-    active: row.active,
-    approvalStatus: row.approvalStatus,
-
-    country: row.country,
-    currency: row.currency,
-
-    defaultLabId: row.defaultLabId ?? null,
-    defaultLab: row.defaultLab
-      ? {
-          id: row.defaultLab.id,
-          name: row.defaultLab.name,
-          active: row.defaultLab.active,
-          status: row.defaultLab.status,
-          country: row.defaultLab.country,
-          currency: row.defaultLab.currency,
-        }
-      : null,
-
-    availableDefaultLabs: labs.map((lab) => ({
+    avatarUrl: row.avatarUrl ?? '',
+    contactPhone: row.phone ?? '',
+    serviceAreas: Array.isArray(serviceAreaMeta.serviceAreas)
+      ? serviceAreaMeta.serviceAreas
+      : [],
+    preferredLabIds: Array.isArray(profileMeta.preferredLabIds)
+      ? profileMeta.preferredLabIds
+      : row.defaultLabId
+        ? [row.defaultLabId]
+        : [],
+    vehicle: {
+      make: cleanString(vehicle.make),
+      model: cleanString(vehicle.model),
+      registration: cleanString(vehicle.registration),
+      color: cleanString(vehicle.color),
+      type: cleanString(vehicle.type || row.vehicleType),
+      changePending: Boolean(vehicle.changePending),
+    },
+    availableLabs: labs.map((lab) => ({
       id: lab.id,
-      name: lab.name,
+      name: lab.displayName || lab.name,
+      logoUrl: lab.logoUrl ?? null,
       active: lab.active,
       status: lab.status,
       country: lab.country,
       currency: lab.currency,
     })),
-
-    /**
-     * Future schema-safe expansion:
-     * preferredRadiusKm, workingHours, sampleTypesAccepted, coldChainCapable,
-     * vehicleMode and homeDrawZones should get a real Json/preferences table
-     * before we persist them.
-     */
-    schemaBackedPreferences: {
-      country: row.country,
-      currency: row.currency,
-      defaultLabId: row.defaultLabId ?? null,
-      active: row.active,
-    },
-
-    createdAt: row.createdAt?.toISOString?.() ?? null,
-    updatedAt: row.updatedAt?.toISOString?.() ?? null,
   };
 }
 
@@ -105,13 +152,15 @@ export async function GET(
     return NextResponse.json({ ok: false, error: 'missing_phlebId' }, { status: 400 });
   }
 
-  const phleb = await findPhleb(phlebId);
+  const existing = await findPhleb(phlebId);
 
-  if (!phleb) {
+  if (!existing) {
     return NextResponse.json({ ok: false, error: 'phleb_not_found' }, { status: 404 });
   }
 
-  if (!canAccessPreferences(phleb, who)) {
+  const allowed = await canAccessPreferences(req, existing, who);
+
+  if (!allowed) {
     return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   }
 
@@ -119,7 +168,7 @@ export async function GET(
     where: {
       active: true,
       status: 'ACTIVE',
-      country: phleb.country,
+      country: existing.country,
     },
     orderBy: { name: 'asc' },
     take: 200,
@@ -127,7 +176,7 @@ export async function GET(
 
   return NextResponse.json({
     ok: true,
-    data: projectPreferences(phleb, labs),
+    data: projectPreferences(existing, labs),
   });
 }
 
@@ -136,21 +185,10 @@ export async function PATCH(
   { params }: { params: { phlebId: string } },
 ) {
   const who = readIdentity(req.headers);
-  const role = roleOf(who);
   const phlebId = cleanString(params.phlebId);
 
   if (!phlebId) {
     return NextResponse.json({ ok: false, error: 'missing_phlebId' }, { status: 400 });
-  }
-
-  const existing = await findPhleb(phlebId);
-
-  if (!existing) {
-    return NextResponse.json({ ok: false, error: 'phleb_not_found' }, { status: 404 });
-  }
-
-  if (!canAccessPreferences(existing, who)) {
-    return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
   }
 
   let body: Record<string, unknown>;
@@ -161,17 +199,55 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
 
+  const existing = await findPhleb(phlebId);
+
+  if (!existing) {
+    return NextResponse.json({ ok: false, error: 'phleb_not_found' }, { status: 404 });
+  }
+
+  const allowed = await canAccessPreferences(req, existing, who);
+
+  if (!allowed) {
+    return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+  }
+
   const data: Record<string, any> = {};
+  const existingProfileMeta = asObject(existing.profileMeta);
+  const existingServiceAreaMeta = asObject(existing.serviceAreaMeta);
 
-  if ('country' in body) {
-    data.country = cleanString(body.country).toUpperCase().slice(0, 2) || existing.country;
+  if ('avatarUrl' in body) {
+    data.avatarUrl = cleanString(body.avatarUrl) || null;
   }
 
-  if ('currency' in body) {
-    data.currency = cleanString(body.currency).toUpperCase().slice(0, 3) || existing.currency;
+  if ('contactPhone' in body || 'phone' in body) {
+    data.phone = cleanString(body.contactPhone || body.phone) || null;
   }
 
-  if ('defaultLabId' in body) {
+  if ('serviceAreas' in body) {
+    data.serviceAreaMeta = {
+      ...existingServiceAreaMeta,
+      serviceAreas: cleanStringArray(body.serviceAreas),
+    };
+  }
+
+  if ('preferredLabIds' in body) {
+    data.profileMeta = {
+      ...existingProfileMeta,
+      preferredLabIds: cleanStringArray(body.preferredLabIds),
+    };
+  }
+
+  if ('vehicle' in body) {
+    const vehicle = cleanVehicle(body.vehicle);
+    data.vehicleType = vehicle.type || null;
+    data.profileMeta = {
+      ...existingProfileMeta,
+      ...(data.profileMeta || {}),
+      vehicle,
+    };
+  }
+
+  if (['admin', 'system'].includes(roleOf(who)) && 'defaultLabId' in body) {
     const defaultLabId = cleanString(body.defaultLabId) || null;
 
     if (defaultLabId) {
@@ -191,7 +267,7 @@ export async function PATCH(
     data.defaultLabId = defaultLabId;
   }
 
-  if (['admin', 'system'].includes(role) && 'active' in body) {
+  if (['admin', 'system'].includes(roleOf(who)) && 'active' in body) {
     data.active = cleanBoolean(body.active, existing.active);
   }
 

@@ -32,11 +32,22 @@ function roleOf(who: any) {
   return String(who.role || '').toLowerCase();
 }
 
-function projectLab(lab: any) {
-  return {
+function projectLab(lab: any, options: { includeVerifiedIdentity?: boolean } = {}) {
+  const data: Record<string, any> = {
     id: lab.id,
     name: lab.name,
+    displayName: lab.displayName ?? lab.name,
     contact: lab.contact ?? null,
+    logoUrl: lab.logoUrl ?? null,
+    website: lab.website ?? null,
+    operationalPhone: lab.operationalPhone ?? null,
+    operationalEmail: lab.operationalEmail ?? null,
+    addressLine1: lab.addressLine1 ?? null,
+    addressLine2: lab.addressLine2 ?? null,
+    city: lab.city ?? null,
+    province: lab.province ?? null,
+    postalCode: lab.postalCode ?? null,
+    profileMeta: lab.profileMeta ?? null,
     active: lab.active,
     status: lab.status,
     onboardingStatus: lab.onboardingStatus ?? null,
@@ -63,6 +74,12 @@ function projectLab(lab: any) {
       specimenBundles: lab._count?.specimenBundles ?? 0,
     },
   };
+
+  if (options.includeVerifiedIdentity) {
+    data.verifiedIdentityMeta = lab.verifiedIdentityMeta ?? null;
+  }
+
+  return data;
 }
 
 async function assertLabReadAccess(req: NextRequest, labId: string, who: any) {
@@ -222,7 +239,7 @@ export async function PATCH(
   }
 
   const role = roleOf(who);
-  const admin = role === 'admin';
+  const admin = role === 'admin' || role === 'system';
 
   const data: Record<string, any> = {};
 
