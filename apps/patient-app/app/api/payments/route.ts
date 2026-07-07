@@ -4,16 +4,20 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CANONICAL_GATEWAY = 'https://ambulant-plus-core-api-gateway-kdon.vercel.app';
+const CANONICAL_GATEWAY = '';
 
 function gatewayBase() {
-  return (
+  const base = (
     process.env.APIGW_BASE ||
     process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.API_GATEWAY_URL ||
     process.env.API_GATEWAY_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
     CANONICAL_GATEWAY
   ).replace(/\/+$/, '');
+
+  if (!base) throw new Error('APIGW_BASE_required');
+  return base;
 }
 
 function forwardHeaders(req: NextRequest, includeJson = false) {

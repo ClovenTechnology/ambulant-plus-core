@@ -220,7 +220,7 @@ export async function POST(req: Request) {
       sub: cred.id,
       actorType: cred.actorType,
       actorRefId,
-      orgId: cred.orgId || 'org-default',
+      orgId: cred.orgId || process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
       iat,
       exp,
       amr: ['email_otp'],

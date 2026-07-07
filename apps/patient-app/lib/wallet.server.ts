@@ -27,7 +27,7 @@ export function formatZar(n: number) {
   return `R${s.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}`;
 }
 
-export async function getOrCreateWallet(userId: string, orgId = 'org-default') {
+export async function getOrCreateWallet(userId: string, orgId = process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default') {
   const existing = await prisma.walletAccount.findUnique({ where: { userId } });
   if (existing) return existing;
 

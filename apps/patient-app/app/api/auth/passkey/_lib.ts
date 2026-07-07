@@ -155,7 +155,7 @@ export async function requirePatientSession() {
     payload,
     userId,
     actorRefId: payload.actorRefId ? String(payload.actorRefId) : null,
-    orgId: payload.orgId ? String(payload.orgId) : 'org-default',
+    orgId: payload.orgId ? String(payload.orgId) : process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
   };
 }
 
@@ -206,7 +206,7 @@ export async function createPatientSessionResponse(params: {
       sub: params.userId,
       actorType: 'PATIENT',
       actorRefId: params.actorRefId || null,
-      orgId: 'org-default',
+      orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
       iat,
       exp,
       amr: [params.authMethod],

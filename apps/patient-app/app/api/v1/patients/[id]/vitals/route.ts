@@ -4,8 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const CANONICAL_API_GATEWAY_URL =
-  'https://ambulant-plus-core-api-gateway-kdon.vercel.app';
+const CANONICAL_API_GATEWAY_URL = '';
 
 const ALLOWED_VITAL_TYPES = new Set([
   'blood_pressure',
@@ -29,17 +28,21 @@ function trimSlash(value: string) {
   return String(value || '').replace(/\/+$/, '');
 }
 
-function gatewayBase() {
+function gatewayBase(): string {
   const configured =
     process.env.APIGW_BASE ||
     process.env.API_GATEWAY_BASE_URL ||
     process.env.API_GATEWAY_URL ||
     process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
-    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    process.env.APIGW_ORIGIN ||
+    process.env.API_GATEWAY_ORIGIN ||
     '';
 
-  return trimSlash(configured || CANONICAL_API_GATEWAY_URL);
+  const base = trimSlash(configured);
+  if (!base) throw new Error('APIGW_BASE_required');
+  return base;
 }
 
 function json(body: unknown, status = 200) {

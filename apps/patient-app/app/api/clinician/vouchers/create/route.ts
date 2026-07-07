@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
         validFrom: now,
         expiresAt,
         sponsorHoldId: hold.id,
-        orgId: 'org-default',
+        orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
         createdByUserId: clinicianId,
       },
     });

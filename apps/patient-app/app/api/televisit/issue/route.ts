@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/api/televisit/issue/route.ts
+// apps/patient-app/app/api/televisit/issue/route.ts
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
@@ -180,7 +180,7 @@ export async function POST(req: Request) {
     const iat = Math.floor(now.getTime() / 1000);
     const exp = Math.floor(expiresAt.getTime() / 1000);
 
-    const orgId = (visit as any)?.orgId ? String((visit as any).orgId) : 'org-default';
+    const orgId = (visit as any)?.orgId ? String((visit as any).orgId) : process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default';
 
     const claims = {
       uid,

@@ -8,11 +8,14 @@ function trimSlash(s: string) {
 }
 
 function gatewayBase() {
-  return trimSlash(
+  const base = trimSlash(
     process.env.APIGW_BASE ||
       process.env.NEXT_PUBLIC_APIGW_BASE ||
-      'https://ambulant-plus-core-api-gateway-kdon.vercel.app',
+      '',
   );
+
+  if (!base) throw new Error('APIGW_BASE_required');
+  return base;
 }
 
 function forwardPatientHeaders(req: NextRequest) {

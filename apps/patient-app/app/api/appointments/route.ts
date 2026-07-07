@@ -16,9 +16,11 @@ function gatewayBase() {
     process.env.API_GATEWAY_URL ||
     process.env.NEXT_PUBLIC_APIGW_BASE ||
     process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
-    'https://ambulant-plus-core-api-gateway-kdon.vercel.app';
+    '';
 
-  return trimSlash(configured);
+  const base = trimSlash(configured);
+  if (!base) throw new Error('APIGW_BASE_required');
+  return base;
 }
 
 function noStore(body: unknown, status = 200) {
@@ -123,7 +125,7 @@ function patientSessionIdentity(req: NextRequest) {
       token: '',
       uid: '',
       actorRefId: '',
-      orgId: '',
+      orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
     };
   }
 

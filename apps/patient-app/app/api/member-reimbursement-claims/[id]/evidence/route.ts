@@ -7,12 +7,25 @@ import {
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function gatewayBase() {
-  return (
+
+function trimSlash(value: string) {
+  return String(value || '').replace(/\/+$/, '');
+}
+function gatewayBase(): string {
+  const configured =
     process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
     process.env.NEXT_PUBLIC_APIGW_BASE ||
-    'https://ambulant-plus-core-api-gateway-kdon.vercel.app'
-  ).replace(/\/+$/, '');
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    process.env.APIGW_ORIGIN ||
+    process.env.API_GATEWAY_ORIGIN ||
+    '';
+
+  const base = trimSlash(configured);
+  if (!base) throw new Error('APIGW_BASE_required');
+  return base;
 }
 
 function forwardHeaders(req: NextRequest) {

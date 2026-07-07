@@ -5,13 +5,16 @@ function trimSlash(s: string) {
 }
 
 export function gatewayBase(): string {
-  return trimSlash(
+  const base = trimSlash(
     process.env.APIGW_BASE ??
       process.env.NEXT_PUBLIC_APIGW_BASE ??
       process.env.APIGW_ORIGIN ??
       process.env.API_GATEWAY_ORIGIN ??
-      'https://ambulant-plus-core-api-gateway-kdon.vercel.app',
+      '',
   );
+
+  if (!base) throw new Error('APIGW_BASE_required');
+  return base;
 }
 
 export function forwardIdentityHeaders(req: NextRequest) {

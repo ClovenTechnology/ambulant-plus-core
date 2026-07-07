@@ -95,7 +95,7 @@ export async function POST(req: NextRequest) {
           sponsorId: v.sponsorId,
           voucherLast4: v.codeLast4,
         },
-        orgId: 'org-default',
+        orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
       },
     });
 
@@ -134,7 +134,7 @@ export async function POST(req: NextRequest) {
       currency: 'ZAR',
       status: 'initiated',
       meta: { method: 'wallet', holdId: hold.id, clinicianId, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString() },
-      orgId: 'org-default',
+      orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
     },
   });
 

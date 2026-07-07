@@ -124,7 +124,7 @@ export async function POST(req: NextRequest) {
       paymentProvider: method === 'wallet' ? 'wallet' : method === 'voucher' ? 'voucher' : 'manual',
       paymentRef: tx,
       meta: JSON.stringify({ method, tx }),
-      orgId: 'org-default',
+      orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
     },
   });
 

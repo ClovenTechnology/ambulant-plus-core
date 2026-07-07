@@ -235,7 +235,7 @@ export async function POST(req: NextRequest) {
           uid,
           promo: reward ? { kind: PROMO_KIND, reward, token: promoToken } : { kind: PROMO_KIND, reward: null },
         },
-        orgId: 'org-default',
+        orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
         items: {
           create: cleanItems.map((it: any) => ({
             productId: it.productId,
@@ -244,7 +244,7 @@ export async function POST(req: NextRequest) {
             name: it.name,
             unitAmountZar: it.unitAmountZar,
             quantity: it.quantity,
-            orgId: 'org-default',
+            orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
           })),
         },
       },

@@ -280,7 +280,7 @@ export async function POST(req: Request) {
         usedAt: null,
         requestedByIp: ip,
         requestedByUa: ua,
-        orgId: cred.orgId || 'org-default',
+        orgId: cred.orgId || process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
       },
     })
     .catch(() => null);

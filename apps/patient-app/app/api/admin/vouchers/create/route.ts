@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
       active: true,
       expiresAt: body?.expiresAt ? new Date(body.expiresAt) : null,
       createdByUserId: body?.createdByUserId ? String(body.createdByUserId) : null,
-      orgId: 'org-default',
+      orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
     },
   });
 

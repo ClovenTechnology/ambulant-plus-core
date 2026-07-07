@@ -224,7 +224,7 @@ export async function POST(req: NextRequest) {
     if (existing) return json({ ok: false, error: 'An account with this email already exists.' }, 409);
 
     const passwordHash = await hashPasswordScrypt(password);
-    const orgId = process.env.DEFAULT_ORG_ID || 'org-default';
+    const orgId = process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default';
     const now = new Date();
     const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || req.headers.get('x-real-ip') || null;
     const ua = req.headers.get('user-agent') || null;
