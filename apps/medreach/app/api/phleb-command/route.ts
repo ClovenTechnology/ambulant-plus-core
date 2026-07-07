@@ -1,4 +1,4 @@
-// apps/medreach/app/api/phleb-jobs/route.ts
+// apps/medreach/app/api/phleb-command/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
@@ -18,7 +18,7 @@ function gatewayBase() {
   ).replace(/\/+$/, '');
 }
 
-function gatewayUrl(path: string, search = '') {
+function gatewayUrl(path: string) {
   const base = gatewayBase();
   if (!base) return null;
 
@@ -28,7 +28,7 @@ function gatewayUrl(path: string, search = '') {
       ? cleanPath.slice(4)
       : cleanPath;
 
-  return `${base}/${finalPath}${search}`;
+  return `${base}/${finalPath}`;
 }
 
 function copyHeaders(req: NextRequest, phlebId: string) {
@@ -43,75 +43,55 @@ function copyHeaders(req: NextRequest, phlebId: string) {
   }
 
   headers.set('accept', 'application/json');
+  headers.set('content-type', req.headers.get('content-type') || 'application/json');
   headers.set('x-role', headers.get('x-role') || 'phleb');
   headers.set('x-user-id', headers.get('x-user-id') || phlebId);
 
   return headers;
 }
 
-function normalizeJobs(raw: any) {
-  const data = raw?.data || raw?.jobs || raw?.items || [];
+export async function POST(req: NextRequest) {
+  const bodyText = await req.text();
 
-  return Array.isArray(data) ? data : [];
-}
+  let body: any;
 
-export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const phlebId = clean(url.searchParams.get('phlebId') || url.searchParams.get('id'));
+  try {
+    body = JSON.parse(bodyText || '{}');
+  } catch {
+    return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
+  }
 
-  if (!phlebId) {
+  const phlebId = clean(body.phlebId);
+  const jobId = clean(body.jobId || body.drawId || body.orderId);
+
+  if (!phlebId || !jobId) {
     return NextResponse.json(
-      { ok: false, error: 'missing_phlebId', data: [], jobs: [] },
+      { ok: false, error: 'missing_phlebId_or_jobId' },
       { status: 400 },
     );
   }
 
-  const passthrough = new URLSearchParams(url.searchParams);
-  passthrough.delete('id');
-  passthrough.delete('phlebId');
-
-  const search = passthrough.toString() ? `?${passthrough.toString()}` : '';
-
   const upstreamUrl = gatewayUrl(
-    `/api/medreach/phlebs/${encodeURIComponent(phlebId)}/jobs`,
-    search,
+    `/api/medreach/phlebs/${encodeURIComponent(phlebId)}/jobs/${encodeURIComponent(jobId)}/command`,
   );
 
   if (!upstreamUrl) {
     return NextResponse.json(
-      { ok: false, error: 'api_gateway_not_configured', data: [], jobs: [] },
+      { ok: false, error: 'api_gateway_not_configured' },
       { status: 503 },
     );
   }
 
   const upstream = await fetch(upstreamUrl, {
-    method: 'GET',
+    method: 'POST',
     headers: copyHeaders(req, phlebId),
+    body: bodyText,
     cache: 'no-store',
   });
 
   const json = await upstream.json().catch(() => null);
 
-  if (!upstream.ok) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: json?.error || 'phleb_jobs_upstream_failed',
-        detail: json,
-        data: [],
-        jobs: [],
-      },
-      { status: upstream.status },
-    );
-  }
-
-  const jobs = normalizeJobs(json);
-
-  return NextResponse.json({
-    ok: true,
-    data: jobs,
-    jobs,
-    meta: json?.meta || { phlebId, count: jobs.length },
-    upstream: json,
+  return NextResponse.json(json || { ok: upstream.ok }, {
+    status: upstream.status,
   });
 }
