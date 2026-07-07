@@ -1803,6 +1803,18 @@ model PharmacyPartner {
 model LabPartner {
   id                    String                     @id @default(cuid())
   name                  String
+  displayName           String?
+  logoUrl               String?
+  website               String?
+  operationalPhone      String?
+  operationalEmail      String?
+  addressLine1          String?
+  addressLine2          String?
+  city                  String?
+  province              String?
+  postalCode            String?
+  profileMeta           Json?
+  verifiedIdentityMeta  Json?
   contact               String?
   active                Boolean                    @default(true)
   createdAt             DateTime                   @default(now())
@@ -2229,6 +2241,13 @@ model MedReachTimelineEntry {
 model MedReachPhlebProfile {
   id                  String                   @id @default(cuid())
   userId              String                   @unique
+  displayName          String?
+  avatarUrl            String?
+  phone                String?
+  vehicleType          String?
+  serviceAreaMeta      Json?
+  profileMeta          Json?
+  verifiedIdentityMeta Json?
   active              Boolean                  @default(true)
   approvalStatus      MedReachPartnerStatus    @default(PENDING)
   country             String                   @default("ZA") @db.VarChar(2)
