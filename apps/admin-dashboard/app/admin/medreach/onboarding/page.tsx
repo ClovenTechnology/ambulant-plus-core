@@ -52,6 +52,27 @@ type Phleb = {
   rejectionReason?: string | null;
 };
 
+type Evidence = {
+  id: string;
+  kind?: string;
+  subjectId?: string | null;
+  subjectType?: string | null;
+  documentType?: string | null;
+  status?: string | null;
+  decision?: string | null;
+  sourceEvidenceId?: string | null;
+  at?: string | null;
+};
+
+type EvidenceStats = {
+  total: number;
+  submitted: number;
+  accepted: number;
+  rejected: number;
+  needsMoreInfo: number;
+  pending: number;
+};
+
 type Filter = 'all' | 'pending' | 'active' | 'rejected' | 'blocked';
 
 function n(value: unknown) {
@@ -75,6 +96,43 @@ function asPhlebs(raw: any): Phleb[] {
   return Array.isArray(data) ? data : [];
 }
 
+function asEvidence(raw: any): Evidence[] {
+  const data = raw?.data || raw?.evidence || raw?.items || [];
+
+  return Array.isArray(data) ? data : [];
+}
+
+function evidenceStatus(row: Evidence) {
+  return String(row.status || row.decision || '').toUpperCase();
+}
+
+function evidenceSummary(rows: Evidence[]): EvidenceStats {
+  const submittedRows = rows.filter(
+    (row) => row.kind === 'medreach_onboarding_evidence_submitted',
+  );
+
+  const reviewedSourceIds = new Set(
+    rows
+      .filter((row) => row.sourceEvidenceId)
+      .map((row) => String(row.sourceEvidenceId)),
+  );
+
+  const accepted = rows.filter((row) => evidenceStatus(row) === 'ACCEPTED').length;
+  const rejected = rows.filter((row) => evidenceStatus(row) === 'REJECTED').length;
+  const needsMoreInfo = rows.filter(
+    (row) => evidenceStatus(row) === 'NEEDS_MORE_INFO',
+  ).length;
+  const pending = submittedRows.filter((row) => !reviewedSourceIds.has(row.id)).length;
+
+  return {
+    total: rows.length,
+    submitted: submittedRows.length,
+    accepted,
+    rejected,
+    needsMoreInfo,
+    pending,
+  };
+}
 function fmtDate(value?: string | null) {
   if (!value) return '-';
 
@@ -189,6 +247,7 @@ function StatCard({
 export default function MedReachOnboardingPage() {
   const [labs, setLabs] = useState<Lab[]>([]);
   const [phlebs, setPhlebs] = useState<Phleb[]>([]);
+  const [evidence, setEvidence] = useState<Evidence[]>([]);
   const [filter, setFilter] = useState<Filter>('pending');
   const [q, setQ] = useState('');
   const [reasonByKey, setReasonByKey] = useState<Record<string, string>>({});
@@ -203,13 +262,15 @@ export default function MedReachOnboardingPage() {
     setNotice(null);
 
     try {
-      const [labsRes, phlebsRes] = await Promise.all([
+      const [labsRes, phlebsRes, evidenceRes] = await Promise.all([
         fetch('/api/admin/medreach/labs?limit=300', { cache: 'no-store' }),
         fetch('/api/admin/medreach/phlebs?limit=300', { cache: 'no-store' }),
+        fetch('/api/admin/medreach/evidence?limit=500', { cache: 'no-store' }),
       ]);
 
       const labsJson = await labsRes.json().catch(() => null);
       const phlebsJson = await phlebsRes.json().catch(() => null);
+      const evidenceJson = await evidenceRes.json().catch(() => null);
 
       if (!labsRes.ok || labsJson?.ok === false) {
         throw new Error(labsJson?.error || `Labs HTTP ${labsRes.status}`);
@@ -219,12 +280,17 @@ export default function MedReachOnboardingPage() {
         throw new Error(phlebsJson?.error || `Phlebs HTTP ${phlebsRes.status}`);
       }
 
+      if (!evidenceRes.ok || evidenceJson?.ok === false) {
+        throw new Error(evidenceJson?.error || `Evidence HTTP ${evidenceRes.status}`);
+      }
       setLabs(asLabs(labsJson));
       setPhlebs(asPhlebs(phlebsJson));
+      setEvidence(asEvidence(evidenceJson));
     } catch (e: any) {
       setErr(e?.message || 'Unable to load MedReach onboarding control centre');
       setLabs([]);
       setPhlebs([]);
+      setEvidence([]);
     } finally {
       setLoading(false);
     }
@@ -262,6 +328,24 @@ export default function MedReachOnboardingPage() {
     };
   }, [labs, phlebs]);
 
+  const evidenceBySubject = useMemo(() => {
+    const map = new Map<string, Evidence[]>();
+
+    for (const row of evidence) {
+      const subjectType = String(row.subjectType || '').toLowerCase();
+      const subjectId = String(row.subjectId || '').trim();
+
+      if (!subjectType || !subjectId) continue;
+
+      const key = `${subjectType}:${subjectId}`;
+      const list = map.get(key) || [];
+
+      list.push(row);
+      map.set(key, list);
+    }
+
+    return map;
+  }, [evidence]);
   const filteredLabs = useMemo(() => {
     const needle = q.trim().toLowerCase();
 
@@ -544,6 +628,9 @@ export default function MedReachOnboardingPage() {
               const readiness = labReadiness(lab);
               const status = labStatus(lab);
               const noteKey = `lab:${lab.id}`;
+              const evidenceStats = evidenceSummary(
+                evidenceBySubject.get(`lab:${lab.id}`) || [],
+              );
 
               return (
                 <article key={lab.id} className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -573,6 +660,24 @@ export default function MedReachOnboardingPage() {
                     <Pill ok={readiness.panels} text="Panels" />
                     <Pill ok={readiness.payout} text="Payout" />
                     <Pill ok={readiness.results} text="Results" />
+                    <Pill
+                      ok={evidenceStats.accepted > 0}
+                      text={`Evidence accepted ${evidenceStats.accepted}`}
+                    />
+                    <Pill
+                      ok={evidenceStats.pending === 0 && evidenceStats.submitted > 0}
+                      text={`Pending docs ${evidenceStats.pending}`}
+                    />
+                    <Pill
+                      ok={evidenceStats.rejected === 0 && evidenceStats.needsMoreInfo === 0}
+                      text={`Review issues ${evidenceStats.rejected + evidenceStats.needsMoreInfo}`}
+                    />
+                    <Link
+                      href={`/admin/medreach/evidence?subjectType=lab&subjectId=${encodeURIComponent(lab.id)}`}
+                      className="rounded-full border bg-white px-2 py-0.5 text-[10px] hover:bg-gray-50"
+                    >
+                      Evidence review
+                    </Link>
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
@@ -670,6 +775,11 @@ export default function MedReachOnboardingPage() {
               const readiness = phlebReadiness(phleb);
               const status = phlebStatus(phleb);
               const noteKey = `phleb:${phleb.id}`;
+              const evidenceStats = evidenceSummary(
+                evidenceBySubject.get(`phleb:${phleb.id}`) ||
+                  evidenceBySubject.get(`phleb:${phleb.userId || ''}`) ||
+                  [],
+              );
 
               return (
                 <article key={phleb.id} className="rounded-2xl border bg-white p-5 shadow-sm">
@@ -699,6 +809,24 @@ export default function MedReachOnboardingPage() {
                     <Pill ok={readiness.defaultLab} text="Default lab" />
                     <Pill ok={readiness.payout} text="Payout" />
                     <Pill ok={readiness.performance} text="Performance" />
+                    <Pill
+                      ok={evidenceStats.accepted > 0}
+                      text={`Evidence accepted ${evidenceStats.accepted}`}
+                    />
+                    <Pill
+                      ok={evidenceStats.pending === 0 && evidenceStats.submitted > 0}
+                      text={`Pending docs ${evidenceStats.pending}`}
+                    />
+                    <Pill
+                      ok={evidenceStats.rejected === 0 && evidenceStats.needsMoreInfo === 0}
+                      text={`Review issues ${evidenceStats.rejected + evidenceStats.needsMoreInfo}`}
+                    />
+                    <Link
+                      href={`/admin/medreach/evidence?subjectType=phleb&subjectId=${encodeURIComponent(phleb.id || phleb.userId || '')}`}
+                      className="rounded-full border bg-white px-2 py-0.5 text-[10px] hover:bg-gray-50"
+                    >
+                      Evidence review
+                    </Link>
                   </div>
 
                   <div className="mt-4 grid grid-cols-2 gap-3 text-xs md:grid-cols-4">
