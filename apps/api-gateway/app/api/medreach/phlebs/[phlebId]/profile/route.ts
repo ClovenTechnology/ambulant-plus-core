@@ -99,6 +99,7 @@ async function findPhleb(phlebId: string) {
 
 async function canReadProfile(req: NextRequest, phleb: any, who: any) {
   const role = roleOf(who);
+  const admin = role === 'admin' || role === 'system';
 
   if (['admin', 'system', 'clinician'].includes(role)) return true;
 
@@ -144,6 +145,7 @@ async function canReadProfile(req: NextRequest, phleb: any, who: any) {
 
 function canWriteProfile(phleb: any, who: any) {
   const role = roleOf(who);
+  const admin = role === 'admin' || role === 'system';
 
   if (['admin', 'system'].includes(role)) return true;
 
@@ -189,6 +191,7 @@ export async function PATCH(
 ) {
   const who = readIdentity(req.headers);
   const role = roleOf(who);
+  const admin = role === 'admin' || role === 'system';
   const phlebId = cleanString(params.phlebId);
 
   if (!phlebId) {
@@ -213,8 +216,28 @@ export async function PATCH(
     return NextResponse.json({ ok: false, error: 'invalid_json' }, { status: 400 });
   }
 
-  const admin = ['admin', 'system'].includes(role);
   const data: Record<string, any> = {};
+
+  const protectedFields = [
+    'active',
+    'approvalStatus',
+    'status',
+    'commissionKind',
+    'commissionValue',
+    'approvedAt',
+    'approvedByUserId',
+    'rejectedAt',
+    'rejectedByUserId',
+    'rejectionReason',
+    'verifiedIdentityMeta',
+  ];
+
+  if (!admin && protectedFields.some((field) => field in body)) {
+    return NextResponse.json(
+      { ok: false, error: 'locked_phleb_identity_or_admin_field' },
+      { status: 403 },
+    );
+  }
 
   if ('country' in body) {
     data.country = cleanString(body.country).toUpperCase().slice(0, 2) || existing.country;

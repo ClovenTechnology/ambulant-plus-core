@@ -245,6 +245,35 @@ export async function PATCH(
 
   const data: Record<string, any> = {};
 
+  const protectedFields = [
+    'name',
+    'active',
+    'status',
+    'onboardingStatus',
+    'ownerUserId',
+    'country',
+    'currency',
+    'canManageStaff',
+    'canPublishResults',
+    'monthlyAccessFeeCents',
+    'commissionKind',
+    'commissionValue',
+    'approvedAt',
+    'approvedByUserId',
+    'rejectedAt',
+    'rejectedByUserId',
+    'rejectionReason',
+    'approveNow',
+    'verifiedIdentityMeta',
+  ];
+
+  if (!admin && protectedFields.some((field) => field in body)) {
+    return NextResponse.json(
+      { ok: false, error: 'locked_lab_identity_or_admin_field' },
+      { status: 403 },
+    );
+  }
+
   if ('name' in body && admin) data.name = cleanString(body.name);
   if ('contact' in body) data.contact = cleanString(body.contact) || null;
   if ('active' in body && admin) data.active = cleanBoolean(body.active, true);
