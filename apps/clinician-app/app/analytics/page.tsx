@@ -5,11 +5,6 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-const API = (process.env.NEXT_PUBLIC_APIGW_BASE ?? '').replace(/\/$/, '');
-
-function apiUrl(path: string) {
-  return API ? `${API}${path}` : path;
-}
 type PlanTier = 'free' | 'basic' | 'pro' | 'host';
 
 type MePlanSummary = {
@@ -30,7 +25,7 @@ export default function ClinicianAnalyticsHubPage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(apiUrl('/api/analytics/clinicians/me/meta'), {
+        const res = await fetch('/api/analytics/clinicians/me/meta', {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',

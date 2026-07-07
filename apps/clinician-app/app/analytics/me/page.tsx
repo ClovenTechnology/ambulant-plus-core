@@ -3,11 +3,6 @@
 
 import { useEffect, useState, useMemo, type ReactNode } from 'react';
 
-const API = (process.env.NEXT_PUBLIC_APIGW_BASE ?? '').replace(/\/$/, '');
-
-function apiUrl(path: string) {
-  return API ? `${API}${path}` : path;
-}
 type RangeKey = '30d' | '90d' | '12m';
 type PlanTier = 'free' | 'basic' | 'pro' | 'host';
 
@@ -169,7 +164,7 @@ export default function ClinicianAnalyticsMePage() {
       setLoading(true);
       setErr(null);
       try {
-        const res = await fetch(apiUrl(`/api/analytics/clinicians/me?range=${range}`), {
+        const res = await fetch(`/api/analytics/clinicians/me?range=${range}`, {
           cache: 'no-store',
           headers: {
             'x-role': 'clinician',
