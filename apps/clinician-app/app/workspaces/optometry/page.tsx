@@ -1,10 +1,10 @@
-﻿/*
+/*
 File: apps/clinician-app/app/workspaces/optometry/page.tsx
 Purpose: World-class Optometry workspace scaffold (local-first UX, context-aware)
 
 Upgrades in this version:
 - Reads patientId / encounterId / clinicianId from query params
-- Stops relying on fake prop defaults
+- Stops relying on placeholder prop defaults
 - Guards create/bookmark/pin actions when consultation context is missing
 - Keeps premium local-first UX intact for now
 
@@ -116,7 +116,7 @@ function makeThumbUrl(url: string) {
   return url;
 }
 
-function mockEvidence(label: string): EvidenceRef {
+function placeholderEvidence(label: string): EvidenceRef {
   const t = Date.now();
   return {
     kind: 'image',
@@ -529,7 +529,7 @@ function OptometryWorkspacePageContent() {
         };
       }
     } else {
-      ev = mockEvidence(`${eye} - Attached media (mock)`);
+      ev = placeholderEvidence(`${eye} - Attached media placeholder`);
     }
 
     createFinding(type, severity, note, [ev]);
@@ -731,7 +731,7 @@ function OptometryWorkspacePageContent() {
                   className="mt-2 w-full rounded border bg-white px-2.5 py-2 text-sm"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search title, note, tags”¦"
+                  placeholder="Search title, note, tags…"
                 />
 
                 <div className="mt-3">
@@ -947,7 +947,7 @@ function OptometryWorkspacePageContent() {
                             title={p.label}
                           >
                             <div className="w-6 h-6 rounded-full grid place-items-center text-[11px] font-semibold shadow bg-blue-600 text-white">
-                              ”¢
+                              •
                             </div>
                           </div>
                         ))}
@@ -1072,7 +1072,7 @@ function OptometryWorkspacePageContent() {
                       </label>
 
                       <div className="rounded-lg border bg-amber-50 border-amber-200 px-3 py-2 text-[11px] text-amber-900">
-                        Local edit only: wire PATCH to make this server-truth.
+                        Local edit only until PATCH support is available for server-truth updates.
                       </div>
                     </>
                   )}
@@ -1191,7 +1191,7 @@ function ExamPanel(props: {
 
       <label className="mt-3 block text-xs text-gray-600">
         Notes
-        <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={symptomNote} onChange={(e) => setSymptomNote(e.target.value)} placeholder="Optional symptom details”¦" disabled={disabled} />
+        <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={symptomNote} onChange={(e) => setSymptomNote(e.target.value)} placeholder="Optional symptom details…" disabled={disabled} />
       </label>
 
       <div className="mt-2 text-[11px] text-gray-500">Later: persist these fields on the encounter (structured observations).</div>
@@ -1253,7 +1253,7 @@ function QuickFindingComposer({
 
         <label className="text-xs text-gray-600">
           Note
-          <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional details”¦" disabled={disabled} />
+          <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={2} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional details…" disabled={disabled} />
         </label>
 
         <button
@@ -1298,7 +1298,7 @@ function BookmarkButton({
         {zone && zone !== 'unknown' ? <span className="text-gray-500"> · zone:{zone}</span> : null}
       </div>
       <div className="mt-1 text-xs text-gray-500">
-        {hasMedia ? 'Will attach the currently selected media item.' : 'No media selected; will attach a mock placeholder.'}
+        {hasMedia ? 'Will attach the currently selected media item.' : 'No media selected; will attach a media placeholder.'}
       </div>
 
       <button
@@ -1351,7 +1351,7 @@ function BookmarkButton({
 
               <label className="text-xs text-gray-600 block">
                 Note
-                <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional details”¦" />
+                <textarea className="mt-1 w-full rounded border px-2 py-2 text-sm" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder="Optional details…" />
               </label>
 
               <div className="flex items-center justify-end gap-2">

@@ -12,17 +12,17 @@ function SurgeryWorkspacePageContent() {
   const patientId =
     searchParams?.get('patientId') ||
     searchParams?.get('patient') ||
-    'pat_demo_001';
+    '';
 
   const encounterId =
     searchParams?.get('encounterId') ||
     searchParams?.get('encounter') ||
-    'enc_demo_001';
+    '';
 
   const clinicianId =
     searchParams?.get('clinicianId') ||
     searchParams?.get('clinician') ||
-    'clin_demo_001';
+    '';
 
   const vm = useSurgeryWorkspace({ patientId, encounterId, clinicianId });
   const { state, actions } = vm;

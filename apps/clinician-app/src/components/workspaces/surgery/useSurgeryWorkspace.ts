@@ -239,9 +239,9 @@ function formatSummary(state: SurgeryState, meta: { patientId: string; encounter
 }
 
 export function useSurgeryWorkspace(props: SurgeryWorkspaceProps) {
-  const patientId = props.patientId ?? 'pat_demo_001';
-  const encounterId = props.encounterId ?? 'enc_demo_001';
-  const clinicianId = props.clinicianId ?? 'clin_demo_001';
+  const patientId = props.patientId ?? '';
+  const encounterId = props.encounterId ?? '';
+  const clinicianId = props.clinicianId ?? '';
 
   const [state, setState] = React.useState<SurgeryState>(DEFAULT_STATE);
 

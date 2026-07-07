@@ -143,17 +143,17 @@ function ENTWorkspacePageContent() {
   const patientId =
     searchParams?.get('patientId') ||
     searchParams?.get('patient') ||
-    'pat_demo_001';
+    '';
 
   const encounterId =
     searchParams?.get('encounterId') ||
     searchParams?.get('encounter') ||
-    'enc_demo_001';
+    '';
 
   const clinicianId =
     searchParams?.get('clinicianId') ||
     searchParams?.get('clinician') ||
-    'clin_demo_001';
+    '';
 
   const storageKey = useMemo(() => `ent-ws-v2:${patientId}:${encounterId}`, [patientId, encounterId]);
   const didLoadRef = useRef(false);
@@ -595,7 +595,7 @@ function ENTWorkspacePageContent() {
     }
   };
 
-  const addDemoPinAnnotation = async () => {
+  const addPinAnnotation = async () => {
     // kept for parity with your old flow: adds a deterministic pin
     await addPinToSelectedEvidence(0.52, 0.41);
   };
@@ -844,11 +844,11 @@ function ENTWorkspacePageContent() {
                 <button
                   type="button"
                   className="rounded-full border bg-white hover:bg-gray-50 px-3 py-1.5 text-xs disabled:opacity-50"
-                  onClick={addDemoPinAnnotation}
+                  onClick={addPinAnnotation}
                   disabled={busy}
-                  title="Creates a demo pin for the selected evidence"
+                  title="Creates a pin for the selected evidence"
                 >
-                  + Demo pin
+                  + Add pin
                 </button>
               </div>
             </div>
@@ -1153,7 +1153,7 @@ function ENTWorkspacePageContent() {
                       </label>
 
                       <div className="rounded-lg border bg-amber-50 border-amber-200 px-3 py-2 text-[11px] text-amber-900">
-                        Local edit only: wire PATCH when ready to make this server-truth.
+                        Local edit only until PATCH support is available for server-truth updates.
                       </div>
                     </>
                   )}

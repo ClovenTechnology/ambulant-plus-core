@@ -1,4 +1,4 @@
-﻿/*
+/*
 File: apps/clinician-app/app/workspaces/physio/page.tsx
 Purpose: Phase 1 world-class standalone Physio workspace (NOT integrated with SFU yet).
 
@@ -218,9 +218,9 @@ function coerceGoal(x: any): Goal | null {
 }
 
 /* --------------------
-   Mock clip capture
+   Clip capture placeholder
 -------------------- */
-function mockMovementClip(label: string): EvidenceRef {
+function movementClipPlaceholder(label: string): EvidenceRef {
   const t = Date.now();
   return {
     kind: 'video_clip',
@@ -478,7 +478,7 @@ function PhysioWorkspacePageContent() {
       return;
     }
 
-    const clip = mockMovementClip(`${region.label} (${view})`);
+    const clip = movementClipPlaceholder(`${region.label} (${view})`);
     addFinding({
       patientId,
       encounterId,
@@ -1078,7 +1078,7 @@ function ExamPanel(props: {
                     className="w-full rounded border px-2 py-1.5 text-sm"
                     value={customName}
                     onChange={(e) => setCustomName(e.target.value)}
-                    placeholder="Type custom test name”¦"
+                    placeholder="Type custom test name…"
                     disabled={disabled}
                   />
                 </div>
@@ -1326,7 +1326,7 @@ function FindingEditor(props: {
           <textarea className="w-full rounded border px-2 py-1.5 text-sm bg-white" rows={2} value={note} onChange={(e) => setNote(e.target.value)} />
         </Field>
         <Field label="Tags (comma separated)">
-          <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="pain, rom, shoulder”¦" />
+          <input className="w-full rounded border px-2 py-1.5 text-sm bg-white" value={tags} onChange={(e) => setTags(e.target.value)} placeholder="pain, rom, shoulder…" />
         </Field>
       </div>
 
@@ -1691,7 +1691,7 @@ function BookmarkMovementButton({ onBookmark, disabled }: { onBookmark: (note?: 
             <div className="px-4 py-3 border-b flex items-center justify-between">
               <div>
                 <div className="text-sm font-semibold">Bookmark movement</div>
-                <div className="text-xs text-gray-500">Creates a clip + attaches to the selected region (mock capture)</div>
+                <div className="text-xs text-gray-500">Creates a clip + attaches to the selected region (placeholder capture)</div>
               </div>
               <button className="text-xs text-gray-600 hover:text-gray-900" onClick={() => setOpen(false)} type="button">
                 Close
@@ -1710,7 +1710,7 @@ function BookmarkMovementButton({ onBookmark, disabled }: { onBookmark: (note?: 
                   rows={3}
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
-                  placeholder="Optional”¦ e.g., pain with overhead reach"
+                  placeholder="Optional… e.g., pain with overhead reach"
                 />
               </label>
 

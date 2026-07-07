@@ -72,17 +72,17 @@ function CardiologyWorkspacePageContent() {
   const patientId =
     searchParams?.get('patientId') ||
     searchParams?.get('patient') ||
-    'pat_demo_001';
+    '';
 
   const encounterId =
     searchParams?.get('encounterId') ||
     searchParams?.get('encounter') ||
-    'enc_demo_001';
+    '';
 
   const clinicianId =
     searchParams?.get('clinicianId') ||
     searchParams?.get('clinician') ||
-    'clin_demo_001';
+    '';
 
   const [mode, setMode] = useState<CardioMode>('ECG');
   const [zone, setZone] = useState<CardioZone>('12_lead');
@@ -314,7 +314,7 @@ function CardiologyWorkspacePageContent() {
     }
   };
 
-  const addDemoPinAnnotation = async () => {
+  const addPinAnnotation = async () => {
     if (!selectedEvidence) {
       setBanner({ kind: 'info', text: 'Select an evidence item first.' });
       return;
@@ -523,11 +523,11 @@ function CardiologyWorkspacePageContent() {
                 </div>
                 <button
                   className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
-                  onClick={addDemoPinAnnotation}
+                  onClick={addPinAnnotation}
                   disabled={busy}
-                  title="Creates a demo pin annotation for the selected evidence"
+                  title="Creates a pin annotation for the selected evidence"
                 >
-                  + Add demo pin
+                  + Add pin
                 </button>
               </div>
 

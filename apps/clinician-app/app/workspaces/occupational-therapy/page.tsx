@@ -357,7 +357,7 @@ function OccupationalTherapyWorkspacePageContent() {
     }
   };
 
-  const addDemoPinAnnotation = async () => {
+  const addPinAnnotation = async () => {
     if (!contextReady) {
       setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
       return;
@@ -555,12 +555,12 @@ function OccupationalTherapyWorkspacePageContent() {
                 </div>
                 <button
                   className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
-                  onClick={addDemoPinAnnotation}
+                  onClick={addPinAnnotation}
                   disabled={busy || !contextReady}
-                  title="Creates a demo pin annotation for the selected evidence"
+                  title="Creates a pin annotation for the selected evidence"
                   type="button"
                 >
-                  + Add demo pin
+                  + Add pin
                 </button>
               </div>
 
@@ -683,7 +683,7 @@ function OTTemplate(props: {
             <input
               ref={adlInputRef as any}
               className="flex-1 rounded border px-2 py-1.5 text-sm bg-white"
-              placeholder="Add a task (e.g., dressing, cooking)”¦"
+              placeholder="Add a task (e.g., dressing, cooking)…"
               disabled={disabled}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
@@ -799,7 +799,7 @@ function OTTemplate(props: {
             rows={2}
             value={template.notes}
             onChange={(e) => setTemplate({ ...template, notes: e.target.value })}
-            placeholder="Optional details”¦"
+            placeholder="Optional details…"
             disabled={disabled}
           />
         </label>
@@ -865,7 +865,7 @@ function QuickFindingComposer(props: {
             rows={2}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Optional details”¦"
+            placeholder="Optional details…"
             disabled={disabled || saving}
           />
         </label>

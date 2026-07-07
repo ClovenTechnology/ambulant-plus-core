@@ -338,7 +338,7 @@ function PaediatricWorkspacePageContent() {
     }
   };
 
-  const addDemoPinAnnotation = async () => {
+  const addPinAnnotation = async () => {
     if (!contextReady) {
       setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
       return;
@@ -541,12 +541,12 @@ function PaediatricWorkspacePageContent() {
                 </div>
                 <button
                   className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
-                  onClick={addDemoPinAnnotation}
+                  onClick={addPinAnnotation}
                   disabled={busy || !contextReady}
-                  title="Creates a demo pin annotation for the selected evidence"
+                  title="Creates a pin annotation for the selected evidence"
                   type="button"
                 >
-                  + Add demo pin
+                  + Add pin
                 </button>
               </div>
 
@@ -678,7 +678,7 @@ function PaedsTemplate(props: {
         </label>
 
         <label className="text-xs text-gray-600">
-          SpOâ‚‚ (%)
+          SpO₂ (%)
           <input
             className="mt-1 w-full rounded border px-2 py-1.5 text-sm"
             value={template.spo2}

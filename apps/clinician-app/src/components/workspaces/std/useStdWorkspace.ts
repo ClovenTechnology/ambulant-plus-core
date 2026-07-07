@@ -455,9 +455,9 @@ function formatFollowUpPlanNote(params: {
 }
 
 export function useStdWorkspace(props: STDWorkspaceProps) {
-  const patientId = props.patientId ?? 'pat_demo_001';
-  const encounterId = props.encounterId ?? 'enc_demo_001';
-  const clinicianId = props.clinicianId ?? 'clin_demo_001';
+  const patientId = props.patientId ?? '';
+  const encounterId = props.encounterId ?? '';
+  const clinicianId = props.clinicianId ?? '';
 
   const [state, setState] = React.useState<StdState>(DEFAULT_STATE);
 
@@ -727,7 +727,7 @@ export function useStdWorkspace(props: STDWorkspaceProps) {
     [clinicianId, encounterId, patientId, setBanner, state.consent.mediaCapture, state.context]
   );
 
-  const addDemoPinAnnotation = React.useCallback(async () => {
+  const addPinAnnotation = React.useCallback(async () => {
     if (!selectedEvidence) {
       setBanner({ kind: 'info', text: 'Select an evidence item first.' });
       return;
@@ -1283,7 +1283,7 @@ export function useStdWorkspace(props: STDWorkspaceProps) {
 
       createManualFinding,
       handleBookmark,
-      addDemoPinAnnotation,
+      addPinAnnotation,
 
       copySummaryNote,
       exportSummaryAsFinding,

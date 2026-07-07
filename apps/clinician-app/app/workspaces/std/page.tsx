@@ -126,7 +126,7 @@ function STDWorkspacePageContent() {
             actions={{
               setBookmarkOpen: actions.setBookmarkOpen,
               setSelectedEvidenceId: actions.setSelectedEvidenceId,
-              addDemoPinAnnotation: actions.addDemoPinAnnotation,
+              addPinAnnotation: actions.addPinAnnotation,
               setBanner: actions.setBanner,
             }}
           />

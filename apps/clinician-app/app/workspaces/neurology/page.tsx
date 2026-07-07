@@ -6,7 +6,7 @@ Purpose: Neurology workspace (Phase 1)
 - Uses optimistic UI for findings/evidence until GET endpoints exist.
 
 Design goals:
-- Same 3-column “worldclass” layout pattern as Dental/Physio/ENT
+- Same 3-column “world-class” layout pattern as Dental/Physio/ENT
 - Neuro exam quick capture + timeline-like findings list + evidence preview
 */
 
@@ -395,7 +395,7 @@ function NeurologyWorkspacePageContent() {
     }
   };
 
-  const addDemoPinAnnotation = async () => {
+  const addPinAnnotation = async () => {
     if (!contextReady) {
       setBanner({ kind: 'error', text: contextBanner || 'Missing consultation context.' });
       return;
@@ -680,12 +680,12 @@ function NeurologyWorkspacePageContent() {
                 </div>
                 <button
                   className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
-                  onClick={addDemoPinAnnotation}
+                  onClick={addPinAnnotation}
                   disabled={busy || !contextReady}
-                  title="Creates a demo pin annotation for the selected evidence"
+                  title="Creates a pin annotation for the selected evidence"
                   type="button"
                 >
-                  + Add demo pin
+                  + Add pin
                 </button>
               </div>
 
@@ -993,7 +993,7 @@ function NeuroQuickExam(props: NeuroQuickExamProps) {
           value={summaryNote}
           disabled={disabled}
           onChange={(e) => setSummaryNote(e.target.value)}
-          placeholder="Optional exam notes”¦"
+          placeholder="Optional exam notes…"
         />
       </label>
 
@@ -1056,7 +1056,7 @@ function QuickFindingComposer(props: {
             rows={2}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Optional details”¦"
+            placeholder="Optional details…"
             disabled={disabled || saving}
           />
         </label>
@@ -1075,7 +1075,7 @@ function QuickFindingComposer(props: {
           }}
           type="button"
         >
-          {saving ? 'Saving”¦' : 'Create finding'}
+          {saving ? 'Saving…' : 'Create finding'}
         </button>
 
         <div className="text-[11px] text-gray-500">Tip: use “Bookmark” to attach snapshot + clip evidence in one step.</div>

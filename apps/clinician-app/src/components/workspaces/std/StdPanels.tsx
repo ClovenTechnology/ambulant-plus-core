@@ -510,7 +510,7 @@ export function StdEvidencePanel(props: {
   actions: {
     setBookmarkOpen: (open: boolean) => void;
     setSelectedEvidenceId: (id: string | null) => void;
-    addDemoPinAnnotation: () => void;
+    addPinAnnotation: () => void;
     setBanner: (b: any) => void;
   };
 }) {
@@ -588,11 +588,11 @@ export function StdEvidencePanel(props: {
           </div>
           <button
             className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
-            onClick={actions.addDemoPinAnnotation}
+            onClick={actions.addPinAnnotation}
             disabled={busy}
             type="button"
           >
-            + Add demo pin
+            + Add pin
           </button>
         </div>
 

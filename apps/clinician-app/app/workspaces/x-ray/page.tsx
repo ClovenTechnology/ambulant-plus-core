@@ -113,10 +113,10 @@ function XRayWorkspacePageContent() {
   );
 
   const patientId = qs.get('patientId') || 'patient-demo-001';
-  const encounterId = qs.get('encounterId') || 'enc-demo-001';
+  const encounterId = qs.get('encounterId') || '';
   const roomId = qs.get('roomId') || qs.get('room') || undefined;
 
-  const createdBy = qs.get('clinicianId') || 'clin_demo_001';
+  const createdBy = qs.get('clinicianId') || '';
 
   const STORAGE_KEY = useMemo(
     () => `ambulant-xray-ws-v2::${patientId}::${encounterId}`,

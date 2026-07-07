@@ -340,20 +340,20 @@ function OBGYNWorkspacePageContent() {
     searchParams.get('patientId'),
     searchParams.get('subjectPatientId'),
     searchParams.get('patient_id')
-  ) || 'pat_demo_001';
+  ) || '';
 
   const encounterId = firstNonEmpty(
     searchParams.get('encounterId'),
     searchParams.get('caseId'),
     searchParams.get('encounter_id')
-  ) || 'enc_demo_001';
+  ) || '';
 
   const clinicianId = firstNonEmpty(
     searchParams.get('clinicianId'),
     searchParams.get('providerId'),
     searchParams.get('uid'),
     searchParams.get('clinician_id')
-  ) || 'clin_demo_001';
+  ) || '';
 
   const contextReady = Boolean(
     firstNonEmpty(
@@ -836,7 +836,7 @@ function OBGYNWorkspacePageContent() {
     }
   };
 
-  const addDemoPinAnnotation = async () => {
+  const addPinAnnotation = async () => {
     if (!contextReady) {
       setBanner({ kind: 'error', text: 'Missing consultation context.' });
       return;
@@ -900,7 +900,7 @@ function OBGYNWorkspacePageContent() {
     if (bpBadge) lines.push(`- BP: ${bpBadge.label} (${bpBadge.hint})`);
     if (tempC) lines.push(`- Temp: ${tempC} °C`);
     if (hr) lines.push(`- HR: ${hr} bpm`);
-    if (spo2) lines.push(`- SpOâ‚‚: ${spo2} %`);
+    if (spo2) lines.push(`- SpO₂: ${spo2} %`);
     if (glucose) lines.push(`- Glucose: ${glucose} mg/dL`);
 
     const rf = Object.entries(redFlags)
@@ -953,7 +953,7 @@ function OBGYNWorkspacePageContent() {
         const evCount = evidenceCountForFinding(f.id);
         if (evCount) lines.push(`  Evidence attached: ${evCount}`);
       }
-      if (findingsForTrack.length > 10) lines.push(`- ”¦and ${findingsForTrack.length - 10} more`);
+      if (findingsForTrack.length > 10) lines.push(`- …and ${findingsForTrack.length - 10} more`);
     }
 
     lines.push('');
@@ -1095,7 +1095,7 @@ function OBGYNWorkspacePageContent() {
               </>
             ) : null}
             <span className="text-[11px] text-gray-500 ml-auto">
-              Context: {!contextReady ? 'Missing IDs' : ctxLoading ? 'Loading”¦' : ctx ? 'Connected' : 'Fallback'}
+              Context: {!contextReady ? 'Missing IDs' : ctxLoading ? 'Loading…' : ctx ? 'Connected' : 'Fallback'}
             </span>
           </div>
         </div>
@@ -1208,7 +1208,7 @@ function OBGYNWorkspacePageContent() {
                     <Info className="w-4 h-4" />
                     Patient context (feeds)
                   </div>
-                  <span className="text-[11px] text-gray-500">{!contextReady ? 'Missing IDs' : ctxLoading ? 'Loading”¦' : ctx ? 'Connected' : 'Fallback'}</span>
+                  <span className="text-[11px] text-gray-500">{!contextReady ? 'Missing IDs' : ctxLoading ? 'Loading…' : ctx ? 'Connected' : 'Fallback'}</span>
                 </div>
 
                 {ctx ? (
@@ -1229,7 +1229,7 @@ function OBGYNWorkspacePageContent() {
                             <b>{ctx.ladyCenter.predictedOvulation ?? '—'}</b> · Pregnancy: <b>{ctx.ladyCenter.possiblePregnancy ?? '—'}</b>
                           </>
                         ) : (
-                          <>Not available yet (wire patient → apigw sync).</>
+                          <>Not available yet; patient-to-gateway sync is pending.</>
                         )}
                       </div>
                     </div>
@@ -1248,7 +1248,7 @@ function OBGYNWorkspacePageContent() {
                             ) : null}
                           </>
                         ) : (
-                          <>Not available yet (wire patient → apigw sync).</>
+                          <>Not available yet; patient-to-gateway sync is pending.</>
                         )}
                       </div>
                     </div>
@@ -1258,7 +1258,7 @@ function OBGYNWorkspacePageContent() {
                         <div className="text-xs font-semibold text-gray-700">Latest vitals (IoMT)</div>
                         <div className="text-xs text-gray-600 mt-1">
                           {ctx.latestVitals.device ? <b>{ctx.latestVitals.device}</b> : 'Device'} · {ctx.latestVitals.capturedAt ? fmtDate(ctx.latestVitals.capturedAt) : '—'} · HR{' '}
-                          <b>{ctx.latestVitals.hr ?? '—'}</b> · SpOâ‚‚ <b>{ctx.latestVitals.spo2 ?? '—'}</b> · BP <b>{ctx.latestVitals.sys ?? '—'}</b>/<b>{ctx.latestVitals.dia ?? '—'}</b> · Temp{' '}
+                          <b>{ctx.latestVitals.hr ?? '—'}</b> · SpO₂ <b>{ctx.latestVitals.spo2 ?? '—'}</b> · BP <b>{ctx.latestVitals.sys ?? '—'}</b>/<b>{ctx.latestVitals.dia ?? '—'}</b> · Temp{' '}
                           <b>{ctx.latestVitals.tempC ?? '—'}</b>
                         </div>
                       </div>
@@ -1306,7 +1306,7 @@ function OBGYNWorkspacePageContent() {
                   </label>
 
                   <label className="text-xs text-gray-600">
-                    SpOâ‚‚ (%)
+                    SpO₂ (%)
                     <input className="mt-1 w-full rounded border px-2 py-1.5 text-sm" inputMode="numeric" value={spo2} onChange={(e) => setSpo2(e.target.value)} placeholder="e.g., 98" disabled={busy || !contextReady} />
                   </label>
                   <label className="text-xs text-gray-600">
@@ -1442,7 +1442,7 @@ function OBGYNWorkspacePageContent() {
                       className="pl-8 pr-2 py-1.5 text-xs rounded border bg-white w-44"
                       value={q}
                       onChange={(e) => setQ(e.target.value)}
-                      placeholder="Search findings”¦"
+                      placeholder="Search findings…"
                     />
                   </div>
                 </div>
@@ -1477,9 +1477,9 @@ function OBGYNWorkspacePageContent() {
                 <div className="flex items-center gap-2">
                   <button
                     className="rounded-full border bg-white hover:bg-gray-50 px-3 py-1.5 text-xs font-medium text-gray-800 disabled:opacity-50 inline-flex items-center gap-2"
-                    onClick={addDemoPinAnnotation}
+                    onClick={addPinAnnotation}
                     disabled={busy || !contextReady}
-                    title="Creates a demo pin annotation for the selected evidence"
+                    title="Creates a pin annotation for the selected evidence"
                     type="button"
                   >
                     <Plus className="w-4 h-4" />
@@ -1943,7 +1943,7 @@ function QuickFindingComposer(props: {
             rows={3}
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Key details”¦"
+            placeholder="Key details…"
             disabled={disabled || saving}
           />
         </label>

@@ -6,7 +6,7 @@ Purpose: Substance Use / Addiction Medicine workspace (Phase 1)
 - Uses optimistic UI for findings/evidence until GET endpoints exist.
 
 Design goals:
-- Same 3-column “worldclass” layout pattern as Dental/Physio/ENT/STD
+- Same 3-column “world-class” layout pattern as Dental/Physio/ENT/STD
 - Neutral, respectful language
 */
 
@@ -77,17 +77,17 @@ function SubstanceAbuseWorkspacePageContent() {
   const patientId =
     searchParams?.get('patientId') ||
     searchParams?.get('patient') ||
-    'pat_demo_001';
+    '';
 
   const encounterId =
     searchParams?.get('encounterId') ||
     searchParams?.get('encounter') ||
-    'enc_demo_001';
+    '';
 
   const clinicianId =
     searchParams?.get('clinicianId') ||
     searchParams?.get('clinician') ||
-    'clin_demo_001';
+    '';
 
   const [context, setContext] = useState<ContextKey>('intake');
 
@@ -309,7 +309,7 @@ function SubstanceAbuseWorkspacePageContent() {
     }
   };
 
-  const addDemoPinAnnotation = async () => {
+  const addPinAnnotation = async () => {
     if (!selectedEvidence) {
       setBanner({ kind: 'info', text: 'Select an evidence item first.' });
       return;
@@ -663,12 +663,12 @@ function SubstanceAbuseWorkspacePageContent() {
                 <div className="text-xs font-semibold text-gray-700">Evidence ({context.replace('_', ' ').toUpperCase()})</div>
                 <button
                   className="text-xs px-3 py-1.5 rounded border bg-white hover:bg-gray-50 disabled:opacity-50"
-                  onClick={addDemoPinAnnotation}
+                  onClick={addPinAnnotation}
                   disabled={busy}
-                  title="Creates a demo pin annotation for the selected evidence"
+                  title="Creates a pin annotation for the selected evidence"
                   type="button"
                 >
-                  + Add demo pin
+                  + Add pin
                 </button>
               </div>
 
