@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/family/page.tsx
+// apps/patient-app/app/family/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState, Suspense } from 'react';
@@ -220,9 +220,9 @@ function FamilyPageContent() {
 
       const combined = [...activeMembers, ...pendingInviteMembers];
 
-      if (combined.length === 0 && demoMode) {
+      if (combined.length === 0 && demoMode && process.env.NODE_ENV !== 'production') {
         setUsingMock(true);
-        setMockNote('Demo mode is enabled (no live family links found).');
+        setMockNote('Development fallback is enabled because no live family links were found.');
         applyMembers(buildMockFamilyMembers());
         return;
       }
@@ -316,7 +316,7 @@ function FamilyPageContent() {
         throw new Error(json?.error || 'Failed to send invitation');
       }
 
-      toast('Invitation sent. Weâ€™ll ask them to accept and choose what to share.', 'success');
+      toast('Invitation sent. We’ll ask them to accept and choose what to share.', 'success');
       setInviteName('');
       setInviteContact('');
       setInviteRelation('Other');
@@ -834,4 +834,3 @@ export default function FamilyPage() {
     </Suspense>
   );
 }
-

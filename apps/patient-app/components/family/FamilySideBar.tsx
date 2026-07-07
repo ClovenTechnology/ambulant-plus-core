@@ -91,9 +91,9 @@ export default function FamilySidebar({
 
       {usingMock ? (
         <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50/80 px-4 py-3">
-          <div className="text-xs font-medium text-sky-900">Showing demo data</div>
+          <div className="text-xs font-medium text-sky-900">Development fallback data</div>
           <div className="mt-1 text-[11px] leading-5 text-sky-800">
-            Demo mode is enabled{mockNote ? ` (${mockNote})` : ''}.
+            Development fallback mode is enabled{mockNote ? ` (${mockNote})` : ''}.
           </div>
           <div className="mt-2 flex flex-wrap gap-2">
             <button

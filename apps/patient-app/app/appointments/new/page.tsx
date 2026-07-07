@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/appointments/new/page.tsx
+// apps/patient-app/app/appointments/new/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState, Suspense } from 'react';
@@ -131,7 +131,7 @@ function policyClientId(policy: MedicalAidPolicy | null) {
     policy.metadata?.clientId ||
     policy.metadata?.sponsorId ||
     (policy.payerName?.toLowerCase().includes('ambulant demo')
-      ? 'client-demo-medical-aid'
+      ? undefined
       : undefined)
   );
 }
@@ -1022,4 +1022,3 @@ export default function NewAppointmentPage() {
     </Suspense>
   );
 }
-
