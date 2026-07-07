@@ -240,7 +240,7 @@ export async function GET(req: NextRequest) {
         ok: false,
         error: 'api_gateway_not_configured',
         detail:
-          'Set APIGW_BASE, NEXT_PUBLIC_APIGW_BASE or NEXT_PUBLIC_API_GATEWAY_BASE_URL. Metrics mocks are disabled.',
+          'Set APIGW_BASE, NEXT_PUBLIC_APIGW_BASE or NEXT_PUBLIC_API_GATEWAY_BASE_URL. Local metric fallbacks are disabled.',
       },
       { status: 503 },
     );

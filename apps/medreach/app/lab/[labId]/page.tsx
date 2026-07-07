@@ -244,7 +244,7 @@ function normalizeLabOrdersResponse(raw: any, labId: string): LabOrdersResponse 
 
 function displayHttpError(status: number, body: string) {
   if (status === 501) {
-    return 'This MedReach gateway endpoint is not implemented yet.';
+    return 'The MedReach gateway has not exposed this operation yet.';
   }
 
   return body || `HTTP ${status}`;

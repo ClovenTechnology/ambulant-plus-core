@@ -126,7 +126,7 @@ export default function LabDashboardPage() {
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-gray-600">
             Operational, specimen, result and financial visibility for this lab. This is
-            backed by the MedReach gateway metrics route, not local mock data.
+            backed by the MedReach gateway metrics route without local fallback data.
           </p>
         </div>
 

@@ -183,7 +183,7 @@ function MedReachHomeInner() {
         <MetricCard
           label="Platform fees"
           value={loading ? '...' : money(finance.platformFeeCents)}
-          hint="Gateway-derived, no local mock"
+          hint="Gateway-derived metrics only"
         />
       </section>
 
@@ -192,7 +192,7 @@ function MedReachHomeInner() {
           <div className="font-semibold">Gateway metrics unavailable</div>
           <div className="mt-1">{err}</div>
           <div className="mt-1 text-xs">
-            MedReach mock metrics are disabled. Configure the API Gateway base URL before live use.
+            Local metric fallbacks are disabled. Configure the API Gateway base URL before live use.
           </div>
         </section>
       ) : null}
