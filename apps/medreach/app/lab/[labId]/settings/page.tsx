@@ -5,6 +5,57 @@ import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
 
+type LabStaffRole = 'OWNER' | 'ADMIN' | 'OPERATIONS' | 'RESULTS' | 'BILLING' | 'VIEWER';
+type LabStaffStatus = 'PENDING' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED' | 'REVOKED';
+
+type LabStaffMember = {
+  id: string;
+  userId: string;
+  labId: string;
+  role: LabStaffRole;
+  active: boolean;
+  status: LabStaffStatus;
+  invitedBy?: string | null;
+  approvedBy?: string | null;
+  invitedAt?: string | null;
+  approvedAt?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+};
+
+type StaffCounts = {
+  total?: number;
+  active?: number;
+  pending?: number;
+  suspended?: number;
+  revoked?: number;
+};
+
+const STAFF_ROLES: LabStaffRole[] = [
+  'OWNER',
+  'ADMIN',
+  'OPERATIONS',
+  'RESULTS',
+  'BILLING',
+  'VIEWER',
+];
+
+const STAFF_STATUSES: LabStaffStatus[] = [
+  'PENDING',
+  'ACTIVE',
+  'SUSPENDED',
+  'REJECTED',
+  'REVOKED',
+];
+
+const STAFF_ROLE_HELP: Record<LabStaffRole, string> = {
+  OWNER: 'Full operational ownership within this lab.',
+  ADMIN: 'Can manage staff and operational settings.',
+  OPERATIONS: 'Can coordinate lab workflow and specimen operations.',
+  RESULTS: 'Can focus on result workflow and publishing operations.',
+  BILLING: 'Can support finance and billing operations.',
+  VIEWER: 'Read-only operational visibility.',
+};
 type LabProfile = {
   id: string;
   name: string;
@@ -186,6 +237,21 @@ export default function LabSettingsPage() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [staff, setStaff] = useState<LabStaffMember[]>([]);
+  const [staffCounts, setStaffCounts] = useState<StaffCounts>({});
+  const [staffLoading, setStaffLoading] = useState(false);
+  const [staffSaving, setStaffSaving] = useState(false);
+  const [staffErr, setStaffErr] = useState<string | null>(null);
+  const [staffNotice, setStaffNotice] = useState<string | null>(null);
+  const [staffDraft, setStaffDraft] = useState<{
+    userId: string;
+    role: LabStaffRole;
+    status: LabStaffStatus;
+  }>({
+    userId: '',
+    role: 'VIEWER',
+    status: 'PENDING',
+  });
 
   async function load() {
     setLoading(true);
@@ -230,8 +296,131 @@ export default function LabSettingsPage() {
     }
   }
 
+  async function loadStaff() {
+    setStaffLoading(true);
+    setStaffErr(null);
+
+    try {
+      const res = await fetch(`/api/labs/${encodeURIComponent(labId)}/staff`, {
+        cache: 'no-store',
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `Staff HTTP ${res.status}`);
+      }
+
+      setStaff(Array.isArray(json?.data) ? json.data : []);
+      setStaffCounts(json?.counts || {});
+    } catch (e: any) {
+      setStaffErr(e?.message || 'Unable to load lab staff');
+      setStaff([]);
+      setStaffCounts({});
+    } finally {
+      setStaffLoading(false);
+    }
+  }
+
+  async function inviteStaff() {
+    const userId = staffDraft.userId.trim();
+
+    if (!userId) {
+      setStaffErr('Enter the staff user ID or user reference.');
+      return;
+    }
+
+    setStaffSaving(true);
+    setStaffErr(null);
+    setStaffNotice(null);
+
+    try {
+      const res = await fetch(`/api/labs/${encodeURIComponent(labId)}/staff`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(staffDraft),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `Staff HTTP ${res.status}`);
+      }
+
+      setStaffDraft({
+        userId: '',
+        role: 'VIEWER',
+        status: 'PENDING',
+      });
+      setStaffNotice('Staff member saved.');
+      await loadStaff();
+    } catch (e: any) {
+      setStaffErr(e?.message || 'Unable to save staff member');
+    } finally {
+      setStaffSaving(false);
+    }
+  }
+
+  async function updateStaffMember(staffId: string, body: Record<string, unknown>) {
+    setStaffSaving(true);
+    setStaffErr(null);
+    setStaffNotice(null);
+
+    try {
+      const res = await fetch(
+        `/api/labs/${encodeURIComponent(labId)}/staff/${encodeURIComponent(staffId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      );
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `Staff HTTP ${res.status}`);
+      }
+
+      setStaffNotice('Staff member updated.');
+      await loadStaff();
+    } catch (e: any) {
+      setStaffErr(e?.message || 'Unable to update staff member');
+    } finally {
+      setStaffSaving(false);
+    }
+  }
+
+  async function revokeStaffMember(staffId: string) {
+    setStaffSaving(true);
+    setStaffErr(null);
+    setStaffNotice(null);
+
+    try {
+      const res = await fetch(
+        `/api/labs/${encodeURIComponent(labId)}/staff/${encodeURIComponent(staffId)}`,
+        {
+          method: 'DELETE',
+        },
+      );
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || json?.ok === false) {
+        throw new Error(json?.error || `Staff HTTP ${res.status}`);
+      }
+
+      setStaffNotice('Staff member revoked.');
+      await loadStaff();
+    } catch (e: any) {
+      setStaffErr(e?.message || 'Unable to revoke staff member');
+    } finally {
+      setStaffSaving(false);
+    }
+  }
   useEffect(() => {
     void load();
+    void loadStaff();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [labId]);
 
@@ -618,6 +807,248 @@ export default function LabSettingsPage() {
           >
             {saving ? 'Saving...' : uploadingLogo ? 'Preparing logo...' : 'Save public profile'}
           </button>
+        </div>
+      </section>
+
+      <section className="rounded-2xl border bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-gray-950">Staff and access control</h2>
+            <p className="mt-1 max-w-3xl text-xs text-gray-500">
+              Invite and manage lab staff using MedReach roles. KYB approval, payout,
+              commission and legal identity remain locked to admin workflows.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 text-right text-xs md:grid-cols-4">
+            <div className="rounded-lg border bg-gray-50 px-3 py-2">
+              <div className="text-gray-500">Total</div>
+              <div className="font-semibold text-gray-950">{staffCounts.total || staff.length}</div>
+            </div>
+            <div className="rounded-lg border bg-gray-50 px-3 py-2">
+              <div className="text-gray-500">Active</div>
+              <div className="font-semibold text-emerald-700">{staffCounts.active || 0}</div>
+            </div>
+            <div className="rounded-lg border bg-gray-50 px-3 py-2">
+              <div className="text-gray-500">Pending</div>
+              <div className="font-semibold text-amber-700">{staffCounts.pending || 0}</div>
+            </div>
+            <div className="rounded-lg border bg-gray-50 px-3 py-2">
+              <div className="text-gray-500">Suspended</div>
+              <div className="font-semibold text-gray-700">{staffCounts.suspended || 0}</div>
+            </div>
+          </div>
+        </div>
+
+        {staffNotice ? (
+          <div className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+            {staffNotice}
+          </div>
+        ) : null}
+
+        {staffErr ? (
+          <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+            {staffErr}
+          </div>
+        ) : null}
+
+        <div className="mt-4 rounded-xl border bg-gray-50 p-4">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-600">
+            Add or update staff
+          </h3>
+
+          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[1fr,180px,180px,auto]">
+            <label className="block text-sm">
+              <span className="text-xs font-medium text-gray-600">User ID / user reference</span>
+              <input
+                value={staffDraft.userId}
+                onChange={(e) =>
+                  setStaffDraft((prev) => ({ ...prev, userId: e.target.value }))
+                }
+                className="mt-1 w-full rounded border bg-white px-3 py-2 text-sm"
+                placeholder="user_xxx or staff user ID"
+              />
+            </label>
+
+            <label className="block text-sm">
+              <span className="text-xs font-medium text-gray-600">Role</span>
+              <select
+                value={staffDraft.role}
+                onChange={(e) =>
+                  setStaffDraft((prev) => ({
+                    ...prev,
+                    role: e.target.value as LabStaffRole,
+                  }))
+                }
+                className="mt-1 w-full rounded border bg-white px-3 py-2 text-sm"
+              >
+                {STAFF_ROLES.map((role) => (
+                  <option key={role} value={role}>
+                    {role}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block text-sm">
+              <span className="text-xs font-medium text-gray-600">Initial status</span>
+              <select
+                value={staffDraft.status}
+                onChange={(e) =>
+                  setStaffDraft((prev) => ({
+                    ...prev,
+                    status: e.target.value as LabStaffStatus,
+                  }))
+                }
+                className="mt-1 w-full rounded border bg-white px-3 py-2 text-sm"
+              >
+                <option value="PENDING">PENDING</option>
+                <option value="ACTIVE">ACTIVE</option>
+              </select>
+            </label>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                onClick={inviteStaff}
+                disabled={staffSaving}
+                className={`w-full rounded border px-4 py-2 text-sm ${
+                  staffSaving
+                    ? 'bg-gray-200 text-gray-500'
+                    : 'bg-gray-900 text-white hover:bg-black'
+                }`}
+              >
+                {staffSaving ? 'Saving...' : 'Save staff'}
+              </button>
+            </div>
+          </div>
+
+          <p className="mt-2 text-[11px] text-gray-500">
+            Use ACTIVE only when the user has already completed internal onboarding. Otherwise
+            keep PENDING until acceptance/approval is fully wired.
+          </p>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+          {STAFF_ROLES.map((role) => (
+            <div key={role} className="rounded-xl border bg-white p-3 text-xs">
+              <div className="font-semibold text-gray-900">{role}</div>
+              <div className="mt-1 text-gray-500">{STAFF_ROLE_HELP[role]}</div>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 overflow-hidden rounded-xl border">
+          <div className="grid grid-cols-12 gap-2 border-b bg-gray-50 px-3 py-2 text-[11px] font-semibold uppercase tracking-wide text-gray-500">
+            <div className="col-span-4">User</div>
+            <div className="col-span-2">Role</div>
+            <div className="col-span-2">Status</div>
+            <div className="col-span-2">Invited</div>
+            <div className="col-span-2 text-right">Actions</div>
+          </div>
+
+          {staffLoading ? (
+            <div className="px-3 py-4 text-sm text-gray-500">Loading staff...</div>
+          ) : staff.length === 0 ? (
+            <div className="px-3 py-4 text-sm text-gray-500">
+              No lab staff have been configured yet.
+            </div>
+          ) : (
+            <div className="divide-y">
+              {staff.map((member) => (
+                <div
+                  key={member.id}
+                  className="grid grid-cols-1 gap-3 px-3 py-3 text-xs md:grid-cols-12 md:items-center"
+                >
+                  <div className="md:col-span-4">
+                    <div className="truncate font-mono text-gray-900">{member.userId}</div>
+                    <div className="text-[11px] text-gray-500">{member.id}</div>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <select
+                      value={member.role}
+                      disabled={staffSaving}
+                      onChange={(e) =>
+                        void updateStaffMember(member.id, {
+                          role: e.target.value,
+                        })
+                      }
+                      className="w-full rounded border bg-white px-2 py-1 text-xs"
+                    >
+                      {STAFF_ROLES.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="md:col-span-2">
+                    <select
+                      value={member.status}
+                      disabled={staffSaving}
+                      onChange={(e) =>
+                        void updateStaffMember(member.id, {
+                          status: e.target.value,
+                        })
+                      }
+                      className="w-full rounded border bg-white px-2 py-1 text-xs"
+                    >
+                      {STAFF_STATUSES.map((status) => (
+                        <option key={status} value={status}>
+                          {status}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="text-gray-500 md:col-span-2">
+                    {member.invitedAt ? new Date(member.invitedAt).toLocaleDateString() : '-'}
+                  </div>
+
+                  <div className="flex flex-wrap justify-start gap-2 md:col-span-2 md:justify-end">
+                    {member.status !== 'ACTIVE' ? (
+                      <button
+                        type="button"
+                        disabled={staffSaving}
+                        onClick={() =>
+                          void updateStaffMember(member.id, {
+                            status: 'ACTIVE',
+                          })
+                        }
+                        className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1 text-[11px] font-medium text-emerald-700 hover:bg-emerald-100"
+                      >
+                        Activate
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={staffSaving}
+                        onClick={() =>
+                          void updateStaffMember(member.id, {
+                            status: 'SUSPENDED',
+                          })
+                        }
+                        className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-medium text-amber-700 hover:bg-amber-100"
+                      >
+                        Suspend
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={staffSaving || member.status === 'REVOKED'}
+                      onClick={() => void revokeStaffMember(member.id)}
+                      className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-medium text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </section>
     </main>
