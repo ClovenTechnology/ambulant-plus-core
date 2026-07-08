@@ -36,6 +36,12 @@ type LabNetwork = {
   };
 };
 
+type ReviewTotals = {
+  publishedCount: number;
+  averageStars: number;
+  starSum: number;
+};
+
 type NetworkBranch = {
   id: string;
   networkId?: string | null;
@@ -58,6 +64,7 @@ type NetworkBranch = {
     panels?: number;
     specimenBundles?: number;
   };
+  reviews?: ReviewTotals;
 };
 
 type NetworkStaff = {
@@ -108,7 +115,9 @@ type NetworkSummary = {
   };
   reviews?: {
     available: boolean;
-    reason?: string;
+    reason?: string | null;
+    summary?: ReviewTotals;
+    notes?: string[];
   };
 };
 
@@ -168,6 +177,12 @@ function formatMoneyMinor(currency: string, amountCents?: number | null) {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`;
+}
+
+function formatStars(value?: number | null) {
+  const stars = Number(value || 0);
+
+  return `${stars.toFixed(1)} / 5`;
 }
 
 function badgeClass(status: string) {
@@ -886,6 +901,49 @@ export default function LabNetworksPage() {
               ) : null}
             </section>
 
+
+            {summary?.reviews ? (
+              <section className="rounded-3xl border bg-white p-5 shadow-sm">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div>
+                    <h2 className="text-sm font-semibold">HQ lab review ratings</h2>
+                    <p className="mt-1 text-xs leading-5 text-gray-500">
+                      Published branch reviews are aggregated at network level. Pending,
+                      hidden, flagged and rejected reviews are excluded.
+                    </p>
+                  </div>
+
+                  <span className={`w-fit rounded-full border px-3 py-1 text-xs font-semibold ${
+                    summary.reviews.available
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                      : 'border-amber-200 bg-amber-50 text-amber-700'
+                  }`}>
+                    {summary.reviews.available ? 'Published reviews' : 'No published reviews'}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                  <StatCard
+                    label="Published reviews"
+                    value={summary.reviews.summary?.publishedCount ?? 0}
+                  />
+                  <StatCard
+                    label="Average rating"
+                    value={formatStars(summary.reviews.summary?.averageStars)}
+                  />
+                  <StatCard
+                    label="Star sum"
+                    value={summary.reviews.summary?.starSum ?? 0}
+                  />
+                </div>
+
+                {summary.reviews.reason ? (
+                  <p className="mt-3 rounded-2xl border bg-slate-50 p-3 text-xs leading-5 text-gray-600">
+                    {summary.reviews.reason}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
             <section className="rounded-3xl border bg-white p-5 shadow-sm">
               <h2 className="text-sm font-semibold">Attach branch</h2>
               <p className="mt-1 text-xs leading-5 text-gray-500">
@@ -1040,6 +1098,9 @@ export default function LabNetworksPage() {
                           <div>{branch.counts?.jobs ?? 0} jobs</div>
                           <div className="text-[11px] text-gray-400">
                             {branch.counts?.staffMembers ?? 0} staff
+                          </div>
+                          <div className="text-[11px] text-gray-400">
+                            {branch.reviews?.publishedCount ?? 0} reviews · {formatStars(branch.reviews?.averageStars)}
                           </div>
                         </div>
 

@@ -47,6 +47,14 @@ function emptyMoney(currency: string) {
   };
 }
 
+function emptyReviews() {
+  return {
+    publishedCount: 0,
+    averageStars: 0,
+    starSum: 0,
+  };
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { networkId: string } },
@@ -117,6 +125,26 @@ export async function GET(
         })
       : [];
 
+  const reviewRows =
+    branchIds.length > 0
+      ? await prisma.medReachLabReview.groupBy({
+          by: ['labId'],
+          where: {
+            labId: { in: branchIds },
+            status: 'PUBLISHED',
+          },
+          _avg: {
+            stars: true,
+          },
+          _sum: {
+            stars: true,
+          },
+          _count: {
+            _all: true,
+          },
+        })
+      : [];
+
   const revenueByCurrencyMap = new Map<string, ReturnType<typeof emptyMoney>>();
   const revenueByLabId = new Map<string, ReturnType<typeof emptyMoney>[]>();
 
@@ -158,6 +186,25 @@ export async function GET(
     revenueByLabId.set(row.labId, perBranch);
   }
 
+  const reviewsByLabId = new Map<string, ReturnType<typeof emptyReviews>>();
+  let totalPublishedReviews = 0;
+  let totalStarSum = 0;
+
+  for (const row of reviewRows) {
+    const publishedCount = n(row._count?._all);
+    const starSum = n(row._sum.stars);
+    const reviewTotal = {
+      publishedCount,
+      averageStars: publishedCount > 0 ? Number(row._avg.stars || 0) : 0,
+      starSum,
+    };
+
+    reviewsByLabId.set(row.labId, reviewTotal);
+
+    totalPublishedReviews += publishedCount;
+    totalStarSum += starSum;
+  }
+
   const totals = branches.reduce(
     (acc, branch) => {
       acc.branches += 1;
@@ -182,6 +229,12 @@ export async function GET(
     },
   );
 
+  const reviewSummary = {
+    publishedCount: totalPublishedReviews,
+    averageStars: totalPublishedReviews > 0 ? totalStarSum / totalPublishedReviews : 0,
+    starSum: totalStarSum,
+  };
+
   return NextResponse.json({
     ok: true,
     data: {
@@ -190,6 +243,7 @@ export async function GET(
       branches: branches.map((branch) => ({
         ...projectBranch(branch),
         revenueByCurrency: revenueByLabId.get(branch.id) || [],
+        reviews: reviewsByLabId.get(branch.id) || emptyReviews(),
       })),
       revenue: {
         available: financialRows.length > 0,
@@ -205,9 +259,16 @@ export async function GET(
         ],
       },
       reviews: {
-        available: false,
+        available: totalPublishedReviews > 0,
+        summary: reviewSummary,
         reason:
-          'No MedReach lab review/rating model exists yet. ClinicianRating is not used for lab branch ratings.',
+          totalPublishedReviews > 0
+            ? null
+            : 'No published MedReachLabReview rows exist yet for HQ-visible branches.',
+        notes: [
+          'Review aggregation uses PUBLISHED MedReachLabReview rows only.',
+          'Pending, hidden, flagged and rejected reviews are excluded from HQ ratings.',
+        ],
       },
     },
   });
