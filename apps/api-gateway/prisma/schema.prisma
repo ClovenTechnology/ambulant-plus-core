@@ -1847,6 +1847,7 @@ model LabPartner {
   planHistory           MedReachLabPlan[]
   staffMembers          MedReachLabStaff[]
   network               MedReachLabNetwork?        @relation(fields: [networkId], references: [id], onDelete: SetNull)
+  labReviews            MedReachLabReview[]
   eligibleOrders        MedReachOrderEligibleLab[]
   orderFinancials       MedReachOrderFinancial[]
   defaultPhlebs         MedReachPhlebProfile[]     @relation("MedReachPhlebDefaultLab")
@@ -2283,6 +2284,34 @@ model MedReachPhlebProfile {
   @@index([country, currency])
 }
 
+
+
+model MedReachLabReview {
+  id             String                  @id @default(cuid())
+  labId          String
+  networkId      String?
+  orderId        String?
+  patientId      String?
+  reviewerUserId String?
+  stars          Int
+  comment        String?
+  status         MedReachLabReviewStatus @default(PENDING)
+  source         String                  @default("patient")
+  metadata       Json?
+  createdAt      DateTime                @default(now())
+  updatedAt      DateTime                @updatedAt
+  reviewedAt     DateTime?
+  moderatedBy    String?
+  moderatedAt    DateTime?
+  lab            LabPartner              @relation(fields: [labId], references: [id], onDelete: Cascade)
+
+  @@unique([orderId, reviewerUserId], name: "MedReachLabReview_orderId_reviewerUserId_key")
+  @@index([labId, status])
+  @@index([networkId, status])
+  @@index([stars])
+  @@index([createdAt])
+  @@index([reviewerUserId])
+}
 
 model MedReachLabNetwork {
   id                   String                         @id @default(cuid())
@@ -4231,6 +4260,15 @@ enum MedReachEarningActorType {
   PHLEB
 }
 
+
+
+enum MedReachLabReviewStatus {
+  PENDING
+  PUBLISHED
+  HIDDEN
+  FLAGGED
+  REJECTED
+}
 
 enum MedReachLabNetworkType {
   INDEPENDENT_GROUP
