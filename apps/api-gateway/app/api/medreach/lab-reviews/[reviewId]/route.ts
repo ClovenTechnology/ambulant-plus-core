@@ -113,20 +113,10 @@ async function canActForNetwork(req: NextRequest, networkId: string, who: any) {
   return Boolean(staff?.id);
 }
 
-async function canModerateReview(req: NextRequest, review: any, who: any) {
+async function canModerateReview(_req: NextRequest, _review: any, who: any) {
   const role = roleOf(who);
 
-  if (['admin', 'system'].includes(role)) return true;
-
-  if (role === 'lab' || role === 'lab_staff') {
-    return canActForLab(req, review.labId, who);
-  }
-
-  if ((role === 'lab_network' || role === 'lab_network_staff') && review.networkId) {
-    return canActForNetwork(req, review.networkId, who);
-  }
-
-  return false;
+  return ['admin', 'system'].includes(role);
 }
 
 export async function GET(
