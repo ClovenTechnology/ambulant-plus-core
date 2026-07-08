@@ -292,8 +292,9 @@ async function assertLabOfferAccess(req: NextRequest, labId: string, who: any) {
         labId,
         active: true,
         status: 'ACTIVE',
+        role: { in: ['OWNER', 'ADMIN', 'OPERATIONS'] as any },
       },
-      select: { labId: true },
+      select: { labId: true, role: true },
     });
 
     return staff?.labId === labId;
