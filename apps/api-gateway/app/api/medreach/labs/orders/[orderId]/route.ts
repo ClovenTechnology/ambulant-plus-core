@@ -330,6 +330,89 @@ function buildEnvelope(params: {
   };
 }
 
+
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { orderId: string } },
+) {
+  const who = readIdentity(req.headers);
+  const orderId = String(params.orderId || '').trim();
+
+  if (!orderId) {
+    return NextResponse.json({ ok: false, error: 'missing_orderId' }, { status: 400 });
+  }
+
+  const order = await buildProjection(orderId);
+
+  if (!order) {
+    return NextResponse.json({ ok: false, error: 'order_not_found' }, { status: 404 });
+  }
+
+  const role = String(who.role || '').toLowerCase();
+  const uid = String(who.uid || '').trim();
+
+  let allowed = false;
+
+  if (['admin', 'system'].includes(role)) {
+    allowed = true;
+  } else if (role === 'patient') {
+    let profileId = '';
+
+    if (uid) {
+      try {
+        const profile = await prisma.patientProfile.findUnique({
+          where: { userId: uid },
+          select: { id: true },
+        });
+
+        profileId = profile?.id || '';
+      } catch {
+        profileId = '';
+      }
+    }
+
+    const patientIds = Array.from(
+      new Set(
+        [
+          uid,
+          profileId,
+          req.headers.get('x-patient-id'),
+          req.headers.get('x-current-patient-id'),
+          req.headers.get('x-actor-ref-id'),
+          req.headers.get('x-ambulant-patient-id'),
+        ]
+          .map((value) => String(value || '').trim())
+          .filter(Boolean),
+      ),
+    );
+
+    allowed = Boolean(order.patientId && patientIds.includes(String(order.patientId)));
+  } else if (role === 'lab' || role === 'lab_staff') {
+    const actorLabId = await resolveActorLabId(req, who);
+
+    allowed = Boolean(
+      actorLabId &&
+        (await assertOrderAccess({
+          role,
+          actorLabId,
+          orderId,
+          drawPartnerId: order.labId ?? null,
+        })),
+    );
+  } else if (role === 'phleb') {
+    allowed = Boolean(uid && order.phlebId && String(order.phlebId) === uid);
+  }
+
+  if (!allowed) {
+    return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    data: order,
+  });
+}
+
 export async function PATCH(
   req: NextRequest,
   { params }: { params: { orderId: string } },
