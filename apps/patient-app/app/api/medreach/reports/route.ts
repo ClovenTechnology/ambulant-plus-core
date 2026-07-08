@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/api/medreach/reports/route.ts
+// apps/patient-app/app/api/medreach/reports/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
 
@@ -39,6 +39,56 @@ function forwardHeaders(req: NextRequest) {
   headers.set('accept', 'application/json');
 
   return headers;
+}
+
+function clean(value: unknown, max = 500) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function isCompletedStatus(value: unknown) {
+  const status = clean(value, 80).toLowerCase();
+
+  return (
+    status === 'completed' ||
+    status === 'sent' ||
+    status === 'ready' ||
+    status === 'result available' ||
+    status === 'result sent' ||
+    status === 'result_sent' ||
+    status === 'result_sent_to_patient'
+  );
+}
+
+function normalizeListedLab(row: any) {
+  const rawReference = clean(row.reference || row.orderId || row.ref || row.id, 160);
+  const orderId = rawReference.startsWith('order_') ? rawReference.slice('order_'.length) : rawReference;
+
+  return {
+    id: row.id || orderId,
+    orderId,
+    encounterId: row.encounterId ?? null,
+    patientId: row.patientId ?? null,
+    patient: row.patientName ?? '',
+    type: row.panel || row.test || 'Lab report',
+    createdAt: row.date || row.createdAt || null,
+    resultStatus: row.resultStatus || (isCompletedStatus(row.status) ? 'SENT' : 'PENDING'),
+    resultSummary: row.resultSummary || row.result || null,
+    resultPdfUrl: row.resultPdfUrl || row.downloadUrl || null,
+    testResults: Array.isArray(row.testResults)
+      ? row.testResults
+      : row.test
+        ? [
+            {
+              name: row.test,
+              value: row.result || row.value || '',
+              unit: row.unit || '',
+              referenceRange: row.referenceRange || row.ref || '',
+              flag: row.flag || '',
+            },
+          ]
+        : [],
+    source: row.source || 'patient-app.api.labs',
+  };
 }
 
 function normalizeReport(order: any) {
