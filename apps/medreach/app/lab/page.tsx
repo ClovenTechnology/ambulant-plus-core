@@ -293,6 +293,30 @@ export default function MedReachLabsPage() {
           })}
         </section>
       )}
+
+      <section className="rounded-3xl border border-emerald-100 bg-emerald-50/70 p-5 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-emerald-700">
+              Network command
+            </p>
+            <h2 className="mt-2 text-lg font-semibold text-gray-950">
+              Lab HQ, branch and franchise management
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm leading-6 text-gray-600">
+              Manage multi-branch lab groups, franchise networks, HQ visibility,
+              branch attachment and network-level staff governance.
+            </p>
+          </div>
+
+          <a
+            href="/lab-networks"
+            className="inline-flex w-fit items-center justify-center rounded-xl bg-gray-950 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-black"
+          >
+            Open network command
+          </a>
+        </div>
+      </section>
     </main>
   );
 }
