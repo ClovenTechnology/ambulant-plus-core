@@ -46,6 +46,7 @@ type LabReport = {
   }>;
   labName?: string;
   source?: string;
+  reviewSubmitted?: boolean;
   [key: string]: any;
 };
 
@@ -616,7 +617,7 @@ export default function MedReachPage() {
               const orderId = cleanText(report.orderId || report.id, 160);
               const status = resultStatusLabel(report);
               const canReview = reportCanBeReviewed(report);
-              const alreadySubmitted = submittedReviewOrderIds.includes(orderId);
+              const alreadySubmitted = Boolean(report.reviewSubmitted) || submittedReviewOrderIds.includes(orderId);
               const isReviewing = reviewingOrderId === orderId;
 
               return (

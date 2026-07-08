@@ -65,6 +65,31 @@ function isCompletedStatus(value: unknown) {
   );
 }
 
+function reviewedOrderIdsFromPayload(payload: any): Set<string> {
+  const rows = Array.isArray(payload?.data)
+    ? payload.data
+    : Array.isArray(payload?.reviews)
+      ? payload.reviews
+      : Array.isArray(payload?.items)
+        ? payload.items
+        : [];
+
+  const ids = rows
+    .map((row: any) => clean(row?.orderId || row?.metadata?.orderId, 180))
+    .filter((value: string) => Boolean(value));
+
+  return new Set<string>(ids);
+}
+
+function withReviewSubmitted(report: any, reviewedOrderIds: Set<string>) {
+  const orderId = clean(report?.orderId || report?.id, 180);
+
+  return {
+    ...report,
+    reviewSubmitted: Boolean(orderId && reviewedOrderIds.has(orderId)),
+  };
+}
+
 function normalizeListedLab(row: any) {
   const rawReference = clean(row.reference || row.orderId || row.ref || row.id, 160);
   const orderId = rawReference.startsWith('order_') ? rawReference.slice('order_'.length) : rawReference;
@@ -151,9 +176,22 @@ export async function GET(req: NextRequest) {
           ? labsPayload.labs
           : [];
 
+      const reviewsRes = await fetch(`${sameOriginBase(req)}/api/medreach/lab-reviews`, {
+        method: 'GET',
+        headers: forwardHeaders(req),
+        cache: 'no-store',
+      }).catch(() => null);
+
+      const reviewsPayload = reviewsRes
+        ? await reviewsRes.json().catch(() => null)
+        : null;
+
+      const reviewedOrderIds = reviewedOrderIdsFromPayload(reviewsPayload);
+
       const reports = rows
         .map(normalizeListedLab)
         .filter((report: any) => report.orderId || report.id)
+        .map((report: any) => withReviewSubmitted(report, reviewedOrderIds))
         .sort((a: any, b: any) => {
           const ta = new Date(a.createdAt || 0).getTime();
           const tb = new Date(b.createdAt || 0).getTime();
