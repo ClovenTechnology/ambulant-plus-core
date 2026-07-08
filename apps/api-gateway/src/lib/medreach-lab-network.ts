@@ -118,6 +118,22 @@ export function projectBranch(row: any) {
   };
 }
 
+export function projectNetworkStaff(row: any) {
+  return {
+    id: row.id,
+    userId: row.userId,
+    networkId: row.networkId,
+    role: row.role,
+    active: row.active,
+    status: row.status,
+    invitedBy: row.invitedBy ?? null,
+    approvedBy: row.approvedBy ?? null,
+    invitedAt: row.invitedAt?.toISOString?.() ?? null,
+    approvedAt: row.approvedAt?.toISOString?.() ?? null,
+    createdAt: row.createdAt?.toISOString?.() ?? null,
+    updatedAt: row.updatedAt?.toISOString?.() ?? null,
+  };
+}
 export async function canReadNetwork(req: NextRequest, networkId: string, who: any) {
   const role = roleOf(who);
 
