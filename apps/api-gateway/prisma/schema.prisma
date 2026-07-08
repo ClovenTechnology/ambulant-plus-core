@@ -1802,6 +1802,10 @@ model PharmacyPartner {
 
 model LabPartner {
   id                    String                     @id @default(cuid())
+  networkId             String?
+  branchCode            String?
+  branchType            MedReachLabBranchType      @default(OWNED_BRANCH)
+  hqVisible             Boolean                    @default(true)
   name                  String
   displayName           String?
   logoUrl               String?
@@ -1842,6 +1846,7 @@ model LabPartner {
   panels                MedReachLabPanel[]
   planHistory           MedReachLabPlan[]
   staffMembers          MedReachLabStaff[]
+  network               MedReachLabNetwork?        @relation(fields: [networkId], references: [id], onDelete: SetNull)
   eligibleOrders        MedReachOrderEligibleLab[]
   orderFinancials       MedReachOrderFinancial[]
   defaultPhlebs         MedReachPhlebProfile[]     @relation("MedReachPhlebDefaultLab")
@@ -1852,6 +1857,9 @@ model LabPartner {
   @@index([status])
   @@index([country, currency])
   @@index([ownerUserId])
+  @@index([networkId])
+  @@index([networkId, status])
+  @@index([networkId, branchCode])
 }
 
 model Delivery {
@@ -2273,6 +2281,51 @@ model MedReachPhlebProfile {
   @@index([approvalStatus])
   @@index([defaultLabId])
   @@index([country, currency])
+}
+
+
+model MedReachLabNetwork {
+  id                   String                         @id @default(cuid())
+  legalName            String
+  displayName          String?
+  networkType          MedReachLabNetworkType         @default(INDEPENDENT_GROUP)
+  country              String                         @default("ZA") @db.VarChar(2)
+  currency             String                         @default("ZAR") @db.VarChar(3)
+  ownerUserId          String?
+  status               MedReachPartnerStatus          @default(PENDING)
+  active               Boolean                        @default(true)
+  profileMeta          Json?
+  verifiedIdentityMeta Json?
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+  branches             LabPartner[]
+  staffMembers         MedReachLabNetworkStaff[]
+
+  @@index([active])
+  @@index([status])
+  @@index([country, currency])
+  @@index([ownerUserId])
+}
+
+model MedReachLabNetworkStaff {
+  id          String                         @id @default(cuid())
+  userId      String
+  networkId   String
+  role        MedReachLabNetworkStaffRole
+  active      Boolean                        @default(true)
+  status      MedReachStaffStatus            @default(PENDING)
+  invitedBy   String?
+  approvedBy  String?
+  invitedAt   DateTime?
+  approvedAt  DateTime?
+  createdAt   DateTime                       @default(now())
+  updatedAt   DateTime                       @updatedAt
+  network     MedReachLabNetwork             @relation(fields: [networkId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, networkId])
+  @@index([networkId, role])
+  @@index([status, active])
+  @@index([userId])
 }
 
 model MedReachLabStaff {
@@ -4176,6 +4229,29 @@ enum MedReachPayoutStatus {
 enum MedReachEarningActorType {
   LAB
   PHLEB
+}
+
+
+enum MedReachLabNetworkType {
+  INDEPENDENT_GROUP
+  CORPORATE_CHAIN
+  FRANCHISE
+  HOLDING_COMPANY
+}
+
+enum MedReachLabBranchType {
+  OWNED_BRANCH
+  FRANCHISE_BRANCH
+  PARTNER_SITE
+}
+
+enum MedReachLabNetworkStaffRole {
+  NETWORK_OWNER
+  NETWORK_ADMIN
+  OPERATIONS
+  FINANCE
+  QUALITY
+  VIEWER
 }
 
 enum MedReachStaffRole {
