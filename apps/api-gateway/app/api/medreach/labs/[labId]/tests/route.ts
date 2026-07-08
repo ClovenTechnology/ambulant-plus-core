@@ -113,7 +113,6 @@ function projectOfferedTest(row: any) {
     updatedAt: row.updatedAt?.toISOString?.() ?? null,
   };
 }
-
 async function assertLabReadAccess(req: NextRequest, labId: string, who: any) {
   const role = roleOf(who);
 
@@ -151,9 +150,8 @@ async function assertLabReadAccess(req: NextRequest, labId: string, who: any) {
         labId,
         active: true,
         status: 'ACTIVE',
-        role: { in: ['OWNER', 'ADMIN', 'OPERATIONS'] as any },
       },
-      select: { labId: true, role: true },
+      select: { labId: true },
     });
 
     return staff?.labId === labId;
@@ -193,19 +191,15 @@ async function assertLabWriteAccess(req: NextRequest, labId: string, who: any) {
 
     if (!headerLabId || headerLabId !== labId || !who.uid) return false;
 
-    /**
-     * Do not guess MedReachStaffRole enum values here.
-     * For Batch 1, any ACTIVE staff member for the lab can maintain inventory.
-     * We can later tighten this once admin/staff role UX is wired.
-     */
     const staff = await prisma.medReachLabStaff.findFirst({
       where: {
         userId: who.uid,
         labId,
         active: true,
         status: 'ACTIVE',
+        role: { in: ['OWNER', 'ADMIN', 'OPERATIONS'] as any },
       },
-      select: { labId: true },
+      select: { labId: true, role: true },
     });
 
     return staff?.labId === labId;

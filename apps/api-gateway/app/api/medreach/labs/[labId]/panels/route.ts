@@ -149,7 +149,6 @@ function projectPanel(row: any) {
     updatedAt: row.updatedAt?.toISOString?.() ?? null,
   };
 }
-
 async function assertLabReadAccess(req: NextRequest, labId: string, who: any) {
   const role = roleOf(who);
 
@@ -187,9 +186,8 @@ async function assertLabReadAccess(req: NextRequest, labId: string, who: any) {
         labId,
         active: true,
         status: 'ACTIVE',
-        role: { in: ['OWNER', 'ADMIN', 'OPERATIONS'] as any },
       },
-      select: { labId: true, role: true },
+      select: { labId: true },
     });
 
     return staff?.labId === labId;
@@ -235,8 +233,9 @@ async function assertLabWriteAccess(req: NextRequest, labId: string, who: any) {
         labId,
         active: true,
         status: 'ACTIVE',
+        role: { in: ['OWNER', 'ADMIN', 'OPERATIONS'] as any },
       },
-      select: { labId: true },
+      select: { labId: true, role: true },
     });
 
     return staff?.labId === labId;
