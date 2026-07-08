@@ -28,6 +28,27 @@ type Delivery = {
 };
 type FilterKey = 'all' | 'pending' | 'today' | 'collected';
 
+type LabReport = {
+  id?: string;
+  orderId?: string;
+  type?: string;
+  createdAt?: string;
+  resultStatus?: string;
+  resultSummary?: string | null;
+  resultPdfUrl?: string | null;
+  testResults?: Array<{
+    code?: string;
+    name?: string;
+    value?: string;
+    unit?: string;
+    referenceRange?: string;
+    flag?: string;
+  }>;
+  labName?: string;
+  source?: string;
+  [key: string]: any;
+};
+
 /* ---------- small UI helpers ---------- */
 
 function LiveBadge({
@@ -63,6 +84,58 @@ function LiveBadge({
       )}
     </div>
   );
+}
+
+
+function cleanText(value: unknown, max = 240) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function resultStatusLabel(report: LabReport) {
+  return cleanText(report.resultStatus || 'PENDING', 40).toUpperCase();
+}
+
+function reportIsVisible(report: LabReport) {
+  const status = resultStatusLabel(report);
+
+  return Boolean(report.orderId || report.id) && ['READY', 'SENT', 'COMPLETED'].includes(status);
+}
+
+function reportCanBeReviewed(report: LabReport) {
+  const status = resultStatusLabel(report);
+
+  return Boolean(report.orderId || report.id) && ['SENT', 'COMPLETED'].includes(status);
+}
+
+function reportTitle(report: LabReport) {
+  const first = Array.isArray(report.testResults) ? report.testResults[0] : null;
+
+  return cleanText(report.type || first?.name || first?.code || 'MedReach lab report', 160);
+}
+
+function reportSummary(report: LabReport) {
+  const first = Array.isArray(report.testResults) ? report.testResults[0] : null;
+
+  return cleanText(
+    report.resultSummary ||
+      (first ? [first.name, first.value, first.unit].filter(Boolean).join(' ') : '') ||
+      resultStatusLabel(report),
+    240,
+  );
+}
+
+function reportDateLabel(report: LabReport) {
+  const d = new Date(String(report.createdAt || ''));
+
+  if (Number.isNaN(d.getTime())) return 'Date not available';
+
+  return d.toLocaleString(undefined, {
+    year: 'numeric',
+    month: 'short',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 /* ---------- mapping helpers ---------- */
@@ -180,6 +253,10 @@ function jobToCoords(job: Delivery): Coord[] {
 export default function MedReachPage() {
   const [deliveries, setDeliveries] = useState<Delivery[]>([]);
   const [loadingIds, setLoadingIds] = useState<string[]>([]);
+  const [reports, setReports] = useState<LabReport[]>([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reviewingOrderId, setReviewingOrderId] = useState<string | null>(null);
+  const [submittedReviewOrderIds, setSubmittedReviewOrderIds] = useState<string[]>([]);
 
   const [sseConnected, setSseConnected] = useState(false);
   const [sseError, setSseError] = useState<string | null>(null);
@@ -212,6 +289,41 @@ export default function MedReachPage() {
         if (!abort) setDeliveries(jobs);
       } catch {
         if (!abort) setDeliveries([]);
+      }
+    })();
+
+    return () => {
+      abort = true;
+    };
+  }, []);
+
+
+  /* ---------- initial lab reports load ---------- */
+
+  useEffect(() => {
+    let abort = false;
+
+    (async () => {
+      setReportsLoading(true);
+
+      try {
+        const res = await fetch('/api/medreach/reports', { cache: 'no-store' });
+        const json = await res.json().catch(() => null);
+        const rows = Array.isArray(json?.reports)
+          ? json.reports
+          : Array.isArray(json?.items)
+            ? json.items
+            : Array.isArray(json?.data)
+              ? json.data
+              : [];
+
+        if (!abort) {
+          setReports(rows.filter(reportIsVisible));
+        }
+      } catch {
+        if (!abort) setReports([]);
+      } finally {
+        if (!abort) setReportsLoading(false);
       }
     })();
 
@@ -325,6 +437,36 @@ export default function MedReachPage() {
     }
   };
 
+
+  const handleReportReview = async (report: LabReport, stars: number) => {
+    const orderId = cleanText(report.orderId || report.id, 160);
+
+    if (!orderId || !reportCanBeReviewed(report)) return;
+
+    setReviewingOrderId(orderId);
+
+    try {
+      const res = await fetch('/api/medreach/lab-reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderId, stars }),
+      });
+
+      const json = await res.json().catch(() => null);
+
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.message || json?.error || 'Review could not be submitted.');
+      }
+
+      setSubmittedReviewOrderIds((prev) => (prev.includes(orderId) ? prev : [...prev, orderId]));
+      toast('Thank you - your lab service review has been submitted for moderation.', 'success');
+    } catch (error: any) {
+      toast(error?.message || 'Review submission failed.', 'error');
+    } finally {
+      setReviewingOrderId(null);
+    }
+  };
+
   /* ---------- filtering ---------- */
 
   const filteredDeliveries = useMemo(() => {
@@ -391,6 +533,11 @@ export default function MedReachPage() {
     }
   };
 
+
+  const visibleReports = useMemo(() => {
+    return reports.filter(reportIsVisible).slice(0, 5);
+  }, [reports]);
+
   /* ---------- render ---------- */
 
   return (
@@ -435,6 +582,111 @@ export default function MedReachPage() {
           <LiveBadge connected={sseConnected} error={sseError} />
         </div>
       </header>
+
+
+      {/* RESULTS */}
+      <section className="rounded-2xl border bg-white shadow-sm p-4 space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
+          <div>
+            <h2 className="text-base font-bold text-gray-950">Recent lab results</h2>
+            <p className="text-xs text-gray-500">
+              Results published by MedReach labs also appear in Health Records.
+            </p>
+          </div>
+
+          <Link
+            href="/medical-records"
+            className="text-xs px-3 py-1.5 border rounded-full bg-white hover:bg-gray-50"
+          >
+            Open Health Records
+          </Link>
+        </div>
+
+        {reportsLoading ? (
+          <div className="text-sm text-gray-500 border rounded-lg bg-gray-50 p-3">
+            Loading lab results...
+          </div>
+        ) : visibleReports.length === 0 ? (
+          <div className="text-sm text-gray-500 border rounded-lg bg-gray-50 p-3">
+            No published MedReach lab results yet. Completed reports will appear here after the lab releases them.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {visibleReports.map((report) => {
+              const orderId = cleanText(report.orderId || report.id, 160);
+              const status = resultStatusLabel(report);
+              const canReview = reportCanBeReviewed(report);
+              const alreadySubmitted = submittedReviewOrderIds.includes(orderId);
+              const isReviewing = reviewingOrderId === orderId;
+
+              return (
+                <article
+                  key={orderId || report.id || reportTitle(report)}
+                  className="rounded-xl border border-slate-200 bg-white p-3 flex flex-col md:flex-row md:items-start md:justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="text-sm font-semibold text-gray-950">{reportTitle(report)}</div>
+                      <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-bold text-emerald-800">
+                        {status}
+                      </span>
+                    </div>
+
+                    <div className="mt-1 text-xs text-gray-500">
+                      {reportDateLabel(report)}
+                      {orderId ? ' - Order ' + orderId : ''}
+                    </div>
+
+                    <div className="mt-2 text-sm text-gray-700">{reportSummary(report)}</div>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+                    {report.resultPdfUrl ? (
+                      <a
+                        href={report.resultPdfUrl}
+                        className="text-xs px-3 py-1.5 border rounded bg-white hover:bg-gray-50"
+                      >
+                        View report
+                      </a>
+                    ) : (
+                      <Link
+                        href="/medical-records"
+                        className="text-xs px-3 py-1.5 border rounded bg-white hover:bg-gray-50"
+                      >
+                        View in records
+                      </Link>
+                    )}
+
+                    {canReview ? (
+                      alreadySubmitted ? (
+                        <span className="text-xs px-3 py-1.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-100">
+                          Review submitted
+                        </span>
+                      ) : (
+                        <div className="flex items-center gap-1 rounded border bg-white px-2 py-1">
+                          <span className="text-[11px] text-gray-500 mr-1">Review</span>
+                          {[1, 2, 3, 4, 5].map((stars) => (
+                            <button
+                              key={stars}
+                              type="button"
+                              disabled={isReviewing}
+                              onClick={() => handleReportReview(report, stars)}
+                              className="text-xs font-bold text-amber-600 disabled:opacity-50"
+                              aria-label={'Rate lab service ' + stars + ' star' + (stars === 1 ? '' : 's')}
+                            >
+                              ★
+                            </button>
+                          ))}
+                        </div>
+                      )
+                    ) : null}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        )}
+      </section>
 
       {/* FILTERS */}
       <section className="flex flex-wrap items-center justify-between gap-3">

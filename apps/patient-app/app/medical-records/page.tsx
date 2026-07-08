@@ -86,6 +86,15 @@ type LabMini = {
   ref?: string;
   flag?: LabFlag;
   orderingClinician?: string;
+  orderId?: string;
+  source?: string;
+  resultStatus?: string;
+  resultPdfUrl?: string;
+  resultReadyAt?: string;
+  resultSentAt?: string;
+  specimenBundleId?: string;
+  labName?: string;
+  reviewSubmitted?: boolean;
 };
 
 type ImagingMini = {
@@ -394,7 +403,7 @@ export default function MedicalRecordsPage() {
       .filter((l) => inDateRange(l.date))
       .filter((l) => {
         if (!normalizedQuery) return true;
-        const blob = `${l.panel || ''} ${l.test} ${l.value} ${l.unit || ''} ${l.ref || ''}`.toLowerCase();
+        const blob = `${l.panel || ''} ${l.test} ${l.value} ${l.unit || ''} ${l.ref || ''} ${l.source || ''} ${l.resultStatus || ''} ${l.labName || ''} ${l.orderId || ''}`.toLowerCase();
         return blob.includes(normalizedQuery);
       })
       .sort((a, b) => +new Date(b.date) - +new Date(a.date));

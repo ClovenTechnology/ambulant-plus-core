@@ -293,6 +293,111 @@ function normalizeLabOrder(row: any) {
   };
 }
 
+
+function normalizeMedReachReportLabs(report: any) {
+  if (!report || typeof report !== 'object') return [];
+
+  const orderId = clean(report.orderId || report.id, 180);
+  if (!orderId) return [];
+
+  const status = firstText(report.resultStatus, 'PENDING').toUpperCase();
+  const labName = firstText(report.labName, report.performer, 'MedReach laboratory');
+  const panel = firstText(report.type, report.panel, 'MedReach lab report');
+  const date = toIso(report.resultSentAt || report.resultReadyAt || report.createdAt || report.date);
+  const resultPdfUrl = firstText(report.resultPdfUrl, report.downloadUrl);
+  const rows = Array.isArray(report.testResults) ? report.testResults : [];
+
+  if (rows.length === 0) {
+    return [
+      {
+        id: `medreach_${orderId}`,
+        date,
+        panel: `${panel} • MedReach • ${status}`,
+        test: panel,
+        value: firstText(report.resultSummary, status === 'SENT' ? 'Result sent' : status),
+        unit: '',
+        ref: orderId,
+        flag: undefined,
+        orderingClinician: labName,
+        orderId,
+        source: 'medreach',
+        resultStatus: status,
+        resultPdfUrl,
+        resultReadyAt: report.resultReadyAt || undefined,
+        resultSentAt: report.resultSentAt || undefined,
+        specimenBundleId: report.specimenBundleId || undefined,
+        labName,
+      },
+    ];
+  }
+
+  return rows.map((row: any, index: number) => {
+    const testName = firstText(row?.name, row?.test, row?.code, `Lab test ${index + 1}`);
+    const value = firstText(row?.value, row?.result, row?.interpretation, report.resultSummary, status);
+    const code = firstText(row?.code, row?.loincCode, testName);
+
+    return {
+      id: `medreach_${orderId}_${index}_${code.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+      date,
+      panel: `${panel} • MedReach • ${status}`,
+      test: testName,
+      value,
+      unit: firstText(row?.unit),
+      ref: firstText(row?.referenceRange, row?.ref, orderId),
+      flag: normalizeLabFlag(row?.flag || row?.status),
+      orderingClinician: labName,
+      orderId,
+      source: 'medreach',
+      resultStatus: status,
+      resultPdfUrl,
+      resultReadyAt: report.resultReadyAt || undefined,
+      resultSentAt: report.resultSentAt || undefined,
+      specimenBundleId: report.specimenBundleId || undefined,
+      labName,
+    };
+  });
+}
+
+function normalizeMedReachReportDoc(report: any) {
+  if (!report || typeof report !== 'object') return null;
+
+  const orderId = clean(report.orderId || report.id, 180);
+  const resultPdfUrl = firstText(report.resultPdfUrl, report.downloadUrl);
+
+  if (!orderId || !resultPdfUrl) return null;
+
+  const title = firstText(report.type, report.panel, 'MedReach lab report');
+  const labName = firstText(report.labName, report.performer, 'MedReach laboratory');
+  const safeName = clean(title, 80).replace(/\s+/g, '-').toLowerCase();
+
+  return {
+    id: `medreach_report_${orderId}`,
+    date: toIso(report.resultSentAt || report.resultReadyAt || report.createdAt || report.date),
+    title,
+    type: 'lab-report',
+    source: labName,
+    fileName: safeName + '-' + orderId + '.pdf',
+    mimeType: 'application/pdf',
+    sizeBytes: undefined,
+    downloadUrl: resultPdfUrl,
+    viewHref: resultPdfUrl,
+  };
+}
+
+function dedupeByKey<T>(rows: T[], keyFn: (row: T) => string) {
+  const seen = new Set<string>();
+  const out: T[] = [];
+
+  for (const row of rows) {
+    const key = keyFn(row);
+    if (!key || seen.has(key)) continue;
+
+    seen.add(key);
+    out.push(row);
+  }
+
+  return out;
+}
 function normalizePatientDocument(row: any) {
   if (!row || typeof row !== 'object') return null;
 
@@ -436,10 +541,11 @@ export async function GET(req: NextRequest) {
     take: 200,
   });
 
-  const [encountersRes, medsRes, allergiesRes, patientDocs, labResults, labOrders] = await Promise.all([
+  const [encountersRes, medsRes, allergiesRes, medReachReportsRes, patientDocs, labResults, labOrders] = await Promise.all([
     fetchJson(req, '/api/encounters?limit=100&details=1'),
     fetchJson(req, `/api/medications?patientId=${encodeURIComponent(patientId)}`),
     fetchJson(req, `/api/allergies?patientId=${encodeURIComponent(patientId)}`),
+    fetchJson(req, '/api/medreach/reports'),
     patientDocsPromise,
     labResultsPromise,
     labOrdersPromise,
@@ -448,6 +554,7 @@ export async function GET(req: NextRequest) {
   const rawEncounters = arrayFromPayload(encountersRes.payload, ['encounters', 'items', 'data']);
   const rawMeds = arrayFromPayload(medsRes.payload, ['items', 'medications', 'meds', 'data']);
   const rawAllergies = arrayFromPayload(allergiesRes.payload, ['items', 'allergies', 'data']);
+  const medReachReports = arrayFromPayload(medReachReportsRes.payload, ['reports', 'items', 'data']);
 
   const encounters = rawEncounters.map(normalizeEncounter).filter(Boolean);
   const medications = rawMeds.map(normalizeMedication).filter(Boolean);
@@ -460,10 +567,19 @@ export async function GET(req: NextRequest) {
         .map(normalizeLabOrder)
         .filter(Boolean)
     : [];
-  const labs = [...resultLabs, ...pendingOrderLabs];
+  const medReachLabs = medReachReports.flatMap(normalizeMedReachReportLabs).filter(Boolean);
+  const labs = dedupeByKey(
+    [...medReachLabs, ...resultLabs, ...pendingOrderLabs],
+    (row: any) => firstText(row.orderId, row.ref, row.id, row.test),
+  );
+
   const encounterDocs = normalizeDocsFromEncounters(rawEncounters);
   const uploadedDocs = Array.isArray(patientDocs) ? patientDocs.map(normalizePatientDocument).filter(Boolean) : [];
-  const docs = [...uploadedDocs, ...encounterDocs];
+  const medReachDocs = medReachReports.map(normalizeMedReachReportDoc).filter(Boolean);
+  const docs = dedupeByKey(
+    [...medReachDocs, ...uploadedDocs, ...encounterDocs],
+    (row: any) => firstText(row.id, row.downloadUrl, row.viewHref, row.title),
+  );
 
   const updatedAt = new Date().toISOString();
 
@@ -487,7 +603,8 @@ export async function GET(req: NextRequest) {
       encounters: { ok: encountersRes.ok, status: encountersRes.status, count: encounters.length },
       medications: { ok: medsRes.ok, status: medsRes.status, count: medications.length },
       allergies: { ok: allergiesRes.ok, status: allergiesRes.status, count: allergies.length },
-      labs: { ok: true, status: 200, count: labs.length, source: 'prisma.labResult/prisma.labOrder' },
+      labs: { ok: true, status: 200, count: labs.length, source: 'medreach/prisma.labResult/prisma.labOrder' },
+      medReachReports: { ok: medReachReportsRes.ok, status: medReachReportsRes.status, count: medReachReports.length },
       labResults: { count: Array.isArray(labResults) ? labResults.length : 0 },
       labOrders: { count: Array.isArray(labOrders) ? labOrders.length : 0 },
     },
