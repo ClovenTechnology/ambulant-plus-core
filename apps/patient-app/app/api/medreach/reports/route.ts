@@ -9,6 +9,12 @@ function json(data: any, status = 200) {
   return NextResponse.json(data, { status });
 }
 
+function sameOriginBase(req: NextRequest) {
+  const url = new URL(req.url);
+
+  return `${url.protocol}//${url.host}`;
+}
+
 function forwardHeaders(req: NextRequest) {
   const headers = new Headers();
 
@@ -130,17 +136,49 @@ export async function GET(req: NextRequest) {
     incoming.searchParams.get('orderId') ||
     incoming.searchParams.get('id') ||
     incoming.searchParams.get('encId') ||
-    '';
+    '';  if (!orderId) {
+    try {
+      const labsRes = await fetch(`${sameOriginBase(req)}/api/labs?limit=50`, {
+        method: 'GET',
+        headers: forwardHeaders(req),
+        cache: 'no-store',
+      });
 
-  if (!orderId) {
-    return json(
-      {
-        ok: true,
-        reports: [],
-        source: 'api_gateway',
-      },
-      200,
-    );
+      const labsPayload = await labsRes.json().catch(() => null);
+      const rows = Array.isArray(labsPayload?.items)
+        ? labsPayload.items
+        : Array.isArray(labsPayload?.labs)
+          ? labsPayload.labs
+          : [];
+
+      const reports = rows
+        .map(normalizeListedLab)
+        .filter((report: any) => report.orderId || report.id)
+        .sort((a: any, b: any) => {
+          const ta = new Date(a.createdAt || 0).getTime();
+          const tb = new Date(b.createdAt || 0).getTime();
+
+          return tb - ta;
+        });
+
+      return json(
+        {
+          ok: true,
+          reports,
+          source: 'api_gateway_list',
+        },
+        200,
+      );
+    } catch (err: any) {
+      return json(
+        {
+          ok: false,
+          error: err?.message || 'medreach_reports_list_failed',
+          reports: [],
+        },
+        502,
+      );
+    }
   }
 
   const upstream = new URL(`/api/medreach/labs/orders/${encodeURIComponent(orderId)}`, base);
