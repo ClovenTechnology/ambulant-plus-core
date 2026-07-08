@@ -77,6 +77,47 @@ function normalizeBody(input: any) {
   };
 }
 
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const base = gatewayBase();
+  if (!base) {
+    return json(
+      {
+        ok: false,
+        error: 'api_gateway_base_required',
+        message: 'Rating service is unavailable because the API gateway base URL is not configured.',
+      },
+      503,
+    );
+  }
+
+  const id = encodeURIComponent(params.id);
+  const attempts = [`/api/encounters/${id}/rating`, `/api/encounters/${id}/rate`];
+  let last: { status: number; payload: any } | null = null;
+
+  for (const path of attempts) {
+    const res = await fetch(`${base}${path}`, {
+      method: 'GET',
+      cache: 'no-store',
+      headers: forwardHeaders(req),
+    });
+    const payload = await readPayload(res);
+
+    if (res.ok) return json(payload ?? { ok: true }, res.status);
+
+    last = { status: res.status, payload };
+    if (![404, 405, 501].includes(res.status)) break;
+  }
+
+  return json(
+    last?.payload ?? {
+      ok: false,
+      error: 'encounter_rating_service_unavailable',
+      message: 'This encounter service does not currently expose a patient rating endpoint.',
+    },
+    last?.status ?? 503,
+  );
+}
+
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const base = gatewayBase();
   if (!base) {

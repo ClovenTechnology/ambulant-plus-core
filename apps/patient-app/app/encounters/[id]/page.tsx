@@ -135,6 +135,29 @@ function latestVitals(encounter?: Encounter | null): VitalsPoint | null {
   return [...rows].sort((a, b) => Date.parse(String(b.t || b.ts || '')) - Date.parse(String(a.t || a.ts || '')))[0] || null;
 }
 
+async function fetchEncounterRating(id: string) {
+  const res = await fetch(`/api/encounters/${encodeURIComponent(id)}/rating`, {
+    cache: 'no-store',
+  });
+
+  const payload = await readJsonSafe(res);
+
+  if (!res.ok || payload?.ok === false) return null;
+
+  const rating = payload?.rating ?? null;
+  if (!rating) return null;
+
+  const score = Number(rating.score ?? rating.stars ?? rating.rating ?? 0);
+
+  return {
+    score: Number.isFinite(score) ? score : 0,
+    stars: Number.isFinite(score) ? score : 0,
+    comment: typeof rating.comment === 'string' ? rating.comment : null,
+    createdAt: rating.createdAt ?? null,
+    updatedAt: rating.updatedAt ?? null,
+  };
+}
+
 function statusIsCompleted(value?: string | null) {
   return /completed|complete|closed|done|ended/i.test(String(value || ''));
 }
@@ -210,10 +233,38 @@ function EncounterContent() {
     setError(null);
     try {
       const next = await fetchEncounter(id);
-      setEncounter(next);
-      const existing = Number(next.patientRating ?? next.rating?.score ?? 0);
-      setRating(Number.isFinite(existing) ? existing : 0);
-      setComment(String(next.patientRatingComment ?? next.rating?.comment ?? ''));
+      const ratingPayload = await fetchEncounterRating(id);
+
+      const existingValue =
+        ratingPayload?.score ??
+        ratingPayload?.stars ??
+        next.patientRating ??
+        next.rating?.score ??
+        0;
+
+      const existing = Number(existingValue);
+      const normalizedExisting = Number.isFinite(existing) && existing > 0 ? existing : null;
+      const normalizedComment =
+        ratingPayload?.comment ??
+        next.patientRatingComment ??
+        next.rating?.comment ??
+        '';
+
+      setEncounter({
+        ...next,
+        patientRating: normalizedExisting ?? next.patientRating ?? null,
+        patientRatingComment: normalizedComment || null,
+        rating: ratingPayload
+          ? {
+              score: normalizedExisting ?? 0,
+              comment: normalizedComment || null,
+              createdAt: ratingPayload.createdAt ?? null,
+            }
+          : next.rating,
+      });
+
+      setRating(normalizedExisting ?? 0);
+      setComment(String(normalizedComment || ''));
     } catch (err: any) {
       setEncounter(null);
       setError(err?.message || 'Could not load encounter.');
