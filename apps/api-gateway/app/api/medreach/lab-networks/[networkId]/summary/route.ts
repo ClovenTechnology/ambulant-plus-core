@@ -25,6 +25,28 @@ const branchInclude = {
   },
 };
 
+function n(value: number | null | undefined) {
+  return Number(value || 0);
+}
+
+function emptyMoney(currency: string) {
+  return {
+    currency,
+    records: 0,
+    subtotalCents: 0,
+    logisticsFeeCents: 0,
+    urgentSurchargeCents: 0,
+    coldChainSurchargeCents: 0,
+    platformFeeCents: 0,
+    labGrossCents: 0,
+    phlebGrossCents: 0,
+    labNetCents: 0,
+    phlebNetCents: 0,
+    sponsorAmountMinor: 0,
+    patientCopayMinor: 0,
+  };
+}
+
 export async function GET(
   req: NextRequest,
   { params }: { params: { networkId: string } },
@@ -67,6 +89,75 @@ export async function GET(
     include: branchInclude,
   });
 
+  const branchIds = branches.map((branch) => branch.id);
+
+  const financialRows =
+    branchIds.length > 0
+      ? await prisma.medReachOrderFinancial.groupBy({
+          by: ['labId', 'currency'],
+          where: {
+            labId: { in: branchIds },
+          },
+          _sum: {
+            subtotalCents: true,
+            logisticsFeeCents: true,
+            urgentSurchargeCents: true,
+            coldChainSurchargeCents: true,
+            platformFeeCents: true,
+            labGrossCents: true,
+            phlebGrossCents: true,
+            labNetCents: true,
+            phlebNetCents: true,
+            sponsorAmountMinor: true,
+            patientCopayMinor: true,
+          },
+          _count: {
+            _all: true,
+          },
+        })
+      : [];
+
+  const revenueByCurrencyMap = new Map<string, ReturnType<typeof emptyMoney>>();
+  const revenueByLabId = new Map<string, ReturnType<typeof emptyMoney>[]>();
+
+  for (const row of financialRows) {
+    const currency = row.currency || network.currency || 'ZAR';
+    const total = revenueByCurrencyMap.get(currency) || emptyMoney(currency);
+    const branchTotal = emptyMoney(currency);
+
+    branchTotal.records = n(row._count?._all);
+    branchTotal.subtotalCents = n(row._sum.subtotalCents);
+    branchTotal.logisticsFeeCents = n(row._sum.logisticsFeeCents);
+    branchTotal.urgentSurchargeCents = n(row._sum.urgentSurchargeCents);
+    branchTotal.coldChainSurchargeCents = n(row._sum.coldChainSurchargeCents);
+    branchTotal.platformFeeCents = n(row._sum.platformFeeCents);
+    branchTotal.labGrossCents = n(row._sum.labGrossCents);
+    branchTotal.phlebGrossCents = n(row._sum.phlebGrossCents);
+    branchTotal.labNetCents = n(row._sum.labNetCents);
+    branchTotal.phlebNetCents = n(row._sum.phlebNetCents);
+    branchTotal.sponsorAmountMinor = n(row._sum.sponsorAmountMinor);
+    branchTotal.patientCopayMinor = n(row._sum.patientCopayMinor);
+
+    total.records += branchTotal.records;
+    total.subtotalCents += branchTotal.subtotalCents;
+    total.logisticsFeeCents += branchTotal.logisticsFeeCents;
+    total.urgentSurchargeCents += branchTotal.urgentSurchargeCents;
+    total.coldChainSurchargeCents += branchTotal.coldChainSurchargeCents;
+    total.platformFeeCents += branchTotal.platformFeeCents;
+    total.labGrossCents += branchTotal.labGrossCents;
+    total.phlebGrossCents += branchTotal.phlebGrossCents;
+    total.labNetCents += branchTotal.labNetCents;
+    total.phlebNetCents += branchTotal.phlebNetCents;
+    total.sponsorAmountMinor += branchTotal.sponsorAmountMinor;
+    total.patientCopayMinor += branchTotal.patientCopayMinor;
+
+    revenueByCurrencyMap.set(currency, total);
+
+    const perBranch = revenueByLabId.get(row.labId) || [];
+    perBranch.push(branchTotal);
+    revenueByLabId.set(row.labId, perBranch);
+  }
+
   const totals = branches.reduce(
     (acc, branch) => {
       acc.branches += 1;
@@ -96,16 +187,27 @@ export async function GET(
     data: {
       network: projectNetwork(network),
       totals,
-      branches: branches.map(projectBranch),
+      branches: branches.map((branch) => ({
+        ...projectBranch(branch),
+        revenueByCurrency: revenueByLabId.get(branch.id) || [],
+      })),
       revenue: {
-        available: false,
+        available: financialRows.length > 0,
+        byCurrency: Array.from(revenueByCurrencyMap.values()),
         reason:
-          'Revenue aggregation is intentionally not calculated until MedReachOrderFinancial money fields are inspected and mapped safely.',
+          financialRows.length > 0
+            ? null
+            : 'No MedReachOrderFinancial rows exist yet for HQ-visible branches.',
+        notes: [
+          'Revenue uses MedReachOrderFinancial cent/minor-unit fields only.',
+          'Lab gross/net and phlebotomist gross/net are reported separately.',
+          'Values are grouped by currency to avoid cross-currency mixing.',
+        ],
       },
       reviews: {
         available: false,
         reason:
-          'Review aggregation is intentionally not calculated until branch review/rating storage is inspected and mapped safely.',
+          'No MedReach lab review/rating model exists yet. ClinicianRating is not used for lab branch ratings.',
       },
     },
   });

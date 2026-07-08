@@ -71,6 +71,22 @@ type NetworkStaff = {
   approvedAt?: string | null;
 };
 
+type MoneyTotals = {
+  currency: string;
+  records: number;
+  subtotalCents: number;
+  logisticsFeeCents: number;
+  urgentSurchargeCents: number;
+  coldChainSurchargeCents: number;
+  platformFeeCents: number;
+  labGrossCents: number;
+  phlebGrossCents: number;
+  labNetCents: number;
+  phlebNetCents: number;
+  sponsorAmountMinor: number;
+  patientCopayMinor: number;
+};
+
 type NetworkSummary = {
   network: LabNetwork;
   totals: {
@@ -86,7 +102,9 @@ type NetworkSummary = {
   branches: NetworkBranch[];
   revenue?: {
     available: boolean;
-    reason?: string;
+    reason?: string | null;
+    byCurrency?: MoneyTotals[];
+    notes?: string[];
   };
   reviews?: {
     available: boolean;
@@ -141,6 +159,15 @@ function formatDate(value?: string | null) {
   } catch {
     return '-';
   }
+}
+
+function formatMoneyMinor(currency: string, amountCents?: number | null) {
+  const value = Number(amountCents || 0) / 100;
+
+  return `${currency} ${value.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 }
 
 function badgeClass(status: string) {
@@ -804,10 +831,57 @@ export default function LabNetworksPage() {
                 </div>
               ) : null}
 
-              {summary?.revenue?.available === false ? (
+              {summary?.revenue?.available && summary.revenue.byCurrency?.length ? (
+                <div className="mt-4 rounded-2xl border bg-slate-50 p-4">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    HQ revenue by currency
+                  </div>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-3">
+                    {summary.revenue.byCurrency.map((row) => (
+                      <div key={row.currency} className="rounded-2xl border bg-white p-3">
+                        <div className="text-xs font-semibold text-gray-500">{row.currency}</div>
+                        <div className="mt-2 text-lg font-semibold text-gray-950">
+                          {formatMoneyMinor(row.currency, row.labGrossCents)}
+                        </div>
+                        <div className="text-[11px] text-gray-500">Lab gross</div>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-gray-600">
+                          <div>
+                            <div className="font-semibold text-gray-900">
+                              {formatMoneyMinor(row.currency, row.labNetCents)}
+                            </div>
+                            <div>Lab net</div>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-gray-900">
+                              {formatMoneyMinor(row.currency, row.platformFeeCents)}
+                            </div>
+                            <div>Platform fee</div>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-gray-900">
+                              {formatMoneyMinor(row.currency, row.phlebGrossCents)}
+                            </div>
+                            <div>Phleb gross</div>
+                          </div>
+                          <div>
+                            <div className="font-semibold text-gray-900">{row.records}</div>
+                            <div>Finance records</div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <p className="mt-3 text-xs leading-5 text-gray-500">
+                    Revenue is grouped by currency from MedReachOrderFinancial and keeps lab,
+                    phlebotomist and platform values separate.
+                  </p>
+                </div>
+              ) : summary?.revenue?.available === false ? (
                 <div className="mt-4 rounded-2xl border bg-slate-50 p-4 text-xs leading-5 text-gray-600">
-                  Revenue aggregation is intentionally held until the finance fields are mapped
-                  safely. Branch operational counts are live.
+                  {summary.revenue.reason || 'No finance rows exist yet for HQ-visible branches.'}
                 </div>
               ) : null}
             </section>
