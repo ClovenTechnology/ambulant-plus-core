@@ -2946,6 +2946,7 @@ model CarePortPharmacySku {
   normalisationConfidence Float?
   normalisationNotes      String?
   globalProductKey        String?   @db.VarChar(180)
+  globalProductId         String?   @db.VarChar(191)
   canonicalName           String?   @db.VarChar(500)
   customAttributeValues   Json?
   normalisedAttributes    Json?
@@ -2973,6 +2974,7 @@ model CarePortPharmacySku {
   @@index([normalisationStatus, reviewRequired])
   @@index([reviewRequired, updatedAt])
   @@index([globalProductKey])
+  @@index([globalProductId])
   @@index([canonicalName])
   @@index([orgId])
 }
@@ -6157,3 +6159,120 @@ model ClientOrgApiClient {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model CarePortGlobalProduct {
+  id               String   @id @default(cuid())
+  orgId            String   @default("org-default")
+  globalProductKey String   @unique @db.VarChar(180)
+  canonicalName    String   @db.VarChar(500)
+
+  productType          String  @default("MEDICATION") @db.VarChar(60)
+  category             String? @db.VarChar(120)
+  subcategory          String? @db.VarChar(120)
+  otc                  Boolean @default(false)
+  prescriptionRequired Boolean @default(true)
+  marketplaceAllowed   Boolean @default(false)
+  sellableOnline       Boolean @default(true)
+
+  brand        String? @db.VarChar(160)
+  manufacturer String? @db.VarChar(160)
+  description  String?
+  imageUrl      String?
+  packSize      String? @db.VarChar(120)
+
+  dosageForm String? @db.VarChar(120)
+  strength   String? @db.VarChar(120)
+  route      String? @db.VarChar(120)
+  unit       String? @db.VarChar(80)
+
+  regulatedSchedule String? @db.VarChar(80)
+  taxCategory       String? @db.VarChar(80)
+
+  primaryBarcode String? @db.VarChar(120)
+  primaryNappi   String? @db.VarChar(120)
+  primaryRxNorm  String? @db.VarChar(120)
+  primaryGtin    String? @db.VarChar(120)
+
+  attributes           Json?
+  normalisedAttributes Json?
+  sourceMeta           Json?
+
+  catalogueStatus String  @default("DRAFT") @db.VarChar(80)
+  catalogueSource String  @default("ADMIN_CREATED") @db.VarChar(80)
+  confidence      Float?
+  notes           String?
+
+  createdBy String?
+  updatedBy String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([productType, category])
+  @@index([catalogueStatus])
+  @@index([catalogueSource])
+  @@index([canonicalName])
+  @@index([primaryNappi])
+  @@index([primaryRxNorm])
+  @@index([primaryGtin])
+  @@index([primaryBarcode])
+  @@index([marketplaceAllowed, sellableOnline])
+}
+
+model CarePortGlobalProductCode {
+  id               String   @id @default(cuid())
+  orgId            String   @default("org-default")
+  globalProductId  String   @db.VarChar(191)
+  globalProductKey String   @db.VarChar(180)
+
+  system  String  @db.VarChar(80)
+  code    String  @db.VarChar(180)
+  display String?
+  country String? @db.VarChar(2)
+
+  source    String  @default("ADMIN_CREATED") @db.VarChar(80)
+  isPrimary Boolean @default(false)
+  isActive  Boolean @default(true)
+  meta      Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([system, code, country], map: "careport_global_product_code_system_code_country_key")
+  @@index([orgId])
+  @@index([globalProductId])
+  @@index([globalProductKey])
+  @@index([system, code])
+  @@index([country])
+  @@index([isActive])
+}
+
+model CarePortPharmacySkuGlobalProductMap {
+  id               String   @id @default(cuid())
+  orgId            String   @default("org-default")
+  pharmacyId       String
+  skuId            String
+  globalProductId  String?  @db.VarChar(191)
+  globalProductKey String   @db.VarChar(180)
+
+  matchSource String @default("NORMALISATION") @db.VarChar(80)
+  matchStatus String @default("ACTIVE") @db.VarChar(80)
+  confidence  Float?
+  notes       String?
+
+  reviewedBy String?
+  reviewedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([skuId, globalProductKey], map: "careport_sku_global_product_map_sku_global_key")
+  @@index([orgId])
+  @@index([pharmacyId])
+  @@index([skuId])
+  @@index([globalProductId])
+  @@index([globalProductKey])
+  @@index([matchStatus])
+  @@index([matchSource])
+}
+
