@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
 import { orgIdFromHeaders, pharmacyIdForStaff, requireRole } from '@/src/lib/careport';
+import { normaliseCarePortSkuForCatalogue } from '@/src/careport/catalogue/normalisation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -305,6 +306,10 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const input = normalizeSkuInput(body, pharmacy.currency || 'ZAR');
     const extended = normalizeCarePortExtendedSkuInput(body);
+    const catalogueGovernance = normaliseCarePortSkuForCatalogue(
+      { ...input, ...extended },
+      'PHARMACY_SUPPLIED',
+    );
 
     if (!input.name) return json({ ok: false, error: 'name_required' }, 400);
     if (!input.priceCents || input.priceCents < 0) return json({ ok: false, error: 'valid_price_required' }, 400);
@@ -336,6 +341,7 @@ export async function POST(req: NextRequest) {
       isGeneric: input.isGeneric,
       isActive: input.isActive,
       ...extended,
+      ...catalogueGovernance,
     };
 
     const item = existing
@@ -357,6 +363,10 @@ export async function POST(req: NextRequest) {
           codeSystem: input.codeSystem,
           isGeneric: input.isGeneric,
           duplicateMatched: Boolean(existing),
+          catalogueSource: catalogueGovernance.catalogueSource,
+          normalisationStatus: catalogueGovernance.normalisationStatus,
+          reviewRequired: catalogueGovernance.reviewRequired,
+          reviewReason: catalogueGovernance.reviewReason,
         },
       },
     }).catch(() => null);

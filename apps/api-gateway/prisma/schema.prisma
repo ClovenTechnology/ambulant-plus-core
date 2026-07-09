@@ -2940,6 +2940,19 @@ model CarePortPharmacySku {
   ageRestricted     Boolean @default(false)
   regulatedSchedule String? @db.VarChar(80)
   taxCategory       String? @db.VarChar(80)
+  // Catalogue normalisation and governance.
+  catalogueSource         String    @default("PHARMACY_SUPPLIED") @db.VarChar(80)
+  normalisationStatus     String    @default("RAW_PHARMACY_SUPPLIED") @db.VarChar(80)
+  normalisationConfidence Float?
+  normalisationNotes      String?
+  globalProductKey        String?   @db.VarChar(180)
+  canonicalName           String?   @db.VarChar(500)
+  customAttributeValues   Json?
+  normalisedAttributes    Json?
+  reviewRequired          Boolean   @default(false)
+  reviewReason            String?
+  reviewedBy              String?
+  reviewedAt              DateTime?
 
   priceCents Int
   currency   String          @default("ZAR")
@@ -2956,6 +2969,11 @@ model CarePortPharmacySku {
   @@index([pharmacyId, prescriptionRequired, isActive])
   @@index([barcode])
   @@index([variantGroupKey])
+  @@index([catalogueSource])
+  @@index([normalisationStatus, reviewRequired])
+  @@index([reviewRequired, updatedAt])
+  @@index([globalProductKey])
+  @@index([canonicalName])
   @@index([orgId])
 }
 

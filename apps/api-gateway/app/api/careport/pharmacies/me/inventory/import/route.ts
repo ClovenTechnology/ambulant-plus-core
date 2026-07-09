@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
 import { orgIdFromHeaders, pharmacyIdForStaff, requireRole } from '@/src/lib/careport';
+import { normaliseCarePortSkuForCatalogue } from '@/src/careport/catalogue/normalisation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -99,6 +100,79 @@ function parseCsv(text: string) {
     'generic',
     'isactive',
     'active',
+    'producttype',
+    'product_type',
+    'type',
+    'itemtype',
+    'item_type',
+    'category',
+    'department',
+    'subcategory',
+    'sub_category',
+    'otc',
+    'isotc',
+    'is_otc',
+    'over_the_counter',
+    'prescriptionrequired',
+    'prescription_required',
+    'rxrequired',
+    'rx_required',
+    'marketplacevisible',
+    'marketplace_visible',
+    'public',
+    'sellableonline',
+    'sellable_online',
+    'online_sale',
+    'brand',
+    'manufacturer',
+    'supplier',
+    'barcode',
+    'gtin',
+    'ean',
+    'upc',
+    'description',
+    'imageurl',
+    'image_url',
+    'image',
+    'packsize',
+    'pack_size',
+    'size',
+    'variantgroupkey',
+    'variant_group_key',
+    'parent_sku',
+    'style_code',
+    'variantname',
+    'variant_name',
+    'variant',
+    'option_name',
+    'variantattributes',
+    'variant_attributes',
+    'attributes',
+    'metadata',
+    'stockonhand',
+    'stock_on_hand',
+    'stock',
+    'quantity',
+    'reservedstock',
+    'reserved_stock',
+    'lowstockthreshold',
+    'low_stock_threshold',
+    'reorderlevel',
+    'reorder_level',
+    'maxorderqty',
+    'max_order_qty',
+    'maxquantity',
+    'max_quantity',
+    'agerestricted',
+    'age_restricted',
+    'adult_only',
+    'regulatedschedule',
+    'regulated_schedule',
+    'schedule',
+    'medicine_schedule',
+    'taxcategory',
+    'tax_category',
+    'vat_category',
   ]);
 
   const hasHeader = normalizedHeaders.some((h) => knownHeaders.has(h));
@@ -183,7 +257,6 @@ function dedupeKey(row: any) {
   return 'name:' + row.name.toLowerCase() + '|price:' + row.priceCents;
 }
 
-
 const CAREPORT_PRODUCT_TYPES = new Set([
   'MEDICATION',
   'OTC_MEDICATION',
@@ -208,7 +281,7 @@ function careportCleanToken(value: unknown, fallback = '') {
 
 function careportOptionalInt(value: unknown): number | null {
   if (value == null || value === '') return null;
-  const n = Number(String(value).replace(/[^0-9.-]/g, ''));
+  const n = Number(String(value).replace(/[^0-9.\-]/g, ''));
   if (!Number.isFinite(n)) return null;
   return Math.max(0, Math.trunc(n));
 }
@@ -235,77 +308,6 @@ function normalizeCarePortProductType(value: unknown, fallback = 'MEDICATION') {
   if (['MERCHANDISE', 'GENERAL', 'RETAIL', 'OTHER'].includes(token)) return 'GENERAL_MERCHANDISE';
 
   return fallback;
-}
-
-function normalizeCarePortExtendedSkuInput(body: any) {
-  const productType = normalizeCarePortProductType(body?.productType ?? body?.type ?? body?.itemType, 'MEDICATION');
-  const otc = asBool(body?.otc ?? body?.isOtc ?? body?.overTheCounter, productType === 'OTC_MEDICATION');
-
-  const prescriptionRequired = asBool(
-    body?.prescriptionRequired ?? body?.requiresPrescription ?? body?.rxRequired,
-    productType === 'MEDICATION' && !otc,
-  );
-
-  return {
-    productType,
-    category: clean(body?.category ?? body?.department, 120) || null,
-    subcategory: clean(body?.subcategory ?? body?.subCategory, 120) || null,
-    otc,
-    prescriptionRequired,
-    marketplaceVisible: asBool(body?.marketplaceVisible ?? body?.visibleInMarketplace ?? body?.public, !prescriptionRequired),
-    sellableOnline: asBool(body?.sellableOnline ?? body?.onlineSale ?? body?.canBuyOnline, true),
-    brand: clean(body?.brand, 160) || null,
-    manufacturer: clean(body?.manufacturer ?? body?.supplier, 160) || null,
-    barcode: clean(body?.barcode ?? body?.gtin ?? body?.ean ?? body?.upc, 120) || null,
-    description: clean(body?.description ?? body?.details, 2000) || null,
-    imageUrl: clean(body?.imageUrl ?? body?.image ?? body?.photoUrl, 1000) || null,
-    packSize: clean(body?.packSize ?? body?.pack ?? body?.size, 120) || null,
-    variantGroupKey: clean(body?.variantGroupKey ?? body?.parentSku ?? body?.styleCode, 160) || null,
-    variantName: clean(body?.variantName ?? body?.variant ?? body?.optionName, 160) || null,
-    variantAttributes: careportJsonObject(body?.variantAttributes ?? body?.variants ?? body?.options),
-    attributes: careportJsonObject(body?.attributes ?? body?.metadata),
-    stockOnHand: careportOptionalInt(body?.stockOnHand ?? body?.stock ?? body?.quantityOnHand),
-    reservedStock: careportOptionalInt(body?.reservedStock) ?? 0,
-    lowStockThreshold: careportOptionalInt(body?.lowStockThreshold ?? body?.reorderLevel),
-    maxOrderQty: careportOptionalInt(body?.maxOrderQty ?? body?.maxQuantity),
-    ageRestricted: asBool(body?.ageRestricted ?? body?.adultOnly, false),
-    regulatedSchedule: clean(body?.regulatedSchedule ?? body?.schedule ?? body?.medicineSchedule, 80) || null,
-    taxCategory: clean(body?.taxCategory ?? body?.vatCategory, 80) || null,
-  };
-}
-
-function normalizeCarePortExtendedSkuPatch(body: any) {
-  const data: Record<string, any> = {};
-
-  if (body.productType !== undefined || body.type !== undefined || body.itemType !== undefined) {
-    data.productType = normalizeCarePortProductType(body.productType ?? body.type ?? body.itemType, 'MEDICATION');
-  }
-
-  if (body.category !== undefined || body.department !== undefined) data.category = clean(body.category ?? body.department, 120) || null;
-  if (body.subcategory !== undefined || body.subCategory !== undefined) data.subcategory = clean(body.subcategory ?? body.subCategory, 120) || null;
-  if (body.otc !== undefined || body.isOtc !== undefined || body.overTheCounter !== undefined) data.otc = asBool(body.otc ?? body.isOtc ?? body.overTheCounter, false);
-  if (body.prescriptionRequired !== undefined || body.requiresPrescription !== undefined || body.rxRequired !== undefined) data.prescriptionRequired = asBool(body.prescriptionRequired ?? body.requiresPrescription ?? body.rxRequired, true);
-  if (body.marketplaceVisible !== undefined || body.visibleInMarketplace !== undefined || body.public !== undefined) data.marketplaceVisible = asBool(body.marketplaceVisible ?? body.visibleInMarketplace ?? body.public, false);
-  if (body.sellableOnline !== undefined || body.onlineSale !== undefined || body.canBuyOnline !== undefined) data.sellableOnline = asBool(body.sellableOnline ?? body.onlineSale ?? body.canBuyOnline, true);
-  if (body.brand !== undefined) data.brand = clean(body.brand, 160) || null;
-  if (body.manufacturer !== undefined || body.supplier !== undefined) data.manufacturer = clean(body.manufacturer ?? body.supplier, 160) || null;
-  if (body.barcode !== undefined || body.gtin !== undefined || body.ean !== undefined || body.upc !== undefined) data.barcode = clean(body.barcode ?? body.gtin ?? body.ean ?? body.upc, 120) || null;
-  if (body.description !== undefined || body.details !== undefined) data.description = clean(body.description ?? body.details, 2000) || null;
-  if (body.imageUrl !== undefined || body.image !== undefined || body.photoUrl !== undefined) data.imageUrl = clean(body.imageUrl ?? body.image ?? body.photoUrl, 1000) || null;
-  if (body.packSize !== undefined || body.pack !== undefined || body.size !== undefined) data.packSize = clean(body.packSize ?? body.pack ?? body.size, 120) || null;
-  if (body.variantGroupKey !== undefined || body.parentSku !== undefined || body.styleCode !== undefined) data.variantGroupKey = clean(body.variantGroupKey ?? body.parentSku ?? body.styleCode, 160) || null;
-  if (body.variantName !== undefined || body.variant !== undefined || body.optionName !== undefined) data.variantName = clean(body.variantName ?? body.variant ?? body.optionName, 160) || null;
-  if (body.variantAttributes !== undefined || body.variants !== undefined || body.options !== undefined) data.variantAttributes = careportJsonObject(body.variantAttributes ?? body.variants ?? body.options);
-  if (body.attributes !== undefined || body.metadata !== undefined) data.attributes = careportJsonObject(body.attributes ?? body.metadata);
-  if (body.stockOnHand !== undefined || body.stock !== undefined || body.quantityOnHand !== undefined) data.stockOnHand = careportOptionalInt(body.stockOnHand ?? body.stock ?? body.quantityOnHand);
-  if (body.reservedStock !== undefined) data.reservedStock = careportOptionalInt(body.reservedStock) ?? 0;
-  if (body.lowStockThreshold !== undefined || body.reorderLevel !== undefined) data.lowStockThreshold = careportOptionalInt(body.lowStockThreshold ?? body.reorderLevel);
-  if (body.maxOrderQty !== undefined || body.maxQuantity !== undefined) data.maxOrderQty = careportOptionalInt(body.maxOrderQty ?? body.maxQuantity);
-  if (body.ageRestricted !== undefined || body.adultOnly !== undefined) data.ageRestricted = asBool(body.ageRestricted ?? body.adultOnly, false);
-  if (body.regulatedSchedule !== undefined || body.schedule !== undefined || body.medicineSchedule !== undefined) data.regulatedSchedule = clean(body.regulatedSchedule ?? body.schedule ?? body.medicineSchedule, 80) || null;
-  if (body.taxCategory !== undefined || body.vatCategory !== undefined) data.taxCategory = clean(body.taxCategory ?? body.vatCategory, 80) || null;
-
-  return data;
 }
 
 function normalizeCarePortExtendedCsvSku(row: Record<string, any>) {
@@ -345,7 +347,6 @@ function normalizeCarePortExtendedCsvSku(row: Record<string, any>) {
   };
 }
 
-
 export async function POST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
@@ -376,6 +377,10 @@ export async function POST(req: NextRequest) {
     rowsRaw.slice(0, 1000).forEach((row: any, index: number) => {
       const normalized = normalizeRow(row, pharmacy.currency || 'ZAR');
       const extended = normalizeCarePortExtendedCsvSku(row);
+      const catalogueGovernance = normaliseCarePortSkuForCatalogue(
+        { ...normalized, ...extended },
+        'CSV_IMPORT',
+      );
       const line = row?._line ?? index + 1;
 
       if (!normalized.name) {
@@ -419,6 +424,7 @@ export async function POST(req: NextRequest) {
         isGeneric: normalized.isGeneric,
         isActive: normalized.isActive,
         ...extended,
+        ...catalogueGovernance,
       });
     });
 
@@ -478,6 +484,18 @@ export async function POST(req: NextRequest) {
           ageRestricted: row.ageRestricted,
           regulatedSchedule: row.regulatedSchedule,
           taxCategory: row.taxCategory,
+          catalogueSource: row.catalogueSource,
+          normalisationStatus: row.normalisationStatus,
+          normalisationConfidence: row.normalisationConfidence,
+          normalisationNotes: row.normalisationNotes,
+          globalProductKey: row.globalProductKey,
+          canonicalName: row.canonicalName,
+          customAttributeValues: row.customAttributeValues,
+          normalisedAttributes: row.normalisedAttributes,
+          reviewRequired: row.reviewRequired,
+          reviewReason: row.reviewReason,
+          reviewedBy: row.reviewedBy,
+          reviewedAt: row.reviewedAt,
         };
 
         if (existing) {
@@ -504,7 +522,8 @@ export async function POST(req: NextRequest) {
             updated,
             errorCount: errors.length,
             codeSystems,
-            duplicateStrategy: 'skuCode_or_drugCode_name_updates_existing',
+            reviewRequired: valid.filter((row: any) => row.reviewRequired).length,
+            duplicateStrategy: 'skuCode_barcode_or_drugCode_name_updates_existing',
           },
         },
       });
@@ -518,6 +537,7 @@ export async function POST(req: NextRequest) {
       updated,
       errors,
       codeSystems,
+      reviewRequired: valid.filter((row: any) => row.reviewRequired).length,
     });
   } catch (error: any) {
     return json({ ok: false, error: error?.message || 'inventory_import_failed' }, error?.status || 500);
