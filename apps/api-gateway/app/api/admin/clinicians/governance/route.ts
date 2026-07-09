@@ -125,6 +125,51 @@ function mergeGovernanceResolution(profile: any, patch: Record<string, any>) {
   };
 }
 
+function contactSummaryFromBody(body: any, key: 'patient' | 'clinician') {
+  const direct = safeJsonObject(body?.[key + 'Contact']);
+  const summary =
+    key === 'patient'
+      ? clean(body.patientContactSummary || body.patientSide || body.patientStatement || direct.summary, 2000)
+      : clean(body.clinicianContactSummary || body.clinicianSide || body.clinicianStatement || direct.summary, 2000);
+
+  const contactedAt =
+    key === 'patient'
+      ? clean(body.patientContactedAt || direct.contactedAt, 100)
+      : clean(body.clinicianContactedAt || direct.contactedAt, 100);
+
+  const method =
+    key === 'patient'
+      ? clean(body.patientContactMethod || direct.method, 80)
+      : clean(body.clinicianContactMethod || direct.method, 80);
+
+  return {
+    contacted: Boolean(summary || contactedAt || method),
+    method: method || null,
+    contactedAt: contactedAt || null,
+    summary: summary || null,
+  };
+}
+
+function evidenceListFromBody(body: any) {
+  const evidence = Array.isArray(body?.evidenceReviewed)
+    ? body.evidenceReviewed
+    : Array.isArray(body?.evidence)
+      ? body.evidence
+      : [];
+
+  return evidence
+    .map((item: any) => clean(item, 240))
+    .filter(Boolean)
+    .slice(0, 20);
+}
+
+function decisionHistoryFrom(profile: any) {
+  const previous = governanceReviewOf(profile);
+  const history = Array.isArray(previous.decisionHistory) ? previous.decisionHistory : [];
+
+  return history.slice(-49);
+}
+
 export async function GET(req: NextRequest) {
   const auth = requireAdmin(req);
   if (!auth.ok) {
@@ -252,6 +297,15 @@ export async function PATCH(req: NextRequest) {
     const clinicianId = clean(body.clinicianId || body.id, 180);
     const action = clean(body.action || body.decision, 80).toLowerCase();
     const note = clean(body.note || body.reason || body.comment, 1200);
+    const decisionRationale = clean(
+      body.decisionRationale || body.rationale || body.judgement || body.judgment || note,
+      2000,
+    );
+    const governanceAssessment = clean(body.governanceAssessment || body.assessment, 2400);
+    const safetyRisk = clean(body.safetyRisk || body.riskLevel || 'not_recorded', 80).toLowerCase();
+    const patientContact = contactSummaryFromBody(body, 'patient');
+    const clinicianContact = contactSummaryFromBody(body, 'clinician');
+    const evidenceReviewed = evidenceListFromBody(body);
 
     if (!clinicianId) {
       return json({ ok: false, error: 'missing_clinician_id' }, 400);
@@ -263,6 +317,18 @@ export async function PATCH(req: NextRequest) {
           ok: false,
           error: 'invalid_governance_action',
           allowedActions: ['reinstate', 'resolve', 'keep_suspended', 'archive'],
+        },
+        400,
+      );
+    }
+
+    if (!decisionRationale) {
+      return json(
+        {
+          ok: false,
+          error: 'governance_decision_rationale_required',
+          message:
+            'A governance decision must include a rationale summarising what informed the judgement.',
         },
         400,
       );
@@ -291,14 +357,34 @@ export async function PATCH(req: NextRequest) {
     }
 
     const now = new Date().toISOString();
+    const decisionHistory = decisionHistoryFrom(profile);
+
+    const decisionEntry = {
+      action,
+      decisionRationale,
+      governanceAssessment: governanceAssessment || null,
+      safetyRisk,
+      patientContact,
+      clinicianContact,
+      evidenceReviewed,
+      decidedBy: auth.who.uid,
+      decidedAt: now,
+    };
 
     const resolutionPatch = {
       active: action === 'keep_suspended',
       resolution: action,
-      resolutionNote: note || null,
+      resolutionNote: decisionRationale,
+      decisionRationale,
+      governanceAssessment: governanceAssessment || null,
+      safetyRisk,
+      patientContact,
+      clinicianContact,
+      evidenceReviewed,
       resolvedBy: auth.who.uid,
       resolvedAt: now,
       lastActionAt: now,
+      decisionHistory: decisionHistory.concat(decisionEntry),
     };
 
     const data: Record<string, any> = {
