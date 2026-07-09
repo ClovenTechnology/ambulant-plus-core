@@ -111,6 +111,9 @@ export default function PatientPharmacyMarketplacePage() {
   const [cart, setCart] = useState<Record<string, CartLine>>({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [checkoutNotice, setCheckoutNotice] = useState('');
+  const [checkoutError, setCheckoutError] = useState('');
 
   const cartLines = useMemo(() => Object.values(cart), [cart]);
 
@@ -166,6 +169,9 @@ export default function PatientPharmacyMarketplacePage() {
   }
 
   function addToCart(item: MarketplaceItem) {
+    setCheckoutNotice('');
+    setCheckoutError('');
+
     setCart((current) => {
       const existing = current[item.skuId];
       const nextQty = Math.min(
@@ -184,6 +190,9 @@ export default function PatientPharmacyMarketplacePage() {
   }
 
   function removeFromCart(skuId: string) {
+    setCheckoutNotice('');
+    setCheckoutError('');
+
     setCart((current) => {
       const next = { ...current };
       delete next[skuId];
@@ -191,6 +200,48 @@ export default function PatientPharmacyMarketplacePage() {
     });
   }
 
+  async function checkout() {
+    if (!cartLines.length) {
+      setCheckoutError('Add at least one product before checkout.');
+      return;
+    }
+
+    setCheckingOut(true);
+    setCheckoutNotice('');
+    setCheckoutError('');
+
+    try {
+      const lines = cartLines.map((line) => ({
+        skuId: line.item.skuId,
+        qty: line.qty,
+      }));
+
+      const res = await fetch('/api/careport/marketplace/checkout', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          fulfillment: 'PICKUP',
+          lines,
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || 'Unable to create CarePort OTC order.');
+      }
+
+      setCart({});
+      setCheckoutNotice(
+        'CarePort OTC order created. Stock has been reserved while payment is pending. Order ID: ' +
+          String(payload?.order?.id || 'created'),
+      );
+    } catch (err: any) {
+      setCheckoutError(err?.message || 'Unable to create CarePort OTC order.');
+    } finally {
+      setCheckingOut(false);
+    }
+  }
   useEffect(() => {
     load();
   }, []);
@@ -379,7 +430,7 @@ export default function PatientPharmacyMarketplacePage() {
               <div>
                 <h2 className="text-lg font-bold text-slate-950">Basket preview</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Checkout and stock reservation will be connected in the next A2/A3 bundle.
+                  Create a CarePort OTC order and reserve pharmacy stock while payment is pending.
                 </p>
               </div>
               <span className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
@@ -421,16 +472,29 @@ export default function PatientPharmacyMarketplacePage() {
                 <span className="font-bold text-slate-950">{money(cartTotal, 'ZAR')}</span>
               </div>
 
+              {checkoutNotice ? (
+                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs leading-5 text-emerald-800">
+                  {checkoutNotice}
+                </div>
+              ) : null}
+
+              {checkoutError ? (
+                <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-800">
+                  {checkoutError}
+                </div>
+              ) : null}
+
               <button
                 type="button"
-                disabled
-                className="mt-4 w-full cursor-not-allowed rounded-2xl bg-slate-300 px-4 py-3 text-sm font-semibold text-white"
+                onClick={checkout}
+                disabled={!cartLines.length || checkingOut}
+                className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                Checkout coming next
+                {checkingOut ? 'Creating order…' : 'Create OTC order'}
               </button>
 
               <p className="mt-3 text-xs leading-5 text-slate-500">
-                This preview does not reserve stock yet. The next bundle will create a CarePort OTC order and reserve inventory safely.
+                This creates a CarePort marketplace order in payment-pending state and reserves stock for the selected pharmacy SKU lines.
               </p>
             </div>
           </aside>
