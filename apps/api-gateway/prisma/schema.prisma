@@ -2908,6 +2908,39 @@ model CarePortPharmacySku {
   drugCode   String?
   skuCode    String?
   isGeneric  Boolean         @default(false)
+  // Universal CarePort catalogue classification.
+  // Supports prescription medicines, OTC items and general pharmacy merchandise.
+  productType          String   @default("MEDICATION") @db.VarChar(60)
+  category             String?  @db.VarChar(120)
+  subcategory          String?  @db.VarChar(120)
+  otc                  Boolean  @default(false)
+  prescriptionRequired Boolean  @default(true)
+  marketplaceVisible   Boolean  @default(false)
+  sellableOnline       Boolean  @default(true)
+
+  // Retail merchandising and catalogue enrichment.
+  brand        String? @db.VarChar(160)
+  manufacturer String? @db.VarChar(160)
+  barcode      String? @db.VarChar(120)
+  description  String?
+  imageUrl      String?
+  packSize      String? @db.VarChar(120)
+
+  // Variant support for size, colour, flavour, strength, bundle size, etc.
+  variantGroupKey   String? @db.VarChar(160)
+  variantName       String? @db.VarChar(160)
+  variantAttributes Json?
+  attributes        Json?
+
+  // Stock and retail guardrails.
+  stockOnHand       Int?
+  reservedStock     Int     @default(0)
+  lowStockThreshold Int?
+  maxOrderQty       Int?
+  ageRestricted     Boolean @default(false)
+  regulatedSchedule String? @db.VarChar(80)
+  taxCategory       String? @db.VarChar(80)
+
   priceCents Int
   currency   String          @default("ZAR")
   isActive   Boolean         @default(true)
@@ -2917,6 +2950,12 @@ model CarePortPharmacySku {
 
   @@index([pharmacyId, isActive])
   @@index([pharmacyId, drugCode])
+  @@index([pharmacyId, productType, isActive])
+  @@index([pharmacyId, category, isActive])
+  @@index([pharmacyId, otc, marketplaceVisible])
+  @@index([pharmacyId, prescriptionRequired, isActive])
+  @@index([barcode])
+  @@index([variantGroupKey])
   @@index([orgId])
 }
 
