@@ -1,4 +1,4 @@
-﻿// apps/admin-dashboard/components/AdminSidebar.tsx
+// apps/admin-dashboard/components/AdminSidebar.tsx
 'use client';
 
 import Link from 'next/link';
@@ -163,6 +163,7 @@ export default function AdminSidebar() {
           { href: '/pharmacies', label: 'Pharmacies', icon: Pill, requires: 'medical' },
           { href: '/careport', label: 'CarePort', icon: Truck, requires: 'medical' },
                     { href: '/admin/careport/catalogue/normalisation', label: 'Catalogue governance', icon: Pill, requires: 'medical' },
+          { href: '/admin/careport/catalogue/global-products', label: 'Global catalogue', icon: Pill, requires: 'medical' },
           { href: '/admin/careport/pharmacy-inventory', label: 'Pharmacy inventory', icon: Pill, requires: 'medical' },
           { href: '/medreach', label: 'MedReach', icon: Syringe, requires: 'medical' },
 { href: '/admin/medreach/reviews', label: 'Review moderation', icon: Syringe, requires: 'medical' },
