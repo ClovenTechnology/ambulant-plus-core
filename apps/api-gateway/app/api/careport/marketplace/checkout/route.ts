@@ -316,6 +316,38 @@ export async function POST(req: NextRequest) {
           },
         });
 
+        const paymentIntent = await tx.carePortPaymentIntent.create({
+          data: {
+            orgId,
+            orderId: order.id,
+            method: 'CARD',
+            status: 'CREATED',
+            amountCents: totalCents,
+            currency,
+            idempotencyKey: erxOrderId,
+            provider: 'paystack',
+            providerRef: erxOrderId,
+            providerStatus: 'CREATED',
+            metadata: {
+              source: 'CAREPORT_OTC_MARKETPLACE',
+              checkout: 'patient_pharmacy',
+              patientId,
+              paymentReference: erxOrderId,
+            },
+          },
+          select: {
+            id: true,
+            orderId: true,
+            method: true,
+            status: true,
+            amountCents: true,
+            currency: true,
+            provider: true,
+            providerRef: true,
+            idempotencyKey: true,
+          },
+        });
+
         const createdItems: any[] = [];
 
         for (const sku of skus) {
@@ -370,6 +402,8 @@ export async function POST(req: NextRequest) {
 
         return {
           order,
+          paymentIntent,
+          paymentReference: erxOrderId,
           items: createdItems,
           reservation: {
             reserved: createdItems.map((item) => ({
@@ -381,12 +415,16 @@ export async function POST(req: NextRequest) {
       },
       {
         isolationLevel: 'Serializable' as any,
+        maxWait: 10000,
+        timeout: 30000,
       },
     );
 
     return json({
       ok: true,
       order: result.order,
+      paymentIntent: result.paymentIntent,
+      paymentReference: result.paymentReference,
       items: result.items,
       reservation: result.reservation,
       next: {

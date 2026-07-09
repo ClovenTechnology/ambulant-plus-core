@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
 import { correlationIdFromHeaders, orgIdFromHeaders, pharmacyIdForStaff, requireRole } from '@/src/lib/careport';
+import { applyMarketplaceReservationTransition } from '@/src/careport/marketplaceReservation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -251,6 +252,18 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
         });
       }
 
+      let reservationTransition: any = null;
+
+      if (nextStatus === 'COMPLETED' && order.fulfillment === 'PICKUP') {
+        reservationTransition = await applyMarketplaceReservationTransition(tx, {
+          orderId,
+          action: 'capture',
+          reason: 'pickup_completed',
+          actorId: who.uid ?? null,
+          actorRole: who.role ?? null,
+        });
+      }
+
       await tx.auditEvent.create({
         data: {
           kind: 'careport_pharmacy_order_status_updated',
@@ -290,7 +303,7 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
       correlationId,
     });
 
-    return json({ ok: true, order: updated, action, status: nextStatus, notificationKind, correlationId });
+    return json({ ok: true, order: updated.order, action, status: nextStatus, notificationKind, marketplaceReservation: updated.marketplaceReservation, correlationId });
   } catch (error: any) {
     return json({ ok: false, error: error?.message || 'pharmacy_order_status_update_failed', correlationId }, error?.status || 500);
   }

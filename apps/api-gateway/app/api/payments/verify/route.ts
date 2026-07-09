@@ -5,76 +5,133 @@ import {
   syncVerifiedPaymentToAppointment,
 } from '@/src/payments/payment-sync';
 import { prisma } from '@/src/lib/db';
+import { applyMarketplaceReservationTransition } from '@/src/careport/marketplaceReservation';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 
-async function reconcileCarePortPayment(reference: string, verified: any) {
-  const intent = await (prisma as any).carePortPaymentIntent?.findFirst?.({
-    where: {
-      OR: [
-        { providerRef: reference },
-        { idempotencyKey: reference },
-        { id: reference },
-      ],
-    },
-    include: { order: true },
-  });
+function carePortPaymentStatus(verified: any) {
+  const raw = String(verified?.status || '').toLowerCase();
 
-  if (!intent?.order) return null;
+  if (['captured', 'success', 'succeeded', 'paid'].includes(raw)) return 'SUCCEEDED';
+  if (['pending', 'requires_action', 'requires-action', 'processing'].includes(raw)) return 'REQUIRES_ACTION';
+  if (['cancelled', 'canceled'].includes(raw)) return 'CANCELLED';
 
-  const status = verified.status === 'captured' ? 'SUCCEEDED' : verified.status === 'pending' ? 'PENDING' : 'FAILED';
-
-  const updatedIntent = await (prisma as any).carePortPaymentIntent.update({
-    where: { id: intent.id },
-    data: {
-      status,
-      providerStatus: status,
-      providerRef: reference,
-      providerPayload: verified.raw ?? null,
-      paidAt: status === 'SUCCEEDED' ? new Date() : intent.paidAt ?? null,
-      failedAt: status === 'FAILED' ? new Date() : intent.failedAt ?? null,
-      failureReason: status === 'FAILED' ? 'provider_verification_failed' : null,
-    },
-  });
-
-  if (status === 'SUCCEEDED' && intent.order.status !== 'PAID') {
-    await prisma.carePortOrder.update({
-      where: { id: intent.order.id },
-      data: {
-        status: 'PAID',
-        settlementStatus: (intent.order as any).settlementStatus || 'UNSETTLED',
-      } as any,
-    });
-  }
-
-  await prisma.auditEvent.create({
-    data: {
-      kind: 'careport_payment_verified',
-      actorId: null,
-      actorRole: 'system',
-      subjectId: intent.order.id,
-      meta: {
-        provider: 'paystack',
-        reference,
-        paymentIntentId: intent.id,
-        status,
-      },
-    },
-  }).catch(() => null);
-
-  return {
-    orderId: intent.order.id,
-    paymentIntent: updatedIntent,
-    redirect:
-      status === 'SUCCEEDED'
-        ? `/careport/marketplace/${encodeURIComponent(intent.order.id)}?payment=success`
-        : `/careport/marketplace/${encodeURIComponent(intent.order.id)}?payment=${encodeURIComponent(String(verified.status || 'failed'))}`,
-  };
+  return 'FAILED';
 }
 
+async function reconcileCarePortPayment(reference: string, verified: any) {
+  const result = await (prisma as any).$transaction(
+    async (tx: any) => {
+      const intent = await tx.carePortPaymentIntent.findFirst({
+        where: {
+          OR: [
+            { providerRef: reference },
+            { idempotencyKey: reference },
+            { id: reference },
+          ],
+        },
+        include: { order: true },
+      });
 
+      if (!intent?.order) return null;
+
+      const status = carePortPaymentStatus(verified);
+      const now = new Date();
+
+      const updatedIntent = await tx.carePortPaymentIntent.update({
+        where: { id: intent.id },
+        data: {
+          status,
+          providerStatus: status,
+          providerRef: reference,
+          providerPayload: verified.raw ?? null,
+          paidAt: status === 'SUCCEEDED' ? now : intent.paidAt ?? null,
+          failedAt: ['FAILED', 'CANCELLED'].includes(status) ? now : intent.failedAt ?? null,
+          failureReason:
+            status === 'FAILED'
+              ? 'provider_verification_failed'
+              : status === 'CANCELLED'
+                ? 'provider_payment_cancelled'
+                : null,
+        },
+      });
+
+      let orderStatus = intent.order.status;
+      let reservationTransition: any = null;
+
+      if (status === 'SUCCEEDED' && intent.order.status !== 'PAID') {
+        const updatedOrder = await tx.carePortOrder.update({
+          where: { id: intent.order.id },
+          data: {
+            status: 'PAID',
+            settlementStatus: (intent.order as any).settlementStatus || 'UNSETTLED',
+          } as any,
+        });
+
+        orderStatus = updatedOrder.status;
+      }
+
+      if (
+        ['FAILED', 'CANCELLED'].includes(status) &&
+        !['DELIVERED', 'COMPLETED', 'CANCELLED', 'EXPIRED'].includes(intent.order.status)
+      ) {
+        reservationTransition = await applyMarketplaceReservationTransition(tx, {
+          orderId: intent.order.id,
+          action: 'release',
+          reason: status === 'CANCELLED' ? 'payment_cancelled' : 'payment_failed',
+          actorId: null,
+          actorRole: 'system',
+        });
+
+        const updatedOrder = await tx.carePortOrder.update({
+          where: { id: intent.order.id },
+          data: {
+            status: 'CANCELLED',
+          } as any,
+        });
+
+        orderStatus = updatedOrder.status;
+      }
+
+      await tx.auditEvent.create({
+        data: {
+          kind: 'careport_payment_verified',
+          actorId: null,
+          actorRole: 'system',
+          subjectId: intent.order.id,
+          meta: {
+            provider: 'paystack',
+            reference,
+            paymentIntentId: intent.id,
+            status,
+            orderStatus,
+            reservationTransition,
+          },
+        },
+      }).catch(() => null);
+
+      return {
+        orderId: intent.order.id,
+        paymentIntent: updatedIntent,
+        orderStatus,
+        marketplaceReservation: reservationTransition,
+        redirect:
+          status === 'SUCCEEDED'
+            ? `/careport/marketplace/${encodeURIComponent(intent.order.id)}?payment=success`
+            : `/careport/marketplace/${encodeURIComponent(intent.order.id)}?payment=${encodeURIComponent(String(verified.status || 'failed'))}`,
+      };
+    },
+    {
+      isolationLevel: 'Serializable' as any,
+      maxWait: 10000,
+      timeout: 30000,
+    },
+  );
+
+  return result;
+}
 function patientAppBaseUrl() {
   return (
     process.env.PATIENT_APP_URL?.trim() ||

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { readIdentity } from '@/src/lib/identity';
 import { orgIdFromHeaders, requireRole } from '@/src/lib/careport';
+import { applyMarketplaceReservationTransition } from '@/src/careport/marketplaceReservation';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -151,6 +152,18 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
         },
       });
 
+      let reservationTransition: any = null;
+
+      if (nextStatus === 'DELIVERED') {
+        reservationTransition = await applyMarketplaceReservationTransition(tx, {
+          orderId,
+          action: 'capture',
+          reason: 'delivery_completed',
+          actorId: userId || null,
+          actorRole: who.role ?? null,
+        });
+      }
+
       await tx.auditEvent.create({
         data: {
           kind: 'careport_rider_status_updated',
@@ -164,7 +177,7 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
       return updatedOrder;
     });
 
-    return json({ ok: true, order: updated, status: nextStatus });
+    return json({ ok: true, order: updated.order, status: nextStatus, marketplaceReservation: updated.marketplaceReservation });
   } catch (error: any) {
     return json({ ok: false, error: error?.message || 'rider_status_update_failed' }, error?.status || 500);
   }
