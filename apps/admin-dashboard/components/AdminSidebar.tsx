@@ -163,6 +163,7 @@ export default function AdminSidebar() {
           { href: '/pharmacies', label: 'Pharmacies', icon: Pill, requires: 'medical' },
           { href: '/careport', label: 'CarePort', icon: Truck, requires: 'medical' },
           { href: '/medreach', label: 'MedReach', icon: Syringe, requires: 'medical' },
+{ href: '/admin/medreach/reviews', label: 'Review moderation', icon: Syringe, requires: 'medical' },
         ],
       },
       {
