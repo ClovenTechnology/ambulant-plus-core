@@ -200,6 +200,29 @@ export default function PatientPharmacyMarketplacePage() {
     });
   }
 
+
+  async function startMarketplacePayment(orderId: string, paymentReference?: string) {
+    const res = await fetch(`/api/careport/marketplace/orders/${encodeURIComponent(orderId)}/payment/init`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        paymentReference: paymentReference || null,
+      }),
+    });
+
+    const payload = await res.json().catch(() => ({}));
+
+    if (!res.ok || payload?.ok === false) {
+      throw new Error(payload?.message || payload?.error || 'Unable to initialise CarePort OTC payment.');
+    }
+
+    const redirectUrl = String(payload?.authorizationUrl || payload?.redirectUrl || '');
+    if (!redirectUrl) {
+      throw new Error('Payment was initialised, but no payment redirect URL was returned.');
+    }
+
+    window.location.href = redirectUrl;
+  }
   async function checkout() {
     if (!cartLines.length) {
       setCheckoutError('Add at least one product before checkout.');
@@ -231,11 +254,23 @@ export default function PatientPharmacyMarketplacePage() {
         throw new Error(payload?.error || 'Unable to create CarePort OTC order.');
       }
 
-      setCart({});
-      setCheckoutNotice(
-        'CarePort OTC order created. Stock has been reserved while payment is pending. Order ID: ' +
-          String(payload?.order?.id || 'created'),
+      const orderId = String(payload?.order?.id || '');
+      const paymentReference = String(
+        payload?.paymentReference ||
+          payload?.paymentIntent?.providerRef ||
+          payload?.paymentIntent?.idempotencyKey ||
+          '',
       );
+
+      if (!orderId) {
+        throw new Error('CarePort OTC order was created, but no order ID was returned for payment.');
+      }
+
+      setCart({});
+      setCheckoutNotice('CarePort OTC order created. Redirecting to secure payment...');
+
+      await startMarketplacePayment(orderId, paymentReference);
+      return;
     } catch (err: any) {
       setCheckoutError(err?.message || 'Unable to create CarePort OTC order.');
     } finally {
@@ -490,11 +525,11 @@ export default function PatientPharmacyMarketplacePage() {
                 disabled={!cartLines.length || checkingOut}
                 className="mt-4 w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {checkingOut ? 'Creating order…' : 'Create OTC order'}
+                {checkingOut ? 'Creating order…' : 'Create OTC order and pay'}
               </button>
 
               <p className="mt-3 text-xs leading-5 text-slate-500">
-                This creates a CarePort marketplace order in payment-pending state and reserves stock for the selected pharmacy SKU lines.
+                This creates a CarePort marketplace order, reserves stock for the selected pharmacy SKU lines, and redirects to payment.
               </p>
             </div>
           </aside>
