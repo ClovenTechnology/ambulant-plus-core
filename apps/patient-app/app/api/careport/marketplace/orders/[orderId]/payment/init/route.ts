@@ -22,7 +22,7 @@ export async function POST(
 
   const response = await fetch(upstream, {
     method: 'POST',
-    headers: forwardJsonHeaders(req.headers),
+    headers: forwardJsonHeaders(req),
     body: await req.text(),
     cache: 'no-store',
   });
