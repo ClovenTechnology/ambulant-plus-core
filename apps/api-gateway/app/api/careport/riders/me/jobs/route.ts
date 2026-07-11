@@ -69,6 +69,21 @@ function shapeOrder(order: any, rider: any = null) {
   };
 }
 
+async function readCarePortRiderReadiness(userId: string) {
+  if (!userId) return null;
+  return (prisma as any).carePortRiderProfile.findUnique({ where: { userId } }).catch(() => null);
+}
+
+function riderReadinessError(profile: any) {
+  if (!profile) return 'rider_profile_not_found';
+  if (profile.isActive !== true) return 'rider_not_active';
+  if (String(profile.kyiStatus || '').toUpperCase() !== 'VERIFIED' || !profile.kyiVerifiedAt) {
+    return 'rider_not_kyi_verified';
+  }
+
+  return null;
+}
+
 export async function GET(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
@@ -78,6 +93,25 @@ export async function GET(req: NextRequest) {
 
     const userId = clean(who.uid, 120);
     if (!userId && who.role !== 'admin') return json({ ok: false, error: 'missing_uid', jobs: [] }, 409);
+    if (who.role !== 'admin') {
+      const riderProfile = await readCarePortRiderReadiness(userId);
+      const readinessError = riderReadinessError(riderProfile);
+
+      if (readinessError) {
+        return json(
+          {
+            ok: false,
+            error: readinessError,
+            riderReadinessRequired: true,
+            kyiStatus: riderProfile?.kyiStatus || null,
+            kyiVerifiedAt: riderProfile?.kyiVerifiedAt || null,
+            isActive: riderProfile?.isActive ?? null, jobs: [],
+          },
+          403,
+        );
+      }
+    }
+
 
     const rider = userId ? await getRiderProfile(userId) : null;
     if (who.role === 'rider' && !rider) {

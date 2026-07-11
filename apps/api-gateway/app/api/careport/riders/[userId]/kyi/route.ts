@@ -59,6 +59,8 @@ export async function POST(req: NextRequest, { params }: { params: { userId: str
       kyiVerifiedAt: null,
       kyiRejectedReason: null,
       kyiStatus: "PENDING_REVIEW",
+      isActive: false,
+      isOnJob: false,
     } as any,
     create: {
       orgId,
@@ -71,8 +73,9 @@ export async function POST(req: NextRequest, { params }: { params: { userId: str
       kyiVerifiedAt: null,
       kyiRejectedReason: null,
       kyiStatus: "PENDING_REVIEW",
-      isActive: true,
+      isActive: false,
       isOnJob: false,
+
     } as any,
   });
 

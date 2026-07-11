@@ -41,6 +41,21 @@ async function riderCanAccessOrder(orderId: string, userId: string, orgId: strin
   return false;
 }
 
+async function readCarePortRiderReadiness(userId: string) {
+  if (!userId) return null;
+  return (prisma as any).carePortRiderProfile.findUnique({ where: { userId } }).catch(() => null);
+}
+
+function riderReadinessError(profile: any) {
+  if (!profile) return 'rider_profile_not_found';
+  if (profile.isActive !== true) return 'rider_not_active';
+  if (String(profile.kyiStatus || '').toUpperCase() !== 'VERIFIED' || !profile.kyiVerifiedAt) {
+    return 'rider_not_kyi_verified';
+  }
+
+  return null;
+}
+
 export async function GET(req: NextRequest, { params }: { params: { orderId: string } }) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
@@ -53,6 +68,25 @@ export async function GET(req: NextRequest, { params }: { params: { orderId: str
 
     const userId = clean(who.uid, 120);
     if (!userId && who.role !== 'admin') return json({ ok: false, error: 'missing_uid' }, 409);
+    if (who.role !== 'admin') {
+      const riderProfile = await readCarePortRiderReadiness(userId);
+      const readinessError = riderReadinessError(riderProfile);
+
+      if (readinessError) {
+        return json(
+          {
+            ok: false,
+            error: readinessError,
+            riderReadinessRequired: true,
+            kyiStatus: riderProfile?.kyiStatus || null,
+            kyiVerifiedAt: riderProfile?.kyiVerifiedAt || null,
+            isActive: riderProfile?.isActive ?? null,
+          },
+          403,
+        );
+      }
+    }
+
 
     const allowed = await riderCanAccessOrder(orderId, userId, orgId, who.role === 'admin');
     if (!allowed) return json({ ok: false, error: 'forbidden' }, 403);
