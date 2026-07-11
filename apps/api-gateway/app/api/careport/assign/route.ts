@@ -15,6 +15,48 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'bad_request' }, { status: 400 });
   }
 
+  const riderProfile = await (prisma as any).carePortRiderProfile
+    .findUnique({ where: { userId: riderId } })
+    .catch(() => null);
+
+  if (!riderProfile) {
+    return NextResponse.json(
+      {
+        error: 'rider_profile_not_found',
+        riderId,
+        riderDispatchReadinessRequired: true,
+      },
+      { status: 409 },
+    );
+  }
+
+  if (riderProfile.isActive !== true) {
+    return NextResponse.json(
+      {
+        error: 'rider_not_active',
+        riderId,
+        riderDispatchReadinessRequired: true,
+        kyiStatus: riderProfile.kyiStatus || null,
+        kyiVerifiedAt: riderProfile.kyiVerifiedAt || null,
+        isActive: riderProfile.isActive ?? null,
+      },
+      { status: 409 },
+    );
+  }
+
+  if (String(riderProfile.kyiStatus || '').toUpperCase() !== 'VERIFIED' || !riderProfile.kyiVerifiedAt) {
+    return NextResponse.json(
+      {
+        error: 'rider_not_kyi_verified',
+        riderId,
+        riderDispatchReadinessRequired: true,
+        kyiStatus: riderProfile.kyiStatus || null,
+        kyiVerifiedAt: riderProfile.kyiVerifiedAt || null,
+        isActive: riderProfile.isActive ?? null,
+      },
+      { status: 409 },
+    );
+  }
   const row = await prisma.delivery.create({
     data: { orderId, encounterId, patientId, clinicianId, partnerId, riderId, status: 'assigned' },
   });
