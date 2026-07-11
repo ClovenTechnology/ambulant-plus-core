@@ -250,6 +250,12 @@ export default function CarePortAdminOrdersPage() {
               >
                 Pharmacy inventory
               </a>
+              <a
+                href="/admin/careport/finance"
+                className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Finance
+              </a>
               <button
                 type="button"
                 onClick={() => void load()}
