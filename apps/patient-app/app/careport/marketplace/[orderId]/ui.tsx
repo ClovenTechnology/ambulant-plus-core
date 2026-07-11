@@ -423,7 +423,11 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
         body: JSON.stringify(payload)
       });
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j?.ok) {
+
+      if (!r.ok || j?.ok === false) {
+        setErr(carePortReadinessMessage(j, "Could not select pharmacy offer."));
+        return;
+      }      if (!r.ok || !j?.ok) {
         setCheckoutMsg(j?.error || `Select failed: HTTP ${r.status}`);
         return;
       }
@@ -473,7 +477,11 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
       });
 
       const j = await r.json().catch(() => ({}));
-      if (!r.ok || !j?.ok) {
+
+      if (!r.ok || j?.ok === false) {
+        setErr(carePortReadinessMessage(j, "Could not checkout CarePort order."));
+        return;
+      }      if (!r.ok || !j?.ok) {
         setCheckoutMsg(j?.error || `Checkout failed: HTTP ${r.status}`);
         return;
       }
