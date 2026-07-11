@@ -100,6 +100,42 @@ function Badge({ children }: { children: React.ReactNode }) {
   return <span className="text-[11px] px-2 py-0.5 rounded-full border bg-white">{children}</span>;
 }
 
+
+function orderStatusTone(status?: string | null) {
+  const s = String(status || '').toUpperCase();
+
+  if (['DELIVERED', 'COLLECTED', 'COMPLETED'].includes(s)) {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  }
+
+  if (
+    [
+      'PAID',
+      'PREPARING',
+      'READY_FOR_PICKUP',
+      'DISPATCHING',
+      'RIDER_ASSIGNED',
+      'EN_ROUTE_TO_PICKUP',
+      'AT_PHARMACY',
+      'PICKED_UP',
+      'EN_ROUTE_TO_CUSTOMER',
+      'DISPATCHED',
+      'OUT_FOR_DELIVERY',
+    ].includes(s)
+  ) {
+    return 'border-blue-200 bg-blue-50 text-blue-800';
+  }
+
+  if (['PAYMENT_PENDING', 'OFFERS_OPEN', 'CREATED', 'BROADCASTING', 'PHARMACY_SELECTED'].includes(s)) {
+    return 'border-amber-200 bg-amber-50 text-amber-900';
+  }
+
+  if (['FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(s)) {
+    return 'border-rose-200 bg-rose-50 text-rose-800';
+  }
+
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
 export default function MarketplaceClient({ orderId }: { orderId: string }) {
   const [data, setData] = useState<OffersResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -449,8 +485,37 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
           </div>
         </div>
         <div className="flex flex-col items-start gap-2 md:items-end">
-          <div className="text-xs text-gray-600">
-            Order: <span className="font-mono">{data.order.id}</span> · Status: <b>{data.order.status}</b>
+                    <div className="flex flex-wrap items-center justify-start gap-2 text-xs text-gray-600 md:justify-end">
+            <span>
+              Order: <span className="font-mono">{data.order.id}</span>
+            </span>
+            <span className={`rounded-full border px-2 py-0.5 font-semibold ${orderStatusTone(data.order.status)}`}>
+              {String(data.order.status || "UNKNOWN").replace(/_/g, " ")}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a
+              href={`/careport/timeline?id=${encodeURIComponent(data.order.id)}`}
+              className="rounded-xl border bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+            >
+              Timeline
+            </a>
+
+            {data.order.fulfillment === "DELIVERY" ? (
+              <a
+                href={`/careport/track?orderId=${encodeURIComponent(data.order.id)}`}
+                className="rounded-xl border bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                Track
+              </a>
+            ) : null}
+
+            <a
+              href="/careport/history"
+              className="rounded-xl border bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+            >
+              History
+            </a>
           </div>
           <button
             type="button"

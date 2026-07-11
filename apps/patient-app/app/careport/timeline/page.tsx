@@ -1,4 +1,4 @@
-﻿// apps/patient-app/app/careport/timeline/page.tsx
+// apps/patient-app/app/careport/timeline/page.tsx
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, Suspense } from 'react';
@@ -20,6 +20,42 @@ function prettyStatus(status: string) {
     .replace(/(^|\s)\S/g, (m) => m.toUpperCase());
 }
 
+
+function timelineTone(status: string) {
+  const s = String(status || '').toUpperCase();
+
+  if (['DELIVERED', 'COLLECTED', 'COMPLETED'].includes(s)) {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+  }
+
+  if (
+    [
+      'PAID',
+      'PREPARING',
+      'READY_FOR_PICKUP',
+      'DISPATCHING',
+      'RIDER_ASSIGNED',
+      'EN_ROUTE_TO_PICKUP',
+      'AT_PHARMACY',
+      'PICKED_UP',
+      'EN_ROUTE_TO_CUSTOMER',
+      'DISPATCHED',
+      'OUT_FOR_DELIVERY',
+    ].includes(s)
+  ) {
+    return 'border-blue-200 bg-blue-50 text-blue-800';
+  }
+
+  if (['PAYMENT_PENDING', 'OFFERS_OPEN', 'CREATED', 'BROADCASTING', 'PHARMACY_SELECTED'].includes(s)) {
+    return 'border-amber-200 bg-amber-50 text-amber-900';
+  }
+
+  if (['FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(s)) {
+    return 'border-rose-200 bg-rose-50 text-rose-800';
+  }
+
+  return 'border-slate-200 bg-slate-50 text-slate-700';
+}
 function isValidTimelineItem(value: unknown): value is TimelineItem {
   if (!value || typeof value !== 'object') return false;
 
@@ -199,13 +235,19 @@ function TimelinePageContent() {
 
         <div className="flex items-center gap-2 text-xs">
           <a
+            href="/careport/history"
+            className="rounded-xl border bg-white px-3 py-2 shadow-sm hover:bg-slate-50"
+          >
+            History
+          </a>
+          <a
             href="/careport"
             className="rounded-xl border bg-white px-3 py-2 shadow-sm hover:bg-slate-50"
           >
             ← Back to CarePort
           </a>
           <a
-            href="/careport/track"
+            href={initialId ? `/careport/track?orderId=${encodeURIComponent(initialId)}` : '/careport/track'}
             className="rounded-xl border bg-white px-3 py-2 shadow-sm hover:bg-slate-50"
           >
             Open tracking
@@ -263,7 +305,7 @@ function TimelinePageContent() {
             {items.map((item, index) => (
               <li
                 key={`${item.status}-${item.at}-${index}`}
-                className="rounded-xl border bg-slate-50 px-3 py-2"
+                className={`rounded-xl border px-3 py-2 ${timelineTone(item.status)}`}
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="font-medium text-slate-900">{prettyStatus(item.status)}</span>
