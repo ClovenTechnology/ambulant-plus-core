@@ -136,6 +136,28 @@ function orderStatusTone(status?: string | null) {
 
   return 'border-slate-200 bg-slate-50 text-slate-700';
 }
+function carePortReadinessMessage(payload: any, fallback: string) {
+  const code = String(payload?.error || payload?.code || '').trim();
+
+  if (code === 'pharmacy_not_kyc_approved') {
+    return 'This pharmacy is no longer approved for CarePort fulfilment. Please choose another pharmacy offer.';
+  }
+
+  if (code === 'pharmacy_not_active') {
+    return 'This pharmacy is not currently active for CarePort fulfilment. Please choose another pharmacy offer.';
+  }
+
+  if (code === 'pharmacy_not_found') {
+    return 'This pharmacy offer is no longer available. Please refresh the pharmacy offers.';
+  }
+
+  if (code === 'rider_not_active' || code === 'rider_not_kyi_verified' || code === 'rider_profile_not_found') {
+    return 'CarePort could not dispatch a verified rider for this order yet. Please try again shortly or choose pickup where available.';
+  }
+
+  return String(payload?.message || payload?.error || fallback);
+}
+
 export default function MarketplaceClient({ orderId }: { orderId: string }) {
   const [data, setData] = useState<OffersResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);

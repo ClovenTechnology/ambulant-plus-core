@@ -102,6 +102,28 @@ function stockClass(item: MarketplaceItem) {
   return 'border-emerald-200 bg-emerald-50 text-emerald-800';
 }
 
+function carePortReadinessMessage(payload: any, fallback: string) {
+  const code = String(payload?.error || payload?.code || '').trim();
+
+  if (
+    code === 'pharmacy_not_kyc_approved' ||
+    payload?.approvedPharmacyKycRequired === true ||
+    payload?.requiresApprovedPharmacyKyc === true
+  ) {
+    return 'This pharmacy is not yet approved for CarePort fulfilment. Please remove the item and choose another available product or try again later.';
+  }
+
+  if (code === 'pharmacy_not_active') {
+    return 'This pharmacy is not currently active for CarePort fulfilment. Please choose another available product or try again later.';
+  }
+
+  if (code === 'pharmacy_not_found') {
+    return 'This pharmacy is no longer available for this order. Please refresh the marketplace and choose another option.';
+  }
+
+  return String(payload?.message || payload?.error || fallback);
+}
+
 export default function PatientPharmacyMarketplacePage() {
   const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [payload, setPayload] = useState<Payload | null>(null);
@@ -154,7 +176,7 @@ export default function PatientPharmacyMarketplacePage() {
       const data: Payload = await res.json().catch(() => ({}));
 
       if (!res.ok || data?.ok === false) {
-        throw new Error(data?.error || 'Unable to load pharmacy marketplace.');
+        throw new Error(carePortReadinessMessage(data, 'Unable to load pharmacy marketplace.'));
       }
 
       setPayload(data);
@@ -251,7 +273,7 @@ export default function PatientPharmacyMarketplacePage() {
       const payload = await res.json().catch(() => ({}));
 
       if (!res.ok || payload?.ok === false) {
-        throw new Error(payload?.error || 'Unable to create CarePort OTC order.');
+        throw new Error(carePortReadinessMessage(payload, 'Unable to create CarePort OTC order.'));
       }
 
       const orderId = String(payload?.order?.id || '');
