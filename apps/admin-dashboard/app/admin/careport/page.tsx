@@ -24,12 +24,12 @@ const CAREPORT_ADMIN_LINKS = [
     bullets: ['Commission', 'Provider fees', 'Rider share', 'Medical-aid preflight'],
   },
   {
-    title: 'Global catalogue',
-    href: '/admin/careport/catalogue/global-products',
+    title: 'Catalogue hub',
+    href: '/admin/careport/catalogue',
     eyebrow: 'Catalogue',
     description:
-      'Govern the canonical CarePort product catalogue used for pharmacy SKU normalisation and marketplace visibility.',
-    bullets: ['Canonical products', 'OTC visibility', 'Categories', 'Product governance'],
+      'Govern global products, SKU normalisation, taxonomy alignment and marketplace eligibility from the catalogue workspace.',
+    bullets: ['Global catalogue', 'Normalisation', 'Taxonomy', 'Marketplace safety'],
   },
   {
     title: 'Catalogue normalisation',
