@@ -51,8 +51,8 @@ async function resolvePatientId(userId: string) {
 
 function buildCallbackUrl(req: NextRequest, orderId: string, reference: string) {
   const base = patientAppBase(req);
-  const url = new URL(`/careport/marketplace/${encodeURIComponent(orderId)}`, base);
-  url.searchParams.set('paymentRef', reference);
+  const url = new URL(`/api/careport/marketplace/orders/${encodeURIComponent(orderId)}/payment/verify`, base);
+  url.searchParams.set('reference', reference);
   url.searchParams.set('paymentProvider', 'paystack');
   url.searchParams.set('reason', 'careport_marketplace_payment_callback');
   return url.toString();
