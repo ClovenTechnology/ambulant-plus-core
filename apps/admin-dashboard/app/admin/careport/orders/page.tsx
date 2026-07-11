@@ -134,6 +134,42 @@ function isMarketplaceOrder(order: CarePortOrder) {
   return String(order.erxOrderId || '').startsWith('otc-marketplace-');
 }
 
+function carePortAdminReadinessMessage(payload: any, fallback: string) {
+  const code = String(payload?.error || payload?.code || '').trim();
+
+  if (code === 'pharmacy_not_kyc_approved' || payload?.approvedPharmacyKycRequired === true || payload?.requiresApprovedPharmacyKyc === true) {
+    return 'CarePort blocked this pharmacy because its KYC is not approved. Review the pharmacy under CarePort KYC governance before allowing fulfilment.';
+  }
+
+  if (code === 'pharmacy_not_active') {
+    return 'CarePort blocked this pharmacy because it is not currently active for fulfilment. Review the pharmacy profile and KYC status before proceeding.';
+  }
+
+  if (code === 'rider_profile_not_found') {
+    return 'CarePort blocked dispatch because the selected rider profile could not be found. Review rider onboarding and KYI before assignment.';
+  }
+
+  if (code === 'rider_not_active') {
+    return 'CarePort blocked dispatch because the selected rider is not active. Review rider activation and KYI status before assignment.';
+  }
+
+  if (code === 'rider_not_kyi_verified') {
+    return 'CarePort blocked dispatch because the selected rider is not KYI verified. Approve rider KYI before assigning this order.';
+  }
+
+  if (payload?.riderDispatchReadinessRequired === true || payload?.riderReadinessRequired === true) {
+    return 'CarePort blocked rider dispatch because rider readiness is incomplete. Review rider activation, KYI status and verification date.';
+  }
+
+  return String(payload?.message || payload?.error || fallback);
+}
+
+const CAREPORT_READINESS_GUARDRAILS = [
+  'Only KYC-approved pharmacies should fulfil marketplace and eRx orders.',
+  'Only active KYI-verified riders should be assigned to pickup or delivery.',
+  'If dispatch fails, review rider KYI status, activation state and verification date before retrying.',
+];
+
 export default function CarePortAdminOrdersPage() {
   const [status, setStatus] = useState('ALL');
   const [q, setQ] = useState('');
@@ -323,6 +359,14 @@ export default function CarePortAdminOrdersPage() {
             </button>
           </div>
 
+          <section className="rounded-3xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+            <div className="font-semibold">CarePort readiness guardrails</div>
+            <ul className="mt-2 list-disc space-y-1 pl-5">
+              {CAREPORT_READINESS_GUARDRAILS.map((item) => (
+                <li key={item}>{item}</li>
+              ))}
+            </ul>
+          </section>
           {error ? (
             <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
               {error}
