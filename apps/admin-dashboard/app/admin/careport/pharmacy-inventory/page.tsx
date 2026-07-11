@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 
@@ -485,6 +485,26 @@ export default function CarePortPharmacyInventoryTaxonomyPage() {
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">CarePort inventory taxonomy</p>
               <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Pharmacy inventory catalogue setup</h1>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <a
+                  href="/admin/careport/catalogue"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Catalogue hub
+                </a>
+                <a
+                  href="/admin/careport/catalogue/global-products"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Global products
+                </a>
+                <a
+                  href="/admin/careport/catalogue/normalisation"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Normalisation queue
+                </a>
+              </div>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
                 Create and import pharmacy SKUs against the CarePort taxonomy. Standard taxonomy values are shown first, custom
                 attributes remain allowed, and every save flows into catalogue normalisation governance before public marketplace use.

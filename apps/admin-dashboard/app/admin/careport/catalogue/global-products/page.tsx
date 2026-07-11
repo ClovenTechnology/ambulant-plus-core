@@ -198,6 +198,26 @@ export default function CarePortGlobalCataloguePage() {
                 CarePort canonical catalogue
               </p>
               <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Global product catalogue</h1>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <a
+                  href="/admin/careport/catalogue"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Catalogue hub
+                </a>
+                <a
+                  href="/admin/careport/catalogue/normalisation"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Normalisation queue
+                </a>
+                <a
+                  href="/admin/careport/pharmacy-inventory"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Pharmacy inventory
+                </a>
+              </div>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
                 Inspect the canonical product layer created from pharmacy-supplied SKUs. This is the bridge between local
                 pharmacy inventory, NAPPI/RxNorm/barcode mapping, prescription-only fulfilment and the patient-facing OTC

@@ -242,6 +242,26 @@ export default function CarePortCatalogueNormalisationPage() {
             <div>
               <p className="text-sm font-semibold uppercase tracking-[0.2em] text-emerald-700">CarePort catalogue governance</p>
               <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Catalogue normalisation queue</h1>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <a
+                  href="/admin/careport/catalogue"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Catalogue hub
+                </a>
+                <a
+                  href="/admin/careport/catalogue/global-products"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Global products
+                </a>
+                <a
+                  href="/admin/careport/pharmacy-inventory"
+                  className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                >
+                  Pharmacy inventory
+                </a>
+              </div>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
                 Review pharmacy-supplied SKUs, normalise custom values, verify canonical names, map items to global product keys and keep unsafe or inconsistent catalogue entries out of the public pharmacy marketplace.
               </p>
