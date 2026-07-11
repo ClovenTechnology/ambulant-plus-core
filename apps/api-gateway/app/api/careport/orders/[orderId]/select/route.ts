@@ -75,6 +75,16 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
     }
 
     const pharmacy = offer.pharmacy;
+    if (!pharmacy.active) {
+      return NextResponse.json({ error: "pharmacy_not_active" }, { status: 409 });
+    }
+
+    if (String((pharmacy as any).kycStatus || "").toUpperCase() !== "APPROVED" || !(pharmacy as any).kycVerifiedAt) {
+      return NextResponse.json(
+        { error: "pharmacy_not_kyc_approved", pharmacyId: pharmacy.id, kycStatus: (pharmacy as any).kycStatus || null },
+        { status: 409 },
+      );
+    }
     if (!pharmacy.country || !pharmacy.currency) {
       return NextResponse.json({ error: "pharmacy_missing_country_or_currency" }, { status: 409 });
     }

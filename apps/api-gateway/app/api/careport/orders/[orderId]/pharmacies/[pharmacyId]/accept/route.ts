@@ -43,6 +43,12 @@ export async function POST(
 
     const pharmacy = await prisma.pharmacyPartner.findUnique({ where: { id: pharmacyId } });
     if (!pharmacy) return NextResponse.json({ error: "pharmacy_not_found" }, { status: 404 });
+    if (String((pharmacy as any).kycStatus || "").toUpperCase() !== "APPROVED" || !(pharmacy as any).kycVerifiedAt) {
+      return NextResponse.json(
+        { error: "pharmacy_not_kyc_approved", pharmacyId, kycStatus: (pharmacy as any).kycStatus || null },
+        { status: 409 },
+      );
+    }
 
     if (!pharmacy.country || !pharmacy.currency) {
       return NextResponse.json({ error: "pharmacy_missing_country_or_currency" }, { status: 409 });
