@@ -284,7 +284,10 @@ export async function POST(req: NextRequest, { params }: { params: { orderId: st
         },
       }).catch(() => null);
 
-      return o;
+      return {
+        order: o,
+        marketplaceReservation: reservationTransition,
+      };
     });
 
     const notificationKind = eventKindForStatus(nextStatus, String(order.fulfillment));
