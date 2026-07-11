@@ -196,7 +196,7 @@ export default function CarePortAdminOrdersPage() {
       const payload = (await res.json().catch(() => ({}))) as OrdersResponse;
 
       if (!res.ok || payload.ok === false) {
-        throw new Error(payload.error || `careport_admin_orders_http_${res.status}`);
+        throw new Error(carePortAdminReadinessMessage(payload, `careport_admin_orders_http_${res.status}`));
       }
 
       setRows(Array.isArray(payload.orders) ? payload.orders : []);
