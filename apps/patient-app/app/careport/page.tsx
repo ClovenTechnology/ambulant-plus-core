@@ -1,4 +1,4 @@
-﻿// FILE: apps/patient-app/app/careport/page.tsx
+// FILE: apps/patient-app/app/careport/page.tsx
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -169,7 +169,7 @@ function isScriptInactive(rx: Rx) {
 function statusTone(status?: string | null) {
   const s = String(status || '').toUpperCase();
 
-  if (['PAID', 'DISPATCHED', 'OUT_FOR_DELIVERY', 'READY_FOR_PICKUP'].includes(s)) {
+  if (['PAID', 'PREPARING', 'READY_FOR_PICKUP', 'DISPATCHING', 'RIDER_ASSIGNED', 'EN_ROUTE_TO_PICKUP', 'AT_PHARMACY', 'PICKED_UP', 'EN_ROUTE_TO_CUSTOMER', 'DISPATCHED', 'OUT_FOR_DELIVERY'].includes(s)) {
     return 'border-blue-200 bg-blue-50 text-blue-700';
   }
 
@@ -177,7 +177,7 @@ function statusTone(status?: string | null) {
     return 'border-emerald-200 bg-emerald-50 text-emerald-700';
   }
 
-  if (['FAILED', 'CANCELLED', 'REJECTED'].includes(s)) {
+  if (['FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(s)) {
     return 'border-rose-200 bg-rose-50 text-rose-700';
   }
 

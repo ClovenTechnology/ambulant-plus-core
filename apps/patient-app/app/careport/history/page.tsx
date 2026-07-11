@@ -46,9 +46,9 @@ function statusTone(status?: string | null) {
   const s = String(status || '').toUpperCase();
 
   if (['DELIVERED', 'COLLECTED', 'COMPLETED'].includes(s)) return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  if (['PAID', 'DISPATCHED', 'OUT_FOR_DELIVERY', 'READY_FOR_PICKUP'].includes(s)) return 'border-blue-200 bg-blue-50 text-blue-700';
-  if (['PAYMENT_PENDING', 'OFFERS_OPEN', 'CREATED'].includes(s)) return 'border-amber-200 bg-amber-50 text-amber-800';
-  if (['FAILED', 'CANCELLED', 'REJECTED'].includes(s)) return 'border-rose-200 bg-rose-50 text-rose-700';
+  if (['PAID', 'PREPARING', 'READY_FOR_PICKUP', 'DISPATCHING', 'RIDER_ASSIGNED', 'EN_ROUTE_TO_PICKUP', 'AT_PHARMACY', 'PICKED_UP', 'EN_ROUTE_TO_CUSTOMER', 'DISPATCHED', 'OUT_FOR_DELIVERY'].includes(s)) return 'border-blue-200 bg-blue-50 text-blue-700';
+  if (['PAYMENT_PENDING', 'OFFERS_OPEN', 'CREATED', 'BROADCASTING', 'PHARMACY_SELECTED'].includes(s)) return 'border-amber-200 bg-amber-50 text-amber-800';
+  if (['FAILED', 'CANCELLED', 'REJECTED', 'EXPIRED'].includes(s)) return 'border-rose-200 bg-rose-50 text-rose-700';
 
   return 'border-slate-200 bg-slate-50 text-slate-700';
 }
