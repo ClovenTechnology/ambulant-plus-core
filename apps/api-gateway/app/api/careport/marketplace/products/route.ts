@@ -61,6 +61,8 @@ function buildSkuWhere(req: NextRequest, orgId: string) {
     normalisationStatus: { in: TRUSTED_SKU_NORMALISATION_STATUSES },
     pharmacy: {
       active: true,
+      kycStatus: 'APPROVED',
+      kycVerifiedAt: { not: null },
     },
   };
 
@@ -212,6 +214,8 @@ export async function GET(req: NextRequest) {
             address: true,
             city: true,
             active: true,
+            kycStatus: true,
+            kycVerifiedAt: true,
             supportsPickup: true,
             supportsDelivery: true,
           },
@@ -303,6 +307,7 @@ export async function GET(req: NextRequest) {
         requiresTrustedSkuNormalisation: true,
         requiresGlobalProductApproval: true,
         requiresActivePharmacy: true,
+        requiresApprovedPharmacyKyc: true,
       },
     });
   } catch (error: any) {

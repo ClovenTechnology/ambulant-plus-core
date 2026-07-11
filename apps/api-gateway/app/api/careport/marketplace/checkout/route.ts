@@ -136,6 +136,8 @@ export async function POST(req: NextRequest) {
             normalisationStatus: { in: TRUSTED_SKU_NORMALISATION_STATUSES },
             pharmacy: {
               active: true,
+              kycStatus: 'APPROVED',
+              kycVerifiedAt: { not: null },
             },
           },
           select: {
@@ -167,6 +169,8 @@ export async function POST(req: NextRequest) {
                 id: true,
                 name: true,
                 active: true,
+                kycStatus: true,
+                kycVerifiedAt: true,
                 supportsPickup: true,
                 supportsDelivery: true,
               },
@@ -192,6 +196,13 @@ export async function POST(req: NextRequest) {
         const pharmacy = skus[0]?.pharmacy;
         if (!pharmacy?.active) {
           throw Object.assign(new Error('pharmacy_not_active'), { status: 409 });
+        }
+
+        if (String(pharmacy.kycStatus || '').toUpperCase() !== 'APPROVED' || !pharmacy.kycVerifiedAt) {
+          throw Object.assign(new Error('pharmacy_not_kyc_approved'), {
+            status: 409,
+            details: { pharmacyId: pharmacy.id, kycStatus: pharmacy.kycStatus || null },
+          });
         }
 
         if (fulfillment === 'PICKUP' && !pharmacy.supportsPickup) {
@@ -298,6 +309,7 @@ export async function POST(req: NextRequest) {
               source: 'CAREPORT_OTC_MARKETPLACE',
               coverage: 'SELF_PAY',
               prescriptionRequiredBlocked: true,
+              approvedPharmacyKycRequired: true,
             },
           },
           select: {
