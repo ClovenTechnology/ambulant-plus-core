@@ -166,6 +166,7 @@ export default function AdminSidebar() {
           { href: '/admin/careport/finance', label: 'CarePort finance', icon: Pill, requires: 'medical' },
           { href: '/admin/careport/commercial-policy', label: 'Commercial policy', icon: Pill, requires: 'medical' },
           { href: '/admin/careport/catalogue', label: 'Catalogue hub', icon: Pill, requires: 'medical' },
+          { href: '/admin/careport/kyc', label: 'KYC governance', icon: Pill, requires: 'medical' },
           { href: '/admin/careport/pharmacy-inventory', label: 'Pharmacy inventory', icon: Pill, requires: 'medical' },
           { href: '/medreach', label: 'MedReach', icon: Syringe, requires: 'medical' },
 { href: '/admin/medreach/reviews', label: 'Review moderation', icon: Syringe, requires: 'medical' },

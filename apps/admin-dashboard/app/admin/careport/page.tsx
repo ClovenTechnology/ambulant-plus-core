@@ -32,6 +32,14 @@ const CAREPORT_ADMIN_LINKS = [
     bullets: ['Global catalogue', 'Normalisation', 'Taxonomy', 'Marketplace safety'],
   },
   {
+    title: 'KYC governance',
+    href: '/admin/careport/kyc',
+    eyebrow: 'Onboarding',
+    description:
+      'Review pharmacy KYB/KYC and rider KYI submissions before enabling trusted marketplace, fulfilment and delivery operations.',
+    bullets: ['Pharmacy review', 'Rider review', 'Evidence', 'Operational readiness'],
+  },
+  {
     title: 'Catalogue normalisation',
     href: '/admin/careport/catalogue/normalisation',
     eyebrow: 'Governance',
