@@ -28,6 +28,40 @@ function normalizeLine(line: any) {
   };
 }
 
+function carePortRiderPayoutReadiness(profile: any) {
+  const blockers: string[] = [];
+
+  if (!profile) {
+    blockers.push("rider_profile_not_found");
+  }
+
+  if (profile && profile.isActive !== true) {
+    blockers.push("rider_not_active");
+  }
+
+  if (
+    profile &&
+    (String(profile.kyiStatus || "").toUpperCase() !== "VERIFIED" || !profile.kyiVerifiedAt)
+  ) {
+    blockers.push("rider_not_kyi_verified");
+  }
+
+  return {
+    subject: "rider",
+    payoutEligible: blockers.length === 0,
+    blockers,
+    status: profile?.accountStatus || (profile?.isActive ? "ACTIVE" : "AWAITING_ACTIVATION"),
+    kyiStatus: profile?.kyiStatus || null,
+    kyiVerifiedAt: profile?.kyiVerifiedAt || null,
+    kyiRejectedReason: profile?.kyiRejectedReason || null,
+    isActive: profile?.isActive ?? null,
+    message:
+      blockers.length === 0
+        ? "Rider payout readiness is clear."
+        : "Rider payouts should remain on hold until KYI and activation readiness are complete.",
+  };
+}
+
 export async function GET(req: NextRequest) {
   const who = readIdentity(req.headers);
 
@@ -58,7 +92,8 @@ export async function GET(req: NextRequest) {
 
     const items = lines?.length ? lines.map(normalizeLine) : (fallbackPayouts || []);
 
-    const profile = await db.carePortRiderProfile?.findUnique?.({ where: { userId: riderUserId } }).catch(() => null);
+    const profile = await db.carePortRiderProfile?.findFirst?.({ where: { userId: riderUserId } }).catch(() => null);
+    const readiness = carePortRiderPayoutReadiness(profile);
     const trips = await prisma.carePortRiderAssignment.findMany({
       where: { riderUserId },
       include: { order: true, pharmacy: true },

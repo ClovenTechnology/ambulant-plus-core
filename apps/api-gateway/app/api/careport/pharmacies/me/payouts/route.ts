@@ -44,6 +44,39 @@ function normalizeLine(line: any) {
   };
 }
 
+function carePortPharmacyPayoutReadiness(pharmacy: any) {
+  const blockers: string[] = [];
+
+  if (!pharmacy) {
+    blockers.push("pharmacy_profile_not_found");
+  }
+
+  if (pharmacy && (pharmacy.active === false || pharmacy.isActive === false)) {
+    blockers.push("pharmacy_not_active");
+  }
+
+  if (
+    pharmacy &&
+    (String(pharmacy.kycStatus || "").toUpperCase() !== "APPROVED" || !pharmacy.kycVerifiedAt)
+  ) {
+    blockers.push("pharmacy_not_kyc_approved");
+  }
+
+  return {
+    subject: "pharmacy",
+    payoutEligible: blockers.length === 0,
+    blockers,
+    status: pharmacy?.active === false || pharmacy?.isActive === false ? "DISABLED" : pharmacy ? "ACTIVE" : "UNKNOWN",
+    kycStatus: pharmacy?.kycStatus || null,
+    kycVerifiedAt: pharmacy?.kycVerifiedAt || null,
+    kycRejectedReason: pharmacy?.kycRejectedReason || null,
+    message:
+      blockers.length === 0
+        ? "Pharmacy payout readiness is clear."
+        : "Pharmacy payouts should remain on hold until KYC and activation readiness are complete.",
+  };
+}
+
 export async function GET(req: NextRequest) {
   const who = readIdentity(req.headers);
 
@@ -53,6 +86,12 @@ export async function GET(req: NextRequest) {
     const pharmacyId = await resolvePharmacyId(req, who);
     if (!pharmacyId) return json({ ok: false, error: "pharmacyId_unresolved", items: [] }, 409);
 
+    const pharmacy = await (
+      (prisma as any).pharmacyPartner?.findUnique?.({ where: { id: pharmacyId } }) ??
+      (prisma as any).carePortPharmacy?.findUnique?.({ where: { id: pharmacyId } }) ??
+      Promise.resolve(null)
+    ).catch(() => null);
+    const readiness = carePortPharmacyPayoutReadiness(pharmacy);
     const db: any = prisma;
     const lines = await db.carePortSettlementLine?.findMany?.({
       where: { orgId, recipientType: "PHARMACY", recipientId: pharmacyId },
@@ -103,10 +142,22 @@ export async function GET(req: NextRequest) {
       source: lines?.length ? "careport_settlement_lines" : "legacy_payouts_or_empty",
       items,
       orders,
+      account: {
+        id: pharmacy?.id || pharmacyId,
+        name: pharmacy?.name || null,
+        status: readiness.status,
+        kycStatus: readiness.kycStatus,
+        kycVerifiedAt: readiness.kycVerifiedAt,
+        kycRejectedReason: readiness.kycRejectedReason,
+        payoutEligible: readiness.payoutEligible,
+      },
+      readiness,
       summary: {
         payoutCount: items?.length || 0,
         pendingCents,
         paidCents,
+        payoutEligible: readiness.payoutEligible,
+        readinessBlockers: readiness.blockers,
       },
     });
   } catch (e: any) {
