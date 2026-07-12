@@ -67,6 +67,137 @@ function prettyJson(value: unknown) {
   }
 }
 
+
+function asReviewRecord(value: unknown): Record<string, any> {
+  if (!value) return {};
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function reviewPath(source: unknown, path: string[]) {
+  let current: any = asReviewRecord(source);
+
+  for (const part of path) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = current[part];
+  }
+
+  return current;
+}
+
+function reviewText(source: unknown, path: string[], fallback = 'Not recorded') {
+  const value = reviewPath(source, path);
+
+  if (Array.isArray(value)) {
+    const joined = value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ');
+    return joined || fallback;
+  }
+
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+
+  const text = String(value ?? '').trim();
+  return text || fallback;
+}
+
+function maskedAccountFromPayload(payload: unknown, fallback?: unknown) {
+  const last4 = reviewText(payload, ['payout', 'accountNumberLast4'], '').replace(/\D/g, '').slice(-4);
+
+  if (last4) return `****${last4}`;
+
+  const fallbackText = String(fallback ?? '').trim();
+  return fallbackText || 'Not recorded';
+}
+
+function ReviewField({ label, value }: { label: string; value: unknown }) {
+  const text = Array.isArray(value)
+    ? value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ')
+    : typeof value === 'boolean'
+      ? value ? 'Yes' : 'No'
+      : String(value ?? '').trim();
+
+  return (
+    <div className="rounded-xl border border-slate-100 bg-white px-3 py-2">
+      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</dt>
+      <dd className="mt-1 break-words text-sm font-medium text-slate-900">{text || 'Not recorded'}</dd>
+    </div>
+  );
+}
+
+function PharmacyEnterpriseReview({ row }: { row: PharmacyKycRow }) {
+  const payload = asReviewRecord(row.kycPayload);
+  const logoUrl = reviewText(payload, ['visualIdentity', 'logoUrl'], '');
+  const organisation = asReviewRecord(reviewPath(payload, ['organisationIdentity']));
+  const contact = asReviewRecord(reviewPath(payload, ['responsibleContact']));
+  const location = asReviewRecord(reviewPath(payload, ['location']));
+  const operatingModel = asReviewRecord(reviewPath(payload, ['operatingModel']));
+  const payout = asReviewRecord(reviewPath(payload, ['payout']));
+
+  return (
+    <div className="w-full rounded-2xl border border-emerald-100 bg-emerald-50/50 p-4 xl:flex-1">
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <div className="w-full lg:w-40">
+          <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+            Pharmacy logo preview
+          </div>
+          <div className="mt-2 flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-emerald-100 bg-white">
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt="Pharmacy logo preview" className="h-full w-full object-cover" />
+            ) : (
+              <span className="px-3 text-center text-xs text-slate-400">No logo supplied</span>
+            )}
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1 space-y-4">
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Organisation identity</h3>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <ReviewField label="Display / trading name" value={organisation.displayName || organisation.tradingName || row.name} />
+              <ReviewField label="Registered name" value={organisation.registeredName || organisation.legalName} />
+              <ReviewField label="Registration number" value={organisation.registrationNumber} />
+              <ReviewField label="SAPC / licence" value={organisation.sapcNumber} />
+            </dl>
+          </section>
+
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Responsible contact</h3>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <ReviewField label="First name" value={contact.firstName} />
+              <ReviewField label="Middle name" value={contact.middleName} />
+              <ReviewField label="Last name" value={contact.lastName} />
+              <ReviewField label="Email / phone" value={[contact.email, contact.phone].filter(Boolean).join(' / ') || row.contact} />
+            </dl>
+          </section>
+
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Location, fulfilment and payout</h3>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <ReviewField label="Address" value={location.address || row.address} />
+              <ReviewField label="City / province" value={[location.city || row.city, location.province].filter(Boolean).join(', ')} />
+              <ReviewField label="Service areas" value={location.serviceAreas} />
+              <ReviewField label="Pickup / delivery" value={`Pickup: ${operatingModel.supportsPickup === false ? 'No' : 'Yes'} / Delivery: ${operatingModel.supportsDelivery === false ? 'No' : 'Yes'}`} />
+              <ReviewField label="Card / medical aid" value={`Card: ${operatingModel.acceptsCard === false ? 'No' : 'Yes'} / Medical aid: ${operatingModel.acceptsMedicalAid ? 'Yes' : 'No'}`} />
+              <ReviewField label="Bank name" value={payout.bankName} />
+              <ReviewField label="Account name" value={payout.accountName} />
+              <ReviewField label="Account / branch" value={`${maskedAccountFromPayload(payload)} / ${payout.branchCode || 'No branch code'}`} />
+            </dl>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function searchable(row: PharmacyKycRow) {
   return [
     row.id,
@@ -79,6 +210,7 @@ function searchable(row: PharmacyKycRow) {
     row.kycStatus,
     row.kycSchemaKey,
     row.kycRejectedReason,
+    prettyJson(row.kycPayload),
   ]
     .filter(Boolean)
     .join(' ')
@@ -356,6 +488,8 @@ export default function CarePortPharmacyKycReviewPage() {
                       </div>
                     ) : null}
                   </div>
+
+                  <PharmacyEnterpriseReview row={row} />
 
                   <div className="w-full space-y-3 xl:w-80">
                     <textarea

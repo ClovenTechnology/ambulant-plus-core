@@ -20,7 +20,6 @@ export async function GET(req: NextRequest) {
 
   const rows = await prisma.pharmacyPartner.findMany({
     where: {
-      active: true,
       country,
       kycStatus: status,
     } as any,

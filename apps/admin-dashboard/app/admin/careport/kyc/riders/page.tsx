@@ -10,6 +10,8 @@ type RiderKyiRow = {
   kyiSubmittedAt?: string | null;
   kyiVerifiedAt?: string | null;
   kyiRejectedReason?: string | null;
+  kyiPayload?: unknown;
+  bankAccountMasked?: string | null;
   isActive?: boolean | null;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -56,6 +58,129 @@ function prettyJson(value: unknown) {
   }
 }
 
+
+function asReviewRecord(value: unknown): Record<string, any> {
+  if (!value) return {};
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function reviewPath(source: unknown, path: string[]) {
+  let current: any = asReviewRecord(source);
+
+  for (const part of path) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = current[part];
+  }
+
+  return current;
+}
+
+function reviewText(source: unknown, path: string[], fallback = 'Not recorded') {
+  const value = reviewPath(source, path);
+
+  if (Array.isArray(value)) {
+    const joined = value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ');
+    return joined || fallback;
+  }
+
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+
+  const text = String(value ?? '').trim();
+  return text || fallback;
+}
+
+function maskedAccountFromPayload(payload: unknown, fallback?: unknown) {
+  const last4 = reviewText(payload, ['payout', 'accountNumberLast4'], '').replace(/\D/g, '').slice(-4);
+
+  if (last4) return `****${last4}`;
+
+  const fallbackText = String(fallback ?? '').trim();
+  return fallbackText || 'Not recorded';
+}
+
+function ReviewField({ label, value }: { label: string; value: unknown }) {
+  const text = Array.isArray(value)
+    ? value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ')
+    : typeof value === 'boolean'
+      ? value ? 'Yes' : 'No'
+      : String(value ?? '').trim();
+
+  return (
+    <div className="rounded-xl border border-slate-100 bg-white px-3 py-2">
+      <dt className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">{label}</dt>
+      <dd className="mt-1 break-words text-sm font-medium text-slate-900">{text || 'Not recorded'}</dd>
+    </div>
+  );
+}
+
+function RiderEnterpriseReview({ row }: { row: RiderKyiRow }) {
+  const payload = asReviewRecord(row.kyiPayload);
+  const avatarUrl = reviewText(payload, ['visualIdentity', 'avatarUrl'], '');
+  const identity = asReviewRecord(reviewPath(payload, ['personalIdentity']));
+  const vehicle = asReviewRecord(reviewPath(payload, ['vehicle']));
+  const payout = asReviewRecord(reviewPath(payload, ['payout']));
+
+  return (
+    <div className="w-full rounded-2xl border border-sky-100 bg-sky-50/60 p-4 xl:flex-1">
+      <div className="flex flex-col gap-4 lg:flex-row">
+        <div className="w-full lg:w-40">
+          <div className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+            Rider profile photo
+          </div>
+          <div className="mt-2 flex h-28 w-28 items-center justify-center overflow-hidden rounded-2xl border border-sky-100 bg-white">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="Rider profile photo" className="h-full w-full object-cover" />
+            ) : (
+              <span className="px-3 text-center text-xs text-slate-400">No photo supplied</span>
+            )}
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1 space-y-4">
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Personal identity</h3>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <ReviewField label="First name" value={identity.firstName} />
+              <ReviewField label="Middle name" value={identity.middleName} />
+              <ReviewField label="Last name" value={identity.lastName} />
+              <ReviewField label="Full name" value={identity.fullName || row.userId} />
+              <ReviewField label="Email / phone" value={[identity.email, identity.phone].filter(Boolean).join(' / ')} />
+              <ReviewField label="Address" value={identity.address} />
+              <ReviewField label="City / province" value={[identity.city, identity.province].filter(Boolean).join(', ')} />
+              <ReviewField label="SA ID / passport" value={identity.saIdNumber || [identity.passportNumber, identity.passportCountry, identity.passportExpiry].filter(Boolean).join(' / ')} />
+            </dl>
+          </section>
+
+          <section>
+            <h3 className="text-xs font-bold uppercase tracking-wide text-slate-500">Service area, vehicle and payout</h3>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <ReviewField label="Service areas" value={reviewPath(payload, ['serviceAreas'])} />
+              <ReviewField label="Vehicle type" value={vehicle.type} />
+              <ReviewField label="Vehicle make/model/year" value={[vehicle.make, vehicle.model, vehicle.year].filter(Boolean).join(' / ')} />
+              <ReviewField label="Vehicle registration/colour" value={[vehicle.registration, vehicle.colour].filter(Boolean).join(' / ')} />
+              <ReviewField label="Own transport" value={vehicle.hasOwnTransport} />
+              <ReviewField label="Medicine-handling acknowledgement" value={vehicle.medicineHandlingAcknowledged} />
+              <ReviewField label="Bank name" value={payout.bankName} />
+              <ReviewField label="Account / branch" value={`${maskedAccountFromPayload(payload, row.bankAccountMasked)} / ${payout.branchCode || 'No branch code'}`} />
+            </dl>
+          </section>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function searchable(row: RiderKyiRow) {
   return [
     row.id,
@@ -63,6 +188,7 @@ function searchable(row: RiderKyiRow) {
     row.country,
     row.kyiStatus,
     row.kyiRejectedReason,
+    prettyJson(row.kyiPayload),
     row.isActive ? 'active' : 'inactive',
   ]
     .filter(Boolean)
@@ -79,6 +205,8 @@ function extraFields(row: RiderKyiRow) {
     'kyiSubmittedAt',
     'kyiVerifiedAt',
     'kyiRejectedReason',
+    'kyiPayload',
+    'bankAccountMasked',
     'isActive',
     'createdAt',
     'updatedAt',
@@ -370,6 +498,8 @@ export default function CarePortRiderKyiReviewPage() {
                       ) : null}
                     </div>
 
+                    <RiderEnterpriseReview row={row} />
+
                     <div className="w-full space-y-3 xl:w-80">
                       <textarea
                         value={reasons[userId] || ''}
@@ -406,7 +536,7 @@ export default function CarePortRiderKyiReviewPage() {
                       View rider KYI record
                     </summary>
                     <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap rounded-2xl bg-slate-950 p-4 text-xs leading-5 text-slate-100">
-                      {prettyJson(Object.fromEntries(extraFields(row)))}
+                      {prettyJson(row.kyiPayload || Object.fromEntries(extraFields(row)))}
                     </pre>
                   </details>
                 </article>

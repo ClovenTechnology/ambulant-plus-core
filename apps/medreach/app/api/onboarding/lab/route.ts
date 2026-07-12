@@ -89,6 +89,11 @@ export async function POST(req: NextRequest) {
     displayName,
     logoUrl: logoUrl || undefined,
     contact: contactName || email || phone,
+    operationalEmail: email || undefined,
+    operationalPhone: phone || undefined,
+    addressLine1: clean(body.address) || undefined,
+    city: clean(body.city) || undefined,
+    province: clean(body.province) || undefined,
     ownerUserId: clean(body.ownerUserId) || email || contactName || phone,
     country,
     currency,
@@ -99,7 +104,7 @@ export async function POST(req: NextRequest) {
     canPublishResults: false,
     payoutAccountMasked: normalizePayoutMask(accountNumber || body.payoutLast4),
     rejectionReason: null,
-    meta: {
+    profileMeta: {
       source: 'medreach_enterprise_partner_onboarding',
       applicantType: 'lab',
       visualIdentity: {

@@ -244,6 +244,187 @@ function StatCard({
   );
 }
 
+
+function asReviewRecord(value: unknown): Record<string, any> {
+  if (!value) return {};
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+
+  return typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function reviewPath(source: unknown, path: string[]) {
+  let current: any = asReviewRecord(source);
+
+  for (const part of path) {
+    if (!current || typeof current !== 'object') return undefined;
+    current = current[part];
+  }
+
+  return current;
+}
+
+function reviewText(source: unknown, path: string[], fallback = '-') {
+  const value = reviewPath(source, path);
+
+  if (Array.isArray(value)) {
+    const joined = value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ');
+    return joined || fallback;
+  }
+
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+
+  const text = String(value ?? '').trim();
+  return text || fallback;
+}
+
+function reviewJoin(values: unknown[], fallback = '-') {
+  const joined = values.map((item) => String(item ?? '').trim()).filter(Boolean).join(' / ');
+  return joined || fallback;
+}
+
+function maskedAccountText(meta: unknown, fallback?: unknown) {
+  const last4 = reviewText(meta, ['payout', 'accountNumberLast4'], '').replace(/\D/g, '').slice(-4);
+
+  if (last4) return `****${last4}`;
+
+  const fallbackText = String(fallback || '').trim();
+  return fallbackText || '-';
+}
+
+function MedReviewField({ label, value }: { label: string; value: unknown }) {
+  const text = Array.isArray(value)
+    ? value.map((item) => String(item ?? '').trim()).filter(Boolean).join(', ')
+    : typeof value === 'boolean'
+      ? value ? 'Yes' : 'No'
+      : String(value ?? '').trim();
+
+  return (
+    <div className="rounded-lg border bg-white px-3 py-2">
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{label}</div>
+      <div className="mt-1 break-words text-xs font-semibold text-gray-900">{text || '-'}</div>
+    </div>
+  );
+}
+
+function LabEnterpriseReview({ lab }: { lab: any }) {
+  const meta = asReviewRecord(lab.profileMeta);
+  const logoUrl = lab.logoUrl || reviewText(meta, ['visualIdentity', 'logoUrl'], '');
+  const org = asReviewRecord(reviewPath(meta, ['organisationIdentity']));
+  const contact = asReviewRecord(reviewPath(meta, ['primaryContact']));
+  const location = asReviewRecord(reviewPath(meta, ['location']));
+  const payout = asReviewRecord(reviewPath(meta, ['payout']));
+
+  return (
+    <section className="mt-4 rounded-xl border border-emerald-100 bg-emerald-50/60 p-4">
+      <div className="flex flex-col gap-4 md:flex-row">
+        <div className="w-full md:w-36">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-emerald-700">Lab logo</div>
+          <div className="mt-2 flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-emerald-100 bg-white">
+            {logoUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={logoUrl} alt="Lab logo" className="h-full w-full object-cover" />
+            ) : (
+              <span className="px-2 text-center text-[10px] text-gray-400">No logo</span>
+            )}
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1 space-y-3">
+          <div>
+            <h4 className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Organisation identity</h4>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <MedReviewField label="Display / trading name" value={org.displayName || org.tradingName || lab.displayName || lab.name} />
+              <MedReviewField label="Registered name" value={org.registeredName || org.legalName} />
+              <MedReviewField label="Registration number" value={org.registrationNumber} />
+              <MedReviewField label="Accreditation" value={org.accreditationBody} />
+            </dl>
+          </div>
+
+          <div>
+            <h4 className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Contact, service area and payout</h4>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <MedReviewField label="Contact" value={contact.fullName || lab.contact || lab.ownerUserId} />
+              <MedReviewField label="Email / phone" value={reviewJoin([contact.email, contact.phone])} />
+              <MedReviewField label="Location" value={reviewJoin([location.city || lab.city, location.province || lab.province, location.country || lab.country])} />
+              <MedReviewField label="Service areas" value={location.serviceAreas} />
+              <MedReviewField label="Bank name" value={payout.bankName} />
+              <MedReviewField label="Account name" value={payout.accountName} />
+              <MedReviewField label="Account" value={maskedAccountText(meta, lab.payoutAccountMasked)} />
+              <MedReviewField label="Branch code" value={payout.branchCode} />
+            </dl>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function PhlebEnterpriseReview({ phleb }: { phleb: any }) {
+  const meta = asReviewRecord(phleb.profileMeta);
+  const serviceMeta = asReviewRecord(phleb.serviceAreaMeta);
+  const avatarUrl = phleb.avatarUrl || reviewText(meta, ['visualIdentity', 'avatarUrl'], '');
+  const identity = asReviewRecord(reviewPath(meta, ['personalIdentity']));
+  const professional = asReviewRecord(reviewPath(meta, ['professionalIdentity']));
+  const vehicle = asReviewRecord(reviewPath(meta, ['vehicle']));
+  const payout = asReviewRecord(reviewPath(meta, ['payout']));
+
+  return (
+    <section className="mt-4 rounded-xl border border-sky-100 bg-sky-50/60 p-4">
+      <div className="flex flex-col gap-4 md:flex-row">
+        <div className="w-full md:w-36">
+          <div className="text-[10px] font-bold uppercase tracking-wide text-sky-700">Phleb profile photo</div>
+          <div className="mt-2 flex h-24 w-24 items-center justify-center overflow-hidden rounded-2xl border border-sky-100 bg-white">
+            {avatarUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="Phleb profile photo" className="h-full w-full object-cover" />
+            ) : (
+              <span className="px-2 text-center text-[10px] text-gray-400">No photo</span>
+            )}
+          </div>
+        </div>
+
+        <div className="min-w-0 flex-1 space-y-3">
+          <div>
+            <h4 className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Personal and professional identity</h4>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <MedReviewField label="First name" value={identity.firstName} />
+              <MedReviewField label="Middle name" value={identity.middleName} />
+              <MedReviewField label="Last name" value={identity.lastName} />
+              <MedReviewField label="Display name" value={identity.fullName || phleb.displayName || phleb.userId || phleb.id} />
+              <MedReviewField label="SA ID" value={identity.saIdNumber} />
+              <MedReviewField label="Passport" value={reviewJoin([identity.passportNumber, identity.passportCountry, identity.passportExpiry])} />
+              <MedReviewField label="Qualification" value={professional.qualification} />
+              <MedReviewField label="HPCSA / reference" value={professional.hpcsaNumber} />
+            </dl>
+          </div>
+
+          <div>
+            <h4 className="text-[11px] font-bold uppercase tracking-wide text-gray-500">Preferred labs, service area, vehicle and payout</h4>
+            <dl className="mt-2 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+              <MedReviewField label="Preferred labs" value={reviewPath(meta, ['preferredLabIds']) || phleb.defaultLab?.name || phleb.defaultLabId} />
+              <MedReviewField label="Service areas" value={reviewPath(meta, ['serviceAreas']) || reviewPath(serviceMeta, ['serviceAreas'])} />
+              <MedReviewField label="Vehicle type" value={vehicle.type || phleb.vehicleType} />
+              <MedReviewField label="Vehicle make/model/year" value={reviewJoin([vehicle.make, vehicle.model, vehicle.year])} />
+              <MedReviewField label="Vehicle registration" value={reviewJoin([vehicle.registration, vehicle.colour])} />
+              <MedReviewField label="Bank name" value={payout.bankName} />
+              <MedReviewField label="Account" value={maskedAccountText(meta, phleb.payoutAccountMasked)} />
+              <MedReviewField label="Branch code" value={payout.branchCode} />
+            </dl>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 export default function MedReachOnboardingPage() {
   const [labs, setLabs] = useState<Lab[]>([]);
   const [phlebs, setPhlebs] = useState<Phleb[]>([]);
@@ -698,6 +879,8 @@ export default function MedReachOnboardingPage() {
                       <div className="font-semibold">{fmtDate(lab.approvedAt)}</div>
                     </div>
                   </div>
+                  <LabEnterpriseReview lab={lab} />
+
 
                   {lab.rejectedAt ? (
                     <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
@@ -851,6 +1034,8 @@ export default function MedReachOnboardingPage() {
                       <div className="font-semibold">{fmtDate(phleb.approvedAt)}</div>
                     </div>
                   </div>
+                  <PhlebEnterpriseReview phleb={phleb} />
+
 
                   {phleb.rejectedAt ? (
                     <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
