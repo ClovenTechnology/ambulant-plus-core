@@ -87,42 +87,48 @@ export async function POST(req: NextRequest) {
       submittedAt: new Date().toISOString(),
     };
 
-    const rider = await (prisma as any).carePortRiderProfile.upsert({
-      where: { userId },
-      create: {
-        orgId,
-        userId,
-        country,
-        currency,
-        isActive: false,
-        isOnJob: false,
-        kyiStatus: 'PENDING_REVIEW',
-        kyiSchemaKey: 'ZA_RIDER_PUBLIC_INTAKE_v1',
-        kyiPayload,
-        kyiSubmittedAt: new Date(),
-        kyiVerifiedAt: null,
-        kyiRejectedReason: null,
-        bankAccountMasked: bankAccountMasked || null,
-        accountStatus: 'AWAITING_ACTIVATION',
-        payoutCycle: 'WEEKLY',
-      } as any,
-      update: {
-        orgId,
-        country,
-        currency,
-        isActive: false,
-        isOnJob: false,
-        kyiStatus: 'PENDING_REVIEW',
-        kyiSchemaKey: 'ZA_RIDER_PUBLIC_INTAKE_v1',
-        kyiPayload,
-        kyiSubmittedAt: new Date(),
-        kyiVerifiedAt: null,
-        kyiRejectedReason: null,
-        bankAccountMasked: bankAccountMasked || null,
-        accountStatus: 'AWAITING_ACTIVATION',
-      } as any,
-    });
+    const existingRider = await (prisma as any).carePortRiderProfile
+      ?.findFirst?.({ where: { userId } })
+      .catch(() => null);
 
+    const rider = existingRider?.id
+      ? await (prisma as any).carePortRiderProfile.update({
+          where: { id: existingRider.id },
+          data: {
+            orgId,
+            country,
+            currency,
+            isActive: false,
+            isOnJob: false,
+            kyiStatus: 'PENDING_REVIEW',
+            kyiSchemaKey: 'ZA_RIDER_PUBLIC_INTAKE_v1',
+            kyiPayload,
+            kyiSubmittedAt: new Date(),
+            kyiVerifiedAt: null,
+            kyiRejectedReason: null,
+            bankAccountMasked: bankAccountMasked || null,
+            accountStatus: 'AWAITING_ACTIVATION',
+          } as any,
+        })
+      : await (prisma as any).carePortRiderProfile.create({
+          data: {
+            orgId,
+            userId,
+            country,
+            currency,
+            isActive: false,
+            isOnJob: false,
+            kyiStatus: 'PENDING_REVIEW',
+            kyiSchemaKey: 'ZA_RIDER_PUBLIC_INTAKE_v1',
+            kyiPayload,
+            kyiSubmittedAt: new Date(),
+            kyiVerifiedAt: null,
+            kyiRejectedReason: null,
+            bankAccountMasked: bankAccountMasked || null,
+            accountStatus: 'AWAITING_ACTIVATION',
+            payoutCycle: 'WEEKLY',
+          } as any,
+        });
     await (prisma as any).auditEvent?.create?.({
       data: {
         kind: 'careport_rider_public_application_submitted',
