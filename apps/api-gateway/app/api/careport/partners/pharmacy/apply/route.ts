@@ -4,7 +4,17 @@ import { prisma } from '@/src/lib/db';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function clean(value: unknown, max = 500) {
+const COUNTRY_CURRENCY: Record<string, string> = {
+  ZA: 'ZAR',
+  NG: 'NGN',
+  GB: 'GBP',
+  UK: 'GBP',
+  US: 'USD',
+  CA: 'CAD',
+  AU: 'AUD',
+};
+
+function clean(value: unknown, max = 2000) {
   return String(value ?? '').trim().slice(0, max);
 }
 
@@ -24,8 +34,36 @@ function bool(value: unknown, fallback = false) {
   return fallback;
 }
 
+function splitCsv(value: unknown) {
+  return clean(value)
+    .split(',')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function countryCode(value: unknown) {
+  return (clean(value, 4) || 'ZA').toUpperCase().slice(0, 2);
+}
+
+function currencyFor(country: string, value: unknown) {
+  return (clean(value, 4) || COUNTRY_CURRENCY[country] || 'ZAR').toUpperCase().slice(0, 3);
+}
+
 function orgIdFromHeaders(req: NextRequest) {
   return clean(req.headers.get('x-org-id') || process.env.DEFAULT_ORG_ID || 'org-default', 160) || 'org-default';
+}
+
+function normalizePayoutMask(value: unknown) {
+  const raw = clean(value, 80).replace(/\s+/g, '');
+
+  if (!raw) return null;
+  if (raw.length <= 4) return `****${raw}`;
+
+  return `****${raw.slice(-4)}`;
+}
+
+function fullName(firstName: string, middleName: string, lastName: string) {
+  return [firstName, middleName, lastName].map((part) => part.trim()).filter(Boolean).join(' ');
 }
 
 function json(data: any, status = 200) {
@@ -43,41 +81,87 @@ export async function POST(req: NextRequest) {
     const orgId = orgIdFromHeaders(req);
     const body = await req.json().catch(() => ({}));
 
-    const pharmacyName = clean(body?.pharmacyName || body?.name || body?.businessName, 220);
-    const contactName = clean(body?.contactName || body?.ownerName || body?.responsiblePerson, 180);
-    const email = cleanEmail(body?.email || body?.contactEmail);
-    const phone = cleanPhone(body?.phone || body?.contactPhone);
+    const displayName = clean(body?.displayName || body?.tradingName || body?.pharmacyName || body?.name || body?.businessName, 220);
+    const registeredName = clean(body?.registeredName || body?.legalName || displayName, 220);
     const registrationNumber = clean(body?.registrationNumber || body?.companyRegistrationNumber, 160);
     const sapcNumber = clean(body?.sapcNumber || body?.licenseNumber || body?.pharmacyCouncilNumber, 160);
+
+    const contactFirstName = clean(body?.contactFirstName || body?.firstName, 120);
+    const contactMiddleName = clean(body?.contactMiddleName || body?.middleName, 120);
+    const contactLastName = clean(body?.contactLastName || body?.lastName, 120);
+    const contactName =
+      clean(body?.contactName || body?.ownerName || body?.responsiblePerson, 180) ||
+      fullName(contactFirstName, contactMiddleName, contactLastName);
+
+    const email = cleanEmail(body?.email || body?.contactEmail);
+    const phone = cleanPhone(body?.phone || body?.contactPhone);
     const address = clean(body?.address || body?.physicalAddress, 500);
     const city = clean(body?.city, 120);
-    const country = clean(body?.country || 'ZA', 2).toUpperCase() || 'ZA';
-    const currency = clean(body?.currency || 'ZAR', 3).toUpperCase() || 'ZAR';
-    const bankAccountMasked = clean(body?.bankAccountMasked || body?.payoutAccountMask || body?.accountMask, 160);
+    const province = clean(body?.province, 120);
+    const serviceAreas = splitCsv(body?.serviceAreas || body?.areas);
+    const country = countryCode(body?.country);
+    const currency = currencyFor(country, body?.currency);
+
+    const logoUrl = clean(body?.logoDataUrl || body?.logoUrl, 1_500_000);
+
+    const bankName = clean(body?.bankName, 160);
+    const accountName = clean(body?.accountName, 180);
+    const accountNumber = clean(body?.accountNumber, 120);
+    const branchCode = clean(body?.branchCode, 80);
+
     const notes = clean(body?.notes || body?.message, 1200);
 
-    if (!pharmacyName) return json({ ok: false, error: 'pharmacy_name_required' }, 400);
+    if (!displayName) return json({ ok: false, error: 'pharmacy_display_or_trading_name_required' }, 400);
+    if (!registeredName) return json({ ok: false, error: 'pharmacy_registered_name_required' }, 400);
+    if (!registrationNumber && !sapcNumber) return json({ ok: false, error: 'pharmacy_registration_or_sapc_required' }, 400);
     if (!email) return json({ ok: false, error: 'email_required' }, 400);
     if (!phone) return json({ ok: false, error: 'phone_required' }, 400);
 
     const kycPayload = {
-      source: 'careport_public_partner_application',
+      source: 'careport_enterprise_public_partner_application',
       applicantType: 'PHARMACY',
-      pharmacyName,
-      contactName,
-      email,
-      phone,
-      registrationNumber,
-      sapcNumber,
-      address,
-      city,
-      country,
-      currency,
-      bankAccountMasked,
-      supportsPickup: bool(body?.supportsPickup, true),
-      supportsDelivery: bool(body?.supportsDelivery, true),
-      acceptsCard: bool(body?.acceptsCard, true),
-      acceptsMedicalAid: bool(body?.acceptsMedicalAid, false),
+      visualIdentity: {
+        kind: 'PHARMACY_LOGO',
+        uploaded: Boolean(logoUrl),
+        logoUrl: logoUrl || null,
+      },
+      organisationIdentity: {
+        displayName,
+        tradingName: displayName,
+        registeredName,
+        legalName: registeredName,
+        registrationNumber,
+        sapcNumber,
+      },
+      responsibleContact: {
+        firstName: contactFirstName,
+        middleName: contactMiddleName,
+        lastName: contactLastName,
+        fullName: contactName,
+        email,
+        phone,
+      },
+      location: {
+        address,
+        city,
+        province,
+        country,
+        serviceAreas,
+      },
+      operatingModel: {
+        supportsPickup: bool(body?.supportsPickup, true),
+        supportsDelivery: bool(body?.supportsDelivery, true),
+        acceptsCard: bool(body?.acceptsCard, true),
+        acceptsMedicalAid: bool(body?.acceptsMedicalAid, false),
+      },
+      payout: {
+        bankName,
+        accountName,
+        accountNumber,
+        accountNumberLast4: accountNumber ? accountNumber.slice(-4) : '',
+        branchCode,
+        currency,
+      },
       notes,
       submittedAt: new Date().toISOString(),
     };
@@ -85,7 +169,7 @@ export async function POST(req: NextRequest) {
     const pharmacy = await (prisma as any).pharmacyPartner.create({
       data: {
         orgId,
-        name: pharmacyName,
+        name: displayName,
         contact: contactName || email || phone,
         address: address || null,
         city: city || null,
@@ -96,10 +180,10 @@ export async function POST(req: NextRequest) {
         supportsDelivery: bool(body?.supportsDelivery, true),
         acceptsCard: bool(body?.acceptsCard, true),
         acceptsMedicalAid: bool(body?.acceptsMedicalAid, false),
-        bankAccountMasked: bankAccountMasked || null,
+        bankAccountMasked: normalizePayoutMask(accountNumber || body?.bankAccountMasked || body?.payoutAccountMask || body?.accountMask),
         commercialStatus: 'ONBOARDING_REVIEW',
         subscriptionStatus: 'PENDING_ONBOARDING',
-        kycSchemaKey: 'ZA_SAPC_PHARMACY_PUBLIC_INTAKE_v1',
+        kycSchemaKey: 'ZA_SAPC_PHARMACY_ENTERPRISE_PUBLIC_INTAKE_v1',
         kycPayload,
         kycSubmittedAt: new Date(),
         kycVerifiedAt: null,
@@ -114,7 +198,7 @@ export async function POST(req: NextRequest) {
         actorId: null,
         actorRole: 'public_applicant',
         subjectId: pharmacy.id,
-        meta: { orgId, pharmacyId: pharmacy.id, pharmacyName, email, phone },
+        meta: { orgId, pharmacyId: pharmacy.id, displayName, registeredName, email, phone },
       },
     }).catch(() => null);
 
