@@ -116,18 +116,24 @@ export async function GET(req: NextRequest) {
       items,
       trips,
       account: {
-        status: profile?.accountStatus || (profile?.isActive ? "ACTIVE" : "AWAITING_ACTIVATION"),
-        kyiStatus: profile?.kyiStatus || null,
-        isActive: profile?.isActive ?? null,
+        status: readiness.status,
+        kyiStatus: readiness.kyiStatus,
+        kyiVerifiedAt: readiness.kyiVerifiedAt,
+        kyiRejectedReason: readiness.kyiRejectedReason,
+        isActive: readiness.isActive,
         isOnJob: profile?.isOnJob ?? null,
         payoutCycle: profile?.payoutCycle || null,
         lastPayoutAt: profile?.lastPayoutAt || null,
+        payoutEligible: readiness.payoutEligible,
       },
+      readiness,
       summary: {
         payoutCount: items?.length || 0,
         pendingCents,
         paidCents,
         tripCount: trips.length,
+        payoutEligible: readiness.payoutEligible,
+        readinessBlockers: readiness.blockers,
       },
     });
   } catch (e: any) {
