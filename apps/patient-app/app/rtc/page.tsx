@@ -681,6 +681,7 @@ function RTCContent() {
             selfLabel={SELF_NAME || 'Me'}
             peerLabel={PEER_NAME}
           />
+          </div>
 
           <details className="rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-sm">
             <summary className="cursor-pointer select-none">Network Stats</summary>
