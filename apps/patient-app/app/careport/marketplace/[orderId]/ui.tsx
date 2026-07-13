@@ -136,6 +136,133 @@ function orderStatusTone(status?: string | null) {
 
   return 'border-slate-200 bg-slate-50 text-slate-700';
 }
+
+function partnerText(value: unknown) {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return text && text !== "[object Object]" ? text : "";
+}
+
+function partnerRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function partnerInitials(value: string) {
+  const parts = value
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return "Rx";
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("");
+}
+
+function pharmacyIdentityValue(pharmacy: Pharmacy, keys: string[]) {
+  const record = pharmacy as Pharmacy & Record<string, unknown>;
+  const kycPayload = partnerRecord(record.kycPayload);
+  const profileMeta = partnerRecord(record.profileMeta);
+  const visualIdentity = partnerRecord(
+    kycPayload.visualIdentity || profileMeta.visualIdentity
+  );
+
+  for (const key of keys) {
+    const direct = partnerText(record[key]);
+    if (direct) return direct;
+
+    const kyc = partnerText(kycPayload[key]);
+    if (kyc) return kyc;
+
+    const profile = partnerText(profileMeta[key]);
+    if (profile) return profile;
+
+    const visual = partnerText(visualIdentity[key]);
+    if (visual) return visual;
+  }
+
+  return "";
+}
+
+function pharmacyDisplayName(pharmacy: Pharmacy) {
+  return (
+    pharmacyIdentityValue(pharmacy, ["tradingName", "displayName", "name"]) ||
+    partnerText((pharmacy as Pharmacy & Record<string, unknown>).name) ||
+    "Pharmacy"
+  );
+}
+
+function pharmacyLegalName(pharmacy: Pharmacy) {
+  return pharmacyIdentityValue(pharmacy, ["registeredName", "legalName", "registeredLegalName"]);
+}
+
+function pharmacyLogoUrl(pharmacy: Pharmacy) {
+  return pharmacyIdentityValue(pharmacy, ["logoUrl", "logoDataUrl", "imageUrl"]);
+}
+
+function pharmacyCredentialLine(pharmacy: Pharmacy) {
+  const sapc = pharmacyIdentityValue(pharmacy, [
+    "sapcNumber",
+    "sapc",
+    "pharmacyCouncilNumber",
+    "licenseNumber",
+    "licenceNumber",
+    "registrationNumber",
+  ]);
+
+  return sapc ? `SAPC/licence ${sapc}` : "";
+}
+
+function pharmacyLocationLine(pharmacy: Pharmacy) {
+  const record = pharmacy as Pharmacy & Record<string, unknown>;
+  return [
+    partnerText(record.address),
+    partnerText(record.city),
+    partnerText(record.province),
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+function PharmacyIdentityCard({ pharmacy }: { pharmacy: Pharmacy }) {
+  const displayName = pharmacyDisplayName(pharmacy);
+  const legalName = pharmacyLegalName(pharmacy);
+  const logoUrl = pharmacyLogoUrl(pharmacy);
+  const credential = pharmacyCredentialLine(pharmacy);
+
+  return (
+    <div data-a4p3="careport-pharmacy-identity" className="flex min-w-0 items-start gap-3">
+      {logoUrl ? (
+        <img
+          src={logoUrl}
+          alt={`${displayName} logo`}
+          className="h-12 w-12 shrink-0 rounded-2xl border border-slate-200 object-cover"
+        />
+      ) : (
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-sm font-black text-emerald-800">
+          {partnerInitials(displayName)}
+        </div>
+      )}
+
+      <div className="min-w-0">
+        <div className="truncate font-semibold text-slate-950">{displayName}</div>
+        {legalName && legalName !== displayName ? (
+          <div className="mt-0.5 truncate text-xs text-slate-500">{legalName}</div>
+        ) : null}
+        {credential ? (
+          <div className="mt-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            {credential}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 function carePortReadinessMessage(payload: any, fallback: string) {
   const code = String(payload?.error || payload?.code || '').trim();
 
@@ -644,9 +771,9 @@ export default function MarketplaceClient({ orderId }: { orderId: string }) {
             <div key={offer.offerId} className="rounded-2xl border bg-white shadow-sm p-4 space-y-3 cursor-default">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <div className="font-semibold">{offer.pharmacy.name}</div>
+                  <PharmacyIdentityCard pharmacy={offer.pharmacy} />
                   <div className="text-xs text-gray-600">
-                    {[offer.pharmacy.address, offer.pharmacy.city].filter(Boolean).join(", ")}
+                    {pharmacyLocationLine(offer.pharmacy) || "Address pending"}
                   </div>
                   <div className="text-xs text-gray-600">
                     {offer.distanceKm != null ? <span>{offer.distanceKm} km</span> : null}
