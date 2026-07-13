@@ -100,6 +100,180 @@ async function loadPolicy(orgId: string) {
   return { policy: normalizePolicy(value || DEFAULT_POLICY), source: value ? ("database" as const) : ("defaults" as const) };
 }
 
+
+const PARTNER_TIER_KEY = "partner.commercial_tiers";
+
+type PartnerTier = {
+  id: string;
+  module: "careport" | "medreach";
+  partnerType: "pharmacy" | "lab";
+  name: string;
+  enabled: boolean;
+  currency?: string;
+  monthlyPlatformFeeCents?: number;
+  catalogueHostingFeeCents?: number;
+  onboardingFeeCents?: number;
+  transactionCommissionBps?: number;
+  paymentProviderFeeBps?: number;
+  paymentProviderFixedFeeCents?: number;
+  includedSkuCount?: number;
+  includedTestCount?: number;
+  includedStorageMb?: number;
+  includedBranches?: number;
+  monthlyOrderLimit?: number;
+  autoAssignRules?: {
+    minSkuCount?: number | null;
+    maxSkuCount?: number | null;
+    minTestCount?: number | null;
+    maxTestCount?: number | null;
+    minStorageMb?: number | null;
+    maxStorageMb?: number | null;
+    minMonthlyOrders?: number | null;
+    maxMonthlyOrders?: number | null;
+  };
+};
+
+type PartnerTierConfig = {
+  version?: number;
+  tiers: PartnerTier[];
+};
+
+function configuredInt(value: unknown, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
+}
+
+function defaultPartnerTierConfig(): PartnerTierConfig {
+  return { version: 1, tiers: [] };
+}
+
+function normalizePartnerTier(raw: any, index: number): PartnerTier {
+  const module = clean(raw?.module, 24).toLowerCase() === "medreach" ? "medreach" : "careport";
+  const partnerType = clean(raw?.partnerType, 24).toLowerCase() === "lab" ? "lab" : "pharmacy";
+  const id =
+    clean(raw?.id, 96)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || `${module}-${partnerType}-${index + 1}`;
+
+  return {
+    id,
+    module,
+    partnerType,
+    name: clean(raw?.name, 160) || id,
+    enabled: raw?.enabled !== false,
+    currency: clean(raw?.currency, 3).toUpperCase() || "ZAR",
+    monthlyPlatformFeeCents: asInt(raw?.monthlyPlatformFeeCents, 0),
+    catalogueHostingFeeCents: asInt(raw?.catalogueHostingFeeCents, 0),
+    onboardingFeeCents: asInt(raw?.onboardingFeeCents, 0),
+    transactionCommissionBps: asInt(raw?.transactionCommissionBps, 0, 0, 10000),
+    paymentProviderFeeBps: asInt(raw?.paymentProviderFeeBps, 0, 0, 2000),
+    paymentProviderFixedFeeCents: asInt(raw?.paymentProviderFixedFeeCents, 0),
+    includedSkuCount: asInt(raw?.includedSkuCount, 0),
+    includedTestCount: asInt(raw?.includedTestCount, 0),
+    includedStorageMb: asInt(raw?.includedStorageMb, 0),
+    includedBranches: asInt(raw?.includedBranches, 0),
+    monthlyOrderLimit: asInt(raw?.monthlyOrderLimit, 0),
+    autoAssignRules: raw?.autoAssignRules && typeof raw.autoAssignRules === "object" ? raw.autoAssignRules : {},
+  };
+}
+
+function normalizePartnerTierConfig(raw: any): PartnerTierConfig {
+  const rows = Array.isArray(raw?.tiers) ? raw.tiers : [];
+
+  return {
+    version: 1,
+    tiers: rows.map((row: any, index: number) => normalizePartnerTier(row, index)),
+  };
+}
+
+async function loadPartnerTierConfig(orgId: string) {
+  const delegate = settingsDelegate();
+
+  if (!delegate?.findUnique && !delegate?.findFirst) {
+    return { config: defaultPartnerTierConfig(), source: "defaults" as const, persistence: "missing_model" as const };
+  }
+
+  const row = delegate.findUnique
+    ? await delegate.findUnique({ where: { orgId_key: { orgId, key: PARTNER_TIER_KEY } } }).catch(() => null)
+    : await delegate.findFirst({ where: { orgId, key: PARTNER_TIER_KEY }, orderBy: { updatedAt: "desc" } }).catch(() => null);
+
+  const value = row?.value && typeof row.value === "object" ? row.value : null;
+
+  return {
+    config: normalizePartnerTierConfig(value || defaultPartnerTierConfig()),
+    source: value ? ("database" as const) : ("defaults" as const),
+    persistence: "available" as const,
+  };
+}
+
+function metricWithin(value: number | null | undefined, min: unknown, max: unknown) {
+  if (value === null || value === undefined) return true;
+
+  const lower = Number(min);
+  const upper = Number(max);
+
+  if (Number.isFinite(lower) && value < lower) return false;
+  if (Number.isFinite(upper) && value > upper) return false;
+
+  return true;
+}
+
+function resolvePartnerCommercialTier(
+  config: PartnerTierConfig,
+  module: "careport" | "medreach",
+  partnerType: "pharmacy" | "lab",
+  metrics: { skuCount?: number | null; testCount?: number | null; storageMb?: number | null; monthlyOrders?: number | null },
+) {
+  const candidates = (config.tiers || []).filter((tier) => tier.enabled && tier.module === module && tier.partnerType === partnerType);
+
+  const matched =
+    candidates.find((tier) => {
+      const rules = tier.autoAssignRules || {};
+
+      return (
+        metricWithin(metrics.skuCount, rules.minSkuCount, rules.maxSkuCount) &&
+        metricWithin(metrics.testCount, rules.minTestCount, rules.maxTestCount) &&
+        metricWithin(metrics.storageMb, rules.minStorageMb, rules.maxStorageMb) &&
+        metricWithin(metrics.monthlyOrders, rules.minMonthlyOrders, rules.maxMonthlyOrders)
+      );
+    }) ||
+    candidates[0] ||
+    null;
+
+  return {
+    tier: matched,
+    source: matched ? "partner_commercial_tiers" : "commercial_policy_default",
+    metrics,
+  };
+}
+
+function tierSnapshot(match: ReturnType<typeof resolvePartnerCommercialTier>) {
+  const tier = match.tier;
+
+  if (!tier) {
+    return {
+      source: match.source,
+      tierId: null,
+      tierName: null,
+      metrics: match.metrics,
+    };
+  }
+
+  return {
+    source: match.source,
+    tierId: tier.id,
+    tierName: tier.name,
+    monthlyPlatformFeeCents: asInt(tier.monthlyPlatformFeeCents, 0),
+    catalogueHostingFeeCents: asInt(tier.catalogueHostingFeeCents, 0),
+    onboardingFeeCents: asInt(tier.onboardingFeeCents, 0),
+    transactionCommissionBps: asInt(tier.transactionCommissionBps, 0),
+    paymentProviderFeeBps: asInt(tier.paymentProviderFeeBps, 0),
+    paymentProviderFixedFeeCents: asInt(tier.paymentProviderFixedFeeCents, 0),
+    metrics: match.metrics,
+  };
+}
+
 function providerFee(amountCents: number, policy: Policy) {
   if (!amountCents) return 0;
   return Math.max(0, Math.round((amountCents * policy.paymentProviderFeeBps) / 10000) + policy.paymentProviderFixedFeeCents);
@@ -138,7 +312,7 @@ async function loadOrders(orgId: string, from: Date, to: Date, includePaid: bool
   });
 }
 
-function buildSettlementPreview(orders: any[], policy: Policy) {
+function buildSettlementPreview(orders: any[], policy: Policy, partnerTierConfig: PartnerTierConfig = defaultPartnerTierConfig()) {
   const pharmacyMap = new Map<string, any>();
   const riderMap = new Map<string, any>();
 
@@ -183,6 +357,8 @@ function buildSettlementPreview(orders: any[], policy: Policy) {
         orderCount: 0,
         grossCents: 0,
         grossMinor: 0,
+        paidCents: 0,
+        paidMinor: 0,
         platformFeeCents: 0,
         platformFeeMinor: 0,
         paymentProviderFeeCents: 0,
@@ -191,6 +367,11 @@ function buildSettlementPreview(orders: any[], policy: Policy) {
         subscriptionFeeMinor: 0,
         inventoryHostingFeeCents: 0,
         inventoryHostingFeeMinor: 0,
+        partnerTier: null,
+        partnerTierId: null,
+        partnerTierName: null,
+        partnerTierSource: null,
+        partnerTierMetrics: null,
         netCents: 0,
         netPayableMinor: 0,
         orderIds: [],
@@ -199,6 +380,8 @@ function buildSettlementPreview(orders: any[], policy: Policy) {
       row.orderCount += 1;
       row.grossCents += subtotal;
       row.grossMinor += subtotal;
+      row.paidCents += paid;
+      row.paidMinor += paid;
       row.platformFeeCents += commissionFee;
       row.platformFeeMinor += commissionFee;
       row.paymentProviderFeeCents += pharmacyProviderFee;
@@ -241,12 +424,55 @@ function buildSettlementPreview(orders: any[], policy: Policy) {
   }
 
   for (const row of pharmacyMap.values()) {
-    row.monthlyFeeCents = policy.pharmacyMonthlyPlatformFeeCents;
-    row.subscriptionFeeMinor = policy.pharmacyMonthlyPlatformFeeCents;
-    row.inventoryHostingFeeCents = policy.pharmacyInventoryHostingFeeCents;
-    row.inventoryHostingFeeMinor = policy.pharmacyInventoryHostingFeeCents;
-    row.netCents = Math.max(0, row.netCents - row.monthlyFeeCents - row.inventoryHostingFeeCents);
-    row.netPayableMinor = Math.max(0, row.netPayableMinor - row.subscriptionFeeMinor - row.inventoryHostingFeeMinor);
+    const rowGrossCents = Number(row.grossCents || row.grossMinor || 0);
+    const rowPaidCents = Number(row.paidCents || row.paidMinor || rowGrossCents || 0);
+    const oldCommissionFee = Number(row.platformFeeCents || row.platformFeeMinor || 0);
+    const oldProviderFee = providerFee(rowPaidCents, policy);
+
+    const match = resolvePartnerCommercialTier(partnerTierConfig, "careport", "pharmacy", {
+      monthlyOrders: Number(row.orderCount || row.orders || 0),
+      skuCount: null,
+      storageMb: null,
+      testCount: null,
+    });
+    const tier = match.tier;
+    const appliedTier = tierSnapshot(match);
+
+    const effectiveCommissionBps = configuredInt(tier?.transactionCommissionBps, policy.platformCommissionBps);
+    const effectiveProviderBps = configuredInt(tier?.paymentProviderFeeBps, policy.paymentProviderFeeBps);
+    const effectiveProviderFixed = configuredInt(tier?.paymentProviderFixedFeeCents, policy.paymentProviderFixedFeeCents);
+    const effectiveMonthlyFee = configuredInt(tier?.monthlyPlatformFeeCents, policy.pharmacyMonthlyPlatformFeeCents);
+    const effectiveHostingFee = configuredInt(tier?.catalogueHostingFeeCents, policy.pharmacyInventoryHostingFeeCents);
+
+    const recalculatedCommission = commission(rowGrossCents, effectiveCommissionBps);
+    const recalculatedProvider = providerFee(rowPaidCents, {
+      ...policy,
+      paymentProviderFeeBps: effectiveProviderBps,
+      paymentProviderFixedFeeCents: effectiveProviderFixed,
+    });
+
+    const oldPlatformContribution = oldCommissionFee + (policy.passPaymentProviderFeeToPharmacy ? 0 : oldProviderFee);
+    const newPlatformContribution = recalculatedCommission + (policy.passPaymentProviderFeeToPharmacy ? 0 : recalculatedProvider);
+
+    platformFees += newPlatformContribution - oldPlatformContribution;
+    providerFees += recalculatedProvider - oldProviderFee;
+
+    row.platformFeeCents = recalculatedCommission;
+    row.platformFeeMinor = recalculatedCommission;
+    row.paymentProviderFeeCents = policy.passPaymentProviderFeeToPharmacy ? recalculatedProvider : 0;
+    row.paymentProviderFeeMinor = row.paymentProviderFeeCents;
+    row.monthlyFeeCents = effectiveMonthlyFee;
+    row.subscriptionFeeMinor = effectiveMonthlyFee;
+    row.inventoryHostingFeeCents = effectiveHostingFee;
+    row.inventoryHostingFeeMinor = effectiveHostingFee;
+    row.partnerTier = appliedTier;
+    row.partnerTierId = appliedTier.tierId;
+    row.partnerTierName = appliedTier.tierName;
+    row.partnerTierSource = appliedTier.source;
+    row.partnerTierMetrics = appliedTier.metrics;
+    row.netCents = Math.max(0, rowGrossCents - row.platformFeeCents - row.paymentProviderFeeCents - row.monthlyFeeCents - row.inventoryHostingFeeCents);
+    row.netPayableMinor = row.netCents;
+
     platformFees += row.monthlyFeeCents + row.inventoryHostingFeeCents;
     subscriptionFees += row.monthlyFeeCents;
     inventoryHostingFees += row.inventoryHostingFeeCents;
@@ -306,8 +532,9 @@ export async function GET(req: NextRequest) {
     const to = asDate(url.searchParams.get("to"), endOfMonth());
     const includePaid = url.searchParams.get("includePaid") === "1" || url.searchParams.get("includePaid") === "true";
     const loadedPolicy = await loadPolicy(orgId);
+    const partnerTiers = await loadPartnerTierConfig(orgId);
     const orders = await loadOrders(orgId, from, to, includePaid);
-    const preview = buildSettlementPreview(orders, loadedPolicy.policy);
+    const preview = buildSettlementPreview(orders, loadedPolicy.policy, partnerTiers.config);
     const existing = await loadExistingSettlementData(orgId, from, to);
 
     return json({ ok: true, orgId, from, to, includePaid, policy: loadedPolicy, ...preview, existingBatches: existing.batches, existingLines: existing.lines });
@@ -362,13 +589,14 @@ export async function POST(req: NextRequest) {
     const includePaid = Boolean(body?.includePaid);
     const dryRun = body?.dryRun !== false;
     const loadedPolicy = await loadPolicy(orgId);
+    const partnerTiers = await loadPartnerTierConfig(orgId);
     const policy = normalizePolicy({ ...loadedPolicy.policy, ...(body?.policyOverride || {}) });
 
     const orders = await loadOrders(orgId, from, to, includePaid);
-    const preview = buildSettlementPreview(orders, policy);
+    const preview = buildSettlementPreview(orders, policy, partnerTiers.config);
 
     if (dryRun) {
-      return json({ ok: true, dryRun: true, orgId, from, to, includePaid, policy: { policy, source: loadedPolicy.source }, ...preview, payouts: [] });
+      return json({ ok: true, dryRun: true, orgId, from, to, includePaid, policy: { policy, source: loadedPolicy.source }, partnerTiers: { source: partnerTiers.source, persistence: partnerTiers.persistence }, ...preview, payouts: [] });
     }
 
     if (!db.carePortSettlementBatch?.create || !db.carePortSettlementLine?.createMany) {
@@ -427,7 +655,7 @@ export async function POST(req: NextRequest) {
         where: { id: order.id },
         data: {
           settlementStatus: "BATCHED" as any,
-          settlementSnapshot: { batchId: batch.id, policy, generatedAt: new Date().toISOString() } as any,
+          settlementSnapshot: { batchId: batch.id, policy, partnerTiers: { source: partnerTiers.source, applied: preview.pharmacy.map((row: any) => row.partnerTier).filter(Boolean) }, generatedAt: new Date().toISOString() } as any,
         } as any,
       }).catch(() => null),
     );
@@ -444,7 +672,7 @@ export async function POST(req: NextRequest) {
     }).catch(() => null);
 
     const createdLines = await db.carePortSettlementLine.findMany({ where: { batchId: batch.id }, orderBy: { createdAt: "asc" } });
-    return json({ ok: true, dryRun: false, orgId, from, to, includePaid, policy: { policy, source: loadedPolicy.source }, ...preview, batch, payouts: createdLines });
+    return json({ ok: true, dryRun: false, orgId, from, to, includePaid, policy: { policy, source: loadedPolicy.source }, partnerTiers: { source: partnerTiers.source, persistence: partnerTiers.persistence }, ...preview, batch, payouts: createdLines });
   } catch (e: any) {
     return json({ ok: false, error: e?.message || "careport_finance_settlement_failed" }, e?.status || 500);
   }

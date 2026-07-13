@@ -236,6 +236,180 @@ function commission(amountCents: number, bps: number) {
   return Math.max(0, Math.round((amountCents * bps) / 10000));
 }
 
+
+const PARTNER_TIER_KEY = "partner.commercial_tiers";
+
+type PartnerTier = {
+  id: string;
+  module: "careport" | "medreach";
+  partnerType: "pharmacy" | "lab";
+  name: string;
+  enabled: boolean;
+  currency?: string;
+  monthlyPlatformFeeCents?: number;
+  catalogueHostingFeeCents?: number;
+  onboardingFeeCents?: number;
+  transactionCommissionBps?: number;
+  paymentProviderFeeBps?: number;
+  paymentProviderFixedFeeCents?: number;
+  includedSkuCount?: number;
+  includedTestCount?: number;
+  includedStorageMb?: number;
+  includedBranches?: number;
+  monthlyOrderLimit?: number;
+  autoAssignRules?: {
+    minSkuCount?: number | null;
+    maxSkuCount?: number | null;
+    minTestCount?: number | null;
+    maxTestCount?: number | null;
+    minStorageMb?: number | null;
+    maxStorageMb?: number | null;
+    minMonthlyOrders?: number | null;
+    maxMonthlyOrders?: number | null;
+  };
+};
+
+type PartnerTierConfig = {
+  version?: number;
+  tiers: PartnerTier[];
+};
+
+function configuredInt(value: unknown, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.round(n) : fallback;
+}
+
+function defaultPartnerTierConfig(): PartnerTierConfig {
+  return { version: 1, tiers: [] };
+}
+
+function normalizePartnerTier(raw: any, index: number): PartnerTier {
+  const module = clean(raw?.module, 24).toLowerCase() === "medreach" ? "medreach" : "careport";
+  const partnerType = clean(raw?.partnerType, 24).toLowerCase() === "lab" ? "lab" : "pharmacy";
+  const id =
+    clean(raw?.id, 96)
+      .toLowerCase()
+      .replace(/[^a-z0-9_-]+/g, "-")
+      .replace(/^-+|-+$/g, "") || `${module}-${partnerType}-${index + 1}`;
+
+  return {
+    id,
+    module,
+    partnerType,
+    name: clean(raw?.name, 160) || id,
+    enabled: raw?.enabled !== false,
+    currency: clean(raw?.currency, 3).toUpperCase() || "ZAR",
+    monthlyPlatformFeeCents: asInt(raw?.monthlyPlatformFeeCents, 0),
+    catalogueHostingFeeCents: asInt(raw?.catalogueHostingFeeCents, 0),
+    onboardingFeeCents: asInt(raw?.onboardingFeeCents, 0),
+    transactionCommissionBps: asInt(raw?.transactionCommissionBps, 0, 0, 10000),
+    paymentProviderFeeBps: asInt(raw?.paymentProviderFeeBps, 0, 0, 2000),
+    paymentProviderFixedFeeCents: asInt(raw?.paymentProviderFixedFeeCents, 0),
+    includedSkuCount: asInt(raw?.includedSkuCount, 0),
+    includedTestCount: asInt(raw?.includedTestCount, 0),
+    includedStorageMb: asInt(raw?.includedStorageMb, 0),
+    includedBranches: asInt(raw?.includedBranches, 0),
+    monthlyOrderLimit: asInt(raw?.monthlyOrderLimit, 0),
+    autoAssignRules: raw?.autoAssignRules && typeof raw.autoAssignRules === "object" ? raw.autoAssignRules : {},
+  };
+}
+
+function normalizePartnerTierConfig(raw: any): PartnerTierConfig {
+  const rows = Array.isArray(raw?.tiers) ? raw.tiers : [];
+
+  return {
+    version: 1,
+    tiers: rows.map((row: any, index: number) => normalizePartnerTier(row, index)),
+  };
+}
+
+async function loadPartnerTierConfig(orgId: string) {
+  const delegate = settingsDelegate();
+
+  if (!delegate?.findUnique && !delegate?.findFirst) {
+    return { config: defaultPartnerTierConfig(), source: "defaults" as const, persistence: "missing_model" as const };
+  }
+
+  const row = delegate.findUnique
+    ? await delegate.findUnique({ where: { orgId_key: { orgId, key: PARTNER_TIER_KEY } } }).catch(() => null)
+    : await delegate.findFirst({ where: { orgId, key: PARTNER_TIER_KEY }, orderBy: { updatedAt: "desc" } }).catch(() => null);
+
+  const value = row?.value && typeof row.value === "object" ? row.value : null;
+
+  return {
+    config: normalizePartnerTierConfig(value || defaultPartnerTierConfig()),
+    source: value ? ("database" as const) : ("defaults" as const),
+    persistence: "available" as const,
+  };
+}
+
+function metricWithin(value: number | null | undefined, min: unknown, max: unknown) {
+  if (value === null || value === undefined) return true;
+
+  const lower = Number(min);
+  const upper = Number(max);
+
+  if (Number.isFinite(lower) && value < lower) return false;
+  if (Number.isFinite(upper) && value > upper) return false;
+
+  return true;
+}
+
+function resolvePartnerCommercialTier(
+  config: PartnerTierConfig,
+  module: "careport" | "medreach",
+  partnerType: "pharmacy" | "lab",
+  metrics: { skuCount?: number | null; testCount?: number | null; storageMb?: number | null; monthlyOrders?: number | null },
+) {
+  const candidates = (config.tiers || []).filter((tier) => tier.enabled && tier.module === module && tier.partnerType === partnerType);
+
+  const matched =
+    candidates.find((tier) => {
+      const rules = tier.autoAssignRules || {};
+
+      return (
+        metricWithin(metrics.skuCount, rules.minSkuCount, rules.maxSkuCount) &&
+        metricWithin(metrics.testCount, rules.minTestCount, rules.maxTestCount) &&
+        metricWithin(metrics.storageMb, rules.minStorageMb, rules.maxStorageMb) &&
+        metricWithin(metrics.monthlyOrders, rules.minMonthlyOrders, rules.maxMonthlyOrders)
+      );
+    }) ||
+    candidates[0] ||
+    null;
+
+  return {
+    tier: matched,
+    source: matched ? "partner_commercial_tiers" : "commercial_policy_default",
+    metrics,
+  };
+}
+
+function tierSnapshot(match: ReturnType<typeof resolvePartnerCommercialTier>) {
+  const tier = match.tier;
+
+  if (!tier) {
+    return {
+      source: match.source,
+      tierId: null,
+      tierName: null,
+      metrics: match.metrics,
+    };
+  }
+
+  return {
+    source: match.source,
+    tierId: tier.id,
+    tierName: tier.name,
+    monthlyPlatformFeeCents: asInt(tier.monthlyPlatformFeeCents, 0),
+    catalogueHostingFeeCents: asInt(tier.catalogueHostingFeeCents, 0),
+    onboardingFeeCents: asInt(tier.onboardingFeeCents, 0),
+    transactionCommissionBps: asInt(tier.transactionCommissionBps, 0),
+    paymentProviderFeeBps: asInt(tier.paymentProviderFeeBps, 0),
+    paymentProviderFixedFeeCents: asInt(tier.paymentProviderFixedFeeCents, 0),
+    metrics: match.metrics,
+  };
+}
+
 function paymentProviderFee(amountCents: number, policy: MedReachCommercialPolicy) {
   if (amountCents <= 0) return 0;
   return Math.max(0, Math.round((amountCents * policy.paymentProviderFeeBps) / 10000) + policy.paymentProviderFixedFeeCents);
@@ -311,6 +485,7 @@ function resolvePhlebFeeSchedule(phlebProfile: any, policy: MedReachCommercialPo
 async function ensureFinancialSnapshot(req: NextRequest, orderId: string) {
   const orgId = orgIdFromHeaders(req.headers);
   const { policy, source, persistence } = await loadCommercialPolicy(orgId);
+  const partnerTiers = await loadPartnerTierConfig(orgId);
 
   const draw = await (prisma as any).draw.findFirst({
     where: { orderId },
@@ -425,9 +600,27 @@ async function ensureFinancialSnapshot(req: NextRequest, orderId: string) {
     urgentSurchargeCents +
     coldChainSurchargeCents;
 
-  const effectiveCommissionBps = policy.medreachCommissionBps || policy.labCommissionBps;
+  const labTierMatch = resolvePartnerCommercialTier(partnerTiers.config, "medreach", "lab", {
+    monthlyOrders: 1,
+    testCount: null,
+    storageMb: null,
+    skuCount: null,
+  });
+  const labTier = labTierMatch.tier;
+  const appliedPartnerTier = tierSnapshot(labTierMatch);
+
+  const effectiveCommissionBps = configuredInt(
+    labTier?.transactionCommissionBps,
+    policy.medreachCommissionBps || policy.labCommissionBps,
+  );
+  const effectivePaymentProviderPolicy = {
+    ...policy,
+    paymentProviderFeeBps: configuredInt(labTier?.paymentProviderFeeBps, policy.paymentProviderFeeBps),
+    paymentProviderFixedFeeCents: configuredInt(labTier?.paymentProviderFixedFeeCents, policy.paymentProviderFixedFeeCents),
+  };
+
   const commissionCents = commission(labGrossCents, effectiveCommissionBps);
-  const providerFeeCents = paymentProviderFee(grossCents, policy);
+  const providerFeeCents = paymentProviderFee(grossCents, effectivePaymentProviderPolicy);
 
   const platformFeeCents =
     commissionCents + (policy.passPaymentProviderFeeToLab ? 0 : providerFeeCents);
@@ -467,6 +660,13 @@ async function ensureFinancialSnapshot(req: NextRequest, orderId: string) {
     drawId: draw.id,
     labId,
     phlebId,
+    partnerTierSource: appliedPartnerTier.source,
+    partnerTierId: appliedPartnerTier.tierId,
+    partnerTierName: appliedPartnerTier.tierName,
+    partnerTier: appliedPartnerTier,
+    partnerTierConfigSource: partnerTiers.source,
+    effectivePaymentProviderFeeBps: effectivePaymentProviderPolicy.paymentProviderFeeBps,
+    effectivePaymentProviderFixedFeeCents: effectivePaymentProviderPolicy.paymentProviderFixedFeeCents,
     phlebFeeSource: phlebFee.source,
     phlebFeeStatus: phlebFee.status,
     phlebFeePhlebProfileId: phlebFee.phlebProfileId,
