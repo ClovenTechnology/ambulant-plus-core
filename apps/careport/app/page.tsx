@@ -1,94 +1,120 @@
-// apps/careport/app/page.tsx
-import { ArrowRightIcon, BuildingStorefrontIcon, ShieldCheckIcon, TruckIcon } from '@heroicons/react/24/outline';
+import Link from "next/link";
 
-const tiles = [
+const roleCards = [
   {
-    href: '/pharmacy',
-    title: 'Pharmacy workspace',
-    description: 'Review CarePort invitations, respond with availability, manage dispensing, and prepare pickup or delivery orders.',
-    icon: BuildingStorefrontIcon,
-    tone: 'text-teal-700 bg-teal-50 ring-teal-100',
-    cta: 'Open pharmacy workspace',
+    title: "Pharmacy operations",
+    description:
+      "Manage pharmacy readiness, inventory, offers, active orders, fulfilment handover and settlement visibility.",
+    href: "/pharmacy",
+    cta: "Open pharmacy workspace",
+    items: ["Inventory", "Offers", "Orders", "Payouts"],
   },
   {
-    href: '/rider',
-    title: 'Rider console',
-    description: 'View assigned jobs, update delivery milestones, and keep patients informed with live delivery state.',
-    icon: TruckIcon,
-    tone: 'text-indigo-700 bg-indigo-50 ring-indigo-100',
-    cta: 'Open rider jobs',
+    title: "Rider operations",
+    description:
+      "Track rider KYI, assigned jobs, pharmacy pickup, medicine handover, proof of delivery and payout readiness.",
+    href: "/rider",
+    cta: "Open rider workspace",
+    items: ["KYI", "Jobs", "Pickup", "Delivery"],
   },
   {
-    href: '/pharmacy/offers',
-    title: 'Incoming pharmacy requests',
-    description: 'Respond to patient eRx requests only when stock coverage and fulfilment mode are clinically sensible.',
-    icon: ShieldCheckIcon,
-    tone: 'text-emerald-700 bg-emerald-50 ring-emerald-100',
-    cta: 'Review invitations',
+    title: "Admin command",
+    description:
+      "Review CarePort configuration, partner governance, finance, pharmacy/rider oversight and operational queues.",
+    href: "/admin",
+    cta: "Open admin tools",
+    items: ["Config", "Finance", "Orders", "Partners"],
   },
 ];
 
-export default function CarePortHome() {
+const operatingPrinciples = [
+  "Applications are reviewed before partners go live.",
+  "Only approved pharmacies should fulfil CarePort orders.",
+  "Only approved riders should receive medicine delivery jobs.",
+  "Payout readiness remains separate from application submission.",
+];
+
+export default function CarePortHomePage() {
   return (
-    <main className="mx-auto max-w-6xl space-y-8 px-4 py-8">
-      <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-teal-950 text-white shadow-xl">
-        <div className="p-6 md:p-8">
-          <div className="inline-flex rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-teal-50">
-            CarePort Operations
-          </div>
-          <h1 className="mt-4 max-w-3xl text-3xl font-semibold tracking-tight md:text-4xl">
-            Pharmacy and last-mile fulfilment for contactless medicine.
-          </h1>
-          <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-200">
-            This operational app is for pharmacies, riders, and CarePort operations teams. Patient order creation and marketplace choice happen in the patient app; this workspace handles verified pharmacy responses, stock availability, fulfilment, and dispatch.
-          </p>
-        </div>
-      </section>
+    <section data-a4p1="careport-shell-home" className="space-y-6">
+      <div className="overflow-hidden rounded-3xl border border-white/10 bg-white shadow-xl">
+        <div className="grid gap-0 lg:grid-cols-[1.15fr_0.85fr]">
+          <div className="space-y-6 p-6 sm:p-8 lg:p-10">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.28em] text-emerald-700">
+                Ambulant+ CarePort
+              </p>
+              <h1 className="mt-3 max-w-3xl text-3xl font-black tracking-tight text-slate-950 sm:text-5xl">
+                Pharmacy fulfilment and rider delivery operations.
+              </h1>
+              <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600">
+                CarePort coordinates pharmacy inventory, eRx fulfilment, OTC marketplace orders,
+                rider pickup, delivery status, settlement readiness and operational governance.
+              </p>
+            </div>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        {tiles.map((tile) => {
-          const Icon = tile.icon;
-          return (
-            <a
-              key={tile.href}
-              href={tile.href}
-              className="group rounded-3xl border border-slate-200 bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-teal-500"
-            >
-              <div className={`inline-flex rounded-2xl p-3 ring-1 ${tile.tone}`}>
-                <Icon className="h-6 w-6" />
-              </div>
-              <h2 className="mt-4 text-base font-semibold text-slate-950">{tile.title}</h2>
-              <p className="mt-2 min-h-[72px] text-sm leading-6 text-slate-600">{tile.description}</p>
-              <div className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-teal-700">
-                {tile.cta}
-                <ArrowRightIcon className="h-4 w-4 transition group-hover:translate-x-1" />
-              </div>
-            </a>
-          );
-        })}
-      </section>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/overview"
+                className="rounded-2xl bg-emerald-700 px-5 py-3 text-center text-sm font-bold text-white shadow-sm transition hover:bg-emerald-800"
+              >
+                View CarePort overview
+              </Link>
+              <Link
+                href="/pharmacy"
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-center text-sm font-bold text-slate-800 transition hover:bg-slate-50"
+              >
+                Pharmacy workspace
+              </Link>
+              <Link
+                href="/rider"
+                className="rounded-2xl border border-slate-200 px-5 py-3 text-center text-sm font-bold text-slate-800 transition hover:bg-slate-50"
+              >
+                Rider workspace
+              </Link>
+            </div>
+          </div>
 
-      <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Fulfilment policy</h2>
-        <div className="mt-4 grid gap-3 md:grid-cols-4">
-          <div className="rounded-2xl bg-slate-50 p-4">
-            <div className="text-xl font-semibold text-slate-950">10 km</div>
-            <div className="mt-1 text-xs text-slate-500">Initial invitation radius</div>
-          </div>
-          <div className="rounded-2xl bg-slate-50 p-4">
-            <div className="text-xl font-semibold text-slate-950">3 min</div>
-            <div className="mt-1 text-xs text-slate-500">Expansion interval</div>
-          </div>
-          <div className="rounded-2xl bg-slate-50 p-4">
-            <div className="text-xl font-semibold text-slate-950">60%+</div>
-            <div className="mt-1 text-xs text-slate-500">Minimum stock coverage</div>
-          </div>
-          <div className="rounded-2xl bg-slate-50 p-4">
-            <div className="text-xl font-semibold text-slate-950">Patient</div>
-            <div className="mt-1 text-xs text-slate-500">Makes final pharmacy choice</div>
+          <div className="bg-slate-950 p-6 text-white sm:p-8 lg:p-10">
+            <div className="rounded-3xl border border-white/10 bg-white/5 p-5">
+              <p className="text-xs font-bold uppercase tracking-[0.24em] text-emerald-200">
+                Partner activation rule
+              </p>
+              <h2 className="mt-3 text-2xl font-black">Reviewed before live operations</h2>
+              <div className="mt-5 space-y-3">
+                {operatingPrinciples.map((item) => (
+                  <div key={item} className="rounded-2xl border border-white/10 bg-white/5 p-3 text-sm text-slate-100">
+                    {item}
+                  </div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
-      </section>
-    </main>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-3">
+        {roleCards.map((card) => (
+          <Link
+            key={card.href}
+            href={card.href}
+            className="group rounded-3xl border border-slate-200 bg-white p-6 shadow-sm transition hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-lg"
+          >
+            <h2 className="text-lg font-black text-slate-950">{card.title}</h2>
+            <p className="mt-3 text-sm leading-6 text-slate-600">{card.description}</p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              {card.items.map((item) => (
+                <span key={item} className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
+                  {item}
+                </span>
+              ))}
+            </div>
+            <div className="mt-6 text-sm font-black text-emerald-700 group-hover:text-emerald-800">
+              {card.cta} →
+            </div>
+          </Link>
+        ))}
+      </div>
+    </section>
   );
 }
