@@ -24,10 +24,10 @@ export default function RiderHomePage() {
           <div className="mt-4 text-sm font-medium text-indigo-700">Open jobs →</div>
         </Link>
 
-        <Link href="/pharmacy" className="rounded-3xl border bg-white p-5 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/30">
-          <div className="text-sm font-semibold text-slate-950">Pharmacy workspace</div>
+        <Link href="/rider/pharmacy" className="rounded-3xl border bg-white p-5 shadow-sm transition hover:border-emerald-200 hover:bg-emerald-50/30">
+          <div className="text-sm font-semibold text-slate-950">Pharmacy pickup directory</div>
           <p className="mt-2 text-sm text-slate-600">Switch to pharmacy operations if you are pharmacy staff.</p>
-          <div className="mt-4 text-sm font-medium text-emerald-700">Open pharmacy →</div>
+          <div className="mt-4 text-sm font-medium text-emerald-700">Open pickup directory →</div>
         </Link>
       </section>
     </main>

@@ -11,9 +11,6 @@ export const metadata: Metadata = {
 const navItems = [
   { href: "/", label: "Home" },
   { href: "/overview", label: "Overview" },
-  { href: "/pharmacy", label: "Pharmacy" },
-  { href: "/rider", label: "Rider" },
-  { href: "/admin", label: "Admin" },
 ];
 
 export default function RootLayout({ children }: { children: ReactNode }) {

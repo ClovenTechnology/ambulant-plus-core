@@ -22,9 +22,6 @@ export default function RootLayout({ children }: { children: ReactNode }) {
               <a href="/" className="px-3 py-1 rounded-full border bg-white hover:bg-gray-50">
                 Overview
               </a>
-              <a href="/phleb" className="px-3 py-1 rounded-full border bg-white hover:bg-gray-50">
-                Phleb jobs
-              </a>
             </nav>
           </header>
           {children}
