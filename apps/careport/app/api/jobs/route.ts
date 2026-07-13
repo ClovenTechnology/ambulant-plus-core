@@ -8,9 +8,9 @@ function disabled() {
   return NextResponse.json(
     {
       ok: false,
-      error: 'legacy_demo_jobs_route_disabled',
+      error: 'legacy_jobs_route_disabled',
       message:
-        'This legacy demo jobs endpoint has been retired. Use /api/careport/riders/me/jobs for rider jobs or /api/careport/pharmacies/me/orders for pharmacy fulfilment.',
+        'This legacy jobs endpoint has been retired. Use /api/careport/riders/me/jobs for rider jobs or /api/careport/pharmacies/me/orders for pharmacy fulfilment.',
       replacements: {
         riderJobs: '/api/careport/riders/me/jobs',
         pharmacyOrders: '/api/careport/pharmacies/me/orders',

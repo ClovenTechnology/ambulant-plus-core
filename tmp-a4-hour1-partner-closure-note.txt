@@ -1,0 +1,24 @@
+A4-HOUR1 Partner Module Closure Note
+====================================
+
+Scope closed in this sprint:
+- Removed high-confidence visible mock/demo/legacy-demo copy from patient /labs and selected CarePort legacy route/user-facing copy.
+- Left [object Object] safe guards untouched because they are protective sanitizers.
+- Left input placeholders untouched because they are form UX, not production leakage.
+- Left service_not_configured fallback codes untouched because they are environment/proxy guardrails.
+- Left storage-backed upload architecture for A4-P4.
+- Left subscription tier/commercial/fee engines for A4-P5 to A4-P8.
+- Left phleb marketplace/assignment escalation for A4-P9.
+- Final partner handbooks should come after A4-P4 to A4-P9 or should explicitly describe current launch limitations.
+
+Changed files:
+- apps/patient-app/app/labs/page.tsx
+- apps/careport/app/api/jobs/[id]/route.ts
+- apps/careport/app/api/jobs/route.ts
+- apps/careport/app/api/pharmacies/[pharmacyId]/route.ts
+- apps/careport/app/api/timeline/route.ts
+- apps/careport/app/api/jobs/data.ts
+- apps/careport/app/pharmacy/page.tsx
+- apps/careport/app/rider/jobs/page.tsx
+
+A4-HOUR1_NOTE_COMPLETE

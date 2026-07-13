@@ -193,7 +193,7 @@ export default function RiderJobsPage() {
           <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Rider jobs</p>
           <h1 className="text-2xl font-semibold text-slate-950">Assigned CarePort deliveries</h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-600">
-            Update pickup and delivery progress. Location sharing is sent through the gateway, not local demo data.
+            Update pickup and delivery progress. Location sharing is sent through the gateway, not local sample data.
           </p>
         </div>
         <div className="flex flex-wrap gap-2 text-sm">

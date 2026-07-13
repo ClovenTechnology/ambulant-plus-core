@@ -8,10 +8,10 @@ function disabled(jobId: string) {
   return NextResponse.json(
     {
       ok: false,
-      error: 'legacy_demo_job_route_disabled',
+      error: 'legacy_job_route_disabled',
       jobId,
       message:
-        'This legacy demo job endpoint has been retired. Use /api/careport/riders/me/jobs/[orderId] for rider jobs or /api/careport/pharmacies/me/orders/[orderId] for pharmacy fulfilment.',
+        'This legacy job endpoint has been retired. Use /api/careport/riders/me/jobs/[orderId] for rider jobs or /api/careport/pharmacies/me/orders/[orderId] for pharmacy fulfilment.',
       replacements: {
         riderJob: `/api/careport/riders/me/jobs/${encodeURIComponent(jobId)}`,
         pharmacyOrder: `/api/careport/pharmacies/me/orders/${encodeURIComponent(jobId)}`,

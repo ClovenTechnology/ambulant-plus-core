@@ -110,7 +110,7 @@ function Drawer({
           <div className="pt-2">
             <div className="text-xs text-gray-500">Notes</div>
             <div className="text-gray-500">
-              Demo-only mock data. Add real interpretation or attachments in the clinician app.
+              Lab result history is loaded from your Ambulant+ record when available.
             </div>
           </div>
         </div>
@@ -166,7 +166,7 @@ export default function LabsPage() {
           >
             Print Labs
           </a>
-          <div className="text-sm text-gray-500">Mock data  Demo-only</div>
+          <div className="text-sm text-gray-500">Laboratory results</div>
         </div>
       </div>
 

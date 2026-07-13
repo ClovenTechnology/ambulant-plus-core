@@ -10,10 +10,10 @@ export async function GET(_req: NextRequest, { params }: { params: { pharmacyId:
   return NextResponse.json(
     {
       ok: false,
-      error: 'legacy_demo_pharmacy_route_disabled',
+      error: 'legacy_pharmacy_route_disabled',
       pharmacyId,
       message:
-        'This legacy demo pharmacy endpoint has been retired. Use gateway-backed CarePort pharmacy routes instead.',
+        'This legacy pharmacy endpoint has been retired. Use gateway-backed CarePort pharmacy routes instead.',
       replacements: {
         currentPharmacyInventory: '/api/careport/pharmacies/me/inventory',
         currentPharmacyOffers: '/api/careport/pharmacies/me/offers',

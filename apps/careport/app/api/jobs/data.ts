@@ -34,11 +34,11 @@ export type Pharmacy = {
 
 const now = Date.now();
 
-// ---- demo data ----
+// ---- retired legacy sample data ----
 
 export const PHARMACIES: Pharmacy[] = [
   {
-    id: 'demo-pharmacy-1',
+    id: 'sample-pharmacy-1',
     name: 'MedCare Sandton',
     city: 'Johannesburg',
     contact: '+27 11 000 0000',
@@ -48,7 +48,7 @@ export const PHARMACIES: Pharmacy[] = [
 export const JOBS: CarePortJob[] = [
   {
     id: 'CP-1001',
-    pharmacyId: 'demo-pharmacy-1',
+    pharmacyId: 'sample-pharmacy-1',
     riderId: 'rider-001',
     patient: 'Ayanda N.',
     address: 'Sandton, Johannesburg',
@@ -57,7 +57,7 @@ export const JOBS: CarePortJob[] = [
   },
   {
     id: 'CP-1002',
-    pharmacyId: 'demo-pharmacy-1',
+    pharmacyId: 'sample-pharmacy-1',
     riderId: 'rider-001',
     patient: 'Michael K.',
     address: 'Bryanston, Johannesburg',

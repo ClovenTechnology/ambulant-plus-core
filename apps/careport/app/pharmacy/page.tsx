@@ -143,7 +143,7 @@ export default function PharmacyDashboardPage() {
               {data?.pharmacy?.name || 'Your pharmacy workspace'}
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
-              Review CarePort requests, respond with real stock availability, and keep patient fulfilment transparent. No demo orders are shown here; if the gateway cannot resolve the pharmacy, the page will tell you directly.
+              Review CarePort requests, respond with real stock availability, and keep patient fulfilment transparent. Only gateway-backed orders are shown here; if the gateway cannot resolve the pharmacy, the page will tell you directly.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">

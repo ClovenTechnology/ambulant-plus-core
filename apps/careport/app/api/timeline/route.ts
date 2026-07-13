@@ -11,7 +11,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(
     {
       ok: false,
-      error: 'legacy_demo_timeline_route_disabled',
+      error: 'legacy_timeline_route_disabled',
       orderId: orderId || null,
       message:
         'This legacy in-memory timeline endpoint has been retired. Use the api-gateway CarePort timeline/order tracking surfaces instead.',
