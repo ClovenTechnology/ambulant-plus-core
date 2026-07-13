@@ -1,4 +1,4 @@
-"use client";
+'use client';
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
@@ -47,6 +47,7 @@ function humanErrorMessage(value: unknown, fallback = "Unable to complete this r
 
   return fallback;
 }
+
 
 function money(cents: number, currency = "ZAR") {
   return `${currency} ${(Number(cents || 0) / 100).toFixed(2)}`;

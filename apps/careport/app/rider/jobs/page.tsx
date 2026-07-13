@@ -1,3 +1,9 @@
+'use client';
+
+//apps/careport/app/rider/jobs/page.tsx
+import Link from 'next/link';
+import { useEffect, useMemo, useState } from 'react';
+
 function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
   if (typeof value === "string") {
     const text = value.trim();
@@ -43,11 +49,6 @@ function humanErrorMessage(value: unknown, fallback = "Unable to complete this r
   return fallback;
 }
 
-//apps/careport/app/rider/jobs/page.tsx
-'use client';
-
-import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
 
 type Job = {
   id: string;

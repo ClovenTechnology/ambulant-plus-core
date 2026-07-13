@@ -1,3 +1,14 @@
+'use client';
+
+// apps/medreach/app/lab/[labId]/orders/[orderId]/result/page.tsx
+import { useEffect, useMemo, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import {
+  getStatusLabel,
+  getStatusClasses,
+  type JobStatus,
+} from '@shared/fsm';
+
 function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
   if (typeof value === "string") {
     const text = value.trim();
@@ -43,16 +54,6 @@ function humanErrorMessage(value: unknown, fallback = "Unable to complete this r
   return fallback;
 }
 
-// apps/medreach/app/lab/[labId]/orders/[orderId]/result/page.tsx
-'use client';
-
-import { useEffect, useMemo, useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
-import {
-  getStatusLabel,
-  getStatusClasses,
-  type JobStatus,
-} from '@shared/fsm';
 
 type LabTestResultFlag =
   | 'LOW'

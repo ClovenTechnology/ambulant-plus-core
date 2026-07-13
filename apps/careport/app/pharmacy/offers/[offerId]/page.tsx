@@ -1,3 +1,10 @@
+'use client';
+
+// apps/careport/app/pharmacy/offers/[offerId]/page.tsx
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
+
 function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
   if (typeof value === "string") {
     const text = value.trim();
@@ -43,12 +50,6 @@ function humanErrorMessage(value: unknown, fallback = "Unable to complete this r
   return fallback;
 }
 
-// apps/careport/app/pharmacy/offers/[offerId]/page.tsx
-'use client';
-
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
 
 type StockFlag = 'AVAILABLE' | 'PARTIAL' | 'UNAVAILABLE';
 

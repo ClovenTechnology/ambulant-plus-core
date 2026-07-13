@@ -1,3 +1,10 @@
+'use client';
+
+// apps/medreach/app/lab/[labId]/dashboard/page.tsx
+import { useEffect, useState } from 'react';
+import { useParams } from 'next/navigation';
+import Link from 'next/link';
+
 function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
   if (typeof value === "string") {
     const text = value.trim();
@@ -43,12 +50,6 @@ function humanErrorMessage(value: unknown, fallback = "Unable to complete this r
   return fallback;
 }
 
-// apps/medreach/app/lab/[labId]/dashboard/page.tsx
-'use client';
-
-import { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
-import Link from 'next/link';
 
 type MetricsResponse = {
   ok?: boolean;

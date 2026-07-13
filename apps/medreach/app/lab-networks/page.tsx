@@ -47,6 +47,7 @@ function humanErrorMessage(value: unknown, fallback = "Unable to complete this r
   return fallback;
 }
 
+
 type NetworkType =
   | 'INDEPENDENT_GROUP'
   | 'CORPORATE_CHAIN'

@@ -1,3 +1,9 @@
+'use client';
+
+// apps/careport/app/pharmacy/offers/page.tsx
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+
 function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
   if (typeof value === "string") {
     const text = value.trim();
@@ -43,11 +49,6 @@ function humanErrorMessage(value: unknown, fallback = "Unable to complete this r
   return fallback;
 }
 
-// apps/careport/app/pharmacy/offers/page.tsx
-'use client';
-
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
 
 type Offer = {
   offerId: string;

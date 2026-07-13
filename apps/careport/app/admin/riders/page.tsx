@@ -48,6 +48,7 @@ function humanErrorMessage(value: unknown, fallback = "Unable to complete this r
   return fallback;
 }
 
+
 type Rider = {
   userId: string;
   country?: string | null;
