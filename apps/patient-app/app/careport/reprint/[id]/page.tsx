@@ -9,7 +9,7 @@ export default function ReprintUnavailablePage() {
   const id = String(params?.id || '').trim();
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8">
+    <main data-p-ui="patient-careport-reprint-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-8">
       <section className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           eRx reprint is not enabled yet. This is intentional: CarePort must only reprint from the production document

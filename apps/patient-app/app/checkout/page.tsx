@@ -127,7 +127,7 @@ function CheckoutPageContent() {
 
   if (!id) {
     return (
-      <main className="p-6 max-w-4xl mx-auto">
+      <main data-p-ui="patient-checkout-page" className="min-w-0 overflow-x-clip p-6 max-w-4xl mx-auto">
         <div className="text-rose-600">Missing appointment id.</div>
         <Link href="/appointments" className="text-sm underline block mt-2">
           ← Back to appointments
@@ -137,7 +137,7 @@ function CheckoutPageContent() {
   }
 
   return (
-    <main className="p-6 max-w-5xl mx-auto space-y-4">
+    <main data-p-ui="patient-checkout-page" className="min-w-0 overflow-x-clip p-6 max-w-5xl mx-auto space-y-4">
       <h1 className="text-2xl font-semibold">Checkout</h1>
 
       {err && <div className="text-rose-600 text-sm">{err}</div>}

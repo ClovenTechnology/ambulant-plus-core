@@ -76,7 +76,7 @@ export default async function SharedMedicalRecordPage({ params }: { params: { to
 
   if (!share.ok) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-10">
+      <main data-p-ui="patient-shared-medical-records-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-10">
         <div className="mx-auto max-w-3xl rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="text-sm font-black uppercase tracking-wide text-rose-700">Link unavailable</div>
           <h1 className="mt-2 text-2xl font-black text-slate-950">This medical record link is no longer available.</h1>
@@ -140,7 +140,7 @@ export default async function SharedMedicalRecordPage({ params }: { params: { to
   });
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-8">
+    <main data-p-ui="patient-shared-medical-records-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-8">
       <div className="mx-auto max-w-5xl space-y-4">
         <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">

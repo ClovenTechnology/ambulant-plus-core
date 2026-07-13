@@ -71,7 +71,7 @@ export default function OrderDetailPage({ params }: { params: { id: string } }) 
 
   const currency = useMemo(() => order?.currency || 'ZAR', [order?.currency]);
 
-  if (busy) return <div className="container mx-auto px-4 py-6 text-sm text-gray-600">Loading…</div>;
+  if (busy) return <div data-p-ui="patient-shop-order-detail-page" className="min-w-0 overflow-x-clip container mx-auto px-4 py-6 text-sm text-gray-600">Loading…</div>;
   if (error) return <div className="container mx-auto px-4 py-6 text-sm text-red-600">{error}</div>;
   if (!order) return null;
 

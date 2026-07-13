@@ -74,7 +74,7 @@ export default function PhlebJobMobilePage() {
 
   if (loading) {
     return (
-      <main className="min-h-screen flex items-center justify-center text-sm text-gray-500">
+      <main data-p-ui="patient-medreach-mobile-job-page" className="min-w-0 overflow-x-clip min-h-screen flex items-center justify-center text-sm text-gray-500">
         Loading job…
       </main>
     );
@@ -82,7 +82,7 @@ export default function PhlebJobMobilePage() {
 
   if (!job) {
     return (
-      <main className="min-h-screen flex flex-col items-center justify-center gap-3 text-sm">
+      <main data-p-ui="patient-medreach-mobile-job-page" className="min-w-0 overflow-x-clip min-h-screen flex flex-col items-center justify-center gap-3 text-sm">
         <div className="text-red-500 font-medium">Job not found</div>
         <button
           className="px-4 py-2 rounded bg-indigo-600 text-white"
@@ -98,7 +98,7 @@ export default function PhlebJobMobilePage() {
   const patientName = job.patient || 'Home collection';
 
   return (
-    <main className="min-h-screen max-w-md mx-auto p-4 space-y-4">
+    <main data-p-ui="patient-medreach-mobile-job-page" className="min-w-0 overflow-x-clip min-h-screen max-w-md mx-auto p-4 space-y-4">
       <header className="flex items-center justify-between">
         <div>
           <div className="text-xs text-gray-400">MedReach</div>

@@ -17,7 +17,7 @@ export default function MonitorOverlayDemo() {
   useEffect(() => () => abortRef.current?.abort(), []);
 
   return (
-    <main className="p-6 space-y-4">
+    <main data-p-ui="patient-mycare-devices-monitor-page" className="min-w-0 overflow-x-clip p-6 space-y-4">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Monitor Overlay</h1>
         <Link href="/televisit" className="text-sm underline">Go to Televisit</Link>

@@ -35,7 +35,7 @@ export default function ReportsPrintPage() {
   }, []);
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
+    <main data-p-ui="patient-reports-print-page" className="min-w-0 overflow-x-clip max-w-5xl mx-auto p-6 space-y-6">
       <header className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Print Report</h1>
         <button

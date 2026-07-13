@@ -46,7 +46,7 @@ export default function MedicalAidPlansMarketplacePage() {
   }, [filter, q]);
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-8 text-slate-100 md:px-8">
+    <main data-p-ui="patient-medical-aid-plans-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-950 px-4 py-8 text-slate-100 md:px-8">
       <div className="mx-auto max-w-6xl space-y-6">
         <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
           <div>

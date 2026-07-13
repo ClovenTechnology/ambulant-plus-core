@@ -119,7 +119,7 @@ function WellnessPageContent() {
   }, [tab]);
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main data-p-ui="patient-wellness-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50">
       <div className="mx-auto w-full max-w-7xl space-y-6 px-4 py-6">
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-start justify-between gap-4">

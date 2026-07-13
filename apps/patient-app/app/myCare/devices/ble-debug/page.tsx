@@ -102,7 +102,7 @@ export default function Page() {
   };
 
   return (
-    <main className="p-4 text-xs">
+    <main data-p-ui="patient-mycare-ble-debug-page" className="min-w-0 overflow-x-clip p-4 text-xs">
       <button className="border rounded px-3 py-1" onClick={scan}>
         Scan
       </button>

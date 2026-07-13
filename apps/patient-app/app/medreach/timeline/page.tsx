@@ -103,7 +103,7 @@ const initialId =
   const displayId = activeId || inputValue || initialId;
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-4">
+    <main data-p-ui="patient-medreach-timeline-page" className="min-w-0 overflow-x-clip max-w-3xl mx-auto p-6 space-y-4">
       {/* HEADER */}
       <header className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div>

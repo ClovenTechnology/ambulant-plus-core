@@ -222,7 +222,7 @@ function TimelinePageContent() {
   }, [id]);
 
   return (
-    <main className="mx-auto max-w-4xl space-y-4 p-6">
+    <main data-p-ui="patient-careport-timeline-page" className="min-w-0 overflow-x-clip mx-auto max-w-4xl space-y-4 p-6">
       <header className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-xl font-semibold text-slate-900 md:text-2xl">

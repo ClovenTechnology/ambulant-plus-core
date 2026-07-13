@@ -15,7 +15,7 @@ const DEVICE_CHIPS = [
 
 export default function IoMTPage() {
   return (
-    <main className="mx-auto max-w-5xl space-y-4 px-3 py-4 md:px-5 md:py-5">
+    <main data-p-ui="patient-iomt-page" className="min-w-0 overflow-x-clip mx-auto max-w-5xl space-y-4 px-3 py-4 md:px-5 md:py-5">
       <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-4 text-white shadow-[0_18px_55px_rgba(15,23,42,0.18)] md:p-5">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.16),transparent_24%),radial-gradient(circle_at_bottom_left,rgba(16,185,129,0.14),transparent_26%)]" />
         <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:24px_24px]" />

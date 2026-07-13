@@ -129,7 +129,7 @@ export default function PatientInsightsPage() {
   }, [items, q, filter]);
 
   return (
-    <main className="p-6 max-w-5xl mx-auto space-y-5">
+    <main data-p-ui="patient-insights-page" className="min-w-0 overflow-x-clip p-6 max-w-5xl mx-auto space-y-5">
       <header className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold">Insights</h1>

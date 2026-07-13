@@ -159,7 +159,7 @@ function ResetPasswordPageContent() {
           : 'bg-emerald-600';
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(900px_circle_at_18%_-10%,rgba(16,185,129,0.16),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(99,102,241,0.14),transparent_55%),linear-gradient(to_bottom,rgba(255,255,255,0.86),rgba(248,250,252,1))]">
+    <main data-p-ui="patient-reset-page" className="min-w-0 overflow-x-clip min-h-screen bg-[radial-gradient(900px_circle_at_18%_-10%,rgba(16,185,129,0.16),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(99,102,241,0.14),transparent_55%),linear-gradient(to_bottom,rgba(255,255,255,0.86),rgba(248,250,252,1))]">
       <div className="mx-auto max-w-2xl px-6 py-12">
         <div className="mx-auto w-full max-w-md">
           <div className="rounded-[28px] border border-slate-200 bg-white/80 p-6 shadow-sm shadow-black/[0.06] backdrop-blur">

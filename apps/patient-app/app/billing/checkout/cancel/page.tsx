@@ -15,7 +15,7 @@ function CheckoutCancelPageContent() {
   const orderId = sp?.get('orderId') || '';
 
   return (
-    <main
+    <main data-p-ui="patient-billing-checkout-cancel-page"
       className={cx(
         'min-h-screen bg-slate-50',
         'bg-[radial-gradient(1000px_circle_at_18%_-12%,rgba(16,185,129,0.18),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(99,102,241,0.16),transparent_55%),radial-gradient(900px_circle_at_55%_105%,rgba(2,132,199,0.12),transparent_52%),linear-gradient(to_bottom,rgba(255,255,255,0.88),rgba(248,250,252,1))]',

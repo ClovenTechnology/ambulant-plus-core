@@ -107,7 +107,7 @@ function DevicesConsoleContent() {
   };
 
   return (
-    <main className="mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
+    <main data-p-ui="patient-mycare-devices-console-page" className="min-w-0 overflow-x-clip mx-auto max-w-4xl space-y-4 p-4 sm:p-6">
       <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Generic device console</p>
         <h1 className="mt-2 text-xl font-semibold text-slate-950">Device console</h1>

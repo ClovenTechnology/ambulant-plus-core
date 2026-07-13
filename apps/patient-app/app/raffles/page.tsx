@@ -349,7 +349,7 @@ function RafflesLandingPageContent() {
 
 export default function RafflesLandingPage() {
   return (
-    <Suspense fallback={<main className="container mx-auto px-4 py-6 text-sm text-gray-600">Loading giveaways…</main>}>
+    <Suspense fallback={<main data-p-ui="patient-raffles-page" className="min-w-0 overflow-x-clip container mx-auto px-4 py-6 text-sm text-gray-600">Loading giveaways…</main>}>
       <RafflesLandingPageContent />
     </Suspense>
   );

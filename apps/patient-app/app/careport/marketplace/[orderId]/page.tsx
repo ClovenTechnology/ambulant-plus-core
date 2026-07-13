@@ -113,7 +113,7 @@ export default function Page({ params, searchParams }: PageProps) {
     clean(searchParams?.trxref, 180);
   const message = clean(searchParams?.message || searchParams?.status, 240);
 
-  if (!orderId) return <div className="p-6">Missing orderId.</div>;
+  if (!orderId) return <div data-p-ui="patient-careport-marketplace-order-page" className="min-w-0 overflow-x-clip p-6">Missing orderId.</div>;
 
   return (
     <>

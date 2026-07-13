@@ -226,7 +226,7 @@ export default function SettingsPage() {
 
   if (!form) {
     return (
-      <main className="min-h-screen bg-slate-50 p-6">
+      <main data-p-ui="patient-settings-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 p-6">
         <div className="mx-auto max-w-4xl rounded-[30px] border border-white bg-white/80 p-6 shadow-sm">
           Loading...
         </div>
@@ -235,7 +235,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50 bg-[radial-gradient(900px_circle_at_15%_-10%,rgba(20,184,166,0.16),transparent_55%),linear-gradient(to_bottom,#ffffff,#f8fafc)] p-6">
+    <main data-p-ui="patient-settings-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 bg-[radial-gradient(900px_circle_at_15%_-10%,rgba(20,184,166,0.16),transparent_55%),linear-gradient(to_bottom,#ffffff,#f8fafc)] p-6">
       <div className="mx-auto grid max-w-6xl gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <section className="rounded-[34px] border border-white/80 bg-white/85 p-7 shadow-xl shadow-teal-900/[0.06] backdrop-blur">
           <div className="inline-flex items-center gap-2 rounded-full border border-teal-100 bg-teal-50 px-3 py-1 text-xs font-black uppercase tracking-[0.16em] text-teal-700">

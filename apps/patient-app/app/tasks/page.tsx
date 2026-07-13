@@ -58,7 +58,7 @@ export default function TasksPage() {
   }, [tasks]);
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-6">
+    <main data-p-ui="patient-tasks-page" className="min-w-0 overflow-x-clip max-w-3xl mx-auto p-6 space-y-6">
       <h1 className="text-2xl font-bold">Tasks</h1>
 
       {/* Add form */}

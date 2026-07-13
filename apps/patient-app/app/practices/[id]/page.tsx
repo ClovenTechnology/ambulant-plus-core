@@ -350,7 +350,7 @@ export default function PracticePage({ params }: { params: { id: string } }) {
 
   if (busy && !practice) {
     return (
-      <main className="p-6 max-w-5xl mx-auto">
+      <main data-p-ui="patient-practice-detail-page" className="min-w-0 overflow-x-clip p-6 max-w-5xl mx-auto">
         <div className="rounded-2xl border bg-white p-5 text-sm text-gray-600">
           Loading practice…
         </div>
@@ -360,7 +360,7 @@ export default function PracticePage({ params }: { params: { id: string } }) {
 
   if (!practice) {
     return (
-      <main className="p-6 max-w-5xl mx-auto">
+      <main data-p-ui="patient-practice-detail-page" className="min-w-0 overflow-x-clip p-6 max-w-5xl mx-auto">
         <div className="text-rose-600">{err ?? 'Practice not found.'}</div>
         <Link href="/practices" className="text-sm underline block mt-2">
           ← Back to practices
@@ -373,7 +373,7 @@ export default function PracticePage({ params }: { params: { id: string } }) {
   const lastEncounter = practice.lastEncounterAt ?? encounters[0]?.startedAt ?? null;
 
   return (
-    <main className="p-6 max-w-5xl mx-auto space-y-8">
+    <main data-p-ui="patient-practice-detail-page" className="min-w-0 overflow-x-clip p-6 max-w-5xl mx-auto space-y-8">
       <header className="flex items-center justify-between">
         <button
           onClick={() => router.back()}

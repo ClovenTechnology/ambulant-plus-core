@@ -71,7 +71,7 @@ export default function DeviceDetails({ params }: { params: { id: string } }) {
   };
 
   return (
-    <main className="p-6 space-y-4 max-w-5xl mx-auto">
+    <main data-p-ui="patient-device-detail-page" className="min-w-0 overflow-x-clip p-6 space-y-4 max-w-5xl mx-auto">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">My Device</h1>
         <Link href="/devices" className="text-sm underline">← Back</Link>

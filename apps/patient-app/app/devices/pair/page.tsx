@@ -72,7 +72,7 @@ export default function PairDevicePage() {
   }
 
   return (
-    <main className="p-4 md:p-6 space-y-4">
+    <main data-p-ui="patient-devices-pair-page" className="min-w-0 overflow-x-clip p-4 md:p-6 space-y-4">
       <header className="flex items-center justify-between">
         <h1 className="text-lg font-semibold">Pair a Device</h1>
       </header>

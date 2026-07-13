@@ -60,7 +60,7 @@ export default function AdminCliniciansPage() {
   }
 
   return (
-    <main className="p-6 max-w-5xl mx-auto">
+    <main data-p-ui="patient-admin-clinicians-page" className="min-w-0 overflow-x-clip p-6 max-w-5xl mx-auto">
       <h1 className="text-2xl font-semibold mb-4">Admin — Clinicians</h1>
 
       <div className="mb-4 flex gap-2 items-center">
