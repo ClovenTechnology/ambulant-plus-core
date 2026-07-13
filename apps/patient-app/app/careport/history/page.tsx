@@ -88,6 +88,73 @@ function normalizeItems(payload: any): HistoryItem[] {
     .filter((x: HistoryItem) => x.id);
 }
 
+
+function partnerText(value: unknown) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text && text !== '[object Object]' ? text : '';
+}
+
+function partnerInitials(value: string, fallback: string) {
+  const parts = value
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return fallback;
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
+}
+
+function PartnerIdentityCard({
+  kind,
+  name,
+  secondary,
+  imageUrl,
+  credential,
+  fallback,
+}: {
+  kind: 'pharmacy' | 'rider';
+  name?: string | null;
+  secondary?: string | null;
+  imageUrl?: string | null;
+  credential?: string | null;
+  fallback: string;
+}) {
+  const displayName = partnerText(name) || fallback;
+  const secondaryText = partnerText(secondary);
+  const credentialText = partnerText(credential);
+  const safeImageUrl = partnerText(imageUrl);
+
+  return (
+    <div data-a4p3="careport-history-partner-identity" className="flex min-w-0 items-start gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2">
+      {safeImageUrl ? (
+        <img
+          src={safeImageUrl}
+          alt={`${displayName} ${kind === 'pharmacy' ? 'logo' : 'photo'}`}
+          className="h-10 w-10 shrink-0 rounded-2xl border border-slate-200 object-cover"
+        />
+      ) : (
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-xs font-black text-emerald-800">
+          {partnerInitials(displayName, kind === 'pharmacy' ? 'Rx' : 'RD')}
+        </div>
+      )}
+
+      <div className="min-w-0">
+        <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+          {kind === 'pharmacy' ? 'Pharmacy' : 'Rider'}
+        </div>
+        <div className="truncate text-sm font-bold text-slate-950">{displayName}</div>
+        {secondaryText ? <div className="truncate text-xs text-slate-500">{secondaryText}</div> : null}
+        {credentialText ? <div className="mt-1 text-[11px] font-semibold text-slate-500">{credentialText}</div> : null}
+      </div>
+    </div>
+  );
+}
+
 export default function HistoryPage({ searchParams }: HistoryPageProps) {
   const encIdFilter =
     (searchParams?.encId as string | undefined) ||
@@ -244,8 +311,24 @@ export default function HistoryPage({ searchParams }: HistoryPageProps) {
                       <div className="mt-2 grid gap-1 text-sm text-slate-600 sm:grid-cols-2">
                         <div>Created: {formatWhen(it.createdAt)}</div>
                         <div>Completed: {formatWhen(it.deliveredAt)}</div>
-                        <div>Pharmacy: {it.pharmacyName || '—'}</div>
-                        <div>Rider: {it.riderName || '—'}</div>
+                        <div className="grid gap-2 sm:grid-cols-2">
+                      <PartnerIdentityCard
+                        kind="pharmacy"
+                        name={it.pharmacyTradingName || it.pharmacyName}
+                        secondary={it.pharmacyRegisteredName}
+                        imageUrl={it.pharmacyLogoUrl}
+                        credential={it.pharmacySapcNumber ? `SAPC/licence ${it.pharmacySapcNumber}` : null}
+                        fallback="Pharmacy pending"
+                      />
+                      <PartnerIdentityCard
+                        kind="rider"
+                        name={it.riderName}
+                        secondary={it.riderVehicle}
+                        imageUrl={it.riderAvatarUrl}
+                        credential={it.riderRegPlate ? `Vehicle reg ${it.riderRegPlate}` : null}
+                        fallback="Rider pending"
+                      />
+                    </div>
                         <div>Total: {money(it.total, it.currency || 'ZAR')}</div>
                         <div>Payment: {it.paymentMethod || '—'}</div>
                       </div>
