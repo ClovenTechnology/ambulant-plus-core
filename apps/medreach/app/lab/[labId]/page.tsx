@@ -1,6 +1,6 @@
-// apps/medreach/app/lab/[labId]/page.tsx
 'use client';
 
+// apps/medreach/app/lab/[labId]/page.tsx
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
