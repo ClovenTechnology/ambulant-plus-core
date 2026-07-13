@@ -1,0 +1,36 @@
+A4-HOUR2 Final partner launch-blocker smoke
+===========================================
+
+Target file presence:
+FOUND	apps/patient-app/app/labs/page.tsx
+FOUND	apps/patient-app/app/careport/marketplace/[orderId]/ui.tsx
+FOUND	apps/patient-app/app/careport/history/page.tsx
+FOUND	apps/patient-app/app/careport/track/page.tsx
+FOUND	apps/patient-app/app/medreach/track/page.tsx
+FOUND	apps/careport/app/pharmacy/page.tsx
+FOUND	apps/careport/app/rider/jobs/page.tsx
+FOUND	apps/careport/app/api/jobs/[id]/route.ts
+FOUND	apps/careport/app/api/jobs/route.ts
+FOUND	apps/careport/app/api/pharmacies/[pharmacyId]/route.ts
+FOUND	apps/careport/app/api/timeline/route.ts
+
+Required identity markers:
+PASS	apps/patient-app/app/careport/marketplace/[orderId]/ui.tsx	data-a4p3="careport-pharmacy-identity"
+PASS	apps/patient-app/app/careport/history/page.tsx	data-a4p3="careport-history-partner-identity"
+PASS	apps/patient-app/app/careport/track/page.tsx	data-a4p3="careport-tracking-partner-identity"
+PASS	apps/patient-app/app/medreach/track/page.tsx	data-a4p3="medreach-tracking-partner-identity"
+
+Blocked visible copy scan:
+PASS	No blocked visible launch-copy markers found in focused partner files.
+
+Deferred backlog acknowledged:
+- Storage-backed upload architecture remains A4-P4.
+- Subscription tiers remain A4-P5.
+- MedReach commercial policy remains A4-P6.
+- Phleb call-out/service fee settings remain A4-P7.
+- Specimen transport pricing remains A4-P8.
+- Phleb marketplace/assignment escalation remains A4-P9.
+- Final partner handbooks remain A4-P10.
+- Patient-app mobile/sidebar/world-class polish begins after partner launch-blocker smoke.
+
+A4-HOUR2_SMOKE_COMPLETE
