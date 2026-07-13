@@ -11,6 +11,7 @@ import {
   Box,
   Building2,
   Calendar,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
@@ -35,6 +36,7 @@ import {
   UserPlus,
   Users,
   Video,
+  X,
 } from 'lucide-react';
 
 type Item = {
@@ -49,6 +51,12 @@ type Group = {
   title: string;
   icon: React.ComponentType<{ className?: string }>;
   items: Item[];
+};
+
+type SidebarProps = {
+  variant?: 'desktop' | 'mobile';
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 };
 
 const CORE: Item[] = [
@@ -126,6 +134,14 @@ const GROUPS: Group[] = [
   },
 ];
 
+const DEFAULT_OPEN_GROUPS: Record<string, boolean> = {
+  care: false,
+  vitals: false,
+  meds: false,
+  'health-programmes': false,
+  services: false,
+};
+
 function cx(...xs: Array<string | false | null | undefined>) {
   return xs.filter(Boolean).join(' ');
 }
@@ -190,7 +206,7 @@ function NavRow({
         href={item.href}
         onClick={onClick}
         className={cx(
-          'group relative flex items-center gap-2 rounded-2xl px-3 py-2 text-sm transition',
+          'group relative flex min-h-[44px] items-center gap-2 rounded-2xl px-3 py-2 text-sm transition',
           active
             ? 'bg-slate-950 text-white shadow-sm shadow-slate-900/10'
             : 'text-slate-700 hover:bg-slate-100 hover:text-slate-950',
@@ -231,40 +247,46 @@ function NavRow({
   );
 }
 
-export default function Sidebar() {
+export default function Sidebar({
+  variant = 'desktop',
+  mobileOpen = false,
+  onMobileClose,
+}: SidebarProps) {
   const pathname = usePathname();
+  const isMobile = variant === 'mobile';
   const [collapsed, setCollapsed] = useState(false);
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({
-    care: true,
-    vitals: true,
-    meds: true,
-    'health-programmes': true,
-    services: false,
-  });
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(DEFAULT_OPEN_GROUPS);
   const [q, setQ] = useState('');
 
+  const visualCollapsed = isMobile ? false : collapsed;
+
   useEffect(() => {
+    if (isMobile) return;
+
     try {
       const stored = localStorage.getItem('sidebar-collapsed');
       if (stored != null) setCollapsed(stored === 'true');
     } catch {}
-  }, []);
+  }, [isMobile]);
 
   useEffect(() => {
+    if (isMobile) return;
+
     try {
       localStorage.setItem('sidebar-collapsed', String(collapsed));
     } catch {}
-  }, [collapsed]);
+  }, [collapsed, isMobile]);
 
   useEffect(() => {
-    if (!pathname) return;
+    if (!isMobile || !mobileOpen) return;
 
-    for (const group of GROUPS) {
-      if (group.items.some((item) => isMatch(pathname, item.href))) {
-        setOpenGroups((prev) => ({ ...prev, [group.key]: true }));
-      }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') onMobileClose?.();
     }
-  }, [pathname]);
+
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isMobile, mobileOpen, onMobileClose]);
 
   const allItems = useMemo(
     () => [
@@ -288,14 +310,22 @@ export default function Sidebar() {
       .slice(0, 9);
   }, [allItems, q]);
 
-  const sidebarW = collapsed ? 'w-[84px]' : 'w-[292px]';
+  const closeAfterNav = isMobile ? onMobileClose : undefined;
+  const sidebarW = visualCollapsed ? 'w-[84px]' : 'w-[292px]';
 
-  return (
+  const aside = (
     <aside
+      data-p-ui={isMobile ? 'patient-mobile-sidebar-drawer' : 'patient-desktop-sidebar'}
+      aria-label="Patient navigation"
+      aria-hidden={isMobile ? !mobileOpen : undefined}
       className={cx(
-        'relative flex h-screen shrink-0 flex-col transition-all duration-300',
-        sidebarW,
-        'border-r border-slate-200/70 bg-white/80 backdrop-blur-xl',
+        'flex shrink-0 flex-col border-r border-slate-200/70 bg-white/90 backdrop-blur-xl transition-all duration-300',
+        isMobile
+          ? cx(
+              'fixed left-0 top-0 z-50 h-dvh w-[min(92vw,340px)] shadow-2xl shadow-slate-950/20',
+              mobileOpen ? 'translate-x-0' : '-translate-x-full pointer-events-none',
+            )
+          : cx('sticky top-[72px] hidden h-[calc(100vh-88px)] lg:flex', sidebarW),
       )}
     >
       <div className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-emerald-500/[0.05] via-transparent to-cyan-500/[0.04]" />
@@ -304,15 +334,16 @@ export default function Sidebar() {
         <div className="flex items-center justify-between gap-2">
           <Link
             href="/"
+            onClick={closeAfterNav}
             className={cx(
               'group flex min-w-0 items-center rounded-2xl focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25',
-              collapsed ? 'justify-center' : 'gap-3',
+              visualCollapsed ? 'justify-center' : 'gap-3',
             )}
             aria-label="Ambulant+ home"
           >
-            <BrandMark collapsed={collapsed} />
+            <BrandMark collapsed={visualCollapsed} />
 
-            {!collapsed ? (
+            {!visualCollapsed ? (
               <span className="min-w-0">
                 <span className="block truncate text-[15px] font-black tracking-tight text-slate-950">
                   Ambulant<span className="text-cyan-600">+</span>
@@ -326,7 +357,16 @@ export default function Sidebar() {
             )}
           </Link>
 
-          {!collapsed ? (
+          {isMobile ? (
+            <button
+              type="button"
+              onClick={onMobileClose}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-2xl border border-slate-200 bg-white transition hover:bg-slate-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25"
+              aria-label="Close patient menu"
+            >
+              <X className="h-5 w-5 text-slate-700" />
+            </button>
+          ) : !visualCollapsed ? (
             <button
               type="button"
               onClick={() => setCollapsed(true)}
@@ -347,7 +387,7 @@ export default function Sidebar() {
           )}
         </div>
 
-        {!collapsed ? (
+        {!visualCollapsed ? (
           <div className="mt-3">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -371,7 +411,10 @@ export default function Sidebar() {
                         item={item}
                         collapsed={false}
                         active={isMatch(pathname, item.href)}
-                        onClick={() => setQ('')}
+                        onClick={() => {
+                          setQ('');
+                          closeAfterNav?.();
+                        }}
                       />
                     ))}
                   </ul>
@@ -388,14 +431,16 @@ export default function Sidebar() {
             <NavRow
               key={item.href}
               item={item}
-              collapsed={collapsed}
+              collapsed={visualCollapsed}
               active={isMatch(pathname, item.href)}
+              onClick={closeAfterNav}
             />
           ))}
 
           {GROUPS.map((group) => {
             const Icon = group.icon;
             const open = !!openGroups[group.key];
+            const groupActive = group.items.some((item) => isMatch(pathname, item.href));
 
             return (
               <li key={group.key} className="pt-2">
@@ -404,19 +449,37 @@ export default function Sidebar() {
                   onClick={() =>
                     setOpenGroups((prev) => ({ ...prev, [group.key]: !open }))
                   }
-                  className="group relative flex w-full items-center gap-2 rounded-2xl px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25"
+                  aria-expanded={open}
+                  className={cx(
+                    'group relative flex min-h-[44px] w-full items-center gap-2 rounded-2xl px-3 py-2 text-sm transition hover:bg-slate-100 hover:text-slate-950 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/25',
+                    groupActive ? 'text-slate-950' : 'text-slate-700',
+                  )}
                 >
-                  <span className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-transparent transition group-hover:border-slate-200 group-hover:bg-white">
-                    <Icon className="h-4 w-4 text-slate-500 group-hover:text-slate-800" />
+                  <span
+                    className={cx(
+                      'inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border transition group-hover:border-slate-200 group-hover:bg-white',
+                      groupActive ? 'border-emerald-200 bg-emerald-50' : 'border-transparent',
+                    )}
+                  >
+                    <Icon
+                      className={cx(
+                        'h-4 w-4',
+                        groupActive ? 'text-emerald-700' : 'text-slate-500 group-hover:text-slate-800',
+                      )}
+                    />
                   </span>
 
-                  {!collapsed ? (
+                  {!visualCollapsed ? (
                     <>
                       <span className="truncate font-black uppercase tracking-[0.08em] text-slate-500">
                         {group.title}
                       </span>
-                      <span className="ml-auto text-xs font-black text-slate-400">
-                        {open ? '▾' : '▸'}
+                      <span className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500">
+                        {open ? (
+                          <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                        )}
                       </span>
                     </>
                   ) : (
@@ -424,15 +487,16 @@ export default function Sidebar() {
                   )}
                 </button>
 
-                {open || collapsed ? (
+                {open && !visualCollapsed ? (
                   <ul className="mt-1 space-y-1">
                     {group.items.map((item) => (
                       <NavRow
                         key={item.href}
                         item={item}
-                        collapsed={collapsed}
+                        collapsed={false}
                         active={isMatch(pathname, item.href)}
                         indent
+                        onClick={closeAfterNav}
                       />
                     ))}
                   </ul>
@@ -447,36 +511,35 @@ export default function Sidebar() {
         <ul className="space-y-1">
           <NavRow
             item={{ href: '/settings', label: 'Settings', icon: Settings }}
-            collapsed={collapsed}
+            collapsed={visualCollapsed}
             active={isMatch(pathname, '/settings')}
+            onClick={closeAfterNav}
           />
-
-          <li>
-            <Link
-              href="/auth/logout"
-              className="group relative flex items-center gap-2 rounded-2xl px-3 py-2 text-sm text-slate-700 transition hover:bg-rose-50 hover:text-rose-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/25"
-            >
-              <span className="inline-flex h-9 w-9 items-center justify-center rounded-2xl border border-transparent transition group-hover:border-rose-200 group-hover:bg-white">
-                <LogOut className="h-4 w-4 text-slate-500 group-hover:text-rose-700" />
-              </span>
-              {!collapsed ? (
-                <span className="font-extrabold">Log out</span>
-              ) : (
-                <CollapsedHint text="Log out" />
-              )}
-            </Link>
-          </li>
+          <NavRow
+            item={{ href: '/auth/logout', label: 'Sign out', icon: LogOut }}
+            collapsed={visualCollapsed}
+            active={false}
+            onClick={closeAfterNav}
+          />
         </ul>
-
-        {!collapsed ? (
-          <div className="mt-2 rounded-2xl border border-slate-200 bg-white p-3">
-            <div className="text-xs font-black text-slate-900">Navigation</div>
-            <div className="mt-1 text-[11px] leading-5 text-slate-600">
-              Modules are grouped by clinical task: care, vitals, medicines, programmes, and services.
-            </div>
-          </div>
-        ) : null}
       </div>
     </aside>
+  );
+
+  if (!isMobile) return aside;
+
+  return (
+    <>
+      <div
+        data-p-ui="patient-mobile-sidebar-backdrop"
+        aria-hidden="true"
+        onClick={onMobileClose}
+        className={cx(
+          'fixed inset-0 z-40 bg-slate-950/40 backdrop-blur-sm transition-opacity lg:hidden',
+          mobileOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
+        )}
+      />
+      {aside}
+    </>
   );
 }
