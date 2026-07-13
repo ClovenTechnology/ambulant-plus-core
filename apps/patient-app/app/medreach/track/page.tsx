@@ -181,6 +181,245 @@ function mapJobToCollectionDetails(
 
 /* ---------- component ---------- */
 
+
+function medreachText(value: unknown) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text && text !== '[object Object]' ? text : '';
+}
+
+function medreachRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function medreachIdentityRecords(...values: unknown[]) {
+  const out: Record<string, unknown>[] = [];
+
+  for (const value of values) {
+    const root = medreachRecord(value);
+    if (!Object.keys(root).length) continue;
+
+    out.push(root);
+
+    for (const key of [
+      'profileMeta',
+      'meta',
+      'visualIdentity',
+      'lab',
+      'labProfile',
+      'assignedLab',
+      'phleb',
+      'phlebProfile',
+      'assignedPhleb',
+      'phlebotomist',
+      'phlebotomistProfile',
+    ]) {
+      const child = medreachRecord(root[key]);
+      if (Object.keys(child).length) {
+        out.push(child);
+
+        const childProfileMeta = medreachRecord(child.profileMeta);
+        if (Object.keys(childProfileMeta).length) out.push(childProfileMeta);
+
+        const childVisualIdentity = medreachRecord(child.visualIdentity || childProfileMeta.visualIdentity);
+        if (Object.keys(childVisualIdentity).length) out.push(childVisualIdentity);
+      }
+    }
+
+    const rootVisualIdentity = medreachRecord(root.visualIdentity || medreachRecord(root.profileMeta).visualIdentity);
+    if (Object.keys(rootVisualIdentity).length) out.push(rootVisualIdentity);
+  }
+
+  return out;
+}
+
+function medreachIdentityValue(values: unknown[], keys: string[]) {
+  for (const source of medreachIdentityRecords(...values)) {
+    for (const key of keys) {
+      const value = medreachText(source[key]);
+      if (value) return value;
+    }
+  }
+
+  return '';
+}
+
+function medreachInitials(value: string, fallback: string) {
+  const parts = value
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return fallback;
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
+}
+
+function MedReachPartnerImage({
+  imageUrl,
+  name,
+  fallback,
+  altKind,
+}: {
+  imageUrl?: string | null;
+  name: string;
+  fallback: string;
+  altKind: string;
+}) {
+  const safeImageUrl = medreachText(imageUrl);
+
+  if (safeImageUrl) {
+    return (
+      <img
+        src={safeImageUrl}
+        alt={`${name} ${altKind}`}
+        className="h-12 w-12 shrink-0 rounded-2xl border border-slate-200 object-cover"
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-emerald-200 bg-emerald-50 text-sm font-black text-emerald-800">
+      {medreachInitials(name, fallback)}
+    </div>
+  );
+}
+
+function MedReachPartnerIdentity({
+  job,
+  phleb,
+  labLoc,
+}: {
+  job: MedReachJob | null;
+  phleb: PhlebProfile | null;
+  labLoc: CollectionLocation | null;
+}) {
+  const jobAny = job as MedReachJob | null;
+
+  const labName =
+    medreachIdentityValue([jobAny, labLoc], ['labDisplayName', 'labName', 'displayName', 'tradingName', 'name']) ||
+    medreachText(labLoc?.name) ||
+    'Assigned lab pending';
+
+  const labRegisteredName = medreachIdentityValue([jobAny, labLoc], [
+    'labRegisteredName',
+    'registeredName',
+    'registeredLegalName',
+    'legalName',
+  ]);
+
+  const labLogoUrl = medreachIdentityValue([jobAny, labLoc], [
+    'labLogoUrl',
+    'logoUrl',
+    'logoDataUrl',
+    'imageUrl',
+  ]);
+
+  const labAddress =
+    medreachIdentityValue([jobAny, labLoc], ['labAddress', 'address', 'location']) ||
+    medreachText(labLoc?.address);
+
+  const labAccreditation = medreachIdentityValue([jobAny, labLoc], [
+    'labAccreditation',
+    'accreditation',
+    'accreditationNumber',
+    'registrationNumber',
+    'licenseNumber',
+    'licenceNumber',
+  ]);
+
+  const phlebName =
+    medreachText(phleb?.name) ||
+    medreachIdentityValue([jobAny, phleb], ['phlebName', 'phlebotomist', 'displayName', 'name']) ||
+    'Assigned phlebotomist pending';
+
+  const phlebAvatar =
+    medreachText(phleb?.avatar) ||
+    medreachIdentityValue([jobAny, phleb], [
+      'phlebAvatarUrl',
+      'phlebAvatar',
+      'avatarUrl',
+      'avatar',
+      'photoUrl',
+      'profilePhoto',
+      'profileImage',
+      'imageUrl',
+    ]);
+
+  const phlebVehicle =
+    medreachText(phleb?.vehicle) ||
+    medreachIdentityValue([jobAny, phleb], ['phlebVehicle', 'vehicle', 'vehicleType']);
+
+  const phlebReg =
+    medreachText(phleb?.regPlate) ||
+    medreachIdentityValue([jobAny, phleb], ['phlebRegPlate', 'regPlate', 'vehicleReg', 'vehicleRegistration', 'registration']);
+
+  const phlebHpcsa = medreachIdentityValue([jobAny, phleb], [
+    'phlebHpcsaNumber',
+    'hpcsaNumber',
+    'hpcsa',
+    'qualificationRegistration',
+    'professionalRegistration',
+  ]);
+
+  return (
+    <section
+      data-a4p3="medreach-tracking-partner-identity"
+      className="grid gap-3 md:grid-cols-2"
+      aria-label="MedReach lab and phlebotomist identity"
+    >
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex min-w-0 items-start gap-3">
+          <MedReachPartnerImage imageUrl={labLogoUrl} name={labName} fallback="Lab" altKind="logo" />
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+              Laboratory
+            </div>
+            <div className="truncate text-sm font-bold text-slate-950">{labName}</div>
+            {labRegisteredName && labRegisteredName !== labName ? (
+              <div className="truncate text-xs text-slate-500">{labRegisteredName}</div>
+            ) : null}
+            {labAddress ? <div className="mt-1 truncate text-xs text-slate-500">{labAddress}</div> : null}
+            {labAccreditation ? (
+              <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                Accreditation/licence {labAccreditation}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex min-w-0 items-start gap-3">
+          <MedReachPartnerImage imageUrl={phlebAvatar} name={phlebName} fallback="PB" altKind="photo" />
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+              Phlebotomist
+            </div>
+            <div className="truncate text-sm font-bold text-slate-950">{phlebName}</div>
+            {phlebVehicle ? <div className="truncate text-xs text-slate-500">{phlebVehicle}</div> : null}
+            {phlebReg ? (
+              <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                Vehicle reg {phlebReg}
+              </div>
+            ) : null}
+            {phlebHpcsa ? (
+              <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                HPCSA/professional ref {phlebHpcsa}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function MedReachTrackPageContent() {
   const searchParams = useSearchParams();
   const qs = searchParams ?? new URLSearchParams();
@@ -327,6 +566,8 @@ function MedReachTrackPageContent() {
           </Link>
         </div>
       </header>
+
+      <MedReachPartnerIdentity job={job} phleb={phleb} labLoc={labLoc} />
 
       {/* Map-ish summary (no embedded map) */}
       <section className="bg-white border rounded-lg p-4 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between">
