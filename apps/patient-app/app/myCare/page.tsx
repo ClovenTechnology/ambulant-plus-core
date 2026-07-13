@@ -520,7 +520,7 @@ export default function MyCareHome() {
 
   /* ---------------------- UI ---------------------- */
   return (
-    <main className="p-6 max-w-7xl mx-auto space-y-6">
+    <main data-p-ui="patient-mycare-page" className="min-w-0 overflow-x-clip p-6 max-w-7xl mx-auto space-y-6">
       <Toaster position="top-right" />
 
       <header className="flex items-center justify-between gap-4">

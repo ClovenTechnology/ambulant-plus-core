@@ -276,7 +276,7 @@ export default function NexRingConsole() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl space-y-4 p-6">
+    <main data-p-ui="patient-nexring-page" className="min-w-0 overflow-x-clip mx-auto max-w-5xl space-y-4 p-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold text-slate-900">NexRing</h1>

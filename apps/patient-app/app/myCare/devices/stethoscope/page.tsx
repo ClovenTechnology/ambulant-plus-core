@@ -2146,7 +2146,7 @@ function StethoscopeConsoleContent() {
   }, [discreet, patient, patientLoading]);
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main data-p-ui="patient-stethoscope-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50">
       <div className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
         {/* Header */}
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -3147,7 +3147,7 @@ function StethoscopeConsoleContent() {
 
 export default function StethoscopeConsole() {
   return (
-    <Suspense fallback={<main className="min-h-screen bg-slate-50 p-6 text-sm text-slate-600">Loading stethoscope console…</main>}>
+    <Suspense fallback={<main data-p-ui="patient-stethoscope-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 p-6 text-sm text-slate-600">Loading stethoscope console…</main>}>
       <StethoscopeConsoleContent />
     </Suspense>
   );

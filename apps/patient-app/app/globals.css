@@ -856,3 +856,400 @@ table {
   }
 }
 /* P-UI3H-B_END */
+
+/* P-UI3I-B: IoMT device mobile shell polish */
+[data-p-ui='patient-mycare-page'],
+[data-p-ui='patient-mycare-devices-page'],
+[data-p-ui='patient-health-monitor-page'],
+[data-p-ui='patient-stethoscope-page'],
+[data-p-ui='patient-otoscope-page'],
+[data-p-ui='patient-nexring-page'] {
+  width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+  isolation: isolate;
+}
+
+[data-p-ui='patient-mycare-page'] > *,
+[data-p-ui='patient-mycare-devices-page'] > *,
+[data-p-ui='patient-health-monitor-page'] > *,
+[data-p-ui='patient-stethoscope-page'] > *,
+[data-p-ui='patient-otoscope-page'] > *,
+[data-p-ui='patient-nexring-page'] > *,
+[data-p-ui='patient-mycare-page'] section,
+[data-p-ui='patient-mycare-page'] article,
+[data-p-ui='patient-mycare-page'] div,
+[data-p-ui='patient-mycare-page'] aside,
+[data-p-ui='patient-mycare-page'] header,
+[data-p-ui='patient-mycare-page'] footer,
+[data-p-ui='patient-mycare-page'] nav,
+[data-p-ui='patient-mycare-devices-page'] section,
+[data-p-ui='patient-mycare-devices-page'] article,
+[data-p-ui='patient-mycare-devices-page'] div,
+[data-p-ui='patient-mycare-devices-page'] aside,
+[data-p-ui='patient-mycare-devices-page'] header,
+[data-p-ui='patient-mycare-devices-page'] footer,
+[data-p-ui='patient-mycare-devices-page'] nav,
+[data-p-ui='patient-health-monitor-page'] section,
+[data-p-ui='patient-health-monitor-page'] article,
+[data-p-ui='patient-health-monitor-page'] div,
+[data-p-ui='patient-health-monitor-page'] aside,
+[data-p-ui='patient-health-monitor-page'] header,
+[data-p-ui='patient-health-monitor-page'] footer,
+[data-p-ui='patient-health-monitor-page'] nav,
+[data-p-ui='patient-stethoscope-page'] section,
+[data-p-ui='patient-stethoscope-page'] article,
+[data-p-ui='patient-stethoscope-page'] div,
+[data-p-ui='patient-stethoscope-page'] aside,
+[data-p-ui='patient-stethoscope-page'] header,
+[data-p-ui='patient-stethoscope-page'] footer,
+[data-p-ui='patient-stethoscope-page'] nav,
+[data-p-ui='patient-otoscope-page'] section,
+[data-p-ui='patient-otoscope-page'] article,
+[data-p-ui='patient-otoscope-page'] div,
+[data-p-ui='patient-otoscope-page'] aside,
+[data-p-ui='patient-otoscope-page'] header,
+[data-p-ui='patient-otoscope-page'] footer,
+[data-p-ui='patient-otoscope-page'] nav,
+[data-p-ui='patient-nexring-page'] section,
+[data-p-ui='patient-nexring-page'] article,
+[data-p-ui='patient-nexring-page'] div,
+[data-p-ui='patient-nexring-page'] aside,
+[data-p-ui='patient-nexring-page'] header,
+[data-p-ui='patient-nexring-page'] footer,
+[data-p-ui='patient-nexring-page'] nav {
+  min-width: 0;
+}
+
+[data-p-ui='patient-mycare-page'] img,
+[data-p-ui='patient-mycare-page'] svg,
+[data-p-ui='patient-mycare-page'] canvas,
+[data-p-ui='patient-mycare-page'] video,
+[data-p-ui='patient-mycare-page'] audio,
+[data-p-ui='patient-mycare-devices-page'] img,
+[data-p-ui='patient-mycare-devices-page'] svg,
+[data-p-ui='patient-mycare-devices-page'] canvas,
+[data-p-ui='patient-mycare-devices-page'] video,
+[data-p-ui='patient-mycare-devices-page'] audio,
+[data-p-ui='patient-health-monitor-page'] img,
+[data-p-ui='patient-health-monitor-page'] svg,
+[data-p-ui='patient-health-monitor-page'] canvas,
+[data-p-ui='patient-health-monitor-page'] video,
+[data-p-ui='patient-health-monitor-page'] audio,
+[data-p-ui='patient-stethoscope-page'] img,
+[data-p-ui='patient-stethoscope-page'] svg,
+[data-p-ui='patient-stethoscope-page'] canvas,
+[data-p-ui='patient-stethoscope-page'] video,
+[data-p-ui='patient-stethoscope-page'] audio,
+[data-p-ui='patient-otoscope-page'] img,
+[data-p-ui='patient-otoscope-page'] svg,
+[data-p-ui='patient-otoscope-page'] canvas,
+[data-p-ui='patient-otoscope-page'] video,
+[data-p-ui='patient-otoscope-page'] audio,
+[data-p-ui='patient-nexring-page'] img,
+[data-p-ui='patient-nexring-page'] svg,
+[data-p-ui='patient-nexring-page'] canvas,
+[data-p-ui='patient-nexring-page'] video,
+[data-p-ui='patient-nexring-page'] audio {
+  max-width: 100%;
+}
+
+[data-p-ui='patient-mycare-page'] canvas,
+[data-p-ui='patient-mycare-devices-page'] canvas,
+[data-p-ui='patient-health-monitor-page'] canvas,
+[data-p-ui='patient-stethoscope-page'] canvas,
+[data-p-ui='patient-otoscope-page'] canvas,
+[data-p-ui='patient-nexring-page'] canvas {
+  height: auto;
+}
+
+[data-p-ui='patient-mycare-page'] input,
+[data-p-ui='patient-mycare-page'] select,
+[data-p-ui='patient-mycare-page'] textarea,
+[data-p-ui='patient-mycare-devices-page'] input,
+[data-p-ui='patient-mycare-devices-page'] select,
+[data-p-ui='patient-mycare-devices-page'] textarea,
+[data-p-ui='patient-health-monitor-page'] input,
+[data-p-ui='patient-health-monitor-page'] select,
+[data-p-ui='patient-health-monitor-page'] textarea,
+[data-p-ui='patient-stethoscope-page'] input,
+[data-p-ui='patient-stethoscope-page'] select,
+[data-p-ui='patient-stethoscope-page'] textarea,
+[data-p-ui='patient-otoscope-page'] input,
+[data-p-ui='patient-otoscope-page'] select,
+[data-p-ui='patient-otoscope-page'] textarea,
+[data-p-ui='patient-nexring-page'] input,
+[data-p-ui='patient-nexring-page'] select,
+[data-p-ui='patient-nexring-page'] textarea {
+  max-width: 100%;
+  font-size: 16px;
+}
+
+[data-p-ui='patient-mycare-page'] pre,
+[data-p-ui='patient-mycare-page'] code,
+[data-p-ui='patient-mycare-devices-page'] pre,
+[data-p-ui='patient-mycare-devices-page'] code,
+[data-p-ui='patient-health-monitor-page'] pre,
+[data-p-ui='patient-health-monitor-page'] code,
+[data-p-ui='patient-stethoscope-page'] pre,
+[data-p-ui='patient-stethoscope-page'] code,
+[data-p-ui='patient-otoscope-page'] pre,
+[data-p-ui='patient-otoscope-page'] code,
+[data-p-ui='patient-nexring-page'] pre,
+[data-p-ui='patient-nexring-page'] code {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+[data-p-ui='patient-mycare-page'] table,
+[data-p-ui='patient-mycare-devices-page'] table,
+[data-p-ui='patient-health-monitor-page'] table,
+[data-p-ui='patient-stethoscope-page'] table,
+[data-p-ui='patient-otoscope-page'] table,
+[data-p-ui='patient-nexring-page'] table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+[data-p-ui='patient-mycare-page'] p,
+[data-p-ui='patient-mycare-page'] li,
+[data-p-ui='patient-mycare-page'] span,
+[data-p-ui='patient-mycare-devices-page'] p,
+[data-p-ui='patient-mycare-devices-page'] li,
+[data-p-ui='patient-mycare-devices-page'] span,
+[data-p-ui='patient-health-monitor-page'] p,
+[data-p-ui='patient-health-monitor-page'] li,
+[data-p-ui='patient-health-monitor-page'] span,
+[data-p-ui='patient-stethoscope-page'] p,
+[data-p-ui='patient-stethoscope-page'] li,
+[data-p-ui='patient-stethoscope-page'] span,
+[data-p-ui='patient-otoscope-page'] p,
+[data-p-ui='patient-otoscope-page'] li,
+[data-p-ui='patient-otoscope-page'] span,
+[data-p-ui='patient-nexring-page'] p,
+[data-p-ui='patient-nexring-page'] li,
+[data-p-ui='patient-nexring-page'] span {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  [data-p-ui='patient-mycare-page'] [class*='grid-cols-2'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-3'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-4'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-5'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-6'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-7'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-8'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-9'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-10'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-11'],
+[data-p-ui='patient-mycare-page'] [class*='grid-cols-12'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-2'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-3'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-4'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-5'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-6'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-7'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-8'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-9'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-10'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-11'],
+[data-p-ui='patient-mycare-devices-page'] [class*='grid-cols-12'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-2'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-3'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-4'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-5'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-6'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-7'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-8'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-9'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-10'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-11'],
+[data-p-ui='patient-health-monitor-page'] [class*='grid-cols-12'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-2'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-3'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-4'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-5'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-6'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-7'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-8'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-9'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-10'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-11'],
+[data-p-ui='patient-stethoscope-page'] [class*='grid-cols-12'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-2'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-3'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-4'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-5'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-6'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-7'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-8'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-9'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-10'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-11'],
+[data-p-ui='patient-otoscope-page'] [class*='grid-cols-12'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-2'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-3'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-4'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-5'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-6'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-7'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-8'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-9'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-10'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-11'],
+[data-p-ui='patient-nexring-page'] [class*='grid-cols-12'] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  [data-p-ui='patient-mycare-page'] button,
+[data-p-ui='patient-mycare-page'] a[role='button'],
+[data-p-ui='patient-mycare-page'] input,
+[data-p-ui='patient-mycare-page'] select,
+[data-p-ui='patient-mycare-page'] textarea,
+[data-p-ui='patient-mycare-devices-page'] button,
+[data-p-ui='patient-mycare-devices-page'] a[role='button'],
+[data-p-ui='patient-mycare-devices-page'] input,
+[data-p-ui='patient-mycare-devices-page'] select,
+[data-p-ui='patient-mycare-devices-page'] textarea,
+[data-p-ui='patient-health-monitor-page'] button,
+[data-p-ui='patient-health-monitor-page'] a[role='button'],
+[data-p-ui='patient-health-monitor-page'] input,
+[data-p-ui='patient-health-monitor-page'] select,
+[data-p-ui='patient-health-monitor-page'] textarea,
+[data-p-ui='patient-stethoscope-page'] button,
+[data-p-ui='patient-stethoscope-page'] a[role='button'],
+[data-p-ui='patient-stethoscope-page'] input,
+[data-p-ui='patient-stethoscope-page'] select,
+[data-p-ui='patient-stethoscope-page'] textarea,
+[data-p-ui='patient-otoscope-page'] button,
+[data-p-ui='patient-otoscope-page'] a[role='button'],
+[data-p-ui='patient-otoscope-page'] input,
+[data-p-ui='patient-otoscope-page'] select,
+[data-p-ui='patient-otoscope-page'] textarea,
+[data-p-ui='patient-nexring-page'] button,
+[data-p-ui='patient-nexring-page'] a[role='button'],
+[data-p-ui='patient-nexring-page'] input,
+[data-p-ui='patient-nexring-page'] select,
+[data-p-ui='patient-nexring-page'] textarea {
+    min-height: 44px;
+  }
+
+  [data-p-ui='patient-mycare-page'] form button,
+[data-p-ui='patient-mycare-page'] form input,
+[data-p-ui='patient-mycare-page'] form select,
+[data-p-ui='patient-mycare-page'] form textarea,
+[data-p-ui='patient-mycare-devices-page'] form button,
+[data-p-ui='patient-mycare-devices-page'] form input,
+[data-p-ui='patient-mycare-devices-page'] form select,
+[data-p-ui='patient-mycare-devices-page'] form textarea,
+[data-p-ui='patient-health-monitor-page'] form button,
+[data-p-ui='patient-health-monitor-page'] form input,
+[data-p-ui='patient-health-monitor-page'] form select,
+[data-p-ui='patient-health-monitor-page'] form textarea,
+[data-p-ui='patient-stethoscope-page'] form button,
+[data-p-ui='patient-stethoscope-page'] form input,
+[data-p-ui='patient-stethoscope-page'] form select,
+[data-p-ui='patient-stethoscope-page'] form textarea,
+[data-p-ui='patient-otoscope-page'] form button,
+[data-p-ui='patient-otoscope-page'] form input,
+[data-p-ui='patient-otoscope-page'] form select,
+[data-p-ui='patient-otoscope-page'] form textarea,
+[data-p-ui='patient-nexring-page'] form button,
+[data-p-ui='patient-nexring-page'] form input,
+[data-p-ui='patient-nexring-page'] form select,
+[data-p-ui='patient-nexring-page'] form textarea {
+    width: 100%;
+  }
+
+  [data-p-ui='patient-mycare-page'] [class*='max-w-'],
+[data-p-ui='patient-mycare-page'] [class*='w-['],
+[data-p-ui='patient-mycare-devices-page'] [class*='max-w-'],
+[data-p-ui='patient-mycare-devices-page'] [class*='w-['],
+[data-p-ui='patient-health-monitor-page'] [class*='max-w-'],
+[data-p-ui='patient-health-monitor-page'] [class*='w-['],
+[data-p-ui='patient-stethoscope-page'] [class*='max-w-'],
+[data-p-ui='patient-stethoscope-page'] [class*='w-['],
+[data-p-ui='patient-otoscope-page'] [class*='max-w-'],
+[data-p-ui='patient-otoscope-page'] [class*='w-['],
+[data-p-ui='patient-nexring-page'] [class*='max-w-'],
+[data-p-ui='patient-nexring-page'] [class*='w-['] {
+    max-width: 100%;
+  }
+
+  [data-p-ui='patient-mycare-page'] [class*='min-w-['],
+[data-p-ui='patient-mycare-devices-page'] [class*='min-w-['],
+[data-p-ui='patient-health-monitor-page'] [class*='min-w-['],
+[data-p-ui='patient-stethoscope-page'] [class*='min-w-['],
+[data-p-ui='patient-otoscope-page'] [class*='min-w-['],
+[data-p-ui='patient-nexring-page'] [class*='min-w-['] {
+    min-width: 0;
+  }
+
+  [data-p-ui='patient-mycare-page'] [class*='p-6'],
+[data-p-ui='patient-mycare-page'] [class*='p-7'],
+[data-p-ui='patient-mycare-page'] [class*='p-8'],
+[data-p-ui='patient-mycare-devices-page'] [class*='p-6'],
+[data-p-ui='patient-mycare-devices-page'] [class*='p-7'],
+[data-p-ui='patient-mycare-devices-page'] [class*='p-8'],
+[data-p-ui='patient-health-monitor-page'] [class*='p-6'],
+[data-p-ui='patient-health-monitor-page'] [class*='p-7'],
+[data-p-ui='patient-health-monitor-page'] [class*='p-8'],
+[data-p-ui='patient-stethoscope-page'] [class*='p-6'],
+[data-p-ui='patient-stethoscope-page'] [class*='p-7'],
+[data-p-ui='patient-stethoscope-page'] [class*='p-8'],
+[data-p-ui='patient-otoscope-page'] [class*='p-6'],
+[data-p-ui='patient-otoscope-page'] [class*='p-7'],
+[data-p-ui='patient-otoscope-page'] [class*='p-8'],
+[data-p-ui='patient-nexring-page'] [class*='p-6'],
+[data-p-ui='patient-nexring-page'] [class*='p-7'],
+[data-p-ui='patient-nexring-page'] [class*='p-8'] {
+    padding: 1rem;
+  }
+
+  [data-p-ui='patient-mycare-page'] [class*='gap-6'],
+[data-p-ui='patient-mycare-page'] [class*='gap-7'],
+[data-p-ui='patient-mycare-page'] [class*='gap-8'],
+[data-p-ui='patient-mycare-devices-page'] [class*='gap-6'],
+[data-p-ui='patient-mycare-devices-page'] [class*='gap-7'],
+[data-p-ui='patient-mycare-devices-page'] [class*='gap-8'],
+[data-p-ui='patient-health-monitor-page'] [class*='gap-6'],
+[data-p-ui='patient-health-monitor-page'] [class*='gap-7'],
+[data-p-ui='patient-health-monitor-page'] [class*='gap-8'],
+[data-p-ui='patient-stethoscope-page'] [class*='gap-6'],
+[data-p-ui='patient-stethoscope-page'] [class*='gap-7'],
+[data-p-ui='patient-stethoscope-page'] [class*='gap-8'],
+[data-p-ui='patient-otoscope-page'] [class*='gap-6'],
+[data-p-ui='patient-otoscope-page'] [class*='gap-7'],
+[data-p-ui='patient-otoscope-page'] [class*='gap-8'],
+[data-p-ui='patient-nexring-page'] [class*='gap-6'],
+[data-p-ui='patient-nexring-page'] [class*='gap-7'],
+[data-p-ui='patient-nexring-page'] [class*='gap-8'] {
+    gap: 1rem;
+  }
+
+  [data-p-ui='patient-mycare-page'] [class*='overflow-x-auto'],
+[data-p-ui='patient-mycare-devices-page'] [class*='overflow-x-auto'],
+[data-p-ui='patient-health-monitor-page'] [class*='overflow-x-auto'],
+[data-p-ui='patient-stethoscope-page'] [class*='overflow-x-auto'],
+[data-p-ui='patient-otoscope-page'] [class*='overflow-x-auto'],
+[data-p-ui='patient-nexring-page'] [class*='overflow-x-auto'] {
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
+@media (min-width: 640px) {
+  [data-p-ui='patient-mycare-page'] form button,
+[data-p-ui='patient-mycare-devices-page'] form button,
+[data-p-ui='patient-health-monitor-page'] form button,
+[data-p-ui='patient-stethoscope-page'] form button,
+[data-p-ui='patient-otoscope-page'] form button,
+[data-p-ui='patient-nexring-page'] form button {
+    width: auto;
+  }
+}
+/* P-UI3I-B_END */

@@ -455,7 +455,7 @@ export default function DevicesPage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main data-p-ui="patient-mycare-devices-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50">
       <div className="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
         {/* HERO */}
         <header className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">

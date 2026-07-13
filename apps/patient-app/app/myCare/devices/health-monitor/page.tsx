@@ -2431,7 +2431,7 @@ function HealthMonitorPageInner() {
 
   if (!patientId) {
     return (
-      <main className="mx-auto max-w-3xl p-6">
+      <main data-p-ui="patient-health-monitor-page" className="min-w-0 overflow-x-clip mx-auto max-w-3xl p-6">
         <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
             <Bluetooth className="h-3.5 w-3.5" />
@@ -2492,7 +2492,7 @@ function HealthMonitorPageInner() {
         devices={devices}
       />
 
-      <main className="mx-auto max-w-6xl space-y-6 bg-[radial-gradient(circle_at_top,rgba(191,219,254,0.16),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(226,232,240,0.32),transparent_24%)] p-4 md:p-6">
+      <main data-p-ui="patient-health-monitor-page" className="min-w-0 overflow-x-clip mx-auto max-w-6xl space-y-6 bg-[radial-gradient(circle_at_top,rgba(191,219,254,0.16),transparent_32%),radial-gradient(circle_at_bottom_right,rgba(226,232,240,0.32),transparent_24%)] p-4 md:p-6">
         {tab === 'overview' && (
           <>
             <SectionCard
