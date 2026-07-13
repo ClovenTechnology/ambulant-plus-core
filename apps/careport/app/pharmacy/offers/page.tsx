@@ -1,3 +1,48 @@
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 // apps/careport/app/pharmacy/offers/page.tsx
 'use client';
 
@@ -62,7 +107,7 @@ export default function PharmacyOffersPage() {
       if (!res.ok || json.ok === false) throw new Error(json.error || `HTTP ${res.status}`);
       setData(json);
     } catch (err: any) {
-      setError(err?.message || 'Unable to load invitations.');
+      setError(humanErrorMessage(err, 'Unable to load invitations.'));
       setData(null);
     } finally {
       setLoading(false);
@@ -132,7 +177,7 @@ export default function PharmacyOffersPage() {
         </div>
       </section>
 
-      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>}
+      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{humanErrorMessage(error, "Unable to complete this request. Please try again.")}</div>}
       {loading && <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">Loading invitations…</div>}
 
       {!loading && !error && (

@@ -1,3 +1,48 @@
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 // apps/careport/app/pharmacy/offers/[offerId]/page.tsx
 'use client';
 
@@ -80,7 +125,7 @@ export default function PharmacyOfferDetailPage() {
       setOffer(found);
       setStockFlags(defaultFlags(found));
     } catch (err: any) {
-      setError(err?.message || 'Unable to load offer.');
+      setError(humanErrorMessage(err, 'Unable to load offer.'));
       setOffer(null);
     } finally {
       setLoading(false);
@@ -116,10 +161,10 @@ export default function PharmacyOfferDetailPage() {
         },
       );
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || json?.ok === false) throw new Error(json?.error || `HTTP ${res.status}`);
+      if (!res.ok || json?.ok === false) throw new Error(humanErrorMessage(json?.error, `HTTP ${res.status}`));
       router.push('/pharmacy/offers?status=ACCEPTED');
     } catch (err: any) {
-      setError(err?.message || 'Unable to submit offer.');
+      setError(humanErrorMessage(err, 'Unable to submit offer.'));
     } finally {
       setBusy(false);
     }
@@ -136,10 +181,10 @@ export default function PharmacyOfferDetailPage() {
         body: JSON.stringify({ reason: declineReason.trim() || undefined }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok || json?.ok === false) throw new Error(json?.error || `HTTP ${res.status}`);
+      if (!res.ok || json?.ok === false) throw new Error(humanErrorMessage(json?.error, `HTTP ${res.status}`));
       router.push('/pharmacy/offers?status=DECLINED');
     } catch (err: any) {
-      setError(err?.message || 'Unable to decline offer.');
+      setError(humanErrorMessage(err, 'Unable to decline offer.'));
     } finally {
       setBusy(false);
     }
@@ -156,7 +201,7 @@ export default function PharmacyOfferDetailPage() {
         </button>
       </div>
 
-      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div>}
+      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{humanErrorMessage(error, "Unable to complete this request. Please try again.")}</div>}
       {loading && <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm text-slate-500">Loading offer…</div>}
 
       {!loading && offer && (

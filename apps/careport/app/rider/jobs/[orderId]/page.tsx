@@ -1,3 +1,48 @@
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 //apps/careport/app/rider/jobs/[orderId]/page.tsx
 'use client';
 
@@ -56,10 +101,10 @@ export default function RiderJobDetailPage({ params }: { params: { orderId: stri
     try {
       const res = await fetch(`/api/careport/riders/me/jobs/${encodeURIComponent(orderId)}`, { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `job_http_${res.status}`);
+      if (!res.ok || !data?.ok) throw new Error(humanErrorMessage(data?.error, `job_http_${res.status}`));
       setOrder(data.order || null);
     } catch (err: any) {
-      setError(err?.message || 'Unable to load rider job.');
+      setError(humanErrorMessage(err, 'Unable to load rider job.'));
       setOrder(null);
     } finally {
       setLoading(false);
@@ -87,13 +132,13 @@ export default function RiderJobDetailPage({ params }: { params: { orderId: stri
         body: JSON.stringify({ action: workflowAction, note: note.trim() || null, proof: proof.trim() || null }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `status_http_${res.status}`);
+      if (!res.ok || !data?.ok) throw new Error(humanErrorMessage(data?.error, `status_http_${res.status}`));
       setMessage(`Job moved to ${displayStatus(data.status)}.`);
       setNote('');
       setProof('');
       await load();
     } catch (err: any) {
-      setError(err?.message || 'Could not update job.');
+      setError(humanErrorMessage(err, 'Could not update job.'));
     } finally {
       setBusy(null);
     }
@@ -122,10 +167,10 @@ export default function RiderJobDetailPage({ params }: { params: { orderId: stri
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.ok === false) throw new Error(data?.error || `location_http_${res.status}`);
+      if (!res.ok || data?.ok === false) throw new Error(humanErrorMessage(data?.error, `location_http_${res.status}`));
       setMessage('Location shared with CarePort tracking.');
     } catch (err: any) {
-      setError(err?.message || 'Could not share location.');
+      setError(humanErrorMessage(err, 'Could not share location.'));
     } finally {
       setGeoBusy(false);
     }
@@ -163,8 +208,8 @@ export default function RiderJobDetailPage({ params }: { params: { orderId: stri
         </button>
       </header>
 
-      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
-      {message && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{message}</div>}
+      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{humanErrorMessage(error, "Unable to complete this request. Please try again.")}</div>}
+      {message && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{humanErrorMessage(message, "Request completed.")}</div>}
 
       <section className="grid gap-4 lg:grid-cols-[1.2fr_0.8fr]">
         <div className="space-y-4">

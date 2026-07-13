@@ -3,6 +3,51 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 type Rider = {
   userId: string;
   country?: string | null;
@@ -38,10 +83,10 @@ export default function AdminRidersPage() {
     try {
       const res = await fetch(`/api/careport/admin/riders?${params.toString()}`, { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `riders_http_${res.status}`);
+      if (!res.ok || !data?.ok) throw new Error(humanErrorMessage(data?.error, `riders_http_${res.status}`));
       setRiders(Array.isArray(data.riders) ? data.riders : []);
     } catch (err: any) {
-      setError(err?.message || 'Unable to load riders.');
+      setError(humanErrorMessage(err, 'Unable to load riders.'));
       setRiders([]);
     }
   }
@@ -58,11 +103,11 @@ export default function AdminRidersPage() {
         body: JSON.stringify({ decision, reason: reason.trim() || null }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `decision_http_${res.status}`);
+      if (!res.ok || !data?.ok) throw new Error(humanErrorMessage(data?.error, `decision_http_${res.status}`));
       setReason('');
       await load(status);
     } catch (err: any) {
-      setError(err?.message || 'Could not save decision.');
+      setError(humanErrorMessage(err, 'Could not save decision.'));
     } finally {
       setBusy(null);
     }
@@ -79,7 +124,7 @@ export default function AdminRidersPage() {
         <Link href="/admin" className="rounded-xl border bg-white px-3 py-2 text-sm hover:bg-slate-50">Admin home</Link>
       </header>
 
-      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{humanErrorMessage(error, "Unable to complete this request. Please try again.")}</div>}
 
       <section className="rounded-3xl border bg-white p-5 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">

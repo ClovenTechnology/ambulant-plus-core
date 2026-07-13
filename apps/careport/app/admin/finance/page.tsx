@@ -3,6 +3,51 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 function money(cents: number, currency = "ZAR") {
   return `${currency} ${(Number(cents || 0) / 100).toFixed(2)}`;
 }
@@ -50,7 +95,7 @@ export default function CarePortAdminFinancePage() {
       setPolicyPayload(pol);
       setPolicy(pol?.policy || finance?.policy?.policy || {});
     } catch (err: any) {
-      setError(err?.message || "Unable to load CarePort finance.");
+      setError(humanErrorMessage(err, "Unable to load CarePort finance."));
     } finally {
       setLoading(false);
     }
@@ -83,11 +128,11 @@ export default function CarePortAdminFinancePage() {
         body: JSON.stringify({ policy }),
       });
       const js = await res.json().catch(() => ({}));
-      if (!res.ok || !js?.ok) throw new Error(js?.message || js?.error || `policy_http_${res.status}`);
+      if (!res.ok || !js?.ok) throw new Error(humanErrorMessage(js?.message || js?.error, `policy_http_${res.status}`));
       setMessage("Commercial policy saved.");
       await load();
     } catch (err: any) {
-      setError(err?.message || "Could not save commercial policy.");
+      setError(humanErrorMessage(err, "Could not save commercial policy."));
     } finally {
       setBusy(false);
     }
@@ -104,11 +149,11 @@ export default function CarePortAdminFinancePage() {
         body: JSON.stringify({ from, to, includePaid, dryRun }),
       });
       const js = await res.json().catch(() => ({}));
-      if (!res.ok || !js?.ok) throw new Error(js?.error || `settlement_http_${res.status}`);
+      if (!res.ok || !js?.ok) throw new Error(humanErrorMessage(js?.error, `settlement_http_${res.status}`));
       setPayload(js);
       setMessage(dryRun ? "Settlement preview refreshed." : `Payout batch generated for ${js?.payouts?.length || 0} recipients.`);
     } catch (err: any) {
-      setError(err?.message || "Could not generate payout batch.");
+      setError(humanErrorMessage(err, "Could not generate payout batch."));
     } finally {
       setBusy(false);
     }
@@ -127,8 +172,8 @@ export default function CarePortAdminFinancePage() {
         <Link href="/admin" className="rounded-xl border bg-white px-3 py-2 text-sm hover:bg-slate-50">Admin home</Link>
       </header>
 
-      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
-      {message && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{message}</div>}
+      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{humanErrorMessage(error, "Unable to complete this request. Please try again.")}</div>}
+      {message && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{humanErrorMessage(message, "Request completed.")}</div>}
 
       {policyPayload?.persistence === "missing_model" && (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">

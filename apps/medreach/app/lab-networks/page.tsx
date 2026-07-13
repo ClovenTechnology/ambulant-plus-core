@@ -2,6 +2,51 @@
 
 import { useEffect, useMemo, useState } from 'react';
 
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 type NetworkType =
   | 'INDEPENDENT_GROUP'
   | 'CORPORATE_CHAIN'
@@ -274,7 +319,7 @@ export default function LabNetworksPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `Networks HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `Networks HTTP ${res.status}`));
       }
 
       const rows = Array.isArray(json?.data) ? json.data : [];
@@ -355,7 +400,7 @@ export default function LabNetworksPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `Create network HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `Create network HTTP ${res.status}`));
       }
 
       const created = json?.data as LabNetwork;
@@ -408,7 +453,7 @@ export default function LabNetworksPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `Attach branch HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `Attach branch HTTP ${res.status}`));
       }
 
       setBranchDraft({
@@ -450,7 +495,7 @@ export default function LabNetworksPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `Update branch HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `Update branch HTTP ${res.status}`));
       }
 
       setNotice('Branch updated.');
@@ -480,7 +525,7 @@ export default function LabNetworksPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `Detach branch HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `Detach branch HTTP ${res.status}`));
       }
 
       setNotice('Branch detached from network.');
@@ -523,7 +568,7 @@ export default function LabNetworksPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `Save staff HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `Save staff HTTP ${res.status}`));
       }
 
       setStaffDraft({
@@ -561,7 +606,7 @@ export default function LabNetworksPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `Update staff HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `Update staff HTTP ${res.status}`));
       }
 
       setNotice('Network staff updated.');
@@ -591,7 +636,7 @@ export default function LabNetworksPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `Revoke staff HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `Revoke staff HTTP ${res.status}`));
       }
 
       setNotice('Network staff revoked.');
@@ -655,7 +700,7 @@ export default function LabNetworksPage() {
 
         {err ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-            {err}
+            {humanErrorMessage(err, "Unable to complete this request. Please try again.")}
           </div>
         ) : null}
 

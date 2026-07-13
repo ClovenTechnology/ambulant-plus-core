@@ -3,6 +3,51 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 type Order = {
   id: string;
   status: string;
@@ -45,11 +90,11 @@ export default function AdminOrdersPage() {
     try {
       const res = await fetch(`/api/careport/admin/orders?${params.toString()}`, { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `orders_http_${res.status}`);
+      if (!res.ok || !data?.ok) throw new Error(humanErrorMessage(data?.error, `orders_http_${res.status}`));
       setOrders(Array.isArray(data.orders) ? data.orders : []);
       setSummary(data.summary || null);
     } catch (err: any) {
-      setError(err?.message || 'Unable to load orders.');
+      setError(humanErrorMessage(err, 'Unable to load orders.'));
       setOrders([]);
       setSummary(null);
     }
@@ -70,7 +115,7 @@ export default function AdminOrdersPage() {
         <Link href="/admin" className="rounded-xl border bg-white px-3 py-2 text-sm hover:bg-slate-50">Admin home</Link>
       </header>
 
-      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
+      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{humanErrorMessage(error, "Unable to complete this request. Please try again.")}</div>}
 
       <section className="grid gap-3 md:grid-cols-5">
         {[

@@ -1,3 +1,48 @@
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 //apps/careport/app/rider/jobs/page.tsx
 'use client';
 
@@ -63,10 +108,10 @@ export default function RiderJobsPage() {
       params.set('limit', '100');
       const res = await fetch(`/api/careport/riders/me/jobs?${params.toString()}`, { cache: 'no-store' });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `jobs_http_${res.status}`);
+      if (!res.ok || !data?.ok) throw new Error(humanErrorMessage(data?.error, `jobs_http_${res.status}`));
       setJobs(Array.isArray(data.jobs) ? data.jobs : []);
     } catch (err: any) {
-      setError(err?.message || 'Unable to load rider jobs.');
+      setError(humanErrorMessage(err, 'Unable to load rider jobs.'));
       setJobs([]);
     } finally {
       setLoading(false);
@@ -96,11 +141,11 @@ export default function RiderJobsPage() {
         body: JSON.stringify({ action: workflowAction }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) throw new Error(data?.error || `status_http_${res.status}`);
+      if (!res.ok || !data?.ok) throw new Error(humanErrorMessage(data?.error, `status_http_${res.status}`));
       setMessage(`Job moved to ${displayStatus(data.status)}.`);
       await load(status);
     } catch (err: any) {
-      setError(err?.message || 'Could not update job.');
+      setError(humanErrorMessage(err, 'Could not update job.'));
     } finally {
       setBusy(null);
     }
@@ -131,10 +176,10 @@ export default function RiderJobsPage() {
         }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok || data?.ok === false) throw new Error(data?.error || `location_http_${res.status}`);
+      if (!res.ok || data?.ok === false) throw new Error(humanErrorMessage(data?.error, `location_http_${res.status}`));
       setMessage('Location shared with CarePort tracking.');
     } catch (err: any) {
-      setError(err?.message || 'Could not share location.');
+      setError(humanErrorMessage(err, 'Could not share location.'));
     } finally {
       setGeoBusy(false);
     }
@@ -165,8 +210,8 @@ export default function RiderJobsPage() {
         <div className="rounded-2xl border bg-white p-4"><div className="text-xs text-slate-500">Done</div><div className="text-2xl font-semibold">{metrics.done}</div></div>
       </section>
 
-      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>}
-      {message && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{message}</div>}
+      {error && <div className="rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{humanErrorMessage(error, "Unable to complete this request. Please try again.")}</div>}
+      {message && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-700">{humanErrorMessage(message, "Request completed.")}</div>}
 
       <section className="rounded-3xl border bg-white p-5 shadow-sm">
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">

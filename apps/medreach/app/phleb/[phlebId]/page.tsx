@@ -1,3 +1,48 @@
+function humanErrorMessage(value: unknown, fallback = "Unable to complete this request. Please try again.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  if (value != null) {
+    const text = String(value).trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  return fallback;
+}
+
 // apps/medreach/app/phleb/[phlebId]/page.tsx
 'use client';
 
@@ -238,7 +283,7 @@ export default function PhlebJobsPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `HTTP ${res.status}`));
       }
 
       setJobs(asArray(json).map(normalizeJob));
@@ -295,7 +340,7 @@ export default function PhlebJobsPage() {
       const json = await res.json().catch(() => null);
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `HTTP ${res.status}`);
+        throw new Error(humanErrorMessage(json?.error, `HTTP ${res.status}`));
       }
 
       setNotice(`${action.replace(/_/g, ' ')} recorded.`);
@@ -402,7 +447,7 @@ export default function PhlebJobsPage() {
 
       {err ? (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          {err}
+          {humanErrorMessage(err, "Unable to complete this request. Please try again.")}
         </section>
       ) : null}
 
