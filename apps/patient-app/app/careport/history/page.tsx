@@ -13,7 +13,14 @@ type HistoryItem = {
   createdAt?: string | null;
   deliveredAt?: string | null;
   pharmacyName?: string | null;
+  pharmacyTradingName?: string | null;
+  pharmacyRegisteredName?: string | null;
+  pharmacyLogoUrl?: string | null;
+  pharmacySapcNumber?: string | null;
   riderName?: string | null;
+  riderAvatarUrl?: string | null;
+  riderVehicle?: string | null;
+  riderRegPlate?: string | null;
   total?: number | null;
   paymentMethod?: string | null;
   currency?: string | null;
@@ -79,8 +86,15 @@ function normalizeItems(payload: any): HistoryItem[] {
       fulfillment: x?.fulfillment ?? null,
       createdAt: x?.createdAt ?? null,
       deliveredAt: x?.deliveredAt ?? null,
-      pharmacyName: x?.pharmacyName ?? x?.chosenPharmacyName ?? null,
-      riderName: x?.riderName ?? null,
+      pharmacyName: x?.pharmacyName ?? x?.chosenPharmacyName ?? x?.pharmacy?.name ?? x?.chosenPharmacy?.name ?? null,
+      pharmacyTradingName: x?.pharmacyTradingName ?? x?.chosenPharmacyTradingName ?? x?.pharmacy?.tradingName ?? x?.chosenPharmacy?.tradingName ?? null,
+      pharmacyRegisteredName: x?.pharmacyRegisteredName ?? x?.chosenPharmacyRegisteredName ?? x?.pharmacy?.registeredName ?? x?.chosenPharmacy?.registeredName ?? null,
+      pharmacyLogoUrl: x?.pharmacyLogoUrl ?? x?.chosenPharmacyLogoUrl ?? x?.pharmacy?.logoUrl ?? x?.chosenPharmacy?.logoUrl ?? null,
+      pharmacySapcNumber: x?.pharmacySapcNumber ?? x?.chosenPharmacySapcNumber ?? x?.pharmacy?.sapcNumber ?? x?.chosenPharmacy?.sapcNumber ?? null,
+      riderName: x?.riderName ?? x?.assignedRiderName ?? x?.rider?.name ?? x?.assignedRider?.name ?? null,
+      riderAvatarUrl: x?.riderAvatarUrl ?? x?.assignedRiderAvatarUrl ?? x?.rider?.avatarUrl ?? x?.assignedRider?.avatarUrl ?? null,
+      riderVehicle: x?.riderVehicle ?? x?.assignedRiderVehicle ?? x?.rider?.vehicle ?? x?.assignedRider?.vehicle ?? null,
+      riderRegPlate: x?.riderRegPlate ?? x?.assignedRiderRegPlate ?? x?.rider?.regPlate ?? x?.assignedRider?.regPlate ?? x?.rider?.registration ?? x?.assignedRider?.registration ?? null,
       total: typeof x?.total === 'number' ? x.total : null,
       paymentMethod: x?.paymentMethod ?? null,
       currency: x?.currency ?? 'ZAR',

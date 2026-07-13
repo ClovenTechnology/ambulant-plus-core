@@ -18,8 +18,15 @@ function normalizeOrderToHistoryItem(order: any) {
     status: order.status,
     createdAt: order.createdAt ?? null,
     deliveredAt: order.deliveredAt ?? null,
-    pharmacyName: order.pharmacyName ?? order.chosenPharmacyName ?? null,
-    riderName: order.riderName ?? null,
+    pharmacyName: order.pharmacyName ?? order.chosenPharmacyName ?? order.pharmacy?.name ?? order.chosenPharmacy?.name ?? null,
+    pharmacyTradingName: order.pharmacyTradingName ?? order.chosenPharmacyTradingName ?? order.pharmacy?.tradingName ?? order.chosenPharmacy?.tradingName ?? null,
+    pharmacyRegisteredName: order.pharmacyRegisteredName ?? order.chosenPharmacyRegisteredName ?? order.pharmacy?.registeredName ?? order.chosenPharmacy?.registeredName ?? null,
+    pharmacyLogoUrl: order.pharmacyLogoUrl ?? order.chosenPharmacyLogoUrl ?? order.pharmacy?.logoUrl ?? order.chosenPharmacy?.logoUrl ?? null,
+    pharmacySapcNumber: order.pharmacySapcNumber ?? order.chosenPharmacySapcNumber ?? order.pharmacy?.sapcNumber ?? order.chosenPharmacy?.sapcNumber ?? null,
+    riderName: order.riderName ?? order.assignedRiderName ?? order.rider?.name ?? order.assignedRider?.name ?? null,
+    riderAvatarUrl: order.riderAvatarUrl ?? order.assignedRiderAvatarUrl ?? order.rider?.avatarUrl ?? order.assignedRider?.avatarUrl ?? null,
+    riderVehicle: order.riderVehicle ?? order.assignedRiderVehicle ?? order.rider?.vehicle ?? order.assignedRider?.vehicle ?? null,
+    riderRegPlate: order.riderRegPlate ?? order.assignedRiderRegPlate ?? order.rider?.regPlate ?? order.assignedRider?.regPlate ?? order.rider?.registration ?? order.assignedRider?.registration ?? null,
     total:
       typeof order.total === 'number'
         ? order.total
