@@ -317,7 +317,7 @@ function EncounterContent() {
 
   if (loading) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/30 to-indigo-50/40 px-4 py-8">
+      <main data-p-ui="patient-encounter-detail-page" className="min-w-0 overflow-x-clip min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/30 to-indigo-50/40 px-4 py-8">
         <div className="mx-auto max-w-7xl space-y-4">
           <div className="h-72 animate-pulse rounded-[36px] bg-white/80" />
           <div className="grid gap-4 lg:grid-cols-3">
@@ -330,7 +330,7 @@ function EncounterContent() {
 
   if (error || !encounter) {
     return (
-      <main className="min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/30 to-indigo-50/40 px-4 py-8">
+      <main data-p-ui="patient-encounter-detail-page" className="min-w-0 overflow-x-clip min-h-screen bg-gradient-to-br from-slate-50 via-cyan-50/30 to-indigo-50/40 px-4 py-8">
         <div className="mx-auto max-w-3xl rounded-[32px] border border-white/70 bg-white/90 p-8 text-center shadow-xl">
           <ClipboardList className="mx-auto h-10 w-10 text-slate-400" />
           <h1 className="mt-4 text-2xl font-black text-slate-950">Encounter unavailable</h1>
@@ -355,7 +355,7 @@ function EncounterContent() {
   const payment = encounter.payment || null;
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-cyan-50/30 to-indigo-50/40 px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
+    <main data-p-ui="patient-encounter-detail-page" className="min-w-0 overflow-x-clip relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-cyan-50/30 to-indigo-50/40 px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
         {toast ? (
           <div className="fixed right-4 top-4 z-50 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 shadow-xl">

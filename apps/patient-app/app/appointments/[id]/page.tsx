@@ -442,7 +442,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
 
   if (loading) {
     return (
-      <main className="p-6">
+      <main data-p-ui="patient-appointment-detail-page" className="min-w-0 overflow-x-clip p-6">
         <div className="rounded-xl border p-4 bg-white">Loading appointment…</div>
       </main>
     );
@@ -450,7 +450,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
 
   if (appt === 'notfound' || appt === null) {
     return (
-      <main className="p-6">
+      <main data-p-ui="patient-appointment-detail-page" className="min-w-0 overflow-x-clip p-6">
         <div className="rounded-xl border p-4 bg-white">Appointment not found.</div>
         <div className="mt-3">
           <Link
@@ -600,7 +600,7 @@ export default function AppointmentDetailPage({ params }: { params: { id: string
   const joinReason = appointmentJoinBlockReason(appt);
 
   return (
-    <main className="p-6 space-y-4 max-w-3xl mx-auto">
+    <main data-p-ui="patient-appointment-detail-page" className="min-w-0 overflow-x-clip p-6 space-y-4 max-w-3xl mx-auto">
       <h1 className="text-xl font-semibold">Appointment</h1>
 
       {subjectPatientId && (

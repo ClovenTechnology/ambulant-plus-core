@@ -465,7 +465,7 @@ function AppointmentPagination({
 
 function AppointmentSkeleton() {
   return (
-    <main className="mx-auto max-w-4xl space-y-4 p-6">
+    <main data-p-ui="patient-appointments-page" className="min-w-0 overflow-x-clip mx-auto max-w-4xl space-y-4 p-6">
       {Array.from({ length: 4 }).map((_, idx) => (
         <div
           key={idx}
@@ -1097,7 +1097,7 @@ function PatientAppointmentsContent() {
   );
 
   return (
-    <main className="mx-auto max-w-5xl space-y-6 p-6">
+    <main data-p-ui="patient-appointments-page" className="min-w-0 overflow-x-clip mx-auto max-w-5xl space-y-6 p-6">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">

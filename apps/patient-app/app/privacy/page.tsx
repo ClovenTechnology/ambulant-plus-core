@@ -2,7 +2,7 @@ export default function PrivacyPolicyPage() {
   const updated = '22 December 2025 • 13:04:00';
 
   return (
-    <main className="min-h-screen bg-white">
+    <main data-p-ui="patient-privacy-page" className="min-w-0 overflow-x-clip min-h-screen bg-white">
       <div className="mx-auto max-w-4xl px-6 py-10">
         <div className="flex items-start justify-between gap-6">
           <div>

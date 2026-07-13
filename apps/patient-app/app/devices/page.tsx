@@ -158,7 +158,7 @@ export default function MyDevicesPage() {
   }, [devices]);
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">
+    <main data-p-ui="patient-devices-page" className="min-w-0 overflow-x-clip mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">
       <section className="relative overflow-hidden rounded-[32px] border border-slate-200 bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 p-5 text-white shadow-[0_24px_80px_rgba(15,23,42,0.24)] md:p-7">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(56,189,248,0.16),transparent_24%),radial-gradient(circle_at_bottom_left,rgba(16,185,129,0.14),transparent_26%)]" />
         <div className="pointer-events-none absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:24px_24px]" />

@@ -291,7 +291,7 @@ export default function ClinicianBioPage({ params }: { params: { id: string } })
 
   if (busy) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8">
+      <main data-p-ui="patient-clinician-detail-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-8">
         <div className="mx-auto max-w-6xl rounded-[2rem] border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
           Loading clinician command profile...
         </div>
@@ -301,7 +301,7 @@ export default function ClinicianBioPage({ params }: { params: { id: string } })
 
   if (err || !profile || !c) {
     return (
-      <main className="min-h-screen bg-slate-50 px-4 py-8">
+      <main data-p-ui="patient-clinician-detail-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-8">
         <div className="mx-auto max-w-4xl rounded-[2rem] border border-rose-200 bg-rose-50 p-6 text-sm text-rose-900">
           {err || 'Clinician profile could not be loaded.'}
           <div className="mt-4">
@@ -324,7 +324,7 @@ export default function ClinicianBioPage({ params }: { params: { id: string } })
   const schemes = Array.isArray(c.acceptedSchemes) ? c.acceptedSchemes : [];
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
+    <main data-p-ui="patient-clinician-detail-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-5 pb-28 lg:pb-8">
         <div className="flex items-center justify-between gap-3">
           <button

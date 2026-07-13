@@ -708,7 +708,7 @@ export default function MedicalRecordsPage() {
 
   if (loading) {
     return (
-      <main className="min-h-[calc(100vh-0px)] bg-white">
+      <main data-p-ui="patient-medical-records-page" className="min-w-0 overflow-x-clip min-h-[calc(100vh-0px)] bg-white">
         <div className="mx-auto max-w-6xl px-4 py-6">
           <div className="flex items-center gap-3">
             <Link
@@ -733,7 +733,7 @@ export default function MedicalRecordsPage() {
 
   if (!bundle) {
     return (
-      <main className="min-h-[calc(100vh-0px)] bg-white">
+      <main data-p-ui="patient-medical-records-page" className="min-w-0 overflow-x-clip min-h-[calc(100vh-0px)] bg-white">
         <div className="mx-auto max-w-6xl px-4 py-6">
           <EmptyState
             icon={FileText}
@@ -755,7 +755,7 @@ export default function MedicalRecordsPage() {
   }
 
   return (
-    <main className="min-h-[calc(100vh-0px)] bg-white">
+    <main data-p-ui="patient-medical-records-page" className="min-w-0 overflow-x-clip min-h-[calc(100vh-0px)] bg-white">
       <div className="mx-auto max-w-6xl px-4 py-6">
         <div className="flex items-center justify-between gap-3">
           <Link

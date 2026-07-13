@@ -225,7 +225,7 @@ export default function HistoryPage({ searchParams }: HistoryPageProps) {
   }, [items]);
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main data-p-ui="patient-careport-history-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50">
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6">
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">

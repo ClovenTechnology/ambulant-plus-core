@@ -504,7 +504,7 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
   const maxPriceRand = Math.round(filters.maxPriceCents / 100);
 
   return (
-    <main className="p-6 max-w-6xl mx-auto space-y-4">
+    <main data-p-ui="patient-practice-calendar-page" className="min-w-0 overflow-x-clip p-6 max-w-6xl mx-auto space-y-4">
       <Toasts />
 
       <div className="flex items-center justify-between">
@@ -765,7 +765,7 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
 
 export default function PracticeCalendarPage({ params }: { params: { id: string } }) {
   return (
-    <Suspense fallback={<main className="p-6 text-sm text-slate-600">Loading practice calendar…</main>}>
+    <Suspense fallback={<main data-p-ui="patient-practice-calendar-page" className="min-w-0 overflow-x-clip p-6 text-sm text-slate-600">Loading practice calendar…</main>}>
       <PracticeCalendarPageContent params={params} />
     </Suspense>
   );

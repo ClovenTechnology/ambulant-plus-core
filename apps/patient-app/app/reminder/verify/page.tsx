@@ -242,7 +242,7 @@ function ReminderVerifyPageContent() {
   }
 
   return (
-    <main className="mx-auto max-w-5xl p-6 space-y-6">
+    <main data-p-ui="patient-reminder-verify-page" className="min-w-0 overflow-x-clip mx-auto max-w-5xl p-6 space-y-6">
       <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -395,7 +395,7 @@ export default function ReminderVerifyPage() {
   return (
     <Suspense
       fallback={
-        <main className="mx-auto max-w-5xl p-6 text-sm text-slate-600">
+        <main data-p-ui="patient-reminder-verify-page" className="min-w-0 overflow-x-clip mx-auto max-w-5xl p-6 text-sm text-slate-600">
           Loading medication verification…
         </main>
       }

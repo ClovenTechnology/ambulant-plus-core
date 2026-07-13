@@ -557,7 +557,7 @@ function CarePortTrackContent() {
   };
 
   return (
-    <main className="p-6 max-w-6xl mx-auto">
+    <main data-p-ui="patient-careport-track-page" className="min-w-0 overflow-x-clip p-6 max-w-6xl mx-auto">
       <header className="flex flex-col md:flex-row md:items-start md:justify-between gap-4 mb-4">
         <div>
           <h1 className="text-2xl font-semibold">Delivery tracking</h1>

@@ -359,7 +359,7 @@ export default function DeviceSetupGuidePage() {
   );
 
   return (
-    <main className="mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">
+    <main data-p-ui="patient-device-setup-page" className="min-w-0 overflow-x-clip mx-auto max-w-7xl px-4 py-6 md:px-6 md:py-8">
       <div className="mb-4">
         <Link
           href="/devices"

@@ -84,7 +84,7 @@ export default function EncounterPrintPage() {
   const generatedAt = new Date();
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-8 text-slate-950 print:bg-white print:px-0 print:py-0">
+    <main data-p-ui="patient-encounter-print-detail-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-100 px-4 py-8 text-slate-950 print:bg-white print:px-0 print:py-0">
       <div className="mx-auto max-w-5xl rounded-[28px] bg-white p-8 shadow-xl print:max-w-none print:rounded-none print:p-0 print:shadow-none">
         <header className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-6">
           <div>

@@ -194,7 +194,7 @@ function PremiumPatientSignupPageContent() {
 
 
   return (
-    <main
+    <main data-p-ui="patient-premium-signup-page"
       className={cx(
         'min-h-screen overflow-hidden bg-slate-50',
         'bg-[radial-gradient(1000px_circle_at_18%_-12%,rgba(20,184,166,0.18),transparent_58%),radial-gradient(820px_circle_at_102%_0%,rgba(59,130,246,0.12),transparent_55%),linear-gradient(to_bottom,rgba(255,255,255,0.92),rgba(248,250,252,1))]',

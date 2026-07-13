@@ -269,7 +269,7 @@ function PatientLoginPageContent() {
   }
 
   return (
-    <main className="min-h-screen overflow-hidden bg-slate-50 bg-[radial-gradient(1100px_circle_at_18%_-15%,rgba(20,184,166,0.18),transparent_58%),radial-gradient(900px_circle_at_100%_5%,rgba(59,130,246,0.12),transparent_50%),linear-gradient(to_bottom,rgba(255,255,255,0.92),rgba(240,253,250,0.45),rgba(248,250,252,1))]">
+    <main data-p-ui="patient-login-page" className="min-w-0 overflow-x-clip min-h-screen overflow-hidden bg-slate-50 bg-[radial-gradient(1100px_circle_at_18%_-15%,rgba(20,184,166,0.18),transparent_58%),radial-gradient(900px_circle_at_100%_5%,rgba(59,130,246,0.12),transparent_50%),linear-gradient(to_bottom,rgba(255,255,255,0.92),rgba(240,253,250,0.45),rgba(248,250,252,1))]">
       <div className="mx-auto flex min-h-screen max-w-6xl items-center px-6 py-10">
         <div className="grid w-full gap-8 lg:grid-cols-[0.95fr_1.05fr] lg:items-center">
           <section className="order-2 lg:order-1">

@@ -634,7 +634,7 @@ export default function RemindersPage() {
   const totalPending = overallStats.pending;
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
+    <main data-p-ui="patient-reminder-page" className="min-w-0 overflow-x-clip max-w-5xl mx-auto p-6 space-y-6">
       <ReminderHeader
         todayLabel={todayLabel}
         totalReminders={totalReminders}

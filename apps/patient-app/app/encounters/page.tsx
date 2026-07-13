@@ -328,7 +328,7 @@ export default function EncountersPage() {
   }, [cases, filter, query]);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-cyan-50/30 to-indigo-50/40 px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
+    <main data-p-ui="patient-encounters-page" className="min-w-0 overflow-x-clip relative min-h-screen overflow-hidden bg-gradient-to-br from-slate-50 via-cyan-50/30 to-indigo-50/40 px-4 py-6 text-slate-950 sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl space-y-6">
         <section className="relative overflow-hidden rounded-[36px] border border-white/70 bg-white/82 p-6 shadow-[0_24px_90px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-8">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_0%,rgba(34,211,238,0.15),transparent_34%),radial-gradient(circle_at_90%_0%,rgba(99,102,241,0.12),transparent_30%)]" />

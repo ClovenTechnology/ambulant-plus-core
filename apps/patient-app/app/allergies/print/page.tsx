@@ -194,7 +194,7 @@ export default function AllergiesPrintPage() {
   const generatedAt = safeDateTime(new Date().toISOString());
 
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-6 print:bg-white print:px-0 print:py-0">
+    <main data-p-ui="patient-allergies-print-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-100 px-4 py-6 print:bg-white print:px-0 print:py-0">
       <div className="mx-auto max-w-5xl rounded-[28px] bg-white p-6 shadow-xl print:rounded-none print:p-0 print:shadow-none">
         <header className="border-b border-slate-200 pb-5">
           <div className="flex flex-wrap items-start justify-between gap-4">

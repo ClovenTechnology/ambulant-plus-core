@@ -196,7 +196,7 @@ export default function JoinSchemePage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 md:px-8">
+    <main data-p-ui="patient-join-scheme-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-950 px-4 py-6 text-slate-100 md:px-8">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
         <header className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
           <div>

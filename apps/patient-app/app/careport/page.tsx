@@ -510,7 +510,7 @@ export default function CarePortPage() {
         : 'Not selected';
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main data-p-ui="patient-careport-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50">
       <div className="mx-auto max-w-6xl space-y-6 px-4 py-6">
         <header className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
           <div className="bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 p-6 text-white md:p-8">

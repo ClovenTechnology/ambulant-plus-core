@@ -264,7 +264,7 @@ export default function PatientOperationsPage() {
   }
 
   return (
-    <main className="p-4 md:p-6 max-w-6xl mx-auto space-y-6">
+    <main data-p-ui="patient-operations-page" className="min-w-0 overflow-x-clip p-4 md:p-6 max-w-6xl mx-auto space-y-6">
       <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-semibold tracking-tight">

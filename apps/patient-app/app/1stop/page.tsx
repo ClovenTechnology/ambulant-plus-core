@@ -115,7 +115,7 @@ function OneStopOrdersPageContent() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-6 space-y-4">
+    <div data-p-ui="patient-onestop-page" className="min-w-0 overflow-x-clip container mx-auto px-4 py-6 space-y-4">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">My 1Stop Orders</h1>

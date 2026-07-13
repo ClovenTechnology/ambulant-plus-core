@@ -542,7 +542,7 @@ export default function MedReachPage() {
   /* ---------- render ---------- */
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
+    <main data-p-ui="patient-medreach-page" className="min-w-0 overflow-x-clip max-w-5xl mx-auto p-6 space-y-6">
       {/* HEADER + NAV */}
       <header className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>

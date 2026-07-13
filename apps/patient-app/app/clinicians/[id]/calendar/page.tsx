@@ -855,7 +855,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
   const totalBookable = slots.filter((slot) => isSelectableSlot(slot, apiEnabled, canBeBooked)).length;
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
+    <main data-p-ui="patient-clinician-calendar-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
       <Toasts />
 
       <div className="mx-auto max-w-7xl space-y-5 pb-28 lg:pb-8">

@@ -471,7 +471,7 @@ function PracticesPageContent() {
   );
 
   return (
-    <main className="p-6 space-y-8 max-w-7xl mx-auto">
+    <main data-p-ui="patient-practices-page" className="min-w-0 overflow-x-clip p-6 space-y-8 max-w-7xl mx-auto">
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <Link href="/auto-triage" className="text-sm text-teal-700 hover:underline">
@@ -877,7 +877,7 @@ function PracticesPageContent() {
 
 export default function PracticesPage() {
   return (
-    <Suspense fallback={<main className="p-6 text-sm text-slate-600">Loading practices…</main>}>
+    <Suspense fallback={<main data-p-ui="patient-practices-page" className="min-w-0 overflow-x-clip p-6 text-sm text-slate-600">Loading practices…</main>}>
       <PracticesPageContent />
     </Suspense>
   );

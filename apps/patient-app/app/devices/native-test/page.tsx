@@ -240,7 +240,7 @@ export default function NativeDeviceTestPage() {
   }, [isNative]);
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100">
+    <main data-p-ui="patient-devices-native-test-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-950 px-4 py-6 text-slate-100">
       <div className="mx-auto flex max-w-6xl flex-col gap-5">
         <section className="rounded-3xl border border-white/10 bg-white/5 p-5 shadow-2xl">
           <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">

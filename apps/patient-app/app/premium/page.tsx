@@ -250,7 +250,7 @@ function PremiumLandingPageContent() {
   );
 
   return (
-    <div className="container mx-auto px-4 py-6 space-y-5">
+    <div data-p-ui="patient-premium-page" className="min-w-0 overflow-x-clip container mx-auto px-4 py-6 space-y-5">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-xl font-semibold">Ambulant+ Premium</h1>

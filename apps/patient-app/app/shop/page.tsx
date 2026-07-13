@@ -545,7 +545,7 @@ export default function ShopStorefrontPage() {
   }, [currency, fxErr, fxMeta]);
 
   return (
-    <div className="container mx-auto px-4 py-6 space-y-5">
+    <div data-p-ui="patient-shop-page" className="min-w-0 overflow-x-clip container mx-auto px-4 py-6 space-y-5">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-xl font-semibold">1Stop Store</h1>

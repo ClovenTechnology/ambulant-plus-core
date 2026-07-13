@@ -304,7 +304,7 @@ export default function PatientPharmacyMarketplacePage() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-slate-50 px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
+    <main data-p-ui="patient-pharmacy-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-5 text-slate-950 sm:px-6 lg:px-8">
       <section className="mx-auto flex max-w-7xl flex-col gap-5">
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

@@ -706,7 +706,7 @@ function NewAppointmentPageContent() {
   const preflightCurrency = preflight?.priceLock?.currency || sponsor?.currency || 'ZAR';
 
   return (
-    <main className="min-h-screen bg-slate-950 px-4 py-6 text-slate-100 md:px-8">
+    <main data-p-ui="patient-appointment-new-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-950 px-4 py-6 text-slate-100 md:px-8">
       <div className="mx-auto max-w-5xl space-y-6">
         <header>
           <div className="text-xs font-semibold uppercase tracking-[0.24em] text-sky-300">
