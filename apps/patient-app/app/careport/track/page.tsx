@@ -26,6 +26,7 @@ export type RiderProfile = {
   id?: string;
   name?: string;
   avatar?: string;
+  avatarUrl?: string;
   rating?: number;
   vehicle?: string;
   phoneMasked?: string;
@@ -38,6 +39,10 @@ type PharmacyProfile = {
   id?: string;
   name?: string;
   address?: string;
+  logoUrl?: string;
+  tradingName?: string;
+  registeredName?: string;
+  sapcNumber?: string;
   coords?: { lat: number; lng: number } | null;
   distanceText?: string;
   phone?: string;
@@ -58,6 +63,153 @@ const EMPTY_PHARMACY: PharmacyProfile = {
   distanceText: '—',
   phone: '',
 };
+
+function partnerText(value: unknown) {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text && text !== '[object Object]' ? text : '';
+}
+
+function partnerRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function partnerIdentityValue(value: unknown, keys: string[]) {
+  const record = partnerRecord(value);
+  const kycPayload = partnerRecord(record.kycPayload);
+  const kyiPayload = partnerRecord(record.kyiPayload);
+  const profileMeta = partnerRecord(record.profileMeta);
+  const visualIdentity = partnerRecord(
+    kycPayload.visualIdentity || kyiPayload.visualIdentity || profileMeta.visualIdentity
+  );
+
+  const sources = [record, kycPayload, kyiPayload, profileMeta, visualIdentity];
+
+  for (const source of sources) {
+    for (const key of keys) {
+      const found = partnerText(source[key]);
+      if (found) return found;
+    }
+  }
+
+  return '';
+}
+
+function partnerInitials(value: string, fallback: string) {
+  const parts = value
+    .split(/\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (!parts.length) return fallback;
+
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('');
+}
+
+function PartnerImage({
+  imageUrl,
+  name,
+  fallback,
+  altKind,
+}: {
+  imageUrl?: string | null;
+  name: string;
+  fallback: string;
+  altKind: string;
+}) {
+  const safeImageUrl = partnerText(imageUrl);
+
+  if (safeImageUrl) {
+    return (
+      <img
+        src={safeImageUrl}
+        alt={`${name} ${altKind}`}
+        className="h-12 w-12 shrink-0 rounded-2xl border border-slate-200 object-cover"
+      />
+    );
+  }
+
+  return (
+    <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-indigo-200 bg-indigo-50 text-sm font-black text-indigo-800">
+      {partnerInitials(name, fallback)}
+    </div>
+  );
+}
+
+function TrackingPartnerIdentity({
+  rider,
+  pharmacy,
+}: {
+  rider: RiderProfile;
+  pharmacy: PharmacyProfile;
+}) {
+  const riderName = partnerText(rider.name) || 'Assigned rider pending';
+  const riderVehicle = partnerText(rider.vehicle);
+  const riderReg = partnerText(rider.regPlate);
+  const riderImage = partnerText(rider.avatarUrl) || partnerText(rider.avatar);
+
+  const pharmacyName =
+    partnerText(pharmacy.tradingName) ||
+    partnerText(pharmacy.name) ||
+    'Assigned pharmacy pending';
+  const pharmacyRegisteredName = partnerText(pharmacy.registeredName);
+  const pharmacyCredential = partnerText(pharmacy.sapcNumber);
+  const pharmacyLocation = partnerText(pharmacy.address);
+  const pharmacyImage = partnerText(pharmacy.logoUrl);
+
+  return (
+    <section
+      data-a4p3="careport-tracking-partner-identity"
+      className="mb-4 grid gap-3 md:grid-cols-2"
+      aria-label="CarePort partner identity"
+    >
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex min-w-0 items-start gap-3">
+          <PartnerImage imageUrl={pharmacyImage} name={pharmacyName} fallback="Rx" altKind="logo" />
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+              Pharmacy
+            </div>
+            <div className="truncate text-sm font-bold text-slate-950">{pharmacyName}</div>
+            {pharmacyRegisteredName && pharmacyRegisteredName !== pharmacyName ? (
+              <div className="truncate text-xs text-slate-500">{pharmacyRegisteredName}</div>
+            ) : null}
+            {pharmacyLocation ? <div className="mt-1 truncate text-xs text-slate-500">{pharmacyLocation}</div> : null}
+            {pharmacyCredential ? (
+              <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                SAPC/licence {pharmacyCredential}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex min-w-0 items-start gap-3">
+          <PartnerImage imageUrl={riderImage} name={riderName} fallback="RD" altKind="photo" />
+          <div className="min-w-0">
+            <div className="text-[10px] font-black uppercase tracking-wide text-slate-400">
+              Rider
+            </div>
+            <div className="truncate text-sm font-bold text-slate-950">{riderName}</div>
+            {riderVehicle ? <div className="truncate text-xs text-slate-500">{riderVehicle}</div> : null}
+            {riderReg ? (
+              <div className="mt-1 text-[11px] font-semibold text-slate-500">
+                Vehicle reg {riderReg}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 
 function firstParam(qs: URLSearchParams, keys: string[]) {
   for (const key of keys) {
@@ -260,7 +412,8 @@ function CarePortTrackContent() {
             ...(prev ?? {}),
             id: String(rd.id ?? prev?.id ?? ''),
             name: String(rd.name ?? rd.fullName ?? prev?.name ?? 'Delivery rider'),
-            avatar: typeof rd.avatar === 'string' ? rd.avatar : prev?.avatar,
+            avatar: partnerIdentityValue(rd, ['avatarUrl', 'avatar', 'photoUrl', 'profilePhoto', 'profileImage']) || prev?.avatar,
+            avatarUrl: partnerIdentityValue(rd, ['avatarUrl', 'avatar', 'photoUrl', 'profilePhoto', 'profileImage']) || prev?.avatarUrl,
             rating: typeof rd.rating === 'number' ? rd.rating : prev?.rating,
             vehicle: String(rd.vehicle ?? rd.vehicleType ?? prev?.vehicle ?? ''),
             phoneMasked: String(rd.phoneMasked ?? prev?.phoneMasked ?? '—'),
@@ -274,7 +427,15 @@ function CarePortTrackContent() {
           setPharmacy((prev) => ({
             ...(prev ?? {}),
             id: String(ph.id ?? prev?.id ?? ''),
-            name: String(ph.name ?? prev?.name ?? 'Pharmacy'),
+            name:
+              partnerIdentityValue(ph, ['tradingName', 'displayName', 'name']) ||
+              String(ph.name ?? prev?.name ?? 'Pharmacy'),
+            tradingName: partnerIdentityValue(ph, ['tradingName', 'displayName']) || prev?.tradingName,
+            registeredName: partnerIdentityValue(ph, ['registeredName', 'legalName', 'registeredLegalName']) || prev?.registeredName,
+            logoUrl: partnerIdentityValue(ph, ['logoUrl', 'logoDataUrl', 'imageUrl']) || prev?.logoUrl,
+            sapcNumber:
+              partnerIdentityValue(ph, ['sapcNumber', 'sapc', 'pharmacyCouncilNumber', 'licenseNumber', 'licenceNumber', 'registrationNumber']) ||
+              prev?.sapcNumber,
             address: String(ph.address ?? prev?.address ?? ''),
             phone: String(ph.phone ?? ph.contact ?? prev?.phone ?? ''),
             coords:
@@ -427,6 +588,8 @@ function CarePortTrackContent() {
           </div>
         </div>
       </header>
+
+      <TrackingPartnerIdentity rider={effectiveRider} pharmacy={effectivePharmacy} />
 
       <div className="mb-4">
         <div className="relative bg-gray-200 h-3 rounded overflow-hidden">
