@@ -13,6 +13,44 @@ import {
 
 import { UserProvider, useUserContext } from '@/context/UserContext';
 
+function clientFacingMessage(value: unknown, fallback = "Unable to load gateway metrics. Check the API Gateway base URL and response format.") {
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value instanceof Error) {
+    const text = value.message.trim();
+    if (text && text !== "[object Object]") return text;
+  }
+
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+
+    for (const key of ["message", "error", "detail", "reason", "statusText", "code"]) {
+      const candidate = record[key];
+
+      if (typeof candidate === "string") {
+        const text = candidate.trim();
+        if (text && text !== "[object Object]") return text;
+      }
+
+      if (candidate && typeof candidate === "object") {
+        const nested = candidate as Record<string, unknown>;
+        for (const nestedKey of ["message", "error", "detail", "reason", "statusText", "code"]) {
+          const nestedCandidate = nested[nestedKey];
+          if (typeof nestedCandidate === "string") {
+            const text = nestedCandidate.trim();
+            if (text && text !== "[object Object]") return text;
+          }
+        }
+      }
+    }
+  }
+
+  return fallback;
+}
+
 type MetricsPayload = {
   ok?: boolean;
   data?: {
@@ -93,7 +131,7 @@ function MedReachHomeInner() {
       const json = (await res.json().catch(() => null)) as MetricsPayload | null;
 
       if (!res.ok || json?.ok === false) {
-        throw new Error(json?.error || `HTTP ${res.status}`);
+        throw new Error(clientFacingMessage(json?.error || `HTTP ${res.status}`, "Unable to load gateway metrics. Check the API Gateway base URL and response format."));
       }
 
       setMetrics(json);
@@ -190,7 +228,7 @@ function MedReachHomeInner() {
       {err ? (
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <div className="font-semibold">Gateway metrics unavailable</div>
-          <div className="mt-1">{err}</div>
+          <div className="mt-1">{clientFacingMessage(err, "Unable to load gateway metrics. Check the API Gateway base URL and response format.")}</div>
           <div className="mt-1 text-xs">
             Local metric fallbacks are disabled. Configure the API Gateway base URL before live use.
           </div>
