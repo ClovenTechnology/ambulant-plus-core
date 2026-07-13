@@ -156,7 +156,7 @@ export default function LabsPage() {
   };
 
   return (
-    <main className="max-w-6xl mx-auto p-6 space-y-6">
+    <main data-p-ui="patient-labs-page" className="min-w-0 overflow-x-clip max-w-6xl mx-auto p-6 space-y-6">
       <div className="flex items-center justify-between gap-3">
         <h1 className="text-2xl font-bold">Lab Results</h1>
         <div className="flex items-center gap-2">

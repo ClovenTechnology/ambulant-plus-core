@@ -226,7 +226,7 @@ export default function PatientVaccinationsPage() {
   }
 
   return (
-    <main className="p-4 md:p-6 max-w-6xl mx-auto space-y-6">
+    <main data-p-ui="patient-vaccinations-page" className="min-w-0 overflow-x-clip p-4 md:p-6 max-w-6xl mx-auto space-y-6">
       {/* Header */}
       <header className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
         <div>

@@ -844,7 +844,7 @@ export default function SleepReportPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen bg-slate-50 p-6 text-sm text-slate-600">
+        <main data-p-ui="patient-reports-sleep-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 p-6 text-sm text-slate-600">
           Loading sleep report…
         </main>
       }

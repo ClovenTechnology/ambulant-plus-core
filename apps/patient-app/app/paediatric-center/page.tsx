@@ -1044,7 +1044,7 @@ export default function PaediatricCenterPage() {
     right?: React.ReactNode;
   }) {
     return (
-      <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+      <div data-p-ui="patient-paediatric-center-page" className="min-w-0 overflow-x-clip mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-lg font-semibold text-slate-900">{title}</h1>

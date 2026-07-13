@@ -791,7 +791,7 @@ export default function StressReportPage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen bg-slate-950 p-6 text-sm text-white/70">
+        <main data-p-ui="patient-reports-stress-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-950 p-6 text-sm text-white/70">
           Loading stress report…
         </main>
       }
