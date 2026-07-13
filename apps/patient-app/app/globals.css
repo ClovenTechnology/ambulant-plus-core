@@ -426,3 +426,122 @@ table {
   }
 }
 /* P-UI3E_END */
+
+/* P-UI3F: Lady Center mobile/world-class polish */
+[data-p-ui='patient-lady-center-page'] {
+  width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+  isolation: isolate;
+}
+
+[data-p-ui='patient-lady-center-page'] > *,
+[data-p-ui='patient-lady-center-page'] article,
+[data-p-ui='patient-lady-center-page'] section,
+[data-p-ui='patient-lady-center-page'] div {
+  min-width: 0;
+}
+
+[data-p-ui='patient-lady-center-page'] img,
+[data-p-ui='patient-lady-center-page'] svg,
+[data-p-ui='patient-lady-center-page'] canvas,
+[data-p-ui='patient-lady-center-page'] video {
+  max-width: 100%;
+}
+
+[data-p-ui='patient-lady-center-page'] input,
+[data-p-ui='patient-lady-center-page'] select,
+[data-p-ui='patient-lady-center-page'] textarea {
+  max-width: 100%;
+  font-size: 16px;
+}
+
+[data-p-ui='patient-lady-center-page'] canvas {
+  height: auto !important;
+}
+
+[data-p-ui='patient-lady-center-page'] [role='dialog'] {
+  max-width: calc(100vw - 1rem);
+}
+
+@media (max-width: 767px) {
+  [data-p-ui='patient-lady-center-page'] {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-2'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-3'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-4'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-5'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-6'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-7'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-8'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-9'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-10'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-11'],
+  [data-p-ui='patient-lady-center-page'] [class*='grid-cols-12'] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  [data-p-ui='patient-lady-center-page'] [class*='max-w-'],
+  [data-p-ui='patient-lady-center-page'] [class*='w-['] {
+    max-width: 100%;
+  }
+
+  [data-p-ui='patient-lady-center-page'] button,
+  [data-p-ui='patient-lady-center-page'] a[role='button'],
+  [data-p-ui='patient-lady-center-page'] input,
+  [data-p-ui='patient-lady-center-page'] select,
+  [data-p-ui='patient-lady-center-page'] textarea {
+    min-height: 44px;
+  }
+
+  [data-p-ui='patient-lady-center-page'] button,
+  [data-p-ui='patient-lady-center-page'] a[role='button'] {
+    overflow-wrap: anywhere;
+  }
+
+  [data-p-ui='patient-lady-center-page'] nav,
+  [data-p-ui='patient-lady-center-page'] [role='tablist'],
+  [data-p-ui='patient-lady-center-page'] [data-tabs],
+  [data-p-ui='patient-lady-center-page'] [class*='tab'] {
+    max-width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-p-ui='patient-lady-center-page'] form {
+    min-width: 0;
+  }
+
+  [data-p-ui='patient-lady-center-page'] form button,
+  [data-p-ui='patient-lady-center-page'] form input,
+  [data-p-ui='patient-lady-center-page'] form select,
+  [data-p-ui='patient-lady-center-page'] form textarea {
+    width: 100%;
+  }
+
+  [data-p-ui='patient-lady-center-page'] [role='dialog'] {
+    max-height: 92dvh;
+  }
+
+  [data-p-ui='patient-lady-center-page'] [class*='p-6'],
+  [data-p-ui='patient-lady-center-page'] [class*='p-7'],
+  [data-p-ui='patient-lady-center-page'] [class*='p-8'] {
+    padding: 1rem;
+  }
+
+  [data-p-ui='patient-lady-center-page'] [class*='gap-6'],
+  [data-p-ui='patient-lady-center-page'] [class*='gap-7'],
+  [data-p-ui='patient-lady-center-page'] [class*='gap-8'] {
+    gap: 1rem;
+  }
+}
+
+@media (min-width: 640px) {
+  [data-p-ui='patient-lady-center-page'] form button {
+    width: auto;
+  }
+}
+/* P-UI3F_END */

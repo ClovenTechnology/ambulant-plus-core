@@ -526,7 +526,7 @@ function Card({
   return (
     <div
       className={cn(
-        "rounded-2xl border border-slate-200/70 bg-white/70 shadow-[0_1px_0_rgba(15,23,42,0.04),0_18px_45px_rgba(2,6,23,0.07)] backdrop-blur",
+        "min-w-0 rounded-[24px] border border-slate-200/70 bg-white/80 shadow-[0_1px_0_rgba(15,23,42,0.04),0_14px_38px_rgba(2,6,23,0.07)] backdrop-blur sm:rounded-2xl",
         className,
       )}
     >
@@ -545,14 +545,14 @@ function SectionHeader({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3">
+    <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
       <div>
         <div className="text-sm font-semibold text-slate-900">{title}</div>
         {subtitle ? (
           <div className="mt-0.5 text-xs text-slate-600">{subtitle}</div>
         ) : null}
       </div>
-      {right ? <div className="shrink-0">{right}</div> : null}
+      {right ? <div className="w-full shrink-0 sm:w-auto">{right}</div> : null}
     </div>
   );
 }
@@ -601,10 +601,10 @@ function Modal({
           if (e.target === e.currentTarget) onClose();
         }}
       />
-      <div className="absolute inset-0 flex items-center justify-center p-4">
+      <div className="absolute inset-0 flex items-end justify-center p-3 sm:items-center sm:p-4">
         <div
           ref={ref}
-          className="w-full max-w-3xl overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl"
+          className="max-h-[92dvh] w-full max-w-3xl overflow-hidden rounded-[24px] border border-slate-200 bg-white shadow-2xl sm:rounded-2xl"
           role="dialog"
           aria-modal="true"
         >
@@ -621,7 +621,7 @@ function Modal({
                 ) : null}
               </div>
               <button
-                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+                className="inline-flex min-h-11 items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 onClick={onClose}
                 aria-label="Close"
               >
@@ -2131,7 +2131,7 @@ function LadyCenterPageContent() {
         <div className="absolute bottom-[-8rem] right-[-10rem] h-80 w-80 rounded-full bg-gradient-to-tr from-amber-200/25 via-rose-200/25 to-blue-200/25 blur-3xl" />
       </div>
 
-      <div className="mx-auto w-full max-w-6xl px-4 py-8">
+      <div data-p-ui="patient-lady-center-page" className="min-w-0 mx-auto w-full max-w-6xl px-4 py-8">
         <LadyCenterHeader
           title="Lady Center"
           subtitle={
