@@ -252,6 +252,62 @@ function chooseEligibility(rows: any[]) {
   );
 }
 
+function asObjectValue(value: unknown): Record<string, any> {
+  const parsed = safeJson<Record<string, any>>(value);
+
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {};
+  }
+
+  return parsed;
+}
+
+type PhlebFeeSchedule = {
+  source: "commercial_policy_default" | "phleb_fee_governance";
+  status: string;
+  phlebProfileId: string | null;
+  phlebUserId: string | null;
+  currency: string;
+  phlebCalloutFeeCents: number;
+  phlebPerKmFeeCents: number;
+  phlebUrgentDrawSurchargeCents: number;
+};
+
+function resolvePhlebFeeSchedule(phlebProfile: any, policy: MedReachCommercialPolicy): PhlebFeeSchedule {
+  const defaults: PhlebFeeSchedule = {
+    source: "commercial_policy_default",
+    status: "INHERIT_DEFAULT",
+    phlebProfileId: phlebProfile?.id || null,
+    phlebUserId: phlebProfile?.userId || null,
+    currency: policy.currency || "ZAR",
+    phlebCalloutFeeCents: policy.phlebCalloutFeeCents,
+    phlebPerKmFeeCents: policy.phlebPerKmFeeCents,
+    phlebUrgentDrawSurchargeCents: policy.phlebUrgentDrawSurchargeCents,
+  };
+
+  const serviceAreaMeta = asObjectValue(phlebProfile?.serviceAreaMeta);
+  const feeGovernance = asObjectValue(serviceAreaMeta.feeGovernance);
+  const status = clean(feeGovernance.status, 80).toUpperCase();
+
+  if (status !== "ACTIVE") {
+    return defaults;
+  }
+
+  return {
+    source: "phleb_fee_governance",
+    status,
+    phlebProfileId: phlebProfile?.id || null,
+    phlebUserId: phlebProfile?.userId || null,
+    currency: clean(feeGovernance.currency, 3).toUpperCase() || defaults.currency,
+    phlebCalloutFeeCents: asInt(feeGovernance.phlebCalloutFeeCents, defaults.phlebCalloutFeeCents),
+    phlebPerKmFeeCents: asInt(feeGovernance.phlebPerKmFeeCents, defaults.phlebPerKmFeeCents),
+    phlebUrgentDrawSurchargeCents: asInt(
+      feeGovernance.phlebUrgentDrawSurchargeCents,
+      defaults.phlebUrgentDrawSurchargeCents
+    ),
+  };
+}
+
 async function ensureFinancialSnapshot(req: NextRequest, orderId: string) {
   const orgId = orgIdFromHeaders(req.headers);
   const { policy, source, persistence } = await loadCommercialPolicy(orgId);
@@ -319,6 +375,23 @@ async function ensureFinancialSnapshot(req: NextRequest, orderId: string) {
     clean(existing?.phlebId, 128) ||
     null;
 
+  const phlebProfile = phlebId
+    ? await (prisma as any).medReachPhlebProfile
+        .findFirst({
+          where: {
+            OR: [{ id: phlebId }, { userId: phlebId }],
+          },
+          select: {
+            id: true,
+            userId: true,
+            serviceAreaMeta: true,
+          },
+        })
+        .catch(() => null)
+    : null;
+
+  const phlebFee = resolvePhlebFeeSchedule(phlebProfile, policy);
+
   const distanceKm = distanceKmFrom(drawCollection, drawMeta, eligibilityMeta, bundleMeta, drawTests);
   const coldChain = valueHasColdChain(drawTests) || valueHasColdChain(eligibilityMeta) || valueHasColdChain(bundleMeta);
   const urgent = valueIsUrgent(drawTests) || valueIsUrgent(drawMeta) || valueIsUrgent(eligibilityMeta);
@@ -327,17 +400,17 @@ async function ensureFinancialSnapshot(req: NextRequest, orderId: string) {
     firstPositive(existing?.subtotalCents) ||
     deriveSubtotalCents(eligibilityMeta, drawTests, bundleMeta, drawMeta);
 
-  const phlebGrossCents =
-    firstPositive(existing?.phlebGrossCents) ||
-    (phlebId ? policy.phlebCalloutFeeCents + Math.round(distanceKm * policy.phlebPerKmFeeCents) : 0);
+  const phlebGrossCents = phlebId
+    ? phlebFee.phlebCalloutFeeCents + Math.round(distanceKm * phlebFee.phlebPerKmFeeCents)
+    : firstPositive(existing?.phlebGrossCents);
 
   const logisticsFeeCents =
     firstPositive(existing?.logisticsFeeCents) ||
     (policy.specimenTransportBaseFeeCents + Math.round(distanceKm * policy.specimenTransportPerKmFeeCents));
 
-  const urgentSurchargeCents =
-    firstPositive(existing?.urgentSurchargeCents) ||
-    (urgent ? policy.phlebUrgentDrawSurchargeCents : 0);
+  const urgentSurchargeCents = urgent
+    ? phlebFee.phlebUrgentDrawSurchargeCents
+    : firstPositive(existing?.urgentSurchargeCents);
 
   const coldChainSurchargeCents =
     firstPositive(existing?.coldChainSurchargeCents) ||
@@ -394,6 +467,16 @@ async function ensureFinancialSnapshot(req: NextRequest, orderId: string) {
     drawId: draw.id,
     labId,
     phlebId,
+    phlebFeeSource: phlebFee.source,
+    phlebFeeStatus: phlebFee.status,
+    phlebFeePhlebProfileId: phlebFee.phlebProfileId,
+    phlebFeeUserId: phlebFee.phlebUserId,
+    phlebFeeSchedule: {
+      currency: phlebFee.currency,
+      phlebCalloutFeeCents: phlebFee.phlebCalloutFeeCents,
+      phlebPerKmFeeCents: phlebFee.phlebPerKmFeeCents,
+      phlebUrgentDrawSurchargeCents: phlebFee.phlebUrgentDrawSurchargeCents,
+    },
     distanceKm,
     coldChain,
     urgent,
