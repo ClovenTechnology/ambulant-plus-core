@@ -327,7 +327,7 @@ export default function NewMedicationPage() {
   }
 
   return (
-    <main className="max-w-3xl mx-auto p-6 space-y-6">
+    <main data-p-ui="patient-medication-new-page" className="min-w-0 overflow-x-clip max-w-3xl mx-auto p-6 space-y-6">
       <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-indigo-50 via-white to-emerald-50 p-6">
         <div className="text-xs font-bold text-slate-600">Medications</div>
         <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-950">Add medication</h1>

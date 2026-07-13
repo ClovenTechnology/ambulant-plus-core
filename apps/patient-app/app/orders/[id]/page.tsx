@@ -64,7 +64,7 @@ export default async function OrderDetailPage({ params }: { params: { id: string
   const status = (order!.status ?? 'Open').toLowerCase();
 
   return (
-    <main className="max-w-4xl mx-auto p-6 space-y-6">
+    <main data-p-ui="patient-order-detail-page" className="min-w-0 overflow-x-clip max-w-4xl mx-auto p-6 space-y-6">
       <header className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold">Order: {order!.id}</h1>

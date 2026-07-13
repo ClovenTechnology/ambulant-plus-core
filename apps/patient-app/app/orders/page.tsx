@@ -339,7 +339,7 @@ export default function OrdersListPage() {
   }
 
   return (
-    <main className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+    <main data-p-ui="patient-orders-page" className="min-w-0 overflow-x-clip mx-auto max-w-7xl space-y-6 p-4 md:p-6">
       <section className="overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 text-white shadow-2xl">
         <div className="p-6 md:p-8">
           <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">

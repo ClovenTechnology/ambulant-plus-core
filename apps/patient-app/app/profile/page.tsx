@@ -1095,7 +1095,7 @@ export default function Profile() {
   }, [devices]);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.14),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_42%,_#f8faff_100%)] px-4 pb-12 pt-4 md:px-6 md:pb-14 md:pt-6 lg:px-8">
+    <main data-p-ui="patient-profile-page" className="min-w-0 overflow-x-clip relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.14),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_42%,_#f8faff_100%)] px-4 pb-12 pt-4 md:px-6 md:pb-14 md:pt-6 lg:px-8">
       <div className="pointer-events-none absolute inset-0 opacity-50">
         <div className="absolute left-[-12%] top-[-8%] h-[420px] w-[420px] rounded-full bg-cyan-300/20 blur-3xl" />
         <div className="absolute right-[-8%] top-[10%] h-[360px] w-[360px] rounded-full bg-fuchsia-300/15 blur-3xl" />

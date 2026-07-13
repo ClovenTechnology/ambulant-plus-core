@@ -2043,7 +2043,7 @@ export default function MedicationsPage() {
   const showMobileCards = true;
 
   return (
-    <main className="max-w-6xl mx-auto p-5 sm:p-6 space-y-6">
+    <main data-p-ui="patient-medications-page" className="min-w-0 overflow-x-clip max-w-6xl mx-auto p-5 sm:p-6 space-y-6">
       {/* Premium header */}
       <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-gradient-to-br from-emerald-50 via-white to-indigo-50 shadow-sm">
         <div className="absolute -top-24 -right-24 h-64 w-64 rounded-full bg-emerald-200/35 blur-3xl" />

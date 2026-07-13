@@ -62,7 +62,7 @@ export default async function OrdersPrintPage() {
   };
 
   return (
-    <main className="max-w-5xl mx-auto p-6 space-y-6">
+    <main data-p-ui="patient-orders-print-page" className="min-w-0 overflow-x-clip max-w-5xl mx-auto p-6 space-y-6">
       <header className="flex items-center justify-between print:justify-start print:gap-4">
         <div>
           <h1 className="text-2xl font-bold">Order Summary</h1>

@@ -326,7 +326,7 @@ function UpgradePlanPageContent() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900">
+    <div data-p-ui="patient-plan-upgrade-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 text-slate-900">
       <RedeemCodeModal
         open={redeemOpen}
         onClose={() => setRedeemOpen(false)}

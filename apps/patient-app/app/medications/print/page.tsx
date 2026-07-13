@@ -604,7 +604,7 @@ export default async function MedicationsPrintPage() {
   const hasErxContext = hasErxMedication;
 
   return (
-    <main className="mx-auto max-w-6xl space-y-5 bg-slate-50/60 p-6 text-slate-900 print:max-w-none print:bg-white print:p-0 print:text-black print:space-y-4">
+    <main data-p-ui="patient-medications-print-page" className="min-w-0 overflow-x-clip mx-auto max-w-6xl space-y-5 bg-slate-50/60 p-6 text-slate-900 print:max-w-none print:bg-white print:p-0 print:text-black print:space-y-4">
       <style>{`
         @media print {
           html, body { background: #fff !important; }
