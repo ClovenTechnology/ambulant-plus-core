@@ -124,15 +124,15 @@ export default function VitalsPage() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.10),_transparent_24%),linear-gradient(to_bottom,_#f8fafc,_#eef2ff_35%,_#f8fafc_100%)]">
+      <main data-p-ui="patient-vitals-page" className="relative min-h-screen overflow-x-clip bg-[radial-gradient(circle_at_top_left,_rgba(59,130,246,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(16,185,129,0.10),_transparent_24%),linear-gradient(to_bottom,_#f8fafc,_#eef2ff_35%,_#f8fafc_100%)]">
         <div className="pointer-events-none absolute inset-0">
           <div className="absolute left-[-120px] top-[-120px] h-72 w-72 rounded-full bg-sky-200/30 blur-3xl" />
           <div className="absolute right-[-80px] top-16 h-72 w-72 rounded-full bg-emerald-200/25 blur-3xl" />
           <div className="absolute bottom-0 left-1/3 h-80 w-80 rounded-full bg-violet-200/20 blur-3xl" />
         </div>
 
-        <div className="relative mx-auto max-w-7xl px-4 py-5 sm:px-6 lg:px-8">
-          <section className="overflow-hidden rounded-[32px] border border-white/60 bg-white/70 p-5 shadow-[0_20px_70px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-7">
+        <div className="relative mx-auto w-full max-w-7xl px-3 py-4 sm:px-5 sm:py-5 lg:px-8">
+          <section data-p-ui="patient-vitals-hero" className="overflow-hidden rounded-[28px] border border-white/60 bg-white/75 p-4 shadow-[0_18px_56px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:rounded-[32px] sm:p-7">
             <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
               <div className="max-w-3xl">
                 <div className="inline-flex items-center gap-2 rounded-full border border-slate-200/80 bg-white/80 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500 shadow-sm">
@@ -140,7 +140,7 @@ export default function VitalsPage() {
                   Health dashboard
                 </div>
 
-                <h1 className="mt-4 text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl">
+                <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-950 sm:text-4xl">
                   Vitals
                 </h1>
 
@@ -165,17 +165,17 @@ export default function VitalsPage() {
                 </div>
               </div>
 
-              <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
+              <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                 <Link
                   href={chartsHref}
-                  className="inline-flex items-center justify-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-medium text-white shadow-lg shadow-slate-900/15 transition hover:-translate-y-0.5 hover:bg-slate-800"
+                  className="inline-flex w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-slate-900/15 transition hover:-translate-y-0.5 hover:bg-slate-800 sm:w-auto"
                 >
                   Open Live Charts
                 </Link>
 
                 <Link
                   href={chartsHref}
-                  className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white/85 px-4 py-2.5 text-sm font-medium text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-white"
+                  className="inline-flex w-full items-center justify-center rounded-2xl border border-slate-200 bg-white/85 px-4 py-2.5 text-sm font-bold text-slate-700 shadow-sm transition hover:-translate-y-0.5 hover:bg-white sm:w-auto"
                 >
                   Fullscreen Viewer
                 </Link>
@@ -203,7 +203,7 @@ export default function VitalsPage() {
 
           <section className="mt-6 grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.65fr)_380px]">
             <div className="min-w-0">
-              <div className="rounded-[30px] border border-white/60 bg-white/75 p-3 shadow-[0_16px_55px_rgba(15,23,42,0.07)] backdrop-blur-xl sm:p-4">
+              <div data-p-ui="patient-vitals-panel-card" className="min-w-0 rounded-[24px] border border-white/60 bg-white/80 p-2 shadow-[0_14px_44px_rgba(15,23,42,0.07)] backdrop-blur-xl sm:rounded-[30px] sm:p-4">
                 <VitalsPanel
                   range={range}
                   setRange={setRange}

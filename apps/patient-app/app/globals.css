@@ -292,3 +292,63 @@ table {
   }
 }
 /* P-UI3C_END */
+
+/* P-UI3D: Vitals + Charts mobile/world-class polish */
+[data-p-ui='patient-vitals-page'],
+[data-p-ui='patient-charts-page'] {
+  width: 100%;
+  min-width: 0;
+}
+
+[data-p-ui='patient-vitals-page'] .recharts-wrapper,
+[data-p-ui='patient-vitals-page'] .recharts-surface,
+[data-p-ui='patient-charts-page'] .recharts-wrapper,
+[data-p-ui='patient-charts-page'] .recharts-surface {
+  max-width: 100% !important;
+}
+
+@media (max-width: 767px) {
+  [data-p-ui='patient-vitals-page'] {
+    isolation: isolate;
+  }
+
+  [data-p-ui='patient-vitals-page'] a[href*='/charts'] {
+    width: 100%;
+    justify-content: center;
+  }
+
+  [data-p-ui='patient-vitals-page'] [data-p-ui='patient-vitals-panel-card'] {
+    overflow-x: clip;
+  }
+
+  [data-p-ui='patient-charts-page'] header button,
+  [data-p-ui='patient-charts-page'] header a,
+  [data-p-ui='patient-charts-page'] [data-p-ui='patient-charts-actions'] button {
+    width: 100%;
+    justify-content: center;
+  }
+
+  [data-p-ui='patient-charts-page'] [data-p-ui='patient-charts-controlbar'] {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  [data-p-ui='patient-charts-page'] section {
+    min-width: 0;
+  }
+
+  [data-p-ui='patient-charts-page'] canvas,
+  [data-p-ui='patient-vitals-page'] canvas {
+    max-width: 100%;
+  }
+}
+
+@media (min-width: 640px) {
+  [data-p-ui='patient-vitals-page'] a[href*='/charts'],
+  [data-p-ui='patient-charts-page'] header button,
+  [data-p-ui='patient-charts-page'] header a,
+  [data-p-ui='patient-charts-page'] [data-p-ui='patient-charts-actions'] button {
+    width: auto;
+  }
+}
+/* P-UI3D_END */

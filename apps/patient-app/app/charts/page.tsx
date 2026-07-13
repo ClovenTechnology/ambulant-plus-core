@@ -476,9 +476,9 @@ function ChartsPageContent() {
   }, [privacy.discreet, privacy.hideSensitive]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
-      <main ref={exportRef} className="mx-auto max-w-6xl px-4 py-6">
-        <header className="rounded-3xl border border-slate-200 bg-white/90 p-5 shadow-sm backdrop-blur">
+    <div data-p-ui="patient-charts-page" className="min-h-screen bg-gradient-to-b from-slate-50 via-white to-slate-50">
+      <main ref={exportRef} className="mx-auto w-full max-w-6xl px-3 py-4 sm:px-4 sm:py-6">
+        <header data-p-ui="patient-charts-hero" className="overflow-hidden rounded-[28px] border border-slate-200 bg-white/90 p-4 shadow-sm backdrop-blur sm:rounded-3xl sm:p-5">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div className="flex items-start gap-3">
               <Link
@@ -533,7 +533,7 @@ function ChartsPageContent() {
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 self-start">
+            <div data-p-ui="patient-charts-actions" className="flex w-full flex-col gap-2 self-stretch sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:self-start">
               <button
                 onClick={expandAll}
                 className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 shadow-sm hover:bg-slate-50"
@@ -578,7 +578,7 @@ function ChartsPageContent() {
           </div>
         </header>
 
-        <div className="mt-4">
+        <div data-p-ui="patient-charts-controlbar" className="mt-4 min-w-0">
           <ChartsControlBar
             q={q}
             onChange={setQ}
@@ -589,7 +589,7 @@ function ChartsPageContent() {
         </div>
 
         <section className="mt-6 space-y-3" aria-label="Overview">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-base font-semibold text-slate-900">Overview</h2>
               <p className="text-xs text-slate-500">A quick snapshot — respects Discreet + Sensitive hidden.</p>
