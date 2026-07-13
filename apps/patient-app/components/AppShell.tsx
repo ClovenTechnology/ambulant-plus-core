@@ -88,11 +88,11 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
           <div className="mx-auto flex max-w-7xl gap-0 px-3 py-4 sm:px-4 lg:gap-6">
             <Sidebar variant="desktop" />
-            <main className="min-w-0 flex-1">{children}</main>
+            <main data-p-ui="patient-page-safety" className="min-w-0 flex-1">{children}</main>
           </div>
         </>
       ) : (
-        <main className={showTopbar ? 'mx-auto max-w-7xl px-3 py-4 sm:px-4' : ''}>
+        <main data-p-ui="patient-page-safety" className={showTopbar ? 'mx-auto max-w-7xl px-3 py-4 sm:px-4' : ''}>
           {children}
         </main>
       )}
