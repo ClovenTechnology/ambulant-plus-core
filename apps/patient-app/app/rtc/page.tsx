@@ -575,12 +575,12 @@ function RTCContent() {
   }
 
   return (
-    <main className="space-y-4 p-6">
-      <h1 className="text-xl font-semibold">Patient — RTC</h1>
+    <main data-p-ui="patient-rtc-page" className="min-h-[calc(100svh-4rem)] space-y-4 overflow-x-clip px-3 py-4 sm:px-5 sm:py-6">
+      <div data-p-ui="patient-rtc-hero" className="rounded-[28px] border border-slate-200 bg-white/90 p-4 shadow-sm backdrop-blur sm:p-5"><p className="text-xs font-black uppercase tracking-[0.16em] text-cyan-700">Secure consultation room</p><h1 className="mt-2 text-2xl font-black tracking-tight text-slate-950 sm:text-3xl">Patient video consultation</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">Join your clinician, manage devices, exchange messages and follow captions from one mobile-ready workspace.</p></div>
 
-      <div className="flex flex-col gap-4 md:flex-row">
-        <div className="space-y-3 md:w-1/2">
-          <div className="space-y-2 rounded border p-3">
+      <div data-p-ui="patient-rtc-layout" className="grid min-w-0 grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.92fr)]">
+        <div data-p-ui="patient-rtc-media-pane" className="min-w-0 space-y-3">
+          <div data-p-ui="patient-rtc-controls-card" className="space-y-3 rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-sm">
             <div className="text-sm opacity-70">Controls</div>
 
             {!signalUrl || !room ? (
@@ -596,10 +596,10 @@ function RTCContent() {
               </div>
             ) : null}
 
-            <div className="flex flex-wrap gap-2">
+            <div data-p-ui="patient-rtc-controls" className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {!active ? (
                 <button
-                  className="rounded border px-3 py-1 disabled:opacity-50"
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:opacity-50"
                   disabled={!signalUrl || !room}
                   onClick={() => setActive(true)}
                 >
@@ -607,7 +607,7 @@ function RTCContent() {
                 </button>
               ) : (
                 <button
-                  className="rounded border px-3 py-1"
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-slate-50"
                   onClick={() => setActive(false)}
                 >
                   End Session
@@ -615,20 +615,20 @@ function RTCContent() {
               )}
 
               <button
-                className="rounded border px-3 py-1"
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-slate-50"
                 onClick={() => setMicOn((value) => !value)}
               >
                 {micOn ? 'Mute Mic' : 'Unmute Mic'}
               </button>
 
               <button
-                className="rounded border px-3 py-1"
+                className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-slate-50"
                 onClick={() => setCamOn((value) => !value)}
               >
                 {camOn ? 'Camera Off' : 'Camera On'}
               </button>
 
-              <button className="rounded border px-3 py-1" onClick={toggleShare}>
+              <button className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-bold text-slate-800 shadow-sm transition hover:bg-slate-50" onClick={toggleShare}>
                 {sharing ? 'Stop Share' : 'Share Screen'}
               </button>
             </div>
@@ -638,9 +638,9 @@ function RTCContent() {
             </div>
           </div>
 
-          <details className="rounded border p-3">
+          <details className="rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-sm">
             <summary className="cursor-pointer select-none">Devices</summary>
-            <div className="mt-2 grid gap-3 md:grid-cols-2">
+            <div className="mt-3 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
               <DeviceSelect
                 audioId={deviceIds.audioId}
                 videoId={deviceIds.videoId}
@@ -674,15 +674,15 @@ function RTCContent() {
           </div>
         </div>
 
-        <div className="space-y-3 md:w-1/2">
-          <ChatPanel
+        <div data-p-ui="patient-rtc-chat-pane" className="min-w-0 space-y-3">
+          <div data-p-ui="patient-rtc-chat-card" className="min-w-0 overflow-hidden rounded-[24px] border border-slate-200 bg-white/90 shadow-sm"><ChatPanel
             send={sendChat}
             onTyping={setTyping}
             selfLabel={SELF_NAME || 'Me'}
             peerLabel={PEER_NAME}
           />
 
-          <details className="rounded border p-3">
+          <details className="rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-sm">
             <summary className="cursor-pointer select-none">Network Stats</summary>
             <div className="mt-2">
               <StatsPanel pc={pcRef.current} />
@@ -691,10 +691,10 @@ function RTCContent() {
 
           <Captions lang="en-GB" />
 
-          <details className="rounded border p-3">
+          <details className="rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-sm">
             <summary className="cursor-pointer select-none">Status</summary>
             <div className="mt-2">
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap text-xs leading-tight">
+              <pre className="max-h-[42svh] overflow-auto whitespace-pre-wrap break-words rounded-2xl bg-slate-950 p-3 text-xs leading-tight text-slate-50">
                 {log.map((item, index) => (
                   <span key={`${index}-${item}`}>
                     {item}
@@ -714,7 +714,7 @@ export default function RTC() {
   return (
     <Suspense
       fallback={
-        <main className="p-6 text-sm text-slate-600">
+        <main data-p-ui="patient-rtc-page" className="min-h-[50svh] px-3 py-4 text-sm text-slate-600 sm:px-6">
           Loading RTC session…
         </main>
       }

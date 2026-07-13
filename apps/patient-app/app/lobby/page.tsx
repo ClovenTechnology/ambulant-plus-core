@@ -346,11 +346,11 @@ function Card({
   return (
     <section
       className={cn(
-        'rounded-[30px] border border-white/70 bg-white/88 p-5 shadow-[0_14px_48px_rgba(15,23,42,0.07)] backdrop-blur-2xl',
+        'min-w-0 rounded-[24px] border border-white/70 bg-white/90 p-4 shadow-[0_12px_38px_rgba(15,23,42,0.07)] backdrop-blur-2xl sm:rounded-[30px] sm:p-5',
         className,
       )}
     >
-      <div className="mb-4 flex items-start justify-between gap-3">
+      <div className="mb-4 flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h2 className="text-sm font-semibold text-slate-950">{title}</h2>
           {subtitle ? (
@@ -386,7 +386,7 @@ function Stat({
             : 'border-slate-200 bg-slate-50';
 
   return (
-    <div className={cn('rounded-2xl border p-3', cls)}>
+    <div className={cn('min-w-0 rounded-2xl border p-3', cls)}>
       <div className="text-[11px] uppercase tracking-[0.14em] text-slate-500">
         {label}
       </div>
@@ -415,13 +415,13 @@ function DeviceModeButton({
       type="button"
       onClick={() => onClick(mode)}
       className={cn(
-        'rounded-[24px] border p-4 text-left transition',
+        'min-h-11 w-full min-w-0 rounded-[24px] border p-4 text-left transition',
         active
           ? 'border-sky-200 bg-sky-50 shadow-[0_12px_36px_rgba(14,165,233,0.12)]'
           : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50',
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex min-w-0 items-start gap-3">
         <div
           className={cn(
             'rounded-2xl border p-3',
@@ -1093,7 +1093,7 @@ export default function PatientLobbyPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.14),_transparent_26%),linear-gradient(180deg,_#f8fbff_0%,_#eef6ff_55%,_#f8fafc_100%)] p-4 text-slate-900 md:p-6">
+    <main data-p-ui="patient-lobby-page" className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.16),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.14),_transparent_26%),linear-gradient(180deg,_#f8fbff_0%,_#eef6ff_55%,_#f8fafc_100%)] p-4 text-slate-900 md:p-6">
       <div className="mx-auto max-w-7xl space-y-5">
         <section className="relative overflow-hidden rounded-[36px] border border-white/70 bg-white/88 p-6 shadow-[0_20px_70px_rgba(15,23,42,0.09)] backdrop-blur-2xl md:p-7">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.12),transparent_30%)]" />

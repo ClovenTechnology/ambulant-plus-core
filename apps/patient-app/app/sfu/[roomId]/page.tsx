@@ -8,5 +8,9 @@ export default function PatientSfuPage({
 }: {
   params: { roomId: string };
 }) {
-  return <PatientSfuShell params={params} />;
+  return (
+    <div data-p-ui="patient-sfu-page" className="min-h-dvh min-w-0 overflow-x-clip bg-slate-950">
+      <PatientSfuShell params={params} />
+    </div>
+  );
 }

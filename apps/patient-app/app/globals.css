@@ -352,3 +352,77 @@ table {
   }
 }
 /* P-UI3D_END */
+
+/* P-UI3E: Patient chat, RTC, lobby and SFU mobile polish */
+[data-p-ui='patient-rtc-page'],
+[data-p-ui='patient-lobby-page'],
+[data-p-ui='patient-sfu-page'] {
+  width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+[data-p-ui='patient-rtc-page'] video,
+[data-p-ui='patient-lobby-page'] video,
+[data-p-ui='patient-sfu-page'] video {
+  max-width: 100%;
+  object-fit: cover;
+}
+
+[data-p-ui='patient-rtc-chat-card'] form,
+[data-p-ui='patient-rtc-chat-card'] footer,
+[data-p-ui='patient-sfu-page'] form,
+[data-p-ui='patient-sfu-page'] footer {
+  min-width: 0;
+}
+
+[data-p-ui='patient-rtc-chat-card'] textarea,
+[data-p-ui='patient-rtc-chat-card'] input,
+[data-p-ui='patient-sfu-page'] textarea,
+[data-p-ui='patient-sfu-page'] input {
+  min-height: 44px;
+  max-width: 100%;
+  font-size: 16px;
+}
+
+@media (max-width: 767px) {
+  [data-p-ui='patient-rtc-page'] {
+    min-height: calc(100svh - 3.5rem);
+  }
+
+  [data-p-ui='patient-rtc-page'] details,
+  [data-p-ui='patient-lobby-page'] details {
+    min-width: 0;
+  }
+
+  [data-p-ui='patient-rtc-page'] button,
+  [data-p-ui='patient-lobby-page'] button,
+  [data-p-ui='patient-sfu-page'] button {
+    min-height: 44px;
+  }
+
+  [data-p-ui='patient-rtc-chat-card'] {
+    max-height: none;
+  }
+
+  [data-p-ui='patient-rtc-chat-card'] [class*='max-h-'],
+  [data-p-ui='patient-sfu-page'] [class*='max-h-'] {
+    max-height: 52svh;
+  }
+
+  [data-p-ui='patient-lobby-page'] [class*='grid-cols-2'],
+  [data-p-ui='patient-lobby-page'] [class*='grid-cols-3'],
+  [data-p-ui='patient-lobby-page'] [class*='grid-cols-4'] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  [data-p-ui='patient-lobby-page'] a,
+  [data-p-ui='patient-lobby-page'] button {
+    overflow-wrap: anywhere;
+  }
+
+  [data-p-ui='patient-sfu-page'] {
+    min-height: 100dvh;
+  }
+}
+/* P-UI3E_END */
