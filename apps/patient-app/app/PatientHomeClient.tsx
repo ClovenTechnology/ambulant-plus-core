@@ -1484,7 +1484,7 @@ export default function HomePage() {
   );
 
   return (
-    <main
+    <main data-p-ui="patient-home-page"
       className={cn(
         'relative isolate min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.14),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_42%,_#f8faff_100%)] px-4 pb-12 pt-4 md:px-6 md:pb-14 md:pt-6 lg:px-8',
         moodTheme.pageGlow,

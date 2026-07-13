@@ -578,7 +578,7 @@ function FamilyPageContent() {
     (confirmState?.kind === 'cancel_invite' && actionBusyId === `inv-cancel-${confirmState.invitationId}`);
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.08),_transparent_24%),radial-gradient(circle_at_top_right,_rgba(34,211,238,0.08),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_48%,_#f8faff_100%)] px-4 pb-10 pt-4 md:px-6 md:pt-6 lg:px-8">
+    <main data-p-ui="patient-family-page" className="min-w-0 overflow-x-clip relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.08),_transparent_24%),radial-gradient(circle_at_top_right,_rgba(34,211,238,0.08),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_48%,_#f8faff_100%)] px-4 pb-10 pt-4 md:px-6 md:pt-6 lg:px-8">
       <div className="pointer-events-none absolute inset-0 opacity-50">
         <div className="absolute left-[-10%] top-[-6%] h-[360px] w-[360px] rounded-full bg-cyan-300/16 blur-3xl" />
         <div className="absolute right-[-8%] top-[8%] h-[320px] w-[320px] rounded-full bg-indigo-300/12 blur-3xl" />

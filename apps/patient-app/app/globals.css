@@ -648,3 +648,211 @@ table {
   }
 }
 /* P-UI3G_END */
+
+/* P-UI3H-B: Core remaining patient mobile shell polish */
+[data-p-ui='patient-home-page'],
+[data-p-ui='patient-family-page'],
+[data-p-ui='patient-clinicians-page'],
+[data-p-ui='patient-careport-partners-page'],
+[data-p-ui='patient-antenatal-center-page'] {
+  width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+  isolation: isolate;
+}
+
+[data-p-ui='patient-home-page'] > *,
+[data-p-ui='patient-family-page'] > *,
+[data-p-ui='patient-clinicians-page'] > *,
+[data-p-ui='patient-careport-partners-page'] > *,
+[data-p-ui='patient-antenatal-center-page'] > *,
+[data-p-ui='patient-home-page'] section,
+[data-p-ui='patient-family-page'] section,
+[data-p-ui='patient-clinicians-page'] section,
+[data-p-ui='patient-careport-partners-page'] section,
+[data-p-ui='patient-antenatal-center-page'] section,
+[data-p-ui='patient-home-page'] article,
+[data-p-ui='patient-family-page'] article,
+[data-p-ui='patient-clinicians-page'] article,
+[data-p-ui='patient-careport-partners-page'] article,
+[data-p-ui='patient-antenatal-center-page'] article,
+[data-p-ui='patient-home-page'] div,
+[data-p-ui='patient-family-page'] div,
+[data-p-ui='patient-clinicians-page'] div,
+[data-p-ui='patient-careport-partners-page'] div,
+[data-p-ui='patient-antenatal-center-page'] div {
+  min-width: 0;
+}
+
+[data-p-ui='patient-home-page'] img,
+[data-p-ui='patient-family-page'] img,
+[data-p-ui='patient-clinicians-page'] img,
+[data-p-ui='patient-careport-partners-page'] img,
+[data-p-ui='patient-antenatal-center-page'] img,
+[data-p-ui='patient-home-page'] svg,
+[data-p-ui='patient-family-page'] svg,
+[data-p-ui='patient-clinicians-page'] svg,
+[data-p-ui='patient-careport-partners-page'] svg,
+[data-p-ui='patient-antenatal-center-page'] svg,
+[data-p-ui='patient-home-page'] canvas,
+[data-p-ui='patient-family-page'] canvas,
+[data-p-ui='patient-clinicians-page'] canvas,
+[data-p-ui='patient-careport-partners-page'] canvas,
+[data-p-ui='patient-antenatal-center-page'] canvas,
+[data-p-ui='patient-home-page'] video,
+[data-p-ui='patient-family-page'] video,
+[data-p-ui='patient-clinicians-page'] video,
+[data-p-ui='patient-careport-partners-page'] video,
+[data-p-ui='patient-antenatal-center-page'] video {
+  max-width: 100%;
+}
+
+[data-p-ui='patient-home-page'] input,
+[data-p-ui='patient-family-page'] input,
+[data-p-ui='patient-clinicians-page'] input,
+[data-p-ui='patient-careport-partners-page'] input,
+[data-p-ui='patient-antenatal-center-page'] input,
+[data-p-ui='patient-home-page'] select,
+[data-p-ui='patient-family-page'] select,
+[data-p-ui='patient-clinicians-page'] select,
+[data-p-ui='patient-careport-partners-page'] select,
+[data-p-ui='patient-antenatal-center-page'] select,
+[data-p-ui='patient-home-page'] textarea,
+[data-p-ui='patient-family-page'] textarea,
+[data-p-ui='patient-clinicians-page'] textarea,
+[data-p-ui='patient-careport-partners-page'] textarea,
+[data-p-ui='patient-antenatal-center-page'] textarea {
+  max-width: 100%;
+  font-size: 16px;
+}
+
+[data-p-ui='patient-home-page'] table,
+[data-p-ui='patient-family-page'] table,
+[data-p-ui='patient-clinicians-page'] table,
+[data-p-ui='patient-careport-partners-page'] table,
+[data-p-ui='patient-antenatal-center-page'] table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 767px) {
+  [data-p-ui='patient-home-page'] [class*='grid-cols-2'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-3'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-4'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-5'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-6'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-7'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-8'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-9'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-10'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-11'],
+  [data-p-ui='patient-home-page'] [class*='grid-cols-12'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-2'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-3'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-4'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-5'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-6'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-7'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-8'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-9'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-10'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-11'],
+  [data-p-ui='patient-family-page'] [class*='grid-cols-12'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-2'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-3'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-4'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-5'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-6'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-7'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-8'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-9'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-10'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-11'],
+  [data-p-ui='patient-clinicians-page'] [class*='grid-cols-12'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-2'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-3'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-4'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-5'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-6'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-7'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-8'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-9'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-10'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-11'],
+  [data-p-ui='patient-careport-partners-page'] [class*='grid-cols-12'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-2'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-3'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-4'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-5'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-6'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-7'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-8'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-9'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-10'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-11'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='grid-cols-12'] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  [data-p-ui='patient-home-page'] button,
+  [data-p-ui='patient-family-page'] button,
+  [data-p-ui='patient-clinicians-page'] button,
+  [data-p-ui='patient-careport-partners-page'] button,
+  [data-p-ui='patient-antenatal-center-page'] button,
+  [data-p-ui='patient-home-page'] a[role='button'],
+  [data-p-ui='patient-family-page'] a[role='button'],
+  [data-p-ui='patient-clinicians-page'] a[role='button'],
+  [data-p-ui='patient-careport-partners-page'] a[role='button'],
+  [data-p-ui='patient-antenatal-center-page'] a[role='button'],
+  [data-p-ui='patient-home-page'] input,
+  [data-p-ui='patient-family-page'] input,
+  [data-p-ui='patient-clinicians-page'] input,
+  [data-p-ui='patient-careport-partners-page'] input,
+  [data-p-ui='patient-antenatal-center-page'] input,
+  [data-p-ui='patient-home-page'] select,
+  [data-p-ui='patient-family-page'] select,
+  [data-p-ui='patient-clinicians-page'] select,
+  [data-p-ui='patient-careport-partners-page'] select,
+  [data-p-ui='patient-antenatal-center-page'] select,
+  [data-p-ui='patient-home-page'] textarea,
+  [data-p-ui='patient-family-page'] textarea,
+  [data-p-ui='patient-clinicians-page'] textarea,
+  [data-p-ui='patient-careport-partners-page'] textarea,
+  [data-p-ui='patient-antenatal-center-page'] textarea {
+    min-height: 44px;
+  }
+
+  [data-p-ui='patient-home-page'] [class*='max-w-'],
+  [data-p-ui='patient-family-page'] [class*='max-w-'],
+  [data-p-ui='patient-clinicians-page'] [class*='max-w-'],
+  [data-p-ui='patient-careport-partners-page'] [class*='max-w-'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='max-w-'],
+  [data-p-ui='patient-home-page'] [class*='w-['],
+  [data-p-ui='patient-family-page'] [class*='w-['],
+  [data-p-ui='patient-clinicians-page'] [class*='w-['],
+  [data-p-ui='patient-careport-partners-page'] [class*='w-['],
+  [data-p-ui='patient-antenatal-center-page'] [class*='w-['] {
+    max-width: 100%;
+  }
+
+  [data-p-ui='patient-home-page'] [class*='p-6'],
+  [data-p-ui='patient-home-page'] [class*='p-7'],
+  [data-p-ui='patient-home-page'] [class*='p-8'],
+  [data-p-ui='patient-family-page'] [class*='p-6'],
+  [data-p-ui='patient-family-page'] [class*='p-7'],
+  [data-p-ui='patient-family-page'] [class*='p-8'],
+  [data-p-ui='patient-clinicians-page'] [class*='p-6'],
+  [data-p-ui='patient-clinicians-page'] [class*='p-7'],
+  [data-p-ui='patient-clinicians-page'] [class*='p-8'],
+  [data-p-ui='patient-careport-partners-page'] [class*='p-6'],
+  [data-p-ui='patient-careport-partners-page'] [class*='p-7'],
+  [data-p-ui='patient-careport-partners-page'] [class*='p-8'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='p-6'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='p-7'],
+  [data-p-ui='patient-antenatal-center-page'] [class*='p-8'] {
+    padding: 1rem;
+  }
+}
+/* P-UI3H-B_END */

@@ -417,7 +417,7 @@ export default function CarePortPartnerApplicationPage() {
   }
 
   return (
-    <main className="min-h-screen bg-slate-50">
+    <main data-p-ui="patient-careport-partners-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50">
       <section className="mx-auto max-w-6xl px-4 py-8">
         <div className="rounded-[2rem] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
           <p className="text-xs font-semibold uppercase tracking-[0.24em] text-emerald-700">

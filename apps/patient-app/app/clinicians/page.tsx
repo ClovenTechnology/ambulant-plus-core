@@ -1707,7 +1707,7 @@ function CliniciansPageContent() {
   }, [compareIds, scoped]);
 
   return (
-    <main
+    <main data-p-ui="patient-clinicians-page"
       className={cn(
         'relative min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.10),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.12),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_42%,_#f8faff_100%)]',
         isPremium && compareIds.length ? 'pb-24' : 'pb-10',

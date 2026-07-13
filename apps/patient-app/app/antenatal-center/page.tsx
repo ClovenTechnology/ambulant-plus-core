@@ -149,7 +149,7 @@ export default function AntenatalCenter() {
   const copyToast = async () => { try { await navigator.clipboard.writeText(toastUrl); setToastCopied(true); } catch {} };
 
   return (
-    <main>
+    <main data-p-ui="patient-antenatal-center-page" className="min-w-0 overflow-x-clip">
       <div className="max-w-7xl mx-auto p-6 sm:p-8 space-y-6">
         {/* Header */}
         <header className="flex items-center justify-between rounded-2xl bg-white/70 backdrop-blur px-5 py-4 border border-gray-200 shadow-sm">
