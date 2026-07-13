@@ -545,3 +545,106 @@ table {
   }
 }
 /* P-UI3F_END */
+
+/* P-UI3G: Self-check mobile/world-class polish */
+[data-p-ui='patient-self-check-page'] {
+  width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+  isolation: isolate;
+}
+
+[data-p-ui='patient-self-check-page'] > *,
+[data-p-ui='patient-self-check-page'] article,
+[data-p-ui='patient-self-check-page'] section,
+[data-p-ui='patient-self-check-page'] div,
+[data-p-ui='patient-self-check-page'] aside {
+  min-width: 0;
+}
+
+[data-p-ui='patient-self-check-page'] img,
+[data-p-ui='patient-self-check-page'] svg,
+[data-p-ui='patient-self-check-page'] canvas,
+[data-p-ui='patient-self-check-page'] video {
+  max-width: 100%;
+}
+
+[data-p-ui='patient-self-check-page'] input,
+[data-p-ui='patient-self-check-page'] select,
+[data-p-ui='patient-self-check-page'] textarea {
+  max-width: 100%;
+  font-size: 16px;
+}
+
+[data-p-ui='patient-self-check-page'] p,
+[data-p-ui='patient-self-check-page'] li,
+[data-p-ui='patient-self-check-page'] span {
+  overflow-wrap: anywhere;
+}
+
+[data-p-ui='patient-self-check-stepper-wrap'] {
+  scrollbar-width: thin;
+}
+
+@media (max-width: 767px) {
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-2'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-3'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-4'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-5'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-6'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-7'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-8'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-9'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-10'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-11'],
+  [data-p-ui='patient-self-check-page'] [class*='grid-cols-12'] {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  [data-p-ui='patient-self-check-page'] button,
+  [data-p-ui='patient-self-check-page'] a[role='button'],
+  [data-p-ui='patient-self-check-page'] input,
+  [data-p-ui='patient-self-check-page'] select,
+  [data-p-ui='patient-self-check-page'] textarea {
+    min-height: 44px;
+  }
+
+  [data-p-ui='patient-self-check-page'] form button,
+  [data-p-ui='patient-self-check-page'] form input,
+  [data-p-ui='patient-self-check-page'] form select,
+  [data-p-ui='patient-self-check-page'] form textarea {
+    width: 100%;
+  }
+
+  [data-p-ui='patient-self-check-page'] [class*='max-w-'],
+  [data-p-ui='patient-self-check-page'] [class*='w-['] {
+    max-width: 100%;
+  }
+
+  [data-p-ui='patient-self-check-page'] [class*='p-6'],
+  [data-p-ui='patient-self-check-page'] [class*='p-7'],
+  [data-p-ui='patient-self-check-page'] [class*='p-8'] {
+    padding: 1rem;
+  }
+
+  [data-p-ui='patient-self-check-page'] [class*='gap-6'],
+  [data-p-ui='patient-self-check-page'] [class*='gap-7'],
+  [data-p-ui='patient-self-check-page'] [class*='gap-8'] {
+    gap: 1rem;
+  }
+
+  [data-p-ui='patient-self-check-stepper-wrap'] > * {
+    min-width: max-content;
+  }
+
+  [data-p-ui='patient-self-check-right-rail'] {
+    order: 2;
+  }
+}
+
+@media (min-width: 640px) {
+  [data-p-ui='patient-self-check-page'] form button {
+    width: auto;
+  }
+}
+/* P-UI3G_END */

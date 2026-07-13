@@ -587,8 +587,8 @@ export default function SelfCheckPage() {
 
   if (!profileGenderReady) {
     return (
-      <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
-        <div className="mx-auto max-w-3xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm">
+      <div data-p-ui="patient-self-check-page" className="min-h-screen overflow-x-clip bg-slate-50 px-3 py-4 text-slate-900 sm:p-6">
+        <div className="mx-auto w-full max-w-3xl rounded-[24px] border border-slate-200 bg-white p-4 shadow-sm sm:rounded-[28px] sm:p-6">
           <div className="text-sm font-semibold uppercase tracking-[0.18em] text-cyan-700">
             Self-check
           </div>
@@ -605,8 +605,8 @@ export default function SelfCheckPage() {
 
   if (!hasUsableProfileGender) {
     return (
-      <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
-        <div className="mx-auto max-w-3xl rounded-[28px] border border-amber-200 bg-amber-50/80 p-6 shadow-sm">
+      <div data-p-ui="patient-self-check-page" className="min-h-screen overflow-x-clip bg-slate-50 px-3 py-4 text-slate-900 sm:p-6">
+        <div className="mx-auto w-full max-w-3xl rounded-[24px] border border-amber-200 bg-amber-50/80 p-4 shadow-sm sm:rounded-[28px] sm:p-6">
           <div className="text-sm font-semibold uppercase tracking-[0.18em] text-amber-800">
             Profile completion required
           </div>
@@ -616,16 +616,16 @@ export default function SelfCheckPage() {
           <p className="mt-2 text-sm leading-6 text-slate-700">
             Self-check uses your profile gender, age, BMI, body metrics, and vitals to provide safer context. To avoid spoofed demographic data, gender is not changed inside this assessment when a profile exists.
           </p>
-          <div className="mt-5 flex flex-wrap gap-3">
+          <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
             <Link
               href="/profile"
-              className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800"
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl bg-slate-950 px-4 py-2 text-sm font-bold text-white hover:bg-slate-800 sm:w-auto"
             >
               Complete profile
             </Link>
             <Link
               href="/"
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+              className="inline-flex min-h-11 w-full items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50 sm:w-auto"
             >
               Back home
             </Link>
@@ -640,11 +640,11 @@ export default function SelfCheckPage() {
       id="selfcheck-root"
       className="min-h-screen bg-[radial-gradient(circle_at_top,_#f8fbff_0%,_#f8fafc_38%,_#f1f5f9_100%)] p-4 text-slate-900 md:p-6"
     >
-      <div className="mx-auto max-w-7xl space-y-5">
-        <section className="rounded-[28px] border border-white/70 bg-white/80 p-4 shadow-[0_10px_40px_rgba(15,23,42,0.06)] backdrop-blur xl:p-5">
+      <div className="mx-auto w-full max-w-7xl min-w-0 space-y-4 sm:space-y-5">
+        <section data-p-ui="patient-self-check-hero" className="min-w-0 overflow-hidden rounded-[24px] border border-white/70 bg-white/85 p-4 shadow-[0_10px_40px_rgba(15,23,42,0.06)] backdrop-blur sm:rounded-[28px] xl:p-5">
           <SelfCheckHeader now={now} bmi={sc.bmi ?? null} />
 
-          <div className="mt-4">
+          <div data-p-ui="patient-self-check-stepper-wrap" className="mt-4 min-w-0 overflow-x-auto pb-1">
             <SelfCheckStepper
               step={sc.step}
               onStep={onStep}
@@ -655,8 +655,8 @@ export default function SelfCheckPage() {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-10">
-          <div className="space-y-5 xl:col-span-7">
+        <div data-p-ui="patient-self-check-layout" className="grid min-w-0 grid-cols-1 gap-4 sm:gap-5 xl:grid-cols-10 xl:gap-6">
+          <div data-p-ui="patient-self-check-main-column" className="min-w-0 space-y-4 sm:space-y-5 xl:col-span-7">
             {sc.step === 'data' && (
               <SelfCheckVitalsStep
                 vitals={sc.vitals}
@@ -688,7 +688,7 @@ export default function SelfCheckPage() {
             )}
 
             {sc.step === 'results' && !sc.hasAnalyzed && (
-              <div className="rounded-2xl border border-slate-200 bg-white/80 p-4 shadow-sm">
+              <div data-p-ui="patient-self-check-locked-results" className="min-w-0 rounded-[24px] border border-slate-200 bg-white/85 p-4 shadow-sm">
                 <div className="text-lg font-semibold text-slate-900">
                   Results are locked
                 </div>
@@ -698,10 +698,10 @@ export default function SelfCheckPage() {
                   and action plan.
                 </div>
 
-                <div className="mt-4 flex gap-2">
+                <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                   <button
                     onClick={() => sc.setStep('symptoms')}
-                    className="rounded-xl border border-slate-200 bg-white px-4 py-2 font-semibold text-slate-800 hover:bg-slate-50"
+                    className="inline-flex min-h-11 w-full items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 font-semibold text-slate-800 hover:bg-slate-50 sm:w-auto"
                     type="button"
                   >
                     Go back
@@ -710,7 +710,7 @@ export default function SelfCheckPage() {
                   <button
                     onClick={sc.runAnalyze}
                     disabled={Boolean(sc.analyzer.busy)}
-                    className="rounded-xl bg-cyan-600 px-4 py-2 font-semibold text-white hover:opacity-95 disabled:opacity-50"
+                    className="inline-flex min-h-11 w-full items-center justify-center rounded-xl bg-cyan-600 px-4 py-2 font-semibold text-white hover:opacity-95 disabled:opacity-50 sm:w-auto"
                     type="button"
                   >
                     {sc.analyzer.busy ? 'Checking…' : 'Analyze now'}
@@ -739,7 +739,7 @@ export default function SelfCheckPage() {
             )}
           </div>
 
-          <div className="xl:col-span-3">
+          <aside data-p-ui="patient-self-check-right-rail" className="min-w-0 xl:col-span-3">
             <SelfCheckRightRail
               cardio={sc.cardioAnalytics.risk}
               hypeIndex={sc.cardioAnalytics.hypertensionIndex}
@@ -752,7 +752,7 @@ export default function SelfCheckPage() {
               onAnalyze={sc.runAnalyze}
               onCopy={copySummary}
             />
-          </div>
+          </aside>
         </div>
       </div>
 
