@@ -163,6 +163,7 @@ export default function AdminSidebar() {
           { href: '/pharmacies', label: 'Pharmacies', icon: Pill, requires: 'medical' },
           { href: '/admin/careport', label: 'CarePort admin', icon: Truck, requires: 'medical' },
           { href: '/admin/careport/orders', label: 'Order board', icon: Truck, requires: 'medical' },
+          { href: '/admin/partner-commercial-tiers', label: 'Partner tiers', icon: Pill, requires: 'medical' },
           { href: '/admin/careport/finance', label: 'CarePort finance', icon: Pill, requires: 'medical' },
           { href: '/admin/careport/commercial-policy', label: 'Commercial policy', icon: Pill, requires: 'medical' },
           { href: '/admin/careport/catalogue', label: 'Catalogue hub', icon: Pill, requires: 'medical' },
