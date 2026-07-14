@@ -93,6 +93,93 @@ function agreementObject(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
+
+function hierarchyText(value: unknown, max = 512) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text.slice(0, max);
+}
+
+function hierarchyObject(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function partnerHierarchySnapshot(body: any, partnerType: string) {
+  const raw = hierarchyObject(
+    body?.carePortPharmacyHierarchy ||
+      body?.pharmacyHierarchy ||
+      body?.hierarchySnapshot ||
+      body?.hierarchy ||
+      body?.network ||
+      body?.branch ||
+      body?.franchise,
+  );
+
+  const networkName =
+    hierarchyText(body?.networkName || body?.pharmacyNetworkName || body?.carePortNetworkName || raw.networkName || raw.name, 180) ||
+    null;
+
+  const branchType =
+    hierarchyText(body?.branchType || body?.pharmacyBranchType || raw.branchType || raw.type, 80).toUpperCase() ||
+    'INDEPENDENT_PHARMACY';
+
+  const hqPharmacyId =
+    hierarchyText(body?.hqPharmacyId || body?.headquarterPharmacyId || body?.parentPharmacyId || raw.hqPharmacyId || raw.headquarterPharmacyId || raw.parentPharmacyId, 160) ||
+    null;
+
+  const parentPharmacyId =
+    hierarchyText(body?.parentPharmacyId || body?.parentId || hqPharmacyId || raw.parentId, 160) ||
+    null;
+
+  const franchiseGroupName =
+    hierarchyText(body?.franchiseGroupName || body?.pharmacyFranchiseName || raw.franchiseGroupName || raw.franchiseName, 180) ||
+    null;
+
+  const branchCode =
+    hierarchyText(body?.pharmacyBranchCode || body?.outletCode || body?.branchCode || raw.branchCode, 80) ||
+    null;
+
+  return {
+    source: 'careport_pharmacy_hq_branch_franchise_network_onboarding',
+    partnerType,
+    carePortPharmacyNetwork: true,
+    hierarchyModel: 'CarePortPharmacyHQBranchFranchiseMetadata',
+    branchType,
+    pharmacyBranchType: branchType,
+    networkName,
+    pharmacyNetworkName: networkName,
+    franchiseGroupName,
+    pharmacyFranchiseName: franchiseGroupName,
+    hqPharmacyId,
+    headquarterPharmacyId: hqPharmacyId,
+    parentPharmacyId,
+    branchCode,
+    pharmacyBranchCode: branchCode,
+    isHeadquarter: ['HQ', 'HEADQUARTER', 'HEAD_OFFICE'].includes(branchType),
+    isBranch: /BRANCH/.test(branchType),
+    isFranchise: /FRANCHISE/.test(branchType) || Boolean(franchiseGroupName),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
+function attachPartnerHierarchySnapshot(target: any, hierarchySnapshot: Record<string, any>) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
+
+  target.hierarchySnapshot = hierarchySnapshot;
+  target.carePortPharmacyHierarchy = hierarchySnapshot;
+  target.pharmacyHierarchy = hierarchySnapshot;
+  target.pharmacyNetworkName = hierarchySnapshot.pharmacyNetworkName;
+  target.pharmacyBranchType = hierarchySnapshot.pharmacyBranchType;
+  target.pharmacyFranchiseName = hierarchySnapshot.pharmacyFranchiseName;
+  target.hqPharmacyId = hierarchySnapshot.hqPharmacyId;
+  target.headquarterPharmacyId = hierarchySnapshot.headquarterPharmacyId;
+  target.parentPharmacyId = hierarchySnapshot.parentPharmacyId;
+  target.pharmacyBranchCode = hierarchySnapshot.pharmacyBranchCode;
+  target.branchPharmacyHierarchy = hierarchySnapshot.isBranch;
+  target.franchisePharmacyHierarchy = hierarchySnapshot.isFranchise;
+
+  return target;
+}
+
 function partnerAgreementSnapshot(body: any, partnerType: string) {
   const now = new Date().toISOString();
   const raw = agreementObject(
@@ -183,6 +270,7 @@ export async function POST(req: NextRequest) {
     const orgId = orgIdFromHeaders(req);
     const body = await req.json().catch(() => ({}));
     const agreementSnapshot = partnerAgreementSnapshot(body, 'careport_pharmacy');
+    const hierarchySnapshot = partnerHierarchySnapshot(body, 'careport_pharmacy');
 
     const displayName = clean(body?.displayName || body?.tradingName || body?.pharmacyName || body?.name || body?.businessName, 220);
     const registeredName = clean(body?.registeredName || body?.legalName || displayName, 220);
@@ -270,6 +358,7 @@ export async function POST(req: NextRequest) {
     };
 
     attachAgreementSnapshot(kycPayload, agreementSnapshot);
+    attachPartnerHierarchySnapshot(kycPayload, hierarchySnapshot);
 
     const pharmacy = await (prisma as any).pharmacyPartner.create({
       data: {
@@ -303,7 +392,7 @@ export async function POST(req: NextRequest) {
         actorId: null,
         actorRole: 'public_applicant',
         subjectId: pharmacy.id,
-        meta: { orgId, pharmacyId: pharmacy.id, displayName, registeredName, email, phone, agreementSnapshot },
+        meta: { orgId, pharmacyId: pharmacy.id, displayName, registeredName, email, phone, agreementSnapshot, hierarchySnapshot },
       },
     }).catch(() => null);
 
