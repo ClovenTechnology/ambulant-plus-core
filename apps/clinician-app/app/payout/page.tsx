@@ -1,185 +1,167 @@
 'use client';
 
-import { SettingsTabs } from '@/components/SettingsTabs';
-import { toast } from '@/components/ToastMount';
-import { useEffect, useState } from 'react';
-import type { ReactNode } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useMemo, useState } from 'react';
 
-function clinicianIdFromUrl() {
-  if (typeof window === 'undefined') return '';
-  return new URLSearchParams(window.location.search).get('clinicianId') || '';
-}
+// A5_J_F_C_CLINICIAN_CONTRACTOR_PAYOUT_SUMMARY_PAGE
 
-function sameOrigin(path: string, params?: URLSearchParams) {
-  const query = params ? params.toString() : '';
-  return query ? `${path}?${query}` : path;
-}
+type PayoutStatus = 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded' | string;
 
-type DemGender = { [k: string]: { count: number; netCents: number } };
-type DemCity = { city: string; count: number; netCents: number }[];
-type DemProvince = { province: string; count: number; netCents: number }[];
+type PayoutRow = {
+  id: string;
+  periodStart: string | null;
+  periodEnd: string | null;
+  periodMonth: string | null;
+  amountCents: number;
+  currency: string;
+  status: PayoutStatus;
+  payoutRef?: string | null;
+  transferStatus?: string | null;
+  transferCode?: string | null;
+  grossEarningsCents: number;
+  refundCents: number;
+  platformFeeCents: number;
+  baseClinicianTakeCents: number;
+  onboardingInstalmentCents: number;
+  planFeeCents: number;
+  customDeductionCents: number;
+  taxWithholdingCents: number;
+  taxEstimateCents: number;
+  totalChargedDeductionsCents: number;
+  netPayableCents: number;
+  deductionLines?: any[];
+  customDeductions?: any[];
+  taxAdvisory?: any;
+  contractorNotice?: string;
+};
+
+type MonthlySummary = {
+  month: string;
+  count: number;
+  grossEarningsCents: number;
+  platformFeeCents: number;
+  refundCents: number;
+  totalDeductionsCents: number;
+  netPayableCents: number;
+  paidCents: number;
+  pendingCents: number;
+  failedCents: number;
+};
 
 type PayoutSummary = {
   ok: boolean;
-  currency: string;
-  splitPercent: { clinician: number; platform: number };
-  range: { from: string; to: string };
-  earnings: {
-    grossCents: number;
-    netToClinicianCents: number;
-    platformShareCents: number;
-    thisWeekNetCents: number;
-    avgMonthlyNetCents: number;
-  };
-  lastPayout: { amountCents: number; at: string | null };
-  nextPayout: { amountCents: number; at: string | null };
-  payoutSettings: { schedule: 'fortnightly' | 'monthly' };
-  demographics: {
-    byGender: DemGender;
-    byCity: DemCity;
-    byProvince: DemProvince;
-  };
-  rows: {
-    id: string;
-    startedAt: string;
-    feeCents: number;
-    netToClinicianCents: number;
-    patientGender?: string | null;
-    patientCity?: string | null;
-    patientProvince?: string | null;
-    status: string;
-  }[];
-};
-
-/* ----------------- PLAN TYPES ----------------- */
-
-export type PlanTierId = 'solo' | 'starter' | 'team' | 'group';
-export type SmartIdDispatchOption = 'collect' | 'courier';
-
-export type PlanTier = {
-  id: PlanTierId;
   label: string;
-  description: string;
-  currency: 'ZAR';
-  monthlySubscriptionZar: number;
-  payoutSharePct: number;
-  includedAdminSlots: number;
-  maxAdminSlots: number;
-  extraAdminSlotZar?: number | null;
-  recommendedFor: string;
-  highlight?: boolean;
-};
-
-const PLAN_TIERS: PlanTier[] = [
-  {
-    id: 'solo',
-    label: 'Solo (Free)',
-    description: 'Single clinician, no admin staff.',
-    currency: 'ZAR',
-    monthlySubscriptionZar: 0,
-    payoutSharePct: 0.8,
-    includedAdminSlots: 0,
-    maxAdminSlots: 1,
-    extraAdminSlotZar: null,
-    recommendedFor: 'Part-time & early adopters',
-  },
-  {
-    id: 'starter',
-    label: 'Starter (Premium)',
-    description: 'Clinician + 1 admin assistant.',
-    currency: 'ZAR',
-    monthlySubscriptionZar: 399,
-    payoutSharePct: 0.82,
-    includedAdminSlots: 1,
-    maxAdminSlots: 2,
-    extraAdminSlotZar: 149,
-    recommendedFor: 'Solo clinics with admin support',
-    highlight: true,
-  },
-  {
-    id: 'team',
-    label: 'Team',
-    description: 'Small group practices.',
-    currency: 'ZAR',
-    monthlySubscriptionZar: 799,
-    payoutSharePct: 0.84,
-    includedAdminSlots: 3,
-    maxAdminSlots: 5,
-    extraAdminSlotZar: 129,
-    recommendedFor: 'Shared admin teams',
-  },
-  {
-    id: 'group',
-    label: 'Group',
-    description: 'Large practices & call-centres.',
-    currency: 'ZAR',
-    monthlySubscriptionZar: 1499,
-    payoutSharePct: 0.86,
-    includedAdminSlots: 5,
-    maxAdminSlots: 10,
-    extraAdminSlotZar: 99,
-    recommendedFor: 'Enterprise clinics',
-  },
-];
-
-type BillingCycle = 'monthly' | 'annual';
-
-type PlanSettingsResponse = {
-  ok: boolean;
-  clinicianId: string;
-  currentPlanId: PlanTierId;
-  smartIdDispatch: SmartIdDispatchOption;
-  billingCycle: BillingCycle;
-  maxAdminStaffSlots: number | null;
-  activeAdminStaffSlots: number;
-};
-
-type FeesExtendedSummary = {
-  ok?: boolean;
-  currency?: string;
-  baseConsultation?: {
-    amountCents?: number | null;
-    followupAmountCents?: number | null;
+  currency: string;
+  clinician?: {
+    id?: string;
+    displayName?: string | null;
+    email?: string | null;
+  };
+  range: {
+    from: string;
+    to: string;
+  };
+  items: PayoutRow[];
+  monthlySummaries: MonthlySummary[];
+  totals: {
+    count: number;
+    grossEarningsCents: number;
+    platformFeeCents: number;
+    refundCents: number;
+    totalDeductionsCents: number;
+    netPayableCents: number;
+    paidCents: number;
+    pendingCents: number;
+    failedCents: number;
+    paidCount: number;
+    pendingCount: number;
+    failedCount: number;
+  };
+  emptyState?: {
+    title?: string;
+    message?: string;
+  } | null;
+  contractorNotice: string;
+  payoutSettings?: {
+    schedule?: string;
+    bankLast4?: string | null;
+    currentPlanId?: string;
+    billingCycle?: string;
+  };
+  lastPayout?: {
+    amountCents?: number;
+    at?: string | null;
+    reference?: string | null;
+  };
+  nextPayout?: {
+    amountCents?: number;
+    at?: string | null;
   };
 };
 
-function centsToMoney(cents: number, currency: string) {
-  const num = (cents || 0) / 100;
-  return new Intl.NumberFormat(undefined, { style: 'currency', currency }).format(num);
+function sameOrigin(path: string, params?: URLSearchParams) {
+  const query = params ? params.toString() : '';
+  return query ? path + '?' + query : path;
 }
 
-/* ================= PAGE ================= */
+function money(cents: number | null | undefined, currency = 'ZAR') {
+  const amount = Number.isFinite(Number(cents)) ? Number(cents) : 0;
+
+  return new Intl.NumberFormat(undefined, {
+    style: 'currency',
+    currency: currency || 'ZAR',
+  }).format(amount / 100);
+}
+
+function statusClass(status: string) {
+  const value = String(status || '').toLowerCase();
+
+  if (value === 'paid') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  if (value === 'failed' || value === 'cancelled' || value === 'refunded') {
+    return 'border-red-200 bg-red-50 text-red-700';
+  }
+  if (value === 'pending') return 'border-amber-200 bg-amber-50 text-amber-700';
+
+  return 'border-gray-200 bg-gray-50 text-gray-700';
+}
+
+function shortText(value: unknown, max = 44) {
+  const text = String(value || '').trim();
+  if (!text) return '—';
+  return text.length > max ? text.slice(0, max - 1) + '…' : text;
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+
+  return date.toLocaleDateString();
+}
+
+function todayIso() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function daysAgoIso(days: number) {
+  return new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+}
 
 export default function ClinicianPayoutPage() {
   const [summary, setSummary] = useState<PayoutSummary | null>(null);
   const [loading, setLoading] = useState(true);
-  const [savingSchedule, setSavingSchedule] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [feesSummary, setFeesSummary] = useState<FeesExtendedSummary | null>(null);
-
-  const today = new Date();
-  const thirtyDaysAgo = new Date(today.getTime() - 30 * 86400000);
-
-  const [from, setFrom] = useState(thirtyDaysAgo.toISOString().slice(0, 10));
-  const [to, setTo] = useState(today.toISOString().slice(0, 10));
-  const [gender, setGender] = useState('');
-  const [city, setCity] = useState('');
-  const [province, setProvince] = useState('');
+  const [from, setFrom] = useState(daysAgoIso(30));
+  const [to, setTo] = useState(todayIso());
 
   async function load() {
-setLoading(true);
+    setLoading(true);
     setError(null);
+
     try {
       const params = new URLSearchParams();
-      const clinicianId = clinicianIdFromUrl();
-
-      if (clinicianId) params.set('clinicianId', clinicianId);
       if (from) params.set('from', from);
       if (to) params.set('to', to);
-      if (gender) params.set('gender', gender);
-      if (city) params.set('city', city);
-      if (province) params.set('province', province);
 
       const res = await fetch(sameOrigin('/api/clinicians/me/payouts', params), {
         cache: 'no-store',
@@ -187,224 +169,332 @@ setLoading(true);
           accept: 'application/json',
         },
       });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json?.error || `HTTP ${res.status}`);
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok || !json?.ok) {
+        throw new Error(json?.error || 'Failed to load Contractor Payout Summary.');
+      }
+
       setSummary(json);
     } catch (e: any) {
-      console.error(e);
-      setError(e?.message || 'Failed to load payouts');
+      console.error('[clinician payout summary] load error', e);
+      setSummary(null);
+      setError(e?.message || 'Failed to load Contractor Payout Summary.');
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadFeesSummary() {
-    try {
-      const res = await fetch('/api/clinicians/me/fees/extended', { cache: 'no-store' });
-      const js: any = await res.json().catch(() => null);
-      if (!res.ok || !js) return;
-
-      const currency = js.currency || js.baseConsultation?.currency || 'ZAR';
-      const baseConsultation = {
-        amountCents: js.baseConsultation?.amountCents ?? js.feeCents ?? null,
-        followupAmountCents: js.baseConsultation?.followupAmountCents ?? null,
-      };
-
-      setFeesSummary({ ok: true, currency, baseConsultation });
-    } catch {}
-  }
-
   useEffect(() => {
-    load();
-    loadFeesSummary();
+    void load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function updateSchedule(next: 'fortnightly' | 'monthly') {
-    if (!summary) return;
-    setSavingSchedule(true);
-    try {
-      const params = new URLSearchParams();
-      const clinicianId = clinicianIdFromUrl();
-      if (clinicianId) params.set('clinicianId', clinicianId);
+  const currency = summary?.currency || 'ZAR';
+  const items = summary?.items || [];
+  const monthly = summary?.monthlySummaries || [];
+  const totals = summary?.totals;
 
-      const res = await fetch(sameOrigin('/api/clinicians/me/payouts', params), {
-        method: 'PUT',
-        headers: {
-          'content-type': 'application/json',
-          accept: 'application/json',
-        },
-        body: JSON.stringify({ schedule: next }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || json?.error) throw new Error(json?.error || 'Save failed');
-      setSummary({ ...summary, payoutSettings: { schedule: next } });
-    } finally {
-      setSavingSchedule(false);
+  const visibleNotice = useMemo(() => {
+    if (error) return error;
+    if (!summary && loading) return null;
+    if (!items.length) {
+      return summary?.emptyState?.message || "You haven't completed any eligible jobs yet.";
     }
+    return null;
+  }, [error, items.length, loading, summary]);
+
+  function downloadCsv() {
+    const params = new URLSearchParams();
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    params.set('format', 'csv');
+
+    window.location.href = sameOrigin('/api/clinicians/me/payouts', params);
   }
 
-  const cur = summary?.currency || feesSummary?.currency || 'ZAR';
-
   return (
-    <main className="p-6 space-y-6">
-      <SettingsTabs />
+    <main className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+      <section className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Ambulant+ finance
+            </p>
+            <h1 className="text-2xl font-semibold text-gray-950">
+              Contractor Payout Summary
+            </h1>
+            <p className="max-w-3xl text-sm text-gray-600">
+              Review your completed eligible clinician work, payout status,
+              deduction/advisory lines and monthly contractor payout summaries.
+            </p>
+          </div>
 
-      {/* HEADER */}
-      <header className="flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold">Payouts & Earnings</h1>
-          <p className="text-sm text-gray-600">
-            Track earnings, payout schedule, and demographic breakdowns.
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void load()}
+              disabled={loading}
+              className="rounded-xl border bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {loading ? 'Refreshing…' : 'Refresh'}
+            </button>
+            <button
+              type="button"
+              onClick={downloadCsv}
+              disabled={loading}
+              className="rounded-xl bg-gray-950 px-3 py-2 text-xs font-medium text-white hover:bg-black disabled:opacity-50"
+            >
+              Download CSV
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-5 grid gap-3 md:grid-cols-3 lg:grid-cols-5">
+          <div className="rounded-2xl border bg-gray-50 p-4">
+            <div className="text-[11px] uppercase tracking-wide text-gray-500">
+              Net payable
+            </div>
+            <div className="mt-1 text-lg font-semibold text-gray-950">
+              {money(totals?.netPayableCents || 0, currency)}
+            </div>
+            <div className="text-[11px] text-gray-500">
+              {totals?.count || 0} payout row(s)
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-amber-50 p-4">
+            <div className="text-[11px] uppercase tracking-wide text-amber-700">
+              Pending
+            </div>
+            <div className="mt-1 text-lg font-semibold text-amber-950">
+              {money(totals?.pendingCents || 0, currency)}
+            </div>
+            <div className="text-[11px] text-amber-700">
+              {totals?.pendingCount || 0} row(s)
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-emerald-50 p-4">
+            <div className="text-[11px] uppercase tracking-wide text-emerald-700">
+              Paid
+            </div>
+            <div className="mt-1 text-lg font-semibold text-emerald-950">
+              {money(totals?.paidCents || 0, currency)}
+            </div>
+            <div className="text-[11px] text-emerald-700">
+              {totals?.paidCount || 0} row(s)
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-red-50 p-4">
+            <div className="text-[11px] uppercase tracking-wide text-red-700">
+              Failed
+            </div>
+            <div className="mt-1 text-lg font-semibold text-red-950">
+              {money(totals?.failedCents || 0, currency)}
+            </div>
+            <div className="text-[11px] text-red-700">
+              {totals?.failedCount || 0} row(s)
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-gray-50 p-4">
+            <div className="text-[11px] uppercase tracking-wide text-gray-500">
+              Deductions
+            </div>
+            <div className="mt-1 text-lg font-semibold text-gray-950">
+              {money(totals?.totalDeductionsCents || 0, currency)}
+            </div>
+            <div className="text-[11px] text-gray-500">
+              Charged deduction lines only
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-5 flex flex-col gap-3 rounded-2xl border bg-gray-50 p-4 md:flex-row md:items-end md:justify-between">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-medium text-gray-700">
+              From
+              <input
+                type="date"
+                value={from}
+                onChange={(e) => setFrom(e.target.value)}
+                className="mt-1 block rounded-xl border bg-white px-3 py-2 text-sm text-gray-900"
+              />
+            </label>
+            <label className="text-xs font-medium text-gray-700">
+              To
+              <input
+                type="date"
+                value={to}
+                onChange={(e) => setTo(e.target.value)}
+                className="mt-1 block rounded-xl border bg-white px-3 py-2 text-sm text-gray-900"
+              />
+            </label>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={loading}
+            className="rounded-xl border bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Apply date range
+          </button>
+        </div>
+      </section>
+
+      {visibleNotice && (
+        <section className="rounded-2xl border border-amber-100 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="font-medium">
+            {error ? 'Unable to load payout summary' : 'No payout summary yet.'}
+          </div>
+          <div className="mt-1">
+            {visibleNotice}
+          </div>
+        </section>
+      )}
+
+      <section className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-col gap-1">
+          <h2 className="text-base font-semibold text-gray-950">
+            Monthly summary
+          </h2>
+          <p className="text-xs text-gray-500">
+            Monthly totals are grouped from generated payout records.
           </p>
         </div>
-      </header>
 
-      {/* PLAN SECTION */}
-      <ClinicianPlanSection />
+        {monthly.length ? (
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+            {monthly.map((month) => (
+              <div key={month.month} className="rounded-2xl border bg-gray-50 p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-medium text-gray-950">{month.month}</div>
+                  <span className="rounded-full border bg-white px-2 py-0.5 text-[11px] text-gray-600">
+                    {month.count} row(s)
+                  </span>
+                </div>
+                <dl className="mt-3 space-y-1 text-xs text-gray-600">
+                  <div className="flex justify-between gap-3">
+                    <dt>Gross earnings</dt>
+                    <dd>{money(month.grossEarningsCents, currency)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Platform fee</dt>
+                    <dd>{money(month.platformFeeCents, currency)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <dt>Deductions</dt>
+                    <dd>{money(month.totalDeductionsCents, currency)}</dd>
+                  </div>
+                  <div className="flex justify-between gap-3 font-semibold text-gray-950">
+                    <dt>Net payable</dt>
+                    <dd>{money(month.netPayableCents, currency)}</dd>
+                  </div>
+                </dl>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed bg-gray-50 p-6 text-center text-sm text-gray-500">
+            No payout summary yet. You haven’t completed any eligible jobs yet.
+          </div>
+        )}
+      </section>
 
-      {error && (
-        <div className="text-sm text-rose-600 border border-rose-200 bg-rose-50 px-3 py-2 rounded">
-          {error}
+      <section className="rounded-3xl border bg-white p-5 shadow-sm">
+        <div className="mb-4 flex flex-col gap-1">
+          <h2 className="text-base font-semibold text-gray-950">
+            Payout records
+          </h2>
+          <p className="text-xs text-gray-500">
+            These rows are generated from completed eligible consultations and
+            reconciled by Ambulant+ finance.
+          </p>
         </div>
-      )}
 
-      {loading && !summary && (
-        <div className="text-sm text-gray-600">Loading payouts”¦</div>
-      )}
+        <div className="overflow-x-auto rounded-2xl border">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-left text-gray-500">
+              <tr>
+                <th className="px-3 py-2 font-medium">Period</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium text-right">Gross</th>
+                <th className="px-3 py-2 font-medium text-right">Platform fee</th>
+                <th className="px-3 py-2 font-medium text-right">Deductions</th>
+                <th className="px-3 py-2 font-medium text-right">Net payable</th>
+                <th className="px-3 py-2 font-medium">Reference</th>
+              </tr>
+            </thead>
+            <tbody>
+              {items.length ? (
+                items.map((row) => (
+                  <tr key={row.id} className="border-t align-top">
+                    <td className="px-3 py-2 text-gray-700">
+                      <div>{row.periodMonth || '—'}</div>
+                      <div className="text-[11px] text-gray-400">
+                        {formatDate(row.periodStart)} → {formatDate(row.periodEnd)}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={'rounded-full border px-2 py-0.5 text-[11px] font-medium ' + statusClass(row.status)}>
+                        {row.status || 'pending'}
+                      </span>
+                      {row.transferStatus && (
+                        <div className="mt-1 text-[11px] text-gray-400">
+                          Transfer: {row.transferStatus}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(row.grossEarningsCents, row.currency)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(row.platformFeeCents, row.currency)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums">
+                      {money(row.totalChargedDeductionsCents, row.currency)}
+                    </td>
+                    <td className="px-3 py-2 text-right tabular-nums font-semibold text-gray-950">
+                      {money(row.netPayableCents, row.currency)}
+                    </td>
+                    <td className="px-3 py-2 text-gray-600">
+                      <div>{shortText(row.payoutRef, 34)}</div>
+                      {row.transferCode && (
+                        <div className="text-[11px] text-gray-400">
+                          {shortText(row.transferCode, 34)}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={7} className="px-3 py-8 text-center text-sm text-gray-500">
+                    No payout summary yet. You haven’t completed any eligible jobs yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section className="rounded-3xl border bg-white p-5 shadow-sm">
+        <h2 className="text-base font-semibold text-gray-950">
+          Contractor notice
+        </h2>
+        <p className="mt-2 text-sm text-gray-600">
+          {summary?.contractorNotice ||
+            'This is a contractor payout summary, not an employment payslip. Tax, PAYE, UIF, pension, professional indemnity and other statutory or professional obligations may remain your responsibility unless Ambulant+ explicitly applies a deduction line.'}
+        </p>
+        <p className="mt-3 text-xs text-gray-500">
+          Please retain this Contractor Payout Summary for your records and
+          obtain independent tax advice where required.
+        </p>
+      </section>
     </main>
   );
-}
-
-/* ================= PLAN SECTION ================= */
-
-type PlanTiersApiResponse = {
-  ok?: boolean;
-  clinicianPlans?: any[];
-  error?: string;
-};
-
-function ClinicianPlanSection() {
-  const router = useRouter();
-  const [planTiers, setPlanTiers] = useState<PlanTier[]>(PLAN_TIERS);
-  const [selectedTierId, setSelectedTierId] = useState<PlanTierId>('starter');
-  const [dispatchOption, setDispatchOption] = useState<SmartIdDispatchOption>('collect');
-  const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const selectedTier = planTiers.find(t => t.id === selectedTierId) ?? planTiers[0];
-  const isFreePlan = selectedTier.monthlySubscriptionZar === 0;
-
-  useEffect(() => {
-    setLoading(false);
-  }, []);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      await fetch('/api/clinicians/me/payout-settings', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          planTierId: selectedTierId,
-          smartIdDispatch: dispatchOption,
-          billingCycle,
-        }),
-      });
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleAddAdminStaffClick = () => {
-    if (isFreePlan) {
-      toast('Upgrade your plan to unlock admin staff slots.', 'info');
-      return;
-    }
-    router.push('/settings/admin-staff');
-  };
-
-  return (
-    <section className="border rounded bg-white p-4 space-y-4 text-sm">
-      <h2 className="text-sm font-semibold text-gray-900">
-        Clinician Plan & Smart ID Dispatch
-      </h2>
-
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-4">
-        {planTiers.map(tier => (
-          <button
-            key={tier.id}
-            onClick={() => setSelectedTierId(tier.id)}
-            className={`text-left rounded-lg border p-3 ${
-              tier.id === selectedTierId
-                ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50/40'
-                : 'border-gray-200 bg-white'
-            }`}
-          >
-            <div className="font-semibold">{tier.label}</div>
-            <div className="text-xs text-gray-500">{tier.description}</div>
-            <div className="mt-1 text-sm font-semibold">
-              ZAR {tier.monthlySubscriptionZar}/month
-            </div>
-            <div className="text-xs text-gray-600">
-              Payout share: {Math.round(tier.payoutSharePct * 100)}%
-            </div>
-          </button>
-        ))}
-      </div>
-
-      <div className="flex gap-3">
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="px-3 py-1.5 rounded bg-black text-white text-xs"
-        >
-          {saving ? 'Saving”¦' : 'Save settings'}
-        </button>
-
-        <button
-          onClick={handleAddAdminStaffClick}
-          className="px-3 py-1.5 rounded border text-xs"
-        >
-          Add Admin Staff
-        </button>
-      </div>
-
-      {error && <div className="text-xs text-rose-600">Error: {error}</div>}
-    </section>
-  );
-}
-
-/* ================= UI HELPERS ================= */
-
-function Card({ label, value, sub }: { label: string; value: string; sub?: string }) {
-  return (
-    <div className="border rounded bg-white p-3">
-      <div className="text-xs text-gray-600">{label}</div>
-      <div className="text-lg font-semibold mt-1">{value}</div>
-      {sub && <div className="text-[11px] text-gray-500 mt-0.5">{sub}</div>}
-    </div>
-  );
-}
-
-function Panel({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <div className="border rounded bg-white p-3">
-      <div className="text-xs font-semibold text-gray-800 mb-1">{title}</div>
-      {children}
-    </div>
-  );
-}
-
-function Th({ children }: { children: ReactNode }) {
-  return (
-    <th className="text-left px-2 py-1 border-b text-[11px] font-semibold text-gray-600">
-      {children}
-    </th>
-  );
-}
-
-function Td({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <td className={`px-2 py-1 align-top ${className}`}>{children}</td>;
 }
