@@ -1,5 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
+// A5_G_C_MEDREACH_PAYSTACK_TRANSFER_ROUTE_IMPORTS
+import {
+  buildPaystackTransferReference,
+  checkPaystackTransferBalance,
+  createPaystackTransferRecipient,
+  extractPartnerBankDetails,
+  initiatePaystackTransfer,
+  paystackBankDetailsReady,
+} from '@/src/payments/paystack-transfers';
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -505,6 +514,174 @@ export async function GET(req: NextRequest) {
 }
 
 
+
+// A5_G_C_MEDREACH_PAYSTACK_TRANSFER_ROUTE_HELPERS
+function a5gJsonObject(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function a5gText(value: unknown, max = 512) {
+  const raw = value === undefined || value === null ? '' : String(value);
+  return raw.trim().slice(0, max);
+}
+
+function a5gPayoutIds(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => a5gText(item, 180)).filter(Boolean);
+  }
+
+  const one = a5gText(value, 180);
+  return one ? [one] : [];
+}
+
+async function a5gLoadMedReachPayoutActorProfile(row: any) {
+  const actorType = a5gText(row?.actorType, 40).toUpperCase();
+  const actorId = a5gText(row?.actorId, 180);
+
+  if (!actorId) return null;
+
+  if (actorType === 'LAB') {
+    return (prisma as any).labPartner?.findUnique?.({ where: { id: actorId } }).catch(() => null);
+  }
+
+  if (actorType === 'PHLEB' || actorType === 'PHLEBOTOMIST') {
+    return (prisma as any).medReachPhlebProfile?.findUnique?.({ where: { id: actorId } }).catch(() => null);
+  }
+
+  return null;
+}
+
+function a5gMedReachPayoutTransferStatus(paystackStatus: string) {
+  const status = a5gText(paystackStatus, 40).toLowerCase();
+
+  if (status === 'success') return 'PAID';
+  if (status === 'failed' || status === 'abandoned' || status === 'reversed') return 'FAILED';
+
+  return 'PENDING';
+}
+
+async function a5gSendMedReachPaystackTransferForPayout(row: any, orgId: string, actorRole: string) {
+  const currentMeta = a5gJsonObject(row?.meta);
+  const profile = await a5gLoadMedReachPayoutActorProfile(row);
+
+  const bankDetails = extractPartnerBankDetails({
+    ...a5gJsonObject(profile),
+    meta: currentMeta,
+    payoutMeta: currentMeta,
+  });
+
+  if (!paystackBankDetailsReady(bankDetails)) {
+    return {
+      ok: false,
+      payoutId: row?.id,
+      actorType: row?.actorType,
+      actorId: row?.actorId,
+      status: 'skipped',
+      error: 'partner_bank_details_missing_or_incomplete',
+    };
+  }
+
+  const existingTransfer = a5gJsonObject(currentMeta.paystackTransfer);
+  const existingRecipientCode =
+    a5gText(existingTransfer.recipientCode || bankDetails?.paystackRecipientCode, 180) || null;
+
+  const recipient = existingRecipientCode
+    ? {
+        recipientCode: existingRecipientCode,
+        raw: { source: 'existing_recipient_code' },
+      }
+    : await createPaystackTransferRecipient({
+        name: bankDetails!.accountName,
+        accountNumber: bankDetails!.accountNumber,
+        bankCode: bankDetails!.bankCode,
+        currency: bankDetails!.currency || row?.currency || 'ZAR',
+        country: bankDetails!.country || 'ZA',
+        metadata: {
+          source: 'ambulant_medreach_partner_payout',
+          orgId,
+          payoutId: row?.id,
+          actorType: row?.actorType,
+          actorId: row?.actorId,
+        },
+      });
+
+  const reference =
+    a5gText(existingTransfer.reference, 180) ||
+    buildPaystackTransferReference(['ambulant', 'medreach', 'payout', row?.id]);
+
+  const transfer = await initiatePaystackTransfer({
+    amountCents: Number(row?.netCents || 0),
+    recipientCode: recipient.recipientCode,
+    reference,
+    currency: row?.currency || bankDetails!.currency || 'ZAR',
+    reason: 'Ambulant+ MedReach partner payout',
+    metadata: {
+      source: 'ambulant_medreach_partner_payout',
+      orgId,
+      payoutId: row?.id,
+      actorType: row?.actorType,
+      actorId: row?.actorId,
+      generatedByRole: actorRole,
+    },
+  });
+
+  const nextStatus = a5gMedReachPayoutTransferStatus(transfer.status);
+  const paidLike = nextStatus === 'PAID';
+  const failedLike = nextStatus === 'FAILED';
+
+  const nextMeta: any = {
+    ...currentMeta,
+    paystackTransfer: {
+      provider: 'paystack',
+      transferEnabled: true,
+      reference: transfer.reference || reference,
+      transferCode: transfer.transferCode || existingTransfer.transferCode || null,
+      recipientCode: transfer.recipientCode || recipient.recipientCode,
+      status: transfer.status,
+      amountCents: transfer.amountCents ?? Number(row?.netCents || 0),
+      currency: transfer.currency || row?.currency || bankDetails!.currency || 'ZAR',
+      message: transfer.message || null,
+      submittedAt: new Date().toISOString(),
+      submittedByRole: actorRole,
+      recipientSource: existingRecipientCode ? 'existing' : 'created',
+      bankDetailsSource: bankDetails!.source || null,
+      raw: transfer.raw,
+    },
+  };
+
+  const updateData: any = {
+    meta: nextMeta,
+    payoutRef: transfer.reference || reference,
+    status: nextStatus as any,
+  };
+
+  if (failedLike) {
+    nextMeta.failureReason = transfer.message || 'paystack_transfer_failed';
+  }
+
+  const updated = await (prisma as any).medReachPayout.update({
+    where: { id: row.id },
+    data: updateData,
+  });
+
+  return {
+    ok: true,
+    payoutId: row.id,
+    actorType: row.actorType,
+    actorId: row.actorId,
+    amountCents: Number(row?.netCents || 0),
+    currency: row?.currency || bankDetails!.currency || 'ZAR',
+    paystackStatus: transfer.status,
+    payoutStatus: nextStatus,
+    paid: paidLike,
+    failed: failedLike,
+    reference: transfer.reference || reference,
+    transferCode: transfer.transferCode || null,
+    recipientCode: transfer.recipientCode || recipient.recipientCode,
+    updated,
+  };
+}
+
 export async function POST(req: NextRequest) {
   try {
     const role = roleOf(req);
@@ -520,6 +697,85 @@ export async function POST(req: NextRequest) {
 
     if (!payoutDelegate?.create) {
       return NextResponse.json({ ok: false, error: "medreach_payout_model_not_configured" }, { status: 501 });
+    }
+
+
+    if (action === "check_paystack_balance" || action === "paystack_balance") {
+      const currency = clean(body?.currency || "ZAR", 8).toUpperCase() || "ZAR";
+      const balance = await checkPaystackTransferBalance(currency);
+
+      return NextResponse.json({
+        ok: true,
+        action,
+        provider: "paystack",
+        transferEnabled: true,
+        balance,
+      });
+    }
+
+    if (["send_paystack_transfer", "send_paystack_transfers", "paystack_transfer"].includes(action)) {
+      const ids = a5gPayoutIds(body?.payoutIds || body?.payoutId || body?.ids);
+
+      if (!ids.length) {
+        return NextResponse.json({ ok: false, error: "payoutIds_required" }, { status: 400 });
+      }
+
+      if (!payoutDelegate?.findMany || !(prisma as any).medReachPayout?.update) {
+        return NextResponse.json({ ok: false, error: "medreach_payout_transfer_update_not_configured" }, { status: 501 });
+      }
+
+      const rows = await payoutDelegate.findMany({ where: { id: { in: ids } } });
+      const transferActorRole = a5gText(req.headers.get("x-user-role") || req.headers.get("x-role") || "admin", 80);
+
+      const results: any[] = [];
+      const skipped: any[] = [];
+
+      for (const row of rows) {
+        if (String(row?.status || "").toUpperCase() === "PAID") {
+          skipped.push({
+            payoutId: row.id,
+            reason: "already_paid",
+            payoutRef: row.payoutRef || null,
+          });
+          continue;
+        }
+
+        if (Number(row?.netCents || 0) <= 0) {
+          skipped.push({
+            payoutId: row.id,
+            reason: "net_amount_not_positive",
+          });
+          continue;
+        }
+
+        try {
+          results.push(await a5gSendMedReachPaystackTransferForPayout(row, orgId, transferActorRole));
+        } catch (error: any) {
+          results.push({
+            ok: false,
+            payoutId: row.id,
+            actorType: row.actorType,
+            actorId: row.actorId,
+            status: "failed",
+            error: error?.message || "paystack_transfer_failed",
+            payload: error?.payload || null,
+          });
+        }
+      }
+
+      return NextResponse.json({
+        ok: true,
+        action,
+        provider: "paystack",
+        transferEnabled: true,
+        requestedCount: ids.length,
+        foundCount: rows.length,
+        transferredCount: results.filter((row: any) => row?.ok).length,
+        failedCount: results.filter((row: any) => row?.ok === false).length,
+        skippedCount: skipped.length,
+        transferResults: results,
+        skippedPayouts: skipped,
+      });
     }
 
     if (action === "mark_paid" || action === "mark_failed") {
@@ -573,7 +829,7 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (!["dry_run", "preview", "generate_batch", "generate", "create"].includes(action)) {
+    if (!["dry_run", "preview", "generate_batch", "generate", "create", "check_paystack_balance", "paystack_balance", "send_paystack_transfer", "send_paystack_transfers", "paystack_transfer"].includes(action)) {
       return NextResponse.json({ ok: false, error: "unsupported_action" }, { status: 400 });
     }
 

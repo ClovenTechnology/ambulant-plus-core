@@ -161,7 +161,7 @@ async function paystackRequest<T>(pathname: string, init: RequestInit = {}): Pro
   const res = await fetch(paystackBaseUrl().replace(/\/+$/, '') + pathname, {
     ...init,
     headers: {
-      Authorization: \`Bearer \${secret}\`,
+      Authorization: `Bearer ${secret}`,
       'Content-Type': 'application/json',
       ...(init.headers || {}),
     },
@@ -177,7 +177,7 @@ async function paystackRequest<T>(pathname: string, init: RequestInit = {}): Pro
   }
 
   if (!res.ok || payload?.status === false) {
-    const error = new Error(payload?.message || \`paystack_transfer_http_\${res.status}\`);
+    const error = new Error(payload?.message || `paystack_transfer_http_${res.status}`);
     (error as any).status = res.status;
     (error as any).payload = payload;
     throw error;
@@ -209,7 +209,7 @@ export function buildPaystackTransferReference(parts: Array<unknown>) {
     .replace(/_+/g, '_')
     .slice(0, 96);
 
-  return body || \`ambulant_transfer_\${Date.now()}\`;
+  return body || `ambulant_transfer_${Date.now()}`;
 }
 
 export function shapePaystackTransferResult(payload: any): PaystackTransferResult {
@@ -419,7 +419,7 @@ export async function verifyPaystackTransfer(reference: string) {
   const ref = text(reference, 180);
   if (!ref) throw new Error('paystack_transfer_reference_required');
 
-  const response = await paystackRequest<any>(\`/transfer/verify/\${encodeURIComponent(ref)}\`, {
+  const response = await paystackRequest<any>(`/transfer/verify/${encodeURIComponent(ref)}`, {
     method: 'GET',
   });
 
@@ -430,7 +430,7 @@ export async function fetchPaystackTransfer(transferCodeOrId: string) {
   const value = text(transferCodeOrId, 180);
   if (!value) throw new Error('paystack_transfer_identifier_required');
 
-  const response = await paystackRequest<any>(\`/transfer/\${encodeURIComponent(value)}\`, {
+  const response = await paystackRequest<any>(`/transfer/${encodeURIComponent(value)}`, {
     method: 'GET',
   });
 
