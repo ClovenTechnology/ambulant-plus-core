@@ -549,6 +549,7 @@ export default function EnterpriseFinanceCapTablePage() {
       "Voting rights",
       "Dividend rights",
       "Status",
+      "Reference",
     ];
 
     const rows = filteredShareholders.map((holder) => [
@@ -561,6 +562,7 @@ export default function EnterpriseFinanceCapTablePage() {
       textAt(holder, ["votingRights", "votes", "voting"], ""),
       textAt(holder, ["dividendRights", "dividends", "dividend"], ""),
       textAt(holder, ["status", "registryStatus", "accessStatus"], "active"),
+      textAt(holder, ["reference", "shareholderId", "id"], ""),
     ]);
 
     const csv = [headings, ...rows].map((row) => row.map((cell) => csvEscape(cell)).join(",")).join("\n");
@@ -845,7 +847,7 @@ export default function EnterpriseFinanceCapTablePage() {
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <thead className="bg-slate-50">
                       <tr>
-                        {["Shareholder", "Holder type", "Class", "Shares", "Ownership", "Voting", "Dividend", "Status"].map((heading) => (
+                        {["Shareholder", "Holder type", "Class", "Shares", "Ownership", "Voting", "Dividend", "Status", "Reference"].map((heading) => (
                           <th key={heading} className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                             {heading}
                           </th>
@@ -883,6 +885,9 @@ export default function EnterpriseFinanceCapTablePage() {
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                             {textAt(holder, ["status", "registryStatus", "accessStatus"], "active")}
+                          </td>
+                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                            {textAt(holder, ["reference", "shareholderId", "id"], "—")}
                           </td>
                         </tr>
                       ))}
@@ -1068,3 +1073,4 @@ export default function EnterpriseFinanceCapTablePage() {
     </main>
   );
 }
+
