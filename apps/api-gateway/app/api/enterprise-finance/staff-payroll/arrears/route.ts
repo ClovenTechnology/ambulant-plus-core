@@ -1,0 +1,185 @@
+import { NextRequest } from 'next/server';
+import { prisma } from '@/lib/prisma';
+import {
+  asCents,
+  asObject,
+  auditEnterpriseFinance,
+  dateRangeWhere,
+  json,
+  requireEnterpriseFinanceAdmin,
+  routeError,
+  text,
+} from '@/src/enterprise-finance/access-envelope';
+
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+// A5_K_D_C_ENTERPRISE_FINANCE_STAFF_ARREARS_ROUTE
+
+export async function GET(req: NextRequest) {
+  try {
+    const access = await requireEnterpriseFinanceAdmin(req);
+    if (!access.ok) return access.response;
+
+    const db: any = prisma;
+    const { searchParams } = new URL(req.url);
+    const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '100', 10) || 100, 1), 500);
+
+    const where: any = {
+      ...dateRangeWhere(searchParams, 'effectiveAt'),
+    };
+
+    const staffUserId = text(searchParams.get('staffUserId'), 180);
+    const status = text(searchParams.get('status'), 80);
+    const entryType = text(searchParams.get('entryType'), 80);
+
+    if (staffUserId) where.staffUserId = staffUserId;
+    if (status) where.status = status;
+    if (entryType) where.entryType = entryType;
+
+    const items = await db.staffArrearsLedger.findMany({
+      where,
+      orderBy: [{ effectiveAt: 'desc' }, { createdAt: 'desc' }],
+      take: limit,
+    });
+
+    return json({ ok: true, envelope: access.envelope, items });
+  } catch (error: any) {
+    return routeError(error, 'enterprise_finance_arrears_list_failed');
+  }
+}
+
+export async function POST(req: NextRequest) {
+  try {
+    const access = await requireEnterpriseFinanceAdmin(req);
+    if (!access.ok) return access.response;
+
+    const db: any = prisma;
+    const body = await req.json().catch(() => ({}));
+    const action = text(body.action || 'create_arrear', 80);
+    const staffUserId = text(body.staffUserId, 180);
+
+    if (!staffUserId) return json({ ok: false, error: 'staffUserId_required' }, 400);
+
+    if (action === 'record_payment') {
+      const amountCents = asCents(body.amountCents ?? body.creditCents);
+      if (amountCents <= 0) return json({ ok: false, error: 'positive_amount_required' }, 400);
+
+      const batch = await db.payrollPaymentBatch.create({
+        data: {
+          label: text(body.label || 'Manual arrears payment', 240),
+          batchType: 'arrears_payment',
+          status: text(body.status || 'paid', 80),
+          staffCount: 1,
+          allocationCount: 1,
+          totalAmountCents: amountCents,
+          paidAmountCents: amountCents,
+          currency: text(body.currency || 'ZAR', 3).toUpperCase(),
+          paymentMethod: text(body.paymentMethod || 'manual', 80),
+          manualReference: text(body.paymentReference || body.manualReference, 180) || null,
+          createdByUserId: access.envelope.actor.userId,
+          approvedByUserId: text(body.approvedByUserId || access.envelope.actor.userId, 180) || null,
+          approvedAt: new Date(),
+          completedAt: new Date(),
+          filtersMeta: asObject(body.filtersMeta),
+          resultMeta: asObject(body.resultMeta),
+          meta: asObject(body.meta),
+        },
+      });
+
+      const allocation = await db.payrollPaymentAllocation.create({
+        data: {
+          paymentBatchId: batch.id,
+          staffUserId,
+          payslipId: text(body.payslipId, 180) || null,
+          arrearsLedgerEntryId: text(body.arrearsLedgerEntryId, 180) || null,
+          salaryAccrualId: text(body.salaryAccrualId, 180) || null,
+          allocationType: 'arrears_payment',
+          status: 'paid',
+          amountCents,
+          currency: text(body.currency || 'ZAR', 3).toUpperCase(),
+          paymentMethod: text(body.paymentMethod || 'manual', 80),
+          paymentReference: text(body.paymentReference || body.manualReference, 180) || null,
+          allocatedAt: new Date(),
+          paidAt: new Date(),
+          reconciledByUserId: access.envelope.actor.userId,
+          reconciledAt: new Date(),
+          meta: asObject(body.meta),
+        },
+      });
+
+      const ledger = await db.staffArrearsLedger.create({
+        data: {
+          staffUserId,
+          payrollProfileId: text(body.payrollProfileId, 180) || null,
+          payrollPeriodId: text(body.payrollPeriodId, 180) || null,
+          payslipId: text(body.payslipId, 180) || null,
+          salaryAccrualId: text(body.salaryAccrualId, 180) || null,
+          entryType: 'payment',
+          status: 'closed',
+          description: text(body.description || 'Arrears payment recorded', 1000),
+          debitCents: 0,
+          creditCents: amountCents,
+          balanceAfterCents: asCents(body.balanceAfterCents),
+          currency: text(body.currency || 'ZAR', 3).toUpperCase(),
+          effectiveAt: body.effectiveAt ? new Date(body.effectiveAt) : new Date(),
+          sourceType: 'payroll_payment_allocation',
+          sourceId: allocation.id,
+          batchId: batch.id,
+          approvedByUserId: access.envelope.actor.userId,
+          approvedAt: new Date(),
+          meta: asObject(body.meta),
+        },
+      });
+
+      await auditEnterpriseFinance('staff_arrears_payment_recorded', req, {
+        model: 'StaffArrearsLedger',
+        subjectId: ledger.id,
+        staffUserId,
+        amountCents,
+        paymentBatchId: batch.id,
+        allocationId: allocation.id,
+      });
+
+      return json({ ok: true, envelope: access.envelope, batch, allocation, item: ledger });
+    }
+
+    const debitCents = asCents(body.debitCents ?? body.amountCents);
+    if (debitCents <= 0) return json({ ok: false, error: 'positive_debit_required' }, 400);
+
+    const item = await db.staffArrearsLedger.create({
+      data: {
+        staffUserId,
+        payrollProfileId: text(body.payrollProfileId, 180) || null,
+        payrollPeriodId: text(body.payrollPeriodId, 180) || null,
+        payslipId: text(body.payslipId, 180) || null,
+        salaryAccrualId: text(body.salaryAccrualId, 180) || null,
+        entryType: text(body.entryType || 'salary_arrear', 80),
+        status: text(body.status || 'open', 80),
+        description: text(body.description || 'Salary arrears entry', 1000),
+        debitCents,
+        creditCents: asCents(body.creditCents),
+        balanceAfterCents: asCents(body.balanceAfterCents ?? debitCents),
+        currency: text(body.currency || 'ZAR', 3).toUpperCase(),
+        dueDate: body.dueDate ? new Date(body.dueDate) : null,
+        effectiveAt: body.effectiveAt ? new Date(body.effectiveAt) : new Date(),
+        sourceType: text(body.sourceType || 'manual_arrears_entry', 120),
+        sourceId: text(body.sourceId, 180) || null,
+        approvedByUserId: text(body.approvedByUserId || access.envelope.actor.userId, 180) || null,
+        approvedAt: body.approvedAt ? new Date(body.approvedAt) : new Date(),
+        meta: asObject(body.meta),
+      },
+    });
+
+    await auditEnterpriseFinance('staff_arrears_entry_created', req, {
+      model: 'StaffArrearsLedger',
+      subjectId: item.id,
+      staffUserId,
+      debitCents,
+    });
+
+    return json({ ok: true, envelope: access.envelope, item });
+  } catch (error: any) {
+    return routeError(error, 'enterprise_finance_arrears_write_failed');
+  }
+}
