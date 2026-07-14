@@ -18,5 +18,43 @@ export default async function VendorInvoicesPage() {
       { key: "invoiceStatus", label: "Status" },
       { key: "dueDate", label: "Due", date: true },
     ],
+    actionTitle: "Vendor invoice workflow actions",
+    actionIntro:
+      "Create, verify and mark vendor invoices as paid while preserving uploaded invoice and proof-of-payment requirements.",
+    actions: [
+      {
+        label: "Create vendor invoice",
+        method: "POST",
+        action: "create_vendor_invoice",
+        description: "Create an uploaded vendor invoice record.",
+        template: {
+          vendorId: "vendor_id_here",
+          invoiceNumber: "INV-001",
+          total: 1000,
+          invoiceUrl: "https://example.com/invoice.pdf",
+          dueDate: "2026-07-31"
+        }
+      },
+      {
+        label: "Verify invoice",
+        method: "PATCH",
+        action: "verify_vendor_invoice",
+        description: "Verify a submitted vendor invoice.",
+        template: {
+          id: "vendor_invoice_id_here"
+        }
+      },
+      {
+        label: "Mark invoice paid",
+        method: "PATCH",
+        action: "mark_vendor_invoice_paid",
+        description: "Mark invoice paid with proof/reference.",
+        template: {
+          id: "vendor_invoice_id_here",
+          paymentReference: "BANK-REFERENCE",
+          proofOfPaymentUrl: "https://example.com/proof.pdf"
+        }
+      }
+    ]
   });
 }

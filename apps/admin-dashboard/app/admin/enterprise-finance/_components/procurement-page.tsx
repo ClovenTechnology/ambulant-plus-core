@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { headers } from "next/headers";
+import { ProcurementActionConsole, type ProcurementActionConfig } from "./procurement-action-console";
 
 export const dynamic = "force-dynamic";
 
@@ -22,6 +23,9 @@ type ReadPageProps = {
   emptyText: string;
   primaryActionLabel?: string;
   primaryActionHref?: string;
+  actions?: ProcurementActionConfig[];
+  actionTitle?: string;
+  actionIntro?: string;
 };
 
 function apiBase() {
@@ -161,6 +165,15 @@ export async function EnterpriseFinanceProcurementReadPage(props: ReadPageProps)
             ) : null}
           </div>
         </div>
+
+        {props.actions?.length ? (
+          <ProcurementActionConsole
+            endpoint={props.endpoint}
+            title={props.actionTitle}
+            intro={props.actionIntro}
+            actions={props.actions}
+          />
+        ) : null}
 
         {result.error ? (
           <section className="rounded-3xl border border-amber-500/30 bg-amber-500/10 p-5 text-sm text-amber-100">
