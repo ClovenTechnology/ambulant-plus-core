@@ -567,6 +567,294 @@ async function handleMedReachPaystackTransferWebhook(rawEvent: any) {
   };
 }
 
+
+// A5_G_F_F_CAREPORT_PAYSTACK_TRANSFER_WEBHOOK_RECONCILIATION
+function a5gffCarePortSettlementStatusFromTransfer(event: string, transferStatus: string) {
+  const normalizedEvent = a5geText(event, 120).toLowerCase();
+  const normalizedStatus = a5geText(transferStatus, 80).toLowerCase();
+
+  if (normalizedEvent === 'transfer.success' || normalizedStatus === 'success') return 'PAID';
+
+  if (
+    normalizedEvent === 'transfer.failed' ||
+    normalizedEvent === 'transfer.reversed' ||
+    normalizedEvent === 'transfer.abandoned' ||
+    normalizedStatus === 'failed' ||
+    normalizedStatus === 'reversed' ||
+    normalizedStatus === 'abandoned'
+  ) {
+    return 'FAILED';
+  }
+
+  return 'PENDING';
+}
+
+function a5gffTransferFailureReason(rawEvent: any) {
+  const data = a5geJsonObject(rawEvent?.data);
+
+  return (
+    a5geText(data.reason, 1000) ||
+    a5geText(data.failure_reason, 1000) ||
+    a5geText(data.message, 1000) ||
+    a5geText(rawEvent?.message, 1000) ||
+    null
+  );
+}
+
+async function a5gffRefreshCarePortSettlementBatchFromLines(batchId: string | null | undefined, receivedAt: Date) {
+  const db: any = prisma;
+  const cleanBatchId = a5geText(batchId, 180);
+
+  if (!cleanBatchId || !db.carePortSettlementLine?.findMany || !db.carePortSettlementBatch?.update) {
+    return null;
+  }
+
+  const lines = await db.carePortSettlementLine.findMany({
+    where: { batchId: cleanBatchId },
+    orderBy: { createdAt: 'asc' },
+  }).catch(() => []);
+
+  if (!lines.length) return null;
+
+  const statuses = lines.map((line: any) => a5geText(line?.status, 80).toUpperCase());
+  const paidCount = statuses.filter((status: string) => status === 'PAID').length;
+  const failedCount = statuses.filter((status: string) => status === 'FAILED').length;
+  const pendingCount = Math.max(0, lines.length - paidCount - failedCount);
+
+  let batchStatus: string | null = null;
+
+  if (paidCount === lines.length) batchStatus = 'PAID';
+  else if (failedCount === lines.length) batchStatus = 'FAILED';
+  else if (paidCount > 0 || failedCount > 0) batchStatus = 'PARTIAL';
+
+  if (!batchStatus) return null;
+
+  const batch =
+    (await db.carePortSettlementBatch.findUnique?.({ where: { id: cleanBatchId } }).catch(() => null)) ||
+    (await db.carePortSettlementBatch.findFirst?.({ where: { id: cleanBatchId } }).catch(() => null));
+
+  const currentMeta = a5geJsonObject(batch?.metadata);
+
+  const updateData: any = {
+    status: batchStatus,
+    metadata: {
+      ...currentMeta,
+      paystackTransferReconciliation: {
+        lineCount: lines.length,
+        paidCount,
+        failedCount,
+        pendingCount,
+        status: batchStatus,
+        lastWebhookAt: receivedAt.toISOString(),
+      },
+    },
+  };
+
+  if (batchStatus === 'PAID') {
+    updateData.paidAt = receivedAt;
+    updateData.failedAt = null;
+    updateData.failureReason = null;
+  }
+
+  if (batchStatus === 'FAILED') {
+    updateData.failedAt = receivedAt;
+    updateData.failureReason = 'all_careport_transfer_lines_failed';
+  }
+
+  await db.carePortSettlementBatch.update({
+    where: { id: cleanBatchId },
+    data: updateData,
+  }).catch(() => null);
+
+  return {
+    batchId: cleanBatchId,
+    batchStatus,
+    lineCount: lines.length,
+    paidCount,
+    failedCount,
+    pendingCount,
+  };
+}
+
+async function handleCarePortPaystackTransferWebhook(rawEvent: any) {
+  const event = a5geText(rawEvent?.event || rawEvent?.type, 120);
+  const shaped = shapePaystackTransferWebhook(rawEvent);
+
+  const reference =
+    a5geText(shaped.reference, 180) ||
+    a5geText(rawEvent?.data?.reference, 180) ||
+    a5geText(rawEvent?.reference, 180);
+
+  const transferCode =
+    a5geText(shaped.transferCode, 180) ||
+    a5geText(rawEvent?.data?.transfer_code || rawEvent?.data?.transferCode, 180);
+
+  const delegate = (prisma as any).carePortSettlementLine;
+
+  if (!delegate?.findFirst || !delegate?.findMany || !delegate?.update) {
+    return {
+      handled: false,
+      reason: 'careport_settlement_line_delegate_unavailable',
+      event,
+      reference,
+      transferCode,
+    };
+  }
+
+  if (!reference && !transferCode) {
+    return {
+      handled: false,
+      reason: 'missing_transfer_reference',
+      event,
+      status: shaped.status,
+    };
+  }
+
+  let settlementLine: any = reference
+    ? await delegate.findFirst({
+        where: {
+          remittanceRef: reference,
+        },
+      })
+    : null;
+
+  if (!settlementLine) {
+    const candidates = await delegate.findMany({
+      take: 500,
+      orderBy: { createdAt: 'desc' },
+    }).catch(() => []);
+
+    settlementLine = candidates.find((row: any) => {
+      const meta = a5geJsonObject(row?.metadata);
+      const transfer = a5geJsonObject(meta.paystackTransfer);
+
+      return (
+        (!!reference && a5geText(row?.remittanceRef, 180) === reference) ||
+        (!!reference && a5geText(transfer.reference, 180) === reference) ||
+        (!!transferCode && a5geText(transfer.transferCode, 180) === transferCode)
+      );
+    });
+  }
+
+  if (!settlementLine) {
+    return {
+      handled: false,
+      reason: 'careport_settlement_line_not_found',
+      event,
+      reference,
+      transferCode,
+      status: shaped.status,
+    };
+  }
+
+  const currentMeta = a5geJsonObject(settlementLine.metadata);
+  const currentTransfer = a5geJsonObject(currentMeta.paystackTransfer);
+  const nextStatus = a5gffCarePortSettlementStatusFromTransfer(event, shaped.status);
+  const receivedAt = new Date();
+  const receivedAtIso = receivedAt.toISOString();
+  const failureReason = nextStatus === 'FAILED' ? a5gffTransferFailureReason(rawEvent) || 'paystack_transfer_failed' : null;
+
+  const nextMeta: any = {
+    ...currentMeta,
+    paystackTransfer: {
+      ...currentTransfer,
+      provider: 'paystack',
+      reference: reference || a5geText(currentTransfer.reference, 180) || settlementLine.remittanceRef || null,
+      transferCode: transferCode || a5geText(currentTransfer.transferCode, 180) || null,
+      recipientCode: shaped.recipientCode || a5geText(currentTransfer.recipientCode, 180) || null,
+      status: shaped.status || a5geText(currentTransfer.status, 80) || null,
+      amountCents: shaped.amountCents ?? currentTransfer.amountCents ?? settlementLine.netPayableMinor ?? null,
+      currency: shaped.currency || currentTransfer.currency || settlementLine.currency || 'ZAR',
+      lastWebhookAt: receivedAtIso,
+      webhook: {
+        event,
+        reference: reference || null,
+        transferCode: transferCode || null,
+        recipientCode: shaped.recipientCode || null,
+        status: shaped.status,
+        amountCents: shaped.amountCents ?? null,
+        currency: shaped.currency || null,
+        receivedAt: receivedAtIso,
+        raw: rawEvent,
+      },
+    },
+    paystackTransferWebhook: {
+      scope: 'careport_settlement_line',
+      event,
+      reference: reference || null,
+      transferCode: transferCode || null,
+      status: shaped.status,
+      receivedAt: receivedAtIso,
+    },
+  };
+
+  const updateData: any = {
+    status: nextStatus,
+    metadata: nextMeta,
+  };
+
+  if (reference && !settlementLine.remittanceRef) {
+    updateData.remittanceRef = reference;
+  }
+
+  if (nextStatus === 'PAID') {
+    updateData.paidAt = receivedAt;
+    updateData.failedAt = null;
+    updateData.failureReason = null;
+    nextMeta.paidAt = receivedAtIso;
+    nextMeta.paystackTransfer.paidAt = receivedAtIso;
+  }
+
+  if (nextStatus === 'FAILED') {
+    updateData.failedAt = receivedAt;
+    updateData.failureReason = failureReason;
+    nextMeta.failedAt = receivedAtIso;
+    nextMeta.failureReason = failureReason;
+    nextMeta.paystackTransfer.failedAt = receivedAtIso;
+    nextMeta.paystackTransfer.failureReason = failureReason;
+  }
+
+  const updated = await delegate.update({
+    where: { id: settlementLine.id },
+    data: updateData,
+  });
+
+  const batchSummary = await a5gffRefreshCarePortSettlementBatchFromLines(settlementLine.batchId, receivedAt);
+
+  await (prisma as any).auditEvent?.create?.({
+    data: {
+      kind: 'careport_paystack_transfer_webhook_reconciled',
+      actorId: null,
+      actorRole: 'system',
+      subjectId: settlementLine.id,
+      meta: {
+        event,
+        reference: reference || null,
+        transferCode: transferCode || null,
+        status: shaped.status,
+        settlementStatus: nextStatus,
+        settlementLineId: settlementLine.id,
+        batchId: settlementLine.batchId || null,
+        batchSummary,
+      },
+      at: new Date(),
+    },
+  }).catch(() => null);
+
+  return {
+    handled: true,
+    event,
+    settlementLineId: settlementLine.id,
+    batchId: settlementLine.batchId || null,
+    reference: reference || settlementLine.remittanceRef || null,
+    transferCode: transferCode || null,
+    paystackStatus: shaped.status,
+    settlementStatus: nextStatus,
+    batchSummary,
+    updatedId: updated?.id || settlementLine.id,
+  };
+}
+
 /** ---- Main webhook ---- */
 export async function POST(req: NextRequest) {
   const raw = await req.text();
@@ -590,18 +878,38 @@ export async function POST(req: NextRequest) {
 
   if (event.startsWith('transfer.')) {
     try {
-      const transferResult = await handleMedReachPaystackTransferWebhook(body);
+      const medReachResult: any = await handleMedReachPaystackTransferWebhook(body);
+
+      if (medReachResult?.handled) {
+        return NextResponse.json({
+          ok: true,
+          kind: 'medreach_transfer',
+          ...medReachResult,
+        });
+      }
+
+      const carePortResult: any = await handleCarePortPaystackTransferWebhook(body);
+
+      if (carePortResult?.handled) {
+        return NextResponse.json({
+          ok: true,
+          kind: 'careport_transfer',
+          ...carePortResult,
+        });
+      }
+
       return NextResponse.json({
         ok: true,
-        kind: 'medreach_transfer',
-        ...transferResult,
+        kind: 'transfer_unmatched',
+        medReach: medReachResult,
+        carePort: carePortResult,
       });
     } catch (e: any) {
-      console.error('[paystack][medreach-transfer] error', e);
+      console.error('[paystack][transfer] reconciliation error', e);
       return NextResponse.json({
         ok: true,
-        kind: 'medreach_transfer_failed',
-        error: e?.message || 'medreach_transfer_failed',
+        kind: 'transfer_reconciliation_failed',
+        error: e?.message || 'transfer_reconciliation_failed',
       });
     }
   }
