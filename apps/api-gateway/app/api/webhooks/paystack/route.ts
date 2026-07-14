@@ -7,6 +7,8 @@ import {
   resolvePaymentReference,
   syncVerifiedPaymentToAppointment,
 } from '@/src/payments/payment-sync';
+// A5_G_E_B_PAYSTACK_TRANSFER_WEBHOOK_IMPORTS
+import { shapePaystackTransferWebhook } from '@/src/payments/paystack-transfers';
 
 export const dynamic = 'force-dynamic';
 
@@ -355,6 +357,216 @@ async function handleShopChargeSuccess(reference: string, data: any) {
   });
 }
 
+
+// A5_G_E_B_PAYSTACK_TRANSFER_WEBHOOK_RECONCILIATION
+function a5geJsonObject(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function a5geText(value: unknown, max = 512) {
+  const raw = value === undefined || value === null ? '' : String(value);
+  return raw.trim().slice(0, max);
+}
+
+function a5geMedReachPayoutStatusFromTransfer(event: string, transferStatus: string) {
+  const normalizedEvent = a5geText(event, 120).toLowerCase();
+  const normalizedStatus = a5geText(transferStatus, 80).toLowerCase();
+
+  if (normalizedEvent === 'transfer.success' || normalizedStatus === 'success') return 'PAID';
+
+  if (
+    normalizedEvent === 'transfer.failed' ||
+    normalizedEvent === 'transfer.reversed' ||
+    normalizedEvent === 'transfer.abandoned' ||
+    normalizedStatus === 'failed' ||
+    normalizedStatus === 'reversed' ||
+    normalizedStatus === 'abandoned'
+  ) {
+    return 'FAILED';
+  }
+
+  return 'PENDING';
+}
+
+function a5geTransferFailureReason(rawEvent: any) {
+  const data = a5geJsonObject(rawEvent?.data);
+
+  return (
+    a5geText(data.reason, 1000) ||
+    a5geText(data.failure_reason, 1000) ||
+    a5geText(data.message, 1000) ||
+    a5geText(rawEvent?.message, 1000) ||
+    null
+  );
+}
+
+async function handleMedReachPaystackTransferWebhook(rawEvent: any) {
+  const event = a5geText(rawEvent?.event || rawEvent?.type, 120);
+  const shaped = shapePaystackTransferWebhook(rawEvent);
+
+  const reference =
+    a5geText(shaped.reference, 180) ||
+    a5geText(rawEvent?.data?.reference, 180) ||
+    a5geText(rawEvent?.reference, 180);
+
+  const transferCode =
+    a5geText(shaped.transferCode, 180) ||
+    a5geText(rawEvent?.data?.transfer_code || rawEvent?.data?.transferCode, 180);
+
+  const delegate = (prisma as any).medReachPayout;
+
+  if (!delegate?.findFirst || !delegate?.findMany || !delegate?.update) {
+    return {
+      handled: false,
+      reason: 'medreach_payout_delegate_unavailable',
+      event,
+      reference,
+      transferCode,
+    };
+  }
+
+  if (!reference && !transferCode) {
+    return {
+      handled: false,
+      reason: 'missing_transfer_reference',
+      event,
+      status: shaped.status,
+    };
+  }
+
+  let payout: any = reference
+    ? await delegate.findFirst({
+        where: {
+          payoutRef: reference,
+        },
+      })
+    : null;
+
+  if (!payout && transferCode) {
+    const candidates = await delegate.findMany({
+      take: 200,
+      orderBy: { createdAt: 'desc' },
+    }).catch(() => []);
+
+    payout = candidates.find((row: any) => {
+      const meta = a5geJsonObject(row?.meta);
+      const transfer = a5geJsonObject(meta.paystackTransfer);
+
+      return (
+        a5geText(transfer.transferCode, 180) === transferCode ||
+        (!!reference && a5geText(transfer.reference, 180) === reference)
+      );
+    });
+  }
+
+  if (!payout) {
+    return {
+      handled: false,
+      reason: 'medreach_payout_not_found',
+      event,
+      reference,
+      transferCode,
+      status: shaped.status,
+    };
+  }
+
+  const currentMeta = a5geJsonObject(payout.meta);
+  const currentTransfer = a5geJsonObject(currentMeta.paystackTransfer);
+  const nextStatus = a5geMedReachPayoutStatusFromTransfer(event, shaped.status);
+  const receivedAt = new Date().toISOString();
+  const failureReason = nextStatus === 'FAILED' ? a5geTransferFailureReason(rawEvent) || 'paystack_transfer_failed' : null;
+
+  const nextMeta: any = {
+    ...currentMeta,
+    paystackTransfer: {
+      ...currentTransfer,
+      provider: 'paystack',
+      reference: reference || a5geText(currentTransfer.reference, 180) || payout.payoutRef || null,
+      transferCode: transferCode || a5geText(currentTransfer.transferCode, 180) || null,
+      recipientCode: shaped.recipientCode || a5geText(currentTransfer.recipientCode, 180) || null,
+      status: shaped.status || a5geText(currentTransfer.status, 80) || null,
+      amountCents: shaped.amountCents ?? currentTransfer.amountCents ?? null,
+      currency: shaped.currency || currentTransfer.currency || payout.currency || 'ZAR',
+      lastWebhookAt: receivedAt,
+      webhook: {
+        event,
+        reference: reference || null,
+        transferCode: transferCode || null,
+        recipientCode: shaped.recipientCode || null,
+        status: shaped.status,
+        amountCents: shaped.amountCents ?? null,
+        currency: shaped.currency || null,
+        receivedAt,
+        raw: rawEvent,
+      },
+    },
+    paystackTransferWebhook: {
+      event,
+      reference: reference || null,
+      transferCode: transferCode || null,
+      status: shaped.status,
+      receivedAt,
+    },
+  };
+
+  if (failureReason) {
+    nextMeta.failureReason = failureReason;
+    nextMeta.paystackTransfer.failureReason = failureReason;
+  }
+
+  if (nextStatus === 'PAID') {
+    nextMeta.paidAt = receivedAt;
+    nextMeta.paystackTransfer.paidAt = receivedAt;
+  }
+
+  if (nextStatus === 'FAILED') {
+    nextMeta.failedAt = receivedAt;
+    nextMeta.paystackTransfer.failedAt = receivedAt;
+  }
+
+  const updateData: any = {
+    status: nextStatus as any,
+    meta: nextMeta,
+  };
+
+  if (reference && !payout.payoutRef) {
+    updateData.payoutRef = reference;
+  }
+
+  const updated = await delegate.update({
+    where: { id: payout.id },
+    data: updateData,
+  });
+
+  await (prisma as any).auditEvent?.create?.({
+    data: {
+      kind: 'medreach_paystack_transfer_webhook_reconciled',
+      actorId: null,
+      actorRole: 'system',
+      subjectId: payout.id,
+      meta: {
+        event,
+        reference: reference || null,
+        transferCode: transferCode || null,
+        status: shaped.status,
+        payoutStatus: nextStatus,
+      },
+      at: new Date(),
+    },
+  }).catch(() => null);
+
+  return {
+    handled: true,
+    event,
+    payoutId: payout.id,
+    reference: reference || payout.payoutRef || null,
+    transferCode: transferCode || null,
+    paystackStatus: shaped.status,
+    payoutStatus: nextStatus,
+    updatedId: updated?.id || payout.id,
+  };
+}
+
 /** ---- Main webhook ---- */
 export async function POST(req: NextRequest) {
   const raw = await req.text();
@@ -375,6 +587,24 @@ export async function POST(req: NextRequest) {
   const event = String(body?.event || body?.type || '');
   const data  = body?.data || {};
   const reference: string = String(data?.reference || body?.reference || '');
+
+  if (event.startsWith('transfer.')) {
+    try {
+      const transferResult = await handleMedReachPaystackTransferWebhook(body);
+      return NextResponse.json({
+        ok: true,
+        kind: 'medreach_transfer',
+        ...transferResult,
+      });
+    } catch (e: any) {
+      console.error('[paystack][medreach-transfer] error', e);
+      return NextResponse.json({
+        ok: true,
+        kind: 'medreach_transfer_failed',
+        error: e?.message || 'medreach_transfer_failed',
+      });
+    }
+  }
 
   // === Appointment mapping by provider reference, payment row metadata, or embedded appointment ID ===
   const resolvedPayment = reference
