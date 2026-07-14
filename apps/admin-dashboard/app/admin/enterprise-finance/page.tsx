@@ -832,6 +832,89 @@ export default function EnterpriseFinanceCommandCentrePage() {
             </a>
           </div>
         </section>
+
+      {/* A5_M_I_D_ENTERPRISE_FINANCE_PROCUREMENT_NAV_CARDS */}
+      <section className="rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/30">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.24em] text-cyan-300">
+              Procurement, vendors and inventory
+            </p>
+            <h2 className="mt-2 text-xl font-semibold text-white">
+              Admin Ops procurement command links
+            </h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-300">
+              Review vendor registration, expenditure, vendor invoices, payouts, stock inventory and import-order receiving workflows from the Enterprise Finance command centre.
+            </p>
+          </div>
+          <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-3 py-1 text-xs font-semibold text-cyan-200">
+            Read-only launch surfaces
+          </span>
+        </div>
+
+        <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <a
+            href="/admin/enterprise-finance/vendors"
+            className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-cyan-400/70 hover:bg-slate-900"
+          >
+            <p className="text-sm font-semibold text-white">Vendors</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Registered vendors, approval state and payout eligibility.
+            </p>
+          </a>
+
+          <a
+            href="/admin/enterprise-finance/expenditure"
+            className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-cyan-400/70 hover:bg-slate-900"
+          >
+            <p className="text-sm font-semibold text-white">Expenditure ledger</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Operating expenditure, proof-of-payment records and payment status.
+            </p>
+          </a>
+
+          <a
+            href="/admin/enterprise-finance/vendor-invoices"
+            className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-cyan-400/70 hover:bg-slate-900"
+          >
+            <p className="text-sm font-semibold text-white">Vendor invoices</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Uploaded invoices, verification state, balances and due dates.
+            </p>
+          </a>
+
+          <a
+            href="/admin/enterprise-finance/vendor-payouts"
+            className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-cyan-400/70 hover:bg-slate-900"
+          >
+            <p className="text-sm font-semibold text-white">Vendor payouts</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Scheduled payouts, Paystack readiness and paid vendor transfers.
+            </p>
+          </a>
+
+          <a
+            href="/admin/enterprise-finance/inventory"
+            className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-cyan-400/70 hover:bg-slate-900"
+          >
+            <p className="text-sm font-semibold text-white">Inventory</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Admin Ops stock, devices, CarePort-linked items and operational consumables.
+            </p>
+          </a>
+
+          <a
+            href="/admin/enterprise-finance/import-orders"
+            className="rounded-2xl border border-slate-800 bg-slate-950/60 p-4 transition hover:border-cyan-400/70 hover:bg-slate-900"
+          >
+            <p className="text-sm font-semibold text-white">Import orders</p>
+            <p className="mt-2 text-sm leading-6 text-slate-400">
+              Order, payment, delivery, inspection and stock-acceptance workflow.
+            </p>
+          </a>
+        </div>
+      </section>
+
 </main>
   );
 }
