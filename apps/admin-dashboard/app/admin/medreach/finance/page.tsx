@@ -66,6 +66,43 @@ type Bucket = {
   orderIds?: string[];
 };
 
+
+// A5_G_D_B_MEDREACH_PAYSTACK_TRANSFER_UI_TYPES
+type GeneratedPayoutRow = {
+  id?: string;
+  actorType?: string;
+  actorId?: string;
+  status?: string;
+  payoutRef?: string | null;
+  netCents?: number;
+  currency?: string;
+  meta?: any;
+};
+
+type PaystackTransferResultRow = {
+  ok?: boolean;
+  payoutId?: string;
+  actorType?: string;
+  actorId?: string;
+  amountCents?: number;
+  currency?: string;
+  paystackStatus?: string;
+  payoutStatus?: string;
+  paid?: boolean;
+  failed?: boolean;
+  reference?: string;
+  transferCode?: string | null;
+  recipientCode?: string | null;
+  error?: string;
+  status?: string;
+};
+
+type PaystackBalanceInfo = {
+  currency?: string;
+  balanceCents?: number;
+  raw?: any;
+};
+
 type FinanceResponse = {
   ok?: boolean;
   error?: string;
@@ -120,6 +157,8 @@ export default function MedReachFinancePage() {
   const [data, setData] = useState<FinanceResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [paystackBusy, setPaystackBusy] = useState(false);
+  const [paystackBalance, setPaystackBalance] = useState<PaystackBalanceInfo | null>(null);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
 
@@ -202,6 +241,103 @@ export default function MedReachFinancePage() {
   }
 
 
+  // A5_G_D_B_MEDREACH_PAYSTACK_TRANSFER_UI_ACTIONS
+  async function runPaystackBalanceCheck() {
+    setPaystackBusy(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const transferCurrency = data?.summary?.currency || data?.rows?.[0]?.currency || 'ZAR';
+
+      const res = await fetch('/api/medreach/admin/finance', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-user-role': 'admin' },
+        body: JSON.stringify({
+          action: 'check_paystack_balance',
+          currency: transferCurrency,
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || 'medreach_paystack_balance_http_' + res.status);
+      }
+
+      setPaystackBalance(payload?.balance || null);
+      setData((current) => ({
+        ...(current || {}),
+        paystackBalance: payload?.balance || null,
+      } as any));
+
+      setNotice(
+        'Paystack transfer balance checked: ' +
+          money(payload?.balance?.balanceCents, payload?.balance?.currency || transferCurrency),
+      );
+    } catch (error: any) {
+      setError(error?.message || 'Failed to check Paystack transfer balance.');
+    } finally {
+      setPaystackBusy(false);
+    }
+  }
+
+  async function runPaystackTransferAction() {
+    const payoutRows = ((((data as any)?.generatedPayouts || []) as GeneratedPayoutRow[]));
+    const payoutIds = payoutRows.map((row) => String(row?.id || '')).filter(Boolean);
+
+    if (!payoutIds.length) {
+      setError('Generate a MedReach payout batch first, then send those generated payouts via Paystack.');
+      return;
+    }
+
+    setPaystackBusy(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const transferCurrency = data?.summary?.currency || data?.rows?.[0]?.currency || payoutRows[0]?.currency || 'ZAR';
+
+      const res = await fetch('/api/medreach/admin/finance', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-user-role': 'admin' },
+        body: JSON.stringify({
+          action: 'send_paystack_transfers',
+          payoutIds,
+          currency: transferCurrency,
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || 'medreach_paystack_transfer_http_' + res.status);
+      }
+
+      setData((current) => ({
+        ...(current || {}),
+        paystackTransferResults: payload?.transferResults || [],
+        paystackSkippedPayouts: payload?.skippedPayouts || [],
+        transferResults: payload?.transferResults || [],
+        generatedPayouts: (current as any)?.generatedPayouts || payoutRows,
+      } as any));
+
+      setNotice(
+        'Paystack transfer request completed: ' +
+          amount(payload?.transferredCount) +
+          ' submitted, ' +
+          amount(payload?.failedCount) +
+          ' failed, ' +
+          amount(payload?.skippedCount) +
+          ' skipped.',
+      );
+    } catch (error: any) {
+      setError(error?.message || 'Failed to send MedReach payouts via Paystack.');
+    } finally {
+      setPaystackBusy(false);
+    }
+  }
+
 
   useEffect(() => {
     void loadFinance();
@@ -211,6 +347,14 @@ export default function MedReachFinancePage() {
   const summary = data?.summary || {};
   const rows = data?.rows || [];
   const currency = summary.currency || rows[0]?.currency || 'ZAR';
+
+  // A5_G_D_B_MEDREACH_PAYSTACK_TRANSFER_UI_DERIVED_STATE
+  const generatedPayoutRows = ((((data as any)?.generatedPayouts || []) as GeneratedPayoutRow[]));
+  const generatedPayoutIds = generatedPayoutRows.map((row) => String(row?.id || '')).filter(Boolean);
+  const paystackTransferRows = ((((data as any)?.paystackTransferResults || (data as any)?.transferResults || []) as PaystackTransferResultRow[]));
+  const paystackSkippedRows = ((((data as any)?.paystackSkippedPayouts || []) as any[]));
+  const transferSuccessCount = paystackTransferRows.filter((row) => row?.ok).length;
+  const transferFailureCount = paystackTransferRows.filter((row) => row?.ok === false).length;
 
   const cards = useMemo(
     () => [
@@ -256,6 +400,23 @@ export default function MedReachFinancePage() {
                   className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
                 >
                   Generate payout batch
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runPaystackBalanceCheck()}
+                  disabled={loading || actionBusy || paystackBusy}
+                  className="rounded-2xl border border-cyan-200 bg-cyan-50 px-4 py-2 text-sm font-semibold text-cyan-800 hover:bg-cyan-100 disabled:opacity-50"
+                >
+                  Check Paystack balance
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runPaystackTransferAction()}
+                  disabled={loading || actionBusy || paystackBusy || !generatedPayoutIds.length}
+                  className="rounded-2xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                  title={!generatedPayoutIds.length ? 'Generate a payout batch first' : 'Send generated payouts via Paystack'}
+                >
+                  Send generated payouts via Paystack
                 </button>
               </div>
             </div>
@@ -357,6 +518,34 @@ export default function MedReachFinancePage() {
 
           {notice ? <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{notice}</div> : null}
           {error ? <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">{error}</div> : null}
+
+          {paystackBalance ? (
+            <div className="mt-4 rounded-2xl border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900">
+              <div className="font-semibold">Paystack transfer balance</div>
+              <div className="mt-1">
+                {paystackBalance.currency || currency}: {money(paystackBalance.balanceCents, paystackBalance.currency || currency)}
+              </div>
+            </div>
+          ) : null}
+
+          {paystackTransferRows.length ? (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+              <div className="font-semibold">Paystack transfer results</div>
+              <div className="mt-1">
+                Submitted: {amount(transferSuccessCount)} · Failed: {amount(transferFailureCount)} · Skipped: {amount(paystackSkippedRows.length)}
+              </div>
+              <div className="mt-2 grid gap-2 md:grid-cols-2">
+                {paystackTransferRows.slice(0, 6).map((row, index) => (
+                  <div key={row.payoutId || row.reference || index} className="rounded-xl border border-emerald-200 bg-white p-2 text-xs">
+                    <div className="font-semibold">{row.reference || row.payoutId || 'Paystack transfer'}</div>
+                    <div>Status: {row.paystackStatus || row.payoutStatus || row.status || (row.ok ? 'submitted' : 'failed')}</div>
+                    <div>Amount: {money(row.amountCents, row.currency || currency)}</div>
+                    {row.error ? <div className="text-rose-700">{row.error}</div> : null}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </section>
 
         <section className="grid gap-6 xl:grid-cols-2">
