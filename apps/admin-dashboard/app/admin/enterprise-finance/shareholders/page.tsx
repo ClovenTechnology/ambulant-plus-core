@@ -693,6 +693,7 @@ export default function EnterpriseFinanceShareholdersPage() {
               <div className="flex flex-wrap gap-2">
                 <StatusPill tone="good">Enterprise Finance</StatusPill>
                 <StatusPill>Shareholder access/admin controls</StatusPill>
+                <StatusPill>Shareholder access data</StatusPill>
                 <StatusPill tone={state.accessEnvelope ? "good" : "warn"}>{accessLabel}</StatusPill>
               </div>
 
@@ -1271,3 +1272,4 @@ export default function EnterpriseFinanceShareholdersPage() {
     </main>
   );
 }
+
