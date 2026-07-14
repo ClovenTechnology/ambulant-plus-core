@@ -36,7 +36,15 @@ export async function GET(req: NextRequest) {
     const valuations = await db.companyValuationSnapshot.findMany({ orderBy: [{ valuationDate: 'desc' }], take: 50 });
     const shareSaleNotices = await db.shareSaleNotice.findMany({ orderBy: [{ createdAt: 'desc' }], take: 50 });
 
-    return json({
+    
+    // A5_N_B_R3_CAP_TABLE_SHARE_TRANSFERS_API_READ_VISIBILITY
+    const shareTransfers = await db.shareTransfer.findMany({
+      take: 200,
+    });
+
+return json({
+      shareTransfers,
+      transfers: shareTransfers,
       ok: true,
       envelope: access.envelope,
       shareClasses,
