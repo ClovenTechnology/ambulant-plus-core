@@ -1,4 +1,4 @@
-﻿generator client {
+generator client {
   provider = "prisma-client-js"
 }
 
@@ -7362,15 +7362,32 @@ model OpsVendor {
   status              String   @default("pending") @db.VarChar(80)
 
   legalName           String
+  registeredName      String?
   tradingName         String?
+  tradingNameSameAsRegistered Boolean @default(false)
   email               String?
   phone               String?
   website             String?
+  industry            String?  @db.VarChar(160)
+  products            Json?
+  addressLine1        String?
+  addressLine2        String?
+  city                String?  @db.VarChar(160)
+  province            String?  @db.VarChar(160)
+  postalCode          String?  @db.VarChar(40)
   country             String?  @db.VarChar(2)
 
   contactName         String?
   contactEmail        String?
   contactPhone        String?
+  contactPerson1Name  String?
+  contactPerson1Role  String?
+  contactPerson1Email String?
+  contactPerson1Phone String?
+  contactPerson2Name  String?
+  contactPerson2Role  String?
+  contactPerson2Email String?
+  contactPerson2Phone String?
 
   manufacturer        Boolean  @default(false)
   supplier            Boolean  @default(true)
@@ -7378,8 +7395,15 @@ model OpsVendor {
   preferredPayoutMethod String? @db.VarChar(80)
 
   bankAccountMasked   String?
+  bankName            String?
+  bankAccountName     String?
+  bankAccountNumberMasked String?
+  bankBranchCode      String?
+  bankSwiftCode       String?
   paypalEmail         String?
   taxIdentifierMasked String?
+  vatRegistered       Boolean  @default(false)
+  vatNumber           String?
 
   registrationSource  String   @default("public_vendor_registration") @db.VarChar(120)
   documents           Json?
@@ -7397,6 +7421,8 @@ model OpsVendor {
   @@index([status])
   @@index([email])
   @@index([country])
+  @@index([industry])
+  @@index([vatRegistered])
   @@index([manufacturer])
   @@index([supplier])
   @@index([payoutEligible])
@@ -7422,12 +7448,22 @@ model OpsVendorInvoice {
 
   invoiceUrl                 String?
   invoiceObjectKey           String?
+  invoiceUploadedAt          DateTime?
+  invoiceVerifiedAt          DateTime?
+  invoiceVerifiedByUserId    String?
   proofOfPaymentUrl          String?
   proofOfPaymentObjectKey    String?
+  proofOfPaymentUploadedAt   DateTime?
+  proofOfPaymentVerifiedAt   DateTime?
+  proofOfPaymentVerifiedByUserId String?
 
   paymentMethod              String?  @db.VarChar(80)
   paymentReference           String?
   paymentDate                DateTime?
+  registeredVendorRequired   Boolean  @default(true)
+  invoiceRequired            Boolean  @default(true)
+  proofOfPaymentRequired     Boolean  @default(false)
+  paymentInitiationMode      String?  @db.VarChar(80)
 
   expenditureLedgerEntryId   String?
   importOrderId              String?
@@ -7446,6 +7482,7 @@ model OpsVendorInvoice {
   @@index([invoiceNumber])
   @@index([paymentMethod])
   @@index([paymentReference])
+  @@index([paymentInitiationMode])
   @@index([expenditureLedgerEntryId])
   @@index([importOrderId])
   @@index([vendorPayoutId])
@@ -7484,6 +7521,7 @@ model OpsExpenditureLedgerEntry {
   paymentMethod              String?  @db.VarChar(80)
   paymentProvider            String?  @db.VarChar(80)
   paymentReference           String?
+  companyBankAccountReference String?
   paymentStatus              String   @default("unpaid") @db.VarChar(80)
   paidAt                     DateTime?
   occurredAt                 DateTime @default(now())
@@ -7492,6 +7530,9 @@ model OpsExpenditureLedgerEntry {
   invoiceObjectKey           String?
   proofOfPaymentUrl          String?
   proofOfPaymentObjectKey    String?
+  proofOfPaymentUploadedAt   DateTime?
+  proofOfPaymentVerifiedAt   DateTime?
+  proofOfPaymentVerifiedByUserId String?
 
   manualEntry                Boolean  @default(true)
   createdByUserId            String?
@@ -7516,6 +7557,7 @@ model OpsExpenditureLedgerEntry {
   @@index([inventoryItemId])
   @@index([vendorPayoutId])
   @@index([paymentMethod])
+  @@index([companyBankAccountReference])
   @@index([paymentStatus])
   @@index([occurredAt])
 }
@@ -7760,8 +7802,13 @@ model OpsVendorPayout {
 
   paymentReference           String?
   paymentProvider            String?
+  paystackRecipientCode      String?
+  paystackTransferCode       String?
   proofOfPaymentUrl          String?
   proofOfPaymentObjectKey    String?
+  invoiceRequired            Boolean  @default(true)
+  registeredVendorRequired   Boolean  @default(true)
+  initiatedViaPaystack       Boolean  @default(false)
 
   scheduledAt                DateTime?
   paidAt                     DateTime?
@@ -7779,6 +7826,8 @@ model OpsVendorPayout {
   @@index([status])
   @@index([payoutMethod])
   @@index([paymentReference])
+  @@index([paystackRecipientCode])
+  @@index([paystackTransferCode])
   @@index([scheduledAt])
   @@index([paidAt])
 }
