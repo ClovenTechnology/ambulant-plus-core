@@ -360,7 +360,7 @@ export default function ClinicianPayouts() {
             </>
           ) : (
             <div className="text-sm text-gray-400 mt-1">
-              No payout data.
+              No payout summary yet.
             </div>
           )}
         </div>
@@ -538,7 +538,7 @@ export default function ClinicianPayouts() {
                     colSpan={7}
                     className="px-3 py-4 text-center text-xs text-gray-500"
                   >
-                    No payout data for this period.
+                    No payout summary yet. You haven’t completed any eligible jobs yet.
                   </td>
                 </tr>
               )}
@@ -630,8 +630,8 @@ export default function ClinicianPayouts() {
           </>
         ) : (
           <p className="text-sm text-gray-500">
-            No clinician payout records were returned for this period.
-            Once payouts are generated, this view will summarise
+            No payout summary yet. You haven’t completed any eligible jobs yet.
+            Once eligible consultations are completed and processed, this view will summarise
             total payouts, blended rates and class-level performance.
           </p>
         )}
