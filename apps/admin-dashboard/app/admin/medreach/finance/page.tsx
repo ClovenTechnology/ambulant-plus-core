@@ -119,6 +119,7 @@ export default function MedReachFinancePage() {
   const [settlementState, setSettlementState] = useState('');
   const [data, setData] = useState<FinanceResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [error, setError] = useState('');
 
@@ -154,6 +155,53 @@ export default function MedReachFinancePage() {
       setLoading(false);
     }
   }
+
+
+  async function runSettlementAction(dryRun: boolean) {
+    setActionBusy(true);
+    setError('');
+    setNotice('');
+
+    try {
+      const res = await fetch('/api/medreach/admin/finance', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-user-role': 'admin' },
+        body: JSON.stringify({
+          action: dryRun ? 'dry_run' : 'generate_batch',
+          from,
+          to,
+          labId,
+          phlebId,
+          settlementState: settlementState || 'ready',
+        }),
+      });
+
+      const payload = await res.json().catch(() => ({}));
+
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || 'medreach_admin_finance_action_http_' + res.status);
+      }
+
+      setData((current) => ({
+        ...(current || {}),
+        ...payload,
+        rows: payload.rows || current?.rows || [],
+        summary: payload.summary || current?.summary,
+      }));
+
+      setNotice(
+        dryRun
+          ? 'MedReach payout dry-run generated ' + amount(payload?.payoutPreview?.length) + ' payout line(s).'
+          : 'MedReach payout batch generated ' + amount(payload?.generatedCount) + ' new payout(s); skipped ' + amount(payload?.skippedCount) + ' existing payout(s).',
+      );
+    } catch (error: any) {
+      setError(error?.message || 'Failed to run MedReach settlement action.');
+    } finally {
+      setActionBusy(false);
+    }
+  }
+
+
 
   useEffect(() => {
     void loadFinance();
@@ -191,6 +239,25 @@ export default function MedReachFinancePage() {
                 logistics, urgent and cold-chain surcharges, platform fees, patient copay, sponsor amount and settlement
                 readiness.
               </p>
+
+              <div className="mt-4 flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void runSettlementAction(true)}
+                  disabled={loading || actionBusy}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Dry-run payout batch
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void runSettlementAction(false)}
+                  disabled={loading || actionBusy}
+                  className="rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                >
+                  Generate payout batch
+                </button>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2">
