@@ -793,6 +793,46 @@ export default function EnterpriseFinanceCommandCentrePage() {
           </div>
         </section>
       </div>
-    </main>
+    
+        <section
+          data-a5-k-k-c="cap-table-input-discoverability-command-centre"
+          className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 shadow-sm"
+        >
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              Accountant input
+            </span>
+            <span className="inline-flex items-center rounded-full border border-emerald-200 bg-white px-2.5 py-1 text-xs font-semibold text-emerald-700">
+              Cap table source-of-truth
+            </span>
+          </div>
+
+          <h2 className="mt-3 text-lg font-bold text-emerald-950">
+            Feed cap table data
+          </h2>
+
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-emerald-900">
+            Accountants and Enterprise Finance admins can now open the cap table input workspace to create audited
+            cap table snapshots, share classes, shareholder rows, valuations and share-sale notices.
+          </p>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <a
+              href="/admin/enterprise-finance/cap-table/input"
+              className="inline-flex items-center justify-center rounded-xl bg-emerald-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-emerald-800"
+            >
+              Open accountant cap table input
+            </a>
+
+            <a
+              href="/admin/enterprise-finance/cap-table"
+              className="inline-flex items-center justify-center rounded-xl border border-emerald-200 bg-white px-4 py-2 text-sm font-bold text-emerald-800 transition hover:bg-emerald-100"
+            >
+              Review cap table view
+            </a>
+          </div>
+        </section>
+</main>
   );
 }
+

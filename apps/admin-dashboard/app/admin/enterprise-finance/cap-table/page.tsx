@@ -1070,7 +1070,47 @@ export default function EnterpriseFinanceCapTablePage() {
           </section>
         </section>
       </div>
-    </main>
+    
+        <section
+          data-a5-k-k-c="cap-table-input-discoverability-cap-table-view"
+          className="rounded-2xl border border-indigo-200 bg-indigo-50 p-5 shadow-sm"
+        >
+          <div className="flex flex-wrap gap-2">
+            <span className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700">
+              Accountant input
+            </span>
+            <span className="inline-flex items-center rounded-full border border-indigo-200 bg-white px-2.5 py-1 text-xs font-semibold text-indigo-700">
+              Source-of-truth workflow
+            </span>
+          </div>
+
+          <h2 className="mt-3 text-lg font-bold text-indigo-950">
+            Add or update cap table data
+          </h2>
+
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-indigo-900">
+            Use the accountant cap table input page when Enterprise Finance needs to feed new share classes,
+            shareholder rows, valuation snapshots, cap table baselines or share-sale notices into the audited backend.
+          </p>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <a
+              href="/admin/enterprise-finance/cap-table/input"
+              className="inline-flex items-center justify-center rounded-xl bg-indigo-700 px-4 py-2 text-sm font-bold text-white transition hover:bg-indigo-800"
+            >
+              Open accountant cap table input
+            </a>
+
+            <a
+              href="/admin/enterprise-finance/shareholders"
+              className="inline-flex items-center justify-center rounded-xl border border-indigo-200 bg-white px-4 py-2 text-sm font-bold text-indigo-800 transition hover:bg-indigo-100"
+            >
+              Review shareholder registry
+            </a>
+          </div>
+        </section>
+</main>
   );
 }
+
 
