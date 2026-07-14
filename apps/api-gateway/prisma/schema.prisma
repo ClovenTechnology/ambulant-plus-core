@@ -6276,3 +6276,1079 @@ model CarePortPharmacySkuGlobalProductMap {
   @@index([matchSource])
 }
 
+// ============================================================
+// A5-K-C-B — Enterprise Finance Schema Foundation
+// A5_K_C_B_ENTERPRISE_FINANCE_SCHEMA_FOUNDATION
+// ============================================================
+// This schema foundation separates:
+// - staff payroll / payslips / salary arrears
+// - commission events and awards
+// - platform revenue and manual capital inflows
+// - cap table, shareholder registry and investor relations
+//
+// Intentionally uses scalar foreign-key fields rather than hard Prisma
+// relations so this foundation can be introduced without disturbing
+// existing auth/user/provider models while the operational APIs are built.
+
+model StaffPayrollProfile {
+  id                    String   @id @default(cuid())
+  staffUserId            String
+  staffDisplayName       String?
+  staffEmail             String?
+  staffRole              String?  @db.VarChar(120)
+  departmentId           String?
+  designationId          String?
+
+  employmentType         String   @default("permanent") @db.VarChar(80)
+  payrollStatus          String   @default("draft") @db.VarChar(80)
+  country                String   @default("ZA") @db.VarChar(2)
+  currency               String   @default("ZAR") @db.VarChar(3)
+
+  baseSalaryCents        Int      @default(0)
+  hourlyRateCents        Int      @default(0)
+  defaultHoursPerPeriod  Decimal? @db.Decimal(10, 2)
+  payFrequency           String   @default("monthly") @db.VarChar(80)
+
+  commissionEligible     Boolean  @default(false)
+  commissionMode         String   @default("none") @db.VarChar(80)
+
+  taxNumber              String?
+  payrollNumber          String?
+  employerReference      String?
+  startDate              DateTime?
+  endDate                DateTime?
+
+  profileMeta            Json?
+  payrollMeta            Json?
+  approvalStatus         String   @default("pending") @db.VarChar(80)
+  approvedByUserId       String?
+  approvedAt             DateTime?
+
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([staffUserId])
+  @@index([staffEmail])
+  @@index([employmentType])
+  @@index([payrollStatus])
+  @@index([approvalStatus])
+  @@index([departmentId, designationId])
+}
+
+model StaffBankAccount {
+  id                    String   @id @default(cuid())
+  staffUserId            String
+  payrollProfileId       String?
+
+  accountHolderName      String?
+  bankName               String?
+  bankCode               String?
+  branchCode             String?
+  accountNumberMasked    String?
+  accountNumberEncrypted String?
+  accountType            String?  @db.VarChar(80)
+  country                String   @default("ZA") @db.VarChar(2)
+  currency               String   @default("ZAR") @db.VarChar(3)
+
+  paystackRecipientCode  String?
+  verificationStatus     String   @default("unverified") @db.VarChar(80)
+  verificationProvider   String?
+  verifiedAt             DateTime?
+
+  isPrimary              Boolean  @default(false)
+  active                 Boolean  @default(true)
+
+  meta                   Json?
+  createdByUserId        String?
+  updatedByUserId        String?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([staffUserId])
+  @@index([payrollProfileId])
+  @@index([verificationStatus])
+  @@index([active])
+}
+
+model PayrollPeriod {
+  id              String   @id @default(cuid())
+  label           String
+  periodType      String   @default("monthly") @db.VarChar(80)
+  startsAt        DateTime
+  endsAt          DateTime
+  payDate         DateTime?
+  country         String   @default("ZA") @db.VarChar(2)
+  currency        String   @default("ZAR") @db.VarChar(3)
+
+  status          String   @default("draft") @db.VarChar(80)
+  lockedAt        DateTime?
+  lockedByUserId  String?
+
+  meta            Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([startsAt, endsAt])
+  @@index([status])
+  @@index([country, currency])
+}
+
+model PayrollRun {
+  id              String   @id @default(cuid())
+  payrollPeriodId String
+  runType         String   @default("regular") @db.VarChar(80)
+  status          String   @default("draft") @db.VarChar(80)
+
+  staffCount      Int      @default(0)
+  grossCents      Int      @default(0)
+  allowanceCents  Int      @default(0)
+  commissionCents Int      @default(0)
+  deductionCents  Int      @default(0)
+  employerCostCents Int    @default(0)
+  netPayCents     Int      @default(0)
+  arrearsCreatedCents Int  @default(0)
+  arrearsPaidCents    Int  @default(0)
+  currency        String   @default("ZAR") @db.VarChar(3)
+
+  generatedByUserId String?
+  generatedAt     DateTime?
+  approvedByUserId String?
+  approvedAt      DateTime?
+  paidAt          DateTime?
+
+  meta            Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([payrollPeriodId])
+  @@index([status])
+  @@index([generatedAt])
+  @@index([approvedAt])
+}
+
+model Payslip {
+  id                String   @id @default(cuid())
+  payrollRunId       String?
+  payrollPeriodId    String
+  staffUserId        String
+  payrollProfileId   String?
+
+  payslipNumber      String?  @unique
+  status             String   @default("draft") @db.VarChar(80)
+
+  grossSalaryCents   Int      @default(0)
+  allowanceCents     Int      @default(0)
+  commissionCents    Int      @default(0)
+  arrearsPaidCents   Int      @default(0)
+  deductionCents     Int      @default(0)
+  taxWithholdingCents Int     @default(0)
+  uifCents           Int      @default(0)
+  pensionCents       Int      @default(0)
+  netPayCents        Int      @default(0)
+  unpaidBalanceCents Int      @default(0)
+  currency           String   @default("ZAR") @db.VarChar(3)
+
+  documentUrl        String?
+  pdfObjectKey       String?
+  issuedAt           DateTime?
+  approvedByUserId   String?
+  approvedAt         DateTime?
+  paidAt             DateTime?
+
+  employerNote       String?
+  staffNote          String?
+  meta               Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([staffUserId])
+  @@index([payrollPeriodId])
+  @@index([payrollRunId])
+  @@index([status])
+  @@index([issuedAt])
+}
+
+model PayslipLineItem {
+  id              String   @id @default(cuid())
+  payslipId        String
+  staffUserId      String?
+  lineType         String   @db.VarChar(80)
+  label            String
+  description      String?
+  amountCents      Int
+  currency         String   @default("ZAR") @db.VarChar(3)
+  taxable          Boolean  @default(false)
+  affectsNetPay    Boolean  @default(true)
+  sourceType       String?  @db.VarChar(120)
+  sourceId         String?
+  meta             Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([payslipId])
+  @@index([staffUserId])
+  @@index([lineType])
+  @@index([sourceType, sourceId])
+}
+
+model StaffSalaryAccrual {
+  id              String   @id @default(cuid())
+  staffUserId      String
+  payrollProfileId String?
+  payrollPeriodId  String?
+  payslipId        String?
+
+  accrualType      String   @default("salary") @db.VarChar(80)
+  status           String   @default("accrued") @db.VarChar(80)
+  earnedFrom       DateTime
+  earnedTo         DateTime
+
+  grossCents       Int      @default(0)
+  netExpectedCents Int      @default(0)
+  paidCents        Int      @default(0)
+  unpaidCents      Int      @default(0)
+  currency         String   @default("ZAR") @db.VarChar(3)
+
+  sourceType       String?  @db.VarChar(120)
+  sourceId         String?
+  meta             Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([staffUserId])
+  @@index([payrollPeriodId])
+  @@index([payslipId])
+  @@index([status])
+  @@index([earnedFrom, earnedTo])
+}
+
+model StaffArrearsLedger {
+  id                String   @id @default(cuid())
+  staffUserId        String
+  payrollProfileId   String?
+  payrollPeriodId    String?
+  payslipId          String?
+  salaryAccrualId    String?
+
+  entryType          String   @db.VarChar(80)
+  status             String   @default("open") @db.VarChar(80)
+  description        String?
+
+  debitCents         Int      @default(0)
+  creditCents        Int      @default(0)
+  balanceAfterCents  Int      @default(0)
+  currency           String   @default("ZAR") @db.VarChar(3)
+
+  dueDate            DateTime?
+  effectiveAt        DateTime @default(now())
+
+  sourceType         String?  @db.VarChar(120)
+  sourceId           String?
+  batchId            String?
+  approvedByUserId   String?
+  approvedAt         DateTime?
+
+  meta               Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([staffUserId])
+  @@index([status])
+  @@index([entryType])
+  @@index([payrollPeriodId])
+  @@index([effectiveAt])
+  @@index([dueDate])
+}
+
+model PayrollPaymentBatch {
+  id                String   @id @default(cuid())
+  label             String
+  batchType         String   @default("payroll") @db.VarChar(80)
+  status            String   @default("draft") @db.VarChar(80)
+
+  staffCount        Int      @default(0)
+  allocationCount   Int      @default(0)
+  totalAmountCents  Int      @default(0)
+  paidAmountCents   Int      @default(0)
+  failedAmountCents Int      @default(0)
+  currency          String   @default("ZAR") @db.VarChar(3)
+
+  paymentMethod     String   @default("manual") @db.VarChar(80)
+  paystackBatchRef  String?
+  manualReference   String?
+
+  createdByUserId   String?
+  approvedByUserId  String?
+  approvedAt        DateTime?
+  submittedAt       DateTime?
+  completedAt       DateTime?
+
+  filtersMeta       Json?
+  resultMeta        Json?
+  meta              Json?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([status])
+  @@index([batchType])
+  @@index([paymentMethod])
+  @@index([createdAt])
+}
+
+model PayrollPaymentAllocation {
+  id                   String   @id @default(cuid())
+  paymentBatchId        String?
+  staffUserId           String
+  payslipId             String?
+  arrearsLedgerEntryId  String?
+  salaryAccrualId       String?
+
+  allocationType        String   @default("arrears_payment") @db.VarChar(80)
+  status                String   @default("pending") @db.VarChar(80)
+  amountCents           Int
+  currency              String   @default("ZAR") @db.VarChar(3)
+
+  paymentMethod         String   @default("manual") @db.VarChar(80)
+  paymentReference      String?
+  paystackTransferCode  String?
+  paystackReference     String?
+  failureReason         String?
+
+  allocatedAt           DateTime?
+  paidAt                DateTime?
+  reconciledByUserId    String?
+  reconciledAt          DateTime?
+
+  meta                  Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([paymentBatchId])
+  @@index([staffUserId])
+  @@index([status])
+  @@index([payslipId])
+  @@index([arrearsLedgerEntryId])
+  @@index([paystackReference])
+}
+
+model StaffPayrollDispute {
+  id                String   @id @default(cuid())
+  staffUserId        String
+  payslipId          String?
+  arrearsLedgerEntryId String?
+
+  disputeType        String   @default("payroll_query") @db.VarChar(80)
+  status             String   @default("open") @db.VarChar(80)
+  subject            String
+  message            String
+  resolutionNote     String?
+
+  raisedAt           DateTime @default(now())
+  resolvedAt         DateTime?
+  resolvedByUserId   String?
+
+  meta               Json?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@index([staffUserId])
+  @@index([status])
+  @@index([payslipId])
+  @@index([arrearsLedgerEntryId])
+}
+
+model CommissionPolicy {
+  id                  String   @id @default(cuid())
+  name                String
+  description         String?
+  sourceType          String   @db.VarChar(120)
+  appliesToRole       String?  @db.VarChar(120)
+
+  calculationMode     String   @default("manual") @db.VarChar(80)
+  rateBps             Int      @default(0)
+  flatAmountCents     Int      @default(0)
+  thresholdCents      Int      @default(0)
+  currency            String   @default("ZAR") @db.VarChar(3)
+
+  active              Boolean  @default(true)
+  requiresApproval    Boolean  @default(true)
+  startsAt            DateTime?
+  endsAt              DateTime?
+
+  ruleMeta            Json?
+  createdByUserId     String?
+  approvedByUserId    String?
+  approvedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([sourceType])
+  @@index([active])
+  @@index([appliesToRole])
+}
+
+model CommissionEvent {
+  id                    String   @id @default(cuid())
+  sourceType             String   @db.VarChar(120)
+  sourceId               String
+  staffUserId            String?
+
+  eventStatus            String   @default("pending_review") @db.VarChar(80)
+  occurredAt             DateTime @default(now())
+
+  grossSourceValueCents  Int      @default(0)
+  calculatedCommissionCents Int   @default(0)
+  currency               String   @default("ZAR") @db.VarChar(3)
+
+  policyId               String?
+  module                 String?  @db.VarChar(80)
+  attributionMeta        Json?
+  sourceMeta             Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@unique([sourceType, sourceId, staffUserId])
+  @@index([staffUserId])
+  @@index([sourceType])
+  @@index([eventStatus])
+  @@index([occurredAt])
+}
+
+model CommissionAward {
+  id                    String   @id @default(cuid())
+  commissionEventId      String?
+  staffUserId            String
+
+  status                 String   @default("draft") @db.VarChar(80)
+  calculatedAmountCents  Int      @default(0)
+  approvedAmountCents    Int      @default(0)
+  paidAmountCents        Int      @default(0)
+  currency               String   @default("ZAR") @db.VarChar(3)
+
+  payrollPeriodId        String?
+  payslipId              String?
+  paymentAllocationId    String?
+
+  approvedByUserId       String?
+  approvedAt             DateTime?
+  rejectedByUserId       String?
+  rejectedAt             DateTime?
+  rejectionReason        String?
+
+  meta                   Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([staffUserId])
+  @@index([commissionEventId])
+  @@index([status])
+  @@index([payrollPeriodId])
+  @@index([payslipId])
+}
+
+model RevenueLedgerEntry {
+  id                  String   @id @default(cuid())
+  entryType            String   @db.VarChar(100)
+  inflowCategory       String   @default("operating_revenue") @db.VarChar(100)
+  module               String?  @db.VarChar(80)
+
+  sourceType           String?  @db.VarChar(120)
+  sourceId             String?
+  externalReference    String?
+  paymentProvider      String?
+  providerEventId      String?
+
+  description          String?
+  counterpartyName     String?
+  counterpartyEmail    String?
+
+  grossAmountCents     Int      @default(0)
+  refundAmountCents    Int      @default(0)
+  providerFeeCents     Int      @default(0)
+  platformFeeCents     Int      @default(0)
+  netPlatformRevenueCents Int   @default(0)
+  amountReceivedCents  Int      @default(0)
+  currency             String   @default("ZAR") @db.VarChar(3)
+
+  recognitionStatus    String   @default("pending") @db.VarChar(80)
+  paymentStatus        String   @default("unreconciled") @db.VarChar(80)
+  occurredAt           DateTime @default(now())
+  recognisedAt         DateTime?
+  reconciledAt         DateTime?
+  reconciledByUserId   String?
+
+  manualEntry          Boolean  @default(false)
+  createdByUserId      String?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+
+  meta                 Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([entryType])
+  @@index([inflowCategory])
+  @@index([module])
+  @@index([sourceType, sourceId])
+  @@index([externalReference])
+  @@index([recognitionStatus])
+  @@index([paymentStatus])
+  @@index([occurredAt])
+}
+
+model FinanceReportSnapshot {
+  id                       String   @id @default(cuid())
+  reportType                String   @db.VarChar(120)
+  label                     String
+  periodStart               DateTime?
+  periodEnd                 DateTime?
+  currency                  String   @default("ZAR") @db.VarChar(3)
+
+  grossRevenueCents          Int      @default(0)
+  netPlatformRevenueCents    Int      @default(0)
+  manualInflowCents          Int      @default(0)
+  investmentInflowCents      Int      @default(0)
+  contractorPayableCents     Int      @default(0)
+  payrollLiabilityCents      Int      @default(0)
+  salaryArrearsCents         Int      @default(0)
+  commissionPayableCents     Int      @default(0)
+  cashOutCents               Int      @default(0)
+
+  snapshotMeta               Json?
+  generatedByUserId          String?
+  generatedAt                DateTime @default(now())
+  approvedByUserId           String?
+  approvedAt                 DateTime?
+
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
+
+  @@index([reportType])
+  @@index([periodStart, periodEnd])
+  @@index([generatedAt])
+}
+
+model PayrollAuditEvent {
+  id              String   @id @default(cuid())
+  eventType        String   @db.VarChar(120)
+  actorUserId      String?
+  actorRole        String?  @db.VarChar(120)
+  subjectType      String?  @db.VarChar(120)
+  subjectId        String?
+  staffUserId      String?
+
+  beforeMeta       Json?
+  afterMeta        Json?
+  meta             Json?
+  occurredAt       DateTime @default(now())
+
+  @@index([eventType])
+  @@index([actorUserId])
+  @@index([subjectType, subjectId])
+  @@index([staffUserId])
+  @@index([occurredAt])
+}
+
+model ShareClass {
+  id                    String   @id @default(cuid())
+  code                  String   @unique
+  name                  String
+  description           String?
+
+  authorisedShares      Decimal  @default(0) @db.Decimal(24, 6)
+  issuedShares          Decimal  @default(0) @db.Decimal(24, 6)
+  allocatedShares       Decimal  @default(0) @db.Decimal(24, 6)
+  unallocatedShares     Decimal  @default(0) @db.Decimal(24, 6)
+
+  votingRights          String   @default("standard") @db.VarChar(120)
+  votesPerShare         Decimal  @default(1) @db.Decimal(18, 6)
+  dividendRights        String?
+  liquidationPreference String?
+  transferRestrictions  String?
+  conversionRights      String?
+  antiDilutionRights    String?
+
+  active                Boolean  @default(true)
+  termsMeta             Json?
+  createdByUserId       String?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([active])
+}
+
+model Shareholder {
+  id                  String   @id @default(cuid())
+  userId              String?
+  shareholderType     String   @default("individual") @db.VarChar(80)
+  displayName         String
+  legalName           String?
+  email               String?
+  phone               String?
+  country             String?  @db.VarChar(2)
+
+  taxIdentifierMasked String?
+  investorStatus      String   @default("active") @db.VarChar(80)
+  kycStatus           String   @default("unverified") @db.VarChar(80)
+
+  communicationOptIn  Boolean  @default(true)
+  portalEnabled       Boolean  @default(false)
+
+  profileMeta         Json?
+  createdByUserId     String?
+  approvedByUserId    String?
+  approvedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@index([userId])
+  @@index([email])
+  @@index([shareholderType])
+  @@index([investorStatus])
+  @@index([kycStatus])
+}
+
+model InvestmentRound {
+  id                    String   @id @default(cuid())
+  name                  String
+  roundType             String   @default("seed") @db.VarChar(80)
+  status                String   @default("draft") @db.VarChar(80)
+
+  openedAt              DateTime?
+  closedAt              DateTime?
+  currency              String   @default("ZAR") @db.VarChar(3)
+
+  targetRaiseCents       Int      @default(0)
+  committedAmountCents   Int      @default(0)
+  receivedAmountCents    Int      @default(0)
+  preMoneyValuationCents Int      @default(0)
+  postMoneyValuationCents Int     @default(0)
+
+  instrumentType         String   @default("equity") @db.VarChar(80)
+  shareClassId           String?
+  pricePerShareCents     Int      @default(0)
+
+  termsMeta              Json?
+  createdByUserId        String?
+  approvedByUserId       String?
+  approvedAt             DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([roundType])
+  @@index([status])
+  @@index([openedAt, closedAt])
+  @@index([shareClassId])
+}
+
+model CapitalContribution {
+  id                  String   @id @default(cuid())
+  shareholderId        String?
+  investorName         String?
+  investmentRoundId    String?
+
+  contributionType     String   @default("investment") @db.VarChar(100)
+  status               String   @default("pending") @db.VarChar(80)
+
+  amountCents          Int
+  currency             String   @default("ZAR") @db.VarChar(3)
+  receivedAt           DateTime?
+  paymentMethod        String?  @db.VarChar(80)
+  externalReference    String?
+  revenueLedgerEntryId String?
+
+  sharesIssued         Decimal? @db.Decimal(24, 6)
+  shareClassId         String?
+  pricePerShareCents   Int?
+
+  description          String?
+  documentUrl          String?
+  meta                 Json?
+  createdByUserId      String?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([shareholderId])
+  @@index([investmentRoundId])
+  @@index([contributionType])
+  @@index([status])
+  @@index([receivedAt])
+  @@index([externalReference])
+}
+
+model Shareholding {
+  id                    String   @id @default(cuid())
+  shareholderId          String
+  shareClassId           String
+
+  sharesHeld             Decimal  @default(0) @db.Decimal(24, 6)
+  allocatedShares        Decimal  @default(0) @db.Decimal(24, 6)
+  vestedShares           Decimal  @default(0) @db.Decimal(24, 6)
+  unvestedShares         Decimal  @default(0) @db.Decimal(24, 6)
+
+  ownershipPercent       Decimal? @db.Decimal(10, 6)
+  fullyDilutedPercent    Decimal? @db.Decimal(10, 6)
+  votingPercent          Decimal? @db.Decimal(10, 6)
+
+  status                 String   @default("active") @db.VarChar(80)
+  asOfDate               DateTime @default(now())
+
+  meta                   Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([shareholderId])
+  @@index([shareClassId])
+  @@index([status])
+  @@index([asOfDate])
+}
+
+model ShareIssuance {
+  id                  String   @id @default(cuid())
+  shareholderId        String
+  shareClassId         String
+  investmentRoundId    String?
+  capitalContributionId String?
+
+  sharesIssued         Decimal  @db.Decimal(24, 6)
+  pricePerShareCents   Int      @default(0)
+  totalConsiderationCents Int   @default(0)
+  currency             String   @default("ZAR") @db.VarChar(3)
+
+  issuanceType         String   @default("subscription") @db.VarChar(100)
+  status               String   @default("draft") @db.VarChar(80)
+  issuedAt             DateTime?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+
+  documentUrl          String?
+  meta                 Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([shareholderId])
+  @@index([shareClassId])
+  @@index([investmentRoundId])
+  @@index([status])
+  @@index([issuedAt])
+}
+
+model ShareTransfer {
+  id                    String   @id @default(cuid())
+  fromShareholderId      String?
+  toShareholderId        String
+  shareClassId           String
+
+  sharesTransferred      Decimal  @db.Decimal(24, 6)
+  considerationCents     Int      @default(0)
+  currency               String   @default("ZAR") @db.VarChar(3)
+
+  transferType           String   @default("secondary_sale") @db.VarChar(100)
+  status                 String   @default("draft") @db.VarChar(80)
+  transferRestrictionCleared Boolean @default(false)
+
+  effectiveAt            DateTime?
+  approvedByUserId       String?
+  approvedAt             DateTime?
+  documentUrl            String?
+
+  meta                   Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([fromShareholderId])
+  @@index([toShareholderId])
+  @@index([shareClassId])
+  @@index([status])
+  @@index([effectiveAt])
+}
+
+model ShareOptionGrant {
+  id                  String   @id @default(cuid())
+  shareholderId        String?
+  staffUserId          String?
+  shareClassId         String
+
+  grantType            String   @default("option") @db.VarChar(80)
+  status               String   @default("draft") @db.VarChar(80)
+
+  grantedShares        Decimal  @db.Decimal(24, 6)
+  vestedShares         Decimal  @default(0) @db.Decimal(24, 6)
+  exercisedShares      Decimal  @default(0) @db.Decimal(24, 6)
+  exercisePriceCents   Int      @default(0)
+  currency             String   @default("ZAR") @db.VarChar(3)
+
+  grantDate            DateTime?
+  vestingStartDate     DateTime?
+  vestingCliffDate     DateTime?
+  vestingEndDate       DateTime?
+
+  vestingMeta          Json?
+  documentUrl          String?
+  approvedByUserId     String?
+  approvedAt           DateTime?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([shareholderId])
+  @@index([staffUserId])
+  @@index([shareClassId])
+  @@index([status])
+}
+
+model CapTableSnapshot {
+  id                    String   @id @default(cuid())
+  label                 String
+  snapshotDate           DateTime @default(now())
+  status                String   @default("draft") @db.VarChar(80)
+
+  totalAuthorisedShares  Decimal  @default(0) @db.Decimal(24, 6)
+  totalIssuedShares      Decimal  @default(0) @db.Decimal(24, 6)
+  totalAllocatedShares   Decimal  @default(0) @db.Decimal(24, 6)
+  totalUnallocatedShares Decimal  @default(0) @db.Decimal(24, 6)
+  fullyDilutedShares     Decimal  @default(0) @db.Decimal(24, 6)
+
+  ordinarySharePercent   Decimal? @db.Decimal(10, 6)
+  preferenceSharePercent Decimal? @db.Decimal(10, 6)
+  optionPoolPercent      Decimal? @db.Decimal(10, 6)
+
+  snapshotMeta           Json?
+  publishedToShareholders Boolean @default(false)
+  generatedByUserId      String?
+  approvedByUserId       String?
+  approvedAt             DateTime?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([snapshotDate])
+  @@index([status])
+  @@index([publishedToShareholders])
+}
+
+model CompanyValuationSnapshot {
+  id                    String   @id @default(cuid())
+  label                 String
+  valuationDate          DateTime @default(now())
+  valuationType          String   @default("internal") @db.VarChar(80)
+  status                String   @default("draft") @db.VarChar(80)
+
+  preMoneyValuationCents Int      @default(0)
+  postMoneyValuationCents Int     @default(0)
+  enterpriseValueCents   Int      @default(0)
+  currency              String   @default("ZAR") @db.VarChar(3)
+
+  methodology           String?
+  notes                 String?
+  valuationMeta         Json?
+  publishedToShareholders Boolean @default(false)
+
+  createdByUserId       String?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([valuationDate])
+  @@index([valuationType])
+  @@index([status])
+  @@index([publishedToShareholders])
+}
+
+model ShareholderAnnouncement {
+  id                    String   @id @default(cuid())
+  title                 String
+  body                  String
+  announcementType      String   @default("general") @db.VarChar(100)
+  status                String   @default("draft") @db.VarChar(80)
+
+  visibleToShareholders Boolean  @default(false)
+  visibleFrom           DateTime?
+  expiresAt             DateTime?
+
+  createdByUserId       String?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  publishedAt           DateTime?
+
+  meta                  Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([announcementType])
+  @@index([status])
+  @@index([visibleToShareholders])
+  @@index([publishedAt])
+}
+
+model ShareholderDocument {
+  id                    String   @id @default(cuid())
+  title                 String
+  documentType          String   @db.VarChar(100)
+  objectKey             String?
+  fileUrl               String?
+  status                String   @default("draft") @db.VarChar(80)
+
+  shareholderId         String?
+  investmentRoundId     String?
+  annualReturnId        String?
+  boardResolutionId     String?
+
+  visibleToShareholders Boolean  @default(false)
+  downloadable          Boolean  @default(true)
+
+  documentMeta          Json?
+  uploadedByUserId      String?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  publishedAt           DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([documentType])
+  @@index([shareholderId])
+  @@index([status])
+  @@index([visibleToShareholders])
+}
+
+model AnnualReturn {
+  id                    String   @id @default(cuid())
+  financialYear         String
+  status                String   @default("draft") @db.VarChar(80)
+
+  preparedByUserId      String?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  filedAt               DateTime?
+
+  reportSnapshotId      String?
+  documentUrl           String?
+  annualReturnMeta      Json?
+  visibleToShareholders Boolean  @default(false)
+
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([financialYear])
+  @@index([status])
+  @@index([visibleToShareholders])
+}
+
+model BoardResolution {
+  id                    String   @id @default(cuid())
+  title                 String
+  resolutionType        String   @default("board") @db.VarChar(100)
+  status                String   @default("draft") @db.VarChar(80)
+
+  resolutionDate        DateTime?
+  effectiveDate         DateTime?
+  summary               String?
+  documentUrl           String?
+
+  visibleToShareholders Boolean  @default(false)
+  passedByUserId        String?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+
+  meta                  Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([resolutionType])
+  @@index([status])
+  @@index([resolutionDate])
+  @@index([visibleToShareholders])
+}
+
+model AGMNotice {
+  id                    String   @id @default(cuid())
+  title                 String
+  meetingDate           DateTime
+  status                String   @default("draft") @db.VarChar(80)
+
+  venue                 String?
+  virtualJoinUrl        String?
+  agenda                String?
+  documentUrl           String?
+
+  visibleToShareholders Boolean  @default(false)
+  publishedAt           DateTime?
+  createdByUserId       String?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+
+  meta                  Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([meetingDate])
+  @@index([status])
+  @@index([visibleToShareholders])
+}
+
+model ShareSaleNotice {
+  id                    String   @id @default(cuid())
+  title                 String
+  shareClassId           String?
+  sellerShareholderId    String?
+
+  sharesAvailable        Decimal? @db.Decimal(24, 6)
+  askingPricePerShareCents Int?
+  currency               String   @default("ZAR") @db.VarChar(3)
+  status                 String   @default("draft") @db.VarChar(80)
+
+  saleTerms              String?
+  restrictionNotes       String?
+  visibleToShareholders  Boolean  @default(false)
+  opensAt                DateTime?
+  closesAt               DateTime?
+
+  createdByUserId        String?
+  approvedByUserId       String?
+  approvedAt             DateTime?
+  publishedAt            DateTime?
+
+  meta                   Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([shareClassId])
+  @@index([sellerShareholderId])
+  @@index([status])
+  @@index([visibleToShareholders])
+  @@index([opensAt, closesAt])
+}
+
+model ShareholderAccessGrant {
+  id                    String   @id @default(cuid())
+  shareholderId          String
+  userId                 String?
+  email                  String?
+
+  accessStatus           String   @default("pending") @db.VarChar(80)
+  accessScope            String   @default("shareholder_read_only") @db.VarChar(120)
+
+  canViewCapTable        Boolean  @default(true)
+  canViewValuations      Boolean  @default(true)
+  canViewAnnualReturns   Boolean  @default(true)
+  canViewAnnouncements   Boolean  @default(true)
+  canDownloadDocuments   Boolean  @default(true)
+
+  grantedByUserId        String?
+  grantedAt              DateTime?
+  revokedByUserId        String?
+  revokedAt              DateTime?
+
+  meta                   Json?
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
+
+  @@index([shareholderId])
+  @@index([userId])
+  @@index([email])
+  @@index([accessStatus])
+}
+
