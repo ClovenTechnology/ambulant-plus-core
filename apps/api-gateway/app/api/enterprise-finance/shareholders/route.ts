@@ -1,4 +1,4 @@
-import { NextRequest } from 'next/server';
+﻿import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
   asObject,
@@ -81,3 +81,90 @@ export async function POST(req: NextRequest) {
     return routeError(error, 'enterprise_finance_shareholder_create_failed');
   }
 }
+
+
+// A5_M_C_ENTERPRISE_FINANCE_SHAREHOLDER_UPDATE_ARCHIVE_VOID_PATCH
+function a5mCDefined(data: Record<string, any>) {
+  return Object.fromEntries(Object.entries(data).filter(([, value]) => value !== undefined));
+}
+
+function a5mCBoolean(value: any) {
+  return value === undefined ? undefined : Boolean(value);
+}
+
+function a5mCIdempotencyKey(req: NextRequest) {
+  return text(req.headers.get('Idempotency-Key'), 180) || null;
+}
+
+async function a5mCAudit(action: string, req: NextRequest, model: string, subjectId: string, idempotencyKey: string | null) {
+  await auditEnterpriseFinance(action, req, {
+    model,
+    subjectId,
+    idempotencyKey,
+    mutationSurface: 'enterprise_finance_patch',
+  });
+}
+
+export async function PATCH(req: NextRequest) {
+  try {
+    const access = await requireEnterpriseFinanceAdmin(req);
+    if (!access.ok) return access.response;
+
+    const db: any = prisma;
+    const body = await req.json().catch(() => ({}));
+    const action = text(body.action || 'update_shareholder', 120);
+    const id = text(body.id || body.shareholderId, 180);
+    const idempotencyKey = a5mCIdempotencyKey(req);
+
+    if (!id) {
+      return json({ ok: false, envelope: access.envelope, error: 'shareholder_id_required' });
+    }
+
+    if (action === 'update_shareholder' || action === 'archive_shareholder' || action === 'disable_shareholder_portal') {
+      const item = await db.shareholder.update({
+        where: { id },
+        data: a5mCDefined({
+          userId: body.userId === undefined ? undefined : text(body.userId, 180) || null,
+          shareholderType: body.shareholderType === undefined ? undefined : text(body.shareholderType, 80),
+          displayName: body.displayName === undefined ? undefined : text(body.displayName, 240),
+          legalName: body.legalName === undefined ? undefined : text(body.legalName, 240) || null,
+          email: body.email === undefined ? undefined : text(body.email, 240) || null,
+          phone: body.phone === undefined ? undefined : text(body.phone, 80) || null,
+          country: body.country === undefined ? undefined : text(body.country, 2).toUpperCase() || null,
+          taxIdentifierMasked: body.taxIdentifierMasked === undefined ? undefined : text(body.taxIdentifierMasked, 120) || null,
+          investorStatus:
+            action === 'archive_shareholder'
+              ? 'archived'
+              : body.investorStatus === undefined
+                ? undefined
+                : text(body.investorStatus, 80),
+          kycStatus: body.kycStatus === undefined ? undefined : text(body.kycStatus, 80),
+          communicationOptIn:
+            action === 'archive_shareholder'
+              ? false
+              : a5mCBoolean(body.communicationOptIn),
+          portalEnabled:
+            action === 'archive_shareholder' || action === 'disable_shareholder_portal'
+              ? false
+              : a5mCBoolean(body.portalEnabled),
+          profileMeta: body.profileMeta === undefined && body.meta === undefined ? undefined : asObject(body.profileMeta || body.meta),
+          approvedByUserId: body.approvedByUserId === undefined ? undefined : text(body.approvedByUserId, 180) || null,
+          approvedAt: body.approvedAt === undefined ? undefined : body.approvedAt ? new Date(body.approvedAt) : null,
+        }),
+      });
+
+      const auditAction =
+        action === 'archive_shareholder' ? 'shareholder_archived' :
+        action === 'disable_shareholder_portal' ? 'shareholder_portal_disabled' :
+        'shareholder_updated';
+
+      await a5mCAudit(auditAction, req, 'Shareholder', item.id, idempotencyKey);
+      return json({ ok: true, envelope: access.envelope, item });
+    }
+
+    return json({ ok: false, envelope: access.envelope, error: 'unsupported_shareholder_patch_action', action });
+  } catch (error: any) {
+    return routeError(error, 'enterprise_finance_shareholder_patch_failed');
+  }
+}
+
