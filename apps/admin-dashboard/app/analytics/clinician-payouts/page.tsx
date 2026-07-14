@@ -79,6 +79,90 @@ function SortIcon({
   );
 }
 
+type FinancePayoutRow = {
+  id: string;
+  role: string;
+  entityId: string;
+  periodStart?: string;
+  periodEnd?: string;
+  amountCents: number;
+  currency?: string;
+  status: string;
+  meta?: Record<string, any> | null;
+};
+
+type FinancePayoutApiResponse = {
+  ok?: boolean;
+  items?: FinancePayoutRow[];
+  summary?: any[];
+  emptyState?: {
+    title?: string;
+    message?: string;
+  } | null;
+  error?: string;
+};
+
+function asPayoutObject(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
+}
+
+function formatPayoutMoney(amountCents: number | null | undefined, currency = 'ZAR') {
+  const cents = Number.isFinite(Number(amountCents)) ? Number(amountCents) : 0;
+  return `${currency || 'ZAR'} ${(cents / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function shortPayoutText(value: unknown, max = 42) {
+  const text = String(value || '').trim();
+  if (!text) return '—';
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function payoutStatusClass(status: string) {
+  const value = String(status || '').toLowerCase();
+
+  if (value === 'paid') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  }
+
+  if (value === 'failed' || value === 'cancelled' || value === 'refunded') {
+    return 'border-red-200 bg-red-50 text-red-700';
+  }
+
+  if (value === 'pending') {
+    return 'border-amber-200 bg-amber-50 text-amber-700';
+  }
+
+  return 'border-gray-200 bg-gray-50 text-gray-700';
+}
+
+function describePaystackBalance(payload: any) {
+  const balance = payload?.balance;
+
+  const candidate =
+    balance?.availableBalance ??
+    balance?.availableBalanceCents ??
+    balance?.balance ??
+    balance?.balanceCents ??
+    balance?.amountCents ??
+    balance?.data?.[0]?.balance ??
+    balance?.data?.[0]?.availableBalance ??
+    null;
+
+  if (Number.isFinite(Number(candidate))) {
+    return `Paystack balance checked: ${formatPayoutMoney(Number(candidate), balance?.currency || 'ZAR')}`;
+  }
+
+  const raw = JSON.stringify(balance ?? payload ?? {});
+  return raw && raw !== '{}'
+    ? `Paystack balance checked: ${raw.slice(0, 220)}`
+    : 'Paystack balance checked.';
+}
+
 export default function ClinicianPayouts() {
   const [rows, setRows] = useState<Row[]>([]);
   const [totalPayout, setTotalPayout] = useState<number>(0);
@@ -87,6 +171,15 @@ export default function ClinicianPayouts() {
   const [err, setErr] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>('payoutZAR');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const [financePayoutRows, setFinancePayoutRows] = useState<FinancePayoutRow[]>([]);
+  const [financePayoutLoading, setFinancePayoutLoading] = useState(false);
+  const [financePayoutBusy, setFinancePayoutBusy] = useState<string | null>(null);
+  const [financePayoutNotice, setFinancePayoutNotice] = useState<string | null>(null);
+  const [financePayoutError, setFinancePayoutError] = useState<string | null>(null);
+  const [paystackBalanceNotice, setPaystackBalanceNotice] = useState<string | null>(null);
+  const [transferResults, setTransferResults] = useState<any[]>([]);
+  const [skippedPayouts, setSkippedPayouts] = useState<any[]>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -121,6 +214,279 @@ export default function ClinicianPayouts() {
       mounted = false;
     };
   }, []);
+
+
+  async function loadFinancePayoutRows() {
+    setFinancePayoutLoading(true);
+    setFinancePayoutError(null);
+
+    try {
+      const res = await fetch('/api/finance/payouts?role=clinician&limit=100', {
+        cache: 'no-store',
+      });
+
+      const json = (await res.json().catch(() => ({}))) as FinancePayoutApiResponse;
+      if (!res.ok || json.ok === false) {
+        throw new Error(json.error || `HTTP ${res.status}`);
+      }
+
+      const items = Array.isArray(json.items) ? json.items : [];
+      setFinancePayoutRows(items);
+
+      if (!items.length && json.emptyState?.message) {
+        setFinancePayoutNotice(json.emptyState.message);
+      } else if (!items.length) {
+        setFinancePayoutNotice(
+          "No payout summary yet. You haven't completed any eligible jobs yet.",
+        );
+      } else {
+        setFinancePayoutNotice(null);
+      }
+    } catch (e: any) {
+      setFinancePayoutRows([]);
+      setFinancePayoutError(e?.message || 'Failed to load clinician payout records.');
+    } finally {
+      setFinancePayoutLoading(false);
+    }
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    void loadFinancePayoutRows();
+  }, []);
+
+  async function postFinancePayoutAction(payload: Record<string, any>) {
+    const res = await fetch('/api/finance/payouts', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-user-role': 'admin',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok || json?.ok === false) {
+      throw new Error(json?.error || `HTTP ${res.status}`);
+    }
+
+    return json;
+  }
+
+  async function handleCheckPaystackBalance() {
+    setFinancePayoutBusy('balance');
+    setFinancePayoutError(null);
+    setFinancePayoutNotice(null);
+
+    try {
+      const json = await postFinancePayoutAction({
+        action: 'check_paystack_balance',
+        currency: 'ZAR',
+      });
+
+      setPaystackBalanceNotice(describePaystackBalance(json));
+    } catch (e: any) {
+      setFinancePayoutError(e?.message || 'Failed to check Paystack balance.');
+    } finally {
+      setFinancePayoutBusy(null);
+    }
+  }
+
+  async function handleSendPendingPaystackTransfers() {
+    const payoutIds = financePayoutRows
+      .filter((row) => {
+        return (
+          String(row.role || '').toLowerCase() === 'clinician' &&
+          String(row.status || '').toLowerCase() === 'pending' &&
+          Number(row.amountCents || 0) > 0
+        );
+      })
+      .map((row) => row.id);
+
+    if (!payoutIds.length) {
+      setFinancePayoutError('No pending clinician payouts are available for Paystack transfer.');
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Send ${payoutIds.length} pending clinician payout(s) via Paystack Transfers?`,
+    );
+
+    if (!confirmed) return;
+
+    setFinancePayoutBusy('send_paystack_transfers');
+    setFinancePayoutError(null);
+    setFinancePayoutNotice(null);
+
+    try {
+      const json = await postFinancePayoutAction({
+        action: 'send_paystack_transfers',
+        payoutIds,
+        actorRole: 'admin',
+      });
+
+      setTransferResults(Array.isArray(json.transferResults) ? json.transferResults : []);
+      setSkippedPayouts(Array.isArray(json.skippedPayouts) ? json.skippedPayouts : []);
+      setFinancePayoutNotice(
+        `Paystack transfer submission complete. Sent: ${json.transferredCount || 0}; failed: ${json.failedCount || 0}; skipped: ${json.skippedCount || 0}.`,
+      );
+
+      await loadFinancePayoutRows();
+    } catch (e: any) {
+      setFinancePayoutError(e?.message || 'Failed to send clinician payouts via Paystack.');
+    } finally {
+      setFinancePayoutBusy(null);
+    }
+  }
+
+  async function handleAddDeduction(row: FinancePayoutRow) {
+    const amountText = window.prompt(
+      'Enter deduction or advisory estimate amount in ZAR. Example: 125.50',
+    );
+
+    if (!amountText) return;
+
+    const amount = Number(amountText);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setFinancePayoutError('Deduction amount must be a valid positive number.');
+      return;
+    }
+
+    const label = window.prompt(
+      'Enter deduction label or reason. Example: Onboarding instalment, plan fee, tax advisory.',
+      'Custom deduction',
+    );
+
+    if (!label) return;
+
+    const advisoryOnly = window.confirm(
+      'Should this be advisory-only and NOT reduce the payout? Press OK for advisory-only, Cancel to deduct from payout.',
+    );
+
+    setFinancePayoutBusy(`deduction:${row.id}`);
+    setFinancePayoutError(null);
+
+    try {
+      await postFinancePayoutAction({
+        action: 'add_deduction',
+        payoutId: row.id,
+        amountCents: Math.round(amount * 100),
+        label,
+        advisoryOnly,
+        actorRole: 'admin',
+      });
+
+      setFinancePayoutNotice(
+        advisoryOnly
+          ? 'Advisory deduction/estimate added without reducing payout.'
+          : 'Deduction added and payout amount updated.',
+      );
+
+      await loadFinancePayoutRows();
+    } catch (e: any) {
+      setFinancePayoutError(e?.message || 'Failed to add deduction.');
+    } finally {
+      setFinancePayoutBusy(null);
+    }
+  }
+
+  async function handleMarkPayoutPaid(row: FinancePayoutRow) {
+    const reference = window.prompt(
+      'Enter remittance/reference for this manual paid reconciliation.',
+    );
+
+    if (!reference) return;
+
+    setFinancePayoutBusy(`mark_paid:${row.id}`);
+    setFinancePayoutError(null);
+
+    try {
+      await postFinancePayoutAction({
+        action: 'mark_paid',
+        payoutIds: [row.id],
+        remittanceRef: reference,
+        actorRole: 'admin',
+      });
+
+      setFinancePayoutNotice('Clinician payout manually marked as paid.');
+      await loadFinancePayoutRows();
+    } catch (e: any) {
+      setFinancePayoutError(e?.message || 'Failed to mark payout as paid.');
+    } finally {
+      setFinancePayoutBusy(null);
+    }
+  }
+
+  async function handleMarkPayoutFailed(row: FinancePayoutRow) {
+    const reason = window.prompt(
+      'Enter failure reason for this manual failed reconciliation.',
+    );
+
+    if (!reason) return;
+
+    setFinancePayoutBusy(`mark_failed:${row.id}`);
+    setFinancePayoutError(null);
+
+    try {
+      await postFinancePayoutAction({
+        action: 'mark_failed',
+        payoutIds: [row.id],
+        failureReason: reason,
+        actorRole: 'admin',
+      });
+
+      setFinancePayoutNotice('Clinician payout manually marked as failed.');
+      await loadFinancePayoutRows();
+    } catch (e: any) {
+      setFinancePayoutError(e?.message || 'Failed to mark payout as failed.');
+    } finally {
+      setFinancePayoutBusy(null);
+    }
+  }
+
+  const pendingFinancePayoutRows = useMemo(() => {
+    return financePayoutRows.filter((row) => {
+      return (
+        String(row.status || '').toLowerCase() === 'pending' &&
+        Number(row.amountCents || 0) > 0
+      );
+    });
+  }, [financePayoutRows]);
+
+  const financePayoutTotals = useMemo(() => {
+    return financePayoutRows.reduce(
+      (acc, row) => {
+        const amount = Number(row.amountCents || 0);
+        acc.totalCents += amount;
+
+        if (String(row.status || '').toLowerCase() === 'pending') {
+          acc.pendingCents += amount;
+          acc.pendingCount += 1;
+        }
+
+        if (String(row.status || '').toLowerCase() === 'paid') {
+          acc.paidCents += amount;
+          acc.paidCount += 1;
+        }
+
+        if (String(row.status || '').toLowerCase() === 'failed') {
+          acc.failedCents += amount;
+          acc.failedCount += 1;
+        }
+
+        return acc;
+      },
+      {
+        totalCents: 0,
+        pendingCents: 0,
+        paidCents: 0,
+        failedCents: 0,
+        pendingCount: 0,
+        paidCount: 0,
+        failedCount: 0,
+      },
+    );
+  }, [financePayoutRows]);
 
   const {
     totalConsultations,
@@ -571,6 +937,270 @@ export default function ClinicianPayouts() {
       </section>
 
       {/* Narrative summary */}
+      {/* A5_J_E_B_CLINICIAN_PAYOUT_ADMIN_CONTROLS */}
+      <section className="rounded-2xl border bg-white p-4 shadow-sm space-y-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-1">
+            <span className="text-sm font-medium text-gray-900">
+              Clinician payout finance controls
+            </span>
+            <p className="text-[11px] text-gray-500 max-w-3xl">
+              Review generated clinician contractor payouts, check Paystack balance,
+              submit pending approved payouts, add Admin deductions or advisory
+              estimates, and use manual reconciliation only when required.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void loadFinancePayoutRows()}
+              disabled={financePayoutLoading || Boolean(financePayoutBusy)}
+              className="rounded border bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {financePayoutLoading ? 'Refreshing…' : 'Refresh payout records'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleCheckPaystackBalance()}
+              disabled={Boolean(financePayoutBusy)}
+              className="rounded border bg-white px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {financePayoutBusy === 'balance'
+                ? 'Checking…'
+                : 'Check Paystack balance'}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSendPendingPaystackTransfers()}
+              disabled={Boolean(financePayoutBusy) || pendingFinancePayoutRows.length === 0}
+              className="rounded bg-gray-900 px-3 py-1.5 text-xs text-white hover:bg-black disabled:opacity-50"
+            >
+              {financePayoutBusy === 'send_paystack_transfers'
+                ? 'Submitting…'
+                : `Send pending payouts via Paystack (${pendingFinancePayoutRows.length})`}
+            </button>
+          </div>
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-4">
+          <div className="rounded-xl border bg-gray-50 p-3">
+            <div className="text-[11px] text-gray-500">Total payout records</div>
+            <div className="mt-1 text-lg font-semibold text-gray-900">
+              {financePayoutRows.length.toLocaleString()}
+            </div>
+          </div>
+          <div className="rounded-xl border bg-amber-50 p-3">
+            <div className="text-[11px] text-amber-700">Pending payable</div>
+            <div className="mt-1 text-lg font-semibold text-amber-900">
+              {formatPayoutMoney(financePayoutTotals.pendingCents)}
+            </div>
+            <div className="text-[11px] text-amber-700">
+              {financePayoutTotals.pendingCount.toLocaleString()} row(s)
+            </div>
+          </div>
+          <div className="rounded-xl border bg-emerald-50 p-3">
+            <div className="text-[11px] text-emerald-700">Paid</div>
+            <div className="mt-1 text-lg font-semibold text-emerald-900">
+              {formatPayoutMoney(financePayoutTotals.paidCents)}
+            </div>
+            <div className="text-[11px] text-emerald-700">
+              {financePayoutTotals.paidCount.toLocaleString()} row(s)
+            </div>
+          </div>
+          <div className="rounded-xl border bg-red-50 p-3">
+            <div className="text-[11px] text-red-700">Failed</div>
+            <div className="mt-1 text-lg font-semibold text-red-900">
+              {formatPayoutMoney(financePayoutTotals.failedCents)}
+            </div>
+            <div className="text-[11px] text-red-700">
+              {financePayoutTotals.failedCount.toLocaleString()} row(s)
+            </div>
+          </div>
+        </div>
+
+        {(paystackBalanceNotice || financePayoutNotice || financePayoutError) && (
+          <div className="space-y-2 text-xs">
+            {paystackBalanceNotice && (
+              <div className="rounded-xl border border-blue-100 bg-blue-50 px-3 py-2 text-blue-800">
+                {paystackBalanceNotice}
+              </div>
+            )}
+            {financePayoutNotice && (
+              <div className="rounded-xl border border-emerald-100 bg-emerald-50 px-3 py-2 text-emerald-800">
+                {financePayoutNotice}
+              </div>
+            )}
+            {financePayoutError && (
+              <div className="rounded-xl border border-red-100 bg-red-50 px-3 py-2 text-red-800">
+                {financePayoutError}
+              </div>
+            )}
+          </div>
+        )}
+
+        {(transferResults.length > 0 || skippedPayouts.length > 0) && (
+          <div className="grid gap-3 lg:grid-cols-2">
+            {transferResults.length > 0 && (
+              <div className="rounded-xl border bg-gray-50 p-3">
+                <div className="text-xs font-medium text-gray-900">
+                  Latest transfer results
+                </div>
+                <div className="mt-2 max-h-40 space-y-1 overflow-auto text-[11px] text-gray-600">
+                  {transferResults.slice(0, 12).map((row, index) => (
+                    <div key={`transfer-${index}`} className="rounded bg-white px-2 py-1">
+                      {shortPayoutText(row.payoutId, 18)} · {row.payoutStatus || row.paystackStatus || 'submitted'}
+                      {row.error ? ` · ${row.error}` : ''}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {skippedPayouts.length > 0 && (
+              <div className="rounded-xl border bg-gray-50 p-3">
+                <div className="text-xs font-medium text-gray-900">
+                  Skipped payout rows
+                </div>
+                <div className="mt-2 max-h-40 space-y-1 overflow-auto text-[11px] text-gray-600">
+                  {skippedPayouts.slice(0, 12).map((row, index) => (
+                    <div key={`skipped-${index}`} className="rounded bg-white px-2 py-1">
+                      {shortPayoutText(row.payoutId, 18)} · {row.reason || row.error || 'skipped'}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-xl border">
+          <table className="w-full text-xs">
+            <thead className="bg-gray-50 text-gray-500">
+              <tr className="text-left">
+                <th className="px-3 py-2 font-medium">Clinician</th>
+                <th className="px-3 py-2 font-medium">Period</th>
+                <th className="px-3 py-2 font-medium">Status</th>
+                <th className="px-3 py-2 font-medium text-right">Net payable</th>
+                <th className="px-3 py-2 font-medium">Reference</th>
+                <th className="px-3 py-2 font-medium">Deductions / advisory</th>
+                <th className="px-3 py-2 font-medium text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {financePayoutRows.length ? (
+                financePayoutRows.map((row) => {
+                  const meta = asPayoutObject(row.meta);
+                  const summary = asPayoutObject(meta.contractorPayoutSummary);
+                  const customDeductions = Array.isArray(summary.customDeductions)
+                    ? summary.customDeductions
+                    : [];
+                  const transfer = asPayoutObject(meta.paystackTransfer);
+                  const isBusy = Boolean(financePayoutBusy?.endsWith(row.id));
+                  const status = String(row.status || 'pending').toLowerCase();
+
+                  return (
+                    <tr key={row.id} className="border-t align-top">
+                      <td className="px-3 py-2">
+                        <div className="font-medium text-gray-900">
+                          {shortPayoutText(row.entityId, 22)}
+                        </div>
+                        <div className="text-[11px] text-gray-400">
+                          {shortPayoutText(row.id, 24)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">
+                        <div>
+                          {row.periodStart
+                            ? new Date(row.periodStart).toLocaleDateString()
+                            : '—'}
+                        </div>
+                        <div className="text-[11px] text-gray-400">
+                          {row.periodEnd
+                            ? new Date(row.periodEnd).toLocaleDateString()
+                            : '—'}
+                        </div>
+                      </td>
+                      <td className="px-3 py-2">
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[11px] font-medium ${payoutStatusClass(status)}`}
+                        >
+                          {status}
+                        </span>
+                      </td>
+                      <td className="px-3 py-2 text-right tabular-nums font-medium text-gray-900">
+                        {formatPayoutMoney(row.amountCents, row.currency)}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">
+                        <div>{shortPayoutText(meta.payoutRef || transfer.reference, 34)}</div>
+                        {transfer.transferCode && (
+                          <div className="text-[11px] text-gray-400">
+                            {shortPayoutText(transfer.transferCode, 34)}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 text-gray-600">
+                        <div className="text-[11px]">
+                          Platform: {formatPayoutMoney(summary.platformFeeCents || meta.platformFeeCents || 0, row.currency)}
+                        </div>
+                        <div className="text-[11px]">
+                          Custom: {formatPayoutMoney(summary.customDeductionCents || 0, row.currency)}
+                        </div>
+                        {customDeductions.length > 0 && (
+                          <div className="mt-1 text-[11px] text-gray-400">
+                            {customDeductions.length} added deduction/advisory item(s)
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-3 py-2">
+                        <div className="flex flex-wrap justify-end gap-1">
+                          <button
+                            type="button"
+                            onClick={() => void handleAddDeduction(row)}
+                            disabled={isBusy || status === 'paid'}
+                            className="rounded border bg-white px-2 py-1 text-[11px] text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                          >
+                            Add deduction
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleMarkPayoutPaid(row)}
+                            disabled={isBusy || status === 'paid'}
+                            className="rounded border bg-white px-2 py-1 text-[11px] text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
+                          >
+                            Mark paid
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => void handleMarkPayoutFailed(row)}
+                            disabled={isBusy || status === 'failed'}
+                            className="rounded border bg-white px-2 py-1 text-[11px] text-red-700 hover:bg-red-50 disabled:opacity-50"
+                          >
+                            Mark failed
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={7} className="px-3 py-6 text-center text-xs text-gray-500">
+                    No payout summary yet. You haven’t completed any eligible jobs yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="text-[11px] text-gray-500">
+          Contractor summaries are not employment payslips. Tax, PAYE, UIF,
+          pension, professional indemnity and other statutory or professional
+          obligations may remain the clinician’s responsibility unless Ambulant+
+          explicitly applies a deduction line.
+        </p>
+      </section>
+
       <section className="rounded-2xl border bg-white p-4 shadow-sm">
         <h2 className="text-sm font-medium mb-2">
           Operator Summary
