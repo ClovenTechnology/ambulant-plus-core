@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
 import { readIdentity } from "@/src/lib/identity";
 import { orgIdFromHeaders, requireRole } from "@/src/lib/careport";
+// A5_G_F_B_CAREPORT_PAYSTACK_TRANSFER_ROUTE_IMPORTS
+import {
+  buildPaystackTransferReference,
+  checkPaystackTransferBalance,
+  createPaystackTransferRecipient,
+  extractPartnerBankDetails,
+  initiatePaystackTransfer,
+  paystackBankDetailsReady,
+} from '@/src/payments/paystack-transfers';
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -543,6 +552,297 @@ export async function GET(req: NextRequest) {
   }
 }
 
+
+// A5_G_F_B_CAREPORT_PAYSTACK_TRANSFER_ROUTE_HELPERS
+function a5gfJsonObject(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function a5gfText(value: unknown, max = 512) {
+  const raw = value === undefined || value === null ? '' : String(value);
+  return raw.trim().slice(0, max);
+}
+
+function a5gfIds(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map((item) => a5gfText(item, 180)).filter(Boolean);
+  }
+
+  const one = a5gfText(value, 180);
+  return one ? [one] : [];
+}
+
+async function a5gfFindFirstSafe(delegate: any, queries: any[]) {
+  if (!delegate?.findFirst && !delegate?.findUnique) return null;
+
+  for (const query of queries) {
+    try {
+      if (delegate.findFirst) {
+        const found = await delegate.findFirst(query);
+        if (found) return found;
+      }
+    } catch {}
+
+    try {
+      if (delegate.findUnique && query?.where?.id) {
+        const found = await delegate.findUnique({ where: { id: query.where.id } });
+        if (found) return found;
+      }
+    } catch {}
+  }
+
+  return null;
+}
+
+async function a5gfLoadCarePortSettlementRecipientProfile(db: any, line: any) {
+  const recipientType = a5gfText(line?.recipientType, 40).toUpperCase();
+  const recipientId = a5gfText(line?.recipientId, 180);
+
+  if (!recipientId) return null;
+
+  if (recipientType === 'PHARMACY') {
+    const delegates = [
+      db.pharmacyPartner,
+      db.carePortPharmacy,
+      db.carePortPharmacyPartner,
+    ].filter(Boolean);
+
+    for (const delegate of delegates) {
+      const found = await a5gfFindFirstSafe(delegate, [
+        { where: { id: recipientId } },
+        { where: { pharmacyId: recipientId } },
+      ]);
+
+      if (found) return found;
+    }
+  }
+
+  if (recipientType === 'RIDER' || recipientType === 'COURIER') {
+    const delegates = [
+      db.carePortRiderProfile,
+      db.carePortRider,
+      db.riderProfile,
+      db.user,
+    ].filter(Boolean);
+
+    for (const delegate of delegates) {
+      const found = await a5gfFindFirstSafe(delegate, [
+        { where: { id: recipientId } },
+        { where: { userId: recipientId } },
+        { where: { riderUserId: recipientId } },
+      ]);
+
+      if (found) return found;
+    }
+  }
+
+  return null;
+}
+
+function a5gfCarePortTransferStatus(paystackStatus: string) {
+  const status = a5gfText(paystackStatus, 40).toLowerCase();
+
+  if (status === 'success') return 'PAID';
+  if (status === 'failed' || status === 'abandoned' || status === 'reversed') return 'FAILED';
+
+  return 'PENDING';
+}
+
+function a5gfExtractCarePortBankDetails(line: any, profile: any) {
+  const lineMeta = a5gfJsonObject(line?.metadata);
+  const profileMeta = a5gfJsonObject(profile?.profileMeta);
+  const verifiedIdentityMeta = a5gfJsonObject(profile?.verifiedIdentityMeta);
+  const metadata = a5gfJsonObject(profile?.metadata);
+  const kycPayload = a5gfJsonObject(profile?.kycPayload);
+  const kyiPayload = a5gfJsonObject(profile?.kyiPayload);
+
+  const candidates = [
+    profile,
+    profileMeta,
+    verifiedIdentityMeta,
+    metadata,
+    kycPayload,
+    kyiPayload,
+    lineMeta,
+    a5gfJsonObject(lineMeta.breakdown),
+    {
+      ...a5gfJsonObject(profile),
+      meta: {
+        ...lineMeta,
+        ...metadata,
+        ...profileMeta,
+        ...verifiedIdentityMeta,
+        ...kycPayload,
+        ...kyiPayload,
+      },
+      payoutMeta: lineMeta,
+      profileMeta,
+      verifiedIdentityMeta,
+      kycPayload,
+      kyiPayload,
+    },
+  ];
+
+  for (const candidate of candidates) {
+    const details = extractPartnerBankDetails(candidate);
+    if (paystackBankDetailsReady(details)) return details;
+  }
+
+  return null;
+}
+
+async function a5gfSendCarePortPaystackTransferForLine(db: any, line: any, orgId: string, actorRole: string) {
+  const currentMeta = a5gfJsonObject(line?.metadata);
+  const profile = await a5gfLoadCarePortSettlementRecipientProfile(db, line);
+  const bankDetails = a5gfExtractCarePortBankDetails(line, profile);
+
+  if (!paystackBankDetailsReady(bankDetails)) {
+    return {
+      ok: false,
+      settlementLineId: line?.id,
+      batchId: line?.batchId || null,
+      recipientType: line?.recipientType,
+      recipientId: line?.recipientId,
+      status: 'skipped',
+      error: 'recipient_bank_details_missing_or_incomplete',
+    };
+  }
+
+  const existingTransfer = a5gfJsonObject(currentMeta.paystackTransfer);
+  const existingRecipientCode =
+    a5gfText(existingTransfer.recipientCode || bankDetails?.paystackRecipientCode, 180) || null;
+
+  const recipient = existingRecipientCode
+    ? {
+        recipientCode: existingRecipientCode,
+        raw: { source: 'existing_recipient_code' },
+      }
+    : await createPaystackTransferRecipient({
+        name: bankDetails!.accountName,
+        accountNumber: bankDetails!.accountNumber,
+        bankCode: bankDetails!.bankCode,
+        currency: bankDetails!.currency || line?.currency || 'ZAR',
+        country: bankDetails!.country || 'ZA',
+        metadata: {
+          source: 'ambulant_careport_settlement_line_payout',
+          orgId,
+          settlementLineId: line?.id,
+          batchId: line?.batchId || null,
+          recipientType: line?.recipientType,
+          recipientId: line?.recipientId,
+        },
+      });
+
+  const reference =
+    a5gfText(existingTransfer.reference || line?.remittanceRef, 180) ||
+    buildPaystackTransferReference(['ambulant', 'careport', 'settlement-line', line?.id]);
+
+  const amountCents = Number(line?.netPayableMinor || line?.netPayableCents || 0);
+
+  const transfer = await initiatePaystackTransfer({
+    amountCents,
+    recipientCode: recipient.recipientCode,
+    reference,
+    currency: line?.currency || bankDetails!.currency || 'ZAR',
+    reason: 'Ambulant+ CarePort partner settlement',
+    metadata: {
+      source: 'ambulant_careport_settlement_line_payout',
+      orgId,
+      settlementLineId: line?.id,
+      batchId: line?.batchId || null,
+      recipientType: line?.recipientType,
+      recipientId: line?.recipientId,
+      generatedByRole: actorRole,
+    },
+  });
+
+  const nextStatus = a5gfCarePortTransferStatus(transfer.status);
+  const now = new Date();
+
+  const nextMeta: any = {
+    ...currentMeta,
+    paystackTransfer: {
+      provider: 'paystack',
+      transferEnabled: true,
+      reference: transfer.reference || reference,
+      transferCode: transfer.transferCode || existingTransfer.transferCode || null,
+      recipientCode: transfer.recipientCode || recipient.recipientCode,
+      status: transfer.status,
+      amountCents: transfer.amountCents ?? amountCents,
+      currency: transfer.currency || line?.currency || bankDetails!.currency || 'ZAR',
+      message: transfer.message || null,
+      submittedAt: now.toISOString(),
+      submittedByRole: actorRole,
+      recipientSource: existingRecipientCode ? 'existing' : 'created',
+      bankDetailsSource: bankDetails!.source || null,
+      raw: transfer.raw,
+    },
+  };
+
+  const updateData: any = {
+    metadata: nextMeta,
+    remittanceRef: transfer.reference || reference,
+    status: nextStatus,
+  };
+
+  if (nextStatus === 'PAID') {
+    updateData.paidAt = now;
+    updateData.failedAt = null;
+    updateData.failureReason = null;
+  }
+
+  if (nextStatus === 'FAILED') {
+    updateData.failedAt = now;
+    updateData.failureReason = transfer.message || 'paystack_transfer_failed';
+    nextMeta.failureReason = updateData.failureReason;
+    nextMeta.paystackTransfer.failureReason = updateData.failureReason;
+  }
+
+  const updated = await db.carePortSettlementLine.update({
+    where: { id: line.id },
+    data: updateData,
+  });
+
+  await db.auditEvent?.create?.({
+    data: {
+      kind: 'careport_paystack_transfer_submitted',
+      actorId: null,
+      actorRole: actorRole || 'admin',
+      subjectId: line.id,
+      meta: {
+        orgId,
+        batchId: line?.batchId || null,
+        settlementLineId: line?.id,
+        recipientType: line?.recipientType,
+        recipientId: line?.recipientId,
+        reference: transfer.reference || reference,
+        transferCode: transfer.transferCode || null,
+        paystackStatus: transfer.status,
+        settlementStatus: nextStatus,
+      },
+      at: new Date(),
+    },
+  }).catch(() => null);
+
+  return {
+    ok: true,
+    settlementLineId: line.id,
+    batchId: line.batchId || null,
+    recipientType: line.recipientType,
+    recipientId: line.recipientId,
+    amountCents,
+    currency: transfer.currency || line?.currency || bankDetails!.currency || 'ZAR',
+    paystackStatus: transfer.status,
+    settlementStatus: nextStatus,
+    paid: nextStatus === 'PAID',
+    failed: nextStatus === 'FAILED',
+    reference: transfer.reference || reference,
+    transferCode: transfer.transferCode || null,
+    recipientCode: transfer.recipientCode || recipient.recipientCode,
+    updated,
+  };
+}
+
 export async function POST(req: NextRequest) {
   const who = readIdentity(req.headers);
   const orgId = orgIdFromHeaders(req.headers);
@@ -552,6 +852,98 @@ export async function POST(req: NextRequest) {
     const body = await req.json().catch(() => ({}));
     const action = clean(body?.action || "generate", 40).toLowerCase();
     const db: any = prisma;
+
+
+    if (action === "check_paystack_balance" || action === "paystack_balance") {
+      const currency = clean(body?.currency || "ZAR", 8).toUpperCase() || "ZAR";
+      const balance = await checkPaystackTransferBalance(currency);
+
+      return json({
+        ok: true,
+        action,
+        provider: "paystack",
+        transferEnabled: true,
+        balance,
+      });
+    }
+
+    if (["send_paystack_transfer", "send_paystack_transfers", "paystack_transfer"].includes(action)) {
+      const settlementLineIds = a5gfIds(body?.settlementLineIds || body?.settlementLineId || body?.lineIds || body?.lineId || body?.ids);
+      const batchId = clean(body?.batchId, 120);
+
+      if (!settlementLineIds.length && !batchId) {
+        return json({ ok: false, error: "settlementLineIds_or_batchId_required" }, 400);
+      }
+
+      if (!db.carePortSettlementLine?.findMany || !db.carePortSettlementLine?.update) {
+        return json({ ok: false, error: "careport_settlement_line_transfer_update_not_configured" }, 501);
+      }
+
+      const lineWhere = settlementLineIds.length
+        ? { orgId, id: { in: settlementLineIds } }
+        : { orgId, batchId };
+
+      const lines = await db.carePortSettlementLine.findMany({
+        where: lineWhere,
+        orderBy: { createdAt: "asc" },
+      });
+
+      const transferActorRole = a5gfText(who.role || req.headers.get("x-user-role") || req.headers.get("x-role") || "admin", 80);
+
+      const results: any[] = [];
+      const skipped: any[] = [];
+
+      for (const line of lines) {
+        if (String(line?.status || "").toUpperCase() === "PAID") {
+          skipped.push({
+            settlementLineId: line.id,
+            batchId: line.batchId || null,
+            reason: "already_paid",
+            remittanceRef: line.remittanceRef || null,
+          });
+          continue;
+        }
+
+        if (Number(line?.netPayableMinor || 0) <= 0) {
+          skipped.push({
+            settlementLineId: line.id,
+            batchId: line.batchId || null,
+            reason: "net_amount_not_positive",
+          });
+          continue;
+        }
+
+        try {
+          results.push(await a5gfSendCarePortPaystackTransferForLine(db, line, orgId, transferActorRole));
+        } catch (error: any) {
+          results.push({
+            ok: false,
+            settlementLineId: line.id,
+            batchId: line.batchId || null,
+            recipientType: line.recipientType,
+            recipientId: line.recipientId,
+            status: "failed",
+            error: error?.message || "careport_paystack_transfer_failed",
+            payload: error?.payload || null,
+          });
+        }
+      }
+
+      return json({
+        ok: true,
+        action,
+        provider: "paystack",
+        transferEnabled: true,
+        requestedLineCount: settlementLineIds.length,
+        batchId: batchId || null,
+        foundLineCount: lines.length,
+        transferredCount: results.filter((row: any) => row?.ok).length,
+        failedCount: results.filter((row: any) => row?.ok === false).length,
+        skippedCount: skipped.length,
+        transferResults: results,
+        skippedSettlementLines: skipped,
+      });
+    }
 
     if (action === "mark_paid" || action === "mark_failed") {
       const batchId = clean(body?.batchId, 120);
