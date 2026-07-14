@@ -23,6 +23,8 @@ type ShareholderFilters = {
   portalRole: string;
 };
 
+type AccessAction = "grant" | "revoke" | "permission_update";
+
 const emptyState: LoadState = {
   accessEnvelope: null,
   overview: null,
@@ -43,7 +45,7 @@ const entitlementRows = [
   {
     label: "Investor only",
     access: "Shareholder portal only",
-    notes: "Read-only shareholder documents, cap table snapshots, valuations, annual returns and notices.",
+    notes: "Read-only shareholder documents, cap table snapshots, valuations, annual returns, share-sale notices and announcements.",
   },
   {
     label: "Staff only",
@@ -53,12 +55,51 @@ const entitlementRows = [
   {
     label: "Staff + shareholder",
     access: "Operations + shareholder portal",
-    notes: "One login with separate operational role and shareholder access entitlement.",
+    notes: "One login with separate operational role and shareholder access entitlement. Staff-shareholder single login is preserved.",
   },
   {
     label: "Accountant / Admin",
     access: "Enterprise Finance controls",
-    notes: "Can manage finance surfaces subject to role guard and future audit logging.",
+    notes: "Can manage finance surfaces subject to role guard, audit logs, idempotency keys and future write endpoints.",
+  },
+];
+
+const portalPermissionRows = [
+  {
+    key: "cap_table_snapshot",
+    label: "Cap table snapshots",
+    defaultAccess: "Read-only",
+    notes: "Shareholder-visible ownership snapshot only; no cap table mutation.",
+  },
+  {
+    key: "valuation_snapshot",
+    label: "Valuation snapshots",
+    defaultAccess: "Read-only",
+    notes: "Published valuation snapshots only; valuation approval remains accountant/admin controlled.",
+  },
+  {
+    key: "annual_returns",
+    label: "Annual returns",
+    defaultAccess: "Read-only / download",
+    notes: "Annual return documents can be exposed to approved shareholder portal users.",
+  },
+  {
+    key: "agm_notices",
+    label: "AGM notices and announcements",
+    defaultAccess: "Read-only / download",
+    notes: "AGM notices, announcements and circulars can be published to portal users.",
+  },
+  {
+    key: "share_sale_notices",
+    label: "Share-sale notices",
+    defaultAccess: "Read-only",
+    notes: "Share-sale notices and transfer-condition notices remain visible without mutation rights.",
+  },
+  {
+    key: "shareholder_documents",
+    label: "Shareholder documents",
+    defaultAccess: "Read-only / download",
+    notes: "Shareholder packs and documents can be downloaded when the access grant permits it.",
   },
 ];
 
@@ -266,6 +307,18 @@ function csvEscape(value: string) {
   return `"${value.replace(/"/g, '""')}"`;
 }
 
+function actionLabel(action: AccessAction) {
+  if (action === "grant") {
+    return "grant access";
+  }
+
+  if (action === "revoke") {
+    return "revoke access";
+  }
+
+  return "update portal permissions";
+}
+
 async function fetchJson(path: string) {
   const response = await fetch(apiPath(path), {
     credentials: "include",
@@ -363,6 +416,9 @@ export default function EnterpriseFinanceShareholdersPage() {
   const [errors, setErrors] = useState<LoadErrors>({});
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<ShareholderFilters>(initialFilters);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [activeShareholder, setActiveShareholder] = useState<JsonRecord | null>(null);
+  const [accessMessage, setAccessMessage] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
 
   const loadShareholderData = useCallback(async () => {
@@ -488,6 +544,10 @@ export default function EnterpriseFinanceShareholdersPage() {
     });
   }, [filters, state.shareholders]);
 
+  const selectedShareholders = useMemo(() => {
+    return filteredShareholders.filter((holder, index) => selectedIds.has(recordId(holder, String(index))));
+  }, [filteredShareholders, selectedIds]);
+
   const summary = useMemo(() => {
     const totalShares = sumNumbers(state.shareholders, ["shares", "shareCount", "ordinaryShares", "allocatedShares"]);
     const capitalContributions = sumAmounts(state.shareholders, ["capitalContribution", "investmentAmount", "amountInvested", "amountCents"]);
@@ -501,16 +561,39 @@ export default function EnterpriseFinanceShareholdersPage() {
       return status.includes("pending") || status.includes("not") || status.includes("missing");
     });
 
+    const staffShareholderRows = state.shareholders.filter((holder) => {
+      const holderType = textAt(holder, ["holderType", "type", "category"], "").toLowerCase();
+      const portalRole = textAt(holder, ["portalRole", "shareholderRole", "role"], "").toLowerCase();
+      return holderType.includes("staff") || portalRole.includes("staff");
+    });
+
     return {
       shareholderCount: state.shareholders.length,
       totalShares,
       capitalContributions,
       activeAccessGrantCount: activeAccessGrants.length,
       pendingAccessCount: pendingAccess.length,
+      staffShareholderCount: staffShareholderRows.length,
+      selectedCount: selectedShareholders.length,
       documentCount: state.documents.length,
       announcementCount: state.announcements.length,
     };
-  }, [state.accessGrants, state.announcements.length, state.documents.length, state.shareholders]);
+  }, [selectedShareholders.length, state.accessGrants, state.announcements.length, state.documents.length, state.shareholders]);
+
+  function toggleSelected(holder: JsonRecord, index: number) {
+    const id = recordId(holder, String(index));
+
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+
+      return next;
+    });
+  }
 
   function copyShareholderRegistryExport() {
     setExportMessage(null);
@@ -550,6 +633,53 @@ export default function EnterpriseFinanceShareholdersPage() {
       .catch(() => setExportMessage("Shareholder registry export could not be copied to clipboard."));
   }
 
+  function copyShareholderAccessPlan(records: JsonRecord[], action: AccessAction) {
+    setAccessMessage(null);
+
+    if (records.length === 0) {
+      setAccessMessage(`Select at least one shareholder before preparing a ${actionLabel(action)} review plan.`);
+      return;
+    }
+
+    const permissionScope = portalPermissionRows.map((row) => `${row.key}:${row.defaultAccess}`).join("; ");
+
+    const headings = [
+      "Action",
+      "Shareholder",
+      "Email",
+      "Holder type",
+      "Portal role",
+      "Current access status",
+      "Reference",
+      "Permission scope",
+      "Audit requirement",
+    ];
+
+    const rows = records.map((holder) => [
+      action,
+      textAt(holder, ["shareholderName", "name", "legalName", "displayName"], "Shareholder"),
+      textAt(holder, ["email", "shareholderEmail"], ""),
+      textAt(holder, ["holderType", "type", "category"], "shareholder"),
+      textAt(holder, ["portalRole", "shareholderRole", "role"], "shareholder"),
+      textAt(holder, ["accessStatus", "portalAccessStatus", "status"], "pending"),
+      textAt(holder, ["reference", "shareholderId", "id"], ""),
+      permissionScope,
+      "future audited write endpoint with audit logs and idempotency keys",
+    ]);
+
+    const csv = [headings, ...rows].map((row) => row.map((cell) => csvEscape(cell)).join(",")).join("\n");
+
+    if (!navigator.clipboard) {
+      setAccessMessage(`${actionLabel(action)} review plan is ready, but clipboard access is unavailable in this browser.`);
+      return;
+    }
+
+    void navigator.clipboard
+      .writeText(csv)
+      .then(() => setAccessMessage(`Copied ${rows.length} shareholder row(s) for ${actionLabel(action)} review.`))
+      .catch(() => setAccessMessage(`${actionLabel(action)} review plan could not be copied to clipboard.`));
+  }
+
   const accessLabel = state.accessEnvelope
     ? textAt(state.accessEnvelope, ["accessLevel", "role", "scope", "status"], "Enterprise finance access loaded")
     : "Access envelope pending";
@@ -562,18 +692,19 @@ export default function EnterpriseFinanceShareholdersPage() {
             <div>
               <div className="flex flex-wrap gap-2">
                 <StatusPill tone="good">Enterprise Finance</StatusPill>
-                <StatusPill>Shareholder registry</StatusPill>
+                <StatusPill>Shareholder access/admin controls</StatusPill>
                 <StatusPill tone={state.accessEnvelope ? "good" : "warn"}>{accessLabel}</StatusPill>
               </div>
 
               <h1 className="mt-4 text-3xl font-bold tracking-tight text-slate-950">
-                Shareholder Registry and Portal Readiness
+                Shareholder Registry and Access Controls
               </h1>
 
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-                Accountant/admin shareholder registry page for shareholder records, access-grant visibility,
-                annual returns, AGM notices, shareholder documents and future shareholder portal readiness.
-                Grant/revoke actions remain a later audited access-control slice.
+                Accountant/admin control surface for shareholder records, access-grant visibility,
+                shareholder-only portal readiness, staff-shareholder single login review, portal
+                permission scopes, annual returns, AGM notices, announcements and shareholder documents.
+                Grant/revoke actions are prepared as audited review plans until write endpoints are added.
               </p>
             </div>
 
@@ -593,9 +724,16 @@ export default function EnterpriseFinanceShareholdersPage() {
               <button
                 type="button"
                 onClick={copyShareholderRegistryExport}
-                className="inline-flex items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800"
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
               >
                 Copy registry export
+              </button>
+              <button
+                type="button"
+                onClick={() => copyShareholderAccessPlan(selectedShareholders, "grant")}
+                className="inline-flex items-center justify-center rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800"
+              >
+                Prepare grant access
               </button>
             </div>
           </div>
@@ -605,11 +743,17 @@ export default function EnterpriseFinanceShareholdersPage() {
               {exportMessage}
             </div>
           ) : null}
+
+          {accessMessage ? (
+            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">
+              {accessMessage}
+            </div>
+          ) : null}
         </header>
 
         {loading ? (
           <div className="rounded-2xl border border-slate-200 bg-white p-5 text-sm font-medium text-slate-600 shadow-sm">
-            Loading shareholder registry data from Enterprise Finance API…
+            Loading shareholder access data from Enterprise Finance API…
           </div>
         ) : null}
 
@@ -619,8 +763,8 @@ export default function EnterpriseFinanceShareholdersPage() {
           <MetricCard label="Capital contributions" value={formatMoney(summary.capitalContributions)} helper="Shareholder investment/capital contribution total from registry fields." tone="good" />
           <MetricCard label="Active access grants" value={String(summary.activeAccessGrantCount)} helper="Shareholder portal grants that look active or enabled." />
           <MetricCard label="Pending access review" value={String(summary.pendingAccessCount)} helper="Registry rows that may need access review later." tone="warn" />
-          <MetricCard label="Shareholder documents" value={String(summary.documentCount)} helper="Annual returns, shareholder packs and document records." />
-          <MetricCard label="AGM / notices" value={String(summary.announcementCount)} helper="AGM notices, announcements or shareholder notice records." />
+          <MetricCard label="Staff-shareholder users" value={String(summary.staffShareholderCount)} helper="Rows that look like staff-shareholder single-login candidates." />
+          <MetricCard label="Selected for access review" value={String(summary.selectedCount)} helper="Rows selected for grant/revoke/permission update planning." />
           <MetricCard label="Portal posture" value="Read-only" helper="Shareholder portal access remains read-only by default." tone="good" />
         </section>
 
@@ -715,24 +859,40 @@ export default function EnterpriseFinanceShareholdersPage() {
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-950">Access-control boundary</h2>
+            <h2 className="text-lg font-bold text-slate-950">Shareholder access/admin controls</h2>
             <p className="mt-1 text-sm leading-6 text-slate-500">
-              This page shows shareholder access readiness. Actual grant, revoke and permission mutation belongs in A5-K-J with audit logs.
+              Prepare grant, revoke and portal permission update plans. Actual mutation remains reserved for future audited write endpoints with audit logs and idempotency keys.
             </p>
 
             <div className="mt-4 grid gap-3">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Read-only portal</div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Shareholders can later view cap table snapshots, valuations, annual returns, AGM notices, share-sale notices and documents.
-                </p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">No ordinary shareholder mutations</div>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Ordinary shareholder users must not edit finance, payroll, commission, valuation, annual return or cap table records.
-                </p>
-              </div>
+              <button
+                type="button"
+                onClick={() => copyShareholderAccessPlan(selectedShareholders, "grant")}
+                className="inline-flex items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100"
+              >
+                Prepare access grant
+              </button>
+              <button
+                type="button"
+                onClick={() => copyShareholderAccessPlan(selectedShareholders, "revoke")}
+                className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-700 transition hover:bg-rose-100"
+              >
+                Prepare access revoke
+              </button>
+              <button
+                type="button"
+                onClick={() => copyShareholderAccessPlan(selectedShareholders, "permission_update")}
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+              >
+                Prepare permission update
+              </button>
+              <button
+                type="button"
+                onClick={() => copyShareholderAccessPlan(filteredShareholders, "permission_update")}
+                className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-50"
+              >
+                Copy filtered permission plan
+              </button>
             </div>
           </section>
         </section>
@@ -740,12 +900,12 @@ export default function EnterpriseFinanceShareholdersPage() {
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h2 className="text-lg font-bold text-slate-950">Shareholder registry</h2>
+              <h2 className="text-lg font-bold text-slate-950">Shareholder registry access table</h2>
               <p className="mt-1 text-sm leading-6 text-slate-500">
-                Registry rows with shares, capital contribution, portal role and access status.
+                Registry rows with shares, capital contribution, portal role, access status and access-review selection.
               </p>
             </div>
-            <StatusPill>{state.shareholders.length} total row(s)</StatusPill>
+            <StatusPill>{selectedShareholders.length} selected row(s)</StatusPill>
           </div>
 
           <div className="grid gap-3">
@@ -759,7 +919,17 @@ export default function EnterpriseFinanceShareholdersPage() {
                   <table className="min-w-full divide-y divide-slate-200 text-sm">
                     <thead className="bg-slate-50">
                       <tr>
-                        {["Shareholder", "Holder type", "Portal role", "Access status", "Shares", "Capital contribution", "Reference"].map((heading) => (
+                        {[
+                          "Select",
+                          "Shareholder",
+                          "Holder type",
+                          "Portal role",
+                          "Access status",
+                          "Shares",
+                          "Capital contribution",
+                          "Reference",
+                          "Action",
+                        ].map((heading) => (
                           <th key={heading} className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                             {heading}
                           </th>
@@ -767,38 +937,61 @@ export default function EnterpriseFinanceShareholdersPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
-                      {filteredShareholders.map((holder, index) => (
-                        <tr key={`${recordId(holder, String(index))}-holder-${index}`}>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            <div className="font-semibold text-slate-900">
-                              {textAt(holder, ["shareholderName", "name", "legalName", "displayName"], "Shareholder")}
-                            </div>
-                            <div className="text-xs text-slate-500">
-                              {textAt(holder, ["email", "shareholderEmail"], "—")}
-                            </div>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {textAt(holder, ["holderType", "type", "category"], "shareholder")}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {textAt(holder, ["portalRole", "shareholderRole", "role"], "shareholder")}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            <StatusPill>
-                              {textAt(holder, ["accessStatus", "portalAccessStatus", "status"], "pending")}
-                            </StatusPill>
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
-                            {formatNumber(numberAt(holder, ["shares", "shareCount", "ordinaryShares", "allocatedShares"]))}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
-                            {formatMoney(amountAt(holder, ["capitalContribution", "investmentAmount", "amountInvested", "amountCents"]))}
-                          </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                            {textAt(holder, ["reference", "shareholderId", "id"], "—")}
-                          </td>
-                        </tr>
-                      ))}
+                      {filteredShareholders.map((holder, index) => {
+                        const id = recordId(holder, String(index));
+                        const selected = selectedIds.has(id);
+
+                        return (
+                          <tr key={`${id}-holder-${index}`}>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                              <input
+                                type="checkbox"
+                                checked={selected}
+                                onChange={() => toggleSelected(holder, index)}
+                                className="h-4 w-4 rounded border-slate-300"
+                                aria-label={`Select shareholder ${id}`}
+                              />
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                              <div className="font-semibold text-slate-900">
+                                {textAt(holder, ["shareholderName", "name", "legalName", "displayName"], "Shareholder")}
+                              </div>
+                              <div className="text-xs text-slate-500">
+                                {textAt(holder, ["email", "shareholderEmail"], "—")}
+                              </div>
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                              {textAt(holder, ["holderType", "type", "category"], "shareholder")}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                              {textAt(holder, ["portalRole", "shareholderRole", "role"], "shareholder")}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                              <StatusPill>
+                                {textAt(holder, ["accessStatus", "portalAccessStatus", "status"], "pending")}
+                              </StatusPill>
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
+                              {formatNumber(numberAt(holder, ["shares", "shareCount", "ordinaryShares", "allocatedShares"]))}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
+                              {formatMoney(amountAt(holder, ["capitalContribution", "investmentAmount", "amountInvested", "amountCents"]))}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                              {textAt(holder, ["reference", "shareholderId", "id"], "—")}
+                            </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                              <button
+                                type="button"
+                                onClick={() => setActiveShareholder(holder)}
+                                className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                              >
+                                Review access
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -807,11 +1000,107 @@ export default function EnterpriseFinanceShareholdersPage() {
           </div>
         </section>
 
+        {activeShareholder ? (
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-950">Shareholder access review card</h2>
+                <p className="mt-1 text-sm leading-6 text-slate-500">
+                  Individual shareholder access snapshot before grant, revoke or permission update is persisted by future write endpoints.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => copyShareholderAccessPlan([activeShareholder], "grant")}
+                  className="inline-flex items-center justify-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-bold text-emerald-700 transition hover:bg-emerald-100"
+                >
+                  Copy grant plan
+                </button>
+                <button
+                  type="button"
+                  onClick={() => copyShareholderAccessPlan([activeShareholder], "revoke")}
+                  className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-sm font-bold text-rose-700 transition hover:bg-rose-100"
+                >
+                  Copy revoke plan
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <MetricCard
+                label="Shareholder"
+                value={textAt(activeShareholder, ["shareholderName", "name", "legalName", "displayName"], "Shareholder")}
+                helper={textAt(activeShareholder, ["email", "shareholderEmail"], "No email returned")}
+              />
+              <MetricCard
+                label="Portal role"
+                value={textAt(activeShareholder, ["portalRole", "shareholderRole", "role"], "shareholder")}
+                helper="Current backend-provided portal role."
+              />
+              <MetricCard
+                label="Access status"
+                value={textAt(activeShareholder, ["accessStatus", "portalAccessStatus", "status"], "pending")}
+                helper="Current access status from registry fields."
+                tone="warn"
+              />
+              <MetricCard
+                label="Reference"
+                value={textAt(activeShareholder, ["reference", "shareholderId", "id"], "—")}
+                helper="Reference used for audited future grant/revoke write paths."
+              />
+            </div>
+          </section>
+        ) : null}
+
+        <section className="grid gap-6 xl:grid-cols-2">
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-950">Portal permission matrix</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              Permission scopes for shareholder-only and staff-shareholder portal access. These are read-only by default and should be persisted by future audited permission endpoints.
+            </p>
+
+            <div className="mt-4 grid gap-3">
+              {portalPermissionRows.map((row) => (
+                <div key={row.key} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="text-sm font-bold text-slate-950">{row.label}</div>
+                      <div className="mt-1 text-xs font-mono text-slate-500">{row.key}</div>
+                    </div>
+                    <StatusPill>{row.defaultAccess}</StatusPill>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{row.notes}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h2 className="text-lg font-bold text-slate-950">Entitlement model</h2>
+            <p className="mt-1 text-sm leading-6 text-slate-500">
+              One-login, multi-entitlement model for shareholder-only users, staff-only users, staff-shareholder users and accountant/admin users.
+            </p>
+
+            <div className="mt-4 grid gap-3">
+              {entitlementRows.map((row) => (
+                <div key={row.label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-sm font-bold text-slate-950">{row.label}</div>
+                    <StatusPill>{row.access}</StatusPill>
+                  </div>
+                  <p className="mt-2 text-sm leading-6 text-slate-600">{row.notes}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+        </section>
+
         <section className="grid gap-6 xl:grid-cols-2">
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <h2 className="text-lg font-bold text-slate-950">Access grants preview</h2>
             <p className="mt-1 text-sm leading-6 text-slate-500">
-              Existing shareholder access grant rows from the backend. Grant/revoke actions are intentionally reserved for the next access-control slice.
+              Existing shareholder access grant rows from the backend. Grant, revoke and permission mutation remains intentionally reserved for audited API write endpoints.
             </p>
 
             <div className="mt-4">
@@ -823,7 +1112,7 @@ export default function EnterpriseFinanceShareholdersPage() {
                     <table className="min-w-full divide-y divide-slate-200 text-sm">
                       <thead className="bg-slate-50">
                         <tr>
-                          {["User", "Scope", "Status", "Granted at"].map((heading) => (
+                          {["User", "Scope", "Status", "Granted at", "Reference"].map((heading) => (
                             <th key={heading} className="whitespace-nowrap px-4 py-3 text-left text-xs font-bold uppercase tracking-wide text-slate-500">
                               {heading}
                             </th>
@@ -845,6 +1134,9 @@ export default function EnterpriseFinanceShareholdersPage() {
                             <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                               {formatDate(valueAt(grant, ["grantedAt", "createdAt", "updatedAt"]))}
                             </td>
+                            <td className="whitespace-nowrap px-4 py-3 text-slate-700">
+                              {textAt(grant, ["reference", "grantId", "id"], "—")}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -856,21 +1148,26 @@ export default function EnterpriseFinanceShareholdersPage() {
           </section>
 
           <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <h2 className="text-lg font-bold text-slate-950">Entitlement model</h2>
-            <p className="mt-1 text-sm leading-6 text-slate-500">
-              One-login, multi-entitlement model for investor-only, staff-only, staff-shareholder and accountant/admin users.
-            </p>
-
+            <h2 className="text-lg font-bold text-slate-950">Admin control boundaries</h2>
             <div className="mt-4 grid gap-3">
-              {entitlementRows.map((row) => (
-                <div key={row.label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                    <div className="text-sm font-bold text-slate-950">{row.label}</div>
-                    <StatusPill>{row.access}</StatusPill>
-                  </div>
-                  <p className="mt-2 text-sm leading-6 text-slate-600">{row.notes}</p>
-                </div>
-              ))}
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Grant / revoke</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Grant and revoke actions are represented as accountant/admin review plans in this slice. Future API mutation should persist them with audit logs and idempotency keys.
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Portal permission scope</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Portal permissions cover cap table snapshots, valuation snapshots, annual returns, AGM notices, announcements, share-sale notices and shareholder document downloads.
+                </p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Ordinary shareholder boundary</div>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Ordinary shareholder users must not edit finance, payroll, commission, cap table, valuation, annual return, share transfer or shareholder access records.
+                </p>
+              </div>
             </div>
           </section>
         </section>
