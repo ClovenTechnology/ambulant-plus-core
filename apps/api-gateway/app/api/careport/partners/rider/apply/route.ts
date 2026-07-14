@@ -81,10 +81,113 @@ function json(data: any, status = 200) {
   });
 }
 
+
+function agreementText(value: unknown, max = 512) {
+  const text = typeof value === 'string' ? value.trim() : '';
+  return text.slice(0, max);
+}
+
+function agreementBool(value: unknown) {
+  if (value === true || value === 1) return true;
+  const text = agreementText(value, 32).toLowerCase();
+
+  return ['true', '1', 'yes', 'y', 'accepted', 'agree', 'agreed', 'signed'].includes(text);
+}
+
+function agreementObject(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, any>) : {};
+}
+
+function partnerAgreementSnapshot(body: any, partnerType: string) {
+  const now = new Date().toISOString();
+  const raw = agreementObject(
+    body?.agreementSnapshot ||
+      body?.agreement ||
+      body?.agreementAcceptance ||
+      body?.terms ||
+      body?.termsAcceptance ||
+      body?.contractAcceptance,
+  );
+
+  const accepted = agreementBool(
+    body?.termsAccepted ??
+      body?.acceptedTerms ??
+      body?.agreementAccepted ??
+      body?.contractAccepted ??
+      body?.attestationAccepted ??
+      raw.accepted ??
+      raw.termsAccepted ??
+      raw.agreementAccepted ??
+      raw.contractAccepted,
+  );
+
+  const termsVersion =
+    agreementText(body?.termsVersion || body?.agreementVersion || body?.contractVersion || raw.termsVersion || raw.agreementVersion || raw.contractVersion || raw.version, 80) ||
+    'A5-PARTNER-TERMS-v1';
+
+  const acceptedAt =
+    agreementText(body?.termsAcceptedAt || body?.agreementAcceptedAt || body?.contractAcceptedAt || body?.acceptedAt || raw.acceptedAt, 80) ||
+    (accepted ? now : null);
+
+  const signedAt =
+    agreementText(body?.signedAt || raw.signedAt, 80) ||
+    (accepted ? now : null);
+
+  return {
+    source: 'partner_onboarding_application',
+    partnerType,
+    accepted,
+    termsAccepted: accepted,
+    agreementAccepted: accepted,
+    contractAccepted: accepted,
+    attestationAccepted: accepted,
+    acceptedAt,
+    termsAcceptedAt: acceptedAt,
+    agreementAcceptedAt: acceptedAt,
+    contractAcceptedAt: acceptedAt,
+    termsVersion,
+    agreementVersion: agreementText(body?.agreementVersion || raw.agreementVersion || termsVersion, 80) || termsVersion,
+    contractVersion: agreementText(body?.contractVersion || raw.contractVersion || termsVersion, 80) || termsVersion,
+    signedAt,
+    signedBy:
+      agreementText(body?.signedBy || body?.applicantName || body?.contactName || body?.ownerName || raw.signedBy || raw.name, 180) ||
+      null,
+    signature: agreementText(body?.signature || body?.signatureText || raw.signature, 240) || null,
+    signatureHash: agreementText(body?.signatureHash || raw.signatureHash, 180) || null,
+    consentIp: agreementText(body?.consentIp || raw.consentIp, 80) || null,
+    userAgent: agreementText(body?.userAgent || raw.userAgent, 300) || null,
+    capturedAt: now,
+  };
+}
+
+function attachAgreementSnapshot(target: any, agreementSnapshot: Record<string, any>) {
+  if (!target || typeof target !== 'object' || Array.isArray(target)) return target;
+
+  target.agreementSnapshot = agreementSnapshot;
+  target.termsAccepted = agreementSnapshot.accepted;
+  target.termsAcceptedAt = agreementSnapshot.termsAcceptedAt;
+  target.termsVersion = agreementSnapshot.termsVersion;
+  target.agreementAccepted = agreementSnapshot.agreementAccepted;
+  target.agreementAcceptedAt = agreementSnapshot.agreementAcceptedAt;
+  target.agreementVersion = agreementSnapshot.agreementVersion;
+  target.contractAccepted = agreementSnapshot.contractAccepted;
+  target.contractAcceptedAt = agreementSnapshot.contractAcceptedAt;
+  target.contractVersion = agreementSnapshot.contractVersion;
+
+  return target;
+}
+
+function withAgreementSnapshot(value: unknown, agreementSnapshot: Record<string, any>) {
+  const base = agreementObject(value);
+
+  return attachAgreementSnapshot({ ...base }, agreementSnapshot);
+}
+
 export async function POST(req: NextRequest) {
   try {
     const orgId = orgIdFromHeaders(req);
     const body = await req.json().catch(() => ({}));
+    const agreementSnapshot = partnerAgreementSnapshot(body, 'careport_rider');
 
     const firstName = clean(body?.firstName, 120);
     const middleName = clean(body?.middleName, 120);
@@ -178,6 +281,8 @@ export async function POST(req: NextRequest) {
       submittedAt: new Date().toISOString(),
     };
 
+    attachAgreementSnapshot(kyiPayload, agreementSnapshot);
+
     const existingRider = await (prisma as any).carePortRiderProfile
       ?.findFirst?.({ where: { userId } })
       .catch(() => null);
@@ -227,7 +332,7 @@ export async function POST(req: NextRequest) {
         actorId: null,
         actorRole: 'public_applicant',
         subjectId: userId,
-        meta: { orgId, riderProfileId: rider.id, userId, fullName: fullNameValue, email, phone },
+        meta: { orgId, riderProfileId: rider.id, userId, fullName: fullNameValue, email, phone, agreementSnapshot },
       },
     }).catch(() => null);
 
