@@ -81,6 +81,33 @@ type SettlementBatch = {
   failedAt?: string | null;
 };
 
+
+// A5_G_F_D3_CAREPORT_PAYSTACK_TRANSFER_UI_TYPES
+type CarePortPaystackBalanceInfo = {
+  currency?: string | null;
+  balanceCents?: number | null;
+  raw?: any;
+};
+
+type CarePortPaystackTransferResult = {
+  ok?: boolean;
+  settlementLineId?: string;
+  batchId?: string | null;
+  recipientType?: string;
+  recipientId?: string;
+  amountCents?: number | null;
+  currency?: string | null;
+  paystackStatus?: string;
+  settlementStatus?: string;
+  paid?: boolean;
+  failed?: boolean;
+  reference?: string;
+  transferCode?: string | null;
+  recipientCode?: string | null;
+  error?: string;
+  status?: string;
+};
+
 type FinanceResponse = {
   ok?: boolean;
   orgId?: string;
@@ -187,6 +214,10 @@ export default function CarePortFinancePage() {
   const [data, setData] = useState<FinanceResponse | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [paystackBusy, setPaystackBusy] = useState<string | null>(null);
+  const [paystackBalance, setPaystackBalance] = useState<CarePortPaystackBalanceInfo | null>(null);
+  const [paystackTransferResults, setPaystackTransferResults] = useState<CarePortPaystackTransferResult[]>([]);
+  const [paystackSkippedSettlementLines, setPaystackSkippedSettlementLines] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -297,6 +328,130 @@ export default function CarePortFinancePage() {
   }, []);
 
   const currency = data?.policy?.policy?.currency || 'ZAR';
+  // A5_G_F_D3_CAREPORT_PAYSTACK_TRANSFER_UI_ACTIONS
+  function carePortGeneratedSettlementLineIds() {
+    const rows = Array.isArray((data as any)?.payouts) ? ((data as any).payouts as any[]) : [];
+    return rows.map((row) => String(row?.id || '')).filter(Boolean);
+  }
+
+  function carePortPendingBatchId() {
+    const generatedBatchId = String((data as any)?.batch?.id || '');
+    if (generatedBatchId) return generatedBatchId;
+
+    const batches = Array.isArray((data as any)?.existingBatches) ? ((data as any).existingBatches as any[]) : [];
+    const pending = batches.find((batch) => String(batch?.status || '').toUpperCase() === 'PENDING');
+    return String(pending?.id || '');
+  }
+
+  function hasCarePortPaystackTransferTarget() {
+    return carePortGeneratedSettlementLineIds().length > 0 || Boolean(carePortPendingBatchId());
+  }
+
+  function carePortCount(value: unknown) {
+    const n = Number(value || 0);
+    return Number.isFinite(n) ? n.toLocaleString() : '0';
+  }
+
+  function carePortMoney(value: unknown, fallbackCurrency = 'ZAR') {
+    const n = Number(value || 0);
+    return money(Number.isFinite(n) ? n : 0, fallbackCurrency);
+  }
+
+  async function runCarePortPaystackBalanceCheck() {
+    setPaystackBusy('balance');
+    setError(null);
+    setNotice(null);
+
+    try {
+      const transferCurrency = String((data as any)?.summary?.currency || 'ZAR').toUpperCase();
+
+      const res = await fetch('/api/careport/admin/finance', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-user-role': 'admin' },
+        body: JSON.stringify({
+          action: 'check_paystack_balance',
+          currency: transferCurrency,
+        }),
+      });
+
+      const payload = (await res.json().catch(() => ({}))) as any;
+
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || 'careport_paystack_balance_http_' + res.status);
+      }
+
+      setPaystackBalance(payload?.balance || null);
+      setNotice(
+        'Paystack transfer balance checked: ' +
+          carePortMoney(payload?.balance?.balanceCents, payload?.balance?.currency || transferCurrency),
+      );
+    } catch (err: any) {
+      setError(err?.message || 'Failed to check CarePort Paystack transfer balance.');
+    } finally {
+      setPaystackBusy(null);
+    }
+  }
+
+  async function runCarePortPaystackTransfer(batchIdOverride?: string) {
+    const settlementLineIds = carePortGeneratedSettlementLineIds();
+    const batchId = batchIdOverride || carePortPendingBatchId();
+
+    if (!settlementLineIds.length && !batchId) {
+      setError('Generate a CarePort settlement batch first, or keep a pending batch available before sending Paystack transfers.');
+      return;
+    }
+
+    setPaystackBusy('transfer');
+    setError(null);
+    setNotice(null);
+
+    try {
+      const res = await fetch('/api/careport/admin/finance', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-user-role': 'admin' },
+        body: JSON.stringify({
+          action: 'send_paystack_transfers',
+          settlementLineIds: settlementLineIds.length ? settlementLineIds : undefined,
+          batchId: settlementLineIds.length ? undefined : batchId,
+          currency: String((data as any)?.summary?.currency || 'ZAR').toUpperCase(),
+        }),
+      });
+
+      const payload = (await res.json().catch(() => ({}))) as any;
+
+      if (!res.ok || payload?.ok === false) {
+        throw new Error(payload?.error || 'careport_paystack_transfer_http_' + res.status);
+      }
+
+      const transferResults = Array.isArray(payload?.transferResults) ? payload.transferResults : [];
+      const skippedRows = Array.isArray(payload?.skippedSettlementLines) ? payload.skippedSettlementLines : [];
+
+      setPaystackTransferResults(transferResults);
+      setPaystackSkippedSettlementLines(skippedRows);
+
+      setData((current) => ({
+        ...((current || {}) as any),
+        paystackTransferResults: transferResults,
+        paystackSkippedSettlementLines: skippedRows,
+      }) as FinanceResponse);
+
+      setNotice(
+        'CarePort Paystack transfer request completed: ' +
+          carePortCount(payload?.transferredCount) +
+          ' submitted, ' +
+          carePortCount(payload?.failedCount) +
+          ' failed, ' +
+          carePortCount(payload?.skippedCount) +
+          ' skipped.',
+      );
+    } catch (err: any) {
+      setError(err?.message || 'Failed to send CarePort settlement lines via Paystack.');
+    } finally {
+      setPaystackBusy(null);
+    }
+  }
+
+
   const summary = data?.summary || {};
   const pharmacy = Array.isArray(data?.pharmacy) ? data.pharmacy : [];
   const riders = Array.isArray(data?.riders) ? data.riders : [];
@@ -428,6 +583,25 @@ export default function CarePortFinancePage() {
             >
               {actionBusy === 'generate' ? 'Generating...' : 'Generate batch'}
             </button>
+              {/* A5_G_F_D3_CAREPORT_PAYSTACK_TRANSFER_UI_BUTTONS */}
+              <button
+                type="button"
+                onClick={() => void runCarePortPaystackBalanceCheck()}
+                disabled={!!actionBusy || !!paystackBusy}
+                className="rounded-2xl border border-cyan-200 bg-cyan-50 px-5 py-3 text-sm font-medium text-cyan-800 hover:bg-cyan-100 disabled:opacity-50"
+              >
+                {paystackBusy === 'balance' ? 'Checking balance...' : 'Check Paystack balance'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void runCarePortPaystackTransfer()}
+                disabled={!!actionBusy || !!paystackBusy || !hasCarePortPaystackTransferTarget()}
+                className="rounded-2xl bg-emerald-700 px-5 py-3 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+                title={!hasCarePortPaystackTransferTarget() ? 'Generate or load a pending settlement batch first' : 'Send CarePort settlement lines via Paystack'}
+              >
+                {paystackBusy === 'transfer' ? 'Sending Paystack transfers...' : 'Send settlement via Paystack'}
+              </button>
+
           </div>
 
           <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-600">
@@ -454,7 +628,42 @@ export default function CarePortFinancePage() {
         <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-lg font-semibold text-slate-950">Settlement preview lines</h2>
+    
+          {/* A5_G_F_D3_CAREPORT_PAYSTACK_TRANSFER_UI_RESULTS */}
+          {paystackBalance ? (
+            <div className="rounded-2xl border border-cyan-200 bg-cyan-50 p-4 text-sm text-cyan-900">
+              <div className="font-semibold">Paystack transfer balance</div>
+              <div className="mt-1">
+                {paystackBalance.currency || 'ZAR'}: {carePortMoney(paystackBalance.balanceCents, paystackBalance.currency || 'ZAR')}
+              </div>
+            </div>
+          ) : null}
+
+          {paystackTransferResults.length || paystackSkippedSettlementLines.length ? (
+            <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+              <div className="font-semibold">CarePort Paystack transfer results</div>
+              <div className="mt-1">
+                Submitted: {carePortCount(paystackTransferResults.filter((row) => row?.ok).length)} · Failed:{' '}
+                {carePortCount(paystackTransferResults.filter((row) => row?.ok === false).length)} · Skipped:{' '}
+                {carePortCount(paystackSkippedSettlementLines.length)}
+              </div>
+              {paystackTransferResults.length ? (
+                <div className="mt-3 grid gap-2 md:grid-cols-2">
+                  {paystackTransferResults.slice(0, 6).map((row, index) => (
+                    <div key={row.settlementLineId || row.reference || index} className="rounded-xl border border-emerald-200 bg-white p-3 text-xs">
+                      <div className="font-semibold">{row.reference || row.settlementLineId || 'CarePort transfer'}</div>
+                      <div>Recipient: {row.recipientType || 'partner'} {row.recipientId || ''}</div>
+                      <div>Status: {row.paystackStatus || row.settlementStatus || row.status || (row.ok ? 'submitted' : 'failed')}</div>
+                      <div>Amount: {carePortMoney(row.amountCents, row.currency || 'ZAR')}</div>
+                      {row.error ? <div className="text-rose-700">{row.error}</div> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
+          <h2 className="text-lg font-semibold text-slate-950">Settlement preview lines</h2>
               <p className="text-sm text-slate-500">
                 Pharmacy and rider rows calculated from eligible CarePort orders for the selected period.
               </p>
