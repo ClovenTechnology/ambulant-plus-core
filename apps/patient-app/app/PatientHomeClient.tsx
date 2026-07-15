@@ -136,24 +136,31 @@ function cn(...classes: Array<string | false | null | undefined>) {
   return classes.filter(Boolean).join(' ');
 }
 
+const ZA_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+const ZA_SHORT_DATE_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  day: '2-digit',
+  month: 'short',
+});
 function formatTimestamp(value?: string) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return date.toLocaleString();
+  return ZA_DATE_TIME_FORMATTER.format(date);
 }
 
 function formatHumanDateTime(value?: string) {
   if (!value) return 'Plan next consultation';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString([], {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
+  return ZA_DATE_TIME_FORMATTER.format(date);
 }
 
 function formatRelativeSync(value?: string) {
@@ -206,15 +213,33 @@ function displayBp(value?: string) {
   return value;
 }
 
+function countLiveVitalSignals(vitals: LiveVitals) {
+  let count = 0;
+  if (Number.isFinite(vitals.hr) && vitals.hr > 0) count += 1;
+  if (Number.isFinite(vitals.spo2) && vitals.spo2 > 0) count += 1;
+  if (Number.isFinite(vitals.temp) && vitals.temp > 0) count += 1;
+  if (typeof vitals.bp === 'string' && /^\d+\/\d+/.test(vitals.bp)) count += 1;
+  return count;
+}
+
+function hasRecoveryBasis(vitals: LiveVitals) {
+  return countLiveVitalSignals(vitals) >= 3;
+}
+
+function hasRecoveryScore(score: number | null | undefined): score is number {
+  return typeof score === 'number' && Number.isFinite(score);
+}
+
+function displayRecoveryScore(score: number | null | undefined) {
+  return hasRecoveryScore(score) ? String(score) : '—';
+}
 function computeRecoveryScore(
   vitals: LiveVitals,
   adherencePct: number,
   alertCount: number,
-) {
-  if (!hasLiveVitalData(vitals)) {
-    const alertsPenalty = Math.min(20, alertCount * 5);
-    const raw = adherencePct * 0.7 + (100 - alertsPenalty) * 0.3;
-    return Math.max(40, Math.min(90, Math.round(raw)));
+): number | null {
+  if (!hasRecoveryBasis(vitals)) {
+    return null;
   }
 
   const systolic = parseInt(String(vitals.bp ?? '0/0').split('/')[0] ?? '0', 10);
@@ -240,7 +265,8 @@ function computeRecoveryScore(
   return Math.max(32, Math.min(99, Math.round(raw)));
 }
 
-function getRecoveryLabel(score: number) {
+function getRecoveryLabel(score: number | null | undefined) {
+  if (!hasRecoveryScore(score)) return 'Calibrating';
   if (score >= 86) return 'Stable';
   if (score >= 72) return 'Good';
   if (score >= 60) return 'Watchful';
@@ -248,15 +274,12 @@ function getRecoveryLabel(score: number) {
 }
 
 function getRecoveryNarrative(
-  score: number,
+  score: number | null,
   vitals: LiveVitals,
   adherencePct: number,
 ) {
-  if (!hasLiveVitalData(vitals)) {
-    if (adherencePct < 80) {
-      return 'Your care workspace is active. Keeping medications on schedule and syncing your supported devices will strengthen today’s insight.';
-    }
-    return 'Connect or sync a supported device to activate a fuller real-time health picture.';
+  if (!hasRecoveryScore(score)) {
+    return 'Not enough real vitals are available yet. Sync at least three supported signals to activate your Recovery Index.';
   }
 
   const systolic = parseInt(String(vitals.bp ?? '0/0').split('/')[0] ?? '0', 10);
@@ -475,7 +498,7 @@ function normalizeAdherenceSummary(payload: unknown): {
             const d = new Date(ts);
             return Number.isNaN(d.getTime())
               ? ts
-              : d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+              : ZA_SHORT_DATE_FORMATTER.format(d);
           })()
         : `Reading ${index + 1}`;
 
@@ -768,14 +791,14 @@ function resolveSummaryVitals(payload: unknown): LiveVitals | null {
   };
 }
 
-function getUIMood(vitals: LiveVitals, alerts: InsightAlert[], score: number): UIMood {
+function getUIMood(vitals: LiveVitals, alerts: InsightAlert[], score: number | null): UIMood {
   const systolic = parseInt(String(vitals.bp ?? '0/0').split('/')[0] ?? '0', 10);
 
   if (
     alerts.some((a) => a.severity === 'critical' || a.severity === 'high') ||
     (hasLiveVitalData(vitals) &&
       (vitals.spo2 < 94 || vitals.hr > 112 || vitals.hr < 52 || systolic > 145)) ||
-    score < 62
+    hasRecoveryScore(score) && score < 62
   ) {
     return 'alert';
   }
@@ -784,7 +807,7 @@ function getUIMood(vitals: LiveVitals, alerts: InsightAlert[], score: number): U
     alerts.length > 0 ||
     (hasLiveVitalData(vitals) &&
       (vitals.spo2 < 96 || vitals.hr > 96 || vitals.hr < 58)) ||
-    score < 78
+    hasRecoveryScore(score) && score < 78
   ) {
     return 'watchful';
   }
@@ -837,7 +860,7 @@ function getMoodTheme(mood: UIMood) {
   };
 }
 
-function OrbitalRing({ score, mood }: { score: number; mood: UIMood }) {
+function OrbitalRing({ score, mood }: { score: number | null; mood: UIMood }) {
   const label = getRecoveryLabel(score);
 
   const badgeClasses =
@@ -869,14 +892,16 @@ function OrbitalRing({ score, mood }: { score: number; mood: UIMood }) {
           Recovery index
         </div>
         <div className="mt-2 bg-gradient-to-br from-slate-900 via-indigo-700 to-cyan-600 bg-clip-text text-5xl font-semibold text-transparent sm:text-6xl">
-          {score}
+          {displayRecoveryScore(score)}
         </div>
         <div className={cn('mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-medium', badgeClasses)}>
           <CheckCircle2 className="h-4 w-4" />
           {label}
         </div>
         <div className="mt-3 px-5 text-center text-[11px] leading-5 text-slate-500">
-          Continuously shaped by preferred telemetry, adherence and live care signals
+          {hasRecoveryScore(score)
+            ? 'Continuously shaped by preferred telemetry, adherence and live care signals'
+            : 'Waiting for enough real telemetry to calculate a safe score'}
         </div>
       </div>
     </div>
@@ -1388,9 +1413,7 @@ export default function HomePage() {
     const lines: string[] = [];
 
     lines.push(
-      hasLiveVitalData(liveVitals)
-        ? `${getRecoveryLabel(recoveryScore)} recovery posture`
-        : 'Telemetry ready for first sync',
+      hasRecoveryScore(recoveryScore) ? `${getRecoveryLabel(recoveryScore)} recovery posture` : 'Recovery index calibrating',
     );
     lines.push(`${deviceCount} active device${deviceCount === 1 ? '' : 's'}`);
     lines.push(
@@ -1712,21 +1735,23 @@ export default function HomePage() {
                         </div>
                         <div className="mt-5 flex items-end gap-3">
                           <div className="bg-gradient-to-br from-slate-950 via-indigo-700 to-cyan-600 bg-clip-text text-5xl font-semibold tracking-tight text-transparent">
-                            {recoveryScore}
+                            {displayRecoveryScore(recoveryScore)}
                           </div>
-                          <div className="pb-2 text-sm font-semibold text-slate-400">/100</div>
+                          <div className="pb-2 text-sm font-semibold text-slate-400">
+                            {hasRecoveryScore(recoveryScore) ? '/100' : 'insufficient data'}
+                          </div>
                         </div>
                         <p className="mt-4 max-w-xl text-sm leading-6 text-slate-600">
                           {hasLiveVitalData(liveVitals)
                             ? 'Balanced by preferred-source vitals, adherence and live care activity.'
-                            : 'Estimated from available adherence, alerts and connected-care activity until supported devices are synced.'}
+                            : 'Recovery Index appears after enough real telemetry is available.'}
                         </p>
                       </div>
 
                       <div className="flex justify-center md:justify-end">
                         <div className="flex h-[150px] w-[150px] items-center justify-center rounded-[30px] border border-white/80 bg-white/82 shadow-sm">
                           <MiniMeterDonut
-                            value={recoveryScore}
+                            value={hasRecoveryScore(recoveryScore) ? recoveryScore : 0}
                             max={100}
                             label={recoveryLabel}
                             unit=""
@@ -2019,24 +2044,7 @@ export default function HomePage() {
             <div className="grid gap-4">
               {hasLiveVitalData(liveVitals) ? (
                 <>
-                  <div className="grid gap-4 sm:grid-cols-3">
-                    <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
-                      <MiniMeterDonut value={liveVitals.hr} max={200} unit="bpm" label="Heart rate" />
-                    </div>
-                    <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
-                      <MiniMeterDonut
-                        value={liveVitals.temp as number}
-                        max={45}
-                        unit="°C"
-                        label="Temperature"
-                      />
-                    </div>
-                    <div className="rounded-[24px] border border-white/72 bg-gradient-to-br from-white to-slate-50 p-4">
-                      <MiniMeterDonut value={liveVitals.spo2} max={100} unit="%" label="SpO₂" />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                     {[
                       ['Heart Rate', displayVitalNumber(liveVitals.hr, ' bpm')],
                       ['Blood Pressure', displayBp(liveVitals.bp)],
@@ -2058,7 +2066,7 @@ export default function HomePage() {
                       <div>
                         <div className="text-sm font-medium text-slate-900">Seven-day trend</div>
                         <div className="text-sm text-slate-500">
-                          A quick visual read of how your recent vitals are moving.
+                          Trend only — headline values are shown once above to avoid duplicate readings.
                         </div>
                       </div>
                       <Link href="/vitals" className="text-sm font-medium text-indigo-600">

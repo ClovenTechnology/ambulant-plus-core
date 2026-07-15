@@ -7,8 +7,6 @@ import type { ChartData, ChartOptions } from 'chart.js';
 import { motion, type Variants } from 'framer-motion';
 
 import type { Vitals } from '@/types';
-import MiniMeterDonut from './MiniMeterDonut';
-
 interface VitalsTrendChartProps {
   vitals: Vitals;
 }
@@ -251,13 +249,6 @@ export default function VitalsTrendChart({ vitals }: VitalsTrendChartProps) {
           animate="pulse"
         />
       )}
-
-      <div className="relative z-10 grid grid-cols-3 gap-2">
-        <MiniMeterDonut value={hrValue} max={200} unit="bpm" label="HR" />
-        <MiniMeterDonut value={tempValue} max={45} unit="°C" label="Temp" />
-        <MiniMeterDonut value={spo2Value} max={100} unit="%" label="SpO₂" />
-      </div>
-
       <div className="relative z-10 rounded-xl bg-white p-2 shadow-sm">
         {trendPoints.length > 0 ? (
           <div className="h-[120px]">
