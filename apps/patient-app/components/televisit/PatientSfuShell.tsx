@@ -343,29 +343,45 @@ function InnerPatientSfuShell({ params }: Props) {
     };
   }, []);
 
-  const appt = useMemo<AppointmentMeta>(
-    () => ({
-      id: appointmentId || `sfu-${roomId}`,
-      when: scheduledStartAt || new Date().toISOString(),
-      patientId: search.get('patientId') || search.get('patient') || 'simulation-patient',
-      patientName: search.get('patientName') || 'Simulation Patient',
-      clinicianName: search.get('clinicianName') || 'Simulation Clinician',
-      clinicianSpecialty: search.get('clinicianSpecialty') || 'General Practice',
-      reason: search.get('reason') || 'Consultation',
+  const appt = useMemo<AppointmentMeta>(() => {
+    const pick = (...keys: string[]) => {
+      for (const key of keys) {
+        const value = search.get(key)?.trim();
+        if (value) return value;
+      }
+      return '';
+    };
+
+    const patientId = pick('patientId', 'subjectPatientId', 'patient');
+    const patientName = pick('patientName', 'subjectPatientName', 'displayPatientName');
+    const clinicianName = pick('clinicianName', 'doctorName', 'providerName');
+    const clinicianSpecialty = pick('clinicianSpecialty', 'specialty');
+    const reason = pick('reason', 'visitReason', 'title');
+    const feeZarRaw = pick('feeZar');
+    const feeZar = feeZarRaw ? Number(feeZarRaw) : undefined;
+    const couponCode = pick('couponCode');
+    const couponPercentRaw = pick('couponPercent');
+    const couponPercent = couponPercentRaw ? Number(couponPercentRaw) : undefined;
+
+    return {
+      id: appointmentId || encounterId || roomId,
+      when: scheduledStartAt || null,
+      patientId,
+      patientName: patientName || 'Patient identity pending',
+      clinicianName: clinicianName || 'Clinician pending',
+      clinicianSpecialty: clinicianSpecialty || undefined,
+      reason: reason || 'Consultation',
       status: state === 'connected' ? 'In progress' : 'Waiting',
-      feeZar: search.get('feeZar') ? Number(search.get('feeZar')) : undefined,
-      coupon: search.get('couponCode')
+      feeZar: Number.isFinite(feeZar) ? feeZar : undefined,
+      coupon: couponCode
         ? {
             applied: true,
-            code: search.get('couponCode') || '',
-            percent: search.get('couponPercent')
-              ? Number(search.get('couponPercent'))
-              : undefined,
+            code: couponCode,
+            percent: Number.isFinite(couponPercent) ? couponPercent : undefined,
           }
         : undefined,
-    }),
-    [appointmentId, roomId, scheduledStartAt, search, state],
-  );
+    };
+  }, [appointmentId, encounterId, roomId, scheduledStartAt, search, state]);
 
   const localParticipantRole = useMemo<RtcParticipantRole>(() => {
     return normalizeRtcParticipantRole(
@@ -603,7 +619,7 @@ function InnerPatientSfuShell({ params }: Props) {
         from: 'patient',
         source: 'health_monitor',
         roomId,
-        patientId: appt.patientId,
+        patientId: appt.patientId || null,
         encounterId: encounterId || null,
         kind,
         label,
