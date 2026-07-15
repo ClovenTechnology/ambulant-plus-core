@@ -1,5 +1,7 @@
 'use client';
 
+
+import { usePlan } from './context/PlanContext';
 import type { ReactNode } from 'react';
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -12,6 +14,62 @@ import ActiveEncounterPicker from './context/ActiveEncounterPicker';
 function isUnder(pathname: string, base: string) {
   if (base === '/') return pathname === '/';
   return pathname === base || pathname.startsWith(base + '/');
+}
+
+
+type PatientPlanBadgeKey = 'free' | 'premium' | 'family' | 'unknown';
+
+function normalisePatientPlanKey(value: unknown): PatientPlanBadgeKey {
+  const key = String(value ?? '').trim().toLowerCase();
+
+  if (key === 'free') return 'free';
+  if (key === 'premium') return 'premium';
+  if (key === 'family') return 'family';
+
+  return 'unknown';
+}
+
+const PATIENT_PLAN_BADGE_COPY: Record<PatientPlanBadgeKey, { label: string; title: string; tone: string }> = {
+  free: {
+    label: 'Free plan active',
+    title: 'Your current Ambulant+ patient plan is Free.',
+    tone: 'border-slate-200 bg-slate-50 text-slate-700',
+  },
+  premium: {
+    label: 'Premium plan active',
+    title: 'Your current Ambulant+ patient plan is Premium.',
+    tone: 'border-sky-200 bg-sky-50 text-sky-700',
+  },
+  family: {
+    label: 'Family plan active',
+    title: 'Your current Ambulant+ patient plan is Family.',
+    tone: 'border-violet-200 bg-violet-50 text-violet-700',
+  },
+  unknown: {
+    label: 'Plan status unavailable',
+    title: 'We could not confirm your current patient plan yet.',
+    tone: 'border-amber-200 bg-amber-50 text-amber-700',
+  },
+};
+
+function PatientPlanStatusBadge() {
+  const planState = usePlan() as {
+    plan?: unknown;
+    effectivePlan?: unknown;
+  };
+
+  const planKey = normalisePatientPlanKey(planState.effectivePlan ?? planState.plan);
+  const copy = PATIENT_PLAN_BADGE_COPY[planKey];
+
+  return (
+    <span
+      className={['hidden rounded-full border px-3 py-1 text-xs font-bold sm:inline-flex', copy.tone].join(' ')}
+      title={copy.title}
+      aria-label={copy.title}
+    >
+      {copy.label}
+    </span>
+  );
 }
 
 export default function AppShell({ children }: { children: ReactNode }) {
@@ -70,9 +128,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
 
             <div className="ml-auto flex min-w-0 items-center gap-2">
               <ActiveEncounterPicker />
-              <span className="hidden rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700 sm:inline-flex">
-                Patient plan active
-              </span>
+              <PatientPlanStatusBadge />
             </div>
           </div>
         </header>
