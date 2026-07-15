@@ -82,6 +82,7 @@ type PatientChatMessage = RtcChatMessage & {
 };
 
 type CaptionTranscriptEvent = CaptionEvent & { receivedAt: number };
+type MobileConsultPanel = 'chat' | 'iomt';
 
 function chatSenderLabel(message: PatientChatMessage | PatientChatMessage['from']) {
   if (typeof message === 'string') {
@@ -281,6 +282,23 @@ function InnerPatientSfuShell({ params }: Props) {
     roomRef.current = room;
   }, [room]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const query = window.matchMedia('(max-width: 1023px)');
+    const sync = () => setIsMobileLayout(query.matches);
+
+    sync();
+
+    if (typeof query.addEventListener === 'function') {
+      query.addEventListener('change', sync);
+      return () => query.removeEventListener('change', sync);
+    }
+
+    query.addListener(sync);
+    return () => query.removeListener(sync);
+  }, []);
+
   const [state, setState] = useState<'disconnected' | 'connecting' | 'connected' | 'reconnecting'>('disconnected');
   const [quality, setQuality] = useState<ConnectionQuality | undefined>(undefined);
   const qualityLabel = quality !== undefined ? String(ConnectionQuality[quality] ?? quality) : 'Unknown';
@@ -310,6 +328,8 @@ function InnerPatientSfuShell({ params }: Props) {
 
   const [rightTab, setRightTab] = useState<PatientRightTab>('overview');
   const [rightOpen, setRightOpen] = useState(true);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
+  const [mobileConsultPanel, setMobileConsultPanel] = useState<MobileConsultPanel>('chat');
 
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -1209,6 +1229,18 @@ function InnerPatientSfuShell({ params }: Props) {
     toast.success?.('Allergies shared with clinician.');
   }, [allergies, publishControl, publishJson, toast]);
 
+  const renderIomtPane = useCallback(
+    () => (
+      <IoMTPane
+        roomId={roomId}
+        patientId={appt.patientId}
+        encounterId={encounterId}
+        onHealthMonitorResult={publishTelevisitVitals}
+      />
+    ),
+    [appt.patientId, encounterId, publishTelevisitVitals, roomId],
+  );
+
   const gridCols = presentation
     ? 'grid-cols-1'
     : leftCollapsed && rightCollapsed
@@ -1298,27 +1330,44 @@ function InnerPatientSfuShell({ params }: Props) {
       ) : null}
 
       <div className={`mx-auto w-full max-w-[1600px] px-4 ${dense ? 'py-3' : 'py-5'}`}>
+        {!presentation ? (
+          <section className="mb-3 rounded-3xl border border-blue-100 bg-blue-50/80 p-3 shadow-sm lg:hidden">
+            <label className="flex items-start gap-3 text-sm leading-6 text-slate-700">
+              <input
+                type="checkbox"
+                checked={consentGiven}
+                onChange={(event) => setConsentGiven(event.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+              />
+              <span>
+                I consent to this Televisit and recording if enabled.{' '}
+                <a
+                  href={policyUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-semibold text-blue-700 underline"
+                >
+                  Policy
+                </a>
+              </span>
+            </label>
+          </section>
+        ) : null}
+
         <div className={`grid gap-4 ${gridCols}`}>
-          {!presentation && !leftCollapsed ? (
+          {!isMobileLayout && !presentation && !leftCollapsed ? (
             <PatientLeftPane
               appt={appt}
               roomId={roomId}
               encounterId={encounterId}
               dense={dense}
-              embeddedIoMT={
-                <IoMTPane
-                  roomId={roomId}
-                  patientId={appt.patientId}
-                  encounterId={encounterId}
-                  onHealthMonitorResult={publishTelevisitVitals}
-                />
-              }
+              embeddedIoMT={renderIomtPane()}
             />
           ) : null}
 
           <div className="flex flex-col gap-4">
             {!videoFloating ? (
-              <div className="sticky top-4 z-20">
+              <div className="sticky top-[92px] z-20 lg:top-4">
                 <PatientVideoStage
                   presentation={presentation}
                   activeSpeaking={activeSpeaking}
@@ -1360,8 +1409,123 @@ function InnerPatientSfuShell({ params }: Props) {
                 />
               </div>
             ) : null}
-          {!presentation ? (
-            <section className="rounded-3xl border border-slate-200 bg-white shadow-sm">
+
+            {isMobileLayout && !presentation ? (
+              <section className="rounded-3xl border border-slate-200 bg-white shadow-sm lg:hidden">
+                <div className="border-b border-slate-100 px-4 py-3">
+                  <div className="text-sm font-semibold text-slate-900">Consultation tools</div>
+                  <div className="text-xs text-slate-500">
+                    Keep the clinician in sight while using chat or IoMT devices.
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 border-b border-slate-100 p-2">
+                  <button
+                    type="button"
+                    onClick={() => setMobileConsultPanel('chat')}
+                    className={`rounded-2xl px-3 py-2 text-sm font-semibold ${
+                      mobileConsultPanel === 'chat'
+                        ? 'bg-slate-900 text-white'
+                        : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    Chat
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setMobileConsultPanel('iomt')}
+                    className={`rounded-2xl px-3 py-2 text-sm font-semibold ${
+                      mobileConsultPanel === 'iomt'
+                        ? 'bg-cyan-700 text-white'
+                        : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    IoMTs
+                  </button>
+                </div>
+
+                {mobileConsultPanel === 'chat' ? (
+                  <>
+                    <div className="max-h-[34vh] space-y-3 overflow-y-auto px-4 py-3">
+                      {patientChatMessages.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
+                          No chat messages yet. Messages from the clinician will appear here.
+                        </div>
+                      ) : (
+                        patientChatMessages.map((message) => {
+                          const mine = message.from === 'patient';
+                          return (
+                            <div
+                              key={message.id}
+                              className={`flex ${mine ? 'justify-end' : 'justify-start'}`}
+                            >
+                              <div
+                                className={`max-w-[85%] rounded-2xl px-3 py-2 text-sm shadow-sm ${
+                                  mine
+                                    ? 'bg-slate-900 text-white'
+                                    : 'border border-slate-200 bg-slate-50 text-slate-800'
+                                }`}
+                              >
+                                <div
+                                  className={`mb-1 text-[10px] font-semibold uppercase tracking-[0.12em] ${
+                                    mine ? 'text-white/70' : 'text-slate-400'
+                                  }`}
+                                >
+                                  {chatSenderLabel(message.from)}
+                                </div>
+                                <div className="whitespace-pre-wrap break-words">{message.text}</div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+
+                      {clinicianTyping ? (
+                        <div className="text-xs text-slate-500">Clinician is typing…</div>
+                      ) : null}
+
+                      <div ref={patientChatEndRef} />
+                    </div>
+
+                    <div className="border-t border-slate-100 p-3">
+                      <div className="flex flex-col gap-2">
+                        <textarea
+                          className="min-h-[44px] flex-1 resize-none rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"
+                          placeholder="Type a message to the clinician…"
+                          value={patientChatDraft}
+                          rows={2}
+                          onChange={(event) => {
+                            setPatientChatDraft(event.target.value);
+                            sendPatientTyping();
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === 'Enter' && !event.shiftKey) {
+                              event.preventDefault();
+                              void sendPatientChat();
+                            }
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => void sendPatientChat()}
+                          disabled={!patientChatDraft.trim() || state !== 'connected'}
+                          className="rounded-2xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:bg-slate-300"
+                        >
+                          Send
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="max-h-[56vh] overflow-y-auto p-3">
+                    {renderIomtPane()}
+                  </div>
+                )}
+              </section>
+            ) : null}
+
+            {!isMobileLayout && !presentation ? (
+              <section className="hidden rounded-3xl border border-slate-200 bg-white shadow-sm lg:block">
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <div>
                   <div className="text-sm font-semibold text-slate-900">Consultation chat</div>
@@ -1448,7 +1612,7 @@ function InnerPatientSfuShell({ params }: Props) {
 
           </div>
 
-          {!presentation && !rightCollapsed ? (
+          {!isMobileLayout && !presentation && !rightCollapsed ? (
             <PatientRightPane
               dense={dense}
               tab={rightTab}
