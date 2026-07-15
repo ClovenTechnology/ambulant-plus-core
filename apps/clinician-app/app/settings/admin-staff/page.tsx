@@ -1,3 +1,4 @@
+// A5-P-C-D configured clinician plan tiers
 'use client';
 
 import { useEffect, useState } from 'react';
@@ -15,32 +16,7 @@ type PlanTier = {
   maxAdminStaffSlots: number;
 };
 
-const PLAN_TIERS: PlanTier[] = [
-  {
-    id: 'solo',
-    label: 'Solo (Free)',
-    monthlySubscriptionZar: 0,
-    maxAdminStaffSlots: 1,
-  },
-  {
-    id: 'starter',
-    label: 'Starter (Premium)',
-    monthlySubscriptionZar: 399,
-    maxAdminStaffSlots: 2,
-  },
-  {
-    id: 'team',
-    label: 'Team',
-    monthlySubscriptionZar: 799,
-    maxAdminStaffSlots: 5,
-  },
-  {
-    id: 'group',
-    label: 'Group',
-    monthlySubscriptionZar: 1499,
-    maxAdminStaffSlots: 10,
-  },
-];
+const STATIC_PLAN_TIERS: PlanTier[] = [];
 
 // --- Types for API responses ---
 
@@ -74,7 +50,42 @@ type AdminStaffListResponse = {
 };
 
 export default function AdminStaffSettingsPage() {
-  const [loading, setLoading] = useState(true);
+  
+  const [planTiers, setPlanTiers] = useState<PlanTier[]>(STATIC_PLAN_TIERS);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadPlanTiers() {
+      try {
+        const res = await fetch('/api/settings/plan-tiers', { cache: 'no-store' });
+        const payload = await res.json().catch(() => ({}));
+        const rows = Array.isArray(payload?.clinicianPlans) ? payload.clinicianPlans : [];
+        if (!active) return;
+
+        setPlanTiers(
+          rows.map((plan: any) => ({
+            id: String(plan.id || 'solo') as PlanTierId,
+            label: String(plan.label || plan.id || 'Solo'),
+            monthlySubscriptionZar: Number.isFinite(Number(plan.monthlySubscriptionZar))
+              ? Math.max(0, Math.trunc(Number(plan.monthlySubscriptionZar)))
+              : 0,
+            maxAdminStaffSlots: Math.max(0, Math.trunc(Number(plan.maxAdminSlots ?? plan.maxAdminStaffSlots ?? 0))),
+          })),
+        );
+      } catch {
+        // Keep empty tier list if settings cannot be loaded.
+      }
+    }
+
+    void loadPlanTiers();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+const [loading, setLoading] = useState(true);
   const [planLoading, setPlanLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -95,7 +106,7 @@ export default function AdminStaffSettingsPage() {
   const [saving, setSaving] = useState(false);
 
   const selectedPlan =
-    PLAN_TIERS.find((t) => t.id === planTierId) ?? PLAN_TIERS[0];
+    planTiers.find((t) => t.id === planTierId) ?? planTiers[0];
 
   const isFreePlan = selectedPlan.monthlySubscriptionZar === 0;
   const atMaxSlots =
@@ -119,7 +130,7 @@ export default function AdminStaffSettingsPage() {
         if (cancelled) return;
 
         const safePlan: PlanTierId =
-          PLAN_TIERS.find((t) => t.id === js.currentPlanId)?.id ?? 'solo';
+          planTiers.find((t) => t.id === js.currentPlanId)?.id ?? 'solo';
 
         setPlanTierId(safePlan);
         setMaxSlots(js.maxAdminStaffSlots);
@@ -275,8 +286,8 @@ export default function AdminStaffSettingsPage() {
             Plan:{' '}
             <span className="font-medium">
               {
-                (PLAN_TIERS.find((t) => t.id === planTierId) ??
-                  PLAN_TIERS[0]
+                (planTiers.find((t) => t.id === planTierId) ??
+                  planTiers[0]
                 ).label
               }
             </span>

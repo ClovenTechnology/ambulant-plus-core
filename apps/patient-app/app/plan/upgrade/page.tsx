@@ -5,10 +5,41 @@ import React, { useEffect, useMemo, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { Plan } from '../../../lib/plans';
-import { PATIENT_PLANS, planMeta } from '../../../lib/plans';
+import { PATIENT_PLANS as STATIC_PATIENT_PLANS, type PatientPlanDef, planMeta } from '../../../lib/plans';
 import { usePlan } from '../../../components/context/PlanContext';
 import RedeemCodeModal from '../../../components/plan/RedeemCodeModal';
 import { applyRedemption, loadEntitlements, pruneExpired } from '../../../lib/entitlements';
+
+
+// A5-P-C-D dynamic patient plan pricing
+type ConfiguredPatientPlanDef = PatientPlanDef & { priceMonthlyZar: number };
+
+type SettingsPlansResponse = {
+  patientPlans?: Array<Partial<PatientPlanDef> & { id?: string; key?: string; label?: string; description?: string }>;
+};
+
+function mergeConfiguredPatientPlans(
+  configured: SettingsPlansResponse['patientPlans'] | undefined,
+): ConfiguredPatientPlanDef[] {
+  const rows = Array.isArray(configured) ? configured : [];
+
+  return STATIC_PATIENT_PLANS.map((base) => {
+    const match = rows.find((plan) => String(plan.id || plan.key || '').toLowerCase() === base.key);
+    const price = Number(match?.priceMonthlyZar);
+
+    return {
+      ...base,
+      name: String(match?.label || match?.name || base.name),
+      tagline: String(match?.description || base.tagline),
+      priceMonthlyZar: Number.isFinite(price) ? Math.max(0, Math.trunc(price)) : 0,
+    };
+  });
+}
+
+function configuredMonthlyPrice(plan: Pick<PatientPlanDef, 'priceMonthlyZar'>): number {
+  const price = Number(plan.priceMonthlyZar);
+  return Number.isFinite(price) ? Math.max(0, Math.trunc(price)) : 0;
+}
 
 type CheckoutResp = { ok: boolean; checkoutUrl?: string; error?: string };
 
@@ -112,7 +143,31 @@ function UpgradePlanPageContent() {
 
   const { plan, effectivePlan, setPlan, refreshEntitlements } = usePlan() as any;
 
-  const planKeys = useMemo(() => PATIENT_PLANS.map((p) => p.key), []);
+  
+  const [patientPlans, setPatientPlans] = useState<ConfiguredPatientPlanDef[]>(() => mergeConfiguredPatientPlans(undefined));
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadConfiguredPlans() {
+      try {
+        const res = await fetch('/api/settings/plans', { cache: 'no-store' });
+        const payload = (await res.json().catch(() => ({}))) as SettingsPlansResponse;
+        if (!active || !res.ok) return;
+        setPatientPlans(mergeConfiguredPatientPlans(payload.patientPlans));
+      } catch {
+        // Keep metadata fallback if settings cannot be loaded.
+      }
+    }
+
+    void loadConfiguredPlans();
+
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const planKeys = useMemo(() => patientPlans.map((p) => p.key), [patientPlans]);
   const defaultPick = (planKeys.includes('premium' as Plan) ? ('premium' as Plan) : (planKeys[0] as Plan)) || 'free';
 
   const rawInitial = (qs.get('plan') as Plan) || defaultPick;
@@ -138,11 +193,11 @@ function UpgradePlanPageContent() {
   const selectedMeta = useMemo(() => planMeta(selected), [selected]);
 
   const mostPopularKey = useMemo<Plan | null>(() => {
-    if (PATIENT_PLANS.some((p) => p.key === 'premium')) return 'premium';
-    const sorted = [...PATIENT_PLANS].sort((a, b) => (b.priceMonthlyZar ?? 0) - (a.priceMonthlyZar ?? 0));
+    if (patientPlans.some((p) => p.key === 'premium')) return 'premium';
+    const sorted = [...patientPlans].sort((a, b) => (b.priceMonthlyZar ?? 0) - (a.priceMonthlyZar ?? 0));
     const pick = sorted.find((p) => p.key !== 'free');
     return (pick?.key as Plan) ?? null;
-  }, []);
+  }, [patientPlans]);
 
   // Payment confirm
   useEffect(() => {
@@ -275,7 +330,7 @@ function UpgradePlanPageContent() {
   }, [effectivePlan, plan, msg]);
 
   const planCards = useMemo(() => {
-    return PATIENT_PLANS.map((p) => {
+    return patientPlans.map((p) => {
       const active = p.key === selected;
       const isCurrent = p.key === plan;
       const isPopular = mostPopularKey ? p.key === mostPopularKey : false;
@@ -297,7 +352,7 @@ function UpgradePlanPageContent() {
 
   const compareModel = useMemo(() => {
     const byPlan = new Map<Plan, Set<string>>();
-    for (const p of PATIENT_PLANS) {
+    for (const p of patientPlans) {
       const bullets = effectiveBullets(p.key as Plan, p.bullets || []);
       byPlan.set(p.key as Plan, new Set(bullets.map(normFeature)));
     }
@@ -307,7 +362,7 @@ function UpgradePlanPageContent() {
     for (const k of ordered) all.set(k, []);
 
     const seen = new Set<string>();
-    for (const p of PATIENT_PLANS) {
+    for (const p of patientPlans) {
       const bullets = effectiveBullets(p.key as Plan, p.bullets || []);
       for (const raw of bullets) {
         const key = normFeature(raw);
@@ -644,7 +699,7 @@ function UpgradePlanPageContent() {
                       <th className="text-left text-xs font-semibold tracking-wide text-slate-600 px-5 py-4 w-[44%]">
                         What you get
                       </th>
-                      {PATIENT_PLANS.map((p) => {
+                      {patientPlans.map((p) => {
                         const isPopular = mostPopularKey ? p.key === mostPopularKey : false;
                         const isSel = p.key === selected;
                         const isCur = p.key === plan;
@@ -672,8 +727,8 @@ function UpgradePlanPageContent() {
                               {p.priceMonthlyZar === 0
                                 ? 'R0/mo'
                                 : billing === 'monthly'
-                                  ? `${formatZar(p.priceMonthlyZar)}/mo`
-                                  : `${formatZar(annualPriceFromMonthly(p.priceMonthlyZar))}/yr`}
+                                  ? `${formatZar(configuredMonthlyPrice(p))}/mo`
+                                  : `${formatZar(annualPriceFromMonthly(configuredMonthlyPrice(p)))}/yr`}
                             </div>
                           </th>
                         );
@@ -689,7 +744,7 @@ function UpgradePlanPageContent() {
                       return (
                         <React.Fragment key={gk}>
                           <tr className="bg-white">
-                            <td colSpan={1 + PATIENT_PLANS.length} className="px-5 pt-6 pb-2">
+                            <td colSpan={1 + patientPlans.length} className="px-5 pt-6 pb-2">
                               <div className="text-[11px] font-semibold tracking-wide text-slate-500 uppercase">{gk}</div>
                             </td>
                           </tr>
@@ -697,7 +752,7 @@ function UpgradePlanPageContent() {
                           {rows.map((r) => (
                             <tr key={r.key} className="border-t border-slate-100">
                               <td className="px-5 py-3 text-sm text-slate-700">{r.label}</td>
-                              {PATIENT_PLANS.map((p) => {
+                              {patientPlans.map((p) => {
                                 const set = compareModel.byPlan.get(p.key as Plan) || new Set<string>();
                                 const hasIt = set.has(r.key);
                                 return (
@@ -737,7 +792,7 @@ function UpgradePlanPageContent() {
 }
 
 export default function UpgradePlanPage() {
-  return (
+return (
     <Suspense fallback={null}>
       <UpgradePlanPageContent />
     </Suspense>

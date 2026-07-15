@@ -60,5 +60,40 @@
       "highlight": false,
       "enabled": true
     }
+  ],
+  "patientPlans": [
+    {
+      "id": "free",
+      "actor": "patient",
+      "label": "Free",
+      "description": "The essentials to begin your care journey.",
+      "currency": "ZAR",
+      "priceMonthlyZar": 0,
+      "recommendedFor": "Patients starting with basic digital care access.",
+      "highlight": false,
+      "enabled": true
+    },
+    {
+      "id": "premium",
+      "actor": "patient",
+      "label": "Premium",
+      "description": "Faster access, deeper reports and enhanced monitoring support.",
+      "currency": "ZAR",
+      "priceMonthlyZar": 99,
+      "recommendedFor": "Patients using connected care, reports and priority support.",
+      "highlight": true,
+      "enabled": true
+    },
+    {
+      "id": "family",
+      "actor": "patient",
+      "label": "Family",
+      "description": "Shared care management for a household or dependent care circle.",
+      "currency": "ZAR",
+      "priceMonthlyZar": 179,
+      "recommendedFor": "Families managing care for multiple people.",
+      "highlight": false,
+      "enabled": true
+    }
   ]
 }

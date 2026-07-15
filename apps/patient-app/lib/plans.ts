@@ -8,7 +8,7 @@ export type PatientPlanDef = {
   name: string;
   badge: string;
   tagline: string;
-  priceMonthlyZar: number;
+  priceMonthlyZar?: number | null;
   bullets: string[];
 };
 
@@ -18,7 +18,7 @@ export const PATIENT_PLANS: PatientPlanDef[] = [
     name: 'Free',
     badge: 'Starter',
     tagline: 'The essentials to begin your care journey.',
-    priceMonthlyZar: 0,
+    priceMonthlyZar: null,
     bullets: [
       'Vitals dashboard with clean, readable trends.',
       'Basic appointments and consultation access.',
@@ -31,7 +31,7 @@ export const PATIENT_PLANS: PatientPlanDef[] = [
     name: 'Premium',
     badge: 'Plus',
     tagline: 'For people who want faster access and deeper clarity.',
-    priceMonthlyZar: 99,
+    priceMonthlyZar: null,
     bullets: [
       'Deeper insights and longer history for trends and reports.',
       'Priority booking windows (where available).',
@@ -44,7 +44,7 @@ export const PATIENT_PLANS: PatientPlanDef[] = [
     name: 'Family',
     badge: 'Household',
     tagline: 'Care that works for you and the people you look after.',
-    priceMonthlyZar: 179,
+    priceMonthlyZar: null,
     bullets: [
       'Shared care experience for a household (care coordination).',
       'Manage loved ones’ care with clarity and consent.',

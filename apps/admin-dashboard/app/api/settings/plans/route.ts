@@ -1,188 +1,171 @@
 // apps/admin-dashboard/app/api/settings/plans/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { promises as fs } from 'fs';
-import path from 'path';
+import fs from 'node:fs/promises';
+import path from 'node:path';
 
-const filePath = path.join(process.cwd(), '../../packages/admin/plans.json');
+export const dynamic = 'force-dynamic';
+
+type PatientPlan = {
+  id: string;
+  actor: 'patient';
+  label: string;
+  description: string;
+  currency: string;
+  priceMonthlyZar: number;
+  recommendedFor: string;
+  highlight: boolean;
+  enabled: boolean;
+};
 
 type ClinicianPlan = {
-  id: 'solo' | 'starter' | 'team' | 'group'; // for now, fixed IDs
+  id: string;
   actor: 'clinician';
   label: string;
   description: string;
-  currency: 'ZAR';
+  currency: string;
   monthlySubscriptionZar: number;
   payoutSharePct: number;
   includedAdminSlots: number;
   maxAdminSlots: number;
-  extraAdminSlotZar?: number | null;
+  extraAdminSlotZar: number | null;
   recommendedFor: string;
-  highlight?: boolean;
+  highlight: boolean;
   enabled: boolean;
 };
 
 type PlansConfig = {
+  patientPlans: PatientPlan[];
   clinicianPlans: ClinicianPlan[];
 };
 
-async function readJsonSafe(p: string): Promise<PlansConfig> {
-  try {
-    const txt = await fs.readFile(p, 'utf-8');
-    const clean = txt.replace(/^\uFEFF/, '');
-    const parsed = JSON.parse(clean);
-    if (!Array.isArray(parsed.clinicianPlans)) {
-      throw new Error('invalid_plans_format');
+function configPathCandidates() {
+  return [
+    path.resolve(process.cwd(), 'packages', 'admin', 'plans.json'),
+    path.resolve(process.cwd(), '..', '..', 'packages', 'admin', 'plans.json'),
+    path.resolve(process.cwd(), '..', 'packages', 'admin', 'plans.json'),
+  ];
+}
+
+async function resolveConfigPath() {
+  for (const candidate of configPathCandidates()) {
+    try {
+      await fs.access(candidate);
+      return candidate;
+    } catch {
+      // try next
     }
-    return parsed as PlansConfig;
+  }
+
+  return configPathCandidates()[1];
+}
+
+function asText(value: unknown, fallback = '') {
+  return String(value ?? fallback).trim();
+}
+
+function asCurrency(value: unknown) {
+  return String(value || 'ZAR').slice(0, 3).toUpperCase();
+}
+
+function asMoney(value: unknown) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.max(0, Math.trunc(n)) : 0;
+}
+
+function asNumber(value: unknown, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function asBool(value: unknown, fallback = false) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function normalizePatientPlan(input: any): PatientPlan | null {
+  const id = asText(input?.id || input?.key).toLowerCase();
+  if (!['free', 'premium', 'family'].includes(id)) return null;
+
+  return {
+    id,
+    actor: 'patient',
+    label: asText(input?.label || input?.name || id),
+    description: asText(input?.description || input?.tagline),
+    currency: asCurrency(input?.currency),
+    priceMonthlyZar: asMoney(input?.priceMonthlyZar),
+    recommendedFor: asText(input?.recommendedFor),
+    highlight: asBool(input?.highlight),
+    enabled: asBool(input?.enabled, true),
+  };
+}
+
+function normalizeClinicianPlan(input: any): ClinicianPlan | null {
+  const id = asText(input?.id).toLowerCase();
+  if (!['solo', 'starter', 'team', 'group'].includes(id)) return null;
+
+  return {
+    id,
+    actor: 'clinician',
+    label: asText(input?.label || id),
+    description: asText(input?.description),
+    currency: asCurrency(input?.currency),
+    monthlySubscriptionZar: asMoney(input?.monthlySubscriptionZar),
+    payoutSharePct: asNumber(input?.payoutSharePct),
+    includedAdminSlots: asMoney(input?.includedAdminSlots),
+    maxAdminSlots: asMoney(input?.maxAdminSlots ?? input?.maxAdminStaffSlots),
+    extraAdminSlotZar:
+      input?.extraAdminSlotZar === null || input?.extraAdminSlotZar === undefined
+        ? null
+        : asMoney(input?.extraAdminSlotZar),
+    recommendedFor: asText(input?.recommendedFor),
+    highlight: asBool(input?.highlight),
+    enabled: asBool(input?.enabled, true),
+  };
+}
+
+function normalizeConfig(input: any): PlansConfig {
+  const patientPlans = Array.isArray(input?.patientPlans)
+    ? input.patientPlans.map(normalizePatientPlan).filter(Boolean) as PatientPlan[]
+    : [];
+
+  const clinicianPlans = Array.isArray(input?.clinicianPlans)
+    ? input.clinicianPlans.map(normalizeClinicianPlan).filter(Boolean) as ClinicianPlan[]
+    : [];
+
+  return { patientPlans, clinicianPlans };
+}
+
+async function readConfig(): Promise<PlansConfig> {
+  const file = await resolveConfigPath();
+
+  try {
+    const parsed = JSON.parse(await fs.readFile(file, 'utf8'));
+    return normalizeConfig(parsed);
   } catch {
-    // fallback to defaults matching your current UI
-    const fallback: PlansConfig = {
-      clinicianPlans: [
-        {
-          id: 'solo',
-          actor: 'clinician',
-          label: 'Solo (Free)',
-          description:
-            'Single clinician, no additional admin staff. Ideal for early adopters testing Ambulant+.',
-          currency: 'ZAR',
-          monthlySubscriptionZar: 0,
-          payoutSharePct: 0.8,
-          includedAdminSlots: 0,
-          maxAdminSlots: 1,
-          extraAdminSlotZar: null,
-          recommendedFor: 'Part-time virtual clinics and side practices.',
-          highlight: false,
-          enabled: true,
-        },
-        {
-          id: 'starter',
-          actor: 'clinician',
-          label: 'Starter (Premium)',
-          description:
-            'Clinician + 1 admin assistant for booking, follow-ups and Smart ID dispatch.',
-          currency: 'ZAR',
-          monthlySubscriptionZar: 399,
-          payoutSharePct: 0.82,
-          includedAdminSlots: 1,
-          maxAdminSlots: 2,
-          extraAdminSlotZar: 149,
-          recommendedFor:
-            'Solo practices with one receptionist or practice manager.',
-          highlight: true,
-          enabled: true,
-        },
-        {
-          id: 'team',
-          actor: 'clinician',
-          label: 'Team',
-          description:
-            'Designed for small group practices with shared admin pool.',
-          currency: 'ZAR',
-          monthlySubscriptionZar: 799,
-          payoutSharePct: 0.84,
-          includedAdminSlots: 3,
-          maxAdminSlots: 5,
-          extraAdminSlotZar: 129,
-          recommendedFor:
-            '2–4 clinicians sharing 2–3 admin assistants.',
-          highlight: false,
-          enabled: true,
-        },
-        {
-          id: 'group',
-          actor: 'clinician',
-          label: 'Group',
-          description:
-            'High-volume multi-disciplinary practices with more complex admin workflows.',
-          currency: 'ZAR',
-          monthlySubscriptionZar: 1499,
-          payoutSharePct: 0.86,
-          includedAdminSlots: 5,
-          maxAdminSlots: 10,
-          extraAdminSlotZar: 99,
-          recommendedFor:
-            'Clinics with centralised admin/call-centre staff.',
-          highlight: false,
-          enabled: true,
-        },
-      ],
-    };
-    return fallback;
+    return { patientPlans: [], clinicianPlans: [] };
   }
 }
 
-function validate(body: any): PlansConfig {
-  const out: PlansConfig = {
-    clinicianPlans: [],
-  };
-
-  const arr = Array.isArray(body?.clinicianPlans)
-    ? body.clinicianPlans
-    : [];
-
-  const clampPct = (v: any) =>
-    Math.max(0, Math.min(1, Number(v ?? 0)));
-
-  for (const raw of arr) {
-    const id = String(raw.id || '').trim() as ClinicianPlan['id'];
-    if (!['solo', 'starter', 'team', 'group'].includes(id)) {
-      // for now we only allow these four IDs; later we can relax this
-      continue;
-    }
-    const plan: ClinicianPlan = {
-      id,
-      actor: 'clinician',
-      label: String(raw.label || '').trim() || id,
-      description: String(raw.description || '').trim(),
-      currency: 'ZAR',
-      monthlySubscriptionZar: Math.max(
-        0,
-        Math.round(Number(raw.monthlySubscriptionZar || 0)),
-      ),
-      payoutSharePct: clampPct(raw.payoutSharePct),
-      includedAdminSlots: Math.max(
-        0,
-        Math.round(Number(raw.includedAdminSlots || 0)),
-      ),
-      maxAdminSlots: Math.max(
-        0,
-        Math.round(Number(raw.maxAdminSlots || 0)),
-      ),
-      extraAdminSlotZar:
-        raw.extraAdminSlotZar != null
-          ? Math.max(
-              0,
-              Math.round(Number(raw.extraAdminSlotZar || 0)),
-            )
-          : null,
-      recommendedFor: String(raw.recommendedFor || '').trim(),
-      highlight: Boolean(raw.highlight),
-      enabled: raw.enabled === false ? false : true,
-    };
-    out.clinicianPlans.push(plan);
-  }
-
-  // Ensure we always have at least one plan
-  if (out.clinicianPlans.length === 0) {
-    return (body as PlansConfig) ?? { clinicianPlans: [] };
-  }
-
-  return out;
+async function writeConfig(config: PlansConfig) {
+  const file = await resolveConfigPath();
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  await fs.writeFile(file, JSON.stringify(config, null, 2) + '\n', 'utf8');
 }
 
 export async function GET() {
-  const cfg = await readJsonSafe(filePath);
-  return NextResponse.json(cfg);
+  const config = await readConfig();
+  return NextResponse.json(config);
 }
 
-export async function PUT(req: NextRequest) {
-  const body = await req.json().catch(() => ({} as any));
-  const clean = validate(body);
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(
-    filePath,
-    JSON.stringify(clean, null, 2),
-    'utf-8',
-  );
-  return NextResponse.json({ ok: true });
+export async function POST(req: NextRequest) {
+  const current = await readConfig();
+  const body = await req.json().catch(() => ({}));
+
+  const next = normalizeConfig({
+    patientPlans: Array.isArray(body?.patientPlans) ? body.patientPlans : current.patientPlans,
+    clinicianPlans: Array.isArray(body?.clinicianPlans) ? body.clinicianPlans : current.clinicianPlans,
+  });
+
+  await writeConfig(next);
+
+  return NextResponse.json(next);
 }

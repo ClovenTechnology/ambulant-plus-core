@@ -1,5 +1,6 @@
 // apps/patient-app/app/api/plan/checkout/route.ts
 import { NextResponse } from 'next/server';
+import { getConfiguredPatientPlanPriceMonthlyZar } from '../../../../lib/adminPlanPricing.server';
 import type { Plan } from '../../../../lib/plans';
 import { normalizePlan } from '../../../../lib/plans';
 
