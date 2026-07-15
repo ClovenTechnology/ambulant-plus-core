@@ -56,25 +56,31 @@ const DEFAULT_CLINICIAN_ID = 'clinician-local-001';
 const DEFAULT_CLINICIAN_NAME = 'Clinician';
 
 /* ---------- Helpers ---------- */
+const ZA_TIME_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+const ZA_DATE_SHORT_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  month: 'short',
+  day: 'numeric',
+});
+
 function formatTime(iso?: string) {
-  if (!iso) return '-';
-  try {
-    return new Date(iso).toLocaleTimeString([], {
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
+  if (!iso) return '—';
+
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return iso;
+
+  return ZA_TIME_FORMATTER.format(date);
 }
 
 function formatDateShort(iso: string) {
-  try {
-    const d = new Date(iso);
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' });
-  } catch {
-    return iso;
-  }
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return iso;
+
+  return ZA_DATE_SHORT_FORMATTER.format(date);
 }
 
 /* ---------- Invite link helpers (queue / waiting room) ---------- */
@@ -166,67 +172,103 @@ function DayProgress({
   appointments: Appointment[];
   progressMap: Record<string, { pct: number; status?: string }>;
 }) {
-  const total = appointments.length;
-  const completed = appointments.filter((a) => a.status === 'completed').length;
+  void progressMap;
 
-  const pctFromStatus = total === 0 ? 0 : Math.round((completed / total) * 100);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
-  const pctValues = appointments
-    .map((a) => progressMap[a.id]?.pct)
-    .filter((v): v is number => typeof v === 'number' && !Number.isNaN(v));
+  useEffect(() => {
+    const interval = window.setInterval(() => setNowMs(Date.now()), 30_000);
+    return () => window.clearInterval(interval);
+  }, []);
 
-  const pctFromMap =
-    pctValues.length > 0
-      ? Math.round(pctValues.reduce((sum, v) => sum + v, 0) / pctValues.length)
+  const activeAppointments = appointments
+    .filter((appointment) => !isClosedAppointment(appointment))
+    .sort(sortByAppointmentStart);
+
+  const total = activeAppointments.length;
+  const completed = appointments.filter(
+    (appointment) => normaliseAppointmentStatus(appointment.status) === 'completed',
+  ).length;
+
+  const starts = activeAppointments
+    .map((appointment) => appointmentStartMs(appointment))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  const ends = activeAppointments
+    .map((appointment) => appointmentEndMs(appointment))
+    .filter((value) => Number.isFinite(value) && value > 0);
+
+  const firstMs = starts.length ? Math.min(...starts) : null;
+  const lastMs = ends.length
+    ? Math.max(...ends)
+    : starts.length
+      ? Math.max(...starts)
       : null;
 
-  const pct = pctFromMap ?? pctFromStatus;
+  let pct = 0;
 
-  const starts = appointments
-    .map((a) => (a.start ? new Date(a.start).getTime() : NaN))
-    .filter(Number.isFinite);
-  const ends = appointments
-    .map((a) => (a.end ? new Date(a.end).getTime() : NaN))
-    .filter(Number.isFinite);
-  const first = starts.length
-    ? new Date(Math.min(...starts)).toISOString()
-    : undefined;
-  const last =
-    starts.length || ends.length
-      ? new Date(Math.max(...starts.concat(ends))).toISOString()
-      : undefined;
+  if (firstMs && lastMs && lastMs > firstMs) {
+    pct = Math.round(((nowMs - firstMs) / (lastMs - firstMs)) * 100);
+  } else if (total > 0 && completed > 0) {
+    pct = Math.round((completed / total) * 100);
+  }
+
+  const boundedPct = Math.max(0, Math.min(100, pct));
+  const current = activeAppointments.find((appointment) => canJoinTelevisitNow(appointment));
 
   return (
-    <div className="flex items-center gap-3">
-      <div className="w-44">
-        <div className="text-xs text-gray-500">Day progress</div>
-        <div className="mt-1 h-3 rounded-full bg-gray-100 overflow-hidden">
+    <div className="flex flex-col gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-3 sm:flex-row sm:items-center">
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-indigo-700">
+              Day progress
+            </div>
+            <div className="mt-1 text-xs text-slate-600">
+              {total > 0
+                ? `${completed} completed · ${total} active booking${total === 1 ? '' : 's'} today`
+                : 'No active bookings for today yet'}
+            </div>
+          </div>
+
+          <div className="text-lg font-bold tabular-nums text-slate-900">
+            {boundedPct}%
+          </div>
+        </div>
+
+        <div className="mt-3 h-3 overflow-hidden rounded-full bg-white">
           <div
-            className="h-3 rounded-full transition-all duration-500 ease-linear"
-            style={{
-              width: `${Math.min(100, pct)}%`,
-              background:
-                pct >= 100
-                  ? 'linear-gradient(90deg,#ef4444,#b91c1c)'
-                  : '#4f46e5',
-            }}
+            className="h-3 rounded-full bg-indigo-600 transition-all duration-500 ease-linear"
+            style={{ width: `${boundedPct}%` }}
             aria-hidden
           />
         </div>
       </div>
-      <div className="text-sm font-medium tabular-nums">{pct}%</div>
-      <div className="text-xs text-gray-500 ml-auto">
-        <div>
-          First:{' '}
-          <span className="font-mono text-xs text-gray-700">
-            {first ? formatTime(first) : '—'}
-          </span>
+
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 sm:min-w-[220px]">
+        <div className="rounded-xl bg-white px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400">First</div>
+          <div className="mt-1 font-mono text-slate-800">
+            {firstMs ? formatTime(new Date(firstMs).toISOString()) : '—'}
+          </div>
         </div>
-        <div>
-          Last:{' '}
-          <span className="font-mono text-xs text-gray-700">
-            {last ? formatTime(last) : '—'}
-          </span>
+
+        <div className="rounded-xl bg-white px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400">Last</div>
+          <div className="mt-1 font-mono text-slate-800">
+            {lastMs ? formatTime(new Date(lastMs).toISOString()) : '—'}
+          </div>
+        </div>
+
+        <div className="col-span-2 rounded-xl bg-white px-3 py-2">
+          <div className="text-[10px] uppercase tracking-[0.14em] text-slate-400">
+            Immediate session
+          </div>
+          <div className="mt-1 truncate font-medium text-slate-800">
+            {current
+              ? current.patient?.name ?? current.patientName ?? 'Patient ready to join'
+              : 'No session ready to join'}
+          </div>
         </div>
       </div>
     </div>
@@ -338,6 +380,64 @@ function getTimeUntil(start?: string) {
 }
 
 /* ---------- Time helpers for televisit ---------- */
+function normaliseAppointmentStatus(value: unknown) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function isClosedAppointment(appt?: Appointment | null) {
+  const status = normaliseAppointmentStatus(appt?.status);
+  return status === 'cancelled' || status === 'completed' || status === 'no-show';
+}
+
+function appointmentStartIso(appt?: Appointment | null): string | undefined {
+  const item = (appt || {}) as Appointment & Record<string, any>;
+
+  return (
+    item.start ||
+    item.startsAt ||
+    item.startTime ||
+    item.when ||
+    item.whenISO ||
+    undefined
+  );
+}
+
+function appointmentEndIso(appt?: Appointment | null): string | undefined {
+  const item = (appt || {}) as Appointment & Record<string, any>;
+
+  if (item.end || item.endsAt || item.endTime) {
+    return item.end || item.endsAt || item.endTime;
+  }
+
+  const startIso = appointmentStartIso(appt);
+  if (!startIso) return undefined;
+
+  const startMs = new Date(startIso).getTime();
+  if (!Number.isFinite(startMs)) return undefined;
+
+  return new Date(startMs + 30 * 60 * 1000).toISOString();
+}
+
+function appointmentStartMs(appt?: Appointment | null) {
+  const iso = appointmentStartIso(appt);
+  if (!iso) return 0;
+
+  const value = new Date(iso).getTime();
+  return Number.isFinite(value) ? value : 0;
+}
+
+function appointmentEndMs(appt?: Appointment | null) {
+  const iso = appointmentEndIso(appt);
+  if (!iso) return 0;
+
+  const value = new Date(iso).getTime();
+  return Number.isFinite(value) ? value : 0;
+}
+
+function sortByAppointmentStart(a: Appointment, b: Appointment) {
+  return appointmentStartMs(a) - appointmentStartMs(b);
+}
+
 function isSameDay(a: Date, b: Date) {
   return (
     a.getFullYear() === b.getFullYear() &&
@@ -346,29 +446,34 @@ function isSameDay(a: Date, b: Date) {
   );
 }
 
+function isTodayAppointment(appt?: Appointment | null) {
+  const startMs = appointmentStartMs(appt);
+  if (!startMs) return false;
+
+  return isSameDay(new Date(startMs), new Date());
+}
+
+function hasTelevisitTarget(appt?: Appointment | null) {
+  const item = (appt || {}) as Appointment & Record<string, any>;
+  return Boolean(item.roomName || item.roomId || item.id);
+}
+
 function canJoinTelevisitNow(appt?: Appointment | null): boolean {
-  if (!appt) return false;
-  const startIso = appt.start ?? appt.when;
-  if (!startIso) return false;
+  if (!appt || isClosedAppointment(appt) || !hasTelevisitTarget(appt)) return false;
 
-  const start = new Date(startIso);
-  if (!Number.isFinite(start.getTime())) return false;
+  const startMs = appointmentStartMs(appt);
+  if (!startMs) return false;
 
-  const end = appt.end
-    ? new Date(appt.end)
-    : new Date(start.getTime() + 30 * 60 * 1000);
+  const endMs = appointmentEndMs(appt) || startMs + 30 * 60 * 1000;
+  if (!Number.isFinite(endMs) || endMs <= startMs) return false;
 
   const now = new Date();
-  if (!isSameDay(start, now)) return false;
+  if (!isSameDay(new Date(startMs), now)) return false;
 
   const nowMs = now.getTime();
-  const startMs = start.getTime();
-  const endMs = end.getTime();
+  const EARLY_JOIN_MS = 5 * 60 * 1000;
 
-  const EARLY_JOIN_MS = 10 * 60 * 1000;
-  const LATE_JOIN_MS = 10 * 60 * 1000;
-
-  return nowMs >= startMs - EARLY_JOIN_MS && nowMs <= endMs + LATE_JOIN_MS;
+  return nowMs >= startMs - EARLY_JOIN_MS && nowMs <= endMs;
 }
 
 /* ---------- Main Page ---------- */
@@ -564,13 +669,14 @@ export default function ClinicianDashboardPage() {
 
   /* ---------- KPI Metrics ---------- */
   const kpis = {
-    patientsToday: liveAppointments.filter((a) => a.status !== 'cancelled')
-      .length,
-    televisits: liveAppointments.filter((a) => a.status === 'checked-in')
-      .length,
+    patientsToday: liveAppointments.filter(
+      (appointment) => isTodayAppointment(appointment) && !isClosedAppointment(appointment),
+    ).length,
+    televisits: liveAppointments.filter(
+      (appointment) => isTodayAppointment(appointment) && canJoinTelevisitNow(appointment),
+    ).length,
     ordersPending: 0,
-    labPending: inbox.filter((i) => i.type === 'lab' || i.type === 'alert')
-      .length,
+    labPending: inbox.filter((event) => event.type === 'lab' || event.type === 'alert').length,
   };
 
   // keyboard shortcuts (C to create, T to join current checked-in)
@@ -700,41 +806,54 @@ export default function ClinicianDashboardPage() {
   };
 
   /* ---------- Derived data for UI ---------- */
-  const needsAttention = liveAppointments.filter(
-    (a) => appointmentPriority(a) === 'High' && a.status !== 'completed',
+  const todaysAppointments = liveAppointments
+    .filter(isTodayAppointment)
+    .sort(sortByAppointmentStart);
+
+  const todaysActiveAppointments = todaysAppointments.filter(
+    (appointment) => !isClosedAppointment(appointment),
   );
+
+  const needsAttention = todaysActiveAppointments.filter(
+    (appointment) => appointmentPriority(appointment) === 'High',
+  );
+
   const labAlerts = inbox.filter(
-    (i) => i.type === 'lab' || i.type === 'alert',
+    (event) => event.type === 'lab' || event.type === 'alert',
   );
 
-  const queue = liveAppointments.filter((a) => a.status === 'checked-in');
-  const checkedInPatient =
-    queue.find((appt) => canJoinTelevisitNow(appt)) ?? null;
-  const nextCheckedIn =
-    !checkedInPatient && queue.length > 0 ? queue[0] : null;
+  const queue = todaysActiveAppointments.filter((appt) => canJoinTelevisitNow(appt));
+  const checkedInPatient = queue[0] ?? null;
 
-  const upcomingFiltered = liveAppointments
-    .filter((a) => a.status !== 'completed' && a.status !== 'cancelled')
-    .sort(
-      (a, b) =>
-        (new Date(a.start ?? '').getTime() || 0) -
-        (new Date(b.start ?? '').getTime() || 0),
-    )
+  const nextCheckedIn =
+    !checkedInPatient && todaysActiveAppointments.length > 0
+      ? todaysActiveAppointments.find((appointment) => appointmentStartMs(appointment) >= Date.now()) ?? null
+      : null;
+
+  const upcomingFiltered = todaysActiveAppointments
+    .filter((appointment) => !canJoinTelevisitNow(appointment))
+    .filter((appointment) => appointmentStartMs(appointment) >= Date.now())
+    .sort(sortByAppointmentStart)
     .slice(0, 6);
 
-  const completedToday = liveAppointments.filter(
-    (a) => a.status === 'completed',
-  ).length;
-  const totalToday = liveAppointments.filter(
-    (a) => a.status !== 'cancelled',
+  const completedToday = todaysAppointments.filter(
+    (appointment) => normaliseAppointmentStatus(appointment.status) === 'completed',
   ).length;
 
-  const nextAppt = pickUpcomingAppt();
+  const totalToday = todaysActiveAppointments.length;
+
+  const nextAppt =
+    checkedInPatient ??
+    todaysActiveAppointments.find((appointment) => appointmentStartMs(appointment) >= Date.now()) ??
+    null;
+
+  const checkedInRecord = checkedInPatient as (Appointment & Record<string, any>) | null;
   const primaryRoomId =
-    queue[0]?.roomName ??
-    nextAppt?.roomName ??
-    (queue[0]?.id || nextAppt?.id) ??
+    checkedInPatient?.roomName ??
+    checkedInRecord?.roomId ??
+    checkedInPatient?.id ??
     '';
+
   const queueLinks = makeLinks(primaryRoomId);
 
   return (
@@ -856,7 +975,7 @@ export default function ClinicianDashboardPage() {
 
           {/* Day Progress */}
           <div className="mt-4">
-            <DayProgress appointments={liveAppointments} progressMap={progressMap} />
+            <DayProgress appointments={todaysAppointments} progressMap={progressMap} />
             <div className="mt-2 text-sm text-gray-600">
               {completedToday} of {totalToday} completed
             </div>
