@@ -91,6 +91,33 @@ type DeviceMode = 'manual' | 'health-monitor' | 'nexring';
 
 const MANUAL_SOURCE_PRIORITY = 80;
 
+const ZA_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  day: '2-digit',
+  month: 'short',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+const ZA_TIME_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+});
+
+function formatZaDateTime(value: Date | string | number) {
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value || '—');
+  return ZA_DATE_TIME_FORMATTER.format(d);
+}
+
+function formatZaTime(value: Date = new Date()) {
+  if (Number.isNaN(value.getTime())) return '—';
+  return ZA_TIME_FORMATTER.format(value);
+}
+
 function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ');
 }
@@ -136,7 +163,17 @@ function buildUrl(origin: string, path: string, ctx: Ctx) {
 }
 
 function makeLinks(roomId: string, ctx: Ctx) {
-  const cleanRoomId = encodeURIComponent(roomId.trim() || 'demo-room');
+  const cleanRoomValue = roomId.trim();
+
+  if (!cleanRoomValue) {
+    return {
+      patientSfu: '',
+      carerInvite: '',
+      clinicianSfu: '',
+    };
+  }
+
+  const cleanRoomId = encodeURIComponent(cleanRoomValue);
 
   if (typeof window === 'undefined') {
     const patientOrigin =
@@ -246,7 +283,7 @@ function formatWhen(value?: string) {
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
 
-  return d.toLocaleString();
+  return formatZaDateTime(d);
 }
 
 function formatVitals(v: SnapshotVitals | null) {
@@ -489,7 +526,7 @@ async function emitManualVital(args: {
 }
 
 export default function PatientLobbyPage() {
-  const [roomId, setRoomId] = useState('demo-room');
+  const [roomId, setRoomId] = useState('');
   const [ctx, setCtx] = useState<Ctx>({});
   const [appointmentState, setAppointmentState] =
     useState<AppointmentState | null>(null);
@@ -503,6 +540,7 @@ export default function PatientLobbyPage() {
   );
   const [manualSaving, setManualSaving] = useState(false);
   const [manualSaveNote, setManualSaveNote] = useState<string | null>(null);
+  const [privacyReady, setPrivacyReady] = useState(false);
 
   const [manualVitals, setManualVitals] = useState<ManualVitalsDraft>({
     hr: '',
@@ -571,10 +609,9 @@ export default function PatientLobbyPage() {
 
     setCtx(nextCtx);
 
-    const snapshot = readVitalsSnapshot(
-      urlRoomId.trim() || 'demo-room',
-      nextCtx.patientId,
-    );
+    const snapshot = urlRoomId.trim()
+      ? readVitalsSnapshot(urlRoomId.trim(), nextCtx.patientId)
+      : null;
 
     setVitalsSnapshot(snapshot);
 
@@ -680,7 +717,7 @@ export default function PatientLobbyPage() {
           appointment?.visit_id;
 
         if (typeof nextRoom === 'string' && nextRoom.trim()) {
-          setRoomId((prev) => (prev === 'demo-room' ? nextRoom.trim() : prev));
+          setRoomId((prev) => (prev.trim() ? prev : nextRoom.trim()));
         }
       } catch (err: any) {
         if (!mounted) return;
@@ -708,6 +745,7 @@ export default function PatientLobbyPage() {
     if (device.hasCamera) score += 8;
     if (device.hasMicrophone) score += 8;
     if (device.previewReady) score += 20;
+    if (privacyReady) score += 10;
     if (vitalsSnapshot) score += 20;
 
     return Math.max(0, Math.min(100, score));
@@ -719,6 +757,7 @@ export default function PatientLobbyPage() {
     device.hasCamera,
     device.hasMicrophone,
     device.previewReady,
+    privacyReady,
     roomId,
     vitalsSnapshot,
   ]);
@@ -727,6 +766,7 @@ export default function PatientLobbyPage() {
     Boolean(roomId.trim()) &&
     Boolean(ctx.appointmentId) &&
     Boolean(appointmentState?.ready) &&
+    privacyReady &&
     !appointmentState?.pending &&
     !appointmentState?.failed &&
     !appointmentBusy;
@@ -744,6 +784,7 @@ export default function PatientLobbyPage() {
     { label: 'Camera detected', ok: device.hasCamera },
     { label: 'Microphone detected', ok: device.hasMicrophone },
     { label: 'Media preview completed', ok: device.previewReady },
+    { label: 'Consent and privacy check accepted', ok: privacyReady },
     { label: 'Pre-visit vitals available', ok: Boolean(vitalsSnapshot) },
   ];
 
@@ -762,7 +803,7 @@ export default function PatientLobbyPage() {
     }
 
     setActionAudit((prev) =>
-      [`${new Date().toLocaleTimeString()} · ${label} copied`, ...prev].slice(
+      [`${formatZaTime()} · ${label} copied`, ...prev].slice(
         0,
         8,
       ),
@@ -839,7 +880,7 @@ export default function PatientLobbyPage() {
       });
 
       setActionAudit((prev) =>
-        [`${new Date().toLocaleTimeString()} · Device check completed`, ...prev].slice(
+        [`${formatZaTime()} · Device check completed`, ...prev].slice(
           0,
           8,
         ),
@@ -969,7 +1010,12 @@ export default function PatientLobbyPage() {
       return;
     }
 
-    const cleanRoomId = roomId.trim() || 'demo-room';
+    const cleanRoomId = roomId.trim();
+
+    if (!cleanRoomId) {
+      setManualSaveNote('Add the consultation room ID before saving pre-visit vitals.');
+      return;
+    }
 
     writeVitalsSnapshot({
       roomId: cleanRoomId,
@@ -980,7 +1026,7 @@ export default function PatientLobbyPage() {
     setVitalsSnapshot(snapshot);
     setManualSaveNote('Manual vitals saved locally for this consultation room.');
     setActionAudit((prev) =>
-      [`${new Date().toLocaleTimeString()} · Manual vitals saved`, ...prev].slice(
+      [`${formatZaTime()} · Manual vitals saved`, ...prev].slice(
         0,
         8,
       ),
@@ -1622,7 +1668,7 @@ export default function PatientLobbyPage() {
 
                 <div className="mt-2 text-xs text-slate-500">
                   {vitalsSnapshot?.ts
-                    ? `Captured ${new Date(vitalsSnapshot.ts).toLocaleString()}`
+                    ? `Captured ${formatZaDateTime(vitalsSnapshot.ts)}`
                     : 'No pre-visit vitals have been saved for this room yet.'}
                 </div>
               </div>
@@ -1671,7 +1717,7 @@ export default function PatientLobbyPage() {
                   <div className="flex gap-2">
                     <input
                       readOnly
-                      value={links.patientSfu}
+                      value={links.patientSfu || 'Room ID required before link is generated'}
                       className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
                     />
                     <button
@@ -1694,7 +1740,7 @@ export default function PatientLobbyPage() {
                   <div className="flex gap-2">
                     <input
                       readOnly
-                      value={links.carerInvite}
+                      value={links.carerInvite || 'Room ID required before invite link is generated'}
                       className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700"
                     />
                     <button
@@ -1723,6 +1769,23 @@ export default function PatientLobbyPage() {
                   Copy all invite links
                 </button>
               </div>
+            </Card>
+
+            <Card
+              title="Consent and privacy"
+              subtitle="Confirm this before entering the live consultation room."
+            >
+              <label className="flex cursor-pointer items-start gap-3 rounded-2xl border border-cyan-100 bg-cyan-50/70 px-3 py-3 text-sm leading-6 text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={privacyReady}
+                  onChange={(event) => setPrivacyReady(event.target.checked)}
+                  className="mt-1 h-4 w-4 rounded border-slate-300 text-cyan-600"
+                />
+                <span>
+                  I am in a private place, I understand the live room will ask for clinical consent, and I will only share invite links with authorised people.
+                </span>
+              </label>
             </Card>
 
             <Card
