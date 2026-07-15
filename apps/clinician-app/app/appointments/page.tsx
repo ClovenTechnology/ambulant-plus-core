@@ -2,6 +2,7 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import JoinTelevisitButton from '@/components/JoinTelevisitButton';
 
 type Appt = {
   id: string;
@@ -693,13 +694,27 @@ export default function ClinicianAppointmentsPage() {
                       >
                         Open lobby
                       </a>
-
-                      <a
-                        href={joinHref(a)}
-                        className="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
-                      >
-                        Join televisit
-                      </a>
+                       <JoinTelevisitButton
+                         startISO={appointmentStart(a) || ''}
+                         endISO={appointmentEnd(a)}
+                         status={a.status}
+                         roomId={roomId || undefined}
+                         apptId={a.id}
+                         hideUntilAvailable
+                         query={{
+                           appointmentId: a.id,
+                           encounterId: a.encounterId || undefined,
+                           caseId: a.caseId || undefined,
+                           visitId: String(a.visitId || a.televisitId || ''),
+                           clinicianId: a.clinicianId || undefined,
+                           clinicianName: a.clinicianName || a.clinicianDisplayName || undefined,
+                           patientId: String(a.subjectPatientId || a.patientId || ''),
+                           patientName: patient,
+                           participantId: a.clinicianParticipantId || undefined,
+                           patientParticipantId: a.patientParticipantId || undefined,
+                         }}
+                         className="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-100"
+                       />
 
                       <button
                         type="button"

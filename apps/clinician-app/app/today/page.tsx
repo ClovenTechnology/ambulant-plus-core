@@ -7,6 +7,7 @@ import AgendaList from '@/src/components/AgendaList';
 import SessionCountdown from '@/src/components/SessionCountdown';
 import NoteForm from '@/components/forms/NoteForm';
 import { getClinicianAlerts } from '@/lib/insightcore-client';
+import JoinTelevisitButton from '@/components/JoinTelevisitButton';
 
 type AlertSeverity = 'low' | 'moderate' | 'high' | 'critical';
 
@@ -96,6 +97,85 @@ function buildLobbyHrefForAppointment(a: any) {
 
   return '/lobby?' + sp.toString();
 }
+
+const ZA_CLOCK_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+function formatClock(value?: string | null) {
+  if (!value) return '—';
+
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return value;
+
+  return ZA_CLOCK_FORMATTER.format(date);
+}
+
+function appointmentStartIso(appointment?: Appointment | null) {
+  const item = (appointment || {}) as Appointment & Record<string, any>;
+
+  return String(
+    item.start ||
+      item.startsAt ||
+      item.startTime ||
+      item.when ||
+      item.whenISO ||
+      '',
+  );
+}
+
+function appointmentEndIso(appointment?: Appointment | null) {
+  const item = (appointment || {}) as Appointment & Record<string, any>;
+
+  if (item.end || item.endsAt || item.endTime) {
+    return String(item.end || item.endsAt || item.endTime);
+  }
+
+  const start = appointmentStartIso(appointment);
+  const startMs = new Date(start).getTime();
+
+  if (!Number.isFinite(startMs)) return '';
+
+  return new Date(startMs + 30 * 60 * 1000).toISOString();
+}
+
+function appointmentRoomId(appointment?: Appointment | null) {
+  const item = (appointment || {}) as Appointment & Record<string, any>;
+
+  return String(item.roomId || item.roomName || (item.id ? `room-${item.id}` : ''));
+}
+
+function appointmentPatientId(appointment?: Appointment | null) {
+  const item = (appointment || {}) as Appointment & Record<string, any>;
+
+  return String(item.patient?.id || item.patientId || item.subjectPatientId || '');
+}
+
+function appointmentPatientName(appointment?: Appointment | null) {
+  const item = (appointment || {}) as Appointment & Record<string, any>;
+
+  return String(item.patient?.name || item.patientName || item.patientDisplayName || 'Patient');
+}
+
+function appointmentStatus(appointment?: Appointment | null) {
+  const item = (appointment || {}) as Appointment & Record<string, any>;
+
+  return String(item.status || '');
+}
+
+function appointmentJoinWindowLabel(appointment?: Appointment | null) {
+  const start = appointmentStartIso(appointment);
+  const startMs = new Date(start).getTime();
+
+  if (!Number.isFinite(startMs)) return 'Join appears once a valid start time is available.';
+
+  const opensAt = new Date(startMs - 5 * 60 * 1000).toISOString();
+
+  return `Join appears from ${formatClock(opensAt)} and closes at the scheduled end time.`;
+}
+
 
 function getSeverityAccentClass(severity: AlertSeverity) {
   switch (severity) {
@@ -302,16 +382,41 @@ export default function TodayPage() {
   }
 
   return (
-    <main className="p-6 max-w-7xl mx-auto space-y-6">
-      <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-        <div>
-          <h1 className="text-3xl font-semibold text-slate-900">
-            Today's Agenda
-          </h1>
+    <main className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+      <header className="overflow-hidden rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-sky-50 p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-700">
+              Clinician command centre
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+              Today&apos;s Agenda
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">
+              Live bookings, InsightCore alerts, session countdowns, notes, and Televisit readiness for the current clinical day.
+            </p>
 
-          {clinicianName && (
-            <p className="text-xs text-gray-500 mt-1">{clinicianName}</p>
-          )}
+            {clinicianName && (
+              <p className="mt-3 inline-flex rounded-full border border-white bg-white/80 px-3 py-1 text-xs font-medium text-slate-600 shadow-sm">
+                Signed in as {clinicianName}
+              </p>
+            )}
+          </div>
+
+          <div className="grid gap-2 text-xs text-slate-600 sm:grid-cols-3 lg:min-w-[360px]">
+            <div className="rounded-2xl bg-white/85 px-3 py-2 shadow-sm">
+              <div className="font-semibold text-slate-900">Alerts</div>
+              <div>{alerts.length} active</div>
+            </div>
+            <div className="rounded-2xl bg-white/85 px-3 py-2 shadow-sm">
+              <div className="font-semibold text-slate-900">Televisit</div>
+              <div>Join opens 5 min before start</div>
+            </div>
+            <div className="rounded-2xl bg-white/85 px-3 py-2 shadow-sm">
+              <div className="font-semibold text-slate-900">Workflow</div>
+              <div>Agenda · countdown · notes</div>
+            </div>
+          </div>
         </div>
       </header>
 
@@ -375,7 +480,7 @@ export default function TodayPage() {
                 )}
 
                 <time className="text-xs text-gray-500 relative z-10">
-                  {new Date(alert.timestamp).toLocaleTimeString()}
+                  {formatClock(alert.timestamp)}
                 </time>
 
                 <div className="h-1 w-full rounded bg-gray-200 mt-1 relative z-10 overflow-hidden">
@@ -395,7 +500,7 @@ export default function TodayPage() {
         )}
       </section>
 
-      <div className="grid lg:grid-cols-[2fr_1fr] gap-6">
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(320px,1fr)]">
         <div>
           <AgendaList
             clinicianId={clinicianId}
@@ -404,46 +509,86 @@ export default function TodayPage() {
           />
         </div>
 
-        <aside className="space-y-6">
-          <div className="sticky top-6">
+        <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
             <SessionCountdown appointment={selected ?? undefined} />
           </div>
 
           {selected && (
-            <div className="p-3 border rounded space-y-2 bg-gray-50">
-              <h2 className="font-medium text-slate-800">Quick Actions</h2>
+            <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    Selected patient
+                  </p>
+                  <h2 className="mt-1 text-base font-semibold text-slate-900">
+                    {appointmentPatientName(selected)}
+                  </h2>
+                  <p className="mt-1 text-xs text-slate-500">
+                    {appointmentJoinWindowLabel(selected)}
+                  </p>
+                </div>
 
-              <div className="flex flex-col gap-2">
-                <button
-                  type="button"
-                  className="px-3 py-2 bg-indigo-600 text-white rounded"
-                  onClick={() =>
-                    window.open(buildLobbyHrefForAppointment(selected as any), '_blank')
-                  }
+                <span className="rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-indigo-700">
+                  {formatClock(appointmentStartIso(selected))}
+                </span>
+              </div>
+
+              <div className="mt-4 grid gap-2">
+                <a
+                  href={buildLobbyHrefForAppointment(selected as any)}
+                  className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                 >
-                  Join Televisit
-                </button>
+                  Open lobby
+                </a>
+
+                <JoinTelevisitButton
+                  startISO={appointmentStartIso(selected)}
+                  endISO={appointmentEndIso(selected)}
+                  status={appointmentStatus(selected)}
+                  roomId={appointmentRoomId(selected)}
+                  apptId={selected.id}
+                  hideUntilAvailable
+                  query={{
+                    appointmentId: selected.id,
+                    clinicianId,
+                    clinicianName: clinicianName || undefined,
+                    patientId: appointmentPatientId(selected),
+                    patientName: appointmentPatientName(selected),
+                    participantId: (selected as any).clinicianParticipantId,
+                    patientParticipantId: (selected as any).patientParticipantId,
+                  }}
+                  className="inline-flex items-center justify-center rounded-full bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+                />
 
                 <button
                   type="button"
-                  className="px-3 py-2 bg-white border rounded"
+                  className="inline-flex items-center justify-center rounded-full border bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
                   onClick={() => setShowNoteForm(true)}
                 >
-                  Add Note
+                  Add note
                 </button>
               </div>
             </div>
           )}
 
-          <div className="p-3 border rounded bg-gray-50">
-            <h2 className="font-medium text-slate-800">AI Suggestions</h2>
 
-            <ul className="text-sm list-disc list-inside text-gray-700">
-              <li>Review patients with critical InsightCore alerts.</li>
-              <li>Prioritise follow-ups for uncontrolled blood pressure.</li>
-              <li>Check adherence for high-risk chronic patients.</li>
+          <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-900">AI Suggestions</h2>
+
+            <ul className="mt-3 space-y-2 text-sm text-slate-600">
+              <li className="rounded-2xl bg-slate-50 px-3 py-2">
+                Review patients with critical InsightCore alerts first.
+              </li>
+              <li className="rounded-2xl bg-slate-50 px-3 py-2">
+                Prioritise follow-ups for uncontrolled blood pressure.
+              </li>
+              <li className="rounded-2xl bg-slate-50 px-3 py-2">
+                Check adherence for high-risk chronic patients.
+              </li>
             </ul>
           </div>
+
         </aside>
       </div>
 
