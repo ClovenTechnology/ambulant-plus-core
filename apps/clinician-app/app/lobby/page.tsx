@@ -18,6 +18,11 @@ type Ctx = {
   joinToken?: string;
 };
 
+type LinkState = {
+  clinician: string;
+  patient: string;
+};
+
 function normalizeOrigin(x?: string | null) {
   const v = (x ?? '').trim();
   if (!v) return '';
@@ -45,7 +50,7 @@ function buildSfuUrl(origin: string, roomId: string, ctx: Ctx) {
   return u.toString();
 }
 
-function makeFallbackLinks(roomId: string, ctx: Ctx, patientParticipantId?: string) {
+function makeFallbackLinks(roomId: string, ctx: Ctx, patientParticipantId?: string): LinkState {
   if (typeof window === 'undefined') {
     return { clinician: '', patient: '' };
   }
@@ -70,6 +75,99 @@ function makeFallbackLinks(roomId: string, ctx: Ctx, patientParticipantId?: stri
   };
 }
 
+function compactId(value?: string | null) {
+  const text = String(value || '').trim();
+  if (!text) return '—';
+  if (text.length <= 18) return text;
+  return `${text.slice(0, 8)}…${text.slice(-6)}`;
+}
+
+function displayValue(value?: string | null, fallback = 'Not supplied') {
+  const text = String(value || '').trim();
+  return text || fallback;
+}
+
+function readinessClass(ok: boolean) {
+  return ok
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : 'border-amber-200 bg-amber-50 text-amber-800';
+}
+
+function ReadinessItem({
+  label,
+  detail,
+  ok,
+}: {
+  label: string;
+  detail: string;
+  ok: boolean;
+}) {
+  return (
+    <div className={`rounded-2xl border px-4 py-3 ${readinessClass(ok)}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold">{label}</div>
+        <span className="rounded-full bg-white/75 px-2.5 py-1 text-[11px] font-semibold">
+          {ok ? 'Ready' : 'Check'}
+        </span>
+      </div>
+      <p className="mt-1 text-xs opacity-80">{detail}</p>
+    </div>
+  );
+}
+
+function ContextCard({
+  label,
+  value,
+  mono = false,
+}: {
+  label: string;
+  value?: string | null;
+  mono?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+        {label}
+      </div>
+      <div className={mono ? 'mt-1 font-mono text-sm text-slate-900' : 'mt-1 text-sm font-medium text-slate-900'}>
+        {displayValue(value, '—')}
+      </div>
+    </div>
+  );
+}
+
+function CopyField({
+  label,
+  value,
+  onCopy,
+}: {
+  label: string;
+  value: string;
+  onCopy: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+        {label}
+      </div>
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <input
+          readOnly
+          value={value}
+          className="min-w-0 flex-1 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-xs text-slate-700"
+        />
+        <button
+          onClick={() => onCopy(value)}
+          className="rounded-2xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          type="button"
+        >
+          Copy
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Lobby() {
   const [ready, setReady] = useState(false);
   const [roomId, setRoomId] = useState('');
@@ -77,6 +175,7 @@ export default function Lobby() {
   const [patientJoinUrl, setPatientJoinUrl] = useState('');
   const [clinicianJoinUrl, setClinicianJoinUrl] = useState('');
   const [patientParticipantId, setPatientParticipantId] = useState('');
+  const [copiedLabel, setCopiedLabel] = useState('');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -93,7 +192,7 @@ export default function Lobby() {
       appointmentId: sp.get('appointmentId') ?? sp.get('appt') ?? undefined,
       encounterId: sp.get('encounterId') ?? undefined,
       visitId: sp.get('visitId') ?? sp.get('televisitId') ?? undefined,
-      patientId: sp.get('patientId') ?? undefined,
+      patientId: sp.get('patientId') ?? sp.get('subjectPatientId') ?? undefined,
       patientName: sp.get('patientName') ?? undefined,
       clinicianId: sp.get('clinicianId') ?? undefined,
       clinicianName: sp.get('clinicianName') ?? undefined,
@@ -123,10 +222,45 @@ export default function Lobby() {
     };
   }, [roomId, ctx, patientJoinUrl, clinicianJoinUrl, patientParticipantId]);
 
-  const copy = async (txt: string) => {
+  const readinessItems = useMemo(
+    () => [
+      {
+        label: 'Room context',
+        ok: Boolean(roomId),
+        detail: roomId ? `Room ${compactId(roomId)} is attached to this lobby.` : 'No room identifier is available.',
+      },
+      {
+        label: 'Patient context',
+        ok: Boolean(ctx.patientName || ctx.patientId),
+        detail: ctx.patientName || ctx.patientId
+          ? 'Patient identity context is available for handover.'
+          : 'Patient name or identifier is missing from the lobby URL.',
+      },
+      {
+        label: 'Secure entry',
+        ok: Boolean(links.clinician),
+        detail: links.clinician
+          ? 'Clinician room link is ready.'
+          : 'Clinician room link could not be generated.',
+      },
+      {
+        label: 'Patient invite',
+        ok: Boolean(links.patient),
+        detail: links.patient
+          ? 'Patient invite can be copied when needed.'
+          : 'No patient invite link is available.',
+      },
+    ],
+    [ctx.patientId, ctx.patientName, links.clinician, links.patient, roomId],
+  );
+
+  const copy = async (txt: string, label = 'Link') => {
+    if (!txt) return;
+
     try {
       await navigator.clipboard.writeText(txt);
-      alert('Copied.');
+      setCopiedLabel(label);
+      window.setTimeout(() => setCopiedLabel(''), 2200);
     } catch {
       const ta = document.createElement('textarea');
       ta.value = txt;
@@ -134,95 +268,233 @@ export default function Lobby() {
       ta.select();
       document.execCommand('copy');
       ta.remove();
-      alert('Copied.');
+      setCopiedLabel(label);
+      window.setTimeout(() => setCopiedLabel(''), 2200);
     }
   };
 
   if (!ready) {
-    return <main className="p-6 max-w-xl mx-auto">Loading lobby...</main>;
+    return (
+      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 lg:px-8">
+        <div className="rounded-3xl border border-slate-200 bg-white p-6 text-sm text-slate-500 shadow-sm">
+          Loading clinician lobby…
+        </div>
+      </main>
+    );
   }
 
   if (!roomId) {
     return (
-      <main className="p-6 max-w-xl mx-auto space-y-4">
-        <h1 className="text-2xl font-semibold">Clinician Lobby</h1>
-        <div className="rounded border border-amber-200 bg-amber-50 p-4 text-amber-800">
-          No appointment room was supplied. Open the lobby from Today or Appointments.
+      <main className="mx-auto max-w-5xl space-y-4 px-4 py-6 sm:px-6 lg:px-8">
+        <section className="rounded-3xl border border-amber-200 bg-amber-50 p-6 shadow-sm">
+          <p className="text-xs font-semibold uppercase tracking-[0.22em] text-amber-700">
+            Clinician lobby
+          </p>
+          <h1 className="mt-2 text-2xl font-semibold tracking-tight text-amber-950">
+            Appointment room missing
+          </h1>
+          <p className="mt-2 max-w-2xl text-sm text-amber-800">
+            No appointment room was supplied. Open the lobby from Today or Appointments so the secure room context can be attached.
+          </p>
+        </section>
+
+        <div className="flex flex-wrap gap-2">
+          <a
+            href="/today"
+            className="inline-flex rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+          >
+            Back to Today
+          </a>
+          <a
+            href="/appointments"
+            className="inline-flex rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Open Appointments
+          </a>
         </div>
-        <a href="/today" className="inline-flex rounded border px-3 py-2 hover:bg-gray-50">
-          Back to Today
-        </a>
       </main>
     );
   }
 
   return (
-    <main className="p-6 max-w-2xl mx-auto space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Clinician Lobby</h1>
-        <p className="text-sm text-gray-600">
-          Prepare for the consultation, review patient context, then enter the secure room.
-        </p>
-      </div>
+    <main className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+      <section className="overflow-hidden rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-sky-50 p-5 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.22em] text-indigo-700">
+              Clinician lobby
+            </p>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">
+              Ready the consultation room
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-slate-600">
+              Review room context, confirm patient details, copy the patient invite if needed, then enter the secure Televisit room.
+            </p>
 
-      <div className="rounded border p-4 space-y-3 bg-white">
-        <div className="grid gap-2 text-sm">
-          <div><span className="text-gray-500">Room:</span> <span className="font-mono">{roomId}</span></div>
-          {ctx.appointmentId && <div><span className="text-gray-500">Appointment:</span> {ctx.appointmentId}</div>}
-          {ctx.encounterId && <div><span className="text-gray-500">Encounter:</span> {ctx.encounterId}</div>}
-          {ctx.patientName && <div><span className="text-gray-500">Patient:</span> {ctx.patientName}</div>}
-          {ctx.reason && <div><span className="text-gray-500">Reason:</span> {ctx.reason}</div>}
-        </div>
-
-        <div className="flex flex-wrap gap-2 pt-2">
-          <a
-            href={links.clinician}
-            className="px-4 py-2 rounded bg-black text-white hover:bg-gray-800"
-          >
-            Proceed to Consultation Session
-          </a>
-
-          {links.patient && (
-            <button
-              onClick={() => copy(links.patient)}
-              className="px-4 py-2 border rounded hover:bg-gray-100"
-              type="button"
-              title="Copy patient invite link"
-            >
-              Copy Patient Invite
-            </button>
-          )}
-        </div>
-      </div>
-
-      <div className="rounded border p-4 space-y-3 bg-white">
-        <div className="font-medium">Secure invite links</div>
-        <div className="text-sm text-gray-600">
-          Share only with the intended participant. Do not expose links in screenshots or public channels.
-        </div>
-
-        <div className="space-y-2">
-          <div className="text-xs text-gray-500">Clinician</div>
-          <div className="flex gap-2">
-            <input readOnly value={links.clinician} className="border rounded px-2 py-1 flex-1 text-xs" />
-            <button onClick={() => copy(links.clinician)} className="px-3 py-1 border rounded" type="button">
-              Copy
-            </button>
-          </div>
-        </div>
-
-        {links.patient && (
-          <div className="space-y-2 pt-2">
-            <div className="text-xs text-gray-500">Patient</div>
-            <div className="flex gap-2">
-              <input readOnly value={links.patient} className="border rounded px-2 py-1 flex-1 text-xs" />
-              <button onClick={() => copy(links.patient)} className="px-3 py-1 border rounded" type="button">
-                Copy
-              </button>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <span className="rounded-full border border-white bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm">
+                Room {compactId(roomId)}
+              </span>
+              <span className="rounded-full border border-white bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm">
+                {displayValue(ctx.patientName || ctx.patientId, 'Patient context pending')}
+              </span>
+              <span className="rounded-full border border-white bg-white/80 px-3 py-1 text-xs font-semibold text-slate-700 shadow-sm">
+                Secure link ready
+              </span>
             </div>
           </div>
-        )}
-      </div>
+
+          <div className="grid gap-2 text-xs text-slate-600 sm:grid-cols-3 lg:min-w-[390px]">
+            <div className="rounded-2xl bg-white/85 px-3 py-2 shadow-sm">
+              <div className="font-semibold text-slate-900">Preflight</div>
+              <div>Room and context check</div>
+            </div>
+            <div className="rounded-2xl bg-white/85 px-3 py-2 shadow-sm">
+              <div className="font-semibold text-slate-900">Privacy</div>
+              <div>Confirm private setting</div>
+            </div>
+            <div className="rounded-2xl bg-white/85 px-3 py-2 shadow-sm">
+              <div className="font-semibold text-slate-900">Next step</div>
+              <div>Enter secure room</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {copiedLabel && (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-800">
+          {copiedLabel} copied.
+        </div>
+      )}
+
+      <section className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
+        <div className="space-y-4">
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  Appointment context
+                </p>
+                <h2 className="mt-1 text-xl font-semibold text-slate-950">
+                  {displayValue(ctx.patientName, 'Patient awaiting context')}
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  {displayValue(ctx.reason, 'Consultation reason not supplied')}
+                </p>
+              </div>
+
+              <a
+                href={links.clinician}
+                className="inline-flex items-center justify-center rounded-full bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-700"
+              >
+                Proceed to Consultation Session
+              </a>
+            </div>
+
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <ContextCard label="Room" value={roomId} mono />
+              <ContextCard label="Appointment" value={ctx.appointmentId} mono />
+              <ContextCard label="Encounter" value={ctx.encounterId} mono />
+              <ContextCard label="Visit" value={ctx.visitId} mono />
+              <ContextCard label="Patient ID" value={ctx.patientId} mono />
+              <ContextCard label="Clinician" value={ctx.clinicianName || ctx.clinicianId} />
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+                  Secure invite links
+                </p>
+                <h2 className="mt-1 text-lg font-semibold text-slate-950">
+                  Share only with the intended participant
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Avoid exposing secure links in screenshots, public channels, or non-clinical messages.
+                </p>
+              </div>
+
+              {links.patient && (
+                <button
+                  onClick={() => copy(links.patient, 'Patient invite')}
+                  className="inline-flex items-center justify-center rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  type="button"
+                  title="Copy patient invite link"
+                >
+                  Copy patient invite
+                </button>
+              )}
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <CopyField label="Clinician room link" value={links.clinician} onCopy={(value) => copy(value, 'Clinician link')} />
+
+              {links.patient && (
+                <CopyField label="Patient invite link" value={links.patient} onCopy={(value) => copy(value, 'Patient invite')} />
+              )}
+            </div>
+          </section>
+        </div>
+
+        <aside className="space-y-4 lg:sticky lg:top-6 lg:self-start">
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              Readiness checklist
+            </p>
+            <h2 className="mt-1 text-lg font-semibold text-slate-950">
+              Preflight before entry
+            </h2>
+
+            <div className="mt-4 space-y-3">
+              {readinessItems.map((item) => (
+                <ReadinessItem
+                  key={item.label}
+                  label={item.label}
+                  detail={item.detail}
+                  ok={item.ok}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-400">
+              Clinical privacy
+            </p>
+            <ul className="mt-3 space-y-2 text-sm text-slate-600">
+              <li className="rounded-2xl bg-slate-50 px-3 py-2">
+                Confirm you are in a private clinical environment.
+              </li>
+              <li className="rounded-2xl bg-slate-50 px-3 py-2">
+                Check camera, microphone, and speaker defaults inside the room if prompted.
+              </li>
+              <li className="rounded-2xl bg-slate-50 px-3 py-2">
+                Keep patient invite links restricted to the intended participant.
+              </li>
+            </ul>
+          </section>
+
+          <section className="rounded-3xl border border-slate-200 bg-slate-950 p-5 text-white shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">
+              Room entry
+            </p>
+            <h2 className="mt-1 text-lg font-semibold">
+              Enter when ready
+            </h2>
+            <p className="mt-2 text-sm text-slate-300">
+              Presence indicators are handled in the Televisit room. Lobby presence will be added in A6-R3-E.
+            </p>
+
+            <a
+              href={links.clinician}
+              className="mt-4 inline-flex w-full items-center justify-center rounded-full bg-white px-4 py-2.5 text-sm font-semibold text-slate-950 hover:bg-slate-100"
+            >
+              Proceed to Consultation Session
+            </a>
+          </section>
+        </aside>
+      </section>
     </main>
   );
 }
