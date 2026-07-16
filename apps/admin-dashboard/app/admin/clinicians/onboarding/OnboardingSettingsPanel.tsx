@@ -5,6 +5,77 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 type BalanceRecoveryMode = 'manual' | 'payout_deduction' | 'disabled';
 
+type OnboardingPathwayKey =
+  | 'START_NOW_PAY_LATER'
+  | 'QUALIFYING_DEPOSIT'
+  | 'FULL_PAYMENT';
+
+type CommercialPathway = {
+  key: OnboardingPathwayKey;
+  displayOrder: number;
+  label: string;
+  badge: string | null;
+  description: string;
+  ctaLabel: string;
+  enabled: boolean;
+  featured: boolean;
+  conditions: string[];
+};
+
+const DEFAULT_COMMERCIAL_PATHWAYS: CommercialPathway[] = [
+  {
+    key: 'START_NOW_PAY_LATER',
+    displayOrder: 1,
+    label: 'Start Now — Pay Later',
+    badge: 'Fastest start',
+    description:
+      'Begin training after Ambulant+ Admin approves your Pay Later request, without making an upfront onboarding payment.',
+    ctaLabel: 'Request Pay Later approval',
+    enabled: true,
+    featured: true,
+    conditions: [
+      'Training access begins after Admin approval.',
+      'No permanent C-Med Kit is dispatched until the qualifying initial payment is received.',
+      'Platform-wide Professional Indemnity cover does not commence until a qualifying payment is received and all applicable policy conditions are satisfied.',
+      'Any outstanding onboarding balance remains payable under the applicable agreement.',
+    ],
+  },
+  {
+    key: 'QUALIFYING_DEPOSIT',
+    displayOrder: 2,
+    label: 'Start with Initial Deposit',
+    badge: 'Balanced option',
+    description:
+      'Pay the Admin-configured qualifying initial amount and proceed with training and partial C-Med Kit fulfilment.',
+    ctaLabel: 'Pay initial deposit',
+    enabled: true,
+    featured: false,
+    conditions: [
+      'The qualifying initial amount is configured by Ambulant+ Admin.',
+      'Initial C-Med Kit fulfilment excludes the HD Otoscope and complimentary merchandise until the outstanding balance is settled.',
+      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
+      'The remaining onboarding balance remains payable under the applicable agreement.',
+    ],
+  },
+  {
+    key: 'FULL_PAYMENT',
+    displayOrder: 3,
+    label: 'Pay in Full',
+    badge: 'Complete package',
+    description:
+      'Settle the complete onboarding fee and proceed with full C-Med Kit fulfilment.',
+    ctaLabel: 'Pay full onboarding fee',
+    enabled: true,
+    featured: false,
+    conditions: [
+      'The full Admin-configured onboarding fee is payable.',
+      'The complete C-Med Kit, including the HD Otoscope and eligible complimentary merchandise, can be dispatched.',
+      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
+      'There is no outstanding onboarding-fee balance after confirmed full payment.',
+    ],
+  },
+];
+
 type BankInstructions = {
   bankName?: string;
   accountName?: string;
@@ -27,6 +98,7 @@ type OnboardingSettings = {
   manualPaymentEnabled: boolean;
   starterKitItems: string[];
   bankInstructions: BankInstructions | null;
+  commercialPathways: CommercialPathway[];
   notes: string | null;
 };
 
@@ -69,6 +141,125 @@ function normaliseItems(text: string) {
     .filter(Boolean);
 }
 
+function cloneDefaultCommercialPathways(): CommercialPathway[] {
+  return DEFAULT_COMMERCIAL_PATHWAYS.map(
+    (pathway) => ({
+      ...pathway,
+      conditions: [
+        ...pathway.conditions,
+      ],
+    }),
+  );
+}
+
+function normaliseCommercialPathways(
+  value: unknown,
+): CommercialPathway[] {
+  const incoming =
+    Array.isArray(value)
+      ? value
+      : [];
+
+  const result =
+    cloneDefaultCommercialPathways().map(
+      (fallback) => {
+        const raw = incoming.find(
+          (candidate: any) =>
+            String(
+              candidate?.key || '',
+            )
+              .trim()
+              .toUpperCase() ===
+            fallback.key,
+        ) as any;
+
+        if (!raw) {
+          return fallback;
+        }
+
+        const requestedOrder =
+          Number(raw.displayOrder);
+
+        const conditions =
+          Array.isArray(raw.conditions)
+            ? raw.conditions
+                .map((item: unknown) =>
+                  String(item || '').trim(),
+                )
+                .filter(Boolean)
+                .slice(0, 12)
+            : fallback.conditions;
+
+        const hasBadge =
+          Object.prototype.hasOwnProperty.call(
+            raw,
+            'badge',
+          );
+
+        return {
+          key: fallback.key,
+          displayOrder:
+            Number.isFinite(requestedOrder)
+              ? Math.min(
+                  99,
+                  Math.max(
+                    1,
+                    Math.round(
+                      requestedOrder,
+                    ),
+                  ),
+                )
+              : fallback.displayOrder,
+          label:
+            String(
+              raw.label || '',
+            ).trim() ||
+            fallback.label,
+          badge: hasBadge
+            ? String(
+                raw.badge || '',
+              ).trim() ||
+              null
+            : fallback.badge,
+          description:
+            String(
+              raw.description || '',
+            ).trim() ||
+            fallback.description,
+          ctaLabel:
+            String(
+              raw.ctaLabel || '',
+            ).trim() ||
+            fallback.ctaLabel,
+          enabled:
+            raw.enabled !== false,
+          featured:
+            raw.featured === true,
+          conditions:
+            conditions.length > 0
+              ? conditions
+              : [
+                  ...fallback.conditions,
+                ],
+        };
+      },
+    );
+
+  return result.sort(
+    (left, right) =>
+      left.displayOrder -
+        right.displayOrder ||
+      DEFAULT_COMMERCIAL_PATHWAYS.findIndex(
+        (item) =>
+          item.key === left.key,
+      ) -
+        DEFAULT_COMMERCIAL_PATHWAYS.findIndex(
+          (item) =>
+            item.key === right.key,
+        ),
+  );
+}
+
 function moneyPreview(amount: string, currency: string) {
   const n = Number(amount || 0);
   try {
@@ -99,6 +290,10 @@ export default function OnboardingSettingsPanel() {
   const [manualPaymentEnabled, setManualPaymentEnabled] = useState(true);
   const [starterKitText, setStarterKitText] = useState(DEFAULT_STARTER_KIT_TEXT);
   const [notes, setNotes] = useState('');
+  const [commercialPathways, setCommercialPathways] =
+    useState<CommercialPathway[]>(
+      cloneDefaultCommercialPathways,
+    );
 
   const [bankName, setBankName] = useState('');
   const [accountName, setAccountName] = useState('');
@@ -111,6 +306,53 @@ export default function OnboardingSettingsPanel() {
   const [bankInstructions, setBankInstructions] = useState('');
 
   const starterKitCount = useMemo(() => normaliseItems(starterKitText).length, [starterKitText]);
+
+  const orderedCommercialPathways =
+    useMemo(
+      () =>
+        normaliseCommercialPathways(
+          commercialPathways,
+        ),
+      [commercialPathways],
+    );
+
+  const updateCommercialPathway = (
+    key: OnboardingPathwayKey,
+    patch: Partial<CommercialPathway>,
+  ) => {
+    setCommercialPathways(
+      (current) =>
+        current.map(
+          (pathway) =>
+            pathway.key === key
+              ? {
+                  ...pathway,
+                  ...patch,
+                  key,
+                }
+              : pathway,
+        ),
+    );
+  };
+
+  const featureCommercialPathway = (
+    key: OnboardingPathwayKey,
+  ) => {
+    setCommercialPathways(
+      (current) =>
+        current.map(
+          (pathway) => ({
+            ...pathway,
+            enabled:
+              pathway.key === key
+                ? true
+                : pathway.enabled,
+            featured:
+              pathway.key === key,
+          }),
+        ),
+    );
+  };
 
   const fullFeeCents = randToCents(trainingFee);
   const minimumCents = randToCents(minimumInitialPayment);
@@ -145,6 +387,11 @@ export default function OnboardingSettingsPanel() {
       setManualPaymentEnabled(s.manualPaymentEnabled !== false);
       setStarterKitText((s.starterKitItems || []).length ? s.starterKitItems.join('\n') : DEFAULT_STARTER_KIT_TEXT);
       setNotes(s.notes || '');
+      setCommercialPathways(
+        normaliseCommercialPathways(
+          s.commercialPathways,
+        ),
+      );
 
       const bank = s.bankInstructions || {};
       setBankName(bank.bankName || '');
@@ -171,6 +418,75 @@ export default function OnboardingSettingsPanel() {
     const trainingFeeCents = randToCents(trainingFee);
     const minimumInitialPaymentCents = randToCents(minimumInitialPayment);
     const starterKitItems = normaliseItems(starterKitText);
+    const configuredPathways =
+      normaliseCommercialPathways(
+        commercialPathways,
+      );
+
+    const enabledPathways =
+      configuredPathways.filter(
+        (pathway) =>
+          pathway.enabled,
+      );
+
+    const featuredPathways =
+      configuredPathways.filter(
+        (pathway) =>
+          pathway.featured,
+      );
+
+    const displayOrders =
+      configuredPathways.map(
+        (pathway) =>
+          pathway.displayOrder,
+      );
+
+    if (enabledPathways.length === 0) {
+      setNotice({
+        tone: 'err',
+        text: 'Enable at least one clinician onboarding pathway.',
+      });
+      return;
+    }
+
+    if (
+      featuredPathways.length !== 1 ||
+      featuredPathways[0]?.enabled !== true
+    ) {
+      setNotice({
+        tone: 'err',
+        text: 'Select exactly one enabled pathway as the featured option.',
+      });
+      return;
+    }
+
+    if (
+      new Set(displayOrders).size !==
+      displayOrders.length
+    ) {
+      setNotice({
+        tone: 'err',
+        text: 'Each onboarding pathway must have a unique display order.',
+      });
+      return;
+    }
+
+    const incompletePathway =
+      configuredPathways.find(
+        (pathway) =>
+          !pathway.label.trim() ||
+          !pathway.description.trim() ||
+          !pathway.ctaLabel.trim() ||
+          pathway.conditions.length === 0,
+      );
+
+    if (incompletePathway) {
+      setNotice({
+        tone: 'err',
+        text: 'Every pathway requires a heading, description, action label and at least one condition.',
+      });
+      return;
+    }
 
     if (trainingFeeCents <= 0) {
       setNotice({ tone: 'err', text: 'Full onboarding fee must be greater than zero before clinicians can pay online.' });
@@ -214,6 +530,8 @@ export default function OnboardingSettingsPanel() {
           cardPaymentEnabled,
           manualPaymentEnabled,
           starterKitItems,
+          commercialPathways:
+            configuredPathways,
           bankInstructions: {
             bankName: bankName.trim(),
             accountName: accountName.trim(),
@@ -232,7 +550,7 @@ export default function OnboardingSettingsPanel() {
         throw new Error(js.error || `HTTP ${res.status} saving settings`);
       }
 
-      setNotice({ tone: 'ok', text: 'Onboarding payment settings saved successfully.' });
+      setNotice({ tone: 'ok', text: 'Onboarding payment and pathway settings saved successfully.' });
       await loadSettings();
     } catch (err: any) {
       setNotice({ tone: 'err', text: err?.message || 'Failed to save onboarding settings.' });
@@ -439,6 +757,269 @@ export default function OnboardingSettingsPanel() {
                   <span className="font-semibold text-gray-900">{starterKitCount}</span> C-Med Kit item(s) configured.
                 </div>
               </div>
+            </div>
+          </div>
+
+
+          <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
+            <div className="flex flex-col gap-3 border-b border-indigo-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="text-sm font-black text-slate-950">
+                  Clinician-facing onboarding pathways
+                </div>
+                <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-600">
+                  Configure the order and presentation of the three approved commercial pathways.
+                  The featured pathway is visually emphasised but is never silently selected for the clinician.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setCommercialPathways(
+                    cloneDefaultCommercialPathways(),
+                  )
+                }
+                disabled={saving || loading}
+                className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
+              >
+                Restore default presentation
+              </button>
+            </div>
+
+            <div className="mt-4 grid gap-4 xl:grid-cols-3">
+              {orderedCommercialPathways.map(
+                (pathway) => (
+                  <article
+                    key={pathway.key}
+                    className={[
+                      'rounded-2xl border p-4 shadow-sm transition',
+                      pathway.featured
+                        ? 'border-purple-300 bg-white ring-2 ring-purple-100'
+                        : 'border-slate-200 bg-white',
+                      pathway.enabled
+                        ? ''
+                        : 'opacity-60',
+                    ].join(' ')}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                          {pathway.key}
+                        </div>
+                        <div className="mt-1 text-sm font-black text-slate-950">
+                          {pathway.label}
+                        </div>
+                      </div>
+
+                      {pathway.featured ? (
+                        <span className="rounded-full border border-purple-200 bg-purple-50 px-2 py-1 text-[10px] font-black text-purple-800">
+                          Featured
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Display order
+                        </span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="99"
+                          step="1"
+                          value={pathway.displayOrder}
+                          onChange={(event) =>
+                            updateCommercialPathway(
+                              pathway.key,
+                              {
+                                displayOrder:
+                                  Number(
+                                    event.target.value,
+                                  ) || 1,
+                              },
+                            )
+                          }
+                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Promotional badge
+                        </span>
+                        <input
+                          value={pathway.badge || ''}
+                          onChange={(event) =>
+                            updateCommercialPathway(
+                              pathway.key,
+                              {
+                                badge:
+                                  event.target.value,
+                              },
+                            )
+                          }
+                          placeholder="Optional badge"
+                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-3 grid gap-3">
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Card heading
+                        </span>
+                        <input
+                          value={pathway.label}
+                          onChange={(event) =>
+                            updateCommercialPathway(
+                              pathway.key,
+                              {
+                                label:
+                                  event.target.value,
+                              },
+                            )
+                          }
+                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Action label
+                        </span>
+                        <input
+                          value={pathway.ctaLabel}
+                          onChange={(event) =>
+                            updateCommercialPathway(
+                              pathway.key,
+                              {
+                                ctaLabel:
+                                  event.target.value,
+                              },
+                            )
+                          }
+                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Description
+                        </span>
+                        <textarea
+                          value={pathway.description}
+                          onChange={(event) =>
+                            updateCommercialPathway(
+                              pathway.key,
+                              {
+                                description:
+                                  event.target.value,
+                              },
+                            )
+                          }
+                          rows={4}
+                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+
+                      <label className="block space-y-1">
+                        <span className="text-[11px] font-semibold text-slate-700">
+                          Conditions — one per line
+                        </span>
+                        <textarea
+                          value={pathway.conditions.join('\n')}
+                          onChange={(event) =>
+                            updateCommercialPathway(
+                              pathway.key,
+                              {
+                                conditions:
+                                  normaliseItems(
+                                    event.target.value,
+                                  ),
+                              },
+                            )
+                          }
+                          rows={7}
+                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                        />
+                      </label>
+                    </div>
+
+                    <div className="mt-4 grid gap-2 border-t pt-3">
+                      <label className="flex items-start gap-2 rounded-lg border bg-slate-50 p-2 text-xs text-slate-700">
+                        <input
+                          type="checkbox"
+                          checked={pathway.enabled}
+                          disabled={pathway.featured}
+                          onChange={(event) =>
+                            updateCommercialPathway(
+                              pathway.key,
+                              {
+                                enabled:
+                                  event.target.checked,
+                              },
+                            )
+                          }
+                          className="mt-0.5"
+                        />
+                        <span>
+                          <span className="block font-semibold text-slate-900">
+                            Enabled
+                          </span>
+                          {pathway.featured
+                            ? 'Choose another featured pathway before disabling this one.'
+                            : 'Show this option to clinicians.'}
+                        </span>
+                      </label>
+
+                      <label className="flex items-start gap-2 rounded-lg border border-purple-100 bg-purple-50 p-2 text-xs text-purple-900">
+                        <input
+                          type="radio"
+                          name="featured-onboarding-pathway"
+                          checked={pathway.featured}
+                          onChange={() =>
+                            featureCommercialPathway(
+                              pathway.key,
+                            )
+                          }
+                          className="mt-0.5"
+                        />
+                        <span>
+                          <span className="block font-semibold">
+                            Feature this pathway
+                          </span>
+                          Visual emphasis only; it does not preselect or accept the pathway for the clinician.
+                        </span>
+                      </label>
+                    </div>
+
+                    <div className="mt-4 rounded-xl border border-dashed bg-slate-50 p-3">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                        Card preview
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-black text-slate-950">
+                          {pathway.label}
+                        </span>
+                        {pathway.badge ? (
+                          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-800">
+                            {pathway.badge}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="mt-2 text-xs leading-relaxed text-slate-600">
+                        {pathway.description}
+                      </p>
+                      <div className="mt-3 rounded-lg bg-slate-900 px-3 py-2 text-center text-xs font-bold text-white">
+                        {pathway.ctaLabel}
+                      </div>
+                    </div>
+                  </article>
+                ),
+              )}
             </div>
           </div>
 

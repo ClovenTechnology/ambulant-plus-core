@@ -3,7 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/src/lib/prisma';
 import {
+  DEFAULT_CLINICIAN_ONBOARDING_PATHWAYS,
   DEFAULT_STARTER_KIT_ITEMS,
+  normaliseClinicianOnboardingCommercialPathways,
   normaliseClinicianOnboardingSettings,
   publicClinicianOnboardingSettings,
 } from '@/src/clinicians/onboarding/settings';
@@ -111,6 +113,8 @@ export async function GET(req: NextRequest) {
       manualPaymentEnabled: true,
       starterKitItems: DEFAULT_STARTER_KIT_ITEMS,
       bankInstructions: Prisma.JsonNull,
+      commercialPathways:
+        DEFAULT_CLINICIAN_ONBOARDING_PATHWAYS as unknown as Prisma.InputJsonValue,
       notes: 'Configure clinician onboarding payment settings from Admin Dashboard.',
     },
   });
@@ -144,6 +148,81 @@ export async function PATCH(req: NextRequest) {
 
     const allowPartialPayment = body.allowPartialPayment === true;
     const recoveryMode = balanceRecoveryMode(body.balanceRecoveryMode);
+
+    const existingSettingsRow =
+      await prisma.clinicianOnboardingSetting.findUnique({
+        where: { id: 'default' },
+      });
+
+    const pathwayInput =
+      Object.prototype.hasOwnProperty.call(
+        body,
+        'commercialPathways',
+      )
+        ? body.commercialPathways
+        : existingSettingsRow?.commercialPathways;
+
+    const commercialPathways =
+      normaliseClinicianOnboardingCommercialPathways(
+        pathwayInput,
+      );
+
+    const enabledPathways =
+      commercialPathways.filter(
+        (pathway) =>
+          pathway.enabled,
+      );
+
+    const featuredPathways =
+      commercialPathways.filter(
+        (pathway) =>
+          pathway.featured,
+      );
+
+    const pathwayOrders =
+      commercialPathways.map(
+        (pathway) =>
+          pathway.displayOrder,
+      );
+
+    if (enabledPathways.length === 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'atLeastOneCommercialPathwayMustBeEnabled',
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      featuredPathways.length !== 1 ||
+      featuredPathways[0]?.enabled !== true
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'exactlyOneEnabledCommercialPathwayMustBeFeatured',
+        },
+        { status: 400 },
+      );
+    }
+
+    if (
+      new Set(pathwayOrders).size !==
+      pathwayOrders.length
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'commercialPathwayDisplayOrdersMustBeUnique',
+        },
+        { status: 400 },
+      );
+    }
 
     if (allowPartialPayment && minimumInitialPaymentCents <= 0) {
       return NextResponse.json(
@@ -181,6 +260,8 @@ export async function PATCH(req: NextRequest) {
         manualPaymentEnabled: body.manualPaymentEnabled !== false,
         starterKitItems: stringArray(body.starterKitItems),
         bankInstructions: jsonNullable(body.bankInstructions),
+        commercialPathways:
+          commercialPathways as unknown as Prisma.InputJsonValue,
         notes: cleanStr(body.notes, 2000),
         updatedByUserId,
       },
@@ -197,6 +278,8 @@ export async function PATCH(req: NextRequest) {
         manualPaymentEnabled: body.manualPaymentEnabled !== false,
         starterKitItems: stringArray(body.starterKitItems),
         bankInstructions: jsonNullable(body.bankInstructions),
+        commercialPathways:
+          commercialPathways as unknown as Prisma.InputJsonValue,
         notes: cleanStr(body.notes, 2000),
         updatedByUserId,
       },
