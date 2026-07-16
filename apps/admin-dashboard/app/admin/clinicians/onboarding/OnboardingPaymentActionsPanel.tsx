@@ -43,9 +43,24 @@ type OnboardingRow = {
     courierName?: string | null;
     trackingCode?: string | null;
   } | null;
+  payLaterRequest?: {
+    id: string;
+    pathwayKey?: string | null;
+    status?: string | null;
+    requestReason?: string | null;
+    requestedAt?: string | null;
+    reviewedAt?: string | null;
+    reviewNotes?: string | null;
+    requestedByUserId?: string | null;
+    reviewedByUserId?: string | null;
+    approvalPaymentId?: string | null;
+    active?: boolean | null;
+    approved?: boolean | null;
+    rejected?: boolean | null;
+  } | null;
 };
 
-type ActiveAction = 'confirm-payment' | 'approve-waiver' | 'dispatch-temporary' | 'dispatch-permanent' | null;
+type ActiveAction = 'confirm-payment' | 'review-pay-later' | 'approve-waiver' | 'dispatch-temporary' | 'dispatch-permanent' | null;
 
 function money(cents: number | null | undefined, currency = 'ZAR') {
   const n = Math.max(0, Math.round(Number(cents || 0))) / 100;
@@ -71,6 +86,87 @@ function statusTone(row: OnboardingRow) {
   if (row.payment?.initialRequirementMet || row.onboarding?.depositPaid) return 'border-sky-200 bg-sky-50 text-sky-900';
   if (row.payment?.waiverActive || row.onboarding?.waiverActive) return 'border-purple-200 bg-purple-50 text-purple-900';
   return 'border-amber-200 bg-amber-50 text-amber-900';
+}
+
+function dateTimeLabel(value?: string | null) {
+  if (!value) return 'Not recorded';
+
+  const date = new Date(value);
+
+  if (!Number.isFinite(date.getTime())) {
+    return String(value);
+  }
+
+  return new Intl.DateTimeFormat('en-ZA', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(date);
+}
+
+function payLaterStatusLabel(value?: string | null) {
+  const status = String(value || '')
+    .trim()
+    .toLowerCase();
+
+  if (status === 'approved') return 'Approved';
+  if (status === 'rejected') return 'Rejected';
+  if (status === 'withdrawn') return 'Withdrawn';
+  if (status === 'cancelled') return 'Cancelled';
+
+  return 'Pending review';
+}
+
+function payLaterStatusTone(value?: string | null) {
+  const status = String(value || '')
+    .trim()
+    .toLowerCase();
+
+  if (status === 'approved') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-950';
+  }
+
+  if (status === 'rejected') {
+    return 'border-rose-200 bg-rose-50 text-rose-950';
+  }
+
+  if (
+    status === 'withdrawn' ||
+    status === 'cancelled'
+  ) {
+    return 'border-slate-200 bg-slate-100 text-slate-800';
+  }
+
+  return 'border-amber-200 bg-amber-50 text-amber-950';
+}
+
+function reviewErrorMessage(value: unknown) {
+  const code = String(value || '').trim();
+
+  const messages: Record<string, string> = {
+    pay_later_request_not_found:
+      'The Pay Later request could not be found. Refresh the board and try again.',
+
+    pay_later_request_already_reviewed_with_different_decision:
+      'This request has already been reviewed with a different decision.',
+
+    pay_later_request_review_conflict:
+      'Another Admin review changed this request. Refresh the board before taking another action.',
+
+    pay_later_approval_blocked_by_qualifying_payment:
+      'Pay Later approval is no longer available because a qualifying payment has already been recorded.',
+
+    pay_later_terms_must_be_confirmed_by_admin:
+      'Confirm the Pay Later device and permanent-kit restrictions before approval.',
+
+    pay_later_request_storage_unavailable:
+      'The Pay Later review service is awaiting its database migration.',
+  };
+
+  return (
+    messages[code] ||
+    code ||
+    'The Pay Later review could not be completed.'
+  );
 }
 
 export default function OnboardingPaymentActionsPanel({
@@ -102,6 +198,7 @@ export default function OnboardingPaymentActionsPanel({
   const [accountantComment, setAccountantComment] = useState('');
   const [nextPaymentAt, setNextPaymentAt] = useState('');
   const [termsConfirmed, setTermsConfirmed] = useState(false);
+  const [payLaterReviewNotes, setPayLaterReviewNotes] = useState('');
 
   const [courierName, setCourierName] = useState('');
   const [trackingCode, setTrackingCode] = useState('');
@@ -125,6 +222,7 @@ export default function OnboardingPaymentActionsPanel({
     setAccountantComment('');
     setNextPaymentAt('');
     setTermsConfirmed(false);
+    setPayLaterReviewNotes('');
 
     setCourierName('');
     setTrackingCode('');
@@ -239,6 +337,106 @@ export default function OnboardingPaymentActionsPanel({
     }
   }
 
+  async function reviewPayLater(
+    decision: 'approved' | 'rejected',
+  ) {
+    if (!activeRow) return;
+
+    const request =
+      activeRow.payLaterRequest;
+
+    const status = String(
+      request?.status || '',
+    )
+      .trim()
+      .toLowerCase();
+
+    if (
+      !request?.id ||
+      status !== 'pending'
+    ) {
+      setNotice({
+        tone: 'err',
+        text:
+          'This Pay Later request is no longer pending. Refresh the board before reviewing it.',
+      });
+
+      return;
+    }
+
+    if (
+      decision === 'approved' &&
+      !termsConfirmed
+    ) {
+      setNotice({
+        tone: 'err',
+        text:
+          'Confirm the Pay Later device and permanent-kit restrictions before approval.',
+      });
+
+      return;
+    }
+
+    setBusyId(
+      activeRow.clinicianId,
+    );
+
+    try {
+      const js =
+        await postJson(
+          '/api/admin/clinicians/onboarding/pay-later/review',
+          {
+            requestId:
+              request.id,
+
+            decision,
+
+            reviewNotes:
+              payLaterReviewNotes.trim() ||
+              null,
+
+            tncAcceptedByAdmin:
+              decision === 'approved',
+
+            nextPaymentAt:
+              decision === 'approved'
+                ? nextPaymentAt ||
+                  null
+                : null,
+
+            expiresInDays: 30,
+          },
+        );
+
+      setNotice({
+        tone: 'ok',
+
+        text:
+          js?.message ||
+          (
+            decision === 'approved'
+              ? 'The clinician Pay Later request has been approved.'
+              : 'The clinician Pay Later request has been rejected.'
+          ),
+      });
+
+      closeModal();
+      router.refresh();
+    } catch (err: any) {
+      setNotice({
+        tone: 'err',
+
+        text:
+          reviewErrorMessage(
+            err?.message ||
+              'pay_later_review_failed',
+          ),
+      });
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   async function generateAuthorisation(row: OnboardingRow, paymentId?: string | null) {
     setBusyId(row.clinicianId);
     try {
@@ -307,7 +505,7 @@ export default function OnboardingPaymentActionsPanel({
       <div className="border-b px-4 py-3">
         <h2 className="text-sm font-semibold text-gray-900">Enterprise onboarding actions</h2>
         <p className="mt-1 text-xs text-gray-600">
-          Confirm manual payments, approve waiver/pay-later, issue authorisation codes, and control temporary versus permanent C-Med StarterKit release.
+          Review clinician-submitted Pay Later requests, manage separate manual waivers, confirm payments, issue authorisation codes, and control temporary versus permanent C-Med StarterKit release.
         </p>
       </div>
 
@@ -348,6 +546,13 @@ export default function OnboardingPaymentActionsPanel({
           const depositMet = row.payment?.initialRequirementMet === true || row.onboarding?.depositPaid === true;
           const waiverActive = row.payment?.waiverActive === true || row.onboarding?.waiverActive === true;
           const canPermanentDispatch = depositMet || row.payment?.fullyPaid === true;
+          const payLaterStatus = String(
+            row.payLaterRequest?.status || '',
+          )
+            .trim()
+            .toLowerCase();
+          const payLaterPending =
+            payLaterStatus === 'pending';
 
           return (
             <article key={row.clinicianId} className="rounded-xl border bg-slate-50 p-3">
@@ -362,6 +567,21 @@ export default function OnboardingPaymentActionsPanel({
                     {row.onboarding?.paymentPlan ? (
                       <span className="rounded-full border border-purple-200 bg-purple-50 px-2 py-0.5 text-[11px] font-bold text-purple-800">
                         {row.onboarding.paymentPlan}
+                      </span>
+                    ) : null}
+                    {row.payLaterRequest ? (
+                      <span
+                        className={
+                          'rounded-full border px-2 py-0.5 text-[11px] font-bold ' +
+                          payLaterStatusTone(
+                            row.payLaterRequest.status,
+                          )
+                        }
+                      >
+                        Pay Later:{' '}
+                        {payLaterStatusLabel(
+                          row.payLaterRequest.status,
+                        )}
                       </span>
                     ) : null}
                     {row.dispatch?.status ? (
@@ -388,6 +608,75 @@ export default function OnboardingPaymentActionsPanel({
                 </div>
               </div>
 
+              {row.payLaterRequest ? (
+                <div
+                  className={
+                    'mt-3 rounded-xl border p-3 text-xs ' +
+                    payLaterStatusTone(
+                      row.payLaterRequest.status,
+                    )
+                  }
+                >
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="font-black">
+                        Clinician Pay Later request ·{' '}
+                        {payLaterStatusLabel(
+                          row.payLaterRequest.status,
+                        )}
+                      </div>
+
+                      <div className="mt-1">
+                        Submitted:{' '}
+                        {dateTimeLabel(
+                          row.payLaterRequest.requestedAt,
+                        )}
+                      </div>
+                    </div>
+
+                    {row.payLaterRequest.approvalPaymentId ? (
+                      <div className="rounded-lg border border-current/20 bg-white/70 px-2 py-1 font-mono text-[10px]">
+                        Approval record:{' '}
+                        {row.payLaterRequest.approvalPaymentId}
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="mt-2 rounded-lg border border-current/15 bg-white/70 p-2 leading-relaxed">
+                    <span className="font-semibold">
+                      Clinician reason:
+                    </span>{' '}
+
+                    {row.payLaterRequest.requestReason ||
+                      'No supporting reason was supplied.'}
+                  </div>
+
+                  {row.payLaterRequest.reviewedAt ? (
+                    <div className="mt-2">
+                      Reviewed:{' '}
+                      {dateTimeLabel(
+                        row.payLaterRequest.reviewedAt,
+                      )}
+
+                      {row.payLaterRequest.reviewedByUserId
+                        ? ' · ' +
+                          row.payLaterRequest.reviewedByUserId
+                        : ''}
+                    </div>
+                  ) : null}
+
+                  {row.payLaterRequest.reviewNotes ? (
+                    <div className="mt-2 rounded-lg border border-current/15 bg-white/70 p-2 leading-relaxed">
+                      <span className="font-semibold">
+                        Admin review note:
+                      </span>{' '}
+
+                      {row.payLaterRequest.reviewNotes}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -398,13 +687,42 @@ export default function OnboardingPaymentActionsPanel({
                   Confirm payment
                 </button>
 
+                {payLaterPending ? (
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() =>
+                      openAction(
+                        row,
+                        'review-pay-later',
+                      )
+                    }
+                    className="rounded-lg border border-amber-300 bg-amber-100 px-3 py-1.5 text-xs font-semibold text-amber-950 hover:bg-amber-200 disabled:opacity-50"
+                  >
+                    Review Pay Later request
+                  </button>
+                ) : null}
+
                 <button
                   type="button"
-                  disabled={busy}
-                  onClick={() => openAction(row, 'approve-waiver')}
+                  disabled={
+                    busy ||
+                    payLaterPending
+                  }
+                  onClick={() =>
+                    openAction(
+                      row,
+                      'approve-waiver',
+                    )
+                  }
+                  title={
+                    payLaterPending
+                      ? 'Use Review Pay Later request for this clinician-submitted request.'
+                      : 'Create a manual Admin waiver without a clinician-submitted request.'
+                  }
                   className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-1.5 text-xs font-semibold text-purple-900 hover:bg-purple-100 disabled:opacity-50"
                 >
-                  Approve waiver/pay later
+                  Manual waiver (separate)
                 </button>
 
                 <button
@@ -454,11 +772,13 @@ export default function OnboardingPaymentActionsPanel({
                 <div className="text-sm font-black text-gray-900">
                   {activeAction === 'confirm-payment'
                     ? 'Confirm EFT/manual payment'
-                    : activeAction === 'approve-waiver'
-                      ? 'Approve waiver / train now, pay later'
-                      : activeAction === 'dispatch-temporary'
-                        ? 'Create temporary training kit dispatch'
-                        : 'Create permanent C-Med StarterKit dispatch'}
+                    : activeAction === 'review-pay-later'
+                      ? 'Review clinician Pay Later request'
+                      : activeAction === 'approve-waiver'
+                        ? 'Manual Admin waiver / train now, pay later'
+                        : activeAction === 'dispatch-temporary'
+                          ? 'Create temporary training kit dispatch'
+                          : 'Create permanent C-Med StarterKit dispatch'}
                 </div>
                 <div className="text-xs text-gray-500">{activeRow.displayName}</div>
               </div>
@@ -490,6 +810,94 @@ export default function OnboardingPaymentActionsPanel({
                     <span className="font-semibold">Proof-of-payment URL</span>
                     <input value={proofOfPaymentUrl} onChange={(e) => setProofOfPaymentUrl(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
                   </label>
+                </>
+              ) : null}
+
+              {activeAction === 'review-pay-later' ? (
+                <>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                    <div className="font-black">
+                      {payLaterStatusLabel(
+                        activeRow.payLaterRequest?.status,
+                      )}
+                    </div>
+
+                    <div className="mt-1">
+                      Submitted:{' '}
+                      {dateTimeLabel(
+                        activeRow.payLaterRequest?.requestedAt,
+                      )}
+                    </div>
+
+                    <div className="mt-2 rounded-lg border border-amber-200 bg-white/70 p-2 leading-relaxed">
+                      <span className="font-semibold">
+                        Clinician reason:
+                      </span>{' '}
+
+                      {activeRow.payLaterRequest?.requestReason ||
+                        'No supporting reason was supplied.'}
+                    </div>
+                  </div>
+
+                  <label className="block space-y-1 text-xs">
+                    <span className="font-semibold">
+                      Admin review note
+                    </span>
+
+                    <textarea
+                      value={payLaterReviewNotes}
+                      onChange={(event) =>
+                        setPayLaterReviewNotes(
+                          event.target.value,
+                        )
+                      }
+                      rows={3}
+                      maxLength={2000}
+                      placeholder="Optional for approval. Recommended when rejecting the request."
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    />
+                  </label>
+
+                  <label className="block space-y-1 text-xs">
+                    <span className="font-semibold">
+                      Next payment/review date
+                    </span>
+
+                    <input
+                      type="date"
+                      value={nextPaymentAt}
+                      onChange={(event) =>
+                        setNextPaymentAt(
+                          event.target.value,
+                        )
+                      }
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    />
+
+                    <span className="text-[11px] text-slate-500">
+                      Used only when the request is approved.
+                    </span>
+                  </label>
+
+                  <label className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                    <input
+                      type="checkbox"
+                      checked={termsConfirmed}
+                      onChange={(event) =>
+                        setTermsConfirmed(
+                          event.target.checked,
+                        )
+                      }
+                    />
+
+                    <span>
+                      Admin confirms that approval permits the Pay Later training pathway and temporary training-device arrangements only. It does not mark the qualifying deposit as paid or release the permanent C-Med StarterKit.
+                    </span>
+                  </label>
+
+                  <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900">
+                    Rejecting the request grants no training access, creates no payment and creates no dispatch.
+                  </div>
                 </>
               ) : null}
 
@@ -541,10 +949,24 @@ export default function OnboardingPaymentActionsPanel({
                 </>
               ) : null}
 
-              <label className="block space-y-1 text-xs">
-                <span className="font-semibold">Admin notes</span>
-                <textarea value={adminNotes} onChange={(e) => setAdminNotes(e.target.value)} rows={2} className="w-full rounded-lg border px-3 py-2 text-sm" />
-              </label>
+              {activeAction !== 'review-pay-later' ? (
+                <label className="block space-y-1 text-xs">
+                  <span className="font-semibold">
+                    Admin notes
+                  </span>
+
+                  <textarea
+                    value={adminNotes}
+                    onChange={(event) =>
+                      setAdminNotes(
+                        event.target.value,
+                      )
+                    }
+                    rows={2}
+                    className="w-full rounded-lg border px-3 py-2 text-sm"
+                  />
+                </label>
+              ) : null}
             </div>
 
             <div className="flex justify-end gap-2 border-t px-4 py-3">
@@ -555,6 +977,41 @@ export default function OnboardingPaymentActionsPanel({
                 <button type="button" disabled={busyId === activeRow.clinicianId} onClick={confirmPayment} className="rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:opacity-50">
                   Confirm & issue code
                 </button>
+              ) : activeAction === 'review-pay-later' ? (
+                <>
+                  <button
+                    type="button"
+                    disabled={
+                      busyId ===
+                      activeRow.clinicianId
+                    }
+                    onClick={() =>
+                      reviewPayLater(
+                        'rejected',
+                      )
+                    }
+                    className="rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                  >
+                    Reject Pay Later
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={
+                      busyId ===
+                        activeRow.clinicianId ||
+                      !termsConfirmed
+                    }
+                    onClick={() =>
+                      reviewPayLater(
+                        'approved',
+                      )
+                    }
+                    className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                  >
+                    Approve Pay Later
+                  </button>
+                </>
               ) : activeAction === 'approve-waiver' ? (
                 <button type="button" disabled={busyId === activeRow.clinicianId} onClick={approveWaiver} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50">
                   Approve waiver & issue code
