@@ -412,6 +412,93 @@ function normaliseCommercialPathways(
 }
 
 
+
+function outwardPayLaterRequest(
+  row: any,
+) {
+  if (!row) {
+    return null;
+  }
+
+  const rawStatus =
+    String(
+      row.status ||
+        'pending',
+    )
+      .trim()
+      .toLowerCase();
+
+  const status = [
+    'pending',
+    'approved',
+    'rejected',
+    'withdrawn',
+    'cancelled',
+  ].includes(rawStatus)
+    ? rawStatus
+    : 'pending';
+
+  const asIso =
+    (value: unknown) => {
+      if (!value) {
+        return null;
+      }
+
+      const date =
+        value instanceof Date
+          ? value
+          : new Date(
+              String(value),
+            );
+
+      return Number.isFinite(
+        date.getTime(),
+      )
+        ? date.toISOString()
+        : null;
+    };
+
+  return {
+    id: String(
+      row.id || '',
+    ),
+    pathwayKey:
+      'START_NOW_PAY_LATER',
+    status,
+    requestReason:
+      row.requestReason
+        ? String(
+            row.requestReason,
+          )
+        : null,
+    requestedAt:
+      asIso(
+        row.requestedAt ||
+          row.createdAt,
+      ),
+    reviewedAt:
+      asIso(
+        row.reviewedAt,
+      ),
+    reviewNotes:
+      row.reviewNotes
+        ? String(
+            row.reviewNotes,
+          )
+        : null,
+    active:
+      status === 'pending',
+    approved:
+      status === 'approved',
+    rejected:
+      status === 'rejected',
+    canResubmit: [
+      'rejected',
+      'withdrawn',
+      'cancelled',
+    ].includes(status),
+  };
+}
 async function localOnboardingSettings() {
   const row = await prisma.clinicianOnboardingSetting
     .findUnique({ where: { id: 'default' } })
@@ -449,6 +536,22 @@ async function localTrainingContext(clinicianId: string) {
   const onboarding = await prisma.clinicianOnboarding.findUnique({
     where: { clinicianId: clinician.id },
   });
+
+  const latestPayLaterRequest =
+    onboarding
+      ? await (prisma as any).clinicianOnboardingPayLaterRequest
+          .findFirst({
+            where: {
+              clinicianId:
+                String(clinician.id),
+            },
+            orderBy: [
+              { requestedAt: 'desc' },
+              { createdAt: 'desc' },
+            ],
+          })
+          .catch(() => null)
+      : null;
 
   const trainingSlot = onboarding?.trainingSlotId
     ? await prisma.clinicianTrainingSlot.findUnique({
@@ -512,6 +615,10 @@ async function localTrainingContext(clinicianId: string) {
           stage: completed ? 'training_completed' : (clinician.status ?? 'pending'),
           notes: null,
         },
+    payLaterRequest:
+      outwardPayLaterRequest(
+        latestPayLaterRequest,
+      ),
     training: {
       status: completed ? 'completed' : scheduled ? 'scheduled' : 'pending',
       startAt: trainingSlot?.startsAt?.toISOString?.() ?? null,

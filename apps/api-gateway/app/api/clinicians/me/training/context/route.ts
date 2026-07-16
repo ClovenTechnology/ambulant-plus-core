@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { readIdentity } from '@/src/lib/identity';
 import {
+  publicClinicianPayLaterRequest,
+} from '@/src/clinicians/onboarding/pay-later';
+import {
   calculateOnboardingPaymentState,
   getClinicianOnboardingSettings,
   publicClinicianOnboardingSettings,
@@ -121,6 +124,22 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
     });
 
+    const latestPayLaterRequest =
+      onboarding
+        ? await db.clinicianOnboardingPayLaterRequest
+            .findFirst({
+              where: {
+                clinicianId:
+                  String(clinician.id),
+              },
+              orderBy: [
+                { requestedAt: 'desc' },
+                { createdAt: 'desc' },
+              ],
+            })
+            .catch(() => null)
+        : null;
+
     const trainingSlot =
       onboarding?.trainingSlotId
         ? await db.clinicianTrainingSlot.findUnique({
@@ -218,6 +237,10 @@ export async function GET(req: NextRequest) {
               waiverActive,
             }
           : null,
+        payLaterRequest:
+          publicClinicianPayLaterRequest(
+            latestPayLaterRequest,
+          ),
         training: trainingSlot
           ? {
               status: trainingCompleted ? 'completed' : outwardTrainingStatus(trainingSlot.status),
