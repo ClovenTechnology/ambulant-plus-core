@@ -6,6 +6,9 @@ import {
   getClinicianOnboardingSettings,
   publicClinicianOnboardingSettings,
 } from '@/src/clinicians/onboarding/settings';
+import {
+  adminClinicianPayLaterRequest,
+} from '@/src/clinicians/onboarding/pay-later';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -66,12 +69,9 @@ function outwardDispatchStatus(
 
 export async function GET(req: NextRequest) {
   try {
-    const isAdmin = await verifyAdminRequest(req);
-    if (!isAdmin) {
-      return NextResponse.json(
-        { ok: false, error: 'admin_required' },
-        { status: 403 },
-      );
+    const admin = await verifyAdminRequest(req);
+    if (!admin.ok) {
+      return admin.response;
     }
 
     const db: any = prisma;
@@ -146,12 +146,61 @@ export async function GET(req: NextRequest) {
         })
       : [];
 
+    let payLaterRequests: any[] = [];
+
+    if (clinicianIds.length) {
+      try {
+        payLaterRequests =
+          await db.clinicianOnboardingPayLaterRequest.findMany({
+            where: {
+              clinicianId: {
+                in: clinicianIds,
+              },
+            },
+            orderBy: [
+              { requestedAt: 'desc' },
+              { createdAt: 'desc' },
+            ],
+          });
+      } catch (error: any) {
+        const code = String(
+          error?.code || '',
+        );
+
+        if (
+          code !== 'P2021' &&
+          code !== 'P2022'
+        ) {
+          throw error;
+        }
+      }
+    }
+
     const paymentsByClinicianId = new Map<string, any[]>();
     for (const payment of payments || []) {
       const cid = String(payment.clinicianId);
       const existing = paymentsByClinicianId.get(cid) || [];
       existing.push(payment);
       paymentsByClinicianId.set(cid, existing);
+    }
+
+    const latestPayLaterRequestByClinicianId =
+      new Map<string, any>();
+
+    for (const request of payLaterRequests || []) {
+      const clinicianId =
+        String(request.clinicianId);
+
+      if (
+        !latestPayLaterRequestByClinicianId.has(
+          clinicianId,
+        )
+      ) {
+        latestPayLaterRequestByClinicianId.set(
+          clinicianId,
+          request,
+        );
+      }
     }
 
     const settings = await getClinicianOnboardingSettings();
@@ -188,6 +237,10 @@ export async function GET(req: NextRequest) {
           ['waiver', 'deferred'].includes(String(payment?.provider || '').toLowerCase()),
         );
       const latestPayment = confirmedPayments[0] || null;
+      const latestPayLaterRequest =
+        latestPayLaterRequestByClinicianId.get(
+          String(clinician.id),
+        ) || null;
 
       return {
         clinicianId: String(clinician.id),
@@ -231,6 +284,11 @@ export async function GET(req: NextRequest) {
               }
             : null,
         },
+
+        payLaterRequest:
+          adminClinicianPayLaterRequest(
+            latestPayLaterRequest,
+          ),
 
         trainingSlot: training
           ? {
