@@ -7,6 +7,77 @@ export const dynamic = 'force-dynamic';
 
 type JsonObj = Record<string, any>;
 
+type OnboardingPathwayKey =
+  | 'START_NOW_PAY_LATER'
+  | 'QUALIFYING_DEPOSIT'
+  | 'FULL_PAYMENT';
+
+type CommercialPathway = {
+  key: OnboardingPathwayKey;
+  displayOrder: number;
+  label: string;
+  badge: string | null;
+  description: string;
+  ctaLabel: string;
+  enabled: boolean;
+  featured: boolean;
+  conditions: string[];
+};
+
+const DEFAULT_COMMERCIAL_PATHWAYS: CommercialPathway[] = [
+  {
+    key: 'START_NOW_PAY_LATER',
+    displayOrder: 1,
+    label: 'Start Now — Pay Later',
+    badge: 'Fastest start',
+    description:
+      'Begin training after Ambulant+ Admin approves your Pay Later request, without making an upfront onboarding payment.',
+    ctaLabel: 'Request Pay Later approval',
+    enabled: true,
+    featured: true,
+    conditions: [
+      'Training access begins after Admin approval.',
+      'No permanent C-Med Kit is dispatched until the qualifying initial payment is received.',
+      'Platform-wide Professional Indemnity cover does not commence until a qualifying payment is received and all applicable policy conditions are satisfied.',
+      'Any outstanding onboarding balance remains payable under the applicable agreement.',
+    ],
+  },
+  {
+    key: 'QUALIFYING_DEPOSIT',
+    displayOrder: 2,
+    label: 'Start with Initial Deposit',
+    badge: 'Balanced option',
+    description:
+      'Pay the Admin-configured qualifying initial amount and proceed with training and partial C-Med Kit fulfilment.',
+    ctaLabel: 'Pay initial deposit',
+    enabled: true,
+    featured: false,
+    conditions: [
+      'The qualifying initial amount is configured by Ambulant+ Admin.',
+      'Initial C-Med Kit fulfilment excludes the HD Otoscope and complimentary merchandise until the outstanding balance is settled.',
+      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
+      'The remaining onboarding balance remains payable under the applicable agreement.',
+    ],
+  },
+  {
+    key: 'FULL_PAYMENT',
+    displayOrder: 3,
+    label: 'Pay in Full',
+    badge: 'Complete package',
+    description:
+      'Settle the complete onboarding fee and proceed with full C-Med Kit fulfilment.',
+    ctaLabel: 'Pay full onboarding fee',
+    enabled: true,
+    featured: false,
+    conditions: [
+      'The full Admin-configured onboarding fee is payable.',
+      'The complete C-Med Kit, including the HD Otoscope and eligible complimentary merchandise, can be dispatched.',
+      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
+      'There is no outstanding onboarding-fee balance after confirmed full payment.',
+    ],
+  },
+];
+
 function json(data: any, status = 200) {
   return NextResponse.json(data, {
     status,
@@ -163,6 +234,184 @@ function stringArray(value: unknown): string[] {
     .filter(Boolean);
 }
 
+function cloneDefaultCommercialPathways(): CommercialPathway[] {
+  return DEFAULT_COMMERCIAL_PATHWAYS.map(
+    (pathway) => ({
+      ...pathway,
+      conditions: [
+        ...pathway.conditions,
+      ],
+    }),
+  );
+}
+
+function normaliseCommercialPathways(
+  value: unknown,
+): CommercialPathway[] {
+  const incoming =
+    Array.isArray(value)
+      ? value
+      : [];
+
+  const defaults =
+    cloneDefaultCommercialPathways();
+
+  const defaultByKey =
+    new Map(
+      defaults.map(
+        (pathway) => [
+          pathway.key,
+          pathway,
+        ],
+      ),
+    );
+
+  const accepted =
+    new Map<
+      OnboardingPathwayKey,
+      CommercialPathway
+    >();
+
+  for (const candidate of incoming) {
+    if (
+      !candidate ||
+      typeof candidate !== 'object' ||
+      Array.isArray(candidate)
+    ) {
+      continue;
+    }
+
+    const raw =
+      candidate as Record<
+        string,
+        any
+      >;
+
+    const key =
+      String(
+        raw.key || '',
+      )
+        .trim()
+        .toUpperCase() as
+        OnboardingPathwayKey;
+
+    const fallback =
+      defaultByKey.get(key);
+
+    if (
+      !fallback ||
+      accepted.has(key)
+    ) {
+      continue;
+    }
+
+    const requestedOrder =
+      Number(
+        raw.displayOrder,
+      );
+
+    const conditions =
+      Array.isArray(
+        raw.conditions,
+      )
+        ? raw.conditions
+            .map(
+              (condition: unknown) =>
+                String(
+                  condition || '',
+                ).trim(),
+            )
+            .filter(Boolean)
+            .slice(0, 12)
+        : [
+            ...fallback.conditions,
+          ];
+
+    const hasBadge =
+      Object.prototype.hasOwnProperty.call(
+        raw,
+        'badge',
+      );
+
+    accepted.set(
+      key,
+      {
+        key,
+        displayOrder:
+          Number.isFinite(
+            requestedOrder,
+          )
+            ? Math.min(
+                99,
+                Math.max(
+                  1,
+                  Math.round(
+                    requestedOrder,
+                  ),
+                ),
+              )
+            : fallback.displayOrder,
+        label:
+          String(
+            raw.label || '',
+          ).trim() ||
+          fallback.label,
+        badge: hasBadge
+          ? String(
+              raw.badge || '',
+            ).trim() ||
+            null
+          : fallback.badge,
+        description:
+          String(
+            raw.description || '',
+          ).trim() ||
+          fallback.description,
+        ctaLabel:
+          String(
+            raw.ctaLabel || '',
+          ).trim() ||
+          fallback.ctaLabel,
+        enabled:
+          raw.enabled !== false,
+        featured:
+          raw.featured === true,
+        conditions:
+          conditions.length > 0
+            ? conditions
+            : [
+                ...fallback.conditions,
+              ],
+      },
+    );
+  }
+
+  return defaults
+    .map(
+      (fallback) =>
+        accepted.get(
+          fallback.key,
+        ) ||
+        fallback,
+    )
+    .sort(
+      (left, right) =>
+        left.displayOrder -
+          right.displayOrder ||
+        defaults.findIndex(
+          (pathway) =>
+            pathway.key ===
+            left.key,
+        ) -
+          defaults.findIndex(
+            (pathway) =>
+              pathway.key ===
+              right.key,
+          ),
+    );
+}
+
+
 async function localOnboardingSettings() {
   const row = await prisma.clinicianOnboardingSetting
     .findUnique({ where: { id: 'default' } })
@@ -179,6 +428,10 @@ async function localOnboardingSettings() {
     cardPaymentEnabled: row?.cardPaymentEnabled !== false,
     manualPaymentEnabled: row?.manualPaymentEnabled !== false,
     starterKitItems: stringArray(row?.starterKitItems),
+    commercialPathways:
+      normaliseCommercialPathways(
+        (row as any)?.commercialPathways,
+      ),
     bankInstructions: row?.bankInstructions && typeof row.bankInstructions === 'object' ? row.bankInstructions : null,
     configured: Math.max(0, Math.round(Number(row?.trainingFeeCents || 0))) > 0,
   };
@@ -294,6 +547,8 @@ async function localTrainingContext(clinicianId: string) {
       allowPartialPayment: settings.allowPartialPayment,
       balanceRecoveryMode: settings.balanceRecoveryMode,
       balanceRecoveryNotes: settings.balanceRecoveryNotes,
+      commercialPathways:
+        settings.commercialPathways,
       amountPaidCents,
       outstandingCents,
       initialPaymentDueCents: minimumInitialPaymentCents,

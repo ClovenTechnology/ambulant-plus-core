@@ -21,6 +21,77 @@ import {
 
 type TrainingMode = 'virtual' | 'in_person';
 
+type OnboardingPathwayKey =
+  | 'START_NOW_PAY_LATER'
+  | 'QUALIFYING_DEPOSIT'
+  | 'FULL_PAYMENT';
+
+type CommercialPathway = {
+  key: OnboardingPathwayKey;
+  displayOrder: number;
+  label: string;
+  badge: string | null;
+  description: string;
+  ctaLabel: string;
+  enabled: boolean;
+  featured: boolean;
+  conditions: string[];
+};
+
+const DEFAULT_COMMERCIAL_PATHWAYS: CommercialPathway[] = [
+  {
+    key: 'START_NOW_PAY_LATER',
+    displayOrder: 1,
+    label: 'Start Now — Pay Later',
+    badge: 'Fastest start',
+    description:
+      'Begin training after Ambulant+ Admin approves your Pay Later request, without making an upfront onboarding payment.',
+    ctaLabel: 'Request Pay Later approval',
+    enabled: true,
+    featured: true,
+    conditions: [
+      'Training access begins after Admin approval.',
+      'No permanent C-Med Kit is dispatched until the qualifying initial payment is received.',
+      'Platform-wide Professional Indemnity cover does not commence until a qualifying payment is received and all applicable policy conditions are satisfied.',
+      'Any outstanding onboarding balance remains payable under the applicable agreement.',
+    ],
+  },
+  {
+    key: 'QUALIFYING_DEPOSIT',
+    displayOrder: 2,
+    label: 'Start with Initial Deposit',
+    badge: 'Balanced option',
+    description:
+      'Pay the Admin-configured qualifying initial amount and proceed with training and partial C-Med Kit fulfilment.',
+    ctaLabel: 'Pay initial deposit',
+    enabled: true,
+    featured: false,
+    conditions: [
+      'The qualifying initial amount is configured by Ambulant+ Admin.',
+      'Initial C-Med Kit fulfilment excludes the HD Otoscope and complimentary merchandise until the outstanding balance is settled.',
+      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
+      'The remaining onboarding balance remains payable under the applicable agreement.',
+    ],
+  },
+  {
+    key: 'FULL_PAYMENT',
+    displayOrder: 3,
+    label: 'Pay in Full',
+    badge: 'Complete package',
+    description:
+      'Settle the complete onboarding fee and proceed with full C-Med Kit fulfilment.',
+    ctaLabel: 'Pay full onboarding fee',
+    enabled: true,
+    featured: false,
+    conditions: [
+      'The full Admin-configured onboarding fee is payable.',
+      'The complete C-Med Kit, including the HD Otoscope and eligible complimentary merchandise, can be dispatched.',
+      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
+      'There is no outstanding onboarding-fee balance after confirmed full payment.',
+    ],
+  },
+];
+
 type TrainingSlot = {
   id: string;
   startAt: string;
@@ -91,6 +162,7 @@ type TrainingContext = {
     allowPartialPayment?: boolean | null;
     balanceRecoveryMode?: string | null;
     balanceRecoveryNotes?: string | null;
+    commercialPathways?: CommercialPathway[] | null;
     amountPaidCents?: number | null;
     outstandingCents?: number | null;
     initialPaymentDueCents?: number | null;
@@ -135,6 +207,146 @@ function errorToMessage(value: unknown, fallback = 'Something went wrong. Please
 
 function apiError(body: unknown, fallback: string) {
   return errorToMessage(body, fallback);
+}
+
+
+function cloneDefaultCommercialPathways(): CommercialPathway[] {
+  return DEFAULT_COMMERCIAL_PATHWAYS.map(
+    (pathway) => ({
+      ...pathway,
+      conditions: [
+        ...pathway.conditions,
+      ],
+    }),
+  );
+}
+
+function normaliseCommercialPathways(
+  value: unknown,
+): CommercialPathway[] {
+  const incoming =
+    Array.isArray(value)
+      ? value
+      : [];
+
+  const defaults =
+    cloneDefaultCommercialPathways();
+
+  return defaults
+    .map(
+      (fallback) => {
+        const raw =
+          incoming.find(
+            (candidate: any) =>
+              String(
+                candidate?.key ||
+                  '',
+              )
+                .trim()
+                .toUpperCase() ===
+              fallback.key,
+          ) as any;
+
+        if (!raw) {
+          return fallback;
+        }
+
+        const requestedOrder =
+          Number(
+            raw.displayOrder,
+          );
+
+        const conditions =
+          Array.isArray(
+            raw.conditions,
+          )
+            ? raw.conditions
+                .map(
+                  (
+                    condition: unknown,
+                  ) =>
+                    String(
+                      condition ||
+                        '',
+                    ).trim(),
+                )
+                .filter(Boolean)
+                .slice(0, 12)
+            : [
+                ...fallback.conditions,
+              ];
+
+        const hasBadge =
+          Object.prototype.hasOwnProperty.call(
+            raw,
+            'badge',
+          );
+
+        return {
+          key: fallback.key,
+          displayOrder:
+            Number.isFinite(
+              requestedOrder,
+            )
+              ? Math.min(
+                  99,
+                  Math.max(
+                    1,
+                    Math.round(
+                      requestedOrder,
+                    ),
+                  ),
+                )
+              : fallback.displayOrder,
+          label:
+            String(
+              raw.label || '',
+            ).trim() ||
+            fallback.label,
+          badge: hasBadge
+            ? String(
+                raw.badge || '',
+              ).trim() ||
+              null
+            : fallback.badge,
+          description:
+            String(
+              raw.description || '',
+            ).trim() ||
+            fallback.description,
+          ctaLabel:
+            String(
+              raw.ctaLabel || '',
+            ).trim() ||
+            fallback.ctaLabel,
+          enabled:
+            raw.enabled !== false,
+          featured:
+            raw.featured === true,
+          conditions:
+            conditions.length > 0
+              ? conditions
+              : [
+                  ...fallback.conditions,
+                ],
+        };
+      },
+    )
+    .sort(
+      (left, right) =>
+        left.displayOrder -
+          right.displayOrder ||
+        defaults.findIndex(
+          (pathway) =>
+            pathway.key ===
+            left.key,
+        ) -
+          defaults.findIndex(
+            (pathway) =>
+              pathway.key ===
+              right.key,
+          ),
+    );
 }
 
 function money(cents: number, currency: string) {
@@ -375,6 +587,186 @@ function EnterpriseOnboardingPolicyCard({
 }
 
 
+
+function CommercialPathwaySelector({
+  pathways,
+  selectedPathway,
+  onSelect,
+}: {
+  pathways: CommercialPathway[];
+  selectedPathway: OnboardingPathwayKey | null;
+  onSelect: (
+    key: OnboardingPathwayKey,
+  ) => void;
+}) {
+  if (pathways.length === 0) {
+    return (
+      <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
+        <h2 className="text-base font-black text-amber-950">
+          Onboarding pathways are temporarily unavailable
+        </h2>
+        <p className="mt-1 text-sm leading-relaxed text-amber-900">
+          Ambulant+ Admin has not enabled an onboarding pathway. Please contact support before continuing.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <section
+      className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm"
+      aria-labelledby="commercial-pathway-heading"
+    >
+      <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="text-xs font-black uppercase tracking-wide text-indigo-700">
+            Choose your onboarding route
+          </div>
+
+          <h2
+            id="commercial-pathway-heading"
+            className="mt-1 text-lg font-black text-slate-950"
+          >
+            How would you like to begin?
+          </h2>
+
+          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-600">
+            Review each pathway carefully and make an explicit selection. The featured option is highlighted for visibility but is not selected automatically.
+          </p>
+        </div>
+
+        <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
+          {selectedPathway
+            ? '1 pathway selected'
+            : 'Selection required'}
+        </div>
+      </div>
+
+      <div
+        className="mt-5 grid gap-4 lg:grid-cols-3"
+        role="radiogroup"
+        aria-label="Clinician onboarding pathway"
+      >
+        {pathways.map(
+          (pathway) => {
+            const selected =
+              selectedPathway ===
+              pathway.key;
+
+            return (
+              <button
+                key={pathway.key}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                onClick={() =>
+                  onSelect(
+                    pathway.key,
+                  )
+                }
+                className={[
+                  'relative flex h-full flex-col rounded-2xl border p-4 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2',
+                  selected
+                    ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100'
+                    : pathway.featured
+                      ? 'border-purple-300 bg-gradient-to-b from-purple-50 to-white ring-1 ring-purple-100 hover:border-purple-400'
+                      : 'border-slate-200 bg-white hover:border-indigo-300 hover:bg-slate-50',
+                ].join(' ')}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                      Option {pathway.displayOrder}
+                    </div>
+
+                    <h3 className="mt-1 text-base font-black text-slate-950">
+                      {pathway.label}
+                    </h3>
+                  </div>
+
+                  <span
+                    aria-hidden="true"
+                    className={[
+                      'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border',
+                      selected
+                        ? 'border-indigo-600 bg-indigo-600'
+                        : 'border-slate-300 bg-white',
+                    ].join(' ')}
+                  >
+                    {selected ? (
+                      <span className="h-2 w-2 rounded-full bg-white" />
+                    ) : null}
+                  </span>
+                </div>
+
+                <div className="mt-3 flex min-h-6 flex-wrap gap-2">
+                  {pathway.badge ? (
+                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-black text-indigo-800">
+                      {pathway.badge}
+                    </span>
+                  ) : null}
+
+                  {pathway.featured ? (
+                    <span className="rounded-full border border-purple-200 bg-purple-100 px-2 py-1 text-[10px] font-black text-purple-800">
+                      Featured
+                    </span>
+                  ) : null}
+
+                  {selected ? (
+                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-black text-emerald-800">
+                      Selected
+                    </span>
+                  ) : null}
+                </div>
+
+                <p className="mt-3 text-sm leading-relaxed text-slate-600">
+                  {pathway.description}
+                </p>
+
+                <ul className="mt-4 flex-1 space-y-2 text-xs leading-relaxed text-slate-600">
+                  {pathway.conditions.map(
+                    (
+                      condition,
+                      index,
+                    ) => (
+                      <li
+                        key={pathway.key + '-' + index}
+                        className="flex gap-2"
+                      >
+                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-600" />
+                        <span>
+                          {condition}
+                        </span>
+                      </li>
+                    ),
+                  )}
+                </ul>
+
+                <div
+                  className={[
+                    'mt-5 rounded-xl px-3 py-2 text-center text-xs font-black',
+                    selected
+                      ? 'bg-indigo-700 text-white'
+                      : 'border border-slate-200 bg-slate-50 text-slate-800',
+                  ].join(' ')}
+                >
+                  {selected
+                    ? 'Selected'
+                    : pathway.ctaLabel}
+                </div>
+              </button>
+            );
+          },
+        )}
+      </div>
+
+      <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
+        Your selection is not submitted merely by choosing a card. Payment initialization and Pay Later review remain separate confirmation actions.
+      </p>
+    </section>
+  );
+}
+
 function TrainingSchedulePageContent() {
   const router = useRouter();
   const sp = useSearchParams() ?? new URLSearchParams();
@@ -389,6 +781,13 @@ function TrainingSchedulePageContent() {
   const [step, setStep] = useState<'pick' | 'pay' | 'done'>('pick');
   const [authorisationCode, setAuthorisationCode] = useState('');
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
+  const [
+    selectedCommercialPathway,
+    setSelectedCommercialPathway,
+  ] =
+    useState<OnboardingPathwayKey | null>(
+      null,
+    );
 
   useEffect(() => {
     const qId = sp.get('clinicianId') || '';
@@ -459,6 +858,8 @@ function TrainingSchedulePageContent() {
     allowPartialPayment: false,
     balanceRecoveryMode: 'manual',
     balanceRecoveryNotes: null,
+    commercialPathways:
+      cloneDefaultCommercialPathways(),
     amountPaidCents: 0,
     outstandingCents: 0,
     initialPaymentDueCents: 0,
@@ -472,6 +873,41 @@ function TrainingSchedulePageContent() {
     configured: false,
   };
   const feeLabel = pricing.trainingFeeCents > 0 ? money(pricing.trainingFeeCents, pricing.currency) : 'Not configured yet';
+
+  const enabledCommercialPathways =
+    useMemo(
+      () =>
+        normaliseCommercialPathways(
+          pricing.commercialPathways,
+        ).filter(
+          (pathway) =>
+            pathway.enabled,
+        ),
+      [
+        pricing.commercialPathways,
+      ],
+    );
+
+  useEffect(
+    () => {
+      if (
+        selectedCommercialPathway &&
+        !enabledCommercialPathways.some(
+          (pathway) =>
+            pathway.key ===
+            selectedCommercialPathway,
+        )
+      ) {
+        setSelectedCommercialPathway(
+          null,
+        );
+      }
+    },
+    [
+      enabledCommercialPathways,
+      selectedCommercialPathway,
+    ],
+  );
 
   const alreadyScheduled = ctx?.training?.status === 'scheduled';
   const alreadyCompleted =
@@ -651,6 +1087,18 @@ function TrainingSchedulePageContent() {
     <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
       <div className="mx-auto max-w-5xl p-6 space-y-6">
         <EnterpriseOnboardingPolicyCard ctx={ctx} pricing={pricing} starterKit={starterKit} />
+
+        <CommercialPathwaySelector
+          pathways={
+            enabledCommercialPathways
+          }
+          selectedPathway={
+            selectedCommercialPathway
+          }
+          onSelect={
+            setSelectedCommercialPathway
+          }
+        />
 
         <header className="rounded-2xl border bg-white p-6 shadow-sm">
           <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
