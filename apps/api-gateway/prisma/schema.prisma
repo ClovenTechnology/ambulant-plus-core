@@ -3918,6 +3918,7 @@ model ClinicianOnboardingSetting {
 
   starterKitItems      Json?
   bankInstructions     Json?
+  commercialPathways  Json?
   notes                String?
 
   updatedByUserId      String?
