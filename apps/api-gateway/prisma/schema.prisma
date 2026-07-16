@@ -866,6 +866,31 @@ model PresenceSession {
   @@index([actorType, app, lastSeenAt])
 }
 
+model TelevisitPresence {
+  id              String   @id @default(cuid())
+  appointmentId   String
+  visitId         String?
+  roomId          String
+  participantId   String
+  participantRole String
+  rtcRole         String
+  surface         String
+  actorUserId     String
+  actorRefId      String?
+  displayName     String?
+  lastSeenAt      DateTime
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([appointmentId, participantId, surface])
+  @@index([appointmentId, rtcRole, surface, expiresAt])
+  @@index([appointmentId, surface, expiresAt])
+  @@index([roomId, surface, expiresAt])
+  @@index([visitId, surface, expiresAt])
+  @@index([participantId, expiresAt])
+}
+
 model AuditLog {
   id          String         @id @default(cuid())
   createdAt   DateTime       @default(now())
