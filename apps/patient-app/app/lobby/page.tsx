@@ -31,6 +31,7 @@ type Ctx = {
   patientId?: string;
   patientName?: string;
   encounterId?: string;
+  visitId?: string;
   clinicianId?: string;
   clinicianName?: string;
   clinicName?: string;
@@ -64,6 +65,45 @@ type DeviceStatus = {
   network: 'unknown' | 'excellent' | 'good' | 'fair' | 'poor';
   error?: string | null;
 };
+
+type PresenceSummary = {
+  online?: boolean;
+  count?: number;
+  lastSeenAt?: string | null;
+  displayName?: string | null;
+  participantId?: string | null;
+};
+
+type PresenceSnapshot = {
+  ok?: boolean;
+  now?: number;
+  ttlMs?: number;
+  context?: {
+    appointmentId?: string | null;
+    visitId?: string | null;
+    roomId?: string | null;
+  };
+  patient?: {
+    lobby?: PresenceSummary;
+    room?: PresenceSummary;
+  };
+  clinician?: {
+    lobby?: PresenceSummary;
+    room?: PresenceSummary;
+  };
+};
+
+type PresenceLoadState =
+  | 'checking'
+  | 'live'
+  | 'unavailable';
+
+const LOBBY_PRESENCE_ENDPOINT =
+  '/api/televisit/presence';
+
+const LOBBY_HEARTBEAT_MS = 15_000;
+const LOBBY_POLL_MS = 5_000;
+
 
 type SnapshotVitals = {
   ts?: number;
@@ -120,6 +160,93 @@ function formatZaTime(value: Date = new Date()) {
 
 function cn(...parts: Array<string | false | null | undefined>) {
   return parts.filter(Boolean).join(' ');
+}
+
+
+function presenceRowClass(online: boolean) {
+  return online
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    : 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
+function presenceStatusText(
+  loadState: PresenceLoadState,
+  summary: PresenceSummary | null | undefined,
+  onlineText: string,
+  offlineText: string,
+) {
+  if (loadState === 'checking') {
+    return 'Checking…';
+  }
+
+  if (loadState === 'unavailable') {
+    return 'Status unavailable';
+  }
+
+  return summary?.online
+    ? onlineText
+    : offlineText;
+}
+
+function presenceDetail(
+  loadState: PresenceLoadState,
+  summary?: PresenceSummary | null,
+) {
+  if (loadState === 'checking') {
+    return 'Waiting for the first live presence update.';
+  }
+
+  if (loadState === 'unavailable') {
+    return 'Live presence is temporarily unavailable. Consultation entry remains available.';
+  }
+
+  if (!summary?.online) {
+    return 'No active presence heartbeat is currently detected.';
+  }
+
+  const parts: string[] = [];
+
+  const displayName =
+    String(summary.displayName || '').trim();
+
+  if (displayName) {
+    parts.push(displayName);
+  }
+
+  const lastSeenAt =
+    String(summary.lastSeenAt || '').trim();
+
+  if (lastSeenAt) {
+    const seen = new Date(lastSeenAt);
+
+    if (!Number.isNaN(seen.getTime())) {
+      parts.push(
+        'Updated ' +
+          seen.toLocaleTimeString('en-ZA', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+      );
+    }
+  }
+
+  return parts.length > 0
+    ? parts.join(' · ')
+    : 'Active now';
+}
+
+function presenceLoadLabel(
+  loadState: PresenceLoadState,
+) {
+  if (loadState === 'live') {
+    return 'Live';
+  }
+
+  if (loadState === 'unavailable') {
+    return 'Unavailable';
+  }
+
+  return 'Checking';
 }
 
 function normalizeOrigin(value?: string | null) {
@@ -541,6 +668,10 @@ export default function PatientLobbyPage() {
   const [manualSaving, setManualSaving] = useState(false);
   const [manualSaveNote, setManualSaveNote] = useState<string | null>(null);
   const [privacyReady, setPrivacyReady] = useState(false);
+  const [presence, setPresence] =
+    useState<PresenceSnapshot | null>(null);
+  const [presenceLoadState, setPresenceLoadState] =
+    useState<PresenceLoadState>('checking');
 
   const [manualVitals, setManualVitals] = useState<ManualVitalsDraft>({
     hr: '',
@@ -590,6 +721,10 @@ export default function PatientLobbyPage() {
         undefined,
       patientName: sp.get('patientName') || undefined,
       encounterId: sp.get('encounterId') || undefined,
+      visitId:
+        sp.get('visitId') ||
+        sp.get('televisitId') ||
+        undefined,
       clinicianId: sp.get('clinicianId') || undefined,
       clinicianName: sp.get('clinicianName') || undefined,
       clinicName: sp.get('clinicName') || undefined,
@@ -672,6 +807,12 @@ export default function PatientLobbyPage() {
         setCtx((prev) => ({
           ...prev,
           appointmentId: prev.appointmentId || data?.appointmentId || appointment?.id,
+          visitId:
+            prev.visitId ||
+            appointment?.visitId ||
+            appointment?.visit_id ||
+            appointment?.televisitId ||
+            appointment?.televisit_id,
           patientId:
             prev.patientId ||
             appointment?.patientId ||
@@ -733,6 +874,184 @@ export default function PatientLobbyPage() {
       mounted = false;
     };
   }, [ctx.appointmentId]);
+
+
+  // A6-R3-E2B: publish patient lobby presence and read clinician presence.
+  useEffect(() => {
+    const appointmentId =
+      String(ctx.appointmentId || '').trim();
+
+    const visitId =
+      String(ctx.visitId || '').trim();
+
+    const rawRoomId =
+      roomId.trim();
+
+    const activeRoomId =
+      visitId && rawRoomId === visitId
+        ? ''
+        : rawRoomId;
+
+    if (
+      !appointmentId &&
+      !visitId &&
+      !activeRoomId
+    ) {
+      setPresence(null);
+      setPresenceLoadState('checking');
+      return;
+    }
+
+    let cancelled = false;
+
+    const acceptSnapshot = (data: any) => {
+      if (
+        cancelled ||
+        !data ||
+        typeof data !== 'object' ||
+        data.ok === false
+      ) {
+        return false;
+      }
+
+      setPresence(data as PresenceSnapshot);
+      setPresenceLoadState('live');
+      return true;
+    };
+
+    const contextQuery = () => {
+      const query = new URLSearchParams();
+
+      if (appointmentId) {
+        query.set(
+          'appointmentId',
+          appointmentId,
+        );
+      }
+
+      if (visitId) {
+        query.set('visitId', visitId);
+      }
+
+      if (activeRoomId) {
+        query.set('roomId', activeRoomId);
+      }
+
+      return query;
+    };
+
+    const publishHeartbeat = async () => {
+      try {
+        const response = await fetch(
+          LOBBY_PRESENCE_ENDPOINT,
+          {
+            method: 'POST',
+            headers: {
+              'content-type':
+                'application/json',
+            },
+            credentials: 'same-origin',
+            cache: 'no-store',
+            body: JSON.stringify({
+              surface: 'lobby',
+              appointmentId:
+                appointmentId || undefined,
+              visitId:
+                visitId || undefined,
+              roomId:
+                activeRoomId || undefined,
+            }),
+          },
+        );
+
+        const data = await response
+          .json()
+          .catch(() => null);
+
+        if (
+          !response.ok ||
+          !acceptSnapshot(data)
+        ) {
+          throw new Error(
+            'lobby_presence_heartbeat_rejected',
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setPresenceLoadState(
+            'unavailable',
+          );
+        }
+      }
+    };
+
+    const pollSnapshot = async () => {
+      try {
+        const query = contextQuery();
+
+        const response = await fetch(
+          LOBBY_PRESENCE_ENDPOINT +
+            '?' +
+            query.toString(),
+          {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+          },
+        );
+
+        const data = await response
+          .json()
+          .catch(() => null);
+
+        if (
+          !response.ok ||
+          !acceptSnapshot(data)
+        ) {
+          throw new Error(
+            'lobby_presence_read_rejected',
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setPresenceLoadState(
+            'unavailable',
+          );
+        }
+      }
+    };
+
+    setPresenceLoadState('checking');
+
+    void publishHeartbeat();
+    void pollSnapshot();
+
+    const heartbeatTimer =
+      window.setInterval(() => {
+        void publishHeartbeat();
+      }, LOBBY_HEARTBEAT_MS);
+
+    const pollTimer =
+      window.setInterval(() => {
+        void pollSnapshot();
+      }, LOBBY_POLL_MS);
+
+    return () => {
+      cancelled = true;
+
+      window.clearInterval(
+        heartbeatTimer,
+      );
+
+      window.clearInterval(
+        pollTimer,
+      );
+    };
+  }, [
+    ctx.appointmentId,
+    ctx.visitId,
+    roomId,
+  ]);
 
   const links = useMemo(() => makeLinks(roomId, ctx), [roomId, ctx]);
 
@@ -1676,6 +1995,129 @@ export default function PatientLobbyPage() {
           </div>
 
           <div className="space-y-5">
+
+            <Card
+              title="Clinician presence"
+              subtitle="Live status shows whether your clinician is waiting here or has entered the consultation room."
+              right={
+                <Pill
+                  tone={
+                    presenceLoadState === 'live'
+                      ? 'success'
+                      : presenceLoadState ===
+                          'unavailable'
+                        ? 'warn'
+                        : 'info'
+                  }
+                >
+                  {presenceLoadLabel(
+                    presenceLoadState,
+                  )}
+                </Pill>
+              }
+            >
+              <div
+                className="grid gap-3"
+                aria-live="polite"
+              >
+                <div
+                  className={cn(
+                    'rounded-2xl border p-3',
+                    presenceRowClass(
+                      presenceLoadState ===
+                        'live' &&
+                        Boolean(
+                          presence?.clinician
+                            ?.lobby?.online,
+                        ),
+                    ),
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-xl border border-white/70 bg-white/80 p-2">
+                      <Radio className="h-4 w-4" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm font-semibold">
+                          Clinician lobby
+                        </span>
+
+                        <span className="text-xs font-semibold">
+                          {presenceStatusText(
+                            presenceLoadState,
+                            presence?.clinician
+                              ?.lobby,
+                            'Waiting in lobby',
+                            'Not in lobby',
+                          )}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 text-xs opacity-75">
+                        {presenceDetail(
+                          presenceLoadState,
+                          presence?.clinician
+                            ?.lobby,
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div
+                  className={cn(
+                    'rounded-2xl border p-3',
+                    presenceRowClass(
+                      presenceLoadState ===
+                        'live' &&
+                        Boolean(
+                          presence?.clinician
+                            ?.room?.online,
+                        ),
+                    ),
+                  )}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="rounded-xl border border-white/70 bg-white/80 p-2">
+                      <Video className="h-4 w-4" />
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-sm font-semibold">
+                          Clinician consultation room
+                        </span>
+
+                        <span className="text-xs font-semibold">
+                          {presenceStatusText(
+                            presenceLoadState,
+                            presence?.clinician
+                              ?.room,
+                            'In consultation room',
+                            'Not in room',
+                          )}
+                        </span>
+                      </div>
+
+                      <p className="mt-1 text-xs opacity-75">
+                        {presenceDetail(
+                          presenceLoadState,
+                          presence?.clinician
+                            ?.room,
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <p className="text-xs leading-5 text-slate-500">
+                  Presence updates are informative only. Device checks, privacy confirmation and consultation entry remain available if live status is temporarily unavailable.
+                </p>
+              </div>
+            </Card>
+
             <Card
               title="Join consultation"
               subtitle="Your main action appears here once the room is ready."

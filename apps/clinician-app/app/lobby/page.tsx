@@ -23,6 +23,45 @@ type LinkState = {
   patient: string;
 };
 
+type PresenceSummary = {
+  online?: boolean;
+  count?: number;
+  lastSeenAt?: string | null;
+  displayName?: string | null;
+  participantId?: string | null;
+};
+
+type PresenceSnapshot = {
+  ok?: boolean;
+  now?: number;
+  ttlMs?: number;
+  context?: {
+    appointmentId?: string | null;
+    visitId?: string | null;
+    roomId?: string | null;
+  };
+  patient?: {
+    lobby?: PresenceSummary;
+    room?: PresenceSummary;
+  };
+  clinician?: {
+    lobby?: PresenceSummary;
+    room?: PresenceSummary;
+  };
+};
+
+type PresenceLoadState =
+  | 'checking'
+  | 'live'
+  | 'unavailable';
+
+const LOBBY_PRESENCE_ENDPOINT =
+  '/api/televisit/presence';
+
+const LOBBY_HEARTBEAT_MS = 15_000;
+const LOBBY_POLL_MS = 5_000;
+
+
 function normalizeOrigin(x?: string | null) {
   const v = (x ?? '').trim();
   if (!v) return '';
@@ -85,6 +124,93 @@ function compactId(value?: string | null) {
 function displayValue(value?: string | null, fallback = 'Not supplied') {
   const text = String(value || '').trim();
   return text || fallback;
+}
+
+
+function presenceRowClass(online: boolean) {
+  return online
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+    : 'border-slate-200 bg-slate-50 text-slate-700';
+}
+
+function presenceStatusText(
+  loadState: PresenceLoadState,
+  summary: PresenceSummary | null | undefined,
+  onlineText: string,
+  offlineText: string,
+) {
+  if (loadState === 'checking') {
+    return 'Checking…';
+  }
+
+  if (loadState === 'unavailable') {
+    return 'Status unavailable';
+  }
+
+  return summary?.online
+    ? onlineText
+    : offlineText;
+}
+
+function presenceDetail(
+  loadState: PresenceLoadState,
+  summary?: PresenceSummary | null,
+) {
+  if (loadState === 'checking') {
+    return 'Waiting for the first live presence update.';
+  }
+
+  if (loadState === 'unavailable') {
+    return 'Live presence is temporarily unavailable. Consultation entry remains available.';
+  }
+
+  if (!summary?.online) {
+    return 'No active presence heartbeat is currently detected.';
+  }
+
+  const parts: string[] = [];
+
+  const displayName =
+    String(summary.displayName || '').trim();
+
+  if (displayName) {
+    parts.push(displayName);
+  }
+
+  const lastSeenAt =
+    String(summary.lastSeenAt || '').trim();
+
+  if (lastSeenAt) {
+    const seen = new Date(lastSeenAt);
+
+    if (!Number.isNaN(seen.getTime())) {
+      parts.push(
+        'Updated ' +
+          seen.toLocaleTimeString('en-ZA', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+      );
+    }
+  }
+
+  return parts.length > 0
+    ? parts.join(' · ')
+    : 'Active now';
+}
+
+function presenceLoadLabel(
+  loadState: PresenceLoadState,
+) {
+  if (loadState === 'live') {
+    return 'Live';
+  }
+
+  if (loadState === 'unavailable') {
+    return 'Unavailable';
+  }
+
+  return 'Checking';
 }
 
 function readinessClass(ok: boolean) {
@@ -176,6 +302,10 @@ export default function Lobby() {
   const [clinicianJoinUrl, setClinicianJoinUrl] = useState('');
   const [patientParticipantId, setPatientParticipantId] = useState('');
   const [copiedLabel, setCopiedLabel] = useState('');
+  const [presence, setPresence] =
+    useState<PresenceSnapshot | null>(null);
+  const [presenceLoadState, setPresenceLoadState] =
+    useState<PresenceLoadState>('checking');
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -210,6 +340,179 @@ export default function Lobby() {
     setClinicianJoinUrl(sp.get('clinicianJoinUrl') || '');
     setReady(true);
   }, []);
+
+
+  // A6-R3-E2B: publish clinician lobby presence and read patient presence.
+  useEffect(() => {
+    const appointmentId =
+      String(ctx.appointmentId || '').trim();
+
+    const visitId =
+      String(ctx.visitId || '').trim();
+
+    const activeRoomId =
+      roomId.trim();
+
+    if (
+      !appointmentId &&
+      !visitId &&
+      !activeRoomId
+    ) {
+      setPresence(null);
+      setPresenceLoadState('checking');
+      return;
+    }
+
+    let cancelled = false;
+
+    const acceptSnapshot = (data: any) => {
+      if (
+        cancelled ||
+        !data ||
+        typeof data !== 'object' ||
+        data.ok === false
+      ) {
+        return false;
+      }
+
+      setPresence(data as PresenceSnapshot);
+      setPresenceLoadState('live');
+      return true;
+    };
+
+    const contextQuery = () => {
+      const query = new URLSearchParams();
+
+      if (appointmentId) {
+        query.set(
+          'appointmentId',
+          appointmentId,
+        );
+      }
+
+      if (visitId) {
+        query.set('visitId', visitId);
+      }
+
+      if (activeRoomId) {
+        query.set('roomId', activeRoomId);
+      }
+
+      return query;
+    };
+
+    const publishHeartbeat = async () => {
+      try {
+        const response = await fetch(
+          LOBBY_PRESENCE_ENDPOINT,
+          {
+            method: 'POST',
+            headers: {
+              'content-type':
+                'application/json',
+            },
+            credentials: 'same-origin',
+            cache: 'no-store',
+            body: JSON.stringify({
+              surface: 'lobby',
+              appointmentId:
+                appointmentId || undefined,
+              visitId:
+                visitId || undefined,
+              roomId:
+                activeRoomId || undefined,
+            }),
+          },
+        );
+
+        const data = await response
+          .json()
+          .catch(() => null);
+
+        if (
+          !response.ok ||
+          !acceptSnapshot(data)
+        ) {
+          throw new Error(
+            'lobby_presence_heartbeat_rejected',
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setPresenceLoadState(
+            'unavailable',
+          );
+        }
+      }
+    };
+
+    const pollSnapshot = async () => {
+      try {
+        const query = contextQuery();
+
+        const response = await fetch(
+          LOBBY_PRESENCE_ENDPOINT +
+            '?' +
+            query.toString(),
+          {
+            method: 'GET',
+            credentials: 'same-origin',
+            cache: 'no-store',
+          },
+        );
+
+        const data = await response
+          .json()
+          .catch(() => null);
+
+        if (
+          !response.ok ||
+          !acceptSnapshot(data)
+        ) {
+          throw new Error(
+            'lobby_presence_read_rejected',
+          );
+        }
+      } catch {
+        if (!cancelled) {
+          setPresenceLoadState(
+            'unavailable',
+          );
+        }
+      }
+    };
+
+    setPresenceLoadState('checking');
+
+    void publishHeartbeat();
+    void pollSnapshot();
+
+    const heartbeatTimer =
+      window.setInterval(() => {
+        void publishHeartbeat();
+      }, LOBBY_HEARTBEAT_MS);
+
+    const pollTimer =
+      window.setInterval(() => {
+        void pollSnapshot();
+      }, LOBBY_POLL_MS);
+
+    return () => {
+      cancelled = true;
+
+      window.clearInterval(
+        heartbeatTimer,
+      );
+
+      window.clearInterval(
+        pollTimer,
+      );
+    };
+  }, [
+    ctx.appointmentId,
+    ctx.visitId,
+    roomId,
+  ]);
 
   const links = useMemo(() => {
     if (!roomId) return { clinician: '', patient: '' };
@@ -482,9 +785,99 @@ export default function Lobby() {
             <h2 className="mt-1 text-lg font-semibold">
               Enter when ready
             </h2>
+
             <p className="mt-2 text-sm text-slate-300">
-              Presence indicators are handled in the Televisit room. Lobby presence will be added in A6-R3-E.
+              Patient lobby and consultation-room presence update automatically. Presence is informative and does not prevent room entry.
             </p>
+
+            <div
+              className="mt-4 grid gap-2"
+              aria-live="polite"
+            >
+              <div className="mb-1 flex items-center justify-between gap-3">
+                <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
+                  Patient presence
+                </span>
+
+                <span className="rounded-full border border-white/15 bg-white/10 px-2.5 py-1 text-[11px] font-semibold text-white">
+                  {presenceLoadLabel(
+                    presenceLoadState,
+                  )}
+                </span>
+              </div>
+
+              <div
+                className={
+                  'rounded-2xl border px-3 py-3 ' +
+                  presenceRowClass(
+                    presenceLoadState ===
+                      'live' &&
+                      Boolean(
+                        presence?.patient?.lobby
+                          ?.online,
+                      ),
+                  )
+                }
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold">
+                    Patient lobby
+                  </span>
+
+                  <span className="text-xs font-semibold">
+                    {presenceStatusText(
+                      presenceLoadState,
+                      presence?.patient?.lobby,
+                      'In lobby',
+                      'Not in lobby',
+                    )}
+                  </span>
+                </div>
+
+                <p className="mt-1 text-xs opacity-75">
+                  {presenceDetail(
+                    presenceLoadState,
+                    presence?.patient?.lobby,
+                  )}
+                </p>
+              </div>
+
+              <div
+                className={
+                  'rounded-2xl border px-3 py-3 ' +
+                  presenceRowClass(
+                    presenceLoadState ===
+                      'live' &&
+                      Boolean(
+                        presence?.patient?.room
+                          ?.online,
+                      ),
+                  )
+                }
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-sm font-semibold">
+                    Patient consultation room
+                  </span>
+
+                  <span className="text-xs font-semibold">
+                    {presenceStatusText(
+                      presenceLoadState,
+                      presence?.patient?.room,
+                      'In consultation room',
+                      'Not in room',
+                    )}
+                  </span>
+                </div>
+
+                <p className="mt-1 text-xs opacity-75">
+                  {presenceDetail(
+                    presenceLoadState,
+                    presence?.patient?.room,
+                  )}
+                </p>
+              </div>
+            </div>
 
             <a
               href={links.clinician}
