@@ -3853,13 +3853,48 @@ model ClinicianOnboarding {
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
 
-  dispatches     ClinicianDispatch[]
-  payments       ClinicianOnboardingPayment[]
-  trainingSlot   ClinicianTrainingSlot? @relation(fields: [trainingSlotId], references: [id])
+  dispatches       ClinicianDispatch[]
+  payments         ClinicianOnboardingPayment[]
+  payLaterRequests ClinicianOnboardingPayLaterRequest[]
+  trainingSlot     ClinicianTrainingSlot? @relation(fields: [trainingSlotId], references: [id])
 
   @@index([status])
 }
 
+model ClinicianOnboardingPayLaterRequest {
+  id                  String   @id @default(cuid())
+  clinicianId         String
+  onboardingId        String
+
+  pathwayKey          String   @default("START_NOW_PAY_LATER")
+  status              String   @default("pending") // pending | approved | rejected | withdrawn | cancelled
+
+  requestReason       String?
+  requestedByUserId   String?
+  requestedAt         DateTime @default(now())
+
+  reviewedByUserId    String?
+  reviewedAt          DateTime?
+  reviewNotes         String?
+
+  // Set while the request is active and cleared when reviewed or withdrawn.
+  // The nullable unique value prevents duplicate active requests while preserving history.
+  activeRequestKey    String?  @unique
+
+  approvalPaymentId   String?
+  meta                Json?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  onboarding          ClinicianOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+
+  @@index([clinicianId, status, requestedAt])
+  @@index([onboardingId, requestedAt])
+  @@index([status, requestedAt])
+  @@index([reviewedAt])
+  @@index([approvalPaymentId])
+}
 model ClinicianOnboardingPayment {
   id                    String   @id @default(cuid())
 
