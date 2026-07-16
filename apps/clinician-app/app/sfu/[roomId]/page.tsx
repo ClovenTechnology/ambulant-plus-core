@@ -1583,6 +1583,64 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
     setRoster,
     audit, roomId, searchParams, attachRoomEvents, detachRoomEvents, checkInAndStartSession]);
 
+
+  // A6-R3-E1G: publish clinician room presence only while LiveKit is connected.
+  useEffect(() => {
+    if (state !== 'connected') return;
+
+    const visitId =
+      searchParams.get('visitId') ||
+      searchParams.get('visit') ||
+      searchParams.get('v') ||
+      roomId;
+
+    let cancelled = false;
+
+    const publishRoomPresence = async () => {
+      try {
+        const response = await fetch('/api/televisit/presence', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          credentials: 'same-origin',
+          cache: 'no-store',
+          body: JSON.stringify({
+            surface: 'room',
+            roomId,
+            visitId,
+            appointmentId: appointmentId || '',
+          }),
+        });
+
+        if (!response.ok && !cancelled) {
+          console.warn(
+            '[ClinicianSFU presence] heartbeat rejected',
+            response.status,
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn(
+            '[ClinicianSFU presence] heartbeat failed',
+            error,
+          );
+        }
+      }
+    };
+
+    void publishRoomPresence();
+
+    const timer = window.setInterval(() => {
+      void publishRoomPresence();
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [appointmentId, roomId, searchParams, state]);
+
   const leave = useCallback(async () => {
     manualLeaveRef.current = true;
     audit('room.leave', { reason: 'manual' });

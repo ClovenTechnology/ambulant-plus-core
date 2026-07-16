@@ -1054,6 +1054,81 @@ function InnerPatientSfuShell({ params }: Props) {
     }
   }, [appointmentId, roomId, search, sessionCtx.appointmentId, state, toast, wireRoomEvents, wsUrl]);
 
+
+  // A6-R3-E1G: publish patient room presence only while LiveKit is connected.
+  useEffect(() => {
+    if (state !== 'connected') return;
+
+    const visitId =
+      sessionCtx.visitId ||
+      search.get('visitId') ||
+      search.get('visit') ||
+      search.get('v') ||
+      roomId;
+
+    const participantId =
+      search.get('participantId') ||
+      search.get('personId') ||
+      '';
+
+    let cancelled = false;
+
+    const publishRoomPresence = async () => {
+      try {
+        const response = await fetch('/api/televisit/presence', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+          },
+          credentials: 'same-origin',
+          cache: 'no-store',
+          body: JSON.stringify({
+            surface: 'room',
+            roomId,
+            visitId,
+            appointmentId:
+              appointmentId ??
+              sessionCtx.appointmentId ??
+              '',
+            participantId,
+          }),
+        });
+
+        if (!response.ok && !cancelled) {
+          console.warn(
+            '[PatientSFU presence] heartbeat rejected',
+            response.status,
+          );
+        }
+      } catch (error) {
+        if (!cancelled) {
+          console.warn(
+            '[PatientSFU presence] heartbeat failed',
+            error,
+          );
+        }
+      }
+    };
+
+    void publishRoomPresence();
+
+    const timer = window.setInterval(() => {
+      void publishRoomPresence();
+    }, 15_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    appointmentId,
+    roomId,
+    search,
+    sessionCtx.appointmentId,
+    sessionCtx.visitId,
+    state,
+  ]);
+
   const leave = useCallback(async () => {
     try {
       roomCleanupRef.current?.();
