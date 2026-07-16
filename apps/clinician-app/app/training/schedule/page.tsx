@@ -909,12 +909,123 @@ function TrainingSchedulePageContent() {
     ],
   );
 
+
+  const selectedCommercialPathwayConfig =
+    useMemo(
+      () =>
+        enabledCommercialPathways.find(
+          (pathway) =>
+            pathway.key ===
+            selectedCommercialPathway,
+        ) || null,
+      [
+        enabledCommercialPathways,
+        selectedCommercialPathway,
+      ],
+    );
+
+  const selectedPathwayIsPayLater =
+    selectedCommercialPathway ===
+    'START_NOW_PAY_LATER';
+
+  const selectedPathwayChargeCents =
+    useMemo(
+      () => {
+        if (
+          !selectedCommercialPathwayConfig ||
+          selectedPathwayIsPayLater
+        ) {
+          return 0;
+        }
+
+        const fullFee = Math.max(
+          0,
+          Math.round(
+            Number(
+              pricing.trainingFeeCents ||
+                0,
+            ),
+          ),
+        );
+
+        const amountPaid = Math.max(
+          0,
+          Math.round(
+            Number(
+              pricing.amountPaidCents ||
+                ctx?.onboarding?.amountPaidCents ||
+                0,
+            ),
+          ),
+        );
+
+        const outstanding = Math.max(
+          0,
+          Math.round(
+            Number(
+              pricing.outstandingCents ??
+                ctx?.onboarding?.outstandingCents ??
+                fullFee - amountPaid,
+            ),
+          ),
+        );
+
+        if (
+          selectedCommercialPathwayConfig.key ===
+          'FULL_PAYMENT'
+        ) {
+          return outstanding;
+        }
+
+        const initialThreshold = Math.max(
+          0,
+          Math.round(
+            Number(
+              pricing.initialPaymentDueCents ??
+                pricing.minimumInitialPaymentCents ??
+                fullFee,
+            ),
+          ),
+        );
+
+        return Math.max(
+          0,
+          initialThreshold - amountPaid,
+        );
+      },
+      [
+        ctx?.onboarding?.amountPaidCents,
+        ctx?.onboarding?.outstandingCents,
+        pricing.amountPaidCents,
+        pricing.initialPaymentDueCents,
+        pricing.minimumInitialPaymentCents,
+        pricing.outstandingCents,
+        pricing.trainingFeeCents,
+        selectedCommercialPathwayConfig,
+        selectedPathwayIsPayLater,
+      ],
+    );
+
+  const selectedPathwayAmountLabel =
+    !selectedCommercialPathwayConfig
+      ? 'Select a pathway'
+      : selectedPathwayIsPayLater
+        ? 'No card payment'
+        : selectedPathwayChargeCents > 0
+          ? money(
+              selectedPathwayChargeCents,
+              pricing.currency,
+            )
+          : 'No payment currently due';
   const alreadyScheduled = ctx?.training?.status === 'scheduled';
   const alreadyCompleted =
     ctx?.training?.status === 'completed' || ctx?.onboarding?.stage === 'training_completed';
   const alreadyPaid = !!ctx?.training?.paid;
 
-  const canProceedPick = !!selectedSlot && !!mode;
+  const canProceedPick =
+    !!selectedSlot &&
+    !!mode &&
+    !!selectedCommercialPathway;
 
   async function proceedToPay() {
     setErr(null);
@@ -922,10 +1033,31 @@ function TrainingSchedulePageContent() {
     setStep('pay');
   }
 
-  async function startCardPayment() {
+  async function startCardPayment(
+    pathwayKey:
+      OnboardingPathwayKey | null,
+  ) {
     setErr(null);
     setPaymentNotice(null);
     if (!selectedSlot) return;
+
+    if (!pathwayKey) {
+      setErr(
+        'Select an onboarding pathway before continuing to payment.',
+      );
+      return;
+    }
+
+    if (
+      pathwayKey ===
+      'START_NOW_PAY_LATER'
+    ) {
+      setErr(
+        'Pay Later requires a separate Ambulant+ Admin review request and cannot be started through card checkout.',
+      );
+      return;
+    }
+
     if (!pricing.configured || pricing.trainingFeeCents <= 0) {
       setErr('Training payment settings are not configured yet. Please contact Ambulant+ support.');
       return;
@@ -947,12 +1079,24 @@ function TrainingSchedulePageContent() {
         body: JSON.stringify({
           clinicianId,
           slotId: selectedSlot.id,
+          pathwayKey,
           callbackUrl,
         }),
       });
 
       const js = await res.json().catch(() => null);
       if (!res.ok || !js?.ok) throw new Error(apiError(js, 'Payment initialisation failed.'));
+
+      if (js.paymentRequired === false) {
+        setPaymentNotice(
+          js.message ||
+            'No further payment is currently required for the selected pathway.',
+        );
+        setBusy(false);
+        await load();
+        return;
+      }
+
       if (!js.redirectUrl) throw new Error('Payment checkout URL was not returned. Please contact Ambulant+ support.');
 
       window.location.href = js.redirectUrl;
@@ -1412,7 +1556,9 @@ function TrainingSchedulePageContent() {
                     onClick={proceedToPay}
                     className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
                   >
-                    Continue to payment
+                    {selectedPathwayIsPayLater
+                      ? 'Continue to Pay Later review'
+                      : 'Continue to payment'}
                   </button>
                   <button
                     type="button"
@@ -1462,6 +1608,26 @@ function TrainingSchedulePageContent() {
                 then Admin adds courier + tracking.
               </p>
 
+              {selectedCommercialPathwayConfig ? (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950">
+                  <div className="font-semibold">
+                    Selected pathway
+                  </div>
+                  <div className="mt-1">
+                    {selectedCommercialPathwayConfig.label}
+                  </div>
+                  <div className="mt-1 text-xs text-indigo-800">
+                    {selectedCommercialPathwayConfig.description}
+                  </div>
+                </div>
+              ) : null}
+
+              {selectedPathwayIsPayLater ? (
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                  Pay Later does not create a card transaction. It requires a separate request and Ambulant+ Admin approval before training access is granted.
+                </div>
+              ) : null}
+
               <div className="rounded-xl border bg-slate-50 p-4">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
@@ -1478,8 +1644,12 @@ function TrainingSchedulePageContent() {
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-xs text-slate-600">Amount</div>
-                    <div className="text-xl font-bold text-slate-900">{feeLabel}</div>
+                    <div className="text-xs text-slate-600">
+                      Amount due for selected pathway
+                    </div>
+                    <div className="text-xl font-bold text-slate-900">
+                      {selectedPathwayAmountLabel}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -1487,12 +1657,26 @@ function TrainingSchedulePageContent() {
               <div className="flex flex-wrap gap-2">
                 <button
                   type="button"
-                  disabled={busy || !selectedSlot || pricing.cardPaymentEnabled === false || pricing.configured === false}
-                  onClick={startCardPayment}
+                  disabled={
+                    busy ||
+                    !selectedSlot ||
+                    !selectedCommercialPathway ||
+                    selectedPathwayIsPayLater ||
+                    pricing.cardPaymentEnabled === false ||
+                    pricing.configured === false
+                  }
+                  onClick={() =>
+                    startCardPayment(
+                      selectedCommercialPathway,
+                    )
+                  }
                   className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
                 >
                   {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                  Continue to Paystack checkout
+                  {selectedPathwayIsPayLater
+                    ? 'Pay Later requires Admin review'
+                    : selectedCommercialPathwayConfig?.ctaLabel ||
+                      'Continue to Paystack checkout'}
                 </button>
                 <button
                   type="button"

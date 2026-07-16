@@ -3,7 +3,11 @@ import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { getProvider } from '@/src/payments';
-import { getClinicianOnboardingSettings } from '@/src/clinicians/onboarding/settings';
+import {
+  calculateOnboardingPaymentState,
+  getClinicianOnboardingSettings,
+  type ClinicianOnboardingPathwayKey,
+} from '@/src/clinicians/onboarding/settings';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +38,83 @@ function buildCallbackUrl(req: NextRequest, clinicianId: string, slotId: string,
   return url.toString();
 }
 
+
+const CONFIRMED_PAYMENT_STATUSES = [
+  'captured',
+  'confirmed',
+  'redeemed',
+  'paid',
+];
+
+function pathwayKeyFromValue(
+  value: unknown,
+): ClinicianOnboardingPathwayKey | null {
+  const key = String(
+    value || '',
+  )
+    .trim()
+    .toUpperCase();
+
+  if (
+    key === 'START_NOW_PAY_LATER' ||
+    key === 'QUALIFYING_DEPOSIT' ||
+    key === 'FULL_PAYMENT'
+  ) {
+    return key;
+  }
+
+  return null;
+}
+
+async function confirmedOnboardingAmountCents(
+  clinicianId: string,
+) {
+  const rows =
+    await prisma.clinicianOnboardingPayment.findMany({
+      where: {
+        clinicianId,
+        status: {
+          in: CONFIRMED_PAYMENT_STATUSES as any,
+        },
+      },
+      select: {
+        amountCents: true,
+        provider: true,
+      },
+    });
+
+  return rows.reduce(
+    (sum: number, row: any) => {
+      const provider = String(
+        row?.provider || '',
+      )
+        .trim()
+        .toLowerCase();
+
+      if (
+        provider === 'waiver' ||
+        provider === 'deferred'
+      ) {
+        return sum;
+      }
+
+      const amount = Number(
+        row?.amountCents || 0,
+      );
+
+      return (
+        sum +
+        (Number.isFinite(amount)
+          ? Math.max(
+              0,
+              Math.round(amount),
+            )
+          : 0)
+      );
+    },
+    0,
+  );
+}
 export async function POST(req: NextRequest) {
   try {
     const body = (await req.json().catch(() => ({}))) as any;
@@ -53,6 +134,60 @@ export async function POST(req: NextRequest) {
     }
     if (settings.paymentProvider !== 'paystack') {
       return NextResponse.json({ ok: false, error: 'unsupported_training_payment_provider' }, { status: 409 });
+    }
+
+    const pathwayKey = pathwayKeyFromValue(
+      body.pathwayKey ||
+        body.paymentPathway ||
+        body.onboardingPathway,
+    );
+
+    if (!pathwayKey) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'pathwayKey_required',
+        },
+        { status: 400 },
+      );
+    }
+
+    const configuredPathway =
+      settings.commercialPathways.find(
+        (pathway) =>
+          pathway.key === pathwayKey,
+      );
+
+    if (
+      !configuredPathway ||
+      configuredPathway.enabled !== true
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'onboarding_pathway_disabled',
+          pathwayKey,
+        },
+        { status: 409 },
+      );
+    }
+
+    if (
+      pathwayKey ===
+      'START_NOW_PAY_LATER'
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'pay_later_requires_admin_review',
+          pathwayKey,
+          paymentRequired: false,
+          message:
+            'Pay Later cannot be initialized as a card transaction and requires a separate Admin review request.',
+        },
+        { status: 409 },
+      );
     }
 
     const clinician = await prisma.clinicianProfile.findUnique({ where: { id: clinicianId } });
@@ -76,13 +211,52 @@ export async function POST(req: NextRequest) {
     const email = cleanStr(body.email || clinician.email, 320);
     if (!email) return NextResponse.json({ ok: false, error: 'email_required_for_paystack' }, { status: 400 });
 
+    const amountPaidCents =
+      await confirmedOnboardingAmountCents(
+        clinicianId,
+      );
+
+    const paymentStateBefore =
+      calculateOnboardingPaymentState({
+        trainingFeeCents:
+          settings.trainingFeeCents,
+        minimumInitialPaymentCents:
+          settings.minimumInitialPaymentCents,
+        amountPaidCents,
+      });
+
     const chargeAmountCents =
-      settings.allowPartialPayment && settings.minimumInitialPaymentCents > 0
-        ? settings.minimumInitialPaymentCents
-        : settings.trainingFeeCents;
+      pathwayKey ===
+      'QUALIFYING_DEPOSIT'
+        ? Math.max(
+            0,
+            paymentStateBefore.minimumInitialPaymentCents -
+              paymentStateBefore.amountPaidCents,
+          )
+        : paymentStateBefore.outstandingCents;
 
     if (chargeAmountCents <= 0) {
-      return NextResponse.json({ ok: false, error: 'payment_amount_not_configured' }, { status: 409 });
+      const reason =
+        pathwayKey ===
+        'QUALIFYING_DEPOSIT'
+          ? 'initial_requirement_already_met'
+          : 'onboarding_fee_already_paid';
+
+      return NextResponse.json(
+        {
+          ok: true,
+          paymentRequired: false,
+          pathwayKey,
+          reason,
+          paymentState: paymentStateBefore,
+          message:
+            pathwayKey ===
+            'QUALIFYING_DEPOSIT'
+              ? 'The configured initial-payment requirement has already been satisfied.'
+              : 'The onboarding fee has already been paid in full.',
+        },
+        { status: 200 },
+      );
     }
 
     const provider = getProvider('paystack');
@@ -100,6 +274,7 @@ export async function POST(req: NextRequest) {
         providerReference: reference,
         meta: jsonSafe({
           source: 'clinician_training_payment_init',
+          pathwayKey,
           slotId,
           callbackUrl,
           clinicianEmail: email,
@@ -107,7 +282,9 @@ export async function POST(req: NextRequest) {
             trainingFeeCents: settings.trainingFeeCents,
             minimumInitialPaymentCents: settings.minimumInitialPaymentCents,
             allowPartialPayment: settings.allowPartialPayment,
+            amountPaidCents,
             chargeAmountCents,
+            paymentStateBefore,
             currency: settings.currency,
             paymentProvider: settings.paymentProvider,
           },
@@ -123,6 +300,7 @@ export async function POST(req: NextRequest) {
       callbackUrl,
       metadata: {
         purpose: 'clinician_training_onboarding',
+        pathwayKey,
         clinicianId,
         onboardingId: onboarding.id,
         slotId,
@@ -136,6 +314,7 @@ export async function POST(req: NextRequest) {
         providerReference: checkout.reference,
         meta: jsonSafe({
           source: 'clinician_training_payment_init',
+          pathwayKey,
           slotId,
           callbackUrl,
           clinicianEmail: email,
@@ -143,7 +322,9 @@ export async function POST(req: NextRequest) {
             trainingFeeCents: settings.trainingFeeCents,
             minimumInitialPaymentCents: settings.minimumInitialPaymentCents,
             allowPartialPayment: settings.allowPartialPayment,
+            amountPaidCents,
             chargeAmountCents,
+            paymentStateBefore,
             currency: settings.currency,
             paymentProvider: settings.paymentProvider,
           },
@@ -156,6 +337,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: true,
+        paymentRequired: true,
+        pathwayKey,
+        paymentStateBefore,
         payment: {
           id: updated.id,
           status: updated.status,

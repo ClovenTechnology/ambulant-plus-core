@@ -3,6 +3,7 @@ import { prisma } from '@/src/lib/prisma';
 import {
   calculateOnboardingPaymentState,
   getClinicianOnboardingSettings,
+  type ClinicianOnboardingPathwayKey,
 } from '@/src/clinicians/onboarding/settings';
 
 type FinaliseTrainingPaymentInput = {
@@ -31,6 +32,33 @@ function jsonSafe(value: unknown) {
   return JSON.parse(JSON.stringify(value ?? null));
 }
 
+
+function paymentPathwayFromMeta(
+  value: unknown,
+): ClinicianOnboardingPathwayKey | null {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value)
+  ) {
+    return null;
+  }
+
+  const key = String(
+    (value as any).pathwayKey || '',
+  )
+    .trim()
+    .toUpperCase();
+
+  if (
+    key === 'QUALIFYING_DEPOSIT' ||
+    key === 'FULL_PAYMENT'
+  ) {
+    return key;
+  }
+
+  return null;
+}
 function defaultDispatchItemsFromLabels(labels: string[]) {
   return labels.map((label, index) => ({
     kind: index <= 3 ? 'device' : index <= 5 ? 'paperwork' : 'merch',
@@ -122,6 +150,11 @@ export async function finaliseClinicianTrainingPayment(input: FinaliseTrainingPa
       return { status: 409, body: { ok: false, error: 'payment_clinician_mismatch' } };
     }
 
+    const paymentPathway =
+      paymentPathwayFromMeta(
+        currentPayment?.meta,
+      );
+
     const currentPaymentStatus = method === 'paystack' ? 'captured' : 'redeemed';
     const amountPaidBefore = await confirmedAmountPaidBeforeCurrentPayment(tx, clinicianId, paymentId);
     const currentAmount = currentPayment ? Math.max(0, Math.round(Number(currentPayment.amountCents || 0))) : 0;
@@ -183,6 +216,9 @@ export async function finaliseClinicianTrainingPayment(input: FinaliseTrainingPa
         `Amount paid: ${paymentState.amountPaidCents}`,
         `Outstanding: ${paymentState.outstandingCents}`,
         `Payment status: ${paymentState.paymentStatus}`,
+        paymentPathway
+          ? `Commercial pathway: ${paymentPathway}`
+          : null,
         cleanStr(input.notes, 1000),
       ]
         .filter(Boolean)
@@ -195,6 +231,10 @@ export async function finaliseClinicianTrainingPayment(input: FinaliseTrainingPa
         status: 'training_scheduled',
         trainingSlotId: slot.id,
         depositPaid: true,
+        paymentPlan:
+          paymentPathway ||
+          existingOnboarding?.paymentPlan ||
+          undefined,
         trainingNotes: note,
       },
       create: {
@@ -202,6 +242,9 @@ export async function finaliseClinicianTrainingPayment(input: FinaliseTrainingPa
         status: 'training_scheduled',
         trainingSlotId: slot.id,
         depositPaid: true,
+        paymentPlan:
+          paymentPathway ||
+          undefined,
         trainingNotes: note,
       },
     });
