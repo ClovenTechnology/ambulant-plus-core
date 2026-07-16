@@ -128,6 +128,25 @@ type TrainingContext = {
     nextPaymentAt?: string | null;
     waiverActive?: boolean | null;
   } | null;
+  payLaterRequest?: {
+    id: string;
+    pathwayKey: 'START_NOW_PAY_LATER';
+    status:
+      | 'pending'
+      | 'approved'
+      | 'rejected'
+      | 'withdrawn'
+      | 'cancelled'
+      | string;
+    requestReason?: string | null;
+    requestedAt?: string | null;
+    reviewedAt?: string | null;
+    reviewNotes?: string | null;
+    active?: boolean | null;
+    approved?: boolean | null;
+    rejected?: boolean | null;
+    canResubmit?: boolean | null;
+  } | null;
   training?: {
     status?: 'scheduled' | 'completed' | 'canceled' | string;
     startAt?: string | null;
@@ -189,6 +208,10 @@ function errorToMessage(value: unknown, fallback = 'Something went wrong. Please
     if (v === '[object Object]') return fallback;
     if (v === 'clinicianId_required') return 'We could not identify your clinician profile. Please use the training link from your signup email or sign in again.';
     if (v === 'clinician_not_found') return 'We could not find this clinician application. Please check your training link or contact Ambulant+ support.';
+    if (v === 'pay_later_pathway_disabled') return 'The Pay Later pathway is currently disabled by Ambulant+ Admin.';
+    if (v === 'pay_later_request_storage_unavailable') return 'The Pay Later request service is awaiting its database migration. Please try again after deployment.';
+    if (v === 'pay_later_not_available_after_qualifying_payment') return 'Pay Later is not available because a qualifying onboarding payment has already been recorded.';
+    if (v === 'clinician_identity_mismatch') return 'Your authenticated clinician identity does not match this onboarding record.';
     if (v.includes('DATABASE_URL') || v.toLowerCase().includes('prisma')) {
       return 'This service is temporarily unable to reach the database. Please try again shortly.';
     }
@@ -781,6 +804,7 @@ function TrainingSchedulePageContent() {
   const [step, setStep] = useState<'pick' | 'pay' | 'done'>('pick');
   const [authorisationCode, setAuthorisationCode] = useState('');
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
+  const [payLaterReason, setPayLaterReason] = useState('');
   const [
     selectedCommercialPathway,
     setSelectedCommercialPathway,
@@ -823,11 +847,26 @@ function TrainingSchedulePageContent() {
       setCtx(c);
       setSlots(s.slots || []);
 
+      const hasPayLaterState = Boolean(
+        c.payLaterRequest ||
+          c.onboarding?.waiverActive === true ||
+          c.onboarding?.paymentPlan ===
+            'WAIVER_TRAIN_NOW_PAY_LATER',
+      );
+
+      if (hasPayLaterState) {
+        setSelectedCommercialPathway(
+          'START_NOW_PAY_LATER',
+        );
+      }
+
       if (c.training?.status === 'training_completed' || c.training?.status === 'completed') {
         setStep('done');
       } else if (c.training?.status === 'scheduled' && c.training?.paid) {
         setStep('done');
       } else if (c.training?.status === 'scheduled' && !c.training?.paid) {
+        setStep('pay');
+      } else if (hasPayLaterState) {
         setStep('pay');
       } else {
         setStep('pick');
@@ -1017,6 +1056,81 @@ function TrainingSchedulePageContent() {
               pricing.currency,
             )
           : 'No payment currently due';
+
+  const payLaterRequest =
+    ctx?.payLaterRequest ||
+    null;
+
+  const payLaterStatus =
+    String(
+      payLaterRequest?.status ||
+        '',
+    )
+      .trim()
+      .toLowerCase();
+
+  const payLaterPending =
+    payLaterStatus ===
+    'pending';
+
+  const payLaterRejected =
+    payLaterStatus ===
+    'rejected';
+
+  const payLaterApproved =
+    payLaterStatus ===
+      'approved' ||
+    ctx?.onboarding?.waiverActive ===
+      true ||
+    ctx?.onboarding?.paymentPlan ===
+      'WAIVER_TRAIN_NOW_PAY_LATER' ||
+    pricing.waiverActive === true ||
+    pricing.paymentPlan ===
+      'WAIVER_TRAIN_NOW_PAY_LATER';
+
+  const payLaterCanSubmit =
+    !payLaterPending &&
+    !payLaterApproved &&
+    (
+      !payLaterRequest ||
+      payLaterRequest.canResubmit ===
+        true ||
+      [
+        'rejected',
+        'withdrawn',
+        'cancelled',
+      ].includes(
+        payLaterStatus,
+      )
+    );
+
+  const payLaterStatusTone =
+    payLaterApproved
+      ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
+      : payLaterRejected
+        ? 'border-rose-200 bg-rose-50 text-rose-950'
+        : payLaterPending
+          ? 'border-amber-200 bg-amber-50 text-amber-950'
+          : 'border-slate-200 bg-slate-50 text-slate-900';
+
+  const payLaterStatusTitle =
+    payLaterApproved
+      ? 'Pay Later approved'
+      : payLaterRejected
+        ? 'Pay Later request not approved'
+        : payLaterPending
+          ? 'Pay Later request awaiting Admin review'
+          : 'Previous Pay Later request closed';
+
+  const payLaterStatusMessage =
+    payLaterApproved
+      ? 'Ambulant+ Admin has approved your Pay Later pathway. Any training access and temporary-device arrangements remain subject to the approved onboarding terms.'
+      : payLaterRejected
+        ? 'Admin did not approve the previous request. Review the note below, then deliberately resubmit if Pay Later remains appropriate.'
+        : payLaterPending
+          ? 'Your request is recorded. Submission alone does not reserve a slot, grant training access, create a payment or dispatch a permanent C-Med Kit.'
+          : 'This request is no longer active. You may submit a new request when the pathway remains available.';
+
   const alreadyScheduled = ctx?.training?.status === 'scheduled';
   const alreadyCompleted =
     ctx?.training?.status === 'completed' || ctx?.onboarding?.stage === 'training_completed';
@@ -1033,6 +1147,110 @@ function TrainingSchedulePageContent() {
     setStep('pay');
   }
 
+
+  async function submitPayLaterRequest() {
+    setErr(null);
+    setPaymentNotice(null);
+
+    if (
+      selectedCommercialPathway !==
+      'START_NOW_PAY_LATER'
+    ) {
+      setErr(
+        'Select Start Now — Pay Later before submitting a request.',
+      );
+      return;
+    }
+
+    if (!selectedSlot) {
+      setErr(
+        'Select your preferred training slot before submitting a Pay Later request.',
+      );
+      return;
+    }
+
+    if (payLaterPending) {
+      setPaymentNotice(
+        'Your Pay Later request is already awaiting Ambulant+ Admin review.',
+      );
+      return;
+    }
+
+    if (payLaterApproved) {
+      setPaymentNotice(
+        'Your Pay Later pathway has already been approved.',
+      );
+      return;
+    }
+
+    if (!payLaterCanSubmit) {
+      setErr(
+        'A new Pay Later request cannot currently be submitted. Please contact Ambulant+ support.',
+      );
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const res =
+        await fetch(
+          '/api/training/pay-later/request',
+          {
+            method: 'POST',
+            headers: {
+              'content-type':
+                'application/json',
+            },
+            body:
+              JSON.stringify({
+                clinicianId,
+                pathwayKey:
+                  'START_NOW_PAY_LATER',
+                requestReason:
+                  payLaterReason.trim() ||
+                  undefined,
+                slotId:
+                  selectedSlot.id,
+                trainingMode: mode,
+              }),
+          },
+        );
+
+      const js =
+        await res.json().catch(
+          () => null,
+        );
+
+      if (!res.ok || !js?.ok) {
+        throw new Error(
+          apiError(
+            js,
+            'Unable to submit your Pay Later request.',
+          ),
+        );
+      }
+
+      setPayLaterReason('');
+
+      setPaymentNotice(
+        js.message ||
+          'Your Pay Later request has been submitted for Ambulant+ Admin review.',
+      );
+
+      await load();
+      setStep('pay');
+    } catch (e: any) {
+      setErr(
+        errorToMessage(
+          e,
+          'Unable to submit your Pay Later request.',
+        ),
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
   async function startCardPayment(
     pathwayKey:
       OnboardingPathwayKey | null,
@@ -1249,7 +1467,7 @@ function TrainingSchedulePageContent() {
             <div className="space-y-1">
               <h1 className="text-2xl font-bold text-slate-900">Mandatory Clinician Training</h1>
               <p className="text-sm text-slate-600">
-                Book your onboarding session, complete payment, then we prepare your starter kit dispatch.
+                Book your onboarding session, confirm your selected commercial pathway, then complete the applicable payment or Admin-review step.
               </p>
               {ctx?.clinician?.name || ctx?.clinician?.email ? (
                 <div className="mt-2 text-xs text-slate-600">
@@ -1269,7 +1487,11 @@ function TrainingSchedulePageContent() {
               />
               <StepPill
                 icon={<CreditCard className="h-4 w-4" />}
-                label="2) Pay"
+                label={
+                  selectedPathwayIsPayLater
+                    ? '2) Request review'
+                    : '2) Pay'
+                }
                 active={step === 'pay'}
                 done={step === 'done'}
               />
@@ -1291,7 +1513,7 @@ function TrainingSchedulePageContent() {
             <InfoCard
               icon={<Truck className="h-5 w-5" />}
               title="Starter kit dispatch"
-              text="After payment, we create your dispatch and Admin will add courier + tracking. You'll be notified automatically."
+              text="Permanent C-Med Kit dispatch follows the applicable qualifying payment rule. An approved Pay Later pathway may permit training access but does not itself release the permanent kit."
             />
             <InfoCard
               icon={<CheckCircle2 className="h-5 w-5" />}
@@ -1317,6 +1539,84 @@ function TrainingSchedulePageContent() {
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
             {paymentNotice}
           </div>
+        ) : null}
+
+        {
+          ctx &&
+          (
+            payLaterRequest ||
+            payLaterApproved
+          )
+            ? (
+          <section
+            className={`rounded-2xl border p-5 shadow-sm ${payLaterStatusTone}`}
+            aria-live="polite"
+          >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <div className="flex items-center gap-2 text-sm font-black">
+                  <ShieldCheck className="h-4 w-4" />
+                  Pay Later request status
+                </div>
+
+                <h2 className="mt-2 text-lg font-black">
+                  {payLaterStatusTitle}
+                </h2>
+
+                <p className="mt-1 max-w-3xl text-sm leading-relaxed">
+                  {payLaterStatusMessage}
+                </p>
+              </div>
+
+              <div className="rounded-xl border border-current/20 bg-white/60 px-3 py-2 text-xs font-bold uppercase tracking-wide">
+                {payLaterApproved
+                  ? 'Approved'
+                  : payLaterRejected
+                    ? 'Rejected'
+                    : payLaterPending
+                      ? 'Pending review'
+                      : 'Closed'}
+              </div>
+            </div>
+
+            {payLaterRequest ? (
+              <div className="mt-4 grid gap-2 rounded-xl border border-current/15 bg-white/60 p-3 text-xs sm:grid-cols-2">
+                {payLaterRequest.requestedAt ? (
+                  <div>
+                    <span className="font-semibold">Submitted:</span>{' '}
+                    {fmt(payLaterRequest.requestedAt)}
+                  </div>
+                ) : null}
+
+                {payLaterRequest.reviewedAt ? (
+                  <div>
+                    <span className="font-semibold">Reviewed:</span>{' '}
+                    {fmt(payLaterRequest.reviewedAt)}
+                  </div>
+                ) : null}
+
+                {payLaterRequest.requestReason ? (
+                  <div className="sm:col-span-2">
+                    <span className="font-semibold">Your reason:</span>{' '}
+                    {payLaterRequest.requestReason}
+                  </div>
+                ) : null}
+
+                {payLaterRequest.reviewNotes ? (
+                  <div className="sm:col-span-2 rounded-lg border border-current/15 bg-white p-3">
+                    <span className="font-semibold">Admin review note:</span>{' '}
+                    {payLaterRequest.reviewNotes}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {payLaterRejected ? (
+              <p className="mt-3 text-xs font-medium">
+                Select Start Now — Pay Later and continue to the review step to submit a new request.
+              </p>
+            ) : null}
+          </section>
         ) : null}
 
         {!ctx ? (
@@ -1575,7 +1875,9 @@ function TrainingSchedulePageContent() {
             <div className="md:col-span-2 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
               <h2 className="text-lg font-semibold text-slate-900">What you'll receive</h2>
               <p className="text-sm text-slate-600">
-                After payment, your starter kit dispatch is created. Admin will assign courier + tracking and you'll be notified automatically.
+                {selectedPathwayIsPayLater
+                  ? 'After Admin approval, you may proceed under the approved Pay Later terms. Permanent C-Med Kit release still requires the applicable qualifying payment.'
+                  : 'After qualifying payment, your starter kit dispatch is created. Admin will assign courier and tracking, and you will be notified automatically.'}
               </p>
 
               <div className="rounded-xl border bg-slate-50 p-4">
@@ -1602,10 +1904,19 @@ function TrainingSchedulePageContent() {
         {ctx && step === 'pay' && !alreadyPaid && !alreadyCompleted ? (
           <section className="grid gap-6 md:grid-cols-5">
             <div className="md:col-span-3 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">Payment</h2>
+              <h2 className="text-lg font-semibold text-slate-900">
+                {selectedPathwayIsPayLater
+                  ? 'Pay Later request'
+                  : 'Payment'}
+              </h2>
               <p className="text-sm text-slate-600">
-                Pay to confirm your training booking. Immediately after payment we create your dispatch as <span className="font-medium">pending</span>,
-                then Admin adds courier + tracking.
+                {selectedPathwayIsPayLater ? (
+                  'Submit your preferred slot and optional supporting context for Ambulant+ Admin review. Submission does not itself confirm the slot or grant training access.'
+                ) : (
+                  <>
+                    Pay to confirm your training booking. Immediately after payment we create your dispatch as <span className="font-medium">pending</span>, then Admin adds courier and tracking.
+                  </>
+                )}
               </p>
 
               {selectedCommercialPathwayConfig ? (
@@ -1625,6 +1936,73 @@ function TrainingSchedulePageContent() {
               {selectedPathwayIsPayLater ? (
                 <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
                   Pay Later does not create a card transaction. It requires a separate request and Ambulant+ Admin approval before training access is granted.
+                </div>
+              ) : null}
+
+              {selectedPathwayIsPayLater ? (
+                <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+                  <div>
+                    <div className="text-sm font-black text-slate-950">
+                      Confirm your Pay Later request
+                    </div>
+
+                    <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                      Submitting this request does not reserve the selected slot, grant training access, create a payment or dispatch a permanent C-Med Kit. Ambulant+ Admin must review and approve it first.
+                    </p>
+                  </div>
+
+                  {(payLaterRequest || payLaterApproved) ? (
+                    <div className={`rounded-lg border p-3 text-xs ${payLaterStatusTone}`}>
+                      <div className="font-black">
+                        {payLaterStatusTitle}
+                      </div>
+
+                      <div className="mt-1 leading-relaxed">
+                        {payLaterStatusMessage}
+                      </div>
+
+                      {payLaterRequest?.reviewNotes ? (
+                        <div className="mt-2 rounded-md border border-current/15 bg-white/70 p-2">
+                          Admin note: {payLaterRequest.reviewNotes}
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
+
+                  <div>
+                    <label
+                      htmlFor="payLaterReason"
+                      className="text-xs font-semibold text-slate-700"
+                    >
+                      Reason or supporting context
+                      <span className="ml-1 font-normal text-slate-500">
+                        Optional
+                      </span>
+                    </label>
+
+                    <textarea
+                      id="payLaterReason"
+                      value={payLaterReason}
+                      onChange={(event) =>
+                        setPayLaterReason(
+                          event.target.value,
+                        )
+                      }
+                      maxLength={2000}
+                      rows={4}
+                      disabled={
+                        busy ||
+                        payLaterPending ||
+                        payLaterApproved
+                      }
+                      placeholder="Optional: tell Ambulant+ Admin why you are requesting the Pay Later pathway."
+                      className="mt-2 w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none focus:border-indigo-400 disabled:bg-slate-100 disabled:text-slate-500"
+                    />
+
+                    <div className="mt-1 text-right text-[11px] text-slate-500">
+                      {payLaterReason.length}/2000
+                    </div>
+                  </div>
                 </div>
               ) : null}
 
@@ -1655,7 +2033,38 @@ function TrainingSchedulePageContent() {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <button
+                {selectedPathwayIsPayLater ? (
+                  <button
+                    type="button"
+                    disabled={
+                      busy ||
+                      !selectedSlot ||
+                      payLaterPending ||
+                      payLaterApproved ||
+                      !payLaterCanSubmit
+                    }
+                    onClick={
+                      submitPayLaterRequest
+                    }
+                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="h-4 w-4" />
+                    )}
+
+                    {busy
+                      ? 'Submitting request...'
+                      : payLaterPending
+                        ? 'Awaiting Admin review'
+                        : payLaterApproved
+                          ? 'Pay Later approved'
+                          : payLaterRejected
+                            ? 'Resubmit Pay Later request'
+                            : 'Submit Pay Later request'}
+                  </button>
+                ) : (                <button
                   type="button"
                   disabled={
                     busy ||
@@ -1678,6 +2087,7 @@ function TrainingSchedulePageContent() {
                     : selectedCommercialPathwayConfig?.ctaLabel ||
                       'Continue to Paystack checkout'}
                 </button>
+                )}
                 <button
                   type="button"
                   disabled={busy}
@@ -1726,11 +2136,23 @@ function TrainingSchedulePageContent() {
             <div className="md:col-span-2 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
               <h2 className="text-lg font-semibold text-slate-900">Next steps</h2>
               <ol className="space-y-2 text-sm text-slate-700 list-decimal pl-5">
-                <li>Payment or a valid admin authorisation code confirms your slot.</li>
-                <li>Dispatch is created (pending).</li>
-                <li>Admin assigns courier + tracking on the onboarding board.</li>
-                <li>You get email/SMS with tracking and starter kit contents.</li>
-                <li>After training completion + admin certification, you become visible to patients.</li>
+                {selectedPathwayIsPayLater ? (
+                  <>
+                    <li>Submit the Pay Later request deliberately.</li>
+                    <li>Ambulant+ Admin reviews and either approves or rejects it.</li>
+                    <li>Pending status does not reserve the slot or grant training access.</li>
+                    <li>Approved Pay Later may permit training and temporary-device arrangements under the approved terms.</li>
+                    <li>The permanent C-Med Kit and platform-wide PI remain subject to the applicable qualifying-payment and policy conditions.</li>
+                  </>
+                ) : (
+                  <>
+                    <li>Payment or a valid Admin authorisation code confirms your slot.</li>
+                    <li>Dispatch is created as pending where the selected paid pathway permits it.</li>
+                    <li>Admin assigns courier and tracking on the onboarding board.</li>
+                    <li>You receive the applicable tracking and starter-kit information.</li>
+                    <li>After training completion and Admin certification, you become visible to patients.</li>
+                  </>
+                )}
               </ol>
             </div>
           </section>
