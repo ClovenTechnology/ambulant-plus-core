@@ -50,15 +50,6 @@ function parseMs(value?: string | null) {
   const ms = new Date(value).getTime();
   return Number.isFinite(ms) ? ms : 0;
 }
-
-function sameDay(a: Date, b: Date) {
-  return (
-    a.getFullYear() === b.getFullYear() &&
-    a.getMonth() === b.getMonth() &&
-    a.getDate() === b.getDate()
-  );
-}
-
 function getJoinState({
   startISO,
   endISO,
@@ -99,15 +90,6 @@ function getJoinState({
 
   const now = new Date();
   const nowMs = now.getTime();
-
-  if (!sameDay(new Date(startMs), now)) {
-    return {
-      joinable: false,
-      label: 'Not today',
-      targetRoom: '',
-      title: 'This appointment is not scheduled for today.',
-    };
-  }
 
   const targetRoom = roomId || apptId || quickHash(startISO);
   const opensAtMs = startMs - EARLY_JOIN_MS;
