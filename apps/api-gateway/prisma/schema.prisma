@@ -732,11 +732,14 @@ model TelevisitConsent {
   locale         String?
   ipHash         String?       @db.VarChar(128)
   userAgent      String?
+  legalDocumentVersionId String?
   orgId          String        @default("org-default")
   visit          Televisit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  legalDocumentVersion LegalDocumentVersion? @relation(fields: [legalDocumentVersionId], references: [id], onDelete: SetNull)
 
   @@unique([visitId, uid, role, consentVersion])
   @@index([visitId, uid, role])
+  @@index([legalDocumentVersionId])
   @@index([orgId])
 }
 
@@ -7891,5 +7894,180 @@ model OpsVendorPayout {
   @@index([paystackTransferCode])
   @@index([scheduledAt])
   @@index([paidAt])
+}
+
+enum LegalDocumentStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum LegalDocumentVersionStatus {
+  DRAFT
+  IN_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  SUPERSEDED
+  RETIRED
+}
+
+enum LegalAcknowledgementMode {
+  NONE
+  NOTICE
+  REQUIRED
+  NON_BLOCKING
+}
+
+enum LegalAcknowledgementAction {
+  ACCEPTED
+  DECLINED
+  WITHDRAWN
+}
+
+enum LegalPublicationEventType {
+  DOCUMENT_CREATED
+  DOCUMENT_UPDATED
+  VERSION_CREATED
+  VERSION_UPDATED
+  SUBMITTED
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  SUPERSEDED
+  RETIRED
+  ACKNOWLEDGED
+}
+
+model LegalDocument {
+  id                        String                       @id @default(cuid())
+  orgId                     String                       @default("org-default")
+  key                       String
+  title                     String
+  category                  String
+  ownerDepartment           String                       @default("legal")
+  status                    LegalDocumentStatus          @default(ACTIVE)
+  acknowledgementMode       LegalAcknowledgementMode     @default(NONE)
+  audiences                 Json
+  applications              Json
+  surfaces                  Json?
+  currentPublishedVersionId String?                      @unique
+  metadata                  Json?
+  createdByUserId           String?
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
+
+  versions                  LegalDocumentVersion[]       @relation("LegalDocumentVersions")
+  currentPublishedVersion   LegalDocumentVersion?        @relation("CurrentPublishedLegalVersion", fields: [currentPublishedVersionId], references: [id], onDelete: SetNull)
+  publicationEvents         LegalPublicationEvent[]
+
+  @@unique([orgId, key])
+  @@index([orgId, status])
+  @@index([category])
+  @@index([ownerDepartment])
+}
+
+model LegalDocumentVersion {
+  id                       String                       @id @default(cuid())
+  orgId                    String                       @default("org-default")
+  documentId               String
+  versionNumber            Int
+  versionLabel             String?
+  locale                   String                       @default("en-ZA")
+  contentFormat            String                       @default("markdown")
+  content                  String
+  renderedHtml             String?
+  checksum                 String                       @db.VarChar(128)
+  status                   LegalDocumentVersionStatus   @default(DRAFT)
+  changeSummary            String?
+  authorUserId             String?
+  submittedByUserId        String?
+  submittedAt              DateTime?
+  approvedByUserId         String?
+  approvedAt               DateTime?
+  scheduledByUserId        String?
+  scheduledAt              DateTime?
+  effectiveAt              DateTime?
+  publishedByUserId        String?
+  publishedAt              DateTime?
+  supersededByUserId       String?
+  supersededAt             DateTime?
+  supersededByVersionId    String?
+  retiredByUserId          String?
+  retiredAt                DateTime?
+  retirementReason         String?
+  metadata                 Json?
+  createdAt                DateTime                     @default(now())
+  updatedAt                DateTime                     @updatedAt
+
+  document                 LegalDocument                @relation("LegalDocumentVersions", fields: [documentId], references: [id], onDelete: Restrict)
+  currentForDocuments      LegalDocument[]              @relation("CurrentPublishedLegalVersion")
+  supersededByVersion      LegalDocumentVersion?        @relation("LegalVersionSupersession", fields: [supersededByVersionId], references: [id], onDelete: SetNull)
+  supersedesVersions       LegalDocumentVersion[]       @relation("LegalVersionSupersession")
+  acknowledgements         LegalAcknowledgement[]
+  publicationEvents        LegalPublicationEvent[]
+  televisitConsents        TelevisitConsent[]
+
+  @@unique([documentId, versionNumber])
+  @@unique([documentId, checksum])
+  @@index([orgId, status])
+  @@index([documentId, status])
+  @@index([scheduledAt])
+  @@index([effectiveAt])
+  @@index([publishedAt])
+  @@index([supersededByVersionId])
+}
+
+model LegalAcknowledgement {
+  id                       String                       @id @default(cuid())
+  orgId                    String                       @default("org-default")
+  legalDocumentVersionId   String
+  documentKeySnapshot      String
+  versionLabelSnapshot     String?
+  checksumSnapshot         String                       @db.VarChar(128)
+  subjectType              String                       @db.VarChar(80)
+  subjectUserId            String?
+  subjectId                String?
+  application              String                       @db.VarChar(120)
+  surface                  String?                      @db.VarChar(160)
+  action                   LegalAcknowledgementAction   @default(ACCEPTED)
+  acknowledgedAt           DateTime                     @default(now())
+  locale                   String?
+  ipHash                   String?                      @db.VarChar(128)
+  userAgent                String?
+  evidence                 Json?
+  idempotencyKey           String?                      @unique
+  createdAt                DateTime                     @default(now())
+
+  legalDocumentVersion     LegalDocumentVersion         @relation(fields: [legalDocumentVersionId], references: [id], onDelete: Restrict)
+
+  @@index([orgId, acknowledgedAt])
+  @@index([legalDocumentVersionId, acknowledgedAt])
+  @@index([subjectUserId, acknowledgedAt])
+  @@index([subjectType, subjectId, acknowledgedAt])
+  @@index([application, acknowledgedAt])
+}
+
+model LegalPublicationEvent {
+  id                       String                       @id @default(cuid())
+  orgId                    String                       @default("org-default")
+  documentId               String
+  versionId                String?
+  eventType                LegalPublicationEventType
+  actorUserId              String?
+  actorRole                String?
+  fromStatus               LegalDocumentVersionStatus?
+  toStatus                 LegalDocumentVersionStatus?
+  reason                   String?
+  metadata                 Json?
+  createdAt                DateTime                     @default(now())
+
+  document                 LegalDocument                @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  version                  LegalDocumentVersion?        @relation(fields: [versionId], references: [id], onDelete: Restrict)
+
+  @@index([orgId, createdAt])
+  @@index([documentId, createdAt])
+  @@index([versionId, createdAt])
+  @@index([eventType, createdAt])
+  @@index([actorUserId, createdAt])
 }
 
