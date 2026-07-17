@@ -16,6 +16,9 @@ type OrderRow = {
   details?: string;
   priceZAR?: number;
   status?: 'pending' | 'in-progress' | 'done' | 'failed';
+  site?: string;
+  dispatchedAt?: string;
+  deliveredAt?: string;
 };
 
 type StatusFilter = 'all' | 'pending' | 'in-progress' | 'done' | 'failed';
@@ -23,45 +26,49 @@ type StatusFilter = 'all' | 'pending' | 'in-progress' | 'done' | 'failed';
 export default function CarePortDashboard() {
   const [rows, setRows] = useState<OrderRow[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [warnings, setWarnings] = useState<string[]>([]);
+  const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   async function load() {
     setLoading(true);
     setErr(null);
+    setWarnings([]);
+
     try {
-      const r = await fetch('/api/orders/index?scope=all', { cache: 'no-store' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const json = await r.json();
-      setRows(Array.isArray(json) ? json : []);
-    } catch (e: any) {
-      setRows([
-        {
-          id: 'rx-10021',
-          kind: 'pharmacy',
-          encounterId: 'enc-za-001',
-          sessionId: 'sess-01',
-          caseId: 'case-01',
-          createdAt: new Date(Date.now() - 1000 * 60 * 60 * 26).toISOString(),
-          title: 'Atorvastatin 20mg',
-          details: '1 tab nightly × 30',
-          priceZAR: 189.99,
-          status: 'done',
-        },
-        {
-          id: 'rx-10022',
-          kind: 'pharmacy',
-          encounterId: 'enc-za-003',
-          sessionId: 'sess-12',
-          caseId: 'case-05',
-          createdAt: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
-          title: 'Amlodipine 5mg',
-          details: '1 tab daily × 30',
-          priceZAR: 142.5,
-          status: 'in-progress',
-        },
-      ]);
-      setErr(e?.message || 'Fell back to demo data');
+      const response = await fetch('/api/orders/index?scope=all', {
+        cache: 'no-store',
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error || 'CarePort request failed with HTTP ' + response.status,
+        );
+      }
+
+      const nextRows = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.rows)
+          ? payload.rows
+          : [];
+
+      const nextWarnings = Array.isArray(payload?.warnings)
+        ? payload.warnings
+            .map((warning: unknown) => String(warning || '').trim())
+            .filter(Boolean)
+        : [];
+
+      setRows(nextRows);
+      setWarnings(nextWarnings);
+    } catch (error: any) {
+      setRows([]);
+      setWarnings([]);
+      setErr(
+        error?.message ||
+          'Live CarePort orders could not be loaded. Please retry.',
+      );
     } finally {
       setLoading(false);
     }
@@ -80,6 +87,66 @@ export default function CarePortDashboard() {
     if (statusFilter === 'all') return pharm;
     return pharm.filter((r) => (r.status ?? 'pending') === statusFilter);
   }, [pharm, statusFilter]);
+
+  const carePortKpis = useMemo(() => {
+    const now = Date.now();
+    const last24Hours = now - 24 * 60 * 60 * 1000;
+
+    const recentOrders = pharm.filter((row) => {
+      if (!row.createdAt) return false;
+
+      const timestamp = new Date(row.createdAt).getTime();
+
+      return (
+        Number.isFinite(timestamp) &&
+        timestamp >= last24Hours &&
+        timestamp <= now
+      );
+    });
+
+    const completedRecent = recentOrders.filter(
+      (row) => row.status === 'done',
+    ).length;
+
+    const tatHours = pharm
+      .map((row) => {
+        if (!row.createdAt) return null;
+
+        const completedAt = row.deliveredAt || row.dispatchedAt;
+
+        if (!completedAt) return null;
+
+        const started = new Date(row.createdAt).getTime();
+        const completed = new Date(completedAt).getTime();
+
+        if (
+          !Number.isFinite(started) ||
+          !Number.isFinite(completed) ||
+          completed < started
+        ) {
+          return null;
+        }
+
+        return (completed - started) / 36e5;
+      })
+      .filter((value): value is number => value !== null);
+
+    return {
+      fulfillment24h:
+        recentOrders.length > 0
+          ? Math.round((completedRecent / recentOrders.length) * 100)
+          : null,
+      avgTatHours:
+        tatHours.length > 0
+          ? Math.round(
+              (tatHours.reduce((sum, value) => sum + value, 0) /
+                tatHours.length) *
+                10,
+            ) / 10
+          : null,
+      failedOrders: pharm.filter((row) => row.status === 'failed').length,
+    };
+  }, [pharm]);
 
   const timeline: TimelineItem[] = filtered.map((r) => ({
     id: r.id,
@@ -159,9 +226,29 @@ export default function CarePortDashboard() {
         </div>
       </header>
 
+      {warnings.map((warning) => (
+        <div
+          key={warning}
+          className="rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800"
+        >
+          {warning}
+        </div>
+      ))}
+
       {err ? (
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded">
-          {err}
+        <div className="flex flex-col gap-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="font-medium">Live CarePort orders unavailable</div>
+            <div className="mt-1 text-xs">{err}</div>
+          </div>
+
+          <button
+            type="button"
+            onClick={load}
+            className="self-start rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-red-100 sm:self-auto"
+          >
+            Retry
+          </button>
         </div>
       ) : null}
 
@@ -171,23 +258,35 @@ export default function CarePortDashboard() {
         <div className="lg:col-span-1 space-y-3">
           <div className="border rounded-lg p-4 bg-white">
             <div className="text-xs text-gray-500">Fulfillment (24h)</div>
-            <div className="text-2xl font-semibold">92%</div>
+            <div className="text-2xl font-semibold">
+              {carePortKpis.fulfillment24h == null
+                ? '—'
+                : carePortKpis.fulfillment24h + '%'}
+            </div>
             <div className="text-xs text-gray-400 mt-1">
-              Jobs completed vs dispatched in the last 24h.
+              Completed pharmacy orders created during the last 24 hours.
             </div>
           </div>
           <div className="border rounded-lg p-4 bg-white">
-            <div className="text-xs text-gray-500">Avg. TAT</div>
-            <div className="text-2xl font-semibold">3h 20m</div>
+            <div className="text-xs text-gray-500">Avg. recorded TAT</div>
+            <div className="text-2xl font-semibold">
+              {carePortKpis.avgTatHours == null
+                ? '—'
+                : carePortKpis.avgTatHours.toLocaleString('en-ZA', {
+                    maximumFractionDigits: 1,
+                  }) + 'h'}
+            </div>
             <div className="text-xs text-gray-400 mt-1">
-              From eRx created to delivery marked as complete.
+              Based only on orders with a recorded dispatch or delivery time.
             </div>
           </div>
           <div className="border rounded-lg p-4 bg-white">
-            <div className="text-xs text-gray-500">Open Issues</div>
-            <div className="text-2xl font-semibold">4</div>
+            <div className="text-xs text-gray-500">Failed orders</div>
+            <div className="text-2xl font-semibold">
+              {carePortKpis.failedOrders.toLocaleString('en-ZA')}
+            </div>
             <div className="text-xs text-gray-400 mt-1">
-              Orders stuck in exception / manual review.
+              Live pharmacy orders currently classified as failed.
             </div>
           </div>
 
@@ -231,7 +330,11 @@ export default function CarePortDashboard() {
             <div className="text-sm text-gray-500 mt-1">Loading…</div>
           ) : filtered.length === 0 ? (
             <div className="text-sm text-gray-500 mt-1">
-              No pharmacy orders in this view. Try clearing filters or refresh.
+              {err
+                ? 'CarePort orders are unavailable until the live request succeeds.'
+                : pharm.length === 0
+                  ? 'No CarePort pharmacy orders have been recorded yet.'
+                  : 'No pharmacy orders match the selected status filter.'}
             </div>
           ) : (
             <Timeline items={timeline} />

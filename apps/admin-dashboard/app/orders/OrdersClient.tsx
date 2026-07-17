@@ -1,4 +1,4 @@
-﻿//apps/admin-dashboard/app/orders/page.tsx
+//apps/admin-dashboard/app/orders/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
@@ -50,7 +50,7 @@ function Sparkline({ values }: { values: number[] }) {
         strokeWidth="2"
         points={pts}
       />
-      <title>Orders per time bucket (mock trend – real series later)</title>
+      <title>Order counts by day over the last 12 days</title>
     </svg>
   );
 }
@@ -121,8 +121,9 @@ export default function OrdersMerged() {
   const analyticsHref = qs ? `/orders/analytics?${qs}` : '/orders/analytics';
 
   const [rows, setRows] = useState<Row[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [warnings, setWarnings] = useState<string[]>([]);
 
   // filters – initial state hydrated from query params
   const [status, setStatus] = useState<StatusFilter>(
@@ -166,41 +167,39 @@ export default function OrdersMerged() {
   const load = async () => {
     setLoading(true);
     setErr(null);
+    setWarnings([]);
+
     try {
-      const r = await fetch('/api/orders/index?scope=all', { cache: 'no-store' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const j = await r.json();
-      setRows(Array.isArray(j) ? j : []);
-    } catch (e: any) {
-      // demo fallback so the page is still useful
-      setRows([
-        {
-          id: 'rx-10021',
-          kind: 'pharmacy',
-          encounterId: 'enc-za-001',
-          sessionId: 'sess-01',
-          caseId: 'case-01',
-          createdAt: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
-          title: 'Amlodipine 5mg',
-          details: '1 tab daily × 30',
-          priceZAR: 142.5,
-          status: 'done',
-        },
-        {
-          id: 'lab-33222',
-          kind: 'lab',
-          encounterId: 'enc-za-004',
-          sessionId: 'sess-05',
-          caseId: 'case-12',
-          createdAt: new Date(Date.now() - 1000 * 60 * 35).toISOString(),
-          title: 'HbA1c',
-          details: 'Glycated hemoglobin',
-          priceZAR: 180,
-          status: 'in-progress',
-          site: 'Ambulant Labs — Cape Town',
-        },
-      ]);
-      setErr(e?.message || 'Fell back to demo data.');
+      const response = await fetch('/api/orders/index?scope=all', {
+        cache: 'no-store',
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(
+          payload?.error || 'Orders request failed with HTTP ' + response.status,
+        );
+      }
+
+      const nextRows = Array.isArray(payload)
+        ? payload
+        : Array.isArray(payload?.rows)
+          ? payload.rows
+          : [];
+
+      const nextWarnings = Array.isArray(payload?.warnings)
+        ? payload.warnings
+            .map((warning: unknown) => String(warning || '').trim())
+            .filter(Boolean)
+        : [];
+
+      setRows(nextRows);
+      setWarnings(nextWarnings);
+    } catch (error: any) {
+      setRows([]);
+      setWarnings([]);
+      setErr(error?.message || 'Live orders could not be loaded. Please retry.');
     } finally {
       setLoading(false);
     }
@@ -250,11 +249,30 @@ export default function OrdersMerged() {
   }, [filtered]);
 
   const sparkVals = useMemo(() => {
-    // simple mock trend for now
-    return Array.from({ length: 12 }, (_, i) =>
-      Math.round(20 + Math.sin(i / 2) * 10 + Math.random() * 10),
-    );
-  }, [rows.length]);
+    const bucketCount = 12;
+    const bucketMilliseconds = 24 * 60 * 60 * 1000;
+    const now = Date.now();
+    const values = Array.from({ length: bucketCount }, () => 0);
+
+    filtered.forEach((row) => {
+      if (!row.createdAt) return;
+
+      const timestamp = new Date(row.createdAt).getTime();
+      if (!Number.isFinite(timestamp)) return;
+
+      const age = now - timestamp;
+      if (age < 0 || age >= bucketCount * bucketMilliseconds) return;
+
+      const bucket =
+        bucketCount - 1 - Math.floor(age / bucketMilliseconds);
+
+      if (bucket >= 0 && bucket < bucketCount) {
+        values[bucket] += 1;
+      }
+    });
+
+    return values;
+  }, [filtered]);
 
   const completionPct = kpis.total
     ? Math.round((kpis.done / kpis.total) * 100)
@@ -299,7 +317,7 @@ export default function OrdersMerged() {
           <div className="text-xs text-gray-500">Total Orders</div>
           <div className="text-2xl font-semibold">{kpis.total}</div>
           <div className="mt-2 text-gray-700">
-            <Tooltip label="Relative trend of orders over recent periods (mocked until backend exposes a proper series).">
+            <Tooltip label="Daily order counts from live records over the last 12 days.">
               <span>
                 <Sparkline values={sparkVals} />
               </span>
@@ -341,19 +359,23 @@ export default function OrdersMerged() {
           </div>
         </div>
         <div className="rounded-2xl border bg-white p-4">
-          <div className="text-xs text-gray-500">Est. Revenue</div>
+          <div className="text-xs text-gray-500">Order value</div>
           <div className="text-2xl font-semibold">
-            R {kpis.rev.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+            R {kpis.rev.toLocaleString('en-ZA', { maximumFractionDigits: 0 })}
           </div>
           <div className="text-[11px] text-gray-500 mt-1">
-            Sum of listed order prices
+            Known priced orders only
           </div>
         </div>
         <div className="rounded-2xl border bg-white p-4">
-          <div className="text-xs text-gray-500">Quality</div>
-          <div className="text-2xl font-semibold">OK</div>
+          <div className="text-xs text-gray-500">Data source</div>
+          <div className="text-2xl font-semibold">
+            {warnings.length ? 'Partial' : 'Live'}
+          </div>
           <div className="text-[11px] text-gray-500 mt-1">
-            No critical incidents reported
+            {warnings.length
+              ? 'One or more live sources are unavailable'
+              : 'CarePort and MedReach records'}
           </div>
         </div>
       </section>
@@ -428,6 +450,32 @@ export default function OrdersMerged() {
         </div>
       </section>
 
+      {warnings.map((warning) => (
+        <div
+          key={warning}
+          className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+        >
+          {warning}
+        </div>
+      ))}
+
+      {err && (
+        <div className="flex flex-col gap-3 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="font-medium">Live orders unavailable</div>
+            <div className="mt-1 text-xs">{err}</div>
+          </div>
+
+          <button
+            type="button"
+            onClick={load}
+            className="self-start rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-red-100 sm:self-auto"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       <section className="rounded-2xl border overflow-hidden bg-white">
         <table className="w-full text-sm">
@@ -487,8 +535,12 @@ export default function OrdersMerged() {
             ))}
             {filtered.length === 0 && !loading && (
               <tr>
-                <td className="p-4 text-center text-gray-500" colSpan={7}>
-                  No data
+                <td className="p-6 text-center text-gray-500" colSpan={7}>
+                  {err
+                    ? 'Orders are unavailable until the live request succeeds.'
+                    : rows.length === 0
+                      ? 'No CarePort or MedReach orders have been recorded yet.'
+                      : 'No orders match the selected filters.'}
                 </td>
               </tr>
             )}
@@ -496,11 +548,6 @@ export default function OrdersMerged() {
         </table>
       </section>
 
-      {err && (
-        <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 p-2 rounded">
-          {err}
-        </div>
-      )}
     </main>
   );
 }
