@@ -161,6 +161,30 @@ const CATALOGUE: readonly CatalogueEntry[] = [
     acknowledgementMode: 'REQUIRED',
   },
   {
+    key: 'PLATFORM_TERMS_OF_SERVICE',
+    title: 'Platform Terms of Service',
+    category: 'terms',
+    acknowledgementMode: 'NOTICE',
+  },
+  {
+    key: 'PLATFORM_PRIVACY_NOTICE',
+    title: 'Platform Privacy Notice',
+    category: 'privacy',
+    acknowledgementMode: 'NOTICE',
+  },
+  {
+    key: 'PLATFORM_CLINICAL_DISCLAIMER',
+    title: 'Platform Clinical Disclaimer',
+    category: 'clinical-disclaimer',
+    acknowledgementMode: 'NOTICE',
+  },
+  {
+    key: 'PLATFORM_COMPLIANCE_STATEMENT',
+    title: 'Platform Compliance Statement',
+    category: 'compliance-statement',
+    acknowledgementMode: 'NOTICE',
+  },
+  {
     key: 'PLATFORM_COOKIE_NOTICE',
     title: 'Platform Cookie Notice',
     category: 'cookie-notice',
