@@ -40,6 +40,13 @@ type EntityRow = {
 };
 
 type OverviewPayload = {
+  source: string;
+  generatedAt: string;
+  period?: {
+    from: string;
+    to: string;
+  } | null;
+  warnings?: string[];
   kpis: Kpi[];
   revenueSeries: RevenuePoint[];
   productMix: MixItem[];
@@ -59,149 +66,19 @@ type InsightAlert = {
   ts: string;
 };
 
-/* ---------- Mock data (fallback until API is wired) ---------- */
+/* ---------- Truthful empty structure ---------- */
 
-const MOCK_OVERVIEW: OverviewPayload = {
-  kpis: [
-    {
-      label: 'Total Revenue (LTM)',
-      value: 'R 1,240,000',
-      sub: '+12% vs prior 12m',
-    },
-    { label: 'Active Patients', value: 18_240, sub: '+4% MoM' },
-    {
-      label: 'Active Clinicians',
-      value: 1_260,
-      sub: 'A: 420 • B: 620 • C: 220',
-    },
-    { label: 'IoMT Devices', value: 9, sub: '7 streaming in last 24h' },
-    { label: 'Rx Revenue', value: 'R 310,500', sub: 'eRx + renewals' },
-    {
-      label: 'Total Payout',
-      value: 'R 870,000',
-      sub: 'Clinicians + riders + phlebs',
-    },
-    {
-      label: 'CarePort Revenue',
-      value: 'R 182,400',
-      sub: 'incl. riders',
-    },
-    {
-      label: 'MedReach Revenue',
-      value: 'R 226,900',
-      sub: 'draws + lab rev share',
-    },
-    { label: '# Rider Payouts (CarePort)', value: 742, sub: 'avg R122/job' },
-    { label: '# Phleb Payouts (MedReach)', value: 311, sub: 'avg R141/draw' },
-    {
-      label: 'Ambulant+ Earnings (net)',
-      value: 'R 344,800',
-      sub: 'after all payouts',
-    },
-    { label: 'Total Refunds', value: 'R 12,600', sub: '0.9% of GMV' },
-  ],
-  revenueSeries: [
-    { label: 'Jan', total: 80, careport: 28, medreach: 22, rx: 30 },
-    { label: 'Feb', total: 86, careport: 30, medreach: 24, rx: 32 },
-    { label: 'Mar', total: 94, careport: 32, medreach: 26, rx: 36 },
-    { label: 'Apr', total: 100, careport: 34, medreach: 28, rx: 38 },
-    { label: 'May', total: 112, careport: 39, medreach: 32, rx: 41 },
-    { label: 'Jun', total: 118, careport: 42, medreach: 34, rx: 42 },
-    { label: 'Jul', total: 124, careport: 44, medreach: 36, rx: 44 },
-    { label: 'Aug', total: 131, careport: 46, medreach: 38, rx: 47 },
-    { label: 'Sep', total: 138, careport: 48, medreach: 40, rx: 50 },
-    { label: 'Oct', total: 142, careport: 49, medreach: 42, rx: 51 },
-    { label: 'Nov', total: 148, careport: 51, medreach: 44, rx: 53 },
-    { label: 'Dec', total: 155, careport: 54, medreach: 46, rx: 55 },
-  ],
-  productMix: [
-    { label: 'Rx & Consult', value: 38 },
-    { label: 'CarePort (pharmacy)', value: 27 },
-    { label: 'MedReach (lab)', value: 24 },
-    { label: 'Other services', value: 11 },
-  ],
-  geo: [
-    {
-      province: 'Gauteng',
-      revenueZAR: 520_000,
-      patients: 8_400,
-      consults: 11_200,
-    },
-    {
-      province: 'Western Cape',
-      revenueZAR: 280_000,
-      patients: 4_200,
-      consults: 6_700,
-    },
-    {
-      province: 'KZN',
-      revenueZAR: 170_000,
-      patients: 2_900,
-      consults: 4_100,
-    },
-    {
-      province: 'Eastern Cape',
-      revenueZAR: 80_000,
-      patients: 1_400,
-      consults: 1_900,
-    },
-    {
-      province: 'Other provinces',
-      revenueZAR: 190_000,
-      patients: 3_340,
-      consults: 4_600,
-    },
-  ],
-  cohorts: [
-    { label: '0–17 (Paeds)', patients: 2_100, sharePct: 12 },
-    { label: '18–39 (Young adult)', patients: 7_900, sharePct: 43 },
-    { label: '40–64 (Adult)', patients: 5_800, sharePct: 32 },
-    { label: '65+ (Senior)', patients: 2_440, sharePct: 13 },
-  ],
-  topEntities: [
-    {
-      label: 'MedExpress — Sandton',
-      kind: 'Pharmacy',
-      revenueZAR: 142_300,
-      orders: 980,
-      location: 'Gauteng',
-    },
-    {
-      label: 'Ambulant Labs — Cape Town',
-      kind: 'Lab',
-      revenueZAR: 126_900,
-      orders: 610,
-      location: 'Western Cape',
-    },
-    {
-      label: 'Dr Naidoo (GP)',
-      kind: 'Clinician',
-      revenueZAR: 94_500,
-      orders: 440,
-      location: 'Gauteng',
-    },
-    {
-      label: 'PathCare Sandton',
-      kind: 'Lab',
-      revenueZAR: 88_200,
-      orders: 390,
-      location: 'Gauteng',
-    },
-    {
-      label: 'Dr Mbele (Physician)',
-      kind: 'Clinician',
-      revenueZAR: 82_700,
-      orders: 360,
-      location: 'KZN',
-    },
-    {
-      label: 'CityMeds — CBD',
-      kind: 'Pharmacy',
-      revenueZAR: 76_100,
-      orders: 340,
-      location: 'Western Cape',
-    },
-  ],
+const EMPTY_OVERVIEW: OverviewPayload = {
+  source: 'unavailable',
+  generatedAt: '',
+  period: null,
+  warnings: [],
+  kpis: [],
+  revenueSeries: [],
+  productMix: [],
+  geo: [],
+  cohorts: [],
+  topEntities: [],
 };
 
 const PROVINCES = [
@@ -247,6 +124,21 @@ function Donut({ items }: { items: MixItem[] }) {
   const colors = ['#4f46e5', '#0f766e', '#f97316', '#6b7280'];
 
   const top = items[0];
+
+  if (!top) {
+    return (
+      <div className="flex min-h-[180px] w-full items-center justify-center rounded-xl border border-dashed bg-gray-50 px-4 py-8 text-center">
+        <div>
+          <div className="text-sm font-medium text-gray-800">
+            No product-mix data available
+          </div>
+          <div className="mt-1 text-xs text-gray-500">
+            The live analytics service did not return an authoritative product breakdown for this period.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex items-center gap-4">
@@ -489,8 +381,9 @@ export default function AnalyticsOverviewPage() {
   const [to, setTo] = useState('');
 
   const [data, setData] = useState<OverviewPayload | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   // 🔢 Risk stats from InsightCore alerts
   const [riskStats, setRiskStats] = useState<{
@@ -526,9 +419,9 @@ export default function AnalyticsOverviewPage() {
         if (!mounted) return;
         setErr(
           e?.message ||
-            'Using mock analytics snapshot until /api/analytics/overview is wired.',
+            'Live analytics could not be loaded. Please retry.',
         );
-        setData(MOCK_OVERVIEW);
+        setData(null);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -537,7 +430,7 @@ export default function AnalyticsOverviewPage() {
     return () => {
       mounted = false;
     };
-  }, [range, province, gender, ageBand, from, to, search]);
+  }, [range, province, gender, ageBand, from, to, search, reloadToken]);
 
   // 🔔 Separate effect: compute 7-day high-risk patient share from InsightCore alerts
   useEffect(() => {
@@ -606,7 +499,16 @@ export default function AnalyticsOverviewPage() {
     loadRiskStats();
   }, []);
 
-  const d = data ?? MOCK_OVERVIEW;
+  const d = data ?? EMPTY_OVERVIEW;
+
+  const overviewIsEmpty =
+    data !== null &&
+    data.kpis.length === 0 &&
+    data.revenueSeries.length === 0 &&
+    data.productMix.length === 0 &&
+    data.geo.length === 0 &&
+    data.cohorts.length === 0 &&
+    data.topEntities.length === 0;
 
   const maxGeoRev = useMemo(
     () => Math.max(...d.geo.map((g) => g.revenueZAR), 1),
@@ -724,13 +626,58 @@ export default function AnalyticsOverviewPage() {
       </header>
 
       {err && (
-        <div className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700">
-          {err}
+        <div className="flex flex-col gap-3 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <div className="font-medium">Live analytics unavailable</div>
+            <div className="mt-1 text-xs">{err}</div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setReloadToken((value) => value + 1)}
+            className="self-start rounded border border-red-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-red-100 sm:self-auto"
+          >
+            Retry
+          </button>
         </div>
       )}
+
       {loading && (
         <div className="text-xs text-gray-500">
-          Loading overview analytics…
+          Loading live overview analytics…
+        </div>
+      )}
+
+      {data && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+          <span className="font-medium">Live data</span>
+          <span>Source: {data.source}</span>
+          <span>
+            Updated:{' '}
+            {data.generatedAt
+              ? new Date(data.generatedAt).toLocaleString()
+              : 'Time unavailable'}
+          </span>
+        </div>
+      )}
+
+      {data?.warnings?.map((warning) => (
+        <div
+          key={warning}
+          className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800"
+        >
+          {warning}
+        </div>
+      ))}
+
+      {overviewIsEmpty && (
+        <div className="rounded border bg-white px-4 py-8 text-center">
+          <div className="font-medium text-gray-800">
+            No analytics records are available
+          </div>
+          <div className="mt-1 text-sm text-gray-500">
+            The live service responded successfully but returned no reportable records.
+          </div>
         </div>
       )}
 
