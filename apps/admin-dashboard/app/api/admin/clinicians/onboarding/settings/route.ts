@@ -1,4 +1,5 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAdminCaller } from '../_helpers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -50,6 +51,13 @@ function buildForwardHeaders(req: NextRequest, hasBody = false) {
 }
 
 async function proxyJson(req: NextRequest, method: 'GET' | 'PATCH') {
+  const caller =
+    await requireAdminCaller(req);
+
+  if (!caller.ok) {
+    return caller.response;
+  }
+
   const url = `${gatewayBase()}/api/admin/clinicians/onboarding/settings`;
 
   const body =

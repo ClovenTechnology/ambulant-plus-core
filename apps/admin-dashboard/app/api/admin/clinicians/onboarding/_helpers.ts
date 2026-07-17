@@ -31,7 +31,173 @@ export async function readJson(req: NextRequest) {
   return out;
 }
 
+const ADMIN_ONBOARDING_CALLER_SCOPES = [
+  'manageRoles',
+  'hr',
+  'finance',
+  'tech',
+  'compliance',
+  'reports',
+  'rnd',
+] as const;
+
+export type AdminCallerGateResult =
+  | {
+      ok: true;
+      userId: string;
+      email: string | null;
+    }
+  | {
+      ok: false;
+      response: NextResponse;
+    };
+
+function unauthorizedAdminCaller(
+  error = 'unauthorized',
+  status = 401,
+) {
+  return {
+    ok: false as const,
+    response: NextResponse.json(
+      {
+        ok: false,
+        error,
+      },
+      {
+        status,
+        headers: {
+          'Cache-Control': 'no-store',
+        },
+      },
+    ),
+  };
+}
+
+export async function requireAdminCaller(
+  req: NextRequest,
+): Promise<AdminCallerGateResult> {
+  const gateway = gatewayBaseFromEnv();
+
+  const cookie =
+    req.headers.get('cookie') || '';
+
+  const authorization =
+    req.headers.get('authorization') || '';
+
+  if (!cookie && !authorization) {
+    return unauthorizedAdminCaller();
+  }
+
+  const headers = new Headers({
+    accept: 'application/json',
+    'cache-control': 'no-store',
+    'x-admin-origin': req.nextUrl.origin,
+  });
+
+  if (cookie) {
+    headers.set('cookie', cookie);
+  }
+
+  if (authorization) {
+    headers.set(
+      'authorization',
+      authorization,
+    );
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(
+      `${gateway}/api/auth/me`,
+      {
+        method: 'GET',
+        headers,
+        cache: 'no-store',
+      },
+    );
+  } catch {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          ok: false,
+          error: 'admin_auth_unavailable',
+        },
+        {
+          status: 503,
+          headers: {
+            'Cache-Control': 'no-store',
+          },
+        },
+      ),
+    };
+  }
+
+  const body =
+    await response
+      .json()
+      .catch(() => null);
+
+  if (
+    !response.ok ||
+    body?.authenticated !== true ||
+    !body?.user
+  ) {
+    return unauthorizedAdminCaller();
+  }
+
+  const effectiveScopes =
+    Array.isArray(body.user.scopes)
+      ? body.user.scopes
+          .map((scope: unknown) =>
+            String(scope || '').trim(),
+          )
+          .filter(Boolean)
+      : [];
+
+  const authorised =
+    ADMIN_ONBOARDING_CALLER_SCOPES.some(
+      (scope) =>
+        effectiveScopes.includes(scope),
+    );
+
+  if (!authorised) {
+    return unauthorizedAdminCaller(
+      'forbidden',
+      403,
+    );
+  }
+
+  const userId = String(
+    body.user.id ||
+      body.user.userId ||
+      body.user.email ||
+      '',
+  ).trim();
+
+  if (!userId) {
+    return unauthorizedAdminCaller();
+  }
+
+  return {
+    ok: true,
+    userId,
+    email:
+      body.user.email == null
+        ? null
+        : String(body.user.email),
+  };
+}
+
 export async function forwardToGateway(req: NextRequest, path: string, body: any) {
+  const caller =
+    await requireAdminCaller(req);
+
+  if (!caller.ok) {
+    return caller.response;
+  }
+
   const gateway = gatewayBaseFromEnv();
   const adminKey = process.env.ADMIN_API_KEY ?? '';
 
