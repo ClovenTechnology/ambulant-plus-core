@@ -205,8 +205,9 @@ export default function AdminSidebar() {
         label: 'Admin',
         icon: Store,
         defaultOpen: true,
-        requires: ['hr', 'manageRoles'],
+        requires: ['hr', 'manageRoles', 'compliance'],
         items: [
+          { href: '/admin/legal', label: 'Legal Department', icon: Shield, requires: ['manageRoles', 'compliance'] },
           { href: '/admin/clinicians', label: 'Admin Clinicians', icon: Stethoscope, requires: ['hr', 'manageRoles'] },
           { href: '/admin/patients', label: 'Admin Patients', icon: Users, requires: ['hr', 'manageRoles'] },
           { href: '/admin/shop', label: 'Admin Shop', icon: Store, requires: ['manageRoles'] },
