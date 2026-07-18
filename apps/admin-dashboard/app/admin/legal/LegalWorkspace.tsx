@@ -345,9 +345,35 @@ async function readJson(
     body?.ok ===
       false
   ) {
+    const requestError =
+      body?.error;
+
+    const requestMessage =
+      typeof requestError ===
+        'string'
+        ? requestError
+        : typeof requestError?.message ===
+            'string'
+          ? requestError.message
+          : typeof requestError?.error ===
+              'string'
+            ? requestError.error
+            : typeof requestError?.detail ===
+                'string'
+              ? requestError.detail
+              : typeof requestError?.details ===
+                  'string'
+                ? requestError.details
+                : typeof requestError?.reason ===
+                    'string'
+                  ? requestError.reason
+                  : typeof requestError?.code ===
+                      'string'
+                    ? requestError.code
+                    : 'legal_request_failed';
+
     throw new Error(
-      body?.error ||
-      'legal_request_failed',
+      requestMessage,
     );
   }
 
