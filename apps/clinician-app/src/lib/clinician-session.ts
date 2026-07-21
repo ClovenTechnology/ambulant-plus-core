@@ -31,21 +31,31 @@ export type ClinicianSessionPayload = {
 };
 
 function sessionSecret() {
-  const secret =
+  const explicitSecret =
     process.env.CLINICIAN_SESSION_SECRET ||
     process.env.AUTH_SESSION_SECRET ||
     process.env.NEXTAUTH_SECRET ||
     '';
 
-  if (!secret) {
-    const error = new Error(
-      'clinician_session_secret_missing',
-    ) as Error & { status?: number };
-    error.status = 503;
-    throw error;
+  if (explicitSecret) return explicitSecret;
+
+  const internalSecret =
+    process.env.AMBULANT_INTERNAL_IDENTITY_SECRET ||
+    process.env.INTERNAL_IDENTITY_SECRET ||
+    '';
+
+  if (internalSecret) {
+    return crypto
+      .createHmac('sha256', internalSecret)
+      .update('ambulant-clinician-session:v1')
+      .digest('base64url');
   }
 
-  return secret;
+  const error = new Error(
+    'clinician_session_secret_missing',
+  ) as Error & { status?: number };
+  error.status = 503;
+  throw error;
 }
 
 function internalIdentitySecret() {

@@ -70,6 +70,71 @@ function decodeBase64Url(
   return bytes;
 }
 
+function encodeBase64Url(
+  value: Uint8Array,
+) {
+  let binary = '';
+
+  for (const byte of value) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/g, '');
+}
+
+async function sessionSecretBytes() {
+  const explicitSecret =
+    process.env.CLINICIAN_SESSION_SECRET ||
+    process.env.AUTH_SESSION_SECRET ||
+    process.env.NEXTAUTH_SECRET ||
+    '';
+
+  if (explicitSecret) {
+    return new TextEncoder().encode(
+      explicitSecret,
+    );
+  }
+
+  const internalSecret =
+    process.env.AMBULANT_INTERNAL_IDENTITY_SECRET ||
+    process.env.INTERNAL_IDENTITY_SECRET ||
+    '';
+
+  if (!internalSecret) return null;
+
+  const derivationKey =
+    await crypto.subtle.importKey(
+      'raw',
+      new TextEncoder().encode(
+        internalSecret,
+      ),
+      {
+        name: 'HMAC',
+        hash: 'SHA-256',
+      },
+      false,
+      ['sign'],
+    );
+
+  const derived =
+    await crypto.subtle.sign(
+      'HMAC',
+      derivationKey,
+      new TextEncoder().encode(
+        'ambulant-clinician-session:v1',
+      ),
+    );
+
+  return new TextEncoder().encode(
+    encodeBase64Url(
+      new Uint8Array(derived),
+    ),
+  );
+}
+
 function decodeJson(value: string) {
   try {
     return JSON.parse(
@@ -91,13 +156,10 @@ async function verifyClinicianSession(
     ?.value
     ?.trim();
 
-  const secret =
-    process.env.CLINICIAN_SESSION_SECRET ||
-    process.env.AUTH_SESSION_SECRET ||
-    process.env.NEXTAUTH_SECRET ||
-    '';
+  const secretBytes =
+    await sessionSecretBytes();
 
-  if (!token || !secret) return null;
+  if (!token || !secretBytes) return null;
 
   try {
     const parts = token.split('.');
@@ -119,7 +181,7 @@ async function verifyClinicianSession(
 
     const key = await crypto.subtle.importKey(
       'raw',
-      new TextEncoder().encode(secret),
+      secretBytes,
       {
         name: 'HMAC',
         hash: 'SHA-256',

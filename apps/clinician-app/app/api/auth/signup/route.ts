@@ -220,7 +220,7 @@ async function hashPasswordScrypt(password: string) {
     });
   });
 
-  return `scrypt${N}${r}${p}${bufferToBase64url(salt)}${bufferToBase64url(hash)}`;
+  return `scrypt$${N}$${r}$${p}$${bufferToBase64url(salt)}$${bufferToBase64url(hash)}`;
 }
 
 function generatePatientMrnCandidate(now = new Date()) {
