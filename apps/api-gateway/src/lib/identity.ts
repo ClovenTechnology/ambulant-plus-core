@@ -34,6 +34,9 @@ export type Who = {
 };
 
 const COOKIE_CANDIDATES = [
+  'adm.profile',
+  'ambulant_clinician_session',
+  '__Host-ambulant_clinician_session',
   '__Host-ambulant_session',
   'ambulant_session',
   'ambulant.session',

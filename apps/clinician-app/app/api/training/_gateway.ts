@@ -1,4 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import {
+  NextRequest,
+  NextResponse,
+} from 'next/server';
+import {
+  createTrustedClinicianIdentityHeader,
+} from '@/src/lib/clinician-session';
 
 function gatewayBase() {
   const raw =
@@ -12,31 +18,60 @@ function gatewayBase() {
     process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
     '';
 
-  return String(raw).trim().replace(/\/+$/, '');
+  return String(raw)
+    .trim()
+    .replace(/\/+$/, '');
 }
 
-function forwardedHeaders(request: NextRequest) {
+function forwardedHeaders(
+  request: NextRequest,
+) {
   const headers = new Headers();
 
-  [
-    'cookie',
-    'authorization',
-    'x-role',
-    'x-uid',
-    'x-user-id',
-    'x-org-id',
-    'x-actor-ref-id',
-    'x-ambulant-identity',
-    'x-ambulant-session-id',
+  for (const name of [
+    'x-correlation-id',
+    'x-request-id',
+    'x-idempotency-key',
+    'idempotency-key',
     'user-agent',
     'accept-language',
-  ].forEach((name) => {
+  ]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
-  });
+  }
 
+  headers.set(
+    'x-ambulant-identity',
+    createTrustedClinicianIdentityHeader(request),
+  );
   headers.set('accept', 'application/json');
+
   return headers;
+}
+
+function identityBridgeError(error: unknown) {
+  const status =
+    typeof (error as any)?.status === 'number'
+      ? (error as any).status
+      : 500;
+
+  const message =
+    error instanceof Error
+      ? error.message
+      : 'identity_bridge_failed';
+
+  return NextResponse.json(
+    {
+      ok: false,
+      error: message,
+    },
+    {
+      status,
+      headers: {
+        'cache-control': 'no-store',
+      },
+    },
+  );
 }
 
 export async function proxyTrainingRequest(
@@ -55,19 +90,31 @@ export async function proxyTrainingRequest(
     );
   }
 
-  const target = new URL(upstreamPath, gateway);
+  let headers: Headers;
 
-  request.nextUrl.searchParams.forEach((value, key) => {
-    target.searchParams.set(key, value);
-  });
+  try {
+    headers = forwardedHeaders(request);
+  }
+  catch (error) {
+    return identityBridgeError(error);
+  }
+
+  const target = new URL(
+    upstreamPath,
+    gateway,
+  );
+
+  request.nextUrl.searchParams.forEach(
+    (value, key) => {
+      target.searchParams.set(key, value);
+    },
+  );
 
   const method = request.method.toUpperCase();
   const body =
     method === 'GET' || method === 'HEAD'
       ? undefined
       : await request.text();
-
-  const headers = forwardedHeaders(request);
 
   if (body) {
     headers.set(
@@ -96,7 +143,8 @@ export async function proxyTrainingRequest(
         'cache-control': 'no-store',
       },
     });
-  } catch (error: any) {
+  }
+  catch (error) {
     console.error(
       '[clinician-app][training proxy] gateway error',
       error,

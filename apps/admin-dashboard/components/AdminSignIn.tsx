@@ -31,12 +31,30 @@ export default function AdminSignIn() {
       window.location.href = next;
     } catch (err: any) {
       const raw = String(err?.message || 'Sign in failed');
-      if (raw.includes('password_not_set')) {
-        setMsg('This admin account does not have a password yet. Use Create account with the same email to set one.');
-      } else if (raw.includes('invalid_credentials')) {
+
+      if (
+        raw.includes('invalid_email_or_password') ||
+        raw.includes('invalid_credentials')
+      ) {
         setMsg('Invalid email or password.');
-      } else {
-        setMsg(raw);
+      }
+      else if (raw.includes('admin_access_not_provisioned')) {
+        setMsg(
+          'Your identity was verified, but this account has not been provisioned for Admin access. Contact platform administration.',
+        );
+      }
+      else if (
+        raw.includes('password_authentication_not_configured') ||
+        raw.includes('admin_session_secret_missing')
+      ) {
+        setMsg(
+          'Secure Admin sign-in is temporarily unavailable. Please contact platform administration.',
+        );
+      }
+      else {
+        setMsg(
+          'We could not complete secure sign-in. Please try again or contact platform administration.',
+        );
       }
     } finally {
       setLoading(false);
@@ -84,17 +102,18 @@ export default function AdminSignIn() {
 
       {msg && <div className="mt-3 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{msg}</div>}
 
-      <div className="mt-4 flex flex-wrap gap-2">
+      <div className="mt-4">
         <button
           type="submit"
           disabled={loading}
-          className="rounded-lg bg-black px-4 py-2 text-white disabled:opacity-60"
+          className="w-full rounded-lg bg-black px-4 py-2 text-white disabled:opacity-60"
         >
-          {loading ? 'Signing in...' : 'Sign in'}
+          {loading ? 'Verifying secure access...' : 'Sign in securely'}
         </button>
-        <a href="/auth/signup" className="rounded-lg border px-4 py-2 text-sm hover:bg-black/5">
-          Create account
-        </a>
+
+        <p className="mt-3 text-center text-xs text-slate-500">
+          Admin access is provisioned by platform administration.
+        </p>
       </div>
     </form>
   );

@@ -1,14 +1,14 @@
-﻿// apps/clinician-app/app/api/auth/login/route.ts
+// apps/clinician-app/app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
+import {
+  CLINICIAN_SESSION_COOKIE,
+  CLINICIAN_SESSION_MAX_AGE_SECONDS,
+  signClinicianSessionToken,
+} from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-const CLINICIAN_SESSION_COOKIE =
-  process.env.CLINICIAN_SESSION_COOKIE || 'ambulant_clinician_session';
-
-const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 function json(data: any, status = 200) {
   return NextResponse.json(data, {
@@ -19,14 +19,6 @@ function json(data: any, status = 200) {
 
 function normEmail(v: any) {
   return String(v || '').trim().toLowerCase();
-}
-
-function b64urlJson(obj: any) {
-  return Buffer.from(JSON.stringify(obj), 'utf8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
 }
 
 function parseObject(raw: unknown) {
@@ -137,7 +129,7 @@ async function verifyPasswordAuth0(
   const data = await res.json().catch(() => null);
   const token = data?.id_token || data?.access_token;
 
-  return token ? { ok: true, token: String(token) } : { ok: true };
+  return token ? { ok: true, token: String(token) } : { ok: false };
 }
 
 export async function POST(req: NextRequest) {
@@ -154,14 +146,27 @@ export async function POST(req: NextRequest) {
     if (!email) return json({ ok: false, error: 'Email required' }, 400);
     if (!password) return json({ ok: false, error: 'Password required' }, 400);
 
+    if (
+      !process.env.AUTH0_DOMAIN ||
+      !process.env.AUTH0_ROPG_CLIENT_ID ||
+      !process.env.AUTH0_ROPG_CLIENT_SECRET
+    ) {
+      return json(
+        {
+          ok: false,
+          error: 'password_authentication_not_configured',
+        },
+        503,
+      );
+    }
+
     const auth0 = await verifyPasswordAuth0(email, password);
 
-    if (
-      process.env.AUTH0_ROPG_CLIENT_ID &&
-      process.env.AUTH0_ROPG_CLIENT_SECRET &&
-      !auth0.ok
-    ) {
-      return json({ ok: false, error: 'Invalid email or password' }, 401);
+    if (!auth0.ok || !auth0.token) {
+      return json(
+        { ok: false, error: 'Invalid email or password' },
+        401,
+      );
     }
 
     let clinician = await prisma.clinicianProfile.findFirst({
@@ -218,7 +223,7 @@ export async function POST(req: NextRequest) {
     const simulationMode = trainingCompleted && !visibleToPatients;
     const canPractice = visibleToPatients || simulationMode;
 
-    const token = auth0.token || `dev-${clinician.id}-${Date.now()}`;
+    const token = auth0.token;
 
     const profile = {
       id: clinician.id,
@@ -251,8 +256,13 @@ export async function POST(req: NextRequest) {
       trainingCompleted,
       simulationMode,
       issuedAt: now,
-      expiresAt: now + SESSION_MAX_AGE_SECONDS * 1000,
+      expiresAt:
+        now +
+        CLINICIAN_SESSION_MAX_AGE_SECONDS * 1000,
     };
+
+    const sessionToken =
+      signClinicianSessionToken(sessionPayload);
 
     const res = json({
       ok: true,
@@ -261,13 +271,18 @@ export async function POST(req: NextRequest) {
       redirectTo: canPractice ? undefined : trainingRedirect(clinician.id),
     });
 
-    res.cookies.set(CLINICIAN_SESSION_COOKIE, b64urlJson(sessionPayload), {
+    res.cookies.set(
+      CLINICIAN_SESSION_COOKIE,
+      sessionToken,
+      {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
-      maxAge: SESSION_MAX_AGE_SECONDS,
-    });
+        maxAge:
+          CLINICIAN_SESSION_MAX_AGE_SECONDS,
+      },
+    );
 
     return res;
   } catch (err: any) {
@@ -282,4 +297,3 @@ export async function POST(req: NextRequest) {
     );
   }
 }
-

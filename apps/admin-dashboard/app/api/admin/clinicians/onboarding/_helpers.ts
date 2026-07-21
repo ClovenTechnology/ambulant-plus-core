@@ -41,6 +41,41 @@ const ADMIN_ONBOARDING_CALLER_SCOPES = [
   'rnd',
 ] as const;
 
+function canonicalAuthority(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+}
+
+function hasSuperAuthority(user: any) {
+  if (user?.superAdmin === true) return true;
+
+  const roles = Array.isArray(user?.roles)
+    ? user.roles
+    : [];
+  const scopes = Array.isArray(user?.scopes)
+    ? user.scopes
+    : [];
+
+  return (
+    roles.some((role: unknown) =>
+      canonicalAuthority(role) === 'superadmin',
+    ) ||
+    scopes.some((scope: unknown) => {
+      const value = String(scope || '')
+        .trim()
+        .toLowerCase();
+
+      return (
+        value === '*' ||
+        value === 'admin:all' ||
+        canonicalAuthority(value) === 'superadmin'
+      );
+    })
+  );
+}
+
 export type AdminCallerGateResult =
   | {
       ok: true;
@@ -157,6 +192,7 @@ export async function requireAdminCaller(
       : [];
 
   const authorised =
+    hasSuperAuthority(body.user) ||
     ADMIN_ONBOARDING_CALLER_SCOPES.some(
       (scope) =>
         effectiveScopes.includes(scope),

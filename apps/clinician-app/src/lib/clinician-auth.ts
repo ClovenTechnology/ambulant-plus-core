@@ -1,101 +1,21 @@
-﻿//apps/clinician-app/src/lib/clinician-auth.ts
+//apps/clinician-app/src/lib/clinician-auth.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
-export const CLINICIAN_SESSION_COOKIE =
-  process.env.CLINICIAN_SESSION_COOKIE || 'ambulant_clinician_session';
+import {
+  CLINICIAN_SESSION_COOKIE,
+  verifyClinicianSessionToken,
+  type ClinicianSessionPayload,
+  type ClinicianSessionRole,
+} from '@/src/lib/clinician-session';
 
-export type ClinicianSessionRole = 'clinician' | 'admin' | 'admin_staff';
-
-export type ClinicianSessionPayload = {
-  sub: string;
-  role: ClinicianSessionRole;
-  clinicianId?: string | null;
-  email?: string | null;
-  name?: string | null;
-  issuedAt?: number;
-  expiresAt?: number;
+export {
+  CLINICIAN_SESSION_COOKIE,
+  verifyClinicianSessionToken,
 };
-
-function isClinicianSessionRole(value: unknown): value is ClinicianSessionRole {
-  return value === 'clinician' || value === 'admin' || value === 'admin_staff';
-}
-
-function decodeBase64UrlJson(value: string): any | null {
-  try {
-    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
-    const padded = normalized.padEnd(normalized.length + ((4 - (normalized.length % 4)) % 4), '=');
-    const decoded =
-      typeof Buffer !== 'undefined'
-        ? Buffer.from(padded, 'base64').toString('utf8')
-        : atob(padded);
-
-    return JSON.parse(decoded);
-  } catch {
-    return null;
-  }
-}
-
-function coerceSessionPayload(value: unknown): ClinicianSessionPayload | null {
-  if (!value || typeof value !== 'object') return null;
-
-  const raw = value as Record<string, unknown>;
-  const sub = String(raw.sub ?? raw.userId ?? raw.id ?? '').trim();
-  const role = raw.role;
-
-  if (!sub || !isClinicianSessionRole(role)) return null;
-
-  const expiresAt =
-    typeof raw.expiresAt === 'number'
-      ? raw.expiresAt
-      : typeof raw.exp === 'number'
-        ? raw.exp * 1000
-        : undefined;
-
-  if (typeof expiresAt === 'number' && expiresAt > 0 && expiresAt < Date.now()) {
-    return null;
-  }
-
-  return {
-    sub,
-    role,
-    clinicianId:
-      typeof raw.clinicianId === 'string' && raw.clinicianId.trim()
-        ? raw.clinicianId.trim()
-        : null,
-    email:
-      typeof raw.email === 'string' && raw.email.trim()
-        ? raw.email.trim()
-        : null,
-    name:
-      typeof raw.name === 'string' && raw.name.trim()
-        ? raw.name.trim()
-        : null,
-    issuedAt:
-      typeof raw.issuedAt === 'number'
-        ? raw.issuedAt
-        : typeof raw.iat === 'number'
-          ? raw.iat * 1000
-          : undefined,
-    expiresAt,
-  };
-}
-
-export function verifyClinicianSessionToken(token?: string | null): ClinicianSessionPayload | null {
-  if (!token) return null;
-
-  const trimmed = token.trim();
-  if (!trimmed) return null;
-
-  // Supports plain base64url JSON session cookies and unsigned JWT payload decoding.
-  // Signature verification should remain in the dedicated auth-session module if/when it exists.
-  if (trimmed.includes('.')) {
-    const [, payload] = trimmed.split('.');
-    return coerceSessionPayload(decodeBase64UrlJson(payload || ''));
-  }
-
-  return coerceSessionPayload(decodeBase64UrlJson(trimmed));
-}
-
+export type {
+  ClinicianSessionPayload,
+  ClinicianSessionRole,
+};
 export type ResolvedClinicianAuth = {
   ok: true;
   session: ClinicianSessionPayload;
@@ -200,7 +120,12 @@ function deriveProfessionKey(clinician: any, profileJson: any): string | null {
 }
 
 function fallbackSessionFromHeaders(req: NextRequest): ClinicianSessionPayload | null {
-  if (process.env.ALLOW_TRUST_HEADER_FALLBACK !== 'true') return null;
+  if (
+    process.env.NODE_ENV === 'production' ||
+    process.env.ALLOW_TRUST_HEADER_FALLBACK !== 'true'
+  ) {
+    return null;
+  }
 
   const uid = String(req.headers.get('x-uid') || '').trim();
   const rawRole = String(req.headers.get('x-role') || '').trim().toLowerCase();
@@ -239,7 +164,7 @@ export async function resolveAuthenticatedClinician(req: NextRequest): Promise<C
           { email: session.sub },
         ].filter(Boolean) as any[],
       },
-      
+
     });
 
     if (!clinician) {

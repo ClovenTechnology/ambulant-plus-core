@@ -1,105 +1,234 @@
-// apps/api-gateway/app/api/auth/me/route.ts
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
+import {
+  ADMIN_SESSION_COOKIE,
+  verifyAdminSessionToken,
+} from '@/src/lib/admin-session';
 
-async function getAllKnownScopes(): Promise<string[]> {
-  // safest because prisma.role exists in your code already
-  const roles = await prisma.role.findMany({
-    select: { scopes: { select: { scope: true } } },
-  });
-  return Array.from(new Set(roles.flatMap(r => r.scopes.map(s => s.scope)).filter(Boolean)));
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+
+function canonicalAuthority(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
 }
 
-async function resolveEffectiveRolesAndScopes(userId?: string, email?: string) {
-  if (!userId && !email) return { roles: [], scopes: [] as string[] };
+function isSuperAdminRole(value: unknown) {
+  return canonicalAuthority(value) === 'superadmin';
+}
 
-  const profile = await prisma.adminUserProfile.findFirst({
-    where: { OR: [{ userId: userId || '' }, { email: email || '' }] },
+function isSuperScope(value: unknown) {
+  const scope = String(value || '')
+    .trim()
+    .toLowerCase();
+
+  return (
+    scope === '*' ||
+    scope === 'admin:all' ||
+    canonicalAuthority(scope) === 'superadmin'
+  );
+}
+
+async function getAllKnownScopes() {
+  const roles = await prisma.role.findMany({
     select: {
-      id: true,
-      userId: true,
-      email: true,
-      name: true,
-      departmentId: true,
-      designationId: true,
-      designation: {
+      scopes: {
         select: {
-          id: true,
-          roles: {
-            select: { role: { select: { id: true, name: true, scopes: { select: { scope: true } } } } },
+          scope: true,
+        },
+      },
+    },
+  });
+
+  return Array.from(
+    new Set(
+      roles
+        .flatMap((role) =>
+          role.scopes.map((scope) => scope.scope),
+        )
+        .filter(Boolean),
+    ),
+  );
+}
+
+async function resolveEffectiveRolesAndScopes(
+  userId: string,
+  email: string,
+) {
+  const profile =
+    await prisma.adminUserProfile.findFirst({
+      where: {
+        OR: [
+          { userId },
+          { email },
+        ],
+      },
+      select: {
+        id: true,
+        userId: true,
+        email: true,
+        name: true,
+        departmentId: true,
+        designationId: true,
+        designation: {
+          select: {
+            id: true,
+            roles: {
+              select: {
+                role: {
+                  select: {
+                    id: true,
+                    name: true,
+                    scopes: {
+                      select: {
+                        scope: true,
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+        roles: {
+          select: {
+            role: {
+              select: {
+                id: true,
+                name: true,
+                scopes: {
+                  select: {
+                    scope: true,
+                  },
+                },
+              },
+            },
           },
         },
       },
-      roles: {
-        select: {
-          role: { select: { id: true, name: true, scopes: { select: { scope: true } } } },
-        },
-      },
-    },
-  });
+    });
 
-  if (!profile) return { roles: [], scopes: [] as string[] };
+  if (!profile) return null;
 
-  const fromDesignation = (profile.designation?.roles ?? []).map(r => r.role);
-  const directRoles = (profile.roles ?? []).map(r => r.role);
+  const designationRoles =
+    (profile.designation?.roles || [])
+      .map((assignment) => assignment.role);
+  const directRoles =
+    (profile.roles || [])
+      .map((assignment) => assignment.role);
+  const effectiveRoles = [
+    ...designationRoles,
+    ...directRoles,
+  ];
 
-  const allRoleNames = Array.from(new Set([...fromDesignation, ...directRoles].map(r => r.name).filter(Boolean)));
-
-  let allScopes = Array.from(
+  const roleNames = Array.from(
     new Set(
-      [...fromDesignation, ...directRoles]
-        .flatMap(r => r.scopes.map(s => s.scope))
-        .filter(Boolean)
-    )
+      effectiveRoles
+        .map((role) => role.name)
+        .filter(Boolean),
+    ),
   );
 
-  // ✅ Super-admin expansion: if role includes "superadmin" OR scopes include admin:all / *
-  const isSuper =
-    allRoleNames.includes('superadmin') ||
-    allScopes.includes('admin:all') ||
-    allScopes.includes('*');
+  let scopes = Array.from(
+    new Set(
+      effectiveRoles
+        .flatMap((role) =>
+          role.scopes.map((scope) => scope.scope),
+        )
+        .filter(Boolean),
+    ),
+  );
 
-  if (isSuper) {
-    allScopes = await getAllKnownScopes();
-    // optional: keep sentinel scopes too (useful for client checks)
-    allScopes = Array.from(new Set([...allScopes, 'admin:all', 'superadmin']));
-    if (!allRoleNames.includes('superadmin')) allRoleNames.push('superadmin');
+  const superAdmin =
+    roleNames.some(isSuperAdminRole) ||
+    scopes.some(isSuperScope);
+
+  if (superAdmin) {
+    scopes = Array.from(
+      new Set([
+        ...(await getAllKnownScopes()),
+        ...scopes,
+        'admin:all',
+        'superadmin',
+        '*',
+      ]),
+    );
+
+    if (!roleNames.some(isSuperAdminRole)) {
+      roleNames.push('superadmin');
+    }
   }
 
   return {
-    roles: allRoleNames,
-    scopes: allScopes,
-    profile: {
-      id: profile.id,
-      userId: profile.userId,
-      email: profile.email,
-      name: profile.name,
-      departmentId: profile.departmentId,
-      designationId: profile.designationId,
-    },
+    profile,
+    roles: roleNames,
+    scopes,
+    superAdmin,
   };
 }
 
 export async function GET() {
-  const raw = cookies().get('adm.profile')?.value;
-  if (!raw) return NextResponse.json({ authenticated: false }, { status: 200 });
+  const token =
+    cookies().get(ADMIN_SESSION_COOKIE)?.value ||
+    null;
+  const session =
+    verifyAdminSessionToken(token);
 
-  let parsed: any = {};
-  try { parsed = JSON.parse(decodeURIComponent(raw)); } catch {}
+  if (!session) {
+    return NextResponse.json(
+      { authenticated: false },
+      {
+        status: 200,
+        headers: {
+          'cache-control': 'no-store',
+        },
+      },
+    );
+  }
 
-  const { roles, scopes, profile } = await resolveEffectiveRolesAndScopes(parsed.userId, parsed.email);
+  const authority =
+    await resolveEffectiveRolesAndScopes(
+      session.sub,
+      session.email,
+    );
 
-  return NextResponse.json({
-    authenticated: true,
-    user: {
-      id: profile?.userId ?? parsed.userId ?? null,
-      email: profile?.email ?? parsed.email ?? null,
-      name: profile?.name ?? parsed.name ?? null,
-      departmentId: profile?.departmentId ?? null,
-      designationId: profile?.designationId ?? null,
-      roles,
-      scopes,
+  if (!authority) {
+    return NextResponse.json(
+      { authenticated: false },
+      {
+        status: 200,
+        headers: {
+          'cache-control': 'no-store',
+        },
+      },
+    );
+  }
+
+  const { profile, roles, scopes, superAdmin } =
+    authority;
+
+  return NextResponse.json(
+    {
+      authenticated: true,
+      user: {
+        id: profile.userId,
+        email: profile.email,
+        name: profile.name,
+        departmentId: profile.departmentId,
+        designationId: profile.designationId,
+        roles,
+        scopes,
+        superAdmin,
+      },
     },
-  });
+    {
+      status: 200,
+      headers: {
+        'cache-control': 'no-store',
+      },
+    },
+  );
 }

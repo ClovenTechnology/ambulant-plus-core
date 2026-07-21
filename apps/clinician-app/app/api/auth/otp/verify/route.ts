@@ -1,19 +1,19 @@
-﻿// apps/clinician-app/app/api/auth/otp/verify/route.ts
+// apps/clinician-app/app/api/auth/otp/verify/route.ts
 import { NextResponse } from 'next/server';
 import { headers } from 'next/headers';
 import crypto from 'node:crypto';
 
 import { prisma } from '@/src/lib/prisma';
+import {
+  CLINICIAN_SESSION_COOKIE,
+  CLINICIAN_SESSION_MAX_AGE_SECONDS,
+  signClinicianSessionToken,
+} from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 const OTP_PURPOSE = 'clinician_login';
-
-const CLINICIAN_SESSION_COOKIE =
-  process.env.CLINICIAN_SESSION_COOKIE || 'ambulant_clinician_session';
-
-const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 7;
 
 type OtpVerifyBody = {
   email?: string;
@@ -56,14 +56,6 @@ function otpHash(identifier: string, code: string) {
   }
 
   return sha256Hex(`${pepper}:${OTP_PURPOSE}:${identifier}:${code}`);
-}
-
-function b64urlJson(obj: any) {
-  return Buffer.from(JSON.stringify(obj), 'utf8')
-    .toString('base64')
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/g, '');
 }
 
 function parseObject(raw: unknown) {
@@ -250,9 +242,14 @@ export async function POST(req: Request) {
     canPractice,
     visibleToPatients,
     issuedAt,
-    expiresAt: issuedAt + SESSION_MAX_AGE_SECONDS * 1000,
+    expiresAt:
+      issuedAt +
+      CLINICIAN_SESSION_MAX_AGE_SECONDS * 1000,
     amr: ['email_otp'],
   };
+
+  const sessionToken =
+    signClinicianSessionToken(sessionPayload);
 
   const res = json(200, {
     ok: true,
@@ -261,13 +258,18 @@ export async function POST(req: Request) {
     redirectTo: canPractice ? undefined : trainingRedirect(clinicianAny.id),
   });
 
-  res.cookies.set(CLINICIAN_SESSION_COOKIE, b64urlJson(sessionPayload), {
+  res.cookies.set(
+    CLINICIAN_SESSION_COOKIE,
+    sessionToken,
+    {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax',
     path: '/',
-    maxAge: SESSION_MAX_AGE_SECONDS,
-  });
+      maxAge:
+        CLINICIAN_SESSION_MAX_AGE_SECONDS,
+    },
+  );
 
   return res;
 }
