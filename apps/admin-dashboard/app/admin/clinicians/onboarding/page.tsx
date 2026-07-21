@@ -1,4 +1,4 @@
-﻿// apps/admin-dashboard/app/admin/clinicians/onboarding/page.tsx
+// apps/admin-dashboard/app/admin/clinicians/onboarding/page.tsx
 import React from 'react';
 import Link from 'next/link';
 import OnboardingDispatchBoard from './OnboardingDispatchBoard';
@@ -54,7 +54,6 @@ type BoardResponse = {
   settings?: {
     publicSettings?: {
       currency?: string;
-      starterKitItems?: string[];
     };
   };
   error?: string;
@@ -131,7 +130,11 @@ async function fetchOnboardingBoard(): Promise<BoardResponse> {
       };
     }
 
-    return { ok: true, rows: js.rows || [] };
+    return {
+      ok: true,
+      rows: js.rows || [],
+      settings: js.settings,
+    };
   } catch (e: any) {
     console.error('fetchOnboardingBoard error', e);
     return {
@@ -205,7 +208,6 @@ export default async function AdminClinicianOnboardingPage() {
 
       <OnboardingPaymentActionsPanel
         rows={board.rows as any}
-        starterKitItems={board.settings?.publicSettings?.starterKitItems || []}
         currency={board.settings?.publicSettings?.currency || 'ZAR'}
       />
 
@@ -221,7 +223,6 @@ export default async function AdminClinicianOnboardingPage() {
 
       <OnboardingDispatchBoard
         rows={board.rows}
-        starterKitItems={board.settings?.publicSettings?.starterKitItems || []}
         simulationPatient={simulationPatient}
       />
     </main>

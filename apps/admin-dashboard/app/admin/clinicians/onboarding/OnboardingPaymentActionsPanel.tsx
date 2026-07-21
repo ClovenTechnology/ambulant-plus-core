@@ -1,8 +1,33 @@
 // apps/admin-dashboard/app/admin/clinicians/onboarding/OnboardingPaymentActionsPanel.tsx
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+
+type OnboardingEntitlementSummary = {
+  pathwayKey?: string | null;
+  pathwayLabel?: string | null;
+  approvedPayLater?: boolean | null;
+  depositQualified?: boolean | null;
+  trainingAccess?: boolean | null;
+  practiceActivation?: boolean | null;
+  starterKitRelease?: 'none' | 'deposit' | 'full' | string | null;
+  authorisedStarterKitItems?: string[] | null;
+  releasedStarterKitItems?: string[] | null;
+  missingStarterKitItems?: string[] | null;
+  starterKitReleaseSatisfied?: boolean | null;
+  platformIndemnityEligible?: boolean | null;
+  balanceRecoveryApplies?: boolean | null;
+  outstandingCents?: number | null;
+  conditions?: string[] | null;
+  privileges?: {
+    trainingAccess?: boolean | null;
+    practiceActivation?: boolean | null;
+    starterKitRelease?: 'none' | 'deposit' | 'full' | string | null;
+    platformIndemnityEligible?: boolean | null;
+    balanceRecoveryApplies?: boolean | null;
+  } | null;
+};
 
 type OnboardingRow = {
   clinicianId: string;
@@ -37,6 +62,8 @@ type OnboardingRow = {
       authorisationExpiresAt?: string | null;
     } | null;
   } | null;
+  entitlements?: OnboardingEntitlementSummary | null;
+
   dispatch?: {
     id?: string;
     status?: string | null;
@@ -60,7 +87,13 @@ type OnboardingRow = {
   } | null;
 };
 
-type ActiveAction = 'confirm-payment' | 'review-pay-later' | 'approve-waiver' | 'dispatch-temporary' | 'dispatch-permanent' | null;
+type ActiveAction =
+  | 'confirm-payment'
+  | 'review-pay-later'
+  | 'approve-waiver'
+  | 'issue-authorisation'
+  | 'dispatch-permanent'
+  | null;
 
 function money(cents: number | null | undefined, currency = 'ZAR') {
   const n = Math.max(0, Math.round(Number(cents || 0))) / 100;
@@ -77,14 +110,22 @@ function asCurrencyCents(value: string) {
   return Math.max(0, Math.round(n * 100));
 }
 
-function safeArray(xs?: string[] | null) {
-  return Array.isArray(xs) ? xs.map((x) => String(x || '').trim()).filter(Boolean) : [];
-}
-
 function statusTone(row: OnboardingRow) {
-  if (row.payment?.fullyPaid) return 'border-emerald-200 bg-emerald-50 text-emerald-900';
-  if (row.payment?.initialRequirementMet || row.onboarding?.depositPaid) return 'border-sky-200 bg-sky-50 text-sky-900';
-  if (row.payment?.waiverActive || row.onboarding?.waiverActive) return 'border-purple-200 bg-purple-50 text-purple-900';
+  const pathway =
+    row.entitlements?.pathwayKey;
+
+  if (pathway === 'FULL_PAYMENT') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-900';
+  }
+
+  if (pathway === 'QUALIFYING_DEPOSIT') {
+    return 'border-sky-200 bg-sky-50 text-sky-900';
+  }
+
+  if (pathway === 'START_NOW_PAY_LATER') {
+    return 'border-purple-200 bg-purple-50 text-purple-900';
+  }
+
   return 'border-amber-200 bg-amber-50 text-amber-900';
 }
 
@@ -139,6 +180,33 @@ function payLaterStatusTone(value?: string | null) {
   return 'border-amber-200 bg-amber-50 text-amber-950';
 }
 
+function hasActiveAuthorisation(
+  row: OnboardingRow,
+) {
+  const payment =
+    row.payment?.latestConfirmedPayment;
+
+  if (
+    !payment?.authorisationCodeHint ||
+    !payment.authorisationExpiresAt
+  ) {
+    return false;
+  }
+
+  const expiresAt =
+    new Date(
+      payment.authorisationExpiresAt,
+    );
+
+  return (
+    Number.isFinite(
+      expiresAt.getTime(),
+    ) &&
+    expiresAt.getTime() >
+      Date.now()
+  );
+}
+
 function reviewErrorMessage(value: unknown) {
   const code = String(value || '').trim();
 
@@ -171,21 +239,28 @@ function reviewErrorMessage(value: unknown) {
 
 export default function OnboardingPaymentActionsPanel({
   rows,
-  starterKitItems,
   currency = 'ZAR',
 }: {
   rows: OnboardingRow[];
-  starterKitItems?: string[];
   currency?: string;
 }) {
   const router = useRouter();
-  const kitItems = useMemo(() => safeArray(starterKitItems), [starterKitItems]);
 
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [activeRow, setActiveRow] = useState<OnboardingRow | null>(null);
   const [activeAction, setActiveAction] = useState<ActiveAction>(null);
-  const [lastCode, setLastCode] = useState<{ clinician: string; code: string; warning?: string } | null>(null);
+  const [lastCode, setLastCode] = useState<{
+    clinician: string;
+    code: string;
+    expiresAt?: string | null;
+    warning?: string;
+  } | null>(null);
+
+  const [
+    codeCopied,
+    setCodeCopied,
+  ] = useState(false);
 
   const [amount, setAmount] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
@@ -199,6 +274,16 @@ export default function OnboardingPaymentActionsPanel({
   const [nextPaymentAt, setNextPaymentAt] = useState('');
   const [termsConfirmed, setTermsConfirmed] = useState(false);
   const [payLaterReviewNotes, setPayLaterReviewNotes] = useState('');
+
+  const [
+    authorisationReplacementReason,
+    setAuthorisationReplacementReason,
+  ] = useState('');
+
+  const [
+    authorisationReplacementConfirmed,
+    setAuthorisationReplacementConfirmed,
+  ] = useState(false);
 
   const [courierName, setCourierName] = useState('');
   const [trackingCode, setTrackingCode] = useState('');
@@ -223,6 +308,9 @@ export default function OnboardingPaymentActionsPanel({
     setNextPaymentAt('');
     setTermsConfirmed(false);
     setPayLaterReviewNotes('');
+    setAuthorisationReplacementReason('');
+    setAuthorisationReplacementConfirmed(false);
+    setCodeCopied(false);
 
     setCourierName('');
     setTrackingCode('');
@@ -281,7 +369,7 @@ export default function OnboardingPaymentActionsPanel({
         provider: 'manual',
       });
 
-      setNotice({ tone: 'ok', text: 'Payment confirmed. You can now generate an authorisation code.' });
+      setNotice({ tone: 'ok', text: 'Payment confirmed. Issuing the one-time authorisation code now.' });
       setLastCode(null);
       closeModal();
 
@@ -421,7 +509,18 @@ export default function OnboardingPaymentActionsPanel({
       });
 
       closeModal();
-      router.refresh();
+
+      if (
+        decision === 'approved' &&
+        js?.payment?.id
+      ) {
+        await generateAuthorisation(
+          activeRow,
+          js.payment.id,
+        );
+      } else {
+        router.refresh();
+      }
     } catch (err: any) {
       setNotice({
         tone: 'err',
@@ -437,65 +536,223 @@ export default function OnboardingPaymentActionsPanel({
     }
   }
 
-  async function generateAuthorisation(row: OnboardingRow, paymentId?: string | null) {
-    setBusyId(row.clinicianId);
+  async function generateAuthorisation(
+    row: OnboardingRow,
+    paymentId?: string | null,
+    options?: {
+      replaceExisting?: boolean;
+      replacementReason?: string;
+    },
+  ) {
+    setBusyId(
+      row.clinicianId,
+    );
+
     try {
-      const js = await postJson('/api/admin/clinicians/onboarding/generate-authorisation', {
-        clinicianId: row.clinicianId,
-        paymentId: paymentId || row.payment?.latestConfirmedPayment?.id || undefined,
-        expiresInDays: 30,
-      });
+      const js =
+        await postJson(
+          '/api/admin/clinicians/onboarding/generate-authorisation',
+          {
+            clinicianId:
+              row.clinicianId,
+
+            paymentId:
+              paymentId ||
+              row.payment
+                ?.latestConfirmedPayment
+                ?.id ||
+              undefined,
+
+            expiresInDays: 30,
+
+            replaceExisting:
+              options
+                ?.replaceExisting ===
+              true,
+
+            replacementReason:
+              options
+                ?.replacementReason
+                ?.trim() ||
+              null,
+          },
+        );
 
       setLastCode({
-        clinician: row.displayName || row.clinicianId,
-        code: String(js.authorisationCode || ''),
-        warning: js.warning || 'Show this code once to the clinician.',
+        clinician:
+          row.displayName ||
+          row.clinicianId,
+
+        code:
+          String(
+            js.authorisationCode ||
+              '',
+          ),
+
+        expiresAt:
+          js?.payment
+            ?.authorisationExpiresAt ||
+          null,
+
+        warning:
+          js.warning ||
+          'This one-time code cannot be retrieved again. Copy it before leaving this page.',
       });
-      setNotice({ tone: 'ok', text: 'Authorisation code generated. Copy it now.' });
+
+      setCodeCopied(false);
+
+      setNotice({
+        tone: 'ok',
+
+        text:
+          options?.replaceExisting
+            ? 'The previous code was replaced. Copy the new one-time code now.'
+            : 'Authorisation code issued. Copy the one-time code now.',
+      });
+
+      closeModal();
       router.refresh();
     } catch (err: any) {
-      setNotice({ tone: 'err', text: err?.message || 'Authorisation generation failed.' });
+      setNotice({
+        tone: 'err',
+
+        text:
+          err?.message ||
+          'Authorisation generation failed.',
+      });
     } finally {
       setBusyId(null);
     }
   }
 
-  async function createDispatch(dispatchKind: 'temporary_training_kit' | 'starter_kit') {
-    if (!activeRow) return;
-    if (!kitItems.length) {
-      setNotice({ tone: 'err', text: 'C-Med StarterKit contents are not configured. Save kit items in onboarding settings first.' });
-      return;
-    }
-    if (!courierName.trim()) {
-      setNotice({ tone: 'err', text: 'Courier name is required.' });
+  async function copyAuthorisationCode() {
+    if (!lastCode?.code) {
       return;
     }
 
-    setBusyId(activeRow.clinicianId);
     try {
-      await postJson('/api/admin/clinicians/onboarding/create-dispatch', {
-        clinicianId: activeRow.clinicianId,
-        onboardingId: activeRow.onboarding?.id,
-        courierName: courierName.trim(),
-        trackingCode: trackingCode.trim() || null,
-        trackingUrl: trackingUrl.trim() || null,
-        kitItems,
-        dispatchKind,
-        notifyClinician,
+      await navigator.clipboard
+        .writeText(
+          lastCode.code,
+        );
+
+      setCodeCopied(true);
+
+      setNotice({
+        tone: 'ok',
+
+        text:
+          'Authorisation code copied to the clipboard.',
       });
+    } catch {
+      setNotice({
+        tone: 'err',
+
+        text:
+          'Clipboard access was blocked. Select and copy the code manually.',
+      });
+    }
+  }
+
+  async function createDispatch() {
+    if (!activeRow) return;
+
+    const entitlements =
+      activeRow.entitlements;
+
+    const authorisedItems =
+      entitlements
+        ?.authorisedStarterKitItems ||
+      [];
+
+    const missingItems =
+      entitlements
+        ?.missingStarterKitItems ||
+      [];
+
+    if (
+      entitlements
+        ?.starterKitRelease ===
+        'none' ||
+      authorisedItems.length === 0
+    ) {
+      setNotice({
+        tone: 'err',
+        text:
+          'The effective Admin-configured pathway does not authorise a permanent C-Med release.',
+      });
+      return;
+    }
+
+    if (
+      missingItems.length === 0 &&
+      entitlements
+        ?.starterKitReleaseSatisfied ===
+        true
+    ) {
+      setNotice({
+        tone: 'ok',
+        text:
+          'All currently authorised C-Med items have already been released.',
+      });
+      closeModal();
+      return;
+    }
+
+    if (!courierName.trim()) {
+      setNotice({
+        tone: 'err',
+        text:
+          'Courier name is required.',
+      });
+      return;
+    }
+
+    setBusyId(
+      activeRow.clinicianId,
+    );
+
+    try {
+      const response =
+        await postJson(
+          '/api/admin/clinicians/onboarding/create-dispatch',
+          {
+            clinicianId:
+              activeRow.clinicianId,
+            onboardingId:
+              activeRow.onboarding?.id,
+            courierName:
+              courierName.trim(),
+            trackingCode:
+              trackingCode.trim() ||
+              null,
+            trackingUrl:
+              trackingUrl.trim() ||
+              null,
+            notifyClinician,
+          },
+        );
 
       setNotice({
         tone: 'ok',
         text:
-          dispatchKind === 'temporary_training_kit'
-            ? 'Temporary training kit dispatch created.'
-            : 'Permanent C-Med StarterKit dispatch created.',
+          response?.alreadySatisfied
+            ? 'The existing server-authorised C-Med release is already complete.'
+            : 'The server-authorised C-Med dispatch delta was prepared.',
       });
+
       closeModal();
       router.refresh();
-    } catch (err: any) {
-      setNotice({ tone: 'err', text: err?.message || 'Dispatch creation failed.' });
-    } finally {
+    }
+    catch (error: any) {
+      setNotice({
+        tone: 'err',
+        text:
+          error?.message ||
+          'Dispatch creation failed.',
+      });
+    }
+    finally {
       setBusyId(null);
     }
   }
@@ -505,7 +762,7 @@ export default function OnboardingPaymentActionsPanel({
       <div className="border-b px-4 py-3">
         <h2 className="text-sm font-semibold text-gray-900">Enterprise onboarding actions</h2>
         <p className="mt-1 text-xs text-gray-600">
-          Review clinician-submitted Pay Later requests, manage separate manual waivers, confirm payments, issue authorisation codes, and control temporary versus permanent C-Med StarterKit release.
+          Review Pay Later requests, confirm payments, issue or replace one-time authorisation codes, and prepare only the C-Med items authorised by the effective Admin-configured pathway.
         </p>
       </div>
 
@@ -523,18 +780,42 @@ export default function OnboardingPaymentActionsPanel({
       ) : null}
 
       {lastCode ? (
-        <div className="mx-4 mt-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-950">
-          <div className="font-black">Authorisation code for {lastCode.clinician}</div>
-          <div className="mt-2 inline-flex rounded-lg bg-white px-3 py-2 font-mono text-sm font-black tracking-wide">
-            {lastCode.code}
+        <div className="mx-4 mt-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-xs text-indigo-950">
+          <div className="font-black">
+            One-time authorisation code for{' '}
+            {lastCode.clinician}
           </div>
-          <div className="mt-2 text-indigo-800">{lastCode.warning}</div>
-        </div>
-      ) : null}
 
-      {!kitItems.length ? (
-        <div className="mx-4 mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-          C-Med StarterKit contents are not configured. Dispatch actions are disabled until Admin saves kit contents in onboarding settings.
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <code className="select-all rounded-lg border border-indigo-100 bg-white px-3 py-2 font-mono text-base font-black tracking-wide">
+              {lastCode.code}
+            </code>
+
+            <button
+              type="button"
+              onClick={
+                copyAuthorisationCode
+              }
+              className="rounded-lg bg-indigo-700 px-3 py-2 font-semibold text-white hover:bg-indigo-800"
+            >
+              {codeCopied
+                ? 'Copied'
+                : 'Copy code'}
+            </button>
+          </div>
+
+          {lastCode.expiresAt ? (
+            <div className="mt-2 font-semibold text-indigo-900">
+              Expires{' '}
+              {dateTimeLabel(
+                lastCode.expiresAt,
+              )}
+            </div>
+          ) : null}
+
+          <div className="mt-2 text-indigo-800">
+            {lastCode.warning}
+          </div>
         </div>
       ) : null}
 
@@ -543,9 +824,39 @@ export default function OnboardingPaymentActionsPanel({
           const busy = busyId === row.clinicianId;
           const trainingScheduled = !!row.trainingSlot?.id;
           const hasConfirmedPayment = !!row.payment?.latestConfirmedPayment?.id;
-          const depositMet = row.payment?.initialRequirementMet === true || row.onboarding?.depositPaid === true;
-          const waiverActive = row.payment?.waiverActive === true || row.onboarding?.waiverActive === true;
-          const canPermanentDispatch = depositMet || row.payment?.fullyPaid === true;
+
+          const activeAuthorisation =
+            hasActiveAuthorisation(
+              row,
+            );
+          const entitlements =
+            row.entitlements;
+
+          const waiverActive =
+            entitlements?.pathwayKey ===
+            'START_NOW_PAY_LATER';
+
+          const authorisedItems =
+            entitlements
+              ?.authorisedStarterKitItems ||
+            [];
+
+          const missingItems =
+            entitlements
+              ?.missingStarterKitItems ||
+            [];
+
+          const releaseSatisfied =
+            entitlements
+              ?.starterKitReleaseSatisfied ===
+            true;
+
+          const canPermanentDispatch =
+            entitlements
+              ?.starterKitRelease !==
+              'none' &&
+            authorisedItems.length > 0 &&
+            missingItems.length > 0;
           const payLaterStatus = String(
             row.payLaterRequest?.status || '',
           )
@@ -559,7 +870,7 @@ export default function OnboardingPaymentActionsPanel({
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="text-sm font-black text-slate-950">{row.displayName}</div>
-                  <div className="text-xs text-slate-500">{row.email || 'No email'} · {row.clinicianId}</div>
+                  <div className="text-xs text-slate-500">{row.email || 'No email'} Â· {row.clinicianId}</div>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <span className={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${statusTone(row)}`}>
                       {row.payment?.paymentStatus || 'unpaid'}
@@ -584,6 +895,20 @@ export default function OnboardingPaymentActionsPanel({
                         )}
                       </span>
                     ) : null}
+                    {entitlements?.pathwayLabel ? (
+                      <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-bold text-indigo-900">
+                        Pathway: {entitlements.pathwayLabel}
+                      </span>
+                    ) : (
+                      <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-bold text-amber-900">
+                        No effective pathway
+                      </span>
+                    )}
+
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-slate-700">
+                      Kit release: {entitlements?.starterKitRelease || 'none'}
+                    </span>
+
                     {row.dispatch?.status ? (
                       <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-bold text-slate-700">
                         Dispatch: {row.dispatch.status}
@@ -620,7 +945,7 @@ export default function OnboardingPaymentActionsPanel({
                   <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                     <div>
                       <div className="font-black">
-                        Clinician Pay Later request ·{' '}
+                        Clinician Pay Later request Â·{' '}
                         {payLaterStatusLabel(
                           row.payLaterRequest.status,
                         )}
@@ -659,7 +984,7 @@ export default function OnboardingPaymentActionsPanel({
                       )}
 
                       {row.payLaterRequest.reviewedByUserId
-                        ? ' · ' +
+                        ? ' Â· ' +
                           row.payLaterRequest.reviewedByUserId
                         : ''}
                     </div>
@@ -727,36 +1052,101 @@ export default function OnboardingPaymentActionsPanel({
 
                 <button
                   type="button"
-                  disabled={busy || !hasConfirmedPayment}
-                  onClick={() => generateAuthorisation(row)}
+                  disabled={
+                    busy ||
+                    !hasConfirmedPayment
+                  }
+                  onClick={() =>
+                    openAction(
+                      row,
+                      'issue-authorisation',
+                    )
+                  }
+                  title={
+                    activeAuthorisation
+                      ? 'A valid code already exists. Replacing it requires a reason and confirmation.'
+                      : 'Issue a one-time payment authorisation code.'
+                  }
                   className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-900 hover:bg-indigo-100 disabled:opacity-50"
                 >
-                  Issue authorisation
+                  {activeAuthorisation
+                    ? 'Replace authorisation'
+                    : 'Issue authorisation'}
                 </button>
 
                 <button
                   type="button"
-                  disabled={busy || !kitItems.length}
-                  onClick={() => openAction(row, 'dispatch-temporary')}
-                  className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:opacity-50"
-                >
-                  Temporary training kit
-                </button>
-
-                <button
-                  type="button"
-                  disabled={busy || !kitItems.length || !canPermanentDispatch}
-                  onClick={() => openAction(row, 'dispatch-permanent')}
+                  disabled={
+                    busy ||
+                    !canPermanentDispatch ||
+                    releaseSatisfied
+                  }
+                  onClick={() =>
+                    openAction(
+                      row,
+                      'dispatch-permanent',
+                    )
+                  }
                   className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-900 hover:bg-emerald-100 disabled:opacity-50"
-                  title={canPermanentDispatch ? 'Release permanent C-Med StarterKit' : 'Requires deposit or full payment'}
+                  title={
+                    releaseSatisfied
+                      ? 'All currently authorised items have already been released.'
+                      : canPermanentDispatch
+                        ? 'Prepare only the server-authorised outstanding C-Med items.'
+                        : 'The effective pathway does not authorise a permanent kit release.'
+                  }
                 >
-                  Permanent C-Med StarterKit
+                  {releaseSatisfied
+                    ? 'Authorised kit released'
+                    : canPermanentDispatch
+                      ? (
+                          'Prepare ' +
+                          missingItems.length +
+                          ' authorised item' +
+                          (missingItems.length === 1 ? '' : 's')
+                        )
+                      : 'Kit release not authorised'}
                 </button>
               </div>
 
-              {waiverActive && !depositMet ? (
-                <div className="mt-3 rounded-lg border border-purple-200 bg-purple-50 p-2 text-[11px] text-purple-900">
-                  Waiver/pay-later active: temporary training devices may be issued, but permanent C-Med StarterKit remains blocked until deposit/full payment.
+              {entitlements ? (
+                <div className="mt-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-[11px] text-indigo-950">
+                  <div className="font-black">
+                    Server-resolved pathway privileges
+                  </div>
+
+                  <div className="mt-1 grid gap-1 sm:grid-cols-2">
+                    <span>
+                      Training access:{' '}
+                      <strong>
+                        {entitlements.trainingAccess ? 'Granted' : 'Not granted'}
+                      </strong>
+                    </span>
+                    <span>
+                      Practice activation:{' '}
+                      <strong>
+                        {entitlements.practiceActivation ? 'Granted' : 'Not granted'}
+                      </strong>
+                    </span>
+                    <span>
+                      Kit release:{' '}
+                      <strong>
+                        {entitlements.starterKitRelease || 'none'}
+                      </strong>
+                    </span>
+                    <span>
+                      Outstanding kit items:{' '}
+                      <strong>
+                        {missingItems.length}
+                      </strong>
+                    </span>
+                  </div>
+
+                  {waiverActive ? (
+                    <div className="mt-2 rounded-lg border border-purple-200 bg-purple-50 p-2 text-purple-950">
+                      Pay Later is the effective pathway. Its exact training, practice, indemnity and kit privileges are those published by Admin.
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </article>
@@ -776,9 +1166,11 @@ export default function OnboardingPaymentActionsPanel({
                       ? 'Review clinician Pay Later request'
                       : activeAction === 'approve-waiver'
                         ? 'Manual Admin waiver / train now, pay later'
-                        : activeAction === 'dispatch-temporary'
-                          ? 'Create temporary training kit dispatch'
-                          : 'Create permanent C-Med StarterKit dispatch'}
+                        : activeAction === 'issue-authorisation'
+                          ? hasActiveAuthorisation(activeRow)
+                            ? 'Replace active authorisation code'
+                            : 'Issue payment authorisation code'
+                        : 'Prepare server-authorised C-Med release'}
                 </div>
                 <div className="text-xs text-gray-500">{activeRow.displayName}</div>
               </div>
@@ -922,12 +1314,86 @@ export default function OnboardingPaymentActionsPanel({
                 </>
               ) : null}
 
-              {activeAction === 'dispatch-temporary' || activeAction === 'dispatch-permanent' ? (
+              {activeAction === 'issue-authorisation' ? (
+                hasActiveAuthorisation(
+                  activeRow,
+                ) ? (
+                  <>
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                      <div className="font-black">
+                        A valid code is already active
+                      </div>
+
+                      <div className="mt-1">
+                        Code ending in{' '}
+                        <span className="font-mono font-black">
+                          {activeRow.payment?.latestConfirmedPayment?.authorisationCodeHint}
+                        </span>
+                        {' Â· '}expires{' '}
+                        {dateTimeLabel(
+                          activeRow.payment?.latestConfirmedPayment?.authorisationExpiresAt,
+                        )}.
+                      </div>
+
+                      <div className="mt-2">
+                        Replacing it immediately invalidates the previous code.
+                      </div>
+                    </div>
+
+                    <label className="block space-y-1 text-xs">
+                      <span className="font-semibold">
+                        Replacement reason
+                      </span>
+
+                      <textarea
+                        value={
+                          authorisationReplacementReason
+                        }
+                        onChange={(event) =>
+                          setAuthorisationReplacementReason(
+                            event.target.value,
+                          )
+                        }
+                        rows={3}
+                        maxLength={1000}
+                        placeholder="Explain why the active code must be replaced."
+                        className="w-full rounded-lg border px-3 py-2 text-sm"
+                      />
+                    </label>
+
+                    <label className="flex gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-950">
+                      <input
+                        type="checkbox"
+                        checked={
+                          authorisationReplacementConfirmed
+                        }
+                        onChange={(event) =>
+                          setAuthorisationReplacementConfirmed(
+                            event.target.checked,
+                          )
+                        }
+                      />
+
+                      <span>
+                        I understand that the existing code will stop working immediately.
+                      </span>
+                    </label>
+                  </>
+                ) : (
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-950">
+                    Issue a single-use code valid for 30 days. The plaintext code is shown once and only its secure hash is retained.
+                  </div>
+                )
+              ) : null}
+
+              {activeAction === 'dispatch-permanent' ? (
                 <>
                   <div className="rounded-lg border bg-slate-50 p-3 text-xs text-slate-700">
-                    <div className="font-black text-slate-900">C-Med StarterKit items from Admin settings</div>
+                    <div className="font-black text-slate-900">Server-authorised C-Med dispatch delta</div>
                     <ul className="mt-2 list-disc pl-5">
-                      {kitItems.map((item) => <li key={item}>{item}</li>)}
+                      {(activeRow.entitlements?.missingStarterKitItems || []).map((item) => (
+                        <li key={item}>{item}</li>
+                      ))}
                     </ul>
                   </div>
                   <label className="block space-y-1 text-xs">
@@ -949,7 +1415,7 @@ export default function OnboardingPaymentActionsPanel({
                 </>
               ) : null}
 
-              {activeAction !== 'review-pay-later' ? (
+              {activeAction !== 'review-pay-later' && activeAction !== 'issue-authorisation' ? (
                 <label className="block space-y-1 text-xs">
                   <span className="font-semibold">
                     Admin notes
@@ -1009,20 +1475,65 @@ export default function OnboardingPaymentActionsPanel({
                     }
                     className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                   >
-                    Approve Pay Later
+                    Approve & issue code
                   </button>
                 </>
               ) : activeAction === 'approve-waiver' ? (
                 <button type="button" disabled={busyId === activeRow.clinicianId} onClick={approveWaiver} className="rounded-lg bg-purple-600 px-3 py-2 text-xs font-semibold text-white hover:bg-purple-700 disabled:opacity-50">
                   Approve waiver & issue code
                 </button>
-              ) : activeAction === 'dispatch-temporary' ? (
-                <button type="button" disabled={busyId === activeRow.clinicianId} onClick={() => createDispatch('temporary_training_kit')} className="rounded-lg bg-amber-600 px-3 py-2 text-xs font-semibold text-white hover:bg-amber-700 disabled:opacity-50">
-                  Create temporary dispatch
+              ) : activeAction === 'issue-authorisation' ? (
+                <button
+                  type="button"
+                  disabled={
+                    busyId ===
+                      activeRow.clinicianId ||
+                    (
+                      hasActiveAuthorisation(
+                        activeRow,
+                      ) &&
+                      (
+                        !authorisationReplacementReason.trim() ||
+                        !authorisationReplacementConfirmed
+                      )
+                    )
+                  }
+                  onClick={() =>
+                    generateAuthorisation(
+                      activeRow,
+                      activeRow.payment?.latestConfirmedPayment?.id,
+                      {
+                        replaceExisting:
+                          hasActiveAuthorisation(
+                            activeRow,
+                          ),
+
+                        replacementReason:
+                          authorisationReplacementReason,
+                      },
+                    )
+                  }
+                  className="rounded-lg bg-indigo-700 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-800 disabled:opacity-50"
+                >
+                  {hasActiveAuthorisation(
+                    activeRow,
+                  )
+                    ? 'Replace & show new code'
+                    : 'Issue & show code'}
                 </button>
               ) : (
-                <button type="button" disabled={busyId === activeRow.clinicianId} onClick={() => createDispatch('starter_kit')} className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50">
-                  Create permanent dispatch
+                <button
+                  type="button"
+                  disabled={
+                    busyId ===
+                    activeRow.clinicianId
+                  }
+                  onClick={
+                    createDispatch
+                  }
+                  className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  Prepare authorised dispatch
                 </button>
               )}
             </div>

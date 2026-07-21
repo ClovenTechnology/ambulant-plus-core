@@ -249,13 +249,42 @@ export async function POST(req: NextRequest) {
      */
     let slot = await db.clinicianTrainingSlot.create({
       data: {
+        title:
+          cleanStr(body.title, 240) ||
+          'Mandatory Clinician Training',
+        summary:
+          cleanStr(body.summary, 2000),
+        status: 'published',
         startsAt: startAt,
         endsAt: endAt,
+        timezone:
+          cleanStr(body.timezone, 120) ||
+          'Africa/Johannesburg',
+        durationDays: 1,
+        totalDurationMinutes: Math.max(
+          1,
+          Math.round(
+            (endAt.getTime() - startAt.getTime()) /
+              60000,
+          ),
+        ),
         capacity: Math.max(participants.length, 1),
         usedCount: participants.length,
         mode,
+        allowedModes: [mode],
+        sessions: [
+          {
+            id: 'session-1',
+            dayNumber: 1,
+            startAt: startAt.toISOString(),
+            endAt: endAt.toISOString(),
+            mode,
+          },
+        ],
         meetingUrl: null,
         trainerName: trainerName || null,
+        publishedAt: new Date(),
+        publishedByUserId: isAdmin.uid,
       },
     });
 
@@ -282,6 +311,7 @@ export async function POST(req: NextRequest) {
         data: {
           status: 'training_scheduled',
           trainingSlotId: slot.id,
+          trainingMode: mode,
           trainingNotes: [
             cleanStr(onboarding.trainingNotes, 2000),
             `Training scheduled ${new Date().toISOString()}`,

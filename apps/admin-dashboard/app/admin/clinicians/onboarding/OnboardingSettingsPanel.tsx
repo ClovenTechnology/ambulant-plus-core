@@ -1,17 +1,31 @@
-﻿// apps/admin-dashboard/app/admin/clinicians/onboarding/OnboardingSettingsPanel.tsx
+// apps/admin-dashboard/app/admin/clinicians/onboarding/OnboardingSettingsPanel.tsx
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
 
-type BalanceRecoveryMode = 'manual' | 'payout_deduction' | 'disabled';
-
-type OnboardingPathwayKey =
+type PathwayKey =
   | 'START_NOW_PAY_LATER'
   | 'QUALIFYING_DEPOSIT'
   | 'FULL_PAYMENT';
 
-type CommercialPathway = {
-  key: OnboardingPathwayKey;
+type Privileges = {
+  trainingAccess: boolean;
+  practiceActivation: boolean;
+  starterKitRelease:
+    | 'none'
+    | 'deposit'
+    | 'full';
+  platformIndemnityEligible: boolean;
+  balanceRecoveryApplies: boolean;
+};
+
+type Pathway = {
+  key: PathwayKey;
   displayOrder: number;
   label: string;
   badge: string | null;
@@ -20,25 +34,70 @@ type CommercialPathway = {
   enabled: boolean;
   featured: boolean;
   conditions: string[];
+  privileges: Privileges;
 };
 
-const DEFAULT_COMMERCIAL_PATHWAYS: CommercialPathway[] = [
+type TrainingPolicy = {
+  heading: string;
+  introduction: string;
+  timezone: string;
+  defaultDurationDays: number;
+  defaultSessionDurationMinutes: number;
+  allowedModes:
+    Array<'virtual' | 'in_person'>;
+  virtualDescription: string;
+  inPersonDescription: string;
+  operationalNotice: string | null;
+  supportMessage: string | null;
+};
+
+type Settings = {
+  trainingFeeCents: number;
+  minimumInitialPaymentCents: number;
+  allowPartialPayment: boolean;
+  balanceRecoveryMode:
+    | 'manual'
+    | 'payout_deduction'
+    | 'disabled';
+  balanceRecoveryNotes: string | null;
+  currency: string;
+  paymentProvider:
+    | 'paystack'
+    | 'payfast';
+  cardPaymentEnabled: boolean;
+  manualPaymentEnabled: boolean;
+  starterKitItems: string[];
+  starterKitDepositItems: string[];
+  bankInstructions:
+    Record<string, string> | null;
+  commercialPathways: Pathway[];
+  trainingPolicy: TrainingPolicy;
+  notes: string | null;
+};
+
+const DEFAULT_PATHWAYS: Pathway[] = [
   {
     key: 'START_NOW_PAY_LATER',
     displayOrder: 1,
     label: 'Start Now — Pay Later',
     badge: 'Fastest start',
     description:
-      'Begin training after Ambulant+ Admin approves your Pay Later request, without making an upfront onboarding payment.',
-    ctaLabel: 'Request Pay Later approval',
+      'Begin after Admin approves the Pay Later request.',
+    ctaLabel:
+      'Request Pay Later approval',
     enabled: true,
     featured: true,
     conditions: [
       'Training access begins after Admin approval.',
-      'No permanent C-Med Kit is dispatched until the qualifying initial payment is received.',
-      'Platform-wide Professional Indemnity cover does not commence until a qualifying payment is received and all applicable policy conditions are satisfied.',
-      'Any outstanding onboarding balance remains payable under the applicable agreement.',
+      'The permanent C-Med Kit requires a qualifying payment.',
     ],
+    privileges: {
+      trainingAccess: true,
+      practiceActivation: true,
+      starterKitRelease: 'none',
+      platformIndemnityEligible: false,
+      balanceRecoveryApplies: true,
+    },
   },
   {
     key: 'QUALIFYING_DEPOSIT',
@@ -46,16 +105,21 @@ const DEFAULT_COMMERCIAL_PATHWAYS: CommercialPathway[] = [
     label: 'Start with Initial Deposit',
     badge: 'Balanced option',
     description:
-      'Pay the Admin-configured qualifying initial amount and proceed with training and partial C-Med Kit fulfilment.',
+      'Pay the qualifying deposit and receive its assigned benefits.',
     ctaLabel: 'Pay initial deposit',
     enabled: true,
     featured: false,
     conditions: [
-      'The qualifying initial amount is configured by Ambulant+ Admin.',
-      'Initial C-Med Kit fulfilment excludes the HD Otoscope and complimentary merchandise until the outstanding balance is settled.',
-      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
-      'The remaining onboarding balance remains payable under the applicable agreement.',
+      'The qualifying amount is set by Admin.',
+      'Only the selected deposit-kit items are released.',
     ],
+    privileges: {
+      trainingAccess: true,
+      practiceActivation: true,
+      starterKitRelease: 'deposit',
+      platformIndemnityEligible: true,
+      balanceRecoveryApplies: true,
+    },
   },
   {
     key: 'FULL_PAYMENT',
@@ -63,525 +127,551 @@ const DEFAULT_COMMERCIAL_PATHWAYS: CommercialPathway[] = [
     label: 'Pay in Full',
     badge: 'Complete package',
     description:
-      'Settle the complete onboarding fee and proceed with full C-Med Kit fulfilment.',
+      'Settle the full onboarding fee and receive the full configured package.',
     ctaLabel: 'Pay full onboarding fee',
     enabled: true,
     featured: false,
     conditions: [
-      'The full Admin-configured onboarding fee is payable.',
-      'The complete C-Med Kit, including the HD Otoscope and eligible complimentary merchandise, can be dispatched.',
-      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
-      'There is no outstanding onboarding-fee balance after confirmed full payment.',
+      'The complete configured C-Med Kit can be released.',
+      'No onboarding-fee balance remains.',
     ],
+    privileges: {
+      trainingAccess: true,
+      practiceActivation: true,
+      starterKitRelease: 'full',
+      platformIndemnityEligible: true,
+      balanceRecoveryApplies: false,
+    },
   },
 ];
 
-type BankInstructions = {
-  bankName?: string;
-  accountName?: string;
-  accountNumber?: string;
-  branchCode?: string;
-  swiftCode?: string;
-  referenceFormat?: string;
-  instructions?: string;
+const DEFAULT_POLICY: TrainingPolicy = {
+  heading:
+    'Mandatory clinician onboarding training',
+  introduction:
+    'Choose an available programme, select a training mode, and complete the applicable onboarding pathway.',
+  timezone: 'Africa/Johannesburg',
+  defaultDurationDays: 1,
+  defaultSessionDurationMinutes: 60,
+  allowedModes: [
+    'virtual',
+    'in_person',
+  ],
+  virtualDescription:
+    'Attend remotely using the secure training room.',
+  inPersonDescription:
+    'Attend at the venue shown in the programme.',
+  operationalNotice: null,
+  supportMessage:
+    'Contact Ambulant+ if you need accessibility support or a special arrangement.',
 };
 
-type OnboardingSettings = {
-  trainingFeeCents: number;
-  minimumInitialPaymentCents: number;
-  allowPartialPayment: boolean;
-  balanceRecoveryMode: BalanceRecoveryMode;
-  balanceRecoveryNotes: string | null;
-  currency: string;
-  paymentProvider: 'paystack' | 'payfast';
-  cardPaymentEnabled: boolean;
-  manualPaymentEnabled: boolean;
-  starterKitItems: string[];
-  bankInstructions: BankInstructions | null;
-  commercialPathways: CommercialPathway[];
-  notes: string | null;
-};
-
-type SettingsResponse = {
-  ok: boolean;
-  settings?: OnboardingSettings;
-  publicSettings?: Partial<OnboardingSettings>;
-  error?: string;
-};
-
-const DEFAULT_STARTER_KIT_TEXT = [
-  'DueCare 6-in-1 Health Monitor (IoMT)',
-  'NexRing (IoMT)',
-  'Digital Stethoscope (IoMT)',
-  'HD Otoscope (IoMT)',
-  'Clinician Handbook',
-  'Consumables pack',
-  'Ambulant+ formal shirt (Black)',
-  'Ambulant+ formal shirt (White)',
-  'Ambulant+ Mug',
-  'Ambulant+ Thermo Bottle',
-  'Smart ID + card holder + lanyard',
-].join('\n');
-
-function centsToRand(cents: number) {
-  const n = Number(cents || 0) / 100;
-  return Number.isFinite(n) ? String(n) : '0';
+function clonePathways(value = DEFAULT_PATHWAYS) {
+  return value.map((pathway) => ({
+    ...pathway,
+    conditions: [...pathway.conditions],
+    privileges: {...pathway.privileges},
+  }));
 }
 
-function randToCents(value: string) {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return 0;
-  return Math.max(0, Math.round(n * 100));
-}
+function cleanLines(value: string) {
+  const seen = new Set<string>();
 
-function normaliseItems(text: string) {
-  return text
+  return value
     .split('\n')
     .map((line) => line.trim())
-    .filter(Boolean);
+    .filter((line) => {
+      if (!line) return false;
+      const identity = line.toLowerCase();
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    });
 }
 
-function cloneDefaultCommercialPathways(): CommercialPathway[] {
-  return DEFAULT_COMMERCIAL_PATHWAYS.map(
-    (pathway) => ({
-      ...pathway,
-      conditions: [
-        ...pathway.conditions,
-      ],
-    }),
+function centsToAmount(value: number) {
+  return String(
+    Number(value || 0) / 100,
   );
 }
 
-function normaliseCommercialPathways(
-  value: unknown,
-): CommercialPathway[] {
+function amountToCents(value: string) {
+  const amount = Number(value);
+  return Number.isFinite(amount)
+    ? Math.max(
+        0,
+        Math.round(amount * 100),
+      )
+    : 0;
+}
+
+function errorText(value: unknown) {
+  return String(
+    value || 'Unable to save settings.',
+  ).replace(/_/g, ' ');
+}
+
+function mergeSettings(raw: any): Settings {
   const incoming =
-    Array.isArray(value)
-      ? value
+    Array.isArray(raw?.commercialPathways)
+      ? raw.commercialPathways
       : [];
 
-  const result =
-    cloneDefaultCommercialPathways().map(
-      (fallback) => {
-        const raw = incoming.find(
-          (candidate: any) =>
-            String(
-              candidate?.key || '',
-            )
-              .trim()
+  const commercialPathways =
+    DEFAULT_PATHWAYS.map((fallback) => {
+      const found =
+        incoming.find(
+          (item: any) =>
+            String(item?.key || '')
               .toUpperCase() ===
             fallback.key,
-        ) as any;
+        );
 
-        if (!raw) {
-          return fallback;
-        }
-
-        const requestedOrder =
-          Number(raw.displayOrder);
-
-        const conditions =
-          Array.isArray(raw.conditions)
-            ? raw.conditions
-                .map((item: unknown) =>
-                  String(item || '').trim(),
-                )
-                .filter(Boolean)
-                .slice(0, 12)
-            : fallback.conditions;
-
-        const hasBadge =
-          Object.prototype.hasOwnProperty.call(
-            raw,
-            'badge',
-          );
-
+      if (!found) {
         return {
-          key: fallback.key,
-          displayOrder:
-            Number.isFinite(requestedOrder)
-              ? Math.min(
-                  99,
-                  Math.max(
-                    1,
-                    Math.round(
-                      requestedOrder,
-                    ),
-                  ),
-                )
-              : fallback.displayOrder,
-          label:
-            String(
-              raw.label || '',
-            ).trim() ||
-            fallback.label,
-          badge: hasBadge
-            ? String(
-                raw.badge || '',
-              ).trim() ||
-              null
-            : fallback.badge,
-          description:
-            String(
-              raw.description || '',
-            ).trim() ||
-            fallback.description,
-          ctaLabel:
-            String(
-              raw.ctaLabel || '',
-            ).trim() ||
-            fallback.ctaLabel,
-          enabled:
-            raw.enabled !== false,
-          featured:
-            raw.featured === true,
-          conditions:
-            conditions.length > 0
-              ? conditions
-              : [
-                  ...fallback.conditions,
-                ],
+          ...fallback,
+          conditions: [...fallback.conditions],
+          privileges:
+            {...fallback.privileges},
         };
-      },
+      }
+
+      return {
+        ...fallback,
+        ...found,
+        conditions:
+          Array.isArray(found.conditions)
+            ? found.conditions
+            : fallback.conditions,
+        privileges: {
+          ...fallback.privileges,
+          ...(found.privileges || {}),
+        },
+      };
+    }).sort(
+      (left, right) =>
+        left.displayOrder -
+        right.displayOrder,
     );
 
-  return result.sort(
-    (left, right) =>
-      left.displayOrder -
-        right.displayOrder ||
-      DEFAULT_COMMERCIAL_PATHWAYS.findIndex(
-        (item) =>
-          item.key === left.key,
-      ) -
-        DEFAULT_COMMERCIAL_PATHWAYS.findIndex(
-          (item) =>
-            item.key === right.key,
-        ),
-  );
-}
-
-function moneyPreview(amount: string, currency: string) {
-  const n = Number(amount || 0);
-  try {
-    return new Intl.NumberFormat('en-ZA', {
-      style: 'currency',
-      currency: currency || 'ZAR',
-    }).format(Number.isFinite(n) ? n : 0);
-  } catch {
-    return `${currency || 'ZAR'} ${Number.isFinite(n) ? n.toFixed(2) : '0.00'}`;
-  }
+  return {
+    trainingFeeCents:
+      Number(raw?.trainingFeeCents || 0),
+    minimumInitialPaymentCents:
+      Number(
+        raw?.minimumInitialPaymentCents || 0,
+      ),
+    allowPartialPayment:
+      raw?.allowPartialPayment === true,
+    balanceRecoveryMode:
+      raw?.balanceRecoveryMode ===
+      'payout_deduction'
+        ? 'payout_deduction'
+        : raw?.balanceRecoveryMode ===
+            'disabled'
+          ? 'disabled'
+          : 'manual',
+    balanceRecoveryNotes:
+      raw?.balanceRecoveryNotes || null,
+    currency:
+      String(raw?.currency || 'ZAR'),
+    paymentProvider:
+      raw?.paymentProvider === 'payfast'
+        ? 'payfast'
+        : 'paystack',
+    cardPaymentEnabled:
+      raw?.cardPaymentEnabled !== false,
+    manualPaymentEnabled:
+      raw?.manualPaymentEnabled !== false,
+    starterKitItems:
+      Array.isArray(raw?.starterKitItems)
+        ? raw.starterKitItems
+        : [],
+    starterKitDepositItems:
+      Array.isArray(
+        raw?.starterKitDepositItems,
+      )
+        ? raw.starterKitDepositItems
+        : [],
+    bankInstructions:
+      raw?.bankInstructions &&
+      typeof raw.bankInstructions ===
+        'object'
+        ? raw.bankInstructions
+        : {},
+    commercialPathways,
+    trainingPolicy: {
+      ...DEFAULT_POLICY,
+      ...(raw?.trainingPolicy || {}),
+      allowedModes:
+        Array.isArray(
+          raw?.trainingPolicy?.allowedModes,
+        ) &&
+        raw.trainingPolicy
+          .allowedModes.length
+          ? raw.trainingPolicy.allowedModes
+          : DEFAULT_POLICY.allowedModes,
+    },
+    notes: raw?.notes || null,
+  };
 }
 
 export default function OnboardingSettingsPanel() {
-  const [open, setOpen] = useState(true);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  const [open, setOpen] =
+    useState(true);
 
-  const [trainingFee, setTrainingFee] = useState('0');
-  const [minimumInitialPayment, setMinimumInitialPayment] = useState('0');
-  const [allowPartialPayment, setAllowPartialPayment] = useState(false);
-  const [balanceRecoveryMode, setBalanceRecoveryMode] = useState<BalanceRecoveryMode>('manual');
-  const [balanceRecoveryNotes, setBalanceRecoveryNotes] = useState('');
+  const [settings, setSettings] =
+    useState<Settings | null>(null);
 
-  const [currency, setCurrency] = useState('ZAR');
-  const [paymentProvider, setPaymentProvider] = useState<'paystack' | 'payfast'>('paystack');
-  const [cardPaymentEnabled, setCardPaymentEnabled] = useState(true);
-  const [manualPaymentEnabled, setManualPaymentEnabled] = useState(true);
-  const [starterKitText, setStarterKitText] = useState(DEFAULT_STARTER_KIT_TEXT);
-  const [notes, setNotes] = useState('');
-  const [commercialPathways, setCommercialPathways] =
-    useState<CommercialPathway[]>(
-      cloneDefaultCommercialPathways,
-    );
+  const [kitText, setKitText] =
+    useState('');
 
-  const [bankName, setBankName] = useState('');
-  const [accountName, setAccountName] = useState('');
-  const [accountNumber, setAccountNumber] = useState('');
-  const [branchCode, setBranchCode] = useState('');
-  const [swiftCode, setSwiftCode] = useState('');
-  const [referenceFormat, setReferenceFormat] = useState(
-    'Use your full name and Ambulant+ clinician ID as payment reference.',
-  );
-  const [bankInstructions, setBankInstructions] = useState('');
+  const [loading, setLoading] =
+    useState(true);
 
-  const starterKitCount = useMemo(() => normaliseItems(starterKitText).length, [starterKitText]);
+  const [saving, setSaving] =
+    useState(false);
 
-  const orderedCommercialPathways =
-    useMemo(
-      () =>
-        normaliseCommercialPathways(
-          commercialPathways,
-        ),
-      [commercialPathways],
-    );
+  const [notice, setNotice] =
+    useState<{
+      tone: 'ok' | 'err';
+      text: string;
+    } | null>(null);
 
-  const updateCommercialPathway = (
-    key: OnboardingPathwayKey,
-    patch: Partial<CommercialPathway>,
-  ) => {
-    setCommercialPathways(
-      (current) =>
-        current.map(
-          (pathway) =>
-            pathway.key === key
-              ? {
-                  ...pathway,
-                  ...patch,
-                  key,
-                }
-              : pathway,
-        ),
-    );
-  };
-
-  const featureCommercialPathway = (
-    key: OnboardingPathwayKey,
-  ) => {
-    setCommercialPathways(
-      (current) =>
-        current.map(
-          (pathway) => ({
-            ...pathway,
-            enabled:
-              pathway.key === key
-                ? true
-                : pathway.enabled,
-            featured:
-              pathway.key === key,
-          }),
-        ),
-    );
-  };
-
-  const fullFeeCents = randToCents(trainingFee);
-  const minimumCents = randToCents(minimumInitialPayment);
-  const outstandingAfterMinimum = Math.max(0, fullFeeCents - minimumCents);
-
-  const loadSettings = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     setNotice(null);
 
     try {
-      const res = await fetch('/api/admin/clinicians/onboarding/settings', {
-        method: 'GET',
-        headers: { accept: 'application/json' },
-        cache: 'no-store',
-      });
+      const response =
+        await fetch(
+          '/api/admin/clinicians/onboarding/settings',
+          {
+            cache: 'no-store',
+            headers: {
+              accept: 'application/json',
+            },
+          },
+        );
 
-      const js = (await res.json().catch(() => ({}))) as SettingsResponse;
-      if (!res.ok || !js.ok || !js.settings) {
-        throw new Error(js.error || `HTTP ${res.status} loading settings`);
+      const body =
+        await response
+          .json()
+          .catch(() => ({}));
+
+      if (
+        !response.ok ||
+        body?.ok !== true ||
+        !body?.settings
+      ) {
+        throw new Error(
+          body?.error ||
+          `HTTP ${response.status}`,
+        );
       }
 
-      const s = js.settings;
-      setTrainingFee(centsToRand(s.trainingFeeCents));
-      setMinimumInitialPayment(centsToRand(s.minimumInitialPaymentCents || 0));
-      setAllowPartialPayment(s.allowPartialPayment === true);
-      setBalanceRecoveryMode(s.balanceRecoveryMode || 'manual');
-      setBalanceRecoveryNotes(s.balanceRecoveryNotes || '');
+      const next =
+        mergeSettings(body.settings);
 
-      setCurrency(s.currency || 'ZAR');
-      setPaymentProvider(s.paymentProvider === 'payfast' ? 'payfast' : 'paystack');
-      setCardPaymentEnabled(s.cardPaymentEnabled !== false);
-      setManualPaymentEnabled(s.manualPaymentEnabled !== false);
-      setStarterKitText((s.starterKitItems || []).length ? s.starterKitItems.join('\n') : DEFAULT_STARTER_KIT_TEXT);
-      setNotes(s.notes || '');
-      setCommercialPathways(
-        normaliseCommercialPathways(
-          s.commercialPathways,
-        ),
+      setSettings(next);
+      setKitText(
+        next.starterKitItems.join('\n'),
       );
-
-      const bank = s.bankInstructions || {};
-      setBankName(bank.bankName || '');
-      setAccountName(bank.accountName || '');
-      setAccountNumber(bank.accountNumber || '');
-      setBranchCode(bank.branchCode || '');
-      setSwiftCode(bank.swiftCode || '');
-      setReferenceFormat(bank.referenceFormat || 'Use your full name and Ambulant+ clinician ID as payment reference.');
-      setBankInstructions(bank.instructions || '');
-    } catch (err: any) {
-      setNotice({ tone: 'err', text: err?.message || 'Failed to load onboarding settings.' });
+    } catch (error: any) {
+      setNotice({
+        tone: 'err',
+        text:
+          error?.message ||
+          'Unable to load settings.',
+      });
     } finally {
       setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadSettings();
-  }, [loadSettings]);
+    void load();
+  }, [load]);
 
-  const saveSettings = async () => {
-    setNotice(null);
+  const fullKit =
+    useMemo(
+      () => cleanLines(kitText),
+      [kitText],
+    );
 
-    const trainingFeeCents = randToCents(trainingFee);
-    const minimumInitialPaymentCents = randToCents(minimumInitialPayment);
-    const starterKitItems = normaliseItems(starterKitText);
-    const configuredPathways =
-      normaliseCommercialPathways(
-        commercialPathways,
-      );
+  function patchSettings(
+    patch: Partial<Settings>,
+  ) {
+    setSettings((current) =>
+      current
+        ? {...current, ...patch}
+        : current,
+    );
+  }
 
-    const enabledPathways =
-      configuredPathways.filter(
-        (pathway) =>
-          pathway.enabled,
-      );
+  function patchPolicy(
+    patch: Partial<TrainingPolicy>,
+  ) {
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            trainingPolicy: {
+              ...current.trainingPolicy,
+              ...patch,
+            },
+          }
+        : current,
+    );
+  }
 
-    const featuredPathways =
-      configuredPathways.filter(
-        (pathway) =>
-          pathway.featured,
-      );
+  function patchPathway(
+    key: PathwayKey,
+    patch: Omit<Partial<Pathway>, 'privileges'> & {
+      privileges?: Partial<Privileges>;
+    },
+  ) {
+    setSettings((current) => {
+      if (!current) return current;
 
-    const displayOrders =
-      configuredPathways.map(
-        (pathway) =>
-          pathway.displayOrder,
-      );
+      return {
+        ...current,
+        commercialPathways:
+          current.commercialPathways.map(
+            (pathway) =>
+              pathway.key === key
+                ? {
+                    ...pathway,
+                    ...patch,
+                    privileges:
+                      patch.privileges
+                        ? {
+                            ...pathway
+                              .privileges,
+                            ...patch
+                              .privileges,
+                          }
+                        : pathway
+                            .privileges,
+                  }
+                : pathway,
+          ),
+      };
+    });
+  }
 
-    if (enabledPathways.length === 0) {
-      setNotice({
-        tone: 'err',
-        text: 'Enable at least one clinician onboarding pathway.',
+  function featurePathway(key: PathwayKey) {
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            commercialPathways:
+              current.commercialPathways.map(
+                (pathway) => ({
+                  ...pathway,
+                  enabled:
+                    pathway.key === key
+                      ? true
+                      : pathway.enabled,
+                  featured:
+                    pathway.key === key,
+                }),
+              ),
+          }
+        : current,
+    );
+  }
+
+  function toggleDepositItem(item: string) {
+    if (!settings) return;
+
+    const selected =
+      settings.starterKitDepositItems
+        .some(
+          (current) =>
+            current.toLowerCase() ===
+            item.toLowerCase(),
+        );
+
+    patchSettings({
+      starterKitDepositItems:
+        selected
+          ? settings
+              .starterKitDepositItems
+              .filter(
+                (current) =>
+                  current.toLowerCase() !==
+                  item.toLowerCase(),
+              )
+          : [
+              ...settings
+                .starterKitDepositItems,
+              item,
+            ],
+    });
+  }
+
+  function toggleMode(
+    mode: 'virtual' | 'in_person',
+  ) {
+    if (!settings) return;
+
+    const current =
+      settings.trainingPolicy.allowedModes;
+
+    const next =
+      current.includes(mode)
+        ? current.filter(
+            (item) => item !== mode,
+          )
+        : [...current, mode];
+
+    if (next.length) {
+      patchPolicy({
+        allowedModes: next,
       });
-      return;
     }
+  }
 
-    if (
-      featuredPathways.length !== 1 ||
-      featuredPathways[0]?.enabled !== true
-    ) {
-      setNotice({
-        tone: 'err',
-        text: 'Select exactly one enabled pathway as the featured option.',
-      });
-      return;
-    }
-
-    if (
-      new Set(displayOrders).size !==
-      displayOrders.length
-    ) {
-      setNotice({
-        tone: 'err',
-        text: 'Each onboarding pathway must have a unique display order.',
-      });
-      return;
-    }
-
-    const incompletePathway =
-      configuredPathways.find(
-        (pathway) =>
-          !pathway.label.trim() ||
-          !pathway.description.trim() ||
-          !pathway.ctaLabel.trim() ||
-          pathway.conditions.length === 0,
-      );
-
-    if (incompletePathway) {
-      setNotice({
-        tone: 'err',
-        text: 'Every pathway requires a heading, description, action label and at least one condition.',
-      });
-      return;
-    }
-
-    if (trainingFeeCents <= 0) {
-      setNotice({ tone: 'err', text: 'Full onboarding fee must be greater than zero before clinicians can pay online.' });
-      return;
-    }
-
-    if (allowPartialPayment && minimumInitialPaymentCents <= 0) {
-      setNotice({ tone: 'err', text: 'Minimum initial deposit is required when partial payment is enabled.' });
-      return;
-    }
-
-    if (allowPartialPayment && minimumInitialPaymentCents > trainingFeeCents) {
-      setNotice({ tone: 'err', text: 'Minimum initial deposit cannot exceed the full onboarding fee.' });
-      return;
-    }
-
-    if (!cardPaymentEnabled && !manualPaymentEnabled) {
-      setNotice({ tone: 'err', text: 'Enable at least one payment method: card or EFT/manual payment.' });
-      return;
-    }
-
-    if (starterKitItems.length === 0) {
-      setNotice({ tone: 'err', text: 'Add at least one C-Med Kit item.' });
-      return;
-    }
+  async function save() {
+    if (!settings) return;
 
     setSaving(true);
+    setNotice(null);
 
     try {
-      const res = await fetch('/api/admin/clinicians/onboarding/settings', {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json', accept: 'application/json' },
-        body: JSON.stringify({
-          trainingFeeCents,
-          minimumInitialPaymentCents,
-          allowPartialPayment,
-          balanceRecoveryMode,
-          balanceRecoveryNotes: balanceRecoveryNotes.trim() || null,
-          currency,
-          paymentProvider,
-          cardPaymentEnabled,
-          manualPaymentEnabled,
-          starterKitItems,
-          commercialPathways:
-            configuredPathways,
-          bankInstructions: {
-            bankName: bankName.trim(),
-            accountName: accountName.trim(),
-            accountNumber: accountNumber.trim(),
-            branchCode: branchCode.trim(),
-            swiftCode: swiftCode.trim(),
-            referenceFormat: referenceFormat.trim(),
-            instructions: bankInstructions.trim(),
-          },
-          notes: notes.trim() || null,
-        }),
-      });
+      const kitByIdentity =
+        new Map(
+          fullKit.map((item) => [
+            item.toLowerCase(),
+            item,
+          ]),
+        );
 
-      const js = (await res.json().catch(() => ({}))) as SettingsResponse;
-      if (!res.ok || !js.ok) {
-        throw new Error(js.error || `HTTP ${res.status} saving settings`);
+      const starterKitDepositItems =
+        settings.starterKitDepositItems
+          .map((item) =>
+            kitByIdentity.get(
+              item.toLowerCase(),
+            ),
+          )
+          .filter(Boolean);
+
+      const response =
+        await fetch(
+          '/api/admin/clinicians/onboarding/settings',
+          {
+            method: 'PATCH',
+            headers: {
+              accept: 'application/json',
+              'content-type':
+                'application/json',
+            },
+            body: JSON.stringify({
+              ...settings,
+              starterKitItems:
+                fullKit,
+              starterKitDepositItems,
+            }),
+          },
+        );
+
+      const body =
+        await response
+          .json()
+          .catch(() => ({}));
+
+      if (
+        !response.ok ||
+        body?.ok !== true
+      ) {
+        throw new Error(
+          body?.error ||
+          `HTTP ${response.status}`,
+        );
       }
 
-      setNotice({ tone: 'ok', text: 'Onboarding payment and pathway settings saved successfully.' });
-      await loadSettings();
-    } catch (err: any) {
-      setNotice({ tone: 'err', text: err?.message || 'Failed to save onboarding settings.' });
+      const next =
+        mergeSettings(body.settings);
+
+      setSettings(next);
+      setKitText(
+        next.starterKitItems.join('\n'),
+      );
+
+      setNotice({
+        tone: 'ok',
+        text:
+          'Training, payment and C-Med policy saved successfully.',
+      });
+    } catch (error: any) {
+      setNotice({
+        tone: 'err',
+        text: errorText(error?.message),
+      });
     } finally {
       setSaving(false);
     }
-  };
+  }
+
+  if (loading && !settings) {
+    return (
+      <section className="rounded-2xl border bg-white p-6 shadow-sm">
+        <div className="text-sm font-semibold text-slate-900">
+          Loading clinician onboarding policy…
+        </div>
+      </section>
+    );
+  }
+
+  if (!settings) {
+    return (
+      <section className="rounded-2xl border border-rose-200 bg-rose-50 p-6">
+        <div className="text-sm font-semibold text-rose-900">
+          The onboarding policy could not be loaded.
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="mt-3 rounded-lg bg-rose-700 px-3 py-2 text-xs font-semibold text-white"
+        >
+          Retry
+        </button>
+      </section>
+    );
+  }
+
+  const bank =
+    settings.bankInstructions || {};
 
   return (
-    <section className="rounded-2xl border bg-white shadow-sm">
-      <div className="flex flex-col gap-3 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+    <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+      <header className="flex flex-col gap-4 border-b bg-gradient-to-r from-slate-950 to-indigo-950 px-5 py-5 text-white sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h2 className="text-sm font-semibold text-gray-900">Clinician onboarding payment settings</h2>
-          <p className="mt-1 text-xs text-gray-600">
-            Configure onboarding fees, partial-payment rules, payment methods, EFT details and C-Med Kit contents.
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-200">
+            Admin-configured control plane
+          </div>
+          <h2 className="mt-1 text-xl font-black">
+            Training, payments and C-Med policy
+          </h2>
+          <p className="mt-1 max-w-3xl text-sm text-slate-300">
+            These settings drive the clinician-facing onboarding experience and fulfilment rules.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="rounded-lg border bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
+          onClick={() => setOpen(!open)}
+          className="rounded-xl border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold hover:bg-white/15"
         >
-          {open ? 'Hide settings' : 'Show settings'}
+          {open ? 'Collapse policy' : 'Open policy'}
         </button>
-      </div>
+      </header>
 
-      {notice && (
+      {notice ? (
         <div
           className={[
-            'mx-4 mt-3 rounded border p-3 text-xs',
+            'mx-5 mt-5 rounded-xl border p-3 text-sm',
             notice.tone === 'ok'
               ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
               : 'border-rose-200 bg-rose-50 text-rose-900',
@@ -589,536 +679,911 @@ export default function OnboardingSettingsPanel() {
         >
           {notice.text}
         </div>
-      )}
+      ) : null}
 
-      {open && (
-        <div className="space-y-4 px-4 py-4">
-          {loading ? (
-            <div className="rounded border bg-slate-50 p-3 text-xs text-gray-600">
-              Loading onboarding settings...
-            </div>
-          ) : null}
+      {open ? (
+        <div className="space-y-6 p-5">
+          <section className="grid gap-4 xl:grid-cols-3">
+            <div className="rounded-2xl border bg-slate-50 p-4">
+              <h3 className="font-black text-slate-950">
+                Payment amounts
+              </h3>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <div className="rounded-xl border bg-slate-50 p-3 lg:col-span-1">
-              <div className="text-xs font-semibold text-gray-900">Fee and deposit</div>
-
-              <div className="mt-3 grid gap-3">
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Full onboarding fee</span>
+              <div className="mt-4 space-y-3">
+                <label className="block text-xs font-bold text-slate-700">
+                  Full onboarding fee
                   <input
                     type="number"
                     min="0"
                     step="0.01"
-                    value={trainingFee}
-                    onChange={(e) => setTrainingFee(e.target.value)}
-                    className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                    placeholder="26500"
+                    value={centsToAmount(
+                      settings.trainingFeeCents,
+                    )}
+                    onChange={(event) =>
+                      patchSettings({
+                        trainingFeeCents:
+                          amountToCents(
+                            event.target.value,
+                          ),
+                      })
+                    }
+                    className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
                   />
                 </label>
 
-                <label className="flex items-start gap-2 rounded-lg border bg-white p-2 text-xs text-gray-700">
+                <label className="flex gap-2 rounded-xl border bg-white p-3 text-xs text-slate-700">
                   <input
                     type="checkbox"
-                    checked={allowPartialPayment}
-                    onChange={(e) => setAllowPartialPayment(e.target.checked)}
-                    className="mt-0.5"
+                    checked={
+                      settings.allowPartialPayment
+                    }
+                    onChange={(event) =>
+                      patchSettings({
+                        allowPartialPayment:
+                          event.target.checked,
+                      })
+                    }
                   />
                   <span>
-                    <span className="block font-semibold text-gray-800">Allow partial initial payment</span>
-                    Clinicians can train/start after paying the configured minimum deposit.
+                    <strong className="block text-slate-950">
+                      Enable deposit pathway
+                    </strong>
+                    Allow a qualifying partial payment.
                   </span>
                 </label>
 
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Minimum initial deposit</span>
+                <label className="block text-xs font-bold text-slate-700">
+                  Minimum qualifying deposit
                   <input
                     type="number"
                     min="0"
                     step="0.01"
-                    value={minimumInitialPayment}
-                    onChange={(e) => setMinimumInitialPayment(e.target.value)}
-                    disabled={!allowPartialPayment}
-                    className="w-full rounded-lg border bg-white px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-500"
-                    placeholder="7950"
+                    disabled={
+                      !settings.allowPartialPayment
+                    }
+                    value={centsToAmount(
+                      settings
+                        .minimumInitialPaymentCents,
+                    )}
+                    onChange={(event) =>
+                      patchSettings({
+                        minimumInitialPaymentCents:
+                          amountToCents(
+                            event.target.value,
+                          ),
+                      })
+                    }
+                    className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm disabled:bg-slate-100"
                   />
                 </label>
 
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Currency</span>
-                  <select
-                    value={currency}
-                    onChange={(e) => setCurrency(e.target.value.toUpperCase())}
-                    className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="ZAR">ZAR</option>
-                    <option value="NGN">NGN</option>
-                    <option value="GBP">GBP</option>
-                    <option value="USD">USD</option>
-                  </select>
-                </label>
-              </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <label className="text-xs font-bold text-slate-700">
+                    Currency
+                    <input
+                      value={settings.currency}
+                      maxLength={3}
+                      onChange={(event) =>
+                        patchSettings({
+                          currency:
+                            event.target.value
+                              .toUpperCase(),
+                        })
+                      }
+                      className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
 
-              <div className="mt-3 space-y-2 rounded-lg border bg-white p-2 text-xs text-gray-700">
-                <div>
-                  Full fee:{' '}
-                  <span className="font-semibold text-gray-900">{moneyPreview(trainingFee, currency)}</span>
+                  <label className="text-xs font-bold text-slate-700">
+                    Provider
+                    <select
+                      value={
+                        settings.paymentProvider
+                      }
+                      onChange={(event) =>
+                        patchSettings({
+                          paymentProvider:
+                            event.target.value as
+                              | 'paystack'
+                              | 'payfast',
+                        })
+                      }
+                      className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="paystack">
+                        Paystack
+                      </option>
+                      <option value="payfast">
+                        PayFast
+                      </option>
+                    </select>
+                  </label>
                 </div>
-                <div>
-                  Initial amount due:{' '}
-                  <span className="font-semibold text-gray-900">
-                    {allowPartialPayment ? moneyPreview(minimumInitialPayment, currency) : moneyPreview(trainingFee, currency)}
-                  </span>
-                </div>
-                {allowPartialPayment ? (
-                  <div>
-                    Outstanding after minimum:{' '}
-                    <span className="font-semibold text-gray-900">
-                      {moneyPreview(String(outstandingAfterMinimum / 100), currency)}
-                    </span>
-                  </div>
-                ) : null}
               </div>
             </div>
 
-            <div className="rounded-xl border bg-slate-50 p-3 lg:col-span-1">
-              <div className="text-xs font-semibold text-gray-900">Payment methods</div>
+            <div className="rounded-2xl border bg-slate-50 p-4">
+              <h3 className="font-black text-slate-950">
+                Accepted payment routes
+              </h3>
 
-              <div className="mt-3 space-y-3">
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Card provider</span>
-                  <select
-                    value={paymentProvider}
-                    onChange={(e) => setPaymentProvider(e.target.value as 'paystack' | 'payfast')}
-                    className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                  >
-                    <option value="paystack">Paystack</option>
-                    <option value="payfast">PayFast</option>
-                  </select>
-                </label>
-
-                <label className="flex items-start gap-2 rounded-lg border bg-white p-2 text-xs text-gray-700">
+              <div className="mt-4 space-y-3">
+                <label className="flex gap-2 rounded-xl border bg-white p-3 text-xs text-slate-700">
                   <input
                     type="checkbox"
-                    checked={cardPaymentEnabled}
-                    onChange={(e) => setCardPaymentEnabled(e.target.checked)}
-                    className="mt-0.5"
+                    checked={
+                      settings.cardPaymentEnabled
+                    }
+                    onChange={(event) =>
+                      patchSettings({
+                        cardPaymentEnabled:
+                          event.target.checked,
+                      })
+                    }
                   />
                   <span>
-                    <span className="block font-semibold text-gray-800">Enable card checkout</span>
-                    Clinicians can pay online using the configured card provider.
+                    <strong className="block text-slate-950">
+                      Card checkout
+                    </strong>
+                    Use the configured provider.
                   </span>
                 </label>
 
-                <label className="flex items-start gap-2 rounded-lg border bg-white p-2 text-xs text-gray-700">
+                <label className="flex gap-2 rounded-xl border bg-white p-3 text-xs text-slate-700">
                   <input
                     type="checkbox"
-                    checked={manualPaymentEnabled}
-                    onChange={(e) => setManualPaymentEnabled(e.target.checked)}
-                    className="mt-0.5"
+                    checked={
+                      settings.manualPaymentEnabled
+                    }
+                    onChange={(event) =>
+                      patchSettings({
+                        manualPaymentEnabled:
+                          event.target.checked,
+                      })
+                    }
                   />
                   <span>
-                    <span className="block font-semibold text-gray-800">Enable EFT/manual authorisation</span>
-                    Admin can confirm direct EFT payments and generate one-time authorisation codes.
+                    <strong className="block text-slate-950">
+                      EFT/manual confirmation
+                    </strong>
+                    Admin confirms payment before issuing authorisation.
                   </span>
                 </label>
-              </div>
-            </div>
 
-            <div className="rounded-xl border bg-slate-50 p-3 lg:col-span-1">
-              <div className="text-xs font-semibold text-gray-900">Balance recovery</div>
-
-              <div className="mt-3 space-y-3">
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Recovery mode</span>
+                <label className="block text-xs font-bold text-slate-700">
+                  Balance recovery
                   <select
-                    value={balanceRecoveryMode}
-                    onChange={(e) => setBalanceRecoveryMode(e.target.value as BalanceRecoveryMode)}
-                    className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                    value={
+                      settings.balanceRecoveryMode
+                    }
+                    onChange={(event) =>
+                      patchSettings({
+                        balanceRecoveryMode:
+                          event.target.value as
+                            Settings['balanceRecoveryMode'],
+                      })
+                    }
+                    className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
                   >
-                    <option value="manual">Manual follow-up</option>
-                    <option value="payout_deduction">Deduct from future payouts</option>
-                    <option value="disabled">No recovery configured</option>
+                    <option value="manual">
+                      Manual follow-up
+                    </option>
+                    <option value="payout_deduction">
+                      Future payout deduction
+                    </option>
+                    <option value="disabled">
+                      Disabled
+                    </option>
                   </select>
                 </label>
 
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Balance recovery notes</span>
-                  <textarea
-                    value={balanceRecoveryNotes}
-                    onChange={(e) => setBalanceRecoveryNotes(e.target.value)}
-                    rows={5}
-                    className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                    placeholder="Example: deduct outstanding balance from clinician payouts before release."
-                  />
-                </label>
-
-                <div className="rounded-lg border bg-white p-3 text-xs text-gray-700">
-                  <span className="font-semibold text-gray-900">{starterKitCount}</span> C-Med Kit item(s) configured.
-                </div>
+                <textarea
+                  value={
+                    settings.balanceRecoveryNotes ||
+                    ''
+                  }
+                  onChange={(event) =>
+                    patchSettings({
+                      balanceRecoveryNotes:
+                        event.target.value,
+                    })
+                  }
+                  rows={4}
+                  placeholder="Balance recovery instructions"
+                  className="w-full rounded-xl border bg-white px-3 py-2 text-sm"
+                />
               </div>
             </div>
-          </div>
 
+            <div className="rounded-2xl border border-indigo-100 bg-indigo-50 p-4">
+              <h3 className="font-black text-indigo-950">
+                Notice governance
+              </h3>
+              <p className="mt-2 text-xs leading-relaxed text-indigo-900">
+                Operational training notices are configured here. Contractual and Professional Indemnity wording must come from an approved published Legal version.
+              </p>
 
-          <div className="rounded-2xl border border-indigo-100 bg-gradient-to-br from-indigo-50 via-white to-purple-50 p-4">
-            <div className="flex flex-col gap-3 border-b border-indigo-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="text-sm font-black text-slate-950">
-                  Clinician-facing onboarding pathways
-                </div>
-                <p className="mt-1 max-w-3xl text-xs leading-relaxed text-slate-600">
-                  Configure the order and presentation of the three approved commercial pathways.
-                  The featured pathway is visually emphasised but is never silently selected for the clinician.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() =>
-                  setCommercialPathways(
-                    cloneDefaultCommercialPathways(),
-                  )
-                }
-                disabled={saving || loading}
-                className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:opacity-50"
+              <a
+                href="/admin/legal"
+                className="mt-4 inline-flex rounded-xl bg-indigo-900 px-3 py-2 text-xs font-bold text-white"
               >
-                Restore default presentation
-              </button>
+                Open Legal Department
+              </a>
+
+              <textarea
+                value={
+                  settings.trainingPolicy
+                    .operationalNotice || ''
+                }
+                onChange={(event) =>
+                  patchPolicy({
+                    operationalNotice:
+                      event.target.value,
+                  })
+                }
+                rows={5}
+                placeholder="Optional clinician-facing operational notice"
+                className="mt-4 w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-sm"
+              />
             </div>
+          </section>
+
+          <section className="rounded-2xl border p-4">
+            <h3 className="text-lg font-black text-slate-950">
+              Training programme defaults
+            </h3>
+            <p className="mt-1 text-xs text-slate-600">
+              Individual published programmes can override their dates, sessions, capacity and venue.
+            </p>
+
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+              <label className="text-xs font-bold text-slate-700 xl:col-span-2">
+                Clinician-facing heading
+                <input
+                  value={
+                    settings.trainingPolicy.heading
+                  }
+                  onChange={(event) =>
+                    patchPolicy({
+                      heading:
+                        event.target.value,
+                    })
+                  }
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="text-xs font-bold text-slate-700">
+                Default duration (days)
+                <input
+                  type="number"
+                  min="1"
+                  max="365"
+                  value={
+                    settings.trainingPolicy
+                      .defaultDurationDays
+                  }
+                  onChange={(event) =>
+                    patchPolicy({
+                      defaultDurationDays:
+                        Number(
+                          event.target.value,
+                        ) || 1,
+                    })
+                  }
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="text-xs font-bold text-slate-700">
+                Default session minutes
+                <input
+                  type="number"
+                  min="1"
+                  max="1440"
+                  value={
+                    settings.trainingPolicy
+                      .defaultSessionDurationMinutes
+                  }
+                  onChange={(event) =>
+                    patchPolicy({
+                      defaultSessionDurationMinutes:
+                        Number(
+                          event.target.value,
+                        ) || 60,
+                    })
+                  }
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="text-xs font-bold text-slate-700">
+                Timezone
+                <input
+                  value={
+                    settings.trainingPolicy.timezone
+                  }
+                  onChange={(event) =>
+                    patchPolicy({
+                      timezone:
+                        event.target.value,
+                    })
+                  }
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </label>
+
+              <div className="rounded-xl border bg-slate-50 p-3 xl:col-span-3">
+                <div className="text-xs font-bold text-slate-700">
+                  Available training modes
+                </div>
+                <div className="mt-2 flex flex-wrap gap-3">
+                  {[
+                    ['virtual', 'Virtual'],
+                    ['in_person', 'In person'],
+                  ].map(([value, label]) => (
+                    <label
+                      key={value}
+                      className="flex items-center gap-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={
+                          settings.trainingPolicy
+                            .allowedModes
+                            .includes(
+                              value as
+                                | 'virtual'
+                                | 'in_person',
+                            )
+                        }
+                        onChange={() =>
+                          toggleMode(
+                            value as
+                              | 'virtual'
+                              | 'in_person',
+                          )
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <label className="text-xs font-bold text-slate-700 md:col-span-2">
+                Introduction
+                <textarea
+                  value={
+                    settings.trainingPolicy
+                      .introduction
+                  }
+                  onChange={(event) =>
+                    patchPolicy({
+                      introduction:
+                        event.target.value,
+                    })
+                  }
+                  rows={4}
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="text-xs font-bold text-slate-700 md:col-span-2">
+                Support message
+                <textarea
+                  value={
+                    settings.trainingPolicy
+                      .supportMessage || ''
+                  }
+                  onChange={(event) =>
+                    patchPolicy({
+                      supportMessage:
+                        event.target.value,
+                    })
+                  }
+                  rows={4}
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="text-xs font-bold text-slate-700 md:col-span-2">
+                Virtual description
+                <textarea
+                  value={
+                    settings.trainingPolicy
+                      .virtualDescription
+                  }
+                  onChange={(event) =>
+                    patchPolicy({
+                      virtualDescription:
+                        event.target.value,
+                    })
+                  }
+                  rows={3}
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="text-xs font-bold text-slate-700 md:col-span-2">
+                In-person description
+                <textarea
+                  value={
+                    settings.trainingPolicy
+                      .inPersonDescription
+                  }
+                  onChange={(event) =>
+                    patchPolicy({
+                      inPersonDescription:
+                        event.target.value,
+                    })
+                  }
+                  rows={3}
+                  className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+          </section>
+
+          <section>
+            <h3 className="text-lg font-black text-slate-950">
+              Payment options and attached privileges
+            </h3>
+            <p className="mt-1 text-xs text-slate-600">
+              Order, wording, availability and benefits are consumed by the clinician experience.
+            </p>
 
             <div className="mt-4 grid gap-4 xl:grid-cols-3">
-              {orderedCommercialPathways.map(
-                (pathway) => (
+              {settings.commercialPathways
+                .slice()
+                .sort(
+                  (left, right) =>
+                    left.displayOrder -
+                    right.displayOrder,
+                )
+                .map((pathway) => (
                   <article
                     key={pathway.key}
                     className={[
-                      'rounded-2xl border p-4 shadow-sm transition',
+                      'rounded-2xl border p-4',
                       pathway.featured
-                        ? 'border-purple-300 bg-white ring-2 ring-purple-100'
-                        : 'border-slate-200 bg-white',
-                      pathway.enabled
-                        ? ''
-                        : 'opacity-60',
+                        ? 'border-indigo-300 bg-indigo-50 ring-2 ring-indigo-100'
+                        : 'bg-white',
                     ].join(' ')}
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
-                          {pathway.key}
-                        </div>
-                        <div className="mt-1 text-sm font-black text-slate-950">
-                          {pathway.label}
-                        </div>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
+                        {pathway.key}
                       </div>
-
-                      {pathway.featured ? (
-                        <span className="rounded-full border border-purple-200 bg-purple-50 px-2 py-1 text-[10px] font-black text-purple-800">
-                          Featured
-                        </span>
-                      ) : null}
+                      <label className="flex items-center gap-1 text-xs">
+                        <input
+                          type="checkbox"
+                          checked={
+                            pathway.enabled
+                          }
+                          disabled={
+                            pathway.featured
+                          }
+                          onChange={(event) =>
+                            patchPathway(
+                              pathway.key,
+                              {
+                                enabled:
+                                  event.target
+                                    .checked,
+                              },
+                            )
+                          }
+                        />
+                        Enabled
+                      </label>
                     </div>
 
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <label className="block space-y-1">
-                        <span className="text-[11px] font-semibold text-slate-700">
-                          Display order
-                        </span>
+                    <div className="mt-3 grid grid-cols-3 gap-2">
+                      <label className="text-[11px] font-bold text-slate-700">
+                        Order
                         <input
                           type="number"
                           min="1"
                           max="99"
-                          step="1"
-                          value={pathway.displayOrder}
+                          value={
+                            pathway.displayOrder
+                          }
                           onChange={(event) =>
-                            updateCommercialPathway(
+                            patchPathway(
                               pathway.key,
                               {
                                 displayOrder:
                                   Number(
-                                    event.target.value,
+                                    event.target
+                                      .value,
                                   ) || 1,
                               },
                             )
                           }
-                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                          className="mt-1 w-full rounded-lg border px-2 py-2"
                         />
                       </label>
 
-                      <label className="block space-y-1">
-                        <span className="text-[11px] font-semibold text-slate-700">
-                          Promotional badge
-                        </span>
+                      <label className="col-span-2 text-[11px] font-bold text-slate-700">
+                        Badge
                         <input
-                          value={pathway.badge || ''}
+                          value={
+                            pathway.badge || ''
+                          }
                           onChange={(event) =>
-                            updateCommercialPathway(
+                            patchPathway(
                               pathway.key,
                               {
                                 badge:
-                                  event.target.value,
+                                  event.target
+                                    .value,
                               },
                             )
                           }
-                          placeholder="Optional badge"
-                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                          className="mt-1 w-full rounded-lg border px-2 py-2"
                         />
                       </label>
                     </div>
 
-                    <div className="mt-3 grid gap-3">
-                      <label className="block space-y-1">
-                        <span className="text-[11px] font-semibold text-slate-700">
-                          Card heading
-                        </span>
-                        <input
-                          value={pathway.label}
-                          onChange={(event) =>
-                            updateCommercialPathway(
-                              pathway.key,
-                              {
-                                label:
-                                  event.target.value,
-                              },
-                            )
-                          }
-                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                        />
-                      </label>
+                    <input
+                      value={pathway.label}
+                      onChange={(event) =>
+                        patchPathway(
+                          pathway.key,
+                          {
+                            label:
+                              event.target.value,
+                          },
+                        )
+                      }
+                      className="mt-3 w-full rounded-xl border px-3 py-2 text-sm font-bold"
+                    />
 
-                      <label className="block space-y-1">
-                        <span className="text-[11px] font-semibold text-slate-700">
-                          Action label
-                        </span>
-                        <input
-                          value={pathway.ctaLabel}
-                          onChange={(event) =>
-                            updateCommercialPathway(
-                              pathway.key,
-                              {
-                                ctaLabel:
-                                  event.target.value,
-                              },
-                            )
-                          }
-                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                        />
-                      </label>
+                    <textarea
+                      value={
+                        pathway.description
+                      }
+                      onChange={(event) =>
+                        patchPathway(
+                          pathway.key,
+                          {
+                            description:
+                              event.target.value,
+                          },
+                        )
+                      }
+                      rows={3}
+                      className="mt-2 w-full rounded-xl border px-3 py-2 text-sm"
+                    />
 
-                      <label className="block space-y-1">
-                        <span className="text-[11px] font-semibold text-slate-700">
-                          Description
-                        </span>
-                        <textarea
-                          value={pathway.description}
-                          onChange={(event) =>
-                            updateCommercialPathway(
-                              pathway.key,
-                              {
-                                description:
-                                  event.target.value,
-                              },
-                            )
-                          }
-                          rows={4}
-                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                        />
-                      </label>
+                    <input
+                      value={pathway.ctaLabel}
+                      onChange={(event) =>
+                        patchPathway(
+                          pathway.key,
+                          {
+                            ctaLabel:
+                              event.target.value,
+                          },
+                        )
+                      }
+                      className="mt-2 w-full rounded-xl border px-3 py-2 text-sm"
+                    />
 
-                      <label className="block space-y-1">
-                        <span className="text-[11px] font-semibold text-slate-700">
-                          Conditions — one per line
-                        </span>
-                        <textarea
-                          value={pathway.conditions.join('\n')}
-                          onChange={(event) =>
-                            updateCommercialPathway(
-                              pathway.key,
-                              {
-                                conditions:
-                                  normaliseItems(
-                                    event.target.value,
-                                  ),
-                              },
-                            )
-                          }
-                          rows={7}
-                          className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                        />
-                      </label>
-                    </div>
+                    <textarea
+                      value={
+                        pathway.conditions.join(
+                          '\n',
+                        )
+                      }
+                      onChange={(event) =>
+                        patchPathway(
+                          pathway.key,
+                          {
+                            conditions:
+                              cleanLines(
+                                event.target
+                                  .value,
+                              ),
+                          },
+                        )
+                      }
+                      rows={5}
+                      className="mt-2 w-full rounded-xl border px-3 py-2 text-xs"
+                      aria-label="Conditions, one per line"
+                    />
 
-                    <div className="mt-4 grid gap-2 border-t pt-3">
-                      <label className="flex items-start gap-2 rounded-lg border bg-slate-50 p-2 text-xs text-slate-700">
-                        <input
-                          type="checkbox"
-                          checked={pathway.enabled}
-                          disabled={pathway.featured}
-                          onChange={(event) =>
-                            updateCommercialPathway(
-                              pathway.key,
-                              {
-                                enabled:
-                                  event.target.checked,
-                              },
-                            )
-                          }
-                          className="mt-0.5"
-                        />
-                        <span>
-                          <span className="block font-semibold text-slate-900">
-                            Enabled
-                          </span>
-                          {pathway.featured
-                            ? 'Choose another featured pathway before disabling this one.'
-                            : 'Show this option to clinicians.'}
-                        </span>
-                      </label>
-
-                      <label className="flex items-start gap-2 rounded-lg border border-purple-100 bg-purple-50 p-2 text-xs text-purple-900">
-                        <input
-                          type="radio"
-                          name="featured-onboarding-pathway"
-                          checked={pathway.featured}
-                          onChange={() =>
-                            featureCommercialPathway(
-                              pathway.key,
-                            )
-                          }
-                          className="mt-0.5"
-                        />
-                        <span>
-                          <span className="block font-semibold">
-                            Feature this pathway
-                          </span>
-                          Visual emphasis only; it does not preselect or accept the pathway for the clinician.
-                        </span>
-                      </label>
-                    </div>
-
-                    <div className="mt-4 rounded-xl border border-dashed bg-slate-50 p-3">
-                      <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
-                        Card preview
+                    <div className="mt-3 space-y-2 rounded-xl border bg-slate-50 p-3">
+                      <div className="text-xs font-black text-slate-900">
+                        Privileges
                       </div>
-                      <div className="mt-2 flex flex-wrap items-center gap-2">
-                        <span className="text-sm font-black text-slate-950">
-                          {pathway.label}
-                        </span>
-                        {pathway.badge ? (
-                          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-800">
-                            {pathway.badge}
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="mt-2 text-xs leading-relaxed text-slate-600">
-                        {pathway.description}
-                      </p>
-                      <div className="mt-3 rounded-lg bg-slate-900 px-3 py-2 text-center text-xs font-bold text-white">
-                        {pathway.ctaLabel}
-                      </div>
+
+                      {[
+                        [
+                          'trainingAccess',
+                          'Training access',
+                        ],
+                        [
+                          'practiceActivation',
+                          'Practice activation',
+                        ],
+                        [
+                          'platformIndemnityEligible',
+                          'PI eligibility',
+                        ],
+                        [
+                          'balanceRecoveryApplies',
+                          'Balance recovery',
+                        ],
+                      ].map(([key, label]) => (
+                        <label
+                          key={key}
+                          className="flex items-center justify-between gap-2 text-xs text-slate-700"
+                        >
+                          {label}
+                          <input
+                            type="checkbox"
+                            checked={
+                              Boolean(
+                                pathway
+                                  .privileges[
+                                  key as keyof Privileges
+                                ],
+                              )
+                            }
+                            onChange={(event) =>
+                              patchPathway(
+                                pathway.key,
+                                {
+                                  privileges: {
+                                    [key]:
+                                      event.target
+                                        .checked,
+                                  },
+                                },
+                              )
+                            }
+                          />
+                        </label>
+                      ))}
+
+                      <label className="block text-xs font-bold text-slate-700">
+                        C-Med release
+                        <select
+                          value={
+                            pathway.privileges
+                              .starterKitRelease
+                          }
+                          onChange={(event) =>
+                            patchPathway(
+                              pathway.key,
+                              {
+                                privileges: {
+                                  starterKitRelease:
+                                    event.target
+                                      .value as
+                                      Privileges['starterKitRelease'],
+                                },
+                              },
+                            )
+                          }
+                          className="mt-1 w-full rounded-lg border bg-white px-2 py-2"
+                        >
+                          <option value="none">
+                            No permanent kit
+                          </option>
+                          <option value="deposit">
+                            Deposit-kit subset
+                          </option>
+                          <option value="full">
+                            Full configured kit
+                          </option>
+                        </select>
+                      </label>
                     </div>
+
+                    <label className="mt-3 flex gap-2 rounded-xl border border-indigo-200 bg-white p-3 text-xs font-bold text-indigo-950">
+                      <input
+                        type="radio"
+                        name="featured-pathway"
+                        checked={
+                          pathway.featured
+                        }
+                        onChange={() =>
+                          featurePathway(
+                            pathway.key,
+                          )
+                        }
+                      />
+                      Feature this option
+                    </label>
                   </article>
-                ),
-              )}
+                ))}
             </div>
-          </div>
+          </section>
 
-          <div className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border bg-slate-50 p-3">
-              <div className="text-xs font-semibold text-gray-900">EFT / bank details</div>
+          <section className="grid gap-4 xl:grid-cols-2">
+            <div className="rounded-2xl border p-4">
+              <h3 className="font-black text-slate-950">
+                Full C-Med Kit
+              </h3>
+              <p className="mt-1 text-xs text-slate-600">
+                This is the sole source displayed to clinicians. One item per line.
+              </p>
+              <textarea
+                value={kitText}
+                onChange={(event) =>
+                  setKitText(
+                    event.target.value,
+                  )
+                }
+                rows={13}
+                className="mt-3 w-full rounded-xl border px-3 py-2 text-sm"
+              />
+              <div className="mt-2 text-xs text-slate-500">
+                {fullKit.length} configured item(s)
+              </div>
+            </div>
+
+            <div className="rounded-2xl border p-4">
+              <h3 className="font-black text-slate-950">
+                Deposit-pathway C-Med entitlement
+              </h3>
+              <p className="mt-1 text-xs text-slate-600">
+                Select the full-kit items released after a qualifying deposit.
+              </p>
+
+              <div className="mt-3 max-h-80 space-y-2 overflow-auto rounded-xl border bg-slate-50 p-3">
+                {fullKit.length ? (
+                  fullKit.map((item) => (
+                    <label
+                      key={item}
+                      className="flex items-start gap-2 rounded-lg border bg-white p-2 text-sm"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={
+                          settings
+                            .starterKitDepositItems
+                            .some(
+                              (selected) =>
+                                selected
+                                  .toLowerCase() ===
+                                item
+                                  .toLowerCase(),
+                            )
+                        }
+                        onChange={() =>
+                          toggleDepositItem(item)
+                        }
+                      />
+                      {item}
+                    </label>
+                  ))
+                ) : (
+                  <div className="text-sm text-slate-600">
+                    Add full-kit items first.
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-2">
+            <div className="rounded-2xl border p-4">
+              <h3 className="font-black text-slate-950">
+                EFT instructions
+              </h3>
 
               <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Bank name</span>
-                  <input value={bankName} onChange={(e) => setBankName(e.target.value)} className="w-full rounded-lg border bg-white px-3 py-2 text-sm" />
-                </label>
+                {[
+                  ['bankName', 'Bank name'],
+                  ['accountName', 'Account name'],
+                  ['accountNumber', 'Account number'],
+                  ['branchCode', 'Branch code'],
+                  ['swiftCode', 'SWIFT code'],
+                  [
+                    'referenceFormat',
+                    'Payment reference',
+                  ],
+                ].map(([key, label]) => (
+                  <label
+                    key={key}
+                    className="text-xs font-bold text-slate-700"
+                  >
+                    {label}
+                    <input
+                      value={bank[key] || ''}
+                      onChange={(event) =>
+                        patchSettings({
+                          bankInstructions: {
+                            ...bank,
+                            [key]:
+                              event.target.value,
+                          },
+                        })
+                      }
+                      className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                    />
+                  </label>
+                ))}
 
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Account name</span>
-                  <input value={accountName} onChange={(e) => setAccountName(e.target.value)} className="w-full rounded-lg border bg-white px-3 py-2 text-sm" />
-                </label>
-
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Account number</span>
-                  <input value={accountNumber} onChange={(e) => setAccountNumber(e.target.value)} className="w-full rounded-lg border bg-white px-3 py-2 text-sm" />
-                </label>
-
-                <label className="block space-y-1">
-                  <span className="text-[11px] font-semibold text-gray-700">Branch code</span>
-                  <input value={branchCode} onChange={(e) => setBranchCode(e.target.value)} className="w-full rounded-lg border bg-white px-3 py-2 text-sm" />
-                </label>
-
-                <label className="block space-y-1 sm:col-span-2">
-                  <span className="text-[11px] font-semibold text-gray-700">SWIFT code / extra banking code</span>
-                  <input value={swiftCode} onChange={(e) => setSwiftCode(e.target.value)} className="w-full rounded-lg border bg-white px-3 py-2 text-sm" />
-                </label>
-
-                <label className="block space-y-1 sm:col-span-2">
-                  <span className="text-[11px] font-semibold text-gray-700">Payment reference instruction</span>
-                  <input value={referenceFormat} onChange={(e) => setReferenceFormat(e.target.value)} className="w-full rounded-lg border bg-white px-3 py-2 text-sm" />
-                </label>
-
-                <label className="block space-y-1 sm:col-span-2">
-                  <span className="text-[11px] font-semibold text-gray-700">Additional EFT instructions</span>
-                  <textarea value={bankInstructions} onChange={(e) => setBankInstructions(e.target.value)} rows={4} className="w-full rounded-lg border bg-white px-3 py-2 text-sm" />
+                <label className="text-xs font-bold text-slate-700 sm:col-span-2">
+                  Additional instructions
+                  <textarea
+                    value={
+                      bank.instructions || ''
+                    }
+                    onChange={(event) =>
+                      patchSettings({
+                        bankInstructions: {
+                          ...bank,
+                          instructions:
+                            event.target.value,
+                        },
+                      })
+                    }
+                    rows={4}
+                    className="mt-1 w-full rounded-xl border px-3 py-2 text-sm"
+                  />
                 </label>
               </div>
             </div>
 
-            <div className="rounded-xl border bg-slate-50 p-3">
-              <div className="text-xs font-semibold text-gray-900">C-Med Kit contents</div>
-
-              <label className="mt-3 block space-y-1">
-                <span className="text-[11px] font-semibold text-gray-700">One item per line</span>
-                <textarea
-                  value={starterKitText}
-                  onChange={(e) => setStarterKitText(e.target.value)}
-                  rows={12}
-                  className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                />
-              </label>
-
-              <label className="mt-3 block space-y-1">
-                <span className="text-[11px] font-semibold text-gray-700">Internal notes</span>
-                <textarea
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                  className="w-full rounded-lg border bg-white px-3 py-2 text-sm"
-                  placeholder="Optional admin-only operational note"
-                />
-              </label>
+            <div className="rounded-2xl border p-4">
+              <h3 className="font-black text-slate-950">
+                Internal operational notes
+              </h3>
+              <p className="mt-1 text-xs text-slate-600">
+                Admin-only notes are never displayed to clinicians.
+              </p>
+              <textarea
+                value={settings.notes || ''}
+                onChange={(event) =>
+                  patchSettings({
+                    notes:
+                      event.target.value,
+                  })
+                }
+                rows={8}
+                className="mt-3 w-full rounded-xl border px-3 py-2 text-sm"
+              />
             </div>
-          </div>
+          </section>
 
-          <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="text-[11px] text-gray-500">
-              Prices are stored in the gateway database and can be changed by authorised Admin users whenever management changes onboarding pricing.
+          <footer className="flex flex-col gap-3 border-t pt-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="text-xs text-slate-500">
+              Saving updates the authoritative Gateway policy and records an Admin audit event.
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex gap-2">
               <button
                 type="button"
-                onClick={loadSettings}
-                disabled={saving || loading}
-                className="rounded-lg border bg-white px-3 py-2 text-xs font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
+                disabled={saving}
+                onClick={() => void load()}
+                className="rounded-xl border px-4 py-2 text-sm font-bold disabled:opacity-50"
               >
                 Reload
               </button>
 
               <button
                 type="button"
-                onClick={saveSettings}
-                disabled={saving || loading}
-                className="rounded-lg bg-emerald-600 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+                disabled={
+                  saving ||
+                  loading
+                }
+                onClick={() => void save()}
+                className="rounded-xl bg-emerald-600 px-5 py-2 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-50"
               >
-                {saving ? 'Saving...' : 'Save onboarding settings'}
+                {saving
+                  ? 'Saving…'
+                  : 'Save authoritative policy'}
               </button>
             </div>
-          </div>
+          </footer>
         </div>
-      )}
+      ) : null}
     </section>
   );
 }
-

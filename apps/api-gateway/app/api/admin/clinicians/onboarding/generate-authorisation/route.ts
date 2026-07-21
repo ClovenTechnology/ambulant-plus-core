@@ -8,13 +8,26 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function cleanStr(value: unknown, max = 500): string | null {
-  const s = String(value ?? '').trim();
-  if (!s) return null;
-  return s.length > max ? s.slice(0, max) : s;
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  return text.length > max ? text.slice(0, max) : text;
+}
+
+function jsonSafe(value: unknown) {
+  return JSON.parse(JSON.stringify(value ?? null));
+}
+
+function objectMeta(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 function isProductionRuntime() {
-  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
+  return (
+    process.env.NODE_ENV === 'production' ||
+    process.env.VERCEL_ENV === 'production'
+  );
 }
 
 function authCodeSalt() {
@@ -32,100 +45,323 @@ function authCodeSalt() {
 }
 
 function hashCode(code: string) {
-  const salt = authCodeSalt();
-  return crypto.createHash('sha256').update(`${salt}:${code.trim().toUpperCase()}`).digest('hex');
+  return crypto
+    .createHash('sha256')
+    .update(`${authCodeSalt()}:${code.trim().toUpperCase()}`)
+    .digest('hex');
 }
 
 function makeCode() {
-  const a = crypto.randomBytes(3).toString('hex').toUpperCase();
-  const b = crypto.randomBytes(3).toString('hex').toUpperCase();
-  return `AMB-${a}-${b}`;
+  const left = crypto.randomBytes(3).toString('hex').toUpperCase();
+  const right = crypto.randomBytes(3).toString('hex').toUpperCase();
+  return `AMB-${left}-${right}`;
 }
 
 function expiryDate(days: number) {
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d;
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + days);
+  return expiresAt;
+}
+
+function requestIp(req: NextRequest) {
+  return cleanStr(
+    req.headers.get('x-forwarded-for')?.split(',')[0] ||
+      req.headers.get('x-real-ip'),
+    120,
+  );
+}
+
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: {
+      'cache-control': 'no-store, max-age=0',
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {
   try {
-    const isAdmin = await verifyAdminRequest(req);
-    if (isAdmin.ok === false) return isAdmin.response;
+    const admin = await verifyAdminRequest(req);
+    if (admin.ok === false) return admin.response;
 
     const body = (await req.json().catch(() => ({}))) as any;
+
     const paymentId = cleanStr(body.paymentId, 120);
     const clinicianId = cleanStr(body.clinicianId, 120);
     const paymentReference = cleanStr(body.paymentReference, 180);
-    const expiresInDays = Math.max(1, Math.min(90, Math.round(Number(body.expiresInDays || 30))));
+    const replaceExisting = body.replaceExisting === true;
+    const replacementReason = cleanStr(
+      body.replacementReason || body.regenerationReason,
+      1000,
+    );
+
+    const expiresInDays = Math.max(
+      1,
+      Math.min(90, Math.round(Number(body.expiresInDays || 30))),
+    );
+
+    if (!paymentId && !clinicianId && !paymentReference) {
+      return json(
+        {
+          ok: false,
+          error: 'payment_or_clinician_selector_required',
+        },
+        400,
+      );
+    }
 
     const payment = paymentId
-      ? await prisma.clinicianOnboardingPayment.findUnique({ where: { id: paymentId } })
+      ? await prisma.clinicianOnboardingPayment.findUnique({
+          where: { id: paymentId },
+        })
       : await prisma.clinicianOnboardingPayment.findFirst({
           where: {
             clinicianId: clinicianId || undefined,
             paymentReference: paymentReference || undefined,
             status: 'confirmed',
-            provider: { in: ['eft', 'manual', 'waiver', 'deferred'] },
+            provider: {
+              in: ['eft', 'manual', 'waiver', 'deferred'],
+            },
           },
-          orderBy: { confirmedAt: 'desc' },
+          orderBy: {
+            confirmedAt: 'desc',
+          },
         });
 
-    if (!payment) return NextResponse.json({ ok: false, error: 'confirmed_payment_not_found' }, { status: 404 });
-    if (!['eft', 'manual', 'waiver', 'deferred'].includes(String(payment.provider))) {
-      return NextResponse.json({ ok: false, error: 'authorisation_only_for_manual_eft_or_approved_waiver' }, { status: 409 });
+    if (!payment) {
+      return json(
+        {
+          ok: false,
+          error: 'confirmed_payment_not_found',
+        },
+        404,
+      );
     }
+
+    if (
+      clinicianId &&
+      String(payment.clinicianId) !== clinicianId
+    ) {
+      return json(
+        {
+          ok: false,
+          error: 'payment_clinician_mismatch',
+        },
+        409,
+      );
+    }
+
+    if (
+      !['eft', 'manual', 'waiver', 'deferred'].includes(
+        String(payment.provider),
+      )
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            'authorisation_only_for_manual_eft_or_approved_waiver',
+        },
+        409,
+      );
+    }
+
     if (payment.status !== 'confirmed') {
-      return NextResponse.json({ ok: false, error: 'payment_not_confirmed' }, { status: 409 });
+      return json(
+        {
+          ok: false,
+          error: 'payment_not_confirmed',
+        },
+        409,
+      );
     }
+
     if (payment.authorisationUsedAt) {
-      return NextResponse.json({ ok: false, error: 'authorisation_already_used' }, { status: 409 });
+      return json(
+        {
+          ok: false,
+          error: 'authorisation_already_used',
+        },
+        409,
+      );
     }
 
-    let code = makeCode();
-    let codeHash = hashCode(code);
+    const activeExistingCode =
+      Boolean(payment.authorisationCodeHash) &&
+      Boolean(payment.authorisationExpiresAt) &&
+      Number(payment.authorisationExpiresAt?.getTime()) > Date.now();
 
-    for (let i = 0; i < 3; i += 1) {
-      const exists = await prisma.clinicianOnboardingPayment.findUnique({
-        where: { authorisationCodeHash: codeHash },
-      });
-      if (!exists) break;
-      code = makeCode();
-      codeHash = hashCode(code);
+    if (activeExistingCode && !replaceExisting) {
+      return json(
+        {
+          ok: false,
+          error: 'active_authorisation_already_exists',
+          message:
+            'A valid authorisation code already exists. Use the replacement action and provide a reason if it must be invalidated.',
+          existing: {
+            hint: payment.authorisationCodeHint,
+            expiresAt:
+              payment.authorisationExpiresAt?.toISOString() || null,
+          },
+        },
+        409,
+      );
     }
 
-    const adminUid = cleanStr((isAdmin as any)?.uid || (isAdmin as any)?.userId || body.generatedByUserId, 120);
+    if (
+      activeExistingCode &&
+      replaceExisting &&
+      (!replacementReason || replacementReason.length < 8)
+    ) {
+      return json(
+        {
+          ok: false,
+          error: 'authorisation_replacement_reason_required',
+          message:
+            'Provide a meaningful reason before replacing an active authorisation code.',
+        },
+        400,
+      );
+    }
+
+    let code: string | null = null;
+    let codeHash: string | null = null;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const candidate = makeCode();
+      const candidateHash = hashCode(candidate);
+
+      const existing =
+        await prisma.clinicianOnboardingPayment.findUnique({
+          where: {
+            authorisationCodeHash: candidateHash,
+          },
+          select: {
+            id: true,
+          },
+        });
+
+      if (!existing) {
+        code = candidate;
+        codeHash = candidateHash;
+        break;
+      }
+    }
+
+    if (!code || !codeHash) {
+      throw new Error('authorisation_code_generation_exhausted');
+    }
+
+    const adminUid =
+      cleanStr(
+        (admin as any)?.uid ||
+          (admin as any)?.userId ||
+          body.generatedByUserId,
+        120,
+      ) || 'admin';
+
     const expiresAt = expiryDate(expiresInDays);
-    const updated = await prisma.clinicianOnboardingPayment.update({
-      where: { id: payment.id },
-      data: {
-        authorisationCodeHash: codeHash,
-        authorisationCodeHint: code.slice(-4),
-        authorisationExpiresAt: expiresAt,
-        confirmedByUserId: payment.confirmedByUserId || adminUid,
-      },
+    const hadPreviousCode = Boolean(payment.authorisationCodeHash);
+    const issuedAt = new Date();
+    const previousMeta = objectMeta(payment.meta);
+
+    const updated = await prisma.$transaction(async (tx) => {
+      const saved =
+        await tx.clinicianOnboardingPayment.update({
+          where: {
+            id: payment.id,
+          },
+          data: {
+            authorisationCodeHash: codeHash,
+            authorisationCodeHint: code.slice(-4),
+            authorisationExpiresAt: expiresAt,
+            confirmedByUserId:
+              payment.confirmedByUserId || adminUid,
+            meta: jsonSafe({
+              ...previousMeta,
+              authorisation: {
+                issuedAt: issuedAt.toISOString(),
+                expiresAt: expiresAt.toISOString(),
+                issuedByUserId: adminUid,
+                replacedPreviousCode: hadPreviousCode,
+                replacementReason:
+                  replacementReason || null,
+              },
+            }),
+          },
+        });
+
+      await tx.auditLog.create({
+        data: {
+          actorUserId: adminUid,
+          actorType: 'ADMIN',
+          actorRefId: adminUid,
+          app: 'admin-dashboard',
+          action: hadPreviousCode
+            ? 'CLINICIAN_PAYMENT_AUTHORISATION_REISSUED'
+            : 'CLINICIAN_PAYMENT_AUTHORISATION_ISSUED',
+          entityType: 'ClinicianOnboardingPayment',
+          entityId: payment.id,
+          description: hadPreviousCode
+            ? 'Admin replaced a clinician onboarding payment authorisation code.'
+            : 'Admin issued a clinician onboarding payment authorisation code.',
+          ip: requestIp(req),
+          userAgent: cleanStr(
+            req.headers.get('user-agent'),
+            1000,
+          ),
+          meta: jsonSafe({
+            clinicianId: payment.clinicianId,
+            onboardingId: payment.onboardingId,
+            paymentId: payment.id,
+            provider: payment.provider,
+            authorisationCodeHint: code.slice(-4),
+            expiresAt: expiresAt.toISOString(),
+            replacedPreviousCode: hadPreviousCode,
+            replacementReason:
+              replacementReason || null,
+          }),
+        },
+      });
+
+      return saved;
     });
 
-    return NextResponse.json(
-      {
-        ok: true,
-        payment: {
-          id: updated.id,
-          clinicianId: updated.clinicianId,
-          onboardingId: updated.onboardingId,
-          status: updated.status,
-          provider: updated.provider,
-          paymentReference: updated.paymentReference,
-          authorisationCodeHint: updated.authorisationCodeHint,
-          authorisationExpiresAt: updated.authorisationExpiresAt?.toISOString() ?? null,
-        },
-        authorisationCode: code,
-        warning: 'Show this code once to the clinician. The code is stored only as a hash.',
+    return json({
+      ok: true,
+      payment: {
+        id: updated.id,
+        clinicianId: updated.clinicianId,
+        onboardingId: updated.onboardingId,
+        status: updated.status,
+        provider: updated.provider,
+        paymentReference: updated.paymentReference,
+        authorisationCodeHint:
+          updated.authorisationCodeHint,
+        authorisationExpiresAt:
+          updated.authorisationExpiresAt?.toISOString() ||
+          null,
       },
-      { status: 200 },
+      replacedPreviousCode: hadPreviousCode,
+      authorisationCode: code,
+      warning:
+        'This one-time code cannot be retrieved again. Only its secure hash is stored.',
+    });
+  } catch (error: any) {
+    console.error(
+      '[admin-generate-clinician-authorisation] error',
+      error,
     );
-  } catch (err: any) {
-    console.error('[admin-generate-clinician-authorisation] error', err);
-    return NextResponse.json({ ok: false, error: err?.message || 'generate_authorisation_failed' }, { status: 500 });
+
+    return json(
+      {
+        ok: false,
+        error:
+          error?.message ||
+          'generate_authorisation_failed',
+      },
+      500,
+    );
   }
 }

@@ -11,6 +11,9 @@ type Clin = {
   name?: string | null;
   specialty?: string | null;
   status?: string | null;
+  trainingCompleted?: boolean | null;
+  disabled?: boolean | null;
+  archived?: boolean | null;
   onboardingStatus?: string | null;
   trainingStatus?: string | null;
   isAvailable?: boolean | null;
@@ -55,18 +58,14 @@ function boolFromMeta(meta: Record<string, any>, keys: string[], fallback = fals
   return fallback;
 }
 
-function isTrainingComplete(clinician: Clin, meta: Record<string, any>) {
-  const direct =
-    String(clinician.trainingStatus ?? '').toLowerCase() === 'completed' ||
-    String(clinician.onboardingStatus ?? '').toLowerCase() === 'training_completed' ||
-    String(clinician.status ?? '').toLowerCase() === 'active';
-
-  const fromMeta =
-    boolFromMeta(meta, ['trainingCompleted', 'training_complete', 'isTrainingComplete'], false) ||
-    String(meta.trainingStatus ?? '').toLowerCase() === 'completed' ||
-    String(meta.onboardingStatus ?? '').toLowerCase() === 'training_completed';
-
-  return direct || fromMeta;
+function isTrainingComplete(
+  clinician: Clin,
+  _meta: Record<string, any>,
+) {
+  return (
+    clinician.trainingCompleted ===
+    true
+  );
 }
 
 function isDiscoverable(clinician: Clin, meta: Record<string, any>) {
@@ -127,10 +126,28 @@ export async function GET() {
       .filter((clinician) => {
         const meta = parseMeta(clinician.meta);
 
+        const status =
+          String(clinician.status || '')
+            .trim()
+            .toLowerCase();
+
         return (
-          isDiscoverable(clinician, meta) &&
-          isTrainingComplete(clinician, meta) &&
-          isRecentlyAvailable(clinician, meta, now)
+          status === 'active' &&
+          clinician.disabled !== true &&
+          clinician.archived !== true &&
+          isDiscoverable(
+            clinician,
+            meta,
+          ) &&
+          isTrainingComplete(
+            clinician,
+            meta,
+          ) &&
+          isRecentlyAvailable(
+            clinician,
+            meta,
+            now,
+          )
         );
       })
       .map((clinician) => {

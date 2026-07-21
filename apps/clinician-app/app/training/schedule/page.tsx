@@ -1,30 +1,43 @@
-//apps/clinician-app/app/training/schedule/page.tsx
 'use client';
 
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
+  BadgeCheck,
+  Banknote,
+  BookOpenCheck,
   CalendarDays,
   CheckCircle2,
+  Clock3,
   CreditCard,
+  Download,
   ExternalLink,
+  FileBadge2,
   Loader2,
+  MapPin,
+  PackageCheck,
+  PlayCircle,
   ShieldCheck,
   Truck,
+  Users,
   Video,
-  MapPin,
-  BadgeCheck,
-  Download,
-  FileBadge2,
-  PlayCircle,
 } from 'lucide-react';
 
 type TrainingMode = 'virtual' | 'in_person';
-
+type SessionMode = TrainingMode | 'both';
 type OnboardingPathwayKey =
   | 'START_NOW_PAY_LATER'
   | 'QUALIFYING_DEPOSIT'
   | 'FULL_PAYMENT';
+type StarterKitRelease = 'none' | 'deposit' | 'full';
+
+type PathwayPrivileges = {
+  trainingAccess: boolean;
+  practiceActivation: boolean;
+  starterKitRelease: StarterKitRelease;
+  platformIndemnityEligible: boolean;
+  balanceRecoveryApplies: boolean;
+};
 
 type CommercialPathway = {
   key: OnboardingPathwayKey;
@@ -36,67 +49,95 @@ type CommercialPathway = {
   enabled: boolean;
   featured: boolean;
   conditions: string[];
+  privileges: PathwayPrivileges;
 };
 
-const DEFAULT_COMMERCIAL_PATHWAYS: CommercialPathway[] = [
-  {
-    key: 'START_NOW_PAY_LATER',
-    displayOrder: 1,
-    label: 'Start Now — Pay Later',
-    badge: 'Fastest start',
-    description:
-      'Begin training after Ambulant+ Admin approves your Pay Later request, without making an upfront onboarding payment.',
-    ctaLabel: 'Request Pay Later approval',
-    enabled: true,
-    featured: true,
-    conditions: [
-      'Training access begins after Admin approval.',
-      'No permanent C-Med Kit is dispatched until the qualifying initial payment is received.',
-      'Platform-wide Professional Indemnity cover does not commence until a qualifying payment is received and all applicable policy conditions are satisfied.',
-      'Any outstanding onboarding balance remains payable under the applicable agreement.',
-    ],
-  },
-  {
-    key: 'QUALIFYING_DEPOSIT',
-    displayOrder: 2,
-    label: 'Start with Initial Deposit',
-    badge: 'Balanced option',
-    description:
-      'Pay the Admin-configured qualifying initial amount and proceed with training and partial C-Med Kit fulfilment.',
-    ctaLabel: 'Pay initial deposit',
-    enabled: true,
-    featured: false,
-    conditions: [
-      'The qualifying initial amount is configured by Ambulant+ Admin.',
-      'Initial C-Med Kit fulfilment excludes the HD Otoscope and complimentary merchandise until the outstanding balance is settled.',
-      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
-      'The remaining onboarding balance remains payable under the applicable agreement.',
-    ],
-  },
-  {
-    key: 'FULL_PAYMENT',
-    displayOrder: 3,
-    label: 'Pay in Full',
-    badge: 'Complete package',
-    description:
-      'Settle the complete onboarding fee and proceed with full C-Med Kit fulfilment.',
-    ctaLabel: 'Pay full onboarding fee',
-    enabled: true,
-    featured: false,
-    conditions: [
-      'The full Admin-configured onboarding fee is payable.',
-      'The complete C-Med Kit, including the HD Otoscope and eligible complimentary merchandise, can be dispatched.',
-      'Platform-wide Professional Indemnity cover becomes available subject to all applicable eligibility and policy conditions.',
-      'There is no outstanding onboarding-fee balance after confirmed full payment.',
-    ],
-  },
-];
+type TrainingSession = {
+  id: string;
+  dayNumber: number;
+  startAt: string;
+  endAt: string;
+  mode: SessionMode;
+  meetingUrl?: string | null;
+  venueName?: string | null;
+  venueAddress?: string | null;
+  trainerName?: string | null;
+};
 
 type TrainingSlot = {
   id: string;
+  title: string;
+  summary?: string | null;
+  status?: string | null;
   startAt: string;
   endAt: string;
-  seatsLeft?: number | null;
+  timezone: string;
+  durationDays: number;
+  totalDurationMinutes: number;
+  capacity: number;
+  usedCount: number;
+  seatsLeft: number;
+  mode: SessionMode;
+  allowedModes: TrainingMode[];
+  sessions: TrainingSession[];
+  trainerName?: string | null;
+  venueName?: string | null;
+  venueAddress?: string | null;
+  virtualInstructions?: string | null;
+  inPersonInstructions?: string | null;
+  bookingOpensAt?: string | null;
+  bookingClosesAt?: string | null;
+};
+
+type TrainingPolicy = {
+  heading: string;
+  introduction: string;
+  timezone: string;
+  defaultDurationDays: number;
+  defaultSessionDurationMinutes: number;
+  allowedModes: TrainingMode[];
+  virtualDescription: string;
+  inPersonDescription: string;
+  operationalNotice?: string | null;
+  supportMessage?: string | null;
+};
+
+type OnboardingEntitlements = {
+  pathwayKey?: OnboardingPathwayKey | null;
+  pathwayLabel?: string | null;
+  approvedPayLater?: boolean | null;
+  depositQualified?: boolean | null;
+  trainingAccess?: boolean | null;
+  practiceActivation?: boolean | null;
+  starterKitRelease?: StarterKitRelease | null;
+  authorisedStarterKitItems?: string[] | null;
+  releasedStarterKitItems?: string[] | null;
+  missingStarterKitItems?: string[] | null;
+  starterKitReleaseSatisfied?: boolean | null;
+  platformIndemnityEligible?: boolean | null;
+  balanceRecoveryApplies?: boolean | null;
+  outstandingCents?: number | null;
+  conditions?: string[] | null;
+  privileges?: Partial<PathwayPrivileges> | null;
+};
+
+type LegalDocument = {
+  documentId: string;
+  key: string;
+  title: string;
+  category?: string | null;
+  acknowledgementMode: 'REQUIRED' | 'NON_BLOCKING' | 'NOTICE' | string;
+  version: {
+    id: string;
+    versionNumber?: number | null;
+    versionLabel?: string | null;
+    locale?: string | null;
+    contentFormat?: string | null;
+    content?: string | null;
+    checksum?: string | null;
+    effectiveAt?: string | null;
+    publishedAt?: string | null;
+  };
 };
 
 type TrainingContext = {
@@ -110,14 +151,7 @@ type TrainingContext = {
     status?: string | null;
   };
   onboarding?: {
-    stage?:
-      | 'applied'
-      | 'screened'
-      | 'approved'
-      | 'rejected'
-      | 'training_scheduled'
-      | 'training_completed'
-      | string;
+    stage?: string | null;
     notes?: string | null;
     depositPaid?: boolean | null;
     paymentPlan?: string | null;
@@ -131,13 +165,7 @@ type TrainingContext = {
   payLaterRequest?: {
     id: string;
     pathwayKey: 'START_NOW_PAY_LATER';
-    status:
-      | 'pending'
-      | 'approved'
-      | 'rejected'
-      | 'withdrawn'
-      | 'cancelled'
-      | string;
+    status: string;
     requestReason?: string | null;
     requestedAt?: string | null;
     reviewedAt?: string | null;
@@ -147,34 +175,34 @@ type TrainingContext = {
     rejected?: boolean | null;
     canResubmit?: boolean | null;
   } | null;
-  training?: {
-    status?: 'scheduled' | 'completed' | 'canceled' | string;
-    startAt?: string | null;
-    endAt?: string | null;
-    mode?: TrainingMode | null;
+  training?: (Partial<TrainingSlot> & {
+    slotId?: string | null;
+    trainingSlotId?: string | null;
+    status?: string | null;
+    selectedMode?: TrainingMode | null;
     joinUrl?: string | null;
     paid?: boolean | null;
     currency?: string | null;
     feeCents?: number | null;
-
     certificateNumber?: string | null;
     certificateCompletedAt?: string | null;
     certificateInstitution?: string | null;
     certificateAvailable?: boolean | null;
     certificateUrl?: string | null;
-  } | null;
+  }) | null;
   dispatch?: {
-    status?: 'pending' | 'packed' | 'shipped' | 'delivered' | 'canceled' | string;
+    status?: string | null;
     courierName?: string | null;
     trackingCode?: string | null;
     trackingUrl?: string | null;
     shippedAt?: string | null;
     deliveredAt?: string | null;
   } | null;
+  entitlements?: OnboardingEntitlements | null;
   pricing?: {
     currency: string;
     trainingFeeCents: number;
-    paymentProvider: 'stripe' | 'paystack' | 'payfast' | 'ozow' | 'unknown';
+    paymentProvider: 'stripe' | 'paystack' | 'payfast' | 'ozow' | 'mock' | 'unknown';
     cardPaymentEnabled?: boolean | null;
     manualPaymentEnabled?: boolean | null;
     minimumInitialPaymentCents?: number | null;
@@ -182,6 +210,7 @@ type TrainingContext = {
     balanceRecoveryMode?: string | null;
     balanceRecoveryNotes?: string | null;
     commercialPathways?: CommercialPathway[] | null;
+    trainingPolicy?: TrainingPolicy | null;
     amountPaidCents?: number | null;
     outstandingCents?: number | null;
     initialPaymentDueCents?: number | null;
@@ -190,41 +219,54 @@ type TrainingContext = {
     fullyPaid?: boolean | null;
     paymentPlan?: string | null;
     waiverActive?: boolean | null;
-    temporaryTrainingDevicesAllowed?: boolean | null;
-    permanentStarterKitRequiresDepositOrFullPayment?: boolean | null;
+    effectivePathwayKey?: OnboardingPathwayKey | null;
+    privileges?: Partial<PathwayPrivileges> | null;
     configured?: boolean | null;
   };
-  bankInstructions?: Record<string, any> | null;
+  bankInstructions?: Record<string, unknown> | null;
   starterKitItems?: string[];
+  starterKitDepositItems?: string[];
   error?: unknown;
 };
 
-function errorToMessage(value: unknown, fallback = 'Something went wrong. Please try again or contact Ambulant+ support.') {
+function errorToMessage(
+  value: unknown,
+  fallback = 'Something went wrong. Please try again or contact Ambulant+ support.',
+) {
   if (!value) return fallback;
 
   if (typeof value === 'string') {
-    const v = value.trim();
-    if (!v) return fallback;
-    if (v === '[object Object]') return fallback;
-    if (v === 'clinicianId_required') return 'We could not identify your clinician profile. Please use the training link from your signup email or sign in again.';
-    if (v === 'clinician_not_found') return 'We could not find this clinician application. Please check your training link or contact Ambulant+ support.';
-    if (v === 'pay_later_pathway_disabled') return 'The Pay Later pathway is currently disabled by Ambulant+ Admin.';
-    if (v === 'pay_later_request_storage_unavailable') return 'The Pay Later request service is awaiting its database migration. Please try again after deployment.';
-    if (v === 'pay_later_not_available_after_qualifying_payment') return 'Pay Later is not available because a qualifying onboarding payment has already been recorded.';
-    if (v === 'clinician_identity_mismatch') return 'Your authenticated clinician identity does not match this onboarding record.';
-    if (v.includes('DATABASE_URL') || v.toLowerCase().includes('prisma')) {
+    const message = value.trim();
+    if (!message || message === '[object Object]') return fallback;
+    const known: Record<string, string> = {
+      clinicianId_required:
+        'We could not identify your clinician profile. Please sign in again.',
+      clinician_not_found:
+        'We could not find this clinician application. Please contact Ambulant+ support.',
+      pay_later_pathway_disabled:
+        'The Pay Later pathway is currently disabled by Ambulant+ Admin.',
+      pay_later_request_storage_unavailable:
+        'The Pay Later request service is temporarily unavailable.',
+      pay_later_not_available_after_qualifying_payment:
+        'Pay Later is not available because a qualifying onboarding payment has already been recorded.',
+      clinician_identity_mismatch:
+        'Your signed-in clinician identity does not match this onboarding record.',
+    };
+    if (known[message]) return known[message];
+    if (message.includes('DATABASE_URL') || message.toLowerCase().includes('prisma')) {
       return 'This service is temporarily unable to reach the database. Please try again shortly.';
     }
-    return v.length > 220 ? fallback : v.replace(/_/g, ' ');
+    return message.length > 220 ? fallback : message.replace(/_/g, ' ');
   }
 
   if (value instanceof Error) return errorToMessage(value.message, fallback);
-
   if (typeof value === 'object') {
-    const obj = value as Record<string, any>;
-    return errorToMessage(obj.error || obj.message || obj.reason || obj.detail, fallback);
+    const object = value as Record<string, unknown>;
+    return errorToMessage(
+      object.error || object.message || object.reason || object.detail,
+      fallback,
+    );
   }
-
   return fallback;
 }
 
@@ -232,157 +274,72 @@ function apiError(body: unknown, fallback: string) {
   return errorToMessage(body, fallback);
 }
 
-
-function cloneDefaultCommercialPathways(): CommercialPathway[] {
-  return DEFAULT_COMMERCIAL_PATHWAYS.map(
-    (pathway) => ({
-      ...pathway,
-      conditions: [
-        ...pathway.conditions,
-      ],
-    }),
-  );
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => String(item || '').trim()).filter(Boolean)
+    : [];
 }
 
-function normaliseCommercialPathways(
-  value: unknown,
-): CommercialPathway[] {
-  const incoming =
-    Array.isArray(value)
-      ? value
-      : [];
+function normaliseCommercialPathways(value: unknown): CommercialPathway[] {
+  const allowed = new Set<OnboardingPathwayKey>([
+    'START_NOW_PAY_LATER',
+    'QUALIFYING_DEPOSIT',
+    'FULL_PAYMENT',
+  ]);
 
-  const defaults =
-    cloneDefaultCommercialPathways();
+  if (!Array.isArray(value)) return [];
 
-  return defaults
-    .map(
-      (fallback) => {
-        const raw =
-          incoming.find(
-            (candidate: any) =>
-              String(
-                candidate?.key ||
-                  '',
-              )
-                .trim()
-                .toUpperCase() ===
-              fallback.key,
-          ) as any;
+  return value
+    .map((candidate: any): CommercialPathway | null => {
+      const key = String(candidate?.key || '').trim().toUpperCase() as OnboardingPathwayKey;
+      if (!allowed.has(key)) return null;
+      const privileges = candidate?.privileges || {};
+      const release = String(privileges.starterKitRelease || '').trim().toLowerCase();
 
-        if (!raw) {
-          return fallback;
-        }
-
-        const requestedOrder =
-          Number(
-            raw.displayOrder,
-          );
-
-        const conditions =
-          Array.isArray(
-            raw.conditions,
-          )
-            ? raw.conditions
-                .map(
-                  (
-                    condition: unknown,
-                  ) =>
-                    String(
-                      condition ||
-                        '',
-                    ).trim(),
-                )
-                .filter(Boolean)
-                .slice(0, 12)
-            : [
-                ...fallback.conditions,
-              ];
-
-        const hasBadge =
-          Object.prototype.hasOwnProperty.call(
-            raw,
-            'badge',
-          );
-
-        return {
-          key: fallback.key,
-          displayOrder:
-            Number.isFinite(
-              requestedOrder,
-            )
-              ? Math.min(
-                  99,
-                  Math.max(
-                    1,
-                    Math.round(
-                      requestedOrder,
-                    ),
-                  ),
-                )
-              : fallback.displayOrder,
-          label:
-            String(
-              raw.label || '',
-            ).trim() ||
-            fallback.label,
-          badge: hasBadge
-            ? String(
-                raw.badge || '',
-              ).trim() ||
-              null
-            : fallback.badge,
-          description:
-            String(
-              raw.description || '',
-            ).trim() ||
-            fallback.description,
-          ctaLabel:
-            String(
-              raw.ctaLabel || '',
-            ).trim() ||
-            fallback.ctaLabel,
-          enabled:
-            raw.enabled !== false,
-          featured:
-            raw.featured === true,
-          conditions:
-            conditions.length > 0
-              ? conditions
-              : [
-                  ...fallback.conditions,
-                ],
-        };
-      },
-    )
-    .sort(
-      (left, right) =>
-        left.displayOrder -
-          right.displayOrder ||
-        defaults.findIndex(
-          (pathway) =>
-            pathway.key ===
-            left.key,
-        ) -
-          defaults.findIndex(
-            (pathway) =>
-              pathway.key ===
-              right.key,
-          ),
-    );
+      return {
+        key,
+        displayOrder: Number.isFinite(Number(candidate?.displayOrder))
+          ? Math.max(1, Math.round(Number(candidate.displayOrder)))
+          : 99,
+        label: String(candidate?.label || key).trim(),
+        badge: String(candidate?.badge || '').trim() || null,
+        description: String(candidate?.description || '').trim(),
+        ctaLabel: String(candidate?.ctaLabel || 'Continue').trim(),
+        enabled: candidate?.enabled !== false,
+        featured: candidate?.featured === true,
+        conditions: stringList(candidate?.conditions).slice(0, 12),
+        privileges: {
+          trainingAccess: privileges.trainingAccess === true,
+          practiceActivation: privileges.practiceActivation === true,
+          starterKitRelease:
+            release === 'full' || release === 'deposit' ? release : 'none',
+          platformIndemnityEligible:
+            privileges.platformIndemnityEligible === true,
+          balanceRecoveryApplies:
+            privileges.balanceRecoveryApplies === true,
+        },
+      };
+    })
+    .filter((pathway): pathway is CommercialPathway => pathway !== null)
+    .sort((left, right) => left.displayOrder - right.displayOrder);
 }
 
 function money(cents: number, currency: string) {
-  const n = (cents || 0) / 100;
+  const amount = Math.max(0, Number(cents || 0)) / 100;
   try {
-    return new Intl.NumberFormat('en-ZA', { style: 'currency', currency }).format(n);
+    return new Intl.NumberFormat('en-ZA', {
+      style: 'currency',
+      currency,
+    }).format(amount);
   } catch {
-    return `${currency} ${n.toFixed(2)}`;
+    return `${currency} ${amount.toFixed(2)}`;
   }
 }
 
-function fmt(dtIso: string) {
-  const d = new Date(dtIso);
+function fmt(value?: string | null) {
+  if (!value) return 'To be confirmed';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return 'To be confirmed';
   return new Intl.DateTimeFormat('en-ZA', {
     weekday: 'short',
     year: 'numeric',
@@ -390,22 +347,56 @@ function fmt(dtIso: string) {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
-  }).format(d);
+  }).format(date);
 }
 
-function fmtDateOnly(dtIso?: string | null) {
-  if (!dtIso) return '-';
-  const d = new Date(dtIso);
+function fmtDateOnly(value?: string | null) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '-';
   return new Intl.DateTimeFormat('en-ZA', {
     year: 'numeric',
     month: 'long',
     day: '2-digit',
-  }).format(d);
+  }).format(date);
 }
 
-function fmtTime(dtIso: string) {
-  const d = new Date(dtIso);
-  return new Intl.DateTimeFormat('en-ZA', { hour: '2-digit', minute: '2-digit' }).format(d);
+function fmtTime(value?: string | null) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '-';
+  return new Intl.DateTimeFormat('en-ZA', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
+
+function durationLabel(minutes?: number | null) {
+  const total = Math.max(0, Math.round(Number(minutes || 0)));
+  if (!total) return 'Duration to be confirmed';
+  const hours = Math.floor(total / 60);
+  const remainder = total % 60;
+  if (!hours) return `${remainder} min`;
+  return remainder ? `${hours}h ${remainder}m` : `${hours}h`;
+}
+
+function modeLabel(mode?: SessionMode | null) {
+  if (mode === 'in_person') return 'In person';
+  if (mode === 'both') return 'Virtual & in person';
+  return 'Virtual';
+}
+
+function releaseLabel(release?: StarterKitRelease | null) {
+  if (release === 'full') return 'Full C-Med package';
+  if (release === 'deposit') return 'Deposit C-Med package';
+  return 'No permanent kit release';
+}
+
+function titleCaseKey(value: string) {
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function makeICS({
@@ -422,29 +413,28 @@ function makeICS({
   location?: string;
 }) {
   const toUtc = (iso: string) => {
-    const d = new Date(iso);
-    const pad = (x: number) => String(x).padStart(2, '0');
+    const date = new Date(iso);
+    const pad = (value: number) => String(value).padStart(2, '0');
     return (
-      d.getUTCFullYear() +
-      pad(d.getUTCMonth() + 1) +
-      pad(d.getUTCDate()) +
+      date.getUTCFullYear() +
+      pad(date.getUTCMonth() + 1) +
+      pad(date.getUTCDate()) +
       'T' +
-      pad(d.getUTCHours()) +
-      pad(d.getUTCMinutes()) +
-      pad(d.getUTCSeconds()) +
+      pad(date.getUTCHours()) +
+      pad(date.getUTCMinutes()) +
+      pad(date.getUTCSeconds()) +
       'Z'
     );
   };
 
-  const uid = `ambulant-training-${Math.random().toString(36).slice(2)}@ambulant.plus`;
-  const lines = [
+  return [
     'BEGIN:VCALENDAR',
     'VERSION:2.0',
     'PRODID:-//Ambulant+//Training//EN',
     'CALSCALE:GREGORIAN',
     'METHOD:PUBLISH',
     'BEGIN:VEVENT',
-    `UID:${uid}`,
+    `UID:ambulant-training-${Math.random().toString(36).slice(2)}@ambulant.plus`,
     `DTSTAMP:${toUtc(new Date().toISOString())}`,
     `DTSTART:${toUtc(startIso)}`,
     `DTEND:${toUtc(endIso)}`,
@@ -453,14 +443,15 @@ function makeICS({
     location ? `LOCATION:${location}` : '',
     'END:VEVENT',
     'END:VCALENDAR',
-  ].filter(Boolean);
-
-  return lines.join('\\r\\n');
+  ]
+    .filter(Boolean)
+    .join('\\r\\n');
 }
 
-function certificateHref(_rawUrl: string | null | undefined, clinicianId: string) {
-  if (!clinicianId) return null;
-  return `/api/training/certificate?clinicianId=${encodeURIComponent(clinicianId)}&download=1`;
+function certificateHref(clinicianId: string) {
+  return clinicianId
+    ? `/api/training/certificate?clinicianId=${encodeURIComponent(clinicianId)}&download=1`
+    : null;
 }
 
 function StepPill({
@@ -478,873 +469,798 @@ function StepPill({
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
     : active
       ? 'border-indigo-200 bg-indigo-50 text-indigo-800'
-      : 'border-gray-200 bg-white text-gray-600';
+      : 'border-slate-200 bg-white text-slate-500';
 
   return (
-    <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${tone}`}>
-      <span className="opacity-80">{icon}</span>
-      <span className="font-medium">{label}</span>
+    <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs ${tone}`}>
+      {icon}
+      <span className="font-semibold">{label}</span>
     </div>
   );
 }
 
-
-function EnterpriseOnboardingPolicyCard({
-  ctx,
-  pricing,
-  starterKit,
-}: {
-  ctx: TrainingContext | null;
-  pricing: NonNullable<TrainingContext['pricing']>;
-  starterKit: string[];
-}) {
-  const currency = pricing.currency || 'ZAR';
-  const fullFee = Math.max(0, Math.round(Number(pricing.trainingFeeCents || 0)));
-  const minimumDue = Math.max(
-    0,
-    Math.round(Number(pricing.initialPaymentDueCents ?? pricing.minimumInitialPaymentCents ?? fullFee)),
-  );
-  const outstanding = Math.max(0, Math.round(Number(pricing.outstandingCents ?? ctx?.onboarding?.outstandingCents ?? fullFee)));
-  const amountPaid = Math.max(0, Math.round(Number(pricing.amountPaidCents ?? ctx?.onboarding?.amountPaidCents ?? 0)));
-  const waiverActive = pricing.waiverActive === true || ctx?.onboarding?.waiverActive === true || ctx?.onboarding?.paymentPlan === 'WAIVER_TRAIN_NOW_PAY_LATER';
-  const depositMet = pricing.initialRequirementMet === true || ctx?.onboarding?.initialRequirementMet === true || ctx?.onboarding?.depositPaid === true;
-  const permanentLocked = pricing.permanentStarterKitRequiresDepositOrFullPayment !== false && !depositMet && !pricing.fullyPaid;
-  const bank = ctx?.bankInstructions || {};
-
+function Privilege({ granted, children }: { granted: boolean; children: React.ReactNode }) {
   return (
-    <section className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-extrabold text-indigo-900">
-            <ShieldCheck className="h-4 w-4" />
-            Admin-configured onboarding policy
-          </div>
-          <h2 className="mt-3 text-lg font-black text-slate-950">C-Med Kit, payment and device release terms</h2>
-          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-600">
-            These fee, deposit, payment-method and C-Med StarterKit rules are controlled by Ambulant+ Admin. Training may proceed after card payment, confirmed EFT/manual authorisation, or approved waiver/pay-later authorisation.
-          </p>
-        </div>
-
-        <div className="grid min-w-[220px] gap-2 rounded-xl border bg-slate-50 p-3 text-xs">
-          <div className="flex justify-between gap-3">
-            <span className="text-slate-500">Full onboarding fee</span>
-            <span className="font-black text-slate-900">{fullFee > 0 ? money(fullFee, currency) : 'Not configured'}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-slate-500">Minimum deposit</span>
-            <span className="font-black text-slate-900">{minimumDue > 0 ? money(minimumDue, currency) : 'Admin review'}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-slate-500">Paid/credited</span>
-            <span className="font-black text-slate-900">{money(amountPaid, currency)}</span>
-          </div>
-          <div className="flex justify-between gap-3">
-            <span className="text-slate-500">Outstanding</span>
-            <span className="font-black text-slate-900">{money(outstanding, currency)}</span>
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-[1.1fr_0.9fr]">
-        <div className="rounded-xl border bg-slate-50 p-4">
-          <div className="flex items-center gap-2 text-sm font-black text-slate-900">
-            <Truck className="h-4 w-4 text-indigo-700" />
-            C-Med StarterKit contents
-          </div>
-          {starterKit.length > 0 ? (
-            <ul className="mt-3 grid gap-2 sm:grid-cols-2">
-              {starterKit.map((item, index) => (
-                <li key={`${item}-${index}`} className="rounded-lg border bg-white px-3 py-2 text-xs font-medium text-slate-700">
-                  {item}
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
-              C-Med StarterKit contents have not been configured by Admin yet. Please wait for Admin to publish the kit before relying on device-release information.
-            </div>
-          )}
-        </div>
-
-        <div className="space-y-3">
-          <div className="rounded-xl border bg-slate-50 p-4 text-xs text-slate-700">
-            <div className="flex items-center gap-2 text-sm font-black text-slate-900">
-              <CreditCard className="h-4 w-4 text-indigo-700" />
-              Accepted payment routes
-            </div>
-            <div className="mt-3 grid gap-2">
-              <div className="rounded-lg border bg-white px-3 py-2">
-                Card/Paystack: <span className="font-bold">{pricing.cardPaymentEnabled === false ? 'Disabled by Admin' : 'Available if configured'}</span>
-              </div>
-              <div className="rounded-lg border bg-white px-3 py-2">
-                EFT/manual proof: <span className="font-bold">{pricing.manualPaymentEnabled === false ? 'Disabled by Admin' : 'Available with Admin confirmation'}</span>
-              </div>
-              <div className="rounded-lg border bg-white px-3 py-2">
-                Waiver/pay later: <span className="font-bold">{waiverActive ? 'Approved for this clinician' : 'Requires Admin approval and T&C'}</span>
-              </div>
-              {bank?.bankName || bank?.accountName || bank?.referenceFormat ? (
-                <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900">
-                  EFT reference: {String(bank.referenceFormat || 'Use your full name and clinician ID as payment reference.')}
-                </div>
-              ) : null}
-            </div>
-          </div>
-
-          <div className={`rounded-xl border p-4 text-xs ${permanentLocked ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-emerald-200 bg-emerald-50 text-emerald-900'}`}>
-            <div className="font-black">
-              {permanentLocked ? 'Permanent kit locked until deposit/full payment' : 'Permanent kit release condition met'}
-            </div>
-            <p className="mt-1 leading-relaxed">
-              Temporary training devices may be loaned for training when Admin approves waiver/pay-later. Permanent C-Med Kit/device release requires the Admin-configured minimum deposit or full payment.
-            </p>
-            {pricing.balanceRecoveryNotes ? (
-              <p className="mt-2 rounded-lg bg-white/70 p-2 leading-relaxed">
-                Balance recovery note: {pricing.balanceRecoveryNotes}
-              </p>
-            ) : null}
-          </div>
-        </div>
-      </div>
-    </section>
+    <div className="flex items-start gap-2 text-xs leading-relaxed text-slate-600">
+      <CheckCircle2
+        className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${granted ? 'text-emerald-600' : 'text-slate-300'}`}
+      />
+      <span>{children}</span>
+    </div>
   );
 }
-
-
 
 function CommercialPathwaySelector({
   pathways,
   selectedPathway,
   onSelect,
+  amountLabel,
 }: {
   pathways: CommercialPathway[];
   selectedPathway: OnboardingPathwayKey | null;
-  onSelect: (
-    key: OnboardingPathwayKey,
-  ) => void;
+  onSelect: (key: OnboardingPathwayKey) => void;
+  amountLabel: (key: OnboardingPathwayKey) => string;
 }) {
-  if (pathways.length === 0) {
+  if (!pathways.length) {
     return (
-      <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm">
-        <h2 className="text-base font-black text-amber-950">
-          Onboarding pathways are temporarily unavailable
-        </h2>
-        <p className="mt-1 text-sm leading-relaxed text-amber-900">
-          Ambulant+ Admin has not enabled an onboarding pathway. Please contact support before continuing.
+      <section className="rounded-3xl border border-amber-200 bg-amber-50 p-6">
+        <h2 className="font-black text-amber-950">Payment options are being prepared</h2>
+        <p className="mt-1 text-sm text-amber-900">
+          Ambulant+ Admin has not enabled an onboarding payment option yet.
         </p>
       </section>
     );
   }
 
   return (
-    <section
-      className="rounded-2xl border border-indigo-100 bg-white p-5 shadow-sm"
-      aria-labelledby="commercial-pathway-heading"
-    >
-      <div className="flex flex-col gap-2 border-b border-slate-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+    <section aria-labelledby="payment-options-heading">
+      <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <div className="text-xs font-black uppercase tracking-wide text-indigo-700">
-            Choose your onboarding route
+          <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-700">
+            Payment option
           </div>
-
-          <h2
-            id="commercial-pathway-heading"
-            className="mt-1 text-lg font-black text-slate-950"
-          >
-            How would you like to begin?
+          <h2 id="payment-options-heading" className="mt-1 text-xl font-black text-slate-950">
+            Choose how you want to begin
           </h2>
-
-          <p className="mt-1 max-w-3xl text-sm leading-relaxed text-slate-600">
-            Review each pathway carefully and make an explicit selection. The featured option is highlighted for visibility but is not selected automatically.
+          <p className="mt-1 text-sm text-slate-600">
+            Amounts, benefits and release rules below are published by Ambulant+ Admin.
           </p>
         </div>
+        <span className="rounded-full border bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+          {selectedPathway ? 'Option selected' : 'Selection required'}
+        </span>
+      </div>
 
-        <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-700">
-          {selectedPathway
-            ? '1 pathway selected'
-            : 'Selection required'}
+      <div className="mt-5 grid gap-4 lg:grid-cols-3" role="radiogroup">
+        {pathways.map((pathway) => {
+          const selected = pathway.key === selectedPathway;
+          return (
+            <button
+              key={pathway.key}
+              type="button"
+              role="radio"
+              aria-checked={selected}
+              onClick={() => onSelect(pathway.key)}
+              className={`relative flex h-full flex-col rounded-3xl border p-5 text-left transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${
+                selected
+                  ? 'border-indigo-500 bg-indigo-50 shadow-lg shadow-indigo-100 ring-2 ring-indigo-100'
+                  : pathway.featured
+                    ? 'border-violet-200 bg-gradient-to-b from-violet-50 to-white hover:border-violet-400'
+                    : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-indigo-300 hover:shadow-md'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-500">
+                    Option {pathway.displayOrder}
+                  </div>
+                  <h3 className="mt-1 text-base font-black text-slate-950">{pathway.label}</h3>
+                </div>
+                <span
+                  className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border ${
+                    selected ? 'border-indigo-600 bg-indigo-600' : 'border-slate-300 bg-white'
+                  }`}
+                >
+                  {selected ? <span className="h-2 w-2 rounded-full bg-white" /> : null}
+                </span>
+              </div>
+
+              <div className="mt-4 text-2xl font-black tracking-tight text-slate-950">
+                {amountLabel(pathway.key)}
+              </div>
+              <p className="mt-2 min-h-16 text-sm leading-relaxed text-slate-600">
+                {pathway.description}
+              </p>
+
+              <div className="mt-4 space-y-2 rounded-2xl border border-slate-200/80 bg-white/80 p-3">
+                <Privilege granted={pathway.privileges.trainingAccess}>Training access</Privilege>
+                <Privilege granted={pathway.privileges.practiceActivation}>Practice activation</Privilege>
+                <Privilege granted={pathway.privileges.platformIndemnityEligible}>
+                  Platform indemnity eligibility
+                </Privilege>
+                <Privilege granted={pathway.privileges.starterKitRelease !== 'none'}>
+                  {releaseLabel(pathway.privileges.starterKitRelease)}
+                </Privilege>
+                <Privilege granted={pathway.privileges.balanceRecoveryApplies}>
+                  Balance recovery applies
+                </Privilege>
+              </div>
+
+              {pathway.conditions.length ? (
+                <ul className="mt-4 flex-1 space-y-2 text-xs leading-relaxed text-slate-600">
+                  {pathway.conditions.map((condition, index) => (
+                    <li key={`${pathway.key}-${index}`} className="flex gap-2">
+                      <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
+                      <span>{condition}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+
+              <div
+                className={`mt-5 rounded-xl px-3 py-2.5 text-center text-xs font-black ${
+                  selected ? 'bg-indigo-700 text-white' : 'border bg-slate-50 text-slate-700'
+                }`}
+              >
+                {selected ? 'Selected' : pathway.ctaLabel}
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function ProgrammeCard({
+  slot,
+  selected,
+  onSelect,
+}: {
+  slot: TrainingSlot;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onSelect}
+      className={`w-full rounded-3xl border p-5 text-left transition ${
+        selected
+          ? 'border-indigo-500 bg-indigo-50 shadow-md ring-2 ring-indigo-100'
+          : 'border-slate-200 bg-white hover:border-indigo-300 hover:shadow-md'
+      }`}
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h3 className="text-base font-black text-slate-950">{slot.title}</h3>
+            {selected ? (
+              <span className="rounded-full bg-indigo-700 px-2.5 py-1 text-[10px] font-black text-white">
+                Selected
+              </span>
+            ) : null}
+          </div>
+          {slot.summary ? (
+            <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600">{slot.summary}</p>
+          ) : null}
+        </div>
+        <div className="shrink-0 rounded-2xl border bg-white px-4 py-3 text-center">
+          <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">Seats left</div>
+          <div className="mt-1 text-xl font-black text-slate-950">{slot.seatsLeft}</div>
         </div>
       </div>
 
-      <div
-        className="mt-5 grid gap-4 lg:grid-cols-3"
-        role="radiogroup"
-        aria-label="Clinician onboarding pathway"
-      >
-        {pathways.map(
-          (pathway) => {
-            const selected =
-              selectedPathway ===
-              pathway.key;
-
-            return (
-              <button
-                key={pathway.key}
-                type="button"
-                role="radio"
-                aria-checked={selected}
-                onClick={() =>
-                  onSelect(
-                    pathway.key,
-                  )
-                }
-                className={[
-                  'relative flex h-full flex-col rounded-2xl border p-4 text-left shadow-sm transition focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2',
-                  selected
-                    ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100'
-                    : pathway.featured
-                      ? 'border-purple-300 bg-gradient-to-b from-purple-50 to-white ring-1 ring-purple-100 hover:border-purple-400'
-                      : 'border-slate-200 bg-white hover:border-indigo-300 hover:bg-slate-50',
-                ].join(' ')}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-[10px] font-black uppercase tracking-wide text-slate-500">
-                      Option {pathway.displayOrder}
-                    </div>
-
-                    <h3 className="mt-1 text-base font-black text-slate-950">
-                      {pathway.label}
-                    </h3>
-                  </div>
-
-                  <span
-                    aria-hidden="true"
-                    className={[
-                      'mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border',
-                      selected
-                        ? 'border-indigo-600 bg-indigo-600'
-                        : 'border-slate-300 bg-white',
-                    ].join(' ')}
-                  >
-                    {selected ? (
-                      <span className="h-2 w-2 rounded-full bg-white" />
-                    ) : null}
-                  </span>
-                </div>
-
-                <div className="mt-3 flex min-h-6 flex-wrap gap-2">
-                  {pathway.badge ? (
-                    <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-1 text-[10px] font-black text-indigo-800">
-                      {pathway.badge}
-                    </span>
-                  ) : null}
-
-                  {pathway.featured ? (
-                    <span className="rounded-full border border-purple-200 bg-purple-100 px-2 py-1 text-[10px] font-black text-purple-800">
-                      Featured
-                    </span>
-                  ) : null}
-
-                  {selected ? (
-                    <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-1 text-[10px] font-black text-emerald-800">
-                      Selected
-                    </span>
-                  ) : null}
-                </div>
-
-                <p className="mt-3 text-sm leading-relaxed text-slate-600">
-                  {pathway.description}
-                </p>
-
-                <ul className="mt-4 flex-1 space-y-2 text-xs leading-relaxed text-slate-600">
-                  {pathway.conditions.map(
-                    (
-                      condition,
-                      index,
-                    ) => (
-                      <li
-                        key={pathway.key + '-' + index}
-                        className="flex gap-2"
-                      >
-                        <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-indigo-600" />
-                        <span>
-                          {condition}
-                        </span>
-                      </li>
-                    ),
-                  )}
-                </ul>
-
-                <div
-                  className={[
-                    'mt-5 rounded-xl px-3 py-2 text-center text-xs font-black',
-                    selected
-                      ? 'bg-indigo-700 text-white'
-                      : 'border border-slate-200 bg-slate-50 text-slate-800',
-                  ].join(' ')}
-                >
-                  {selected
-                    ? 'Selected'
-                    : pathway.ctaLabel}
-                </div>
-              </button>
-            );
-          },
-        )}
+      <div className="mt-4 grid gap-2 text-xs text-slate-600 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex items-center gap-2"><CalendarDays className="h-4 w-4 text-indigo-600" />{fmt(slot.startAt)}</div>
+        <div className="flex items-center gap-2"><Clock3 className="h-4 w-4 text-indigo-600" />{slot.durationDays} day{slot.durationDays === 1 ? '' : 's'} · {durationLabel(slot.totalDurationMinutes)}</div>
+        <div className="flex items-center gap-2"><Video className="h-4 w-4 text-indigo-600" />{slot.allowedModes.map(modeLabel).join(' or ')}</div>
+        <div className="flex items-center gap-2"><Users className="h-4 w-4 text-indigo-600" />{slot.usedCount} of {slot.capacity} booked</div>
       </div>
 
-      <p className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-600">
-        Your selection is not submitted merely by choosing a card. Payment initialization and Pay Later review remain separate confirmation actions.
-      </p>
+      {slot.sessions.length ? (
+        <div className="mt-4 grid gap-2 border-t border-indigo-100 pt-4 sm:grid-cols-2">
+          {slot.sessions.map((session) => (
+            <div key={session.id} className="rounded-2xl border bg-white p-3 text-xs text-slate-600">
+              <div className="font-black text-slate-900">Day {session.dayNumber}</div>
+              <div className="mt-1">{fmt(session.startAt)} – {fmtTime(session.endAt)}</div>
+              <div className="mt-1">{modeLabel(session.mode)}{session.trainerName ? ` · ${session.trainerName}` : ''}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </button>
+  );
+}
+
+function LegalNoticePanel({
+  documents,
+  accepted,
+  onToggle,
+  status,
+}: {
+  documents: LegalDocument[];
+  accepted: Record<string, boolean>;
+  onToggle: (versionId: string, checked: boolean) => void;
+  status: 'loading' | 'ready' | 'error';
+}) {
+  if (status === 'loading') {
+    return (
+      <section className="rounded-3xl border bg-white p-5 text-sm text-slate-600">
+        <div className="flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Loading published notices…</div>
+      </section>
+    );
+  }
+
+  if (status === 'error') {
+    return (
+      <section className="rounded-3xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-900">
+        Published onboarding terms could not be loaded. Payment and authorization actions are paused until they are available.
+      </section>
+    );
+  }
+
+  if (!documents.length) return null;
+
+  return (
+    <section className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm" aria-labelledby="legal-heading">
+      <div className="flex items-start gap-3">
+        <BookOpenCheck className="mt-0.5 h-5 w-5 text-indigo-700" />
+        <div>
+          <h2 id="legal-heading" className="font-black text-slate-950">Published onboarding terms</h2>
+          <p className="mt-1 text-xs leading-relaxed text-slate-600">
+            These are the current versions published by Ambulant+ Admin. Required terms must be acknowledged before you continue.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 space-y-3">
+        {documents.map((document) => {
+          const required = document.acknowledgementMode === 'REQUIRED';
+          return (
+            <details key={document.version.id} className="group rounded-2xl border bg-slate-50 p-4">
+              <summary className="cursor-pointer list-none">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="font-semibold text-slate-900">{document.title}</div>
+                  <div className="flex gap-2">
+                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${required ? 'border-amber-200 bg-amber-50 text-amber-900' : 'border-slate-200 bg-white text-slate-600'}`}>
+                      {required ? 'Required' : 'Notice'}
+                    </span>
+                    <span className="rounded-full border bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">
+                      {document.version.versionLabel || `Version ${document.version.versionNumber || ''}`}
+                    </span>
+                  </div>
+                </div>
+                <div className="mt-1 text-[11px] text-indigo-700 group-open:hidden">Open to read</div>
+              </summary>
+
+              <div className="mt-4 whitespace-pre-wrap rounded-xl border bg-white p-4 text-sm leading-7 text-slate-700">
+                {document.version.content || 'No plain-text content was published for this notice.'}
+              </div>
+
+              {required ? (
+                <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-950">
+                  <input
+                    type="checkbox"
+                    checked={accepted[document.version.id] === true}
+                    onChange={(event) => onToggle(document.version.id, event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-indigo-300 text-indigo-700"
+                  />
+                  <span>I have read and acknowledge this published version.</span>
+                </label>
+              ) : null}
+            </details>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function CMedPackageCard({
+  release,
+  items,
+  released,
+  missing,
+  dispatch,
+}: {
+  release: StarterKitRelease;
+  items: string[];
+  released: string[];
+  missing: string[];
+  dispatch?: TrainingContext['dispatch'];
+}) {
+  return (
+    <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="cmed-package-heading">
+      <div className="border-b bg-gradient-to-r from-slate-950 to-indigo-950 p-5 text-white">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="rounded-2xl bg-white/10 p-2"><PackageCheck className="h-5 w-5" /></div>
+            <div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-200">Admin-configured fulfilment</div>
+              <h2 id="cmed-package-heading" className="mt-0.5 text-lg font-black">C-Med package</h2>
+            </div>
+          </div>
+          <span className="rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold">
+            {releaseLabel(release)}
+          </span>
+        </div>
+      </div>
+
+      <div className="p-5">
+        {release === 'none' ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
+            This option does not release a permanent C-Med package. Admin may grant training access independently under the selected pathway.
+          </div>
+        ) : items.length ? (
+          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {items.map((item) => {
+              const shipped = released.includes(item);
+              const outstanding = missing.includes(item);
+              return (
+                <div key={item} className="flex items-start gap-2 rounded-2xl border bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                  <CheckCircle2 className={`mt-0.5 h-4 w-4 shrink-0 ${shipped ? 'text-emerald-600' : 'text-indigo-600'}`} />
+                  <div>
+                    <div className="font-medium">{item}</div>
+                    {shipped ? <div className="mt-0.5 text-[10px] font-bold text-emerald-700">Released</div> : null}
+                    {outstanding ? <div className="mt-0.5 text-[10px] font-bold text-amber-700">Awaiting dispatch</div> : null}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+            Admin has not published contents for this release level yet.
+          </div>
+        )}
+
+        {dispatch?.status ? (
+          <div className="mt-4 flex flex-col gap-3 rounded-2xl border bg-slate-50 p-4 text-sm sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="font-black text-slate-900">Dispatch: <span className="capitalize">{dispatch.status}</span></div>
+              <div className="mt-1 text-xs text-slate-600">
+                {[dispatch.courierName, dispatch.trackingCode].filter(Boolean).join(' · ') || 'Courier and tracking details will appear here.'}
+              </div>
+            </div>
+            {dispatch.trackingUrl ? (
+              <a href={dispatch.trackingUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-700 hover:underline">
+                Track shipment <ExternalLink className="h-4 w-4" />
+              </a>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
 
 function TrainingSchedulePageContent() {
   const router = useRouter();
-  const sp = useSearchParams() ?? new URLSearchParams();
-
-  const [clinicianId, setClinicianId] = useState<string>('');
+  const searchParams = useSearchParams() ?? new URLSearchParams();
+  const [identityReady, setIdentityReady] = useState(false);
+  const [clinicianId, setClinicianId] = useState('');
   const [ctx, setCtx] = useState<TrainingContext | null>(null);
   const [slots, setSlots] = useState<TrainingSlot[]>([]);
   const [mode, setMode] = useState<TrainingMode>('virtual');
-  const [slotId, setSlotId] = useState<string>('');
+  const [slotId, setSlotId] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [step, setStep] = useState<'pick' | 'pay' | 'done'>('pick');
   const [authorisationCode, setAuthorisationCode] = useState('');
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const [payLaterReason, setPayLaterReason] = useState('');
-  const [
-    selectedCommercialPathway,
-    setSelectedCommercialPathway,
-  ] =
-    useState<OnboardingPathwayKey | null>(
-      null,
-    );
+  const [selectedCommercialPathway, setSelectedCommercialPathway] =
+    useState<OnboardingPathwayKey | null>(null);
+  const [legalDocuments, setLegalDocuments] = useState<LegalDocument[]>([]);
+  const [legalAccepted, setLegalAccepted] = useState<Record<string, boolean>>({});
+  const [legalStatus, setLegalStatus] = useState<'loading' | 'ready' | 'error'>('loading');
 
   useEffect(() => {
-    const qId = sp.get('clinicianId') || '';
-    const qSlotId = sp.get('slotId') || '';
-    if (qSlotId) setSlotId(qSlotId);
-    if (qId) {
-      setClinicianId(qId);
+    const queryClinicianId = searchParams.get('clinicianId') || '';
+    const querySlotId = searchParams.get('slotId') || '';
+    if (querySlotId) setSlotId(querySlotId);
+    if (queryClinicianId) {
+      setClinicianId(queryClinicianId);
+      setIdentityReady(true);
       return;
     }
+
     try {
-      const p = JSON.parse(localStorage.getItem('ambulant.profile') || '{}');
-      if (p?.id) setClinicianId(String(p.id));
+      const profile = JSON.parse(localStorage.getItem('ambulant.profile') || '{}');
+      if (profile?.id) setClinicianId(String(profile.id));
     } catch {
-      // ignore
+      // Authenticated Gateway identity remains the source of truth.
     }
-  }, [sp]);
+    setIdentityReady(true);
+  }, [searchParams]);
 
   async function load() {
-    if (!clinicianId) return;
+    if (!identityReady) return;
     setErr(null);
+    const clinicianQuery = clinicianId
+      ? `?clinicianId=${encodeURIComponent(clinicianId)}`
+      : '';
+    const legalQuery =
+      '?keys=CLINICIAN_ONBOARDING_PAYMENT_DISCLOSURE,CLINICIAN_PROFESSIONAL_INDEMNITY_NOTICE' +
+      '&application=clinician-app&surface=clinician-onboarding';
+
     try {
-      const [cRes, sRes] = await Promise.all([
-        fetch(`/api/training/context?clinicianId=${encodeURIComponent(clinicianId)}`, { cache: 'no-store' }),
-        fetch(`/api/training/slots?clinicianId=${encodeURIComponent(clinicianId)}`, { cache: 'no-store' }),
+      const [contextResponse, slotResponse, legalResponse] = await Promise.all([
+        fetch(`/api/training/context${clinicianQuery}`, { cache: 'no-store' }),
+        fetch(`/api/training/slots${clinicianQuery}`, { cache: 'no-store' }),
+        fetch(`/api/training/legal/published${legalQuery}`, { cache: 'no-store' }),
       ]);
 
-      const c = (await cRes.json().catch(() => null)) as TrainingContext | null;
-      const s = (await sRes.json().catch(() => null)) as { ok: boolean; slots: TrainingSlot[]; error?: string } | null;
+      const context = (await contextResponse.json().catch(() => null)) as TrainingContext | null;
+      const slotPayload = (await slotResponse.json().catch(() => null)) as
+        | { ok: boolean; slots?: TrainingSlot[]; error?: unknown }
+        | null;
+      const legalPayload = (await legalResponse.json().catch(() => null)) as
+        | { ok: boolean; documents?: LegalDocument[]; error?: unknown }
+        | null;
 
-      if (!cRes.ok || !c?.ok) throw new Error(apiError(c, 'Unable to load your training details right now.'));
-      if (!sRes.ok || !s?.ok) throw new Error(apiError(s, 'Unable to load available training slots right now.'));
-
-      setCtx(c);
-      setSlots(s.slots || []);
-
-      const hasPayLaterState = Boolean(
-        c.payLaterRequest ||
-          c.onboarding?.waiverActive === true ||
-          c.onboarding?.paymentPlan ===
-            'WAIVER_TRAIN_NOW_PAY_LATER',
-      );
-
-      if (hasPayLaterState) {
-        setSelectedCommercialPathway(
-          'START_NOW_PAY_LATER',
-        );
+      if (!contextResponse.ok || !context?.ok) {
+        throw new Error(apiError(context, 'Unable to load your training details right now.'));
+      }
+      if (!slotResponse.ok || !slotPayload?.ok) {
+        throw new Error(apiError(slotPayload, 'Unable to load available training programmes right now.'));
       }
 
-      if (c.training?.status === 'training_completed' || c.training?.status === 'completed') {
+      setCtx(context);
+      setSlots(Array.isArray(slotPayload.slots) ? slotPayload.slots : []);
+
+      const resolvedClinicianId = String(context.clinician?.id || '').trim();
+      if (resolvedClinicianId && resolvedClinicianId !== clinicianId) {
+        setClinicianId(resolvedClinicianId);
+      }
+
+      if (legalResponse.ok && legalPayload?.ok) {
+        setLegalDocuments(Array.isArray(legalPayload.documents) ? legalPayload.documents : []);
+        setLegalStatus('ready');
+      } else {
+        setLegalDocuments([]);
+        setLegalStatus('error');
+      }
+
+      const currentPathway =
+        context.entitlements?.pathwayKey ||
+        context.pricing?.effectivePathwayKey ||
+        (context.payLaterRequest || context.onboarding?.waiverActive
+          ? 'START_NOW_PAY_LATER'
+          : null);
+      if (currentPathway) setSelectedCommercialPathway(currentPathway);
+
+      const trainingStatus = String(context.training?.status || '').toLowerCase();
+      if (trainingStatus === 'completed' || context.onboarding?.stage === 'training_completed') {
         setStep('done');
-      } else if (c.training?.status === 'scheduled' && c.training?.paid) {
+      } else if (trainingStatus === 'scheduled' && context.training?.paid) {
         setStep('done');
-      } else if (c.training?.status === 'scheduled' && !c.training?.paid) {
-        setStep('pay');
-      } else if (hasPayLaterState) {
+      } else if (trainingStatus === 'scheduled' || currentPathway === 'START_NOW_PAY_LATER') {
         setStep('pay');
       } else {
         setStep('pick');
       }
 
-      if (c.training?.startAt) {
-        const pre = (s.slots || []).find((x) => x.startAt === c.training?.startAt);
-        if (pre) setSlotId(pre.id);
-      }
-    } catch (e: any) {
-      setErr(errorToMessage(e, 'Unable to load your training details right now.'));
+      const returnedSlotId = String(
+        context.training?.trainingSlotId || context.training?.slotId || '',
+      );
+      if (returnedSlotId) setSlotId(returnedSlotId);
+      if (context.training?.selectedMode) setMode(context.training.selectedMode);
+    } catch (error) {
+      setErr(errorToMessage(error, 'Unable to load your onboarding workspace right now.'));
     }
   }
 
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clinicianId]);
+  }, [identityReady]);
 
-  const selectedSlot = useMemo(() => slots.find((x) => x.id === slotId) || null, [slots, slotId]);
-  const pricing = ctx?.pricing || {
-    currency: 'ZAR',
-    trainingFeeCents: 0,
-    paymentProvider: 'unknown' as const,
-    cardPaymentEnabled: false,
-    manualPaymentEnabled: false,
-    minimumInitialPaymentCents: 0,
-    allowPartialPayment: false,
-    balanceRecoveryMode: 'manual',
-    balanceRecoveryNotes: null,
-    commercialPathways:
-      cloneDefaultCommercialPathways(),
-    amountPaidCents: 0,
-    outstandingCents: 0,
-    initialPaymentDueCents: 0,
-    paymentStatus: 'unpaid',
-    initialRequirementMet: false,
-    fullyPaid: false,
-    paymentPlan: null,
-    waiverActive: false,
-    temporaryTrainingDevicesAllowed: false,
-    permanentStarterKitRequiresDepositOrFullPayment: true,
-    configured: false,
+  const pricing = ctx?.pricing;
+  const currency = pricing?.currency || 'ZAR';
+  const trainingPolicy: TrainingPolicy = pricing?.trainingPolicy || {
+    heading: 'Clinician onboarding training',
+    introduction: 'Choose a published programme and complete an available onboarding option.',
+    timezone: 'Africa/Johannesburg',
+    defaultDurationDays: 1,
+    defaultSessionDurationMinutes: 60,
+    allowedModes: ['virtual', 'in_person'],
+    virtualDescription: 'Attend through the secure training room after confirmation.',
+    inPersonDescription: 'Attend at the venue published for your programme.',
+    operationalNotice: null,
+    supportMessage: null,
   };
-  const feeLabel = pricing.trainingFeeCents > 0 ? money(pricing.trainingFeeCents, pricing.currency) : 'Not configured yet';
+  const pathways = useMemo(
+    () => normaliseCommercialPathways(pricing?.commercialPathways).filter((pathway) => pathway.enabled),
+    [pricing?.commercialPathways],
+  );
+  const selectedPathway = pathways.find((pathway) => pathway.key === selectedCommercialPathway) || null;
+  const contextTrainingSlot =
+    ctx?.training?.trainingSlotId && ctx.training.startAt && ctx.training.endAt
+      ? ({
+          ...ctx.training,
+          id: String(ctx.training.trainingSlotId),
+          title: ctx.training.title || 'Your clinician training programme',
+          startAt: ctx.training.startAt,
+          endAt: ctx.training.endAt,
+          timezone: ctx.training.timezone || trainingPolicy.timezone,
+          durationDays: Math.max(1, Number(ctx.training.durationDays || 1)),
+          totalDurationMinutes: Math.max(
+            1,
+            Number(
+              ctx.training.totalDurationMinutes ||
+                trainingPolicy.defaultSessionDurationMinutes,
+            ),
+          ),
+          capacity: Math.max(0, Number(ctx.training.capacity || 0)),
+          usedCount: Math.max(0, Number(ctx.training.usedCount || 0)),
+          seatsLeft: Math.max(0, Number(ctx.training.seatsLeft || 0)),
+          mode: ctx.training.mode || ctx.training.selectedMode || 'virtual',
+          allowedModes:
+            ctx.training.allowedModes?.length
+              ? ctx.training.allowedModes
+              : ctx.training.selectedMode
+                ? [ctx.training.selectedMode]
+                : trainingPolicy.allowedModes,
+          sessions: ctx.training.sessions || [],
+        } as TrainingSlot)
+      : null;
+  const selectedSlot =
+    slots.find((slot) => slot.id === slotId) || contextTrainingSlot;
+  const eligibleModes = useMemo(() => {
+    const policyModes = trainingPolicy.allowedModes || [];
+    const programmeModes = selectedSlot?.allowedModes || policyModes;
+    return programmeModes.filter((candidate) => policyModes.includes(candidate));
+  }, [selectedSlot, trainingPolicy.allowedModes]);
 
-  const enabledCommercialPathways =
-    useMemo(
-      () =>
-        normaliseCommercialPathways(
-          pricing.commercialPathways,
-        ).filter(
-          (pathway) =>
-            pathway.enabled,
-        ),
-      [
-        pricing.commercialPathways,
-      ],
-    );
+  useEffect(() => {
+    if (eligibleModes.length && !eligibleModes.includes(mode)) setMode(eligibleModes[0]);
+  }, [eligibleModes, mode]);
 
-  useEffect(
-    () => {
-      if (
-        selectedCommercialPathway &&
-        !enabledCommercialPathways.some(
-          (pathway) =>
-            pathway.key ===
-            selectedCommercialPathway,
-        )
-      ) {
-        setSelectedCommercialPathway(
-          null,
-        );
-      }
-    },
-    [
-      enabledCommercialPathways,
-      selectedCommercialPathway,
-    ],
+  useEffect(() => {
+    if (
+      selectedCommercialPathway &&
+      !pathways.some((pathway) => pathway.key === selectedCommercialPathway)
+    ) {
+      setSelectedCommercialPathway(null);
+    }
+  }, [pathways, selectedCommercialPathway]);
+
+  const fullFee = Math.max(0, Math.round(Number(pricing?.trainingFeeCents || 0)));
+  const amountPaid = Math.max(
+    0,
+    Math.round(Number(pricing?.amountPaidCents ?? ctx?.onboarding?.amountPaidCents ?? 0)),
+  );
+  const outstanding = Math.max(
+    0,
+    Math.round(Number(pricing?.outstandingCents ?? ctx?.onboarding?.outstandingCents ?? fullFee - amountPaid)),
+  );
+  const initialDue = Math.max(
+    0,
+    Math.round(Number(pricing?.initialPaymentDueCents ?? pricing?.minimumInitialPaymentCents ?? fullFee)),
   );
 
+  function pathwayCharge(key: OnboardingPathwayKey) {
+    if (key === 'START_NOW_PAY_LATER') return 0;
+    if (key === 'FULL_PAYMENT') return outstanding;
+    return Math.max(0, initialDue - amountPaid);
+  }
 
-  const selectedCommercialPathwayConfig =
-    useMemo(
-      () =>
-        enabledCommercialPathways.find(
-          (pathway) =>
-            pathway.key ===
-            selectedCommercialPathway,
-        ) || null,
-      [
-        enabledCommercialPathways,
-        selectedCommercialPathway,
-      ],
-    );
+  function pathwayAmountLabel(key: OnboardingPathwayKey) {
+    if (key === 'START_NOW_PAY_LATER') return 'Pay later';
+    const charge = pathwayCharge(key);
+    return charge > 0 ? money(charge, currency) : 'Nothing due now';
+  }
 
-  const selectedPathwayIsPayLater =
-    selectedCommercialPathway ===
-    'START_NOW_PAY_LATER';
-
-  const selectedPathwayChargeCents =
-    useMemo(
-      () => {
-        if (
-          !selectedCommercialPathwayConfig ||
-          selectedPathwayIsPayLater
-        ) {
-          return 0;
-        }
-
-        const fullFee = Math.max(
-          0,
-          Math.round(
-            Number(
-              pricing.trainingFeeCents ||
-                0,
-            ),
-          ),
-        );
-
-        const amountPaid = Math.max(
-          0,
-          Math.round(
-            Number(
-              pricing.amountPaidCents ||
-                ctx?.onboarding?.amountPaidCents ||
-                0,
-            ),
-          ),
-        );
-
-        const outstanding = Math.max(
-          0,
-          Math.round(
-            Number(
-              pricing.outstandingCents ??
-                ctx?.onboarding?.outstandingCents ??
-                fullFee - amountPaid,
-            ),
-          ),
-        );
-
-        if (
-          selectedCommercialPathwayConfig.key ===
-          'FULL_PAYMENT'
-        ) {
-          return outstanding;
-        }
-
-        const initialThreshold = Math.max(
-          0,
-          Math.round(
-            Number(
-              pricing.initialPaymentDueCents ??
-                pricing.minimumInitialPaymentCents ??
-                fullFee,
-            ),
-          ),
-        );
-
-        return Math.max(
-          0,
-          initialThreshold - amountPaid,
-        );
-      },
-      [
-        ctx?.onboarding?.amountPaidCents,
-        ctx?.onboarding?.outstandingCents,
-        pricing.amountPaidCents,
-        pricing.initialPaymentDueCents,
-        pricing.minimumInitialPaymentCents,
-        pricing.outstandingCents,
-        pricing.trainingFeeCents,
-        selectedCommercialPathwayConfig,
-        selectedPathwayIsPayLater,
-      ],
-    );
-
-  const selectedPathwayAmountLabel =
-    !selectedCommercialPathwayConfig
-      ? 'Select a pathway'
-      : selectedPathwayIsPayLater
-        ? 'No card payment'
-        : selectedPathwayChargeCents > 0
-          ? money(
-              selectedPathwayChargeCents,
-              pricing.currency,
-            )
-          : 'No payment currently due';
-
-  const payLaterRequest =
-    ctx?.payLaterRequest ||
-    null;
-
-  const payLaterStatus =
-    String(
-      payLaterRequest?.status ||
-        '',
-    )
-      .trim()
-      .toLowerCase();
-
-  const payLaterPending =
-    payLaterStatus ===
-    'pending';
-
-  const payLaterRejected =
-    payLaterStatus ===
-    'rejected';
-
+  const selectedPathwayIsPayLater = selectedCommercialPathway === 'START_NOW_PAY_LATER';
+  const payLaterRequest = ctx?.payLaterRequest || null;
+  const payLaterStatus = String(payLaterRequest?.status || '').toLowerCase();
+  const payLaterPending = payLaterStatus === 'pending';
+  const payLaterRejected = payLaterStatus === 'rejected';
   const payLaterApproved =
-    payLaterStatus ===
-      'approved' ||
-    ctx?.onboarding?.waiverActive ===
-      true ||
-    ctx?.onboarding?.paymentPlan ===
-      'WAIVER_TRAIN_NOW_PAY_LATER' ||
-    pricing.waiverActive === true ||
-    pricing.paymentPlan ===
-      'WAIVER_TRAIN_NOW_PAY_LATER';
-
+    payLaterStatus === 'approved' ||
+    ctx?.entitlements?.approvedPayLater === true ||
+    ctx?.onboarding?.waiverActive === true ||
+    pricing?.waiverActive === true;
   const payLaterCanSubmit =
     !payLaterPending &&
     !payLaterApproved &&
-    (
-      !payLaterRequest ||
-      payLaterRequest.canResubmit ===
-        true ||
-      [
-        'rejected',
-        'withdrawn',
-        'cancelled',
-      ].includes(
-        payLaterStatus,
-      )
-    );
+    (!payLaterRequest ||
+      payLaterRequest.canResubmit === true ||
+      ['rejected', 'withdrawn', 'cancelled'].includes(payLaterStatus));
 
-  const payLaterStatusTone =
-    payLaterApproved
-      ? 'border-emerald-200 bg-emerald-50 text-emerald-950'
-      : payLaterRejected
-        ? 'border-rose-200 bg-rose-50 text-rose-950'
-        : payLaterPending
-          ? 'border-amber-200 bg-amber-50 text-amber-950'
-          : 'border-slate-200 bg-slate-50 text-slate-900';
-
-  const payLaterStatusTitle =
-    payLaterApproved
-      ? 'Pay Later approved'
-      : payLaterRejected
-        ? 'Pay Later request not approved'
-        : payLaterPending
-          ? 'Pay Later request awaiting Admin review'
-          : 'Previous Pay Later request closed';
-
-  const payLaterStatusMessage =
-    payLaterApproved
-      ? 'Ambulant+ Admin has approved your Pay Later pathway. Any training access and temporary-device arrangements remain subject to the approved onboarding terms.'
-      : payLaterRejected
-        ? 'Admin did not approve the previous request. Review the note below, then deliberately resubmit if Pay Later remains appropriate.'
-        : payLaterPending
-          ? 'Your request is recorded. Submission alone does not reserve a slot, grant training access, create a payment or dispatch a permanent C-Med Kit.'
-          : 'This request is no longer active. You may submit a new request when the pathway remains available.';
-
-  const alreadyScheduled = ctx?.training?.status === 'scheduled';
+  const trainingStatus = String(ctx?.training?.status || '').toLowerCase();
+  const alreadyScheduled = trainingStatus === 'scheduled';
   const alreadyCompleted =
-    ctx?.training?.status === 'completed' || ctx?.onboarding?.stage === 'training_completed';
-  const alreadyPaid = !!ctx?.training?.paid;
+    trainingStatus === 'completed' || ctx?.onboarding?.stage === 'training_completed';
+  const alreadyPaid = ctx?.training?.paid === true;
+  const requiredLegalDocuments = legalDocuments.filter(
+    (document) => document.acknowledgementMode === 'REQUIRED',
+  );
+  const requiredLegalAccepted =
+    legalStatus === 'ready' &&
+    requiredLegalDocuments.every((document) => legalAccepted[document.version.id] === true);
 
-  const canProceedPick =
-    !!selectedSlot &&
-    !!mode &&
-    !!selectedCommercialPathway;
+  async function acknowledgeRequiredLegal(action: string) {
+    if (legalStatus !== 'ready') {
+      throw new Error('Published onboarding terms are unavailable. Please reload before continuing.');
+    }
+    const missing = requiredLegalDocuments.filter(
+      (document) => legalAccepted[document.version.id] !== true,
+    );
+    if (missing.length) {
+      throw new Error('Please open, read and acknowledge every required published term before continuing.');
+    }
+
+    for (const document of requiredLegalDocuments) {
+      const response = await fetch('/api/training/legal/acknowledgements', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          legalDocumentVersionId: document.version.id,
+          documentKey: document.key,
+          subjectType: 'clinician',
+          subjectId: clinicianId,
+          application: 'clinician-app',
+          surface: 'payment-pathway-selection',
+          action: 'ACCEPTED',
+          idempotencyKey: [
+            'clinician-onboarding',
+            document.version.id,
+            clinicianId,
+            selectedCommercialPathway || 'no-pathway',
+            selectedSlot?.id || 'no-slot',
+          ].join(':'),
+          evidence: {
+            action,
+            pathwayKey: selectedCommercialPathway,
+            trainingSlotId: selectedSlot?.id || null,
+            trainingMode: mode,
+          },
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        throw new Error(apiError(payload, 'Unable to record your acknowledgement.'));
+      }
+    }
+  }
+
+  function validateSelection() {
+    if (!selectedSlot) throw new Error('Select a published training programme.');
+    if (!eligibleModes.includes(mode)) throw new Error('Select an available training mode.');
+    if (!selectedCommercialPathway || !selectedPathway) {
+      throw new Error('Select an Admin-configured payment option.');
+    }
+  }
 
   async function proceedToPay() {
     setErr(null);
-    if (!canProceedPick) return;
-    setStep('pay');
+    try {
+      validateSelection();
+      setStep('pay');
+    } catch (error) {
+      setErr(errorToMessage(error));
+    }
   }
-
 
   async function submitPayLaterRequest() {
     setErr(null);
     setPaymentNotice(null);
-
-    if (
-      selectedCommercialPathway !==
-      'START_NOW_PAY_LATER'
-    ) {
-      setErr(
-        'Select Start Now — Pay Later before submitting a request.',
-      );
-      return;
-    }
-
-    if (!selectedSlot) {
-      setErr(
-        'Select your preferred training slot before submitting a Pay Later request.',
-      );
-      return;
-    }
-
-    if (payLaterPending) {
-      setPaymentNotice(
-        'Your Pay Later request is already awaiting Ambulant+ Admin review.',
-      );
-      return;
-    }
-
-    if (payLaterApproved) {
-      setPaymentNotice(
-        'Your Pay Later pathway has already been approved.',
-      );
-      return;
-    }
-
-    if (!payLaterCanSubmit) {
-      setErr(
-        'A new Pay Later request cannot currently be submitted. Please contact Ambulant+ support.',
-      );
-      return;
-    }
-
-    setBusy(true);
-
     try {
-      const res =
-        await fetch(
-          '/api/training/pay-later/request',
-          {
-            method: 'POST',
-            headers: {
-              'content-type':
-                'application/json',
-            },
-            body:
-              JSON.stringify({
-                clinicianId,
-                pathwayKey:
-                  'START_NOW_PAY_LATER',
-                requestReason:
-                  payLaterReason.trim() ||
-                  undefined,
-                slotId:
-                  selectedSlot.id,
-                trainingMode: mode,
-              }),
-          },
-        );
-
-      const js =
-        await res.json().catch(
-          () => null,
-        );
-
-      if (!res.ok || !js?.ok) {
-        throw new Error(
-          apiError(
-            js,
-            'Unable to submit your Pay Later request.',
-          ),
-        );
+      validateSelection();
+      if (!selectedPathwayIsPayLater) throw new Error('Select the Pay Later option first.');
+      if (payLaterPending) {
+        setPaymentNotice('Your Pay Later request is already awaiting Admin review.');
+        return;
       }
+      if (payLaterApproved) {
+        setPaymentNotice('Your Pay Later option has already been approved.');
+        return;
+      }
+      if (!payLaterCanSubmit) throw new Error('A new Pay Later request cannot currently be submitted.');
 
-      setPayLaterReason('');
-
-      setPaymentNotice(
-        js.message ||
-          'Your Pay Later request has been submitted for Ambulant+ Admin review.',
-      );
-
-      await load();
-      setStep('pay');
-    } catch (e: any) {
-      setErr(
-        errorToMessage(
-          e,
-          'Unable to submit your Pay Later request.',
-        ),
-      );
-    } finally {
-      setBusy(false);
-    }
-  }
-  async function startCardPayment(
-    pathwayKey:
-      OnboardingPathwayKey | null,
-  ) {
-    setErr(null);
-    setPaymentNotice(null);
-    if (!selectedSlot) return;
-
-    if (!pathwayKey) {
-      setErr(
-        'Select an onboarding pathway before continuing to payment.',
-      );
-      return;
-    }
-
-    if (
-      pathwayKey ===
-      'START_NOW_PAY_LATER'
-    ) {
-      setErr(
-        'Pay Later requires a separate Ambulant+ Admin review request and cannot be started through card checkout.',
-      );
-      return;
-    }
-
-    if (!pricing.configured || pricing.trainingFeeCents <= 0) {
-      setErr('Training payment settings are not configured yet. Please contact Ambulant+ support.');
-      return;
-    }
-    if (pricing.cardPaymentEnabled === false) {
-      setErr('Card payment is currently disabled for clinician onboarding. Use an authorisation code if Admin has issued one.');
-      return;
-    }
-
-    setBusy(true);
-    try {
-      const callbackUrl = `${window.location.origin}/training/schedule?clinicianId=${encodeURIComponent(
-        clinicianId,
-      )}&slotId=${encodeURIComponent(selectedSlot.id)}&reason=payment_callback`;
-
-      const res = await fetch('/api/training/payment/init', {
+      setBusy(true);
+      await acknowledgeRequiredLegal('PAY_LATER_REQUEST');
+      const response = await fetch('/api/training/pay-later/request', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           clinicianId,
-          slotId: selectedSlot.id,
+          pathwayKey: 'START_NOW_PAY_LATER',
+          requestReason: payLaterReason.trim() || undefined,
+          slotId: selectedSlot?.id,
+          trainingMode: mode,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        throw new Error(apiError(payload, 'Unable to submit your Pay Later request.'));
+      }
+      setPayLaterReason('');
+      setPaymentNotice(payload.message || 'Your Pay Later request was submitted for Admin review.');
+      await load();
+      setStep('pay');
+    } catch (error) {
+      setErr(errorToMessage(error, 'Unable to submit your Pay Later request.'));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startCardPayment(pathwayKey: OnboardingPathwayKey | null) {
+    setErr(null);
+    setPaymentNotice(null);
+    try {
+      validateSelection();
+      if (!pathwayKey || pathwayKey === 'START_NOW_PAY_LATER') {
+        throw new Error('Choose Deposit or Full Payment for card checkout.');
+      }
+      if (!pricing?.configured || fullFee <= 0) {
+        throw new Error('Payment settings are not configured yet. Please contact Ambulant+ support.');
+      }
+      if (pricing.cardPaymentEnabled === false) {
+        throw new Error('Card payment is currently disabled by Ambulant+ Admin.');
+      }
+
+      setBusy(true);
+      await acknowledgeRequiredLegal('CARD_PAYMENT_INITIALISATION');
+      const callbackUrl = `${window.location.origin}/training/schedule?clinicianId=${encodeURIComponent(
+        clinicianId,
+      )}&slotId=${encodeURIComponent(selectedSlot?.id || '')}&reason=payment_callback`;
+      const response = await fetch('/api/training/payment/init', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          clinicianId,
+          slotId: selectedSlot?.id,
           pathwayKey,
           callbackUrl,
         }),
       });
-
-      const js = await res.json().catch(() => null);
-      if (!res.ok || !js?.ok) throw new Error(apiError(js, 'Payment initialisation failed.'));
-
-      if (js.paymentRequired === false) {
-        setPaymentNotice(
-          js.message ||
-            'No further payment is currently required for the selected pathway.',
-        );
-        setBusy(false);
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        throw new Error(apiError(payload, 'Payment initialisation failed.'));
+      }
+      if (payload.paymentRequired === false) {
+        setPaymentNotice(payload.message || 'No further payment is currently required.');
         await load();
         return;
       }
-
-      if (!js.redirectUrl) throw new Error('Payment checkout URL was not returned. Please contact Ambulant+ support.');
-
-      window.location.href = js.redirectUrl;
-    } catch (e: any) {
-      setErr(errorToMessage(e, 'Payment initialisation failed.'));
+      if (!payload.redirectUrl) {
+        throw new Error('Payment checkout URL was not returned. Please contact Ambulant+ support.');
+      }
+      window.location.href = payload.redirectUrl;
+    } catch (error) {
+      setErr(errorToMessage(error, 'Payment initialisation failed.'));
       setBusy(false);
     }
   }
 
   async function verifyReturnedPayment(reference: string) {
     setErr(null);
-    setPaymentNotice('Verifying payment...');
+    setPaymentNotice('Verifying your payment…');
     setBusy(true);
     try {
-      const res = await fetch('/api/training/payment/verify', {
+      const response = await fetch('/api/training/payment/verify', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           clinicianId,
-          slotId: slotId || sp.get('slotId') || undefined,
+          slotId: slotId || searchParams.get('slotId') || undefined,
           providerReference: reference,
         }),
       });
-      const js = await res.json().catch(() => null);
-      if (!res.ok || !js?.ok) throw new Error(apiError(js, 'Payment verification failed.'));
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        throw new Error(apiError(payload, 'Payment verification failed.'));
+      }
       await load();
       setStep('done');
-      setPaymentNotice('Payment confirmed. Your training booking is now scheduled.');
-    } catch (e: any) {
-      setErr(errorToMessage(e, 'Payment verification failed.'));
+      setPaymentNotice('Payment confirmed. Your training booking is scheduled.');
+    } catch (error) {
+      setErr(errorToMessage(error, 'Payment verification failed.'));
       setPaymentNotice(null);
     } finally {
       setBusy(false);
@@ -1354,994 +1270,357 @@ function TrainingSchedulePageContent() {
   async function redeemAuthorisationCode() {
     setErr(null);
     setPaymentNotice(null);
-    if (!selectedSlot) {
-      setErr('Please select a training slot before using an authorisation code.');
-      return;
-    }
-    const code = authorisationCode.trim();
-    if (!code) {
-      setErr('Enter the authorisation code issued by Admin.');
-      return;
-    }
-
-    setBusy(true);
     try {
-      const res = await fetch('/api/training/payment/authorisation', {
+      validateSelection();
+      const code = authorisationCode.trim();
+      if (!code) throw new Error('Enter the one-time authorization code issued by Admin.');
+      setBusy(true);
+      await acknowledgeRequiredLegal('AUTHORISATION_CODE_REDEMPTION');
+      const response = await fetch('/api/training/payment/authorisation', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           clinicianId,
-          slotId: selectedSlot.id,
+          slotId: selectedSlot?.id,
           authorisationCode: code,
         }),
       });
-      const js = await res.json().catch(() => null);
-      if (!res.ok || !js?.ok) throw new Error(apiError(js, 'Authorisation failed.'));
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.ok) {
+        throw new Error(apiError(payload, 'Authorization failed.'));
+      }
       await load();
       setStep('done');
-      setPaymentNotice('Authorisation accepted. Your training booking is now scheduled.');
-    } catch (e: any) {
-      setErr(errorToMessage(e, 'Authorisation failed.'));
+      setPaymentNotice('Authorization accepted. Your training booking is scheduled.');
+    } catch (error) {
+      setErr(errorToMessage(error, 'Authorization failed.'));
     } finally {
       setBusy(false);
     }
   }
 
   useEffect(() => {
-    if (!clinicianId) return;
-    const reference = sp.get('paymentRef') || sp.get('reference') || sp.get('trxref') || '';
+    if (!identityReady || (!clinicianId && !ctx?.clinician?.id)) return;
+    const reference =
+      searchParams.get('paymentRef') ||
+      searchParams.get('reference') ||
+      searchParams.get('trxref') ||
+      '';
     if (!reference) return;
-
     const key = `ambulant-training-payment-verified:${reference}`;
     if (sessionStorage.getItem(key) === '1') return;
     sessionStorage.setItem(key, '1');
     verifyReturnedPayment(reference);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clinicianId, sp]);
+  }, [identityReady, clinicianId, ctx?.clinician?.id, searchParams]);
 
   const trainingIcsHref = useMemo(() => {
-    const t = ctx?.training;
-    const c = ctx?.clinician;
-    if (!t?.startAt || !t?.endAt) return null;
-
-    const title = 'Ambulant+ - Mandatory Clinician Training';
+    const training = ctx?.training;
+    if (!training?.startAt || !training?.endAt) return null;
+    const title = training.title || 'Ambulant+ Clinician Training';
     const description = [
-      `Clinician: ${c?.name || c?.email || '-'}`,
-      `Mode: ${t.mode || '-'}`,
-      t.joinUrl ? `Join URL: ${t.joinUrl}` : 'Join URL: will be provided if virtual',
-      '',
-      'Note: You will not be visible to patients until training is completed and certified by Admin.',
-    ].join('\n');
-
-    const location = t.mode === 'in_person' ? 'Ambulant+ Training Centre (details will be sent)' : (t.joinUrl || 'Virtual');
-    const ics = makeICS({ title, startIso: t.startAt, endIso: t.endAt, description, location });
-
-    const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
-    return URL.createObjectURL(blob);
+      `Clinician: ${ctx?.clinician?.name || ctx?.clinician?.email || '-'}`,
+      `Mode: ${modeLabel(training.selectedMode || training.mode)}`,
+      training.joinUrl ? `Join URL: ${training.joinUrl}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+    const location =
+      training.selectedMode === 'in_person'
+        ? [training.venueName, training.venueAddress].filter(Boolean).join(', ')
+        : training.joinUrl || 'Virtual';
+    return URL.createObjectURL(
+      new Blob(
+        [
+          makeICS({
+            title,
+            startIso: training.startAt,
+            endIso: training.endAt,
+            description,
+            location,
+          }),
+        ],
+        { type: 'text/calendar;charset=utf-8' },
+      ),
+    );
   }, [ctx]);
 
-  const certificateDownloadHref = certificateHref(ctx?.training?.certificateUrl, clinicianId);
-
-  const starterKit = Array.isArray(ctx?.starterKitItems)
-    ? ctx.starterKitItems.map((item) => String(item || '').trim()).filter(Boolean)
-    : [];
-
+  const resolvedClinicianId = clinicianId || ctx?.clinician?.id || '';
+  const certificateDownloadHref = certificateHref(resolvedClinicianId);
   const trainingSlotIdForRoom =
-    slotId ||
-    (ctx?.training as any)?.trainingSlotId ||
-    (ctx?.training as any)?.slotId ||
-    ctx?.training?.startAt ||
-    '';
-
-  const trainingRoomId = trainingSlotIdForRoom
-    ? `training-slot-${trainingSlotIdForRoom}`
-    : '';
-
+    ctx?.training?.trainingSlotId || ctx?.training?.slotId || slotId || '';
   const trainingRoomHref =
-    ctx?.training?.mode === 'virtual' &&
-    ctx?.training?.status === 'scheduled' &&
-    ctx?.training?.startAt &&
-    trainingRoomId
-      ? `/training/room/${encodeURIComponent(trainingRoomId)}?trainingSlotId=${encodeURIComponent(trainingSlotIdForRoom)}`
+    ctx?.training?.selectedMode === 'virtual' &&
+    alreadyScheduled &&
+    trainingSlotIdForRoom
+      ? `/training/room/${encodeURIComponent(`training-slot-${trainingSlotIdForRoom}`)}?trainingSlotId=${encodeURIComponent(trainingSlotIdForRoom)}`
       : null;
 
+  const effectiveRelease: StarterKitRelease =
+    ctx?.entitlements?.starterKitRelease ||
+    selectedPathway?.privileges.starterKitRelease ||
+    'none';
+  const fullKit = stringList(ctx?.starterKitItems);
+  const depositKit = stringList(ctx?.starterKitDepositItems);
+  const authorisedKit = stringList(ctx?.entitlements?.authorisedStarterKitItems);
+  const packageItems =
+    ctx?.entitlements?.pathwayKey
+      ? authorisedKit
+      : effectiveRelease === 'full'
+        ? fullKit
+        : effectiveRelease === 'deposit'
+          ? depositKit
+          : [];
+  const releasedKit = stringList(ctx?.entitlements?.releasedStarterKitItems);
+  const missingKit = stringList(ctx?.entitlements?.missingStarterKitItems);
+  const selectedModeInstructions =
+    mode === 'in_person'
+      ? selectedSlot?.inPersonInstructions
+      : selectedSlot?.virtualInstructions;
+  const bankEntries = Object.entries(ctx?.bankInstructions || {}).filter(
+    ([, value]) =>
+      value !== null &&
+      value !== undefined &&
+      ['string', 'number', 'boolean'].includes(typeof value) &&
+      String(value).trim(),
+  );
+
   return (
-    <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
-      <div className="mx-auto max-w-5xl p-6 space-y-6">
-        <EnterpriseOnboardingPolicyCard ctx={ctx} pricing={pricing} starterKit={starterKit} />
-
-        <CommercialPathwaySelector
-          pathways={
-            enabledCommercialPathways
-          }
-          selectedPathway={
-            selectedCommercialPathway
-          }
-          onSelect={
-            setSelectedCommercialPathway
-          }
-        />
-
-        <header className="rounded-2xl border bg-white p-6 shadow-sm">
-          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-1">
-              <h1 className="text-2xl font-bold text-slate-900">Mandatory Clinician Training</h1>
-              <p className="text-sm text-slate-600">
-                Book your onboarding session, confirm your selected commercial pathway, then complete the applicable payment or Admin-review step.
-              </p>
-              {ctx?.clinician?.name || ctx?.clinician?.email ? (
-                <div className="mt-2 text-xs text-slate-600">
-                  Signed up as <span className="font-medium text-slate-800">{ctx?.clinician?.name || '-'}</span>
-                  {ctx?.clinician?.email ? <span className="text-slate-500"> - {ctx.clinician.email}</span> : null}
-                  {ctx?.clinician?.specialty ? <span className="text-slate-500"> - {ctx.clinician.specialty}</span> : null}
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_#eef2ff,_transparent_35%),linear-gradient(to_bottom,_#f8fafc,_#ffffff)]">
+      <div className="mx-auto max-w-7xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-10">
+        <header className="overflow-hidden rounded-[2rem] border border-indigo-100 bg-white shadow-xl shadow-indigo-100/40">
+          <div className="bg-gradient-to-br from-slate-950 via-indigo-950 to-indigo-800 px-6 py-8 text-white sm:px-8 lg:px-10">
+            <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+              <div className="max-w-3xl">
+                <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold text-indigo-100">
+                  <ShieldCheck className="h-4 w-4" /> Secure clinician onboarding
                 </div>
-              ) : null}
-            </div>
+                <h1 className="mt-4 text-3xl font-black tracking-tight sm:text-4xl">
+                  {trainingPolicy.heading}
+                </h1>
+                <p className="mt-3 max-w-2xl text-sm leading-7 text-indigo-100 sm:text-base">
+                  {trainingPolicy.introduction}
+                </p>
+                {ctx?.clinician ? (
+                  <div className="mt-5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-indigo-200">
+                    <span className="font-bold text-white">{ctx.clinician.name || 'Clinician'}</span>
+                    {ctx.clinician.email ? <span>{ctx.clinician.email}</span> : null}
+                    {ctx.clinician.specialty ? <span>{ctx.clinician.specialty}</span> : null}
+                  </div>
+                ) : null}
+              </div>
 
-            <div className="flex flex-wrap gap-2">
-              <StepPill
-                icon={<CalendarDays className="h-4 w-4" />}
-                label="1) Book slot"
-                active={step === 'pick'}
-                done={step !== 'pick'}
-              />
-              <StepPill
-                icon={<CreditCard className="h-4 w-4" />}
-                label={
-                  selectedPathwayIsPayLater
-                    ? '2) Request review'
-                    : '2) Pay'
-                }
-                active={step === 'pay'}
-                done={step === 'done'}
-              />
-              <StepPill
-                icon={<BadgeCheck className="h-4 w-4" />}
-                label="3) Confirmed"
-                active={step === 'done'}
-                done={step === 'done'}
-              />
+              <div className="flex flex-wrap gap-2 lg:max-w-sm lg:justify-end">
+                <StepPill icon={<CalendarDays className="h-4 w-4" />} label="1. Programme" active={step === 'pick'} done={step !== 'pick'} />
+                <StepPill icon={<CreditCard className="h-4 w-4" />} label="2. Confirm" active={step === 'pay'} done={step === 'done'} />
+                <StepPill icon={<BadgeCheck className="h-4 w-4" />} label="3. Ready" active={step === 'done'} done={step === 'done'} />
+              </div>
             </div>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <InfoCard
-              icon={<ShieldCheck className="h-5 w-5" />}
-              title="Visibility gate"
-              text="You can log in, but you won't be visible to patients until training is completed and certified by Admin."
-            />
-            <InfoCard
-              icon={<Truck className="h-5 w-5" />}
-              title="Starter kit dispatch"
-              text="Permanent C-Med Kit dispatch follows the applicable qualifying payment rule. An approved Pay Later pathway may permit training access but does not itself release the permanent kit."
-            />
-            <InfoCard
-              icon={<CheckCircle2 className="h-5 w-5" />}
-              title="Fast onboarding"
-              text="Once certified, your profile becomes active, insurance can be auto-attached (if enabled), and you can set fees + availability."
-            />
+          <div className="grid gap-4 px-6 py-5 text-sm text-slate-600 sm:grid-cols-3 sm:px-8 lg:px-10">
+            <div className="flex gap-3"><ShieldCheck className="h-5 w-5 shrink-0 text-indigo-700" /><span>Patient visibility starts only after Admin certification.</span></div>
+            <div className="flex gap-3"><Truck className="h-5 w-5 shrink-0 text-indigo-700" /><span>C-Med fulfilment follows your effective payment privileges.</span></div>
+            <div className="flex gap-3"><CheckCircle2 className="h-5 w-5 shrink-0 text-indigo-700" /><span>All schedules and terms are published by Admin.</span></div>
           </div>
         </header>
 
-        {!clinicianId ? (
-          <div className="rounded-xl border bg-white p-4 text-sm text-rose-700">
-            Missing <code className="font-mono">clinicianId</code>. Use the training link from your email/SMS or sign in first.
+        {trainingPolicy.operationalNotice ? (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
+            <span className="font-black">Important:</span> {trainingPolicy.operationalNotice}
           </div>
         ) : null}
-
-        {err ? (
-          <div className="rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
-            {err}
-          </div>
-        ) : null}
-
-        {paymentNotice ? (
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-            {paymentNotice}
-          </div>
-        ) : null}
-
-        {
-          ctx &&
-          (
-            payLaterRequest ||
-            payLaterApproved
-          )
-            ? (
-          <section
-            className={`rounded-2xl border p-5 shadow-sm ${payLaterStatusTone}`}
-            aria-live="polite"
-          >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <div className="flex items-center gap-2 text-sm font-black">
-                  <ShieldCheck className="h-4 w-4" />
-                  Pay Later request status
-                </div>
-
-                <h2 className="mt-2 text-lg font-black">
-                  {payLaterStatusTitle}
-                </h2>
-
-                <p className="mt-1 max-w-3xl text-sm leading-relaxed">
-                  {payLaterStatusMessage}
-                </p>
-              </div>
-
-              <div className="rounded-xl border border-current/20 bg-white/60 px-3 py-2 text-xs font-bold uppercase tracking-wide">
-                {payLaterApproved
-                  ? 'Approved'
-                  : payLaterRejected
-                    ? 'Rejected'
-                    : payLaterPending
-                      ? 'Pending review'
-                      : 'Closed'}
-              </div>
-            </div>
-
-            {payLaterRequest ? (
-              <div className="mt-4 grid gap-2 rounded-xl border border-current/15 bg-white/60 p-3 text-xs sm:grid-cols-2">
-                {payLaterRequest.requestedAt ? (
-                  <div>
-                    <span className="font-semibold">Submitted:</span>{' '}
-                    {fmt(payLaterRequest.requestedAt)}
-                  </div>
-                ) : null}
-
-                {payLaterRequest.reviewedAt ? (
-                  <div>
-                    <span className="font-semibold">Reviewed:</span>{' '}
-                    {fmt(payLaterRequest.reviewedAt)}
-                  </div>
-                ) : null}
-
-                {payLaterRequest.requestReason ? (
-                  <div className="sm:col-span-2">
-                    <span className="font-semibold">Your reason:</span>{' '}
-                    {payLaterRequest.requestReason}
-                  </div>
-                ) : null}
-
-                {payLaterRequest.reviewNotes ? (
-                  <div className="sm:col-span-2 rounded-lg border border-current/15 bg-white p-3">
-                    <span className="font-semibold">Admin review note:</span>{' '}
-                    {payLaterRequest.reviewNotes}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {payLaterRejected ? (
-              <p className="mt-3 text-xs font-medium">
-                Select Start Now — Pay Later and continue to the review step to submit a new request.
-              </p>
-            ) : null}
-          </section>
-        ) : null}
+        {err ? <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900" role="alert">{err}</div> : null}
+        {paymentNotice ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900" role="status">{paymentNotice}</div> : null}
 
         {!ctx ? (
-          <div className="rounded-xl border bg-white p-6 text-sm text-slate-600 flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" />
-            Loading training context…
+          <div className="rounded-3xl border bg-white p-8 shadow-sm">
+            <div className="flex items-center gap-3 text-sm text-slate-600"><Loader2 className="h-5 w-5 animate-spin text-indigo-600" />Preparing your secure onboarding workspace…</div>
           </div>
-        ) : null}
-
-        {ctx && (alreadyScheduled || alreadyCompleted) ? (
-          <section className="rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+        ) : alreadyCompleted || (alreadyScheduled && alreadyPaid) ? (
+          <section className="rounded-[2rem] border bg-white p-6 shadow-sm sm:p-8">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
               <div>
-                <div
-                  className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium ${
-                    alreadyCompleted
-                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                      : 'border-emerald-200 bg-emerald-50 text-emerald-800'
-                  }`}
-                >
-                  <CheckCircle2 className="h-4 w-4" />
-                  {alreadyCompleted ? 'Training completed' : 'Training scheduled'}
+                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-800">
+                  <CheckCircle2 className="h-4 w-4" />{alreadyCompleted ? 'Training completed' : 'Training scheduled'}
                 </div>
-                <h2 className="mt-2 text-lg font-semibold text-slate-900">
-                  {alreadyCompleted ? 'Your training completion' : 'Your booking'}
-                </h2>
-                <div className="mt-1 text-sm text-slate-700">
-                  {ctx.training?.startAt ? (
-                    <>
-                      {fmt(ctx.training.startAt)} {'→'} {ctx.training?.endAt ? fmtTime(ctx.training.endAt) : '-'}
-                    </>
-                  ) : (
-                    '-'
-                  )}
+                <h2 className="mt-4 text-2xl font-black text-slate-950">{ctx.training?.title || 'Your clinician training programme'}</h2>
+                {ctx.training?.summary ? <p className="mt-2 max-w-2xl text-sm leading-relaxed text-slate-600">{ctx.training.summary}</p> : null}
+                <div className="mt-4 flex flex-wrap gap-3 text-sm text-slate-700">
+                  <span className="rounded-full border bg-slate-50 px-3 py-1.5">{fmt(ctx.training?.startAt)}</span>
+                  <span className="rounded-full border bg-slate-50 px-3 py-1.5">{modeLabel(ctx.training?.selectedMode || ctx.training?.mode)}</span>
+                  <span className="rounded-full border bg-slate-50 px-3 py-1.5">{ctx.training?.timezone || trainingPolicy.timezone}</span>
                 </div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Mode: <span className="font-medium">{ctx.training?.mode === 'in_person' ? 'In person' : 'Virtual'}</span>
-                  {ctx.training?.paid ? (
-                    <span className="ml-2 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] text-emerald-800">
-                      Paid
-                    </span>
-                  ) : (
-                    <span className="ml-2 inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] text-amber-800">
-                      Payment pending
-                    </span>
-                  )}
-                </div>
-
-                {ctx.training?.joinUrl && !alreadyCompleted ? (
-                  <a
-                    className="mt-2 inline-flex items-center gap-2 text-sm text-indigo-700 hover:underline"
-                    href={ctx.training.joinUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Join link <ExternalLink className="h-4 w-4" />
-                  </a>
-                ) : null}
               </div>
-
               <div className="flex flex-wrap gap-2">
-                {trainingIcsHref && !alreadyCompleted ? (
-                  <a
-                    href={trainingIcsHref}
-                    download="ambulant-training.ics"
-                    className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                  >
-                    Add to calendar
-                  </a>
-                ) : null}
-
-                {trainingRoomHref && !alreadyCompleted ? (
-                  <a
-                    href={trainingRoomHref}
-                    className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                  >
-                    <PlayCircle className="h-4 w-4" />
-                    Open training room
-                  </a>
-                ) : null}
-
-                {ctx.training?.certificateAvailable && certificateDownloadHref ? (
-                  <a
-                    href={`${certificateDownloadHref || '#'}`}
-                    className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download certificate
-                  </a>
-                ) : null}
-
-                {!alreadyPaid && !alreadyCompleted ? (
-                  <button
-                    type="button"
-                    onClick={() => setStep('pay')}
-                    className="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white hover:bg-indigo-700"
-                  >
-                    Complete payment
-                  </button>
-                ) : (
-                  <button
-                    type="button"
-                    onClick={() => router.push('/auth/login')}
-                    className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-black"
-                  >
-                    Go to login
-                  </button>
-                )}
+                {trainingIcsHref && !alreadyCompleted ? <a href={trainingIcsHref} download="ambulant-training.ics" className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50">Add to calendar</a> : null}
+                {trainingRoomHref && !alreadyCompleted ? <a href={trainingRoomHref} className="inline-flex items-center gap-2 rounded-xl bg-indigo-700 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-800"><PlayCircle className="h-4 w-4" />Open training room</a> : null}
+                {ctx.training?.certificateAvailable && certificateDownloadHref ? <a href={certificateDownloadHref} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><Download className="h-4 w-4" />Certificate</a> : null}
               </div>
             </div>
 
-            {ctx.training?.certificateAvailable ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-900">
-                      <FileBadge2 className="h-4 w-4" />
-                      Training certificate issued
-                    </div>
-                    <div className="mt-1 text-sm text-emerald-900">
-                      Certificate No:{' '}
-                      <span className="font-semibold">{ctx.training.certificateNumber || '-'}</span>
-                    </div>
-                    <div className="mt-1 text-xs text-emerald-800">
-                      Completed: {fmtDateOnly(ctx.training.certificateCompletedAt)}
-                    </div>
-                    <div className="mt-1 text-xs text-emerald-800">
-                      Institution: {ctx.training.certificateInstitution || 'Ambulant+ / Cloven Technology'}
-                    </div>
+            {ctx.training?.sessions?.length ? (
+              <div className="mt-6 grid gap-3 md:grid-cols-2">
+                {ctx.training.sessions.map((session) => (
+                  <div key={session.id} className="rounded-2xl border bg-slate-50 p-4 text-sm text-slate-700">
+                    <div className="font-black text-slate-950">Day {session.dayNumber}</div>
+                    <div className="mt-2">{fmt(session.startAt)} – {fmtTime(session.endAt)}</div>
+                    <div className="mt-1 text-xs text-slate-600">{modeLabel(session.mode)}{session.trainerName ? ` · ${session.trainerName}` : ''}</div>
+                    {session.venueName ? <div className="mt-1 text-xs text-slate-600">{session.venueName}{session.venueAddress ? ` · ${session.venueAddress}` : ''}</div> : null}
                   </div>
-
-                  {certificateDownloadHref ? (
-                    <a
-                      href={`${certificateDownloadHref || '#'}`}
-                      className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-medium text-emerald-900 ring-1 ring-emerald-200 hover:bg-emerald-100"
-                    >
-                      <Download className="h-4 w-4" />
-                      PDF
-                    </a>
-                  ) : null}
-                </div>
+                ))}
               </div>
             ) : null}
 
-            <div className="rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
-              <div className="font-semibold">Starter kit dispatch</div>
-              {ctx.dispatch?.status ? (
-                <div className="mt-1 text-xs text-slate-600 space-y-1">
-                  <div>Status: <span className="font-medium capitalize">{ctx.dispatch.status}</span></div>
-                  {ctx.dispatch.courierName ? <div>Courier: {ctx.dispatch.courierName}</div> : null}
-                  {ctx.dispatch.trackingCode ? <div>Tracking: {ctx.dispatch.trackingCode}</div> : null}
-                  {ctx.dispatch.trackingUrl ? (
-                    <a className="inline-flex items-center gap-1 text-indigo-700 hover:underline" href={ctx.dispatch.trackingUrl} target="_blank" rel="noreferrer">
-                      Track shipment <ExternalLink className="h-4 w-4" />
-                    </a>
-                  ) : (
-                    <div className="text-[11px] text-slate-500">Tracking will appear after Admin assigns courier + tracking.</div>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-1 text-xs text-slate-600">
-                  Dispatch will be created after payment, then Admin assigns courier + tracking.
-                </div>
-              )}
-            </div>
+            {ctx.training?.certificateAvailable ? (
+              <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+                <div className="flex items-center gap-2 font-black"><FileBadge2 className="h-4 w-4" />Certificate issued</div>
+                <div className="mt-2 text-xs">No. {ctx.training.certificateNumber || '-'} · Completed {fmtDateOnly(ctx.training.certificateCompletedAt)} · {ctx.training.certificateInstitution || 'Ambulant+ / Cloven Technology'}</div>
+              </div>
+            ) : null}
           </section>
-        ) : null}
-
-        {ctx && step === 'pick' && !alreadyScheduled && !alreadyCompleted ? (
-          <section className="grid gap-6 md:grid-cols-5">
-            <div className="md:col-span-3 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">Choose training mode</h2>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <ModeCard
-                  active={mode === 'virtual'}
-                  onClick={() => setMode('virtual')}
-                  icon={<Video className="h-5 w-5" />}
-                  title="Virtual"
-                  subtitle="Join from anywhere. Link is issued after scheduling."
-                />
-                <ModeCard
-                  active={mode === 'in_person'}
-                  onClick={() => setMode('in_person')}
-                  icon={<MapPin className="h-5 w-5" />}
-                  title="In person"
-                  subtitle="Training centre details will be sent after booking."
-                />
-              </div>
-
-              <div className="pt-2">
-                <h3 className="text-sm font-semibold text-slate-900">Pick a slot</h3>
-                <p className="mt-1 text-xs text-slate-600">
-                  Select one slot. If you need a special time, contact support after booking and we'll adjust.
-                </p>
-
-                <div className="mt-3 space-y-2">
-                  {slots.length === 0 ? (
-                    <div className="rounded-lg border bg-slate-50 p-3 text-sm text-slate-600">
-                      No slots available right now.
-                    </div>
-                  ) : (
-                    slots.map((s) => {
-                      const active = s.id === slotId;
-                      return (
-                        <button
-                          key={s.id}
-                          type="button"
-                          onClick={() => setSlotId(s.id)}
-                          className={`w-full rounded-xl border p-4 text-left transition ${
-                            active ? 'border-indigo-300 bg-indigo-50' : 'hover:bg-slate-50'
-                          }`}
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="text-sm font-semibold text-slate-900">{fmt(s.startAt)}</div>
-                              <div className="mt-1 text-xs text-slate-600">
-                                {fmtTime(s.startAt)} {'→'} {fmtTime(s.endAt)}
-                                {s.seatsLeft != null ? <span className="ml-2">- Seats left: {s.seatsLeft}</span> : null}
-                              </div>
-                            </div>
-                            {active ? (
-                              <span className="inline-flex items-center rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-medium text-white">
-                                Selected
-                              </span>
-                            ) : null}
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    disabled={!canProceedPick}
-                    onClick={proceedToPay}
-                    className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
-                  >
-                    {selectedPathwayIsPayLater
-                      ? 'Continue to Pay Later review'
-                      : 'Continue to payment'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setStep('pay')}
-                    disabled={!selectedSlot}
-                    className="rounded-lg border px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    Use payment authorisation code
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="md:col-span-2 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">What you'll receive</h2>
-              <p className="text-sm text-slate-600">
-                {selectedPathwayIsPayLater
-                  ? 'After Admin approval, you may proceed under the approved Pay Later terms. Permanent C-Med Kit release still requires the applicable qualifying payment.'
-                  : 'After qualifying payment, your starter kit dispatch is created. Admin will assign courier and tracking, and you will be notified automatically.'}
-              </p>
-
-              <div className="rounded-xl border bg-slate-50 p-4">
-                <div className="text-xs font-semibold text-slate-700">Starter kit contents</div>
-                <ul className="mt-2 space-y-1 text-sm text-slate-700 list-disc pl-5">
-                  {starterKit.map((x) => (
-                    <li key={x}>{x}</li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="rounded-xl border bg-slate-50 p-4 text-sm text-slate-700">
-                <div className="font-semibold">Training fee</div>
-                <div className="mt-1 text-2xl font-bold text-slate-900">{feeLabel}</div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Provider: <span className="font-medium">{pricing.paymentProvider}</span>
-                  {pricing.configured === false ? <span className="ml-2 text-amber-700">Admin setup pending</span> : null}
-                </div>
-              </div>
-            </div>
-          </section>
-        ) : null}
-
-        {ctx && step === 'pay' && !alreadyPaid && !alreadyCompleted ? (
-          <section className="grid gap-6 md:grid-cols-5">
-            <div className="md:col-span-3 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">
-                {selectedPathwayIsPayLater
-                  ? 'Pay Later request'
-                  : 'Payment'}
-              </h2>
-              <p className="text-sm text-slate-600">
-                {selectedPathwayIsPayLater ? (
-                  'Submit your preferred slot and optional supporting context for Ambulant+ Admin review. Submission does not itself confirm the slot or grant training access.'
-                ) : (
-                  <>
-                    Pay to confirm your training booking. Immediately after payment we create your dispatch as <span className="font-medium">pending</span>, then Admin adds courier and tracking.
-                  </>
-                )}
-              </p>
-
-              {selectedCommercialPathwayConfig ? (
-                <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-4 text-sm text-indigo-950">
-                  <div className="font-semibold">
-                    Selected pathway
-                  </div>
-                  <div className="mt-1">
-                    {selectedCommercialPathwayConfig.label}
-                  </div>
-                  <div className="mt-1 text-xs text-indigo-800">
-                    {selectedCommercialPathwayConfig.description}
+        ) : (
+          <>
+            {step === 'pick' ? (
+              <section className="space-y-8 rounded-[2rem] border bg-white p-6 shadow-sm sm:p-8">
+                <div>
+                  <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-700">Training programme</div>
+                  <h2 className="mt-1 text-xl font-black text-slate-950">Choose a published programme</h2>
+                  <p className="mt-1 text-sm text-slate-600">Times are shown in {trainingPolicy.timezone}.</p>
+                  <div className="mt-5 space-y-4">
+                    {!slots.length ? (
+                      <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+                        <CalendarDays className="mx-auto h-8 w-8 text-slate-400" />
+                        <div className="mt-3 font-black text-slate-900">No programmes are open for booking</div>
+                        <p className="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-600">{trainingPolicy.supportMessage || 'Ambulant+ Admin is preparing the next training programme. Please check again shortly.'}</p>
+                        <button type="button" onClick={load} className="mt-4 rounded-xl border bg-white px-4 py-2 text-sm font-semibold hover:bg-slate-100">Refresh programmes</button>
+                      </div>
+                    ) : slots.map((slot) => <ProgrammeCard key={slot.id} slot={slot} selected={slot.id === slotId} onSelect={() => setSlotId(slot.id)} />)}
                   </div>
                 </div>
-              ) : null}
 
-              {selectedPathwayIsPayLater ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
-                  Pay Later does not create a card transaction. It requires a separate request and Ambulant+ Admin approval before training access is granted.
-                </div>
-              ) : null}
-
-              {selectedPathwayIsPayLater ? (
-                <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
+                {selectedSlot ? (
                   <div>
-                    <div className="text-sm font-black text-slate-950">
-                      Confirm your Pay Later request
-                    </div>
-
-                    <p className="mt-1 text-xs leading-relaxed text-slate-600">
-                      Submitting this request does not reserve the selected slot, grant training access, create a payment or dispatch a permanent C-Med Kit. Ambulant+ Admin must review and approve it first.
-                    </p>
-                  </div>
-
-                  {(payLaterRequest || payLaterApproved) ? (
-                    <div className={`rounded-lg border p-3 text-xs ${payLaterStatusTone}`}>
-                      <div className="font-black">
-                        {payLaterStatusTitle}
-                      </div>
-
-                      <div className="mt-1 leading-relaxed">
-                        {payLaterStatusMessage}
-                      </div>
-
-                      {payLaterRequest?.reviewNotes ? (
-                        <div className="mt-2 rounded-md border border-current/15 bg-white/70 p-2">
-                          Admin note: {payLaterRequest.reviewNotes}
-                        </div>
+                    <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-700">Training mode</div>
+                    <h2 className="mt-1 text-xl font-black text-slate-950">How will you attend?</h2>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      {eligibleModes.includes('virtual') ? (
+                        <button type="button" onClick={() => setMode('virtual')} className={`rounded-3xl border p-5 text-left transition ${mode === 'virtual' ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100' : 'hover:border-indigo-300'}`}>
+                          <Video className="h-5 w-5 text-indigo-700" /><div className="mt-3 font-black text-slate-950">Virtual</div><p className="mt-1 text-sm leading-relaxed text-slate-600">{trainingPolicy.virtualDescription}</p>
+                        </button>
+                      ) : null}
+                      {eligibleModes.includes('in_person') ? (
+                        <button type="button" onClick={() => setMode('in_person')} className={`rounded-3xl border p-5 text-left transition ${mode === 'in_person' ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-100' : 'hover:border-indigo-300'}`}>
+                          <MapPin className="h-5 w-5 text-indigo-700" /><div className="mt-3 font-black text-slate-950">In person</div><p className="mt-1 text-sm leading-relaxed text-slate-600">{trainingPolicy.inPersonDescription}</p>
+                        </button>
                       ) : null}
                     </div>
-                  ) : null}
-
-                  <div>
-                    <label
-                      htmlFor="payLaterReason"
-                      className="text-xs font-semibold text-slate-700"
-                    >
-                      Reason or supporting context
-                      <span className="ml-1 font-normal text-slate-500">
-                        Optional
-                      </span>
-                    </label>
-
-                    <textarea
-                      id="payLaterReason"
-                      value={payLaterReason}
-                      onChange={(event) =>
-                        setPayLaterReason(
-                          event.target.value,
-                        )
-                      }
-                      maxLength={2000}
-                      rows={4}
-                      disabled={
-                        busy ||
-                        payLaterPending ||
-                        payLaterApproved
-                      }
-                      placeholder="Optional: tell Ambulant+ Admin why you are requesting the Pay Later pathway."
-                      className="mt-2 w-full resize-y rounded-lg border px-3 py-2 text-sm outline-none focus:border-indigo-400 disabled:bg-slate-100 disabled:text-slate-500"
-                    />
-
-                    <div className="mt-1 text-right text-[11px] text-slate-500">
-                      {payLaterReason.length}/2000
-                    </div>
+                    {selectedModeInstructions ? <div className="mt-3 rounded-2xl border border-indigo-100 bg-indigo-50 p-4 text-sm text-indigo-950">{selectedModeInstructions}</div> : null}
                   </div>
-                </div>
-              ) : null}
-
-              <div className="rounded-xl border bg-slate-50 p-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="text-xs font-semibold text-slate-700">Training booking</div>
-                    <div className="mt-1 text-sm text-slate-900">
-                      {selectedSlot ? (
-                        <>
-                          {fmt(selectedSlot.startAt)} {'→'} {fmtTime(selectedSlot.endAt)} - {' '}
-                          <span className="font-medium">{mode === 'in_person' ? 'In person' : 'Virtual'}</span>
-                        </>
-                      ) : (
-                        <span className="text-slate-600">No slot selected (go back and choose one).</span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-xs text-slate-600">
-                      Amount due for selected pathway
-                    </div>
-                    <div className="text-xl font-bold text-slate-900">
-                      {selectedPathwayAmountLabel}
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2">
-                {selectedPathwayIsPayLater ? (
-                  <button
-                    type="button"
-                    disabled={
-                      busy ||
-                      !selectedSlot ||
-                      payLaterPending ||
-                      payLaterApproved ||
-                      !payLaterCanSubmit
-                    }
-                    onClick={
-                      submitPayLaterRequest
-                    }
-                    className="inline-flex items-center gap-2 rounded-lg bg-indigo-700 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {busy ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ShieldCheck className="h-4 w-4" />
-                    )}
-
-                    {busy
-                      ? 'Submitting request...'
-                      : payLaterPending
-                        ? 'Awaiting Admin review'
-                        : payLaterApproved
-                          ? 'Pay Later approved'
-                          : payLaterRejected
-                            ? 'Resubmit Pay Later request'
-                            : 'Submit Pay Later request'}
-                  </button>
-                ) : (                <button
-                  type="button"
-                  disabled={
-                    busy ||
-                    !selectedSlot ||
-                    !selectedCommercialPathway ||
-                    selectedPathwayIsPayLater ||
-                    pricing.cardPaymentEnabled === false ||
-                    pricing.configured === false
-                  }
-                  onClick={() =>
-                    startCardPayment(
-                      selectedCommercialPathway,
-                    )
-                  }
-                  className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}
-                  {selectedPathwayIsPayLater
-                    ? 'Pay Later requires Admin review'
-                    : selectedCommercialPathwayConfig?.ctaLabel ||
-                      'Continue to Paystack checkout'}
-                </button>
-                )}
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => setStep('pick')}
-                  className="rounded-lg border px-4 py-2 text-sm hover:bg-slate-50 disabled:opacity-50"
-                >
-                  Back
-                </button>
-              </div>
-
-              <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700">
-                <div className="font-semibold text-slate-900">Manual/EFT payment</div>
-                If you have already paid by EFT or direct transfer, Admin must first confirm your payment and issue a one-time authorisation code.
-                Enter that code below to activate your training booking.
-                {ctx.bankInstructions ? (
-                  <pre className="mt-2 overflow-auto rounded bg-white p-2 text-[11px] text-slate-700">
-                    {JSON.stringify(ctx.bankInstructions, null, 2)}
-                  </pre>
                 ) : null}
-              </div>
 
-              <div className="rounded-xl border bg-white p-4">
-                <label className="text-xs font-semibold text-slate-700" htmlFor="authorisationCode">
-                  Payment authorisation code
-                </label>
-                <div className="mt-2 flex flex-col gap-2 sm:flex-row">
-                  <input
-                    id="authorisationCode"
-                    value={authorisationCode}
-                    onChange={(e) => setAuthorisationCode(e.target.value)}
-                    placeholder="Example: AMB-ABC123-DEF456"
-                    className="min-w-0 flex-1 rounded-lg border px-3 py-2 text-sm outline-none focus:border-indigo-400"
-                  />
-                  <button
-                    type="button"
-                    disabled={busy || !selectedSlot || pricing.manualPaymentEnabled === false}
-                    onClick={redeemAuthorisationCode}
-                    className="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    Verify code
+                <CommercialPathwaySelector pathways={pathways} selectedPathway={selectedCommercialPathway} onSelect={setSelectedCommercialPathway} amountLabel={pathwayAmountLabel} />
+
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-6">
+                  <p className="text-xs text-slate-500">Select one programme, an available mode, and one payment option.</p>
+                  <button type="button" disabled={busy || !selectedSlot || !selectedPathway || !eligibleModes.includes(mode)} onClick={proceedToPay} className="rounded-xl bg-indigo-700 px-5 py-3 text-sm font-black text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50">
+                    Review and confirm
                   </button>
                 </div>
-              </div>
-            </div>
+              </section>
+            ) : (
+              <section className="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(320px,0.65fr)]">
+                <div className="space-y-6 rounded-[2rem] border bg-white p-6 shadow-sm sm:p-8">
+                  <div>
+                    <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-700">Confirmation</div>
+                    <h2 className="mt-1 text-2xl font-black text-slate-950">Complete your onboarding option</h2>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">Your programme and pathway remain subject to the Admin-published terms shown below.</p>
+                  </div>
 
-            <div className="md:col-span-2 rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-              <h2 className="text-lg font-semibold text-slate-900">Next steps</h2>
-              <ol className="space-y-2 text-sm text-slate-700 list-decimal pl-5">
-                {selectedPathwayIsPayLater ? (
-                  <>
-                    <li>Submit the Pay Later request deliberately.</li>
-                    <li>Ambulant+ Admin reviews and either approves or rejects it.</li>
-                    <li>Pending status does not reserve the slot or grant training access.</li>
-                    <li>Approved Pay Later may permit training and temporary-device arrangements under the approved terms.</li>
-                    <li>The permanent C-Med Kit and platform-wide PI remain subject to the applicable qualifying-payment and policy conditions.</li>
-                  </>
-                ) : (
-                  <>
-                    <li>Payment or a valid Admin authorisation code confirms your slot.</li>
-                    <li>Dispatch is created as pending where the selected paid pathway permits it.</li>
-                    <li>Admin assigns courier and tracking on the onboarding board.</li>
-                    <li>You receive the applicable tracking and starter-kit information.</li>
-                    <li>After training completion and Admin certification, you become visible to patients.</li>
-                  </>
-                )}
-              </ol>
-            </div>
-          </section>
+                  {selectedPathwayIsPayLater ? (
+                    <div className="space-y-4 rounded-3xl border border-violet-200 bg-violet-50 p-5">
+                      <div className="font-black text-violet-950">Request Pay Later approval</div>
+                      {payLaterRequest ? (
+                        <div className={`rounded-2xl border p-3 text-sm ${payLaterApproved ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : payLaterRejected ? 'border-rose-200 bg-rose-50 text-rose-950' : 'border-amber-200 bg-amber-50 text-amber-950'}`}>
+                          <div className="font-black">{payLaterApproved ? 'Approved' : payLaterRejected ? 'Not approved' : 'Awaiting Admin review'}</div>
+                          {payLaterRequest.reviewNotes ? <div className="mt-1 text-xs">Admin note: {payLaterRequest.reviewNotes}</div> : null}
+                        </div>
+                      ) : null}
+                      <label className="block text-xs font-semibold text-violet-950" htmlFor="payLaterReason">Supporting context <span className="font-normal text-violet-700">(optional)</span></label>
+                      <textarea id="payLaterReason" value={payLaterReason} onChange={(event) => setPayLaterReason(event.target.value)} maxLength={2000} rows={4} disabled={busy || payLaterPending || payLaterApproved} className="w-full rounded-2xl border border-violet-200 bg-white px-4 py-3 text-sm outline-none focus:border-violet-500 disabled:bg-slate-100" placeholder="Tell Admin anything relevant to this request." />
+                      <button type="button" disabled={busy || payLaterPending || payLaterApproved || !payLaterCanSubmit || !requiredLegalAccepted} onClick={submitPayLaterRequest} className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-3 text-sm font-black text-white hover:bg-violet-800 disabled:opacity-50">
+                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}{payLaterPending ? 'Awaiting Admin review' : payLaterApproved ? 'Pay Later approved' : payLaterRejected ? 'Resubmit request' : 'Submit for Admin review'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div><div className="text-xs font-black uppercase tracking-wide text-emerald-700">Amount due</div><div className="mt-1 text-3xl font-black text-emerald-950">{selectedCommercialPathway ? pathwayAmountLabel(selectedCommercialPathway) : '-'}</div></div>
+                        <CreditCard className="h-8 w-8 text-emerald-700" />
+                      </div>
+                      <button type="button" disabled={busy || !selectedCommercialPathway || pricing?.cardPaymentEnabled === false || pricing?.configured === false || !requiredLegalAccepted} onClick={() => startCardPayment(selectedCommercialPathway)} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-50">
+                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}{selectedPathway?.ctaLabel || 'Continue to secure checkout'}
+                      </button>
+                    </div>
+                  )}
+
+                  <div className="rounded-3xl border bg-slate-50 p-5">
+                    <div className="flex items-center gap-2 font-black text-slate-950"><Banknote className="h-5 w-5 text-indigo-700" />EFT or Admin authorization</div>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">After Admin confirms an EFT/manual payment, use the one-time code issued from the Admin onboarding board.</p>
+                    {bankEntries.length ? (
+                      <dl className="mt-4 grid gap-3 rounded-2xl border bg-white p-4 text-sm sm:grid-cols-2">
+                        {bankEntries.map(([key, value]) => <div key={key}><dt className="text-[10px] font-black uppercase tracking-wide text-slate-500">{titleCaseKey(key)}</dt><dd className="mt-1 break-words font-semibold text-slate-900">{String(value)}</dd></div>)}
+                      </dl>
+                    ) : null}
+                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                      <input id="authorisationCode" value={authorisationCode} onChange={(event) => setAuthorisationCode(event.target.value)} placeholder="AMB-ABC123-DEF456" className="min-w-0 flex-1 rounded-xl border bg-white px-4 py-3 text-sm outline-none focus:border-indigo-500" />
+                      <button type="button" disabled={busy || pricing?.manualPaymentEnabled === false || !requiredLegalAccepted} onClick={redeemAuthorisationCode} className="rounded-xl border bg-white px-4 py-3 text-sm font-black text-slate-800 hover:bg-slate-100 disabled:opacity-50">Verify code</button>
+                    </div>
+                  </div>
+
+                  <button type="button" disabled={busy} onClick={() => setStep('pick')} className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-slate-50">Back to choices</button>
+                </div>
+
+                <aside className="space-y-4">
+                  <div className="rounded-3xl border bg-white p-5 shadow-sm">
+                    <div className="text-xs font-black uppercase tracking-[0.16em] text-indigo-700">Your selection</div>
+                    <h3 className="mt-2 font-black text-slate-950">{selectedSlot?.title || 'No programme selected'}</h3>
+                    <div className="mt-3 space-y-2 text-sm text-slate-600"><div>{fmt(selectedSlot?.startAt)}</div><div>{modeLabel(mode)}</div><div>{selectedPathway?.label || 'No payment option selected'}</div></div>
+                  </div>
+                  {trainingPolicy.supportMessage ? <div className="rounded-3xl border border-indigo-100 bg-indigo-50 p-5 text-sm leading-relaxed text-indigo-950">{trainingPolicy.supportMessage}</div> : null}
+                </aside>
+              </section>
+            )}
+          </>
+        )}
+
+        {ctx ? (
+          <LegalNoticePanel documents={legalDocuments} accepted={legalAccepted} onToggle={(versionId, checked) => setLegalAccepted((current) => ({ ...current, [versionId]: checked }))} status={legalStatus} />
         ) : null}
 
-        {ctx && step === 'done' && ctx.training?.startAt ? (
-          <section className="rounded-2xl border bg-white p-6 shadow-sm space-y-4">
-            <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
-              <div className="space-y-1">
-                <div className="inline-flex items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800">
-                  <CheckCircle2 className="h-4 w-4" />
-                  {alreadyCompleted ? 'Training completed' : 'Confirmed'}
-                </div>
-                <h2 className="text-xl font-semibold text-slate-900">
-                  {alreadyCompleted ? 'Training completed successfully' : 'Training booked successfully'}
-                </h2>
-                <div className="text-sm text-slate-700">
-                  {fmt(ctx.training.startAt)} {'→'} {ctx.training?.endAt ? fmtTime(ctx.training.endAt) : '-'} - {' '}
-                  <span className="font-medium">{ctx.training.mode === 'in_person' ? 'In person' : 'Virtual'}</span>
-                </div>
-                {ctx.training.joinUrl && !alreadyCompleted ? (
-                  <a
-                    className="inline-flex items-center gap-2 text-sm text-indigo-700 hover:underline"
-                    href={ctx.training.joinUrl}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Open join link <ExternalLink className="h-4 w-4" />
-                  </a>
-                ) : null}
-              </div>
+        {ctx ? (
+          <CMedPackageCard release={effectiveRelease} items={packageItems} released={releasedKit} missing={missingKit} dispatch={ctx.dispatch} />
+        ) : null}
 
-              <div className="flex flex-wrap gap-2">
-                {trainingIcsHref && !alreadyCompleted ? (
-                  <a
-                    href={trainingIcsHref}
-                    download="ambulant-training.ics"
-                    className="rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                  >
-                    Add to calendar
-                  </a>
-                ) : null}
-                {trainingRoomHref && !alreadyCompleted ? (
-                  <a
-                    href={trainingRoomHref}
-                    className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                  >
-                    <PlayCircle className="h-4 w-4" />
-                    Open training room
-                  </a>
-                ) : null}
-                {ctx.training?.certificateAvailable && certificateDownloadHref ? (
-                  <a
-                    href={`${certificateDownloadHref || '#'}`}
-                    className="inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm hover:bg-slate-50"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download certificate
-                  </a>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={() => router.push('/auth/login')}
-                  className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-black"
-                >
-                  Continue to login
-                </button>
-              </div>
-            </div>
-
-            {ctx.training?.certificateAvailable ? (
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="inline-flex items-center gap-2 text-sm font-semibold text-emerald-900">
-                      <FileBadge2 className="h-4 w-4" />
-                      Training certificate available
-                    </div>
-                    <div className="mt-1 text-sm text-emerald-900">
-                      Certificate No:{' '}
-                      <span className="font-semibold">{ctx.training.certificateNumber || '-'}</span>
-                    </div>
-                    <div className="mt-1 text-xs text-emerald-800">
-                      Completed: {fmtDateOnly(ctx.training.certificateCompletedAt)}
-                    </div>
-                    <div className="mt-1 text-xs text-emerald-800">
-                      Institution: {ctx.training.certificateInstitution || 'Ambulant+ / Cloven Technology'}
-                    </div>
-                  </div>
-
-                  {certificateDownloadHref ? (
-                    <a
-                      href={`${certificateDownloadHref || '#'}`}
-                      className="inline-flex items-center gap-2 rounded-lg bg-white px-3 py-2 text-sm font-medium text-emerald-900 ring-1 ring-emerald-200 hover:bg-emerald-100"
-                    >
-                      <Download className="h-4 w-4" />
-                      PDF
-                    </a>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="grid gap-4 md:grid-cols-2">
-              <div className="rounded-xl border bg-slate-50 p-4">
-                <div className="text-sm font-semibold text-slate-900">Starter kit (preparing)</div>
-                <div className="mt-1 text-xs text-slate-600">
-                  Tracking will be sent once Admin assigns courier + tracking number.
-                </div>
-                <ul className="mt-3 space-y-1 text-sm text-slate-700 list-disc pl-5">
-                  {starterKit.map((x) => (
-                    <li key={x}>{x}</li>
-                  ))}
-                </ul>
-              </div>
-
-              <div className="rounded-xl border bg-slate-50 p-4 space-y-2">
-                <div className="text-sm font-semibold text-slate-900">Certification gate</div>
-                <div className="text-sm text-slate-700">
-                  After training, Admin will certify your profile. Only then you become visible to patients.
-                </div>
-                <div className="text-xs text-slate-600">
-                  Current stage:{' '}
-                  <span className="font-medium">{ctx.onboarding?.stage || ctx.clinician?.status || '-'}</span>
-                </div>
-              </div>
-            </div>
-          </section>
+        {ctx && !alreadyCompleted ? (
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border bg-white p-5 text-sm text-slate-600">
+            <span>Need help? {trainingPolicy.supportMessage || 'Contact Ambulant+ support for onboarding assistance.'}</span>
+            {alreadyPaid ? <button type="button" onClick={() => router.push('/auth/login')} className="rounded-xl bg-slate-950 px-4 py-2 font-semibold text-white hover:bg-black">Continue to clinician portal</button> : null}
+          </div>
         ) : null}
       </div>
     </main>
   );
 }
 
-function InfoCard({ icon, title, text }: { icon: React.ReactNode; title: string; text: string }) {
-  return (
-    <div className="rounded-xl border bg-slate-50 p-4">
-      <div className="flex items-center gap-2 text-slate-900">
-        <span className="text-slate-700">{icon}</span>
-        <div className="text-sm font-semibold">{title}</div>
-      </div>
-      <div className="mt-1 text-sm text-slate-600">{text}</div>
-    </div>
-  );
-}
-
-function ModeCard({
-  active,
-  onClick,
-  icon,
-  title,
-  subtitle,
-}: {
-  active?: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  title: string;
-  subtitle: string;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`rounded-2xl border p-4 text-left transition ${
-        active ? 'border-indigo-300 bg-indigo-50' : 'hover:bg-slate-50'
-      }`}
-    >
-      <div className="flex items-start gap-3">
-        <div className="mt-0.5 text-slate-700">{icon}</div>
-        <div>
-          <div className="text-sm font-semibold text-slate-900">{title}</div>
-          <div className="mt-1 text-xs text-slate-600">{subtitle}</div>
-        </div>
-      </div>
-    </button>
-  );
-}
-
-
-
 export default function TrainingSchedulePage() {
   return (
     <Suspense
       fallback={
-        <main className="min-h-screen bg-gradient-to-b from-slate-50 to-white">
-          <div className="mx-auto max-w-5xl p-6">
-            <div className="rounded-xl border bg-white p-6 text-sm text-slate-600 flex items-center gap-2">
-              <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600" />
-              Loading training schedule…
+        <main className="min-h-screen bg-slate-50">
+          <div className="mx-auto max-w-7xl p-6">
+            <div className="rounded-3xl border bg-white p-8 text-sm text-slate-600">
+              <div className="flex items-center gap-3"><Loader2 className="h-5 w-5 animate-spin text-indigo-600" />Loading your training workspace…</div>
             </div>
           </div>
         </main>

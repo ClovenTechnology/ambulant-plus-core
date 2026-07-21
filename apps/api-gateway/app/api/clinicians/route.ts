@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { sendEmail, sendSms } from '@/src/lib/mailer';
 import { verifyAdminRequest } from '../utils/auth';
+import {
+  resolveClinicianOnboardingEntitlements,
+} from '@/src/clinicians/onboarding/entitlements';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -774,8 +777,81 @@ export async function PATCH(req: NextRequest) {
     const id = cleanStr(body?.id);
     if (!id) return json({ ok: false, error: 'id required' }, 400);
 
-    const existing = await prisma.clinicianProfile.findUnique({ where: { id } });
-    if (!existing) return json({ ok: false, error: 'not_found' }, 404);
+    const existing =
+      await prisma.clinicianProfile.findUnique({
+        where: { id },
+      });
+
+    if (!existing) {
+      return json(
+        {
+          ok: false,
+          error: 'not_found',
+        },
+        404,
+      );
+    }
+
+    const requestedStatus =
+      String(body?.status || '')
+        .trim()
+        .toLowerCase();
+
+    if (requestedStatus === 'active') {
+      if (
+        existing.trainingCompleted !==
+        true
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_not_completed',
+            message:
+              'Use the dedicated training-completion workflow before activating this clinician.',
+          },
+          409,
+        );
+      }
+
+      const onboarding =
+        await prisma.clinicianOnboarding
+          .findUnique({
+            where: {
+              clinicianId: id,
+            },
+          });
+
+      const entitlements =
+        await resolveClinicianOnboardingEntitlements(
+          prisma,
+          id,
+          onboarding,
+        );
+
+      if (
+        !entitlements.practiceActivation
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'commercial_practice_activation_not_granted',
+            message:
+              'The effective Admin-configured onboarding pathway does not grant practice activation.',
+            entitlements: {
+              pathwayKey:
+                entitlements.pathwayKey,
+              privileges:
+                entitlements.privileges,
+              paymentState:
+                entitlements.paymentState,
+            },
+          },
+          409,
+        );
+      }
+    }
 
     const data: any = {};
 
@@ -807,7 +883,23 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    if (typeof body.trainingCompleted === 'boolean') data.trainingCompleted = body.trainingCompleted;
+    if (
+      typeof body.trainingCompleted ===
+        'boolean' &&
+      body.trainingCompleted !==
+        existing.trainingCompleted
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            'dedicated_training_completion_required',
+          message:
+            'Training completion can only be changed through the dedicated Admin training-completion workflow.',
+        },
+        409,
+      );
+    }
     if (body.trainingScheduledAt) data.trainingScheduledAt = new Date(body.trainingScheduledAt);
     if (typeof body.disabled === 'boolean') data.disabled = body.disabled;
     if (typeof body.archived === 'boolean') data.archived = body.archived;
@@ -946,5 +1038,3 @@ export async function DELETE(req: NextRequest) {
     return json({ ok: false, error: err?.message || String(err) }, 500);
   }
 }
-
-

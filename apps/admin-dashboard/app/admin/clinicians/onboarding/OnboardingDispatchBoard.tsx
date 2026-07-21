@@ -4,6 +4,31 @@
 import { useMemo, useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 
+type OnboardingEntitlementSummary = {
+  pathwayKey?: string | null;
+  pathwayLabel?: string | null;
+  approvedPayLater?: boolean | null;
+  depositQualified?: boolean | null;
+  trainingAccess?: boolean | null;
+  practiceActivation?: boolean | null;
+  starterKitRelease?: 'none' | 'deposit' | 'full' | string | null;
+  authorisedStarterKitItems?: string[] | null;
+  releasedStarterKitItems?: string[] | null;
+  missingStarterKitItems?: string[] | null;
+  starterKitReleaseSatisfied?: boolean | null;
+  platformIndemnityEligible?: boolean | null;
+  balanceRecoveryApplies?: boolean | null;
+  outstandingCents?: number | null;
+  conditions?: string[] | null;
+  privileges?: {
+    trainingAccess?: boolean | null;
+    practiceActivation?: boolean | null;
+    starterKitRelease?: 'none' | 'deposit' | 'full' | string | null;
+    platformIndemnityEligible?: boolean | null;
+    balanceRecoveryApplies?: boolean | null;
+  } | null;
+};
+
 type OnboardingBoardRow = {
   clinicianId: string;
   displayName: string;
@@ -24,6 +49,8 @@ type OnboardingBoardRow = {
     notes?: string | null;
   };
 
+  entitlements?: OnboardingEntitlementSummary | null;
+
   trainingSlot?: {
     id: string;
     startAt: string;
@@ -40,6 +67,11 @@ type OnboardingBoardRow = {
     trackingCode?: string | null;
     shippedAt?: string | null;
     deliveredAt?: string | null;
+    items?: {
+      label?: string | null;
+      quantity?: number | null;
+      shipped?: boolean | null;
+    }[] | null;
   } | null;
 };
 
@@ -145,27 +177,6 @@ function normaliseSimulationPatient(config?: SimulationPatientConfig) {
 
   if (!id || !email || !name) return null;
   return { id, email, name };
-}
-
-function kitKey(label: string, index: number) {
-  const slug = String(label || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .slice(0, 80);
-
-  return slug || `cmed_item_${index + 1}`;
-}
-
-function starterKitCatalogFromItems(items?: string[] | null): { key: string; label: string }[] {
-  return Array.isArray(items)
-    ? items
-        .map((item, index) => {
-          const label = String(item || '').trim();
-          return label ? { key: kitKey(label, index), label } : null;
-        })
-        .filter(Boolean) as { key: string; label: string }[]
-    : [];
 }
 
 function safeDate(s?: string | null) {
@@ -381,18 +392,15 @@ function Field({
 
 export default function OnboardingDispatchBoard({
   rows,
-  starterKitItems = [],
   simulationPatient = null,
 }: {
   rows: OnboardingBoardRow[];
-  starterKitItems?: string[];
   simulationPatient?: SimulationPatientConfig;
 }) {
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
   const [simulationByClinician, setSimulationByClinician] = useState<Record<string, SimulationState>>({});
-  const starterKitCatalog = useMemo(() => starterKitCatalogFromItems(starterKitItems), [starterKitItems]);
   const configuredSimulationPatient = useMemo(
     () => normaliseSimulationPatient(simulationPatient),
     [simulationPatient],
@@ -413,11 +421,6 @@ export default function OnboardingDispatchBoard({
   const [dispCourier, setDispCourier] = useState('');
   const [dispTrackingCode, setDispTrackingCode] = useState('');
   const [dispTrackingUrl, setDispTrackingUrl] = useState('');
-  const [dispKit, setDispKit] = useState<Record<string, boolean>>(() => {
-    const init: Record<string, boolean> = {};
-    for (const it of starterKitCatalog) init[it.key] = true;
-    return init;
-  });
   const [dispNotifyNow, setDispNotifyNow] = useState(true);
 
   // tracking update modal (for existing dispatch)
@@ -742,10 +745,6 @@ setBusyId(schedRow.clinicianId);
     setDispTrackingCode('');
     setDispTrackingUrl('');
     setDispNotifyNow(true);
-    // default kit all checked
-    const init: Record<string, boolean> = {};
-    for (const it of starterKitCatalog) init[it.key] = true;
-    setDispKit(init);
     setDispOpen(true);
   };
 
@@ -756,9 +755,44 @@ setBusyId(schedRow.clinicianId);
       return;
     }
 
-    const kitItems = starterKitCatalog.filter((k) => !!dispKit[k.key]).map((k) => k.label);
-    if (kitItems.length === 0) {
-      setNotice({ tone: 'err', text: 'Select at least one kit item.' });
+    const entitlements =
+      dispRow.entitlements;
+
+    const authorisedItems =
+      entitlements
+        ?.authorisedStarterKitItems ||
+      [];
+
+    const missingItems =
+      entitlements
+        ?.missingStarterKitItems ||
+      [];
+
+    if (
+      entitlements
+        ?.starterKitRelease ===
+        'none' ||
+      authorisedItems.length === 0
+    ) {
+      setNotice({
+        tone: 'err',
+        text:
+          'The effective Admin-configured payment pathway does not authorise a permanent C-Med release.',
+      });
+      return;
+    }
+
+    if (
+      missingItems.length === 0 &&
+      entitlements
+        ?.starterKitReleaseSatisfied ===
+        true
+    ) {
+      setNotice({
+        tone: 'ok',
+        text:
+          'All currently authorised C-Med items have already been released.',
+      });
       return;
     }
 
@@ -770,8 +804,6 @@ setBusyId(schedRow.clinicianId);
         courierName: dispCourier.trim(),
         trackingCode: dispTrackingCode.trim() ? dispTrackingCode.trim() : null,
         trackingUrl: dispTrackingUrl.trim() ? dispTrackingUrl.trim() : null,
-        kitItems,
-        dispatchKind: 'starter_kit',
         notifyClinician: !!dispNotifyNow,
       });
       if (ok) setDispOpen(false);
@@ -808,9 +840,6 @@ setBusyId(schedRow.clinicianId);
       return;
     }
 
-    // kit items still included for notification payload (stable “full kit list”)
-    const kitItems = starterKitCatalog.map((k) => k.key);
-
     setBusyId(trackRow.clinicianId);
     try {
       const ok = await postAction('/api/admin/clinicians/onboarding/update-dispatch-tracking', {
@@ -819,7 +848,6 @@ setBusyId(schedRow.clinicianId);
         courierName,
         trackingCode: trackingCode || null,
         trackingUrl: trackingUrl || null,
-        kitItems,
         notifyClinician: !!trackNotify,
       });
       if (ok) setTrackOpen(false);
@@ -1006,6 +1034,35 @@ setBusyId(schedRow.clinicianId);
           const created = new Date(row.createdAt).toLocaleString();
           const training = row.trainingSlot;
           const dispatch = row.dispatch;
+          const entitlements =
+            row.entitlements;
+
+          const authorisedKitItems =
+            entitlements
+              ?.authorisedStarterKitItems ||
+            [];
+
+          const releasedKitItems =
+            entitlements
+              ?.releasedStarterKitItems ||
+            [];
+
+          const missingKitItems =
+            entitlements
+              ?.missingStarterKitItems ||
+            [];
+
+          const releaseAllowed =
+            entitlements
+              ?.starterKitRelease !==
+              'none' &&
+            authorisedKitItems.length >
+              0;
+
+          const releaseSatisfied =
+            entitlements
+              ?.starterKitReleaseSatisfied ===
+            true;
           const isBusy = busyId === row.clinicianId;
           const readiness = computeReadiness(row);
           const simulationState = simulationByClinician[row.clinicianId];
@@ -1090,6 +1147,71 @@ setBusyId(schedRow.clinicianId);
                   ) : (
                     <div className="text-[11px] text-gray-500">No training slot scheduled yet.</div>
                   )}
+                </div>
+
+                {/* Commercial entitlement block */}
+                <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50/60 p-3 text-xs">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <div className="font-semibold text-indigo-950">
+                        Effective onboarding entitlement
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-indigo-800">
+                        Server-resolved from confirmed payment or approved Pay Later evidence.
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-1">
+                      <span className="rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-indigo-900">
+                        {entitlements?.pathwayLabel || 'No effective pathway'}
+                      </span>
+                      <span className="rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-indigo-900">
+                        Kit release: {entitlements?.starterKitRelease || 'none'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                    <div className="rounded-lg border border-indigo-100 bg-white p-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        Authorised
+                      </div>
+                      <div className="mt-1 font-black text-slate-900">
+                        {authorisedKitItems.length} items
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-indigo-100 bg-white p-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        Released
+                      </div>
+                      <div className="mt-1 font-black text-slate-900">
+                        {releasedKitItems.length} items
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-indigo-100 bg-white p-2">
+                      <div className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                        Remaining
+                      </div>
+                      <div className="mt-1 font-black text-slate-900">
+                        {missingKitItems.length} items
+                      </div>
+                    </div>
+                  </div>
+
+                  {missingKitItems.length > 0 ? (
+                    <div className="mt-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-950">
+                      <div className="font-semibold">
+                        Server-authorised dispatch delta
+                      </div>
+                      <ul className="mt-1 list-disc pl-4">
+                        {missingKitItems.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
 
                 {/* Dispatch block */}
@@ -1330,11 +1452,35 @@ setBusyId(schedRow.clinicianId);
                   <div className="flex flex-col gap-1">
                     <button
                       type="button"
-                      disabled={isBusy || !!row.dispatch}
-                      onClick={() => openCreateDispatch(row)}
+                      disabled={
+                        isBusy ||
+                        !releaseAllowed ||
+                        releaseSatisfied
+                      }
+                      onClick={() =>
+                        openCreateDispatch(
+                          row,
+                        )
+                      }
+                      title={
+                        releaseSatisfied
+                          ? 'All currently authorised items have already been released.'
+                          : releaseAllowed
+                            ? 'Prepare only the server-authorised outstanding C-Med items.'
+                            : 'The effective payment pathway does not authorise a permanent kit release.'
+                      }
                       className="rounded bg-teal-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-teal-700 disabled:opacity-50"
                     >
-                      Create starter kit dispatch
+                      {releaseSatisfied
+                        ? 'Authorised kit released'
+                        : releaseAllowed
+                          ? (
+                              'Prepare ' +
+                              missingKitItems.length +
+                              ' authorised item' +
+                              (missingKitItems.length === 1 ? '' : 's')
+                            )
+                          : 'Kit release not authorised'}
                     </button>
 
                     {row.dispatch && (
@@ -1469,7 +1615,7 @@ setBusyId(schedRow.clinicianId);
                 onClick={saveCreateDispatch}
                 className="rounded-lg bg-black px-3 py-1.5 text-xs font-semibold text-white hover:bg-black/90"
               >
-                Create dispatch
+                Prepare authorised dispatch
               </button>
             </div>
           </div>
@@ -1504,19 +1650,37 @@ setBusyId(schedRow.clinicianId);
           </div>
 
           <div className="sm:col-span-2">
-            <div className="text-[11px] font-semibold text-gray-700">Kit items</div>
-            <div className="mt-2 grid gap-2 sm:grid-cols-2">
-              {starterKitCatalog.map((it) => (
-                <label key={it.key} className="flex items-start gap-2 text-xs text-gray-700">
-                  <input
-                    type="checkbox"
-                    checked={!!dispKit[it.key]}
-                    onChange={(e) => setDispKit((p) => ({ ...p, [it.key]: e.target.checked }))}
-                    className="mt-0.5"
-                  />
-                  <span>{it.label}</span>
-                </label>
-              ))}
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 text-xs text-indigo-950">
+              <div className="font-black">
+                Server-authorised C-Med release
+              </div>
+
+              <div className="mt-1">
+                Effective pathway:{' '}
+                <span className="font-semibold">
+                  {dispRow?.entitlements?.pathwayLabel || 'None'}
+                </span>
+                {' '}· Release level:{' '}
+                <span className="font-semibold">
+                  {dispRow?.entitlements?.starterKitRelease || 'none'}
+                </span>
+              </div>
+
+              {(dispRow?.entitlements?.missingStarterKitItems || []).length > 0 ? (
+                <ul className="mt-2 list-disc pl-5">
+                  {(dispRow?.entitlements?.missingStarterKitItems || []).map((item) => (
+                    <li key={item}>{item}</li>
+                  ))}
+                </ul>
+              ) : (
+                <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-900">
+                  No outstanding authorised items remain.
+                </div>
+              )}
+
+              <div className="mt-2 text-[11px] text-indigo-800">
+                Contents are calculated by the Gateway. They cannot be selected or altered in the browser.
+              </div>
             </div>
           </div>
         </div>
@@ -1584,8 +1748,7 @@ setBusyId(schedRow.clinicianId);
               />
             </Field>
             <div className="mt-2 text-[11px] text-gray-500">
-              This will trigger an auto-notification payload containing <span className="font-semibold">trackingUrl</span> + the
-              <span className="font-semibold"> full kit list</span>. If the gateway hasn’t implemented notify yet, the save still succeeds.
+              Tracking notifications use the items already stored on the server-authorised dispatch.
             </div>
           </div>
         </div>

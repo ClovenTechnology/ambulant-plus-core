@@ -1,155 +1,657 @@
-//apps/api-gateway/app/api/admin/clinicians/onboarding/create-dispatch/route.ts
-import { NextRequest, NextResponse } from 'next/server';
+import {
+  NextRequest,
+  NextResponse,
+} from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { verifyAdminRequest } from '../../../../utils/auth';
+import {
+  resolveClinicianOnboardingEntitlements,
+} from '@/src/clinicians/onboarding/entitlements';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function cleanStr(v: any, max = 240): string | null {
-  const s = (v ?? '').toString().trim();
-  if (!s) return null;
-  return s.length > max ? s.slice(0, max) : s;
+function cleanStr(
+  value: unknown,
+  max = 240,
+): string | null {
+  const text =
+    String(value ?? '').trim();
+
+  if (!text) return null;
+
+  return text.length > max
+    ? text.slice(0, max)
+    : text;
 }
 
-function parseDateMaybe(v: any): Date | null {
-  if (!v) return null;
-  const d = new Date(String(v));
-  return Number.isFinite(d.getTime()) ? d : null;
+function parseDateMaybe(
+  value: unknown,
+): Date | null {
+  if (!value) return null;
+
+  const date =
+    new Date(String(value));
+
+  return Number.isFinite(date.getTime())
+    ? date
+    : null;
 }
 
-function normalizeItemKind(v: any): string {
-  const s = (v ?? '').toString().trim().toLowerCase();
-  if (!s) return 'other';
-  if (['device', 'merch', 'paperwork', 'other'].includes(s)) return s;
-  if (s.includes('device') || s.includes('iot') || s.includes('monitor')) return 'device';
-  if (s.includes('merch') || s.includes('hoodie') || s.includes('shirt')) return 'merch';
-  if (s.includes('paper') || s.includes('doc')) return 'paperwork';
+function normaliseItemKind(
+  value: unknown,
+): string {
+  const text =
+    String(value || '')
+      .trim()
+      .toLowerCase();
+
+  if (
+    text.includes('device') ||
+    text.includes('iomt') ||
+    text.includes('monitor') ||
+    text.includes('scope') ||
+    text.includes('ring')
+  ) {
+    return 'device';
+  }
+
+  if (
+    text.includes('shirt') ||
+    text.includes('mug') ||
+    text.includes('bottle') ||
+    text.includes('lanyard')
+  ) {
+    return 'merch';
+  }
+
+  if (
+    text.includes('handbook') ||
+    text.includes('document') ||
+    text.includes('card')
+  ) {
+    return 'paperwork';
+  }
+
   return 'other';
 }
 
-/**
- * POST /api/admin/clinicians/onboarding/create-dispatch
- * Body:
- * {
- *   clinicianId: string,            // ClinicianProfile.id
- *   courier: string,
- *   trackingCode: string,
- *   trackingUrl?: string,
- *   etaDate?: string|Date,
- *   notes?: string,
- *   items?: Array<{ kind?: string, label: string, quantity?: number, deviceId?: string|null, isMandatory?: boolean }>
- * }
- */
-export async function POST(req: NextRequest) {
+function itemIdentity(
+  value: unknown,
+) {
+  return String(value || '')
+    .trim()
+    .toLowerCase();
+}
+
+function isPermanentDispatch(
+  dispatch: any,
+) {
+  const status =
+    String(dispatch?.status || '')
+      .trim()
+      .toLowerCase();
+
+  if (
+    status === 'canceled' ||
+    status === 'cancelled'
+  ) {
+    return false;
+  }
+
+  const notes =
+    String(dispatch?.notes || '')
+      .trim()
+      .toLowerCase();
+
+  return !(
+    notes.includes('temporary training') ||
+    notes.includes('training loan') ||
+    notes.includes('loaner training')
+  );
+}
+
+function actorId(
+  admin: any,
+  request: NextRequest,
+) {
+  return (
+    cleanStr(
+      admin?.uid ||
+      admin?.userId ||
+      admin?.user?.id ||
+      request.headers.get('x-uid'),
+      120,
+    ) ||
+    'admin-dashboard'
+  );
+}
+
+function requestIp(
+  request: NextRequest,
+) {
+  return (
+    request.headers
+      .get('x-forwarded-for')
+      ?.split(',')[0]
+      ?.trim() ||
+    request.headers.get('x-real-ip') ||
+    null
+  );
+}
+
+function json(
+  body: any,
+  status = 200,
+) {
+  return NextResponse.json(
+    body,
+    {
+      status,
+      headers: {
+        'cache-control': 'no-store',
+      },
+    },
+  );
+}
+
+export async function POST(
+  request: NextRequest,
+) {
   try {
-    const isAdmin = await verifyAdminRequest(req);
-    if (!isAdmin) return NextResponse.json({ ok: false, error: 'admin_required' }, { status: 403 });
+    const admin =
+      await verifyAdminRequest(request);
 
-    const body = (await req.json().catch(() => ({}))) as any;
-
-    const clinicianId = cleanStr(body.clinicianId, 80);
-    const courier = cleanStr(body.courier || body.courierName, 120);
-    const trackingCode = cleanStr(body.trackingCode, 120) || 'Pending';
-
-    if (!clinicianId) return NextResponse.json({ ok: false, error: 'clinicianId required' }, { status: 400 });
-    if (!courier) return NextResponse.json({ ok: false, error: 'courier required' }, { status: 400 });
-
-    const onboarding = await prisma.clinicianOnboarding.findUnique({ where: { clinicianId } });
-    if (!onboarding) return NextResponse.json({ ok: false, error: 'onboarding_not_found' }, { status: 404 });
-
-    const dispatchKind =
-      cleanStr(body.dispatchKind || body.dispatchType || body.kitType || 'starter_kit', 80) ||
-      'starter_kit';
-
-    const isTemporaryTrainingKit = [
-      'temporary_training_kit',
-      'training_loan_kit',
-      'loaner_training_kit',
-      'temporary',
-      'loaner',
-    ].includes(dispatchKind);
-
-    const itemsIn = Array.isArray(body.items)
-      ? (body.items as any[])
-      : Array.isArray(body.kitItems)
-        ? (body.kitItems as any[]).map((x) =>
-            typeof x === 'string'
-              ? { label: x, quantity: 1, kind: x.toLowerCase().includes('device') || x.toLowerCase().includes('iomt') || x.toLowerCase().includes('monitor') ? 'device' : 'other' }
-              : x,
-          )
-        : [];
-
-    if (!onboarding.depositPaid && !isTemporaryTrainingKit) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error: 'deposit_required_for_permanent_starter_kit',
-          message:
-            'Permanent starter kit/device dispatch requires minimum deposit or full payment. Use dispatchKind=temporary_training_kit for waiver/pay-later training devices.',
-          paymentPlan: onboarding.paymentPlan ?? null,
-          depositPaid: onboarding.depositPaid,
-        },
-        { status: 409 },
+    if (
+      admin === false ||
+      (admin as any)?.ok === false
+    ) {
+      return (
+        (admin as any)?.response ||
+        json(
+          {
+            ok: false,
+            error: 'admin_required',
+          },
+          403,
+        )
       );
     }
 
-    const trackingUrl = cleanStr(body.trackingUrl, 600);
-    const etaDate = parseDateMaybe(body.etaDate);
-    const notes = [
-      cleanStr(body.notes, 2000),
-      `Dispatch kind: ${dispatchKind}`,
-      isTemporaryTrainingKit
-        ? 'Temporary training/loan devices only; must be retrieved after training. Permanent kit blocked until deposit/full payment.'
-        : null,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    const body =
+      await request
+        .json()
+        .catch(() => ({} as any));
 
-    const created = await prisma.clinicianDispatch.create({
-      data: {
-        onboardingId: onboarding.id,
-        clinicianId,
-        courier,
-        trackingCode,
-        trackingUrl: trackingUrl ?? null,
-        etaDate: etaDate ?? null,
-        status: 'prepared',
-        notes: notes ?? null,
-        items: {
-          create: itemsIn.map((it) => ({
-            kind: normalizeItemKind(it.kind),
-            label: cleanStr(it.label, 240) ?? 'Item',
-            quantity:
-              Number.isFinite(Number(it.quantity)) && Number(it.quantity) >= 1 ? Math.round(Number(it.quantity)) : 1,
-            deviceId: it.deviceId === null ? null : cleanStr(it.deviceId, 120),
-            isMandatory: typeof it.isMandatory === 'boolean' ? it.isMandatory : true,
-            isShipped: true,
-          })),
+    const clinicianId =
+      cleanStr(body.clinicianId, 120);
+
+    const requestedOnboardingId =
+      cleanStr(body.onboardingId, 120);
+
+    if (!clinicianId) {
+      return json(
+        {
+          ok: false,
+          error: 'clinicianId_required',
         },
-      },
-      include: { items: true },
-    });
+        400,
+      );
+    }
 
-    // Nudge onboarding status
-    await prisma.clinicianOnboarding.update({
-      where: { id: onboarding.id },
-      data: {
-        status: isTemporaryTrainingKit ? onboarding.status : 'kit_prepared',
-        trainingNotes: [
-          cleanStr(onboarding.trainingNotes, 4000),
-          isTemporaryTrainingKit
-            ? `Temporary training kit prepared ${new Date().toISOString()}`
-            : `Permanent starter kit prepared ${new Date().toISOString()}`,
-        ]
-          .filter(Boolean)
-          .join('\n'),
-      },
-    });
+    const requestedDispatchKind =
+      String(
+        body.dispatchKind ||
+        body.dispatchType ||
+        body.kitType ||
+        'starter_kit',
+      )
+        .trim()
+        .toLowerCase();
 
-    return NextResponse.json({ ok: true, dispatch: created }, { status: 201 });
-  } catch (err: any) {
-    console.error('create-dispatch error', err);
-    return NextResponse.json({ ok: false, error: String(err?.message || err) }, { status: 500 });
+    if (
+      [
+        'temporary_training_kit',
+        'training_loan_kit',
+        'loaner_training_kit',
+        'temporary',
+        'loaner',
+      ].includes(requestedDispatchKind)
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            'temporary_training_kit_not_configured',
+          message:
+            'Temporary or loan-kit fulfilment is not part of the active Admin-configured onboarding policy.',
+        },
+        409,
+      );
+    }
+
+    const courier =
+      cleanStr(
+        body.courier ||
+        body.courierName,
+        120,
+      );
+
+    const trackingCode =
+      cleanStr(
+        body.trackingCode,
+        120,
+      );
+
+    const trackingUrl =
+      cleanStr(
+        body.trackingUrl,
+        1000,
+      );
+
+    const etaDate =
+      parseDateMaybe(body.etaDate);
+
+    const adminNote =
+      cleanStr(body.notes, 1500);
+
+    const ignoredClientSuppliedItems =
+      Array.isArray(body.items) ||
+      Array.isArray(body.kitItems);
+
+    const result =
+      await prisma.$transaction(
+        async (tx: any) => {
+          await tx.$queryRaw`
+            SELECT pg_advisory_xact_lock(
+              hashtext(
+                ${`clinician-starter-kit:${clinicianId}`}
+              )
+            )
+          `;
+
+          const onboarding =
+            await tx.clinicianOnboarding
+              .findUnique({
+                where: {
+                  clinicianId,
+                },
+              });
+
+          if (!onboarding) {
+            return {
+              httpStatus: 404,
+              error:
+                'onboarding_not_found',
+            };
+          }
+
+          if (
+            requestedOnboardingId &&
+            String(onboarding.id) !==
+              requestedOnboardingId
+          ) {
+            return {
+              httpStatus: 409,
+              error:
+                'onboarding_clinician_mismatch',
+            };
+          }
+
+          const entitlements =
+            await resolveClinicianOnboardingEntitlements(
+              tx,
+              clinicianId,
+              onboarding,
+            );
+
+          if (
+            entitlements.starterKitRelease ===
+              'none' ||
+            !entitlements.starterKitItems
+              .length
+          ) {
+            return {
+              httpStatus: 409,
+              error:
+                'starter_kit_release_not_authorised',
+              message:
+                'The effective Admin-configured payment pathway does not authorise a permanent C-Med Kit release.',
+              entitlements,
+            };
+          }
+
+          const existingDispatches =
+            await tx.clinicianDispatch
+              .findMany({
+                where: {
+                  clinicianId,
+                  onboardingId:
+                    onboarding.id,
+                },
+                include: {
+                  items: true,
+                },
+                orderBy: {
+                  createdAt: 'desc',
+                },
+              });
+
+          const permanentDispatches =
+            existingDispatches.filter(
+              isPermanentDispatch,
+            );
+
+          const alreadyReleased =
+            new Set<string>();
+
+          for (
+            const dispatch of
+            permanentDispatches
+          ) {
+            for (
+              const item of
+              Array.isArray(dispatch.items)
+                ? dispatch.items
+                : []
+            ) {
+              const identity =
+                itemIdentity(item?.label);
+
+              if (identity) {
+                alreadyReleased.add(
+                  identity,
+                );
+              }
+            }
+          }
+
+          const missingItems =
+            entitlements.starterKitItems
+              .filter(
+                (label: string) =>
+                  !alreadyReleased.has(
+                    itemIdentity(label),
+                  ),
+              );
+
+          if (!missingItems.length) {
+            const existing =
+              permanentDispatches[0] ||
+              null;
+
+            let dispatch = existing;
+
+            if (existing) {
+              const updateData:
+                Record<string, any> = {};
+
+              if (courier) {
+                updateData.courier =
+                  courier;
+              }
+
+              if (trackingCode) {
+                updateData.trackingCode =
+                  trackingCode;
+              }
+
+              if (trackingUrl) {
+                updateData.trackingUrl =
+                  trackingUrl;
+              }
+
+              if (etaDate) {
+                updateData.etaDate =
+                  etaDate;
+              }
+
+              if (
+                Object.keys(updateData)
+                  .length
+              ) {
+                dispatch =
+                  await tx.clinicianDispatch
+                    .update({
+                      where: {
+                        id: existing.id,
+                      },
+                      data: updateData,
+                      include: {
+                        items: true,
+                      },
+                    });
+              }
+            }
+
+            return {
+              httpStatus: 200,
+              ok: true,
+              alreadySatisfied: true,
+              dispatch,
+              entitlements,
+              missingItems: [],
+            };
+          }
+
+          const dispatch =
+            await tx.clinicianDispatch
+              .create({
+                data: {
+                  onboardingId:
+                    onboarding.id,
+                  clinicianId,
+                  courier:
+                    courier ||
+                    'Pending admin assignment',
+                  trackingCode:
+                    trackingCode ||
+                    'Pending',
+                  trackingUrl:
+                    trackingUrl || null,
+                  etaDate:
+                    etaDate || null,
+                  status: 'prepared',
+                  notes: [
+                    'Server-authorised onboarding kit release.',
+                    `Commercial pathway: ${entitlements.pathwayKey}.`,
+                    `Release level: ${entitlements.starterKitRelease}.`,
+                    adminNote,
+                  ]
+                    .filter(Boolean)
+                    .join(' '),
+                  items: {
+                    create:
+                      missingItems.map(
+                        (
+                          label: string,
+                          index: number,
+                        ) => ({
+                          kind:
+                            normaliseItemKind(
+                              label,
+                            ),
+                          label,
+                          quantity: 1,
+                          deviceId: null,
+                          isMandatory: true,
+                          isShipped: false,
+                          sku:
+                            label
+                              .toUpperCase()
+                              .replace(
+                                /[^A-Z0-9]+/g,
+                                '-',
+                              )
+                              .replace(
+                                /^-+|-+$/g,
+                                '',
+                              )
+                              .slice(0, 64) ||
+                            `CMED-${index + 1}`,
+                        }),
+                      ),
+                  },
+                },
+                include: {
+                  items: true,
+                },
+              });
+
+          await tx.clinicianOnboarding
+            .update({
+              where: {
+                id: onboarding.id,
+              },
+              data: {
+                trainingNotes: [
+                  cleanStr(
+                    onboarding.trainingNotes,
+                    4000,
+                  ),
+                  [
+                    'Permanent C-Med release prepared',
+                    new Date()
+                      .toISOString(),
+                    `pathway=${entitlements.pathwayKey}`,
+                    `release=${entitlements.starterKitRelease}`,
+                    `items=${missingItems.length}`,
+                  ].join(' | '),
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
+              },
+            });
+
+          return {
+            httpStatus: 201,
+            ok: true,
+            alreadySatisfied: false,
+            dispatch,
+            entitlements,
+            missingItems,
+          };
+        },
+      );
+
+    if (!result.ok) {
+      return json(
+        {
+          ok: false,
+          error: result.error,
+          message:
+            (result as any).message,
+          entitlements:
+            (result as any)
+              .entitlements || null,
+        },
+        result.httpStatus || 409,
+      );
+    }
+
+    const adminUid =
+      actorId(admin, request);
+
+    await prisma.auditLog
+      .create({
+        data: {
+          actorUserId: adminUid,
+          actorType: 'ADMIN',
+          actorRefId: adminUid,
+          app: 'admin-dashboard',
+          action:
+            result.alreadySatisfied
+              ? 'clinician_starter_kit.release_confirmed'
+              : 'clinician_starter_kit.dispatch_created',
+          entityType:
+            'ClinicianDispatch',
+          entityId:
+            result.dispatch?.id ||
+            clinicianId,
+          description:
+            result.alreadySatisfied
+              ? 'Admin confirmed an existing server-authorised C-Med Kit release.'
+              : 'Admin created a server-authorised C-Med Kit dispatch.',
+          ip: requestIp(request),
+          userAgent:
+            cleanStr(
+              request.headers
+                .get('user-agent'),
+              1000,
+            ),
+          meta: {
+            clinicianId,
+            onboardingId:
+              result.dispatch
+                ?.onboardingId ||
+              requestedOnboardingId,
+            commercialPathway:
+              result.entitlements
+                .pathwayKey,
+            starterKitRelease:
+              result.entitlements
+                .starterKitRelease,
+            authorisedItems:
+              result.entitlements
+                .starterKitItems,
+            newlyReleasedItems:
+              result.missingItems,
+            ignoredClientSuppliedItems,
+          },
+        },
+      })
+      .catch((error: any) => {
+        console.warn(
+          '[create-dispatch] audit failed',
+          error,
+        );
+      });
+
+    return json(
+      {
+        ok: true,
+        alreadySatisfied:
+          result.alreadySatisfied,
+        dispatch: result.dispatch,
+        entitlements: {
+          pathwayKey:
+            result.entitlements
+              .pathwayKey,
+          privileges:
+            result.entitlements
+              .privileges,
+          starterKitRelease:
+            result.entitlements
+              .starterKitRelease,
+          authorisedItems:
+            result.entitlements
+              .starterKitItems,
+          newlyReleasedItems:
+            result.missingItems,
+        },
+        ignoredClientSuppliedItems,
+        notificationRequested:
+          body.notifyClinician === true,
+      },
+      result.httpStatus,
+    );
+  }
+  catch (error: any) {
+    console.error(
+      '[api-gateway][admin][onboarding][create-dispatch] error',
+      error,
+    );
+
+    return json(
+      {
+        ok: false,
+        error:
+          String(
+            error?.message ||
+            'create_dispatch_failed',
+          ),
+      },
+      500,
+    );
   }
 }

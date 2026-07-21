@@ -721,21 +721,21 @@ model TelevisitJoinTicket {
 }
 
 model TelevisitConsent {
-  id             String        @id @default(cuid())
-  visitId        String
-  uid            String
-  role           TelevisitRole
-  consentVersion String
-  consentDocHash String        @db.VarChar(128)
-  scopes         Json
-  acceptedAt     DateTime      @default(now())
-  locale         String?
-  ipHash         String?       @db.VarChar(128)
-  userAgent      String?
+  id                     String                @id @default(cuid())
+  visitId                String
+  uid                    String
+  role                   TelevisitRole
+  consentVersion         String
+  consentDocHash         String                @db.VarChar(128)
+  scopes                 Json
+  acceptedAt             DateTime              @default(now())
+  locale                 String?
+  ipHash                 String?               @db.VarChar(128)
+  userAgent              String?
   legalDocumentVersionId String?
-  orgId          String        @default("org-default")
-  visit          Televisit     @relation(fields: [visitId], references: [id], onDelete: Cascade)
-  legalDocumentVersion LegalDocumentVersion? @relation(fields: [legalDocumentVersionId], references: [id], onDelete: SetNull)
+  orgId                  String                @default("org-default")
+  visit                  Televisit             @relation(fields: [visitId], references: [id], onDelete: Cascade)
+  legalDocumentVersion   LegalDocumentVersion? @relation(fields: [legalDocumentVersionId], references: [id], onDelete: SetNull)
 
   @@unique([visitId, uid, role, consentVersion])
   @@index([visitId, uid, role])
@@ -820,30 +820,30 @@ model AuthOtpChallenge {
 }
 
 model UserPasskeyCredential {
-  id                 String   @id @default(cuid())
-  userId             String
-  credentialId       String   @unique
-  publicKey          String
-  counter            BigInt   @default(0)
-  transports         Json?
-  deviceLabel        String?
-  backedUp           Boolean  @default(false)
-  createdAt          DateTime @default(now())
-  lastUsedAt         DateTime?
-  disabledAt         DateTime?
+  id           String    @id @default(cuid())
+  userId       String
+  credentialId String    @unique
+  publicKey    String
+  counter      BigInt    @default(0)
+  transports   Json?
+  deviceLabel  String?
+  backedUp     Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+  disabledAt   DateTime?
 
   @@index([userId])
 }
 
 model WebAuthnChallenge {
-  id          String   @id @default(cuid())
-  userId      String?
-  identifier  String?
-  challenge   String   @unique
-  type        String
-  expiresAt   DateTime
-  consumedAt  DateTime?
-  createdAt   DateTime @default(now())
+  id         String    @id @default(cuid())
+  userId     String?
+  identifier String?
+  challenge  String    @unique
+  type       String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
 
   @@index([userId, type])
   @@index([identifier, type])
@@ -1774,51 +1774,51 @@ model EhrIndex {
 }
 
 model PharmacyPartner {
-  id                      String                    @id @default(cuid())
-  name                    String
-  contact                 String?
-  active                  Boolean                   @default(true)
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
-  acceptedMedicalAids     String[]                  @default([])
-  acceptsCard             Boolean                   @default(true)
-  acceptsCod              Boolean                   @default(false)
-  acceptsMedicalAid       Boolean                   @default(false)
-  acceptsRcs              Boolean                   @default(false)
-  acceptsStoreCard        Boolean                   @default(false)
-  address                 String?
-  bankAccountMasked       String?
-  commercialStatus       String                    @default("ACTIVE")
-  billingCycle           String                    @default("MONTHLY")
-  onboardingFeeCents     Int                       @default(0)
-  monthlyPlatformFeeCents Int                      @default(0)
-  inventoryHostingFeeCents Int                     @default(0)
-  subscriptionStatus     String                    @default("CURRENT")
-  nextBillingAt          DateTime?
-  arrearsCents           Int                       @default(0)
-  suspendedReason        String?
-  lastSettledAt          DateTime?
-  city                    String?
-  country                 String                    @default("ZA") @db.VarChar(2)
-  currency                String                    @default("ZAR") @db.VarChar(3)
-  kycPayload              Json?
-  kycRejectedReason       String?
-  kycSchemaKey            String?                   @db.VarChar(64)
-  kycStatus               String                    @default("PENDING")
-  kycSubmittedAt          DateTime?
-  kycVerifiedAt           DateTime?
-  lat                     Float?
-  lng                     Float?
-  supportsDelivery        Boolean                   @default(true)
-  supportsPickup          Boolean                   @default(true)
-  careportGenericLinks    CarePortGenericLink[]
-  carePortJobs            CarePortJob[]
-  careportOffers          CarePortOffer[]
-  careportOrdersChosen    CarePortOrder[]           @relation("ChosenPharmacy")
-  careportSkus            CarePortPharmacySku[]
-  careportStaff           CarePortPharmacyStaff[]
-  subscriptionInvoices    CarePortSubscriptionInvoice[]
-  CarePortRiderAssignment CarePortRiderAssignment[]
+  id                       String                        @id @default(cuid())
+  name                     String
+  contact                  String?
+  active                   Boolean                       @default(true)
+  createdAt                DateTime                      @default(now())
+  updatedAt                DateTime                      @updatedAt
+  acceptedMedicalAids      String[]                      @default([])
+  acceptsCard              Boolean                       @default(true)
+  acceptsCod               Boolean                       @default(false)
+  acceptsMedicalAid        Boolean                       @default(false)
+  acceptsRcs               Boolean                       @default(false)
+  acceptsStoreCard         Boolean                       @default(false)
+  address                  String?
+  bankAccountMasked        String?
+  commercialStatus         String                        @default("ACTIVE")
+  billingCycle             String                        @default("MONTHLY")
+  onboardingFeeCents       Int                           @default(0)
+  monthlyPlatformFeeCents  Int                           @default(0)
+  inventoryHostingFeeCents Int                           @default(0)
+  subscriptionStatus       String                        @default("CURRENT")
+  nextBillingAt            DateTime?
+  arrearsCents             Int                           @default(0)
+  suspendedReason          String?
+  lastSettledAt            DateTime?
+  city                     String?
+  country                  String                        @default("ZA") @db.VarChar(2)
+  currency                 String                        @default("ZAR") @db.VarChar(3)
+  kycPayload               Json?
+  kycRejectedReason        String?
+  kycSchemaKey             String?                       @db.VarChar(64)
+  kycStatus                String                        @default("PENDING")
+  kycSubmittedAt           DateTime?
+  kycVerifiedAt            DateTime?
+  lat                      Float?
+  lng                      Float?
+  supportsDelivery         Boolean                       @default(true)
+  supportsPickup           Boolean                       @default(true)
+  careportGenericLinks     CarePortGenericLink[]
+  carePortJobs             CarePortJob[]
+  careportOffers           CarePortOffer[]
+  careportOrdersChosen     CarePortOrder[]               @relation("ChosenPharmacy")
+  careportSkus             CarePortPharmacySku[]
+  careportStaff            CarePortPharmacyStaff[]
+  subscriptionInvoices     CarePortSubscriptionInvoice[]
+  CarePortRiderAssignment  CarePortRiderAssignment[]
 
   @@index([active])
   @@index([name])
@@ -2276,8 +2276,8 @@ model MedReachTimelineEntry {
 }
 
 model MedReachPhlebProfile {
-  id                  String                   @id @default(cuid())
-  userId              String                   @unique
+  id                   String                   @id @default(cuid())
+  userId               String                   @unique
   displayName          String?
   avatarUrl            String?
   phone                String?
@@ -2285,34 +2285,32 @@ model MedReachPhlebProfile {
   serviceAreaMeta      Json?
   profileMeta          Json?
   verifiedIdentityMeta Json?
-  active              Boolean                  @default(true)
-  approvalStatus      MedReachPartnerStatus    @default(PENDING)
-  country             String                   @default("ZA") @db.VarChar(2)
-  currency            String                   @default("ZAR") @db.VarChar(3)
-  payoutAccountMasked String?
-  commissionKind      MedReachCommissionKind   @default(PERCENT)
-  commissionValue     Decimal                  @default(0) @db.Decimal(10, 2)
-  defaultLabId        String?
-  ratingAvg           Decimal?                 @db.Decimal(4, 2)
-  ratingCount         Int                      @default(0)
-  completedJobsCount  Int                      @default(0)
-  cancelledJobsCount  Int                      @default(0)
-  approvedByUserId    String?
-  approvedAt          DateTime?
-  rejectedByUserId    String?
-  rejectedAt          DateTime?
-  rejectionReason     String?
-  createdAt           DateTime                 @default(now())
-  updatedAt           DateTime                 @updatedAt
-  orderFinancials     MedReachOrderFinancial[]
-  defaultLab          LabPartner?              @relation("MedReachPhlebDefaultLab", fields: [defaultLabId], references: [id])
+  active               Boolean                  @default(true)
+  approvalStatus       MedReachPartnerStatus    @default(PENDING)
+  country              String                   @default("ZA") @db.VarChar(2)
+  currency             String                   @default("ZAR") @db.VarChar(3)
+  payoutAccountMasked  String?
+  commissionKind       MedReachCommissionKind   @default(PERCENT)
+  commissionValue      Decimal                  @default(0) @db.Decimal(10, 2)
+  defaultLabId         String?
+  ratingAvg            Decimal?                 @db.Decimal(4, 2)
+  ratingCount          Int                      @default(0)
+  completedJobsCount   Int                      @default(0)
+  cancelledJobsCount   Int                      @default(0)
+  approvedByUserId     String?
+  approvedAt           DateTime?
+  rejectedByUserId     String?
+  rejectedAt           DateTime?
+  rejectionReason      String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  orderFinancials      MedReachOrderFinancial[]
+  defaultLab           LabPartner?              @relation("MedReachPhlebDefaultLab", fields: [defaultLabId], references: [id])
 
   @@index([approvalStatus])
   @@index([defaultLabId])
   @@index([country, currency])
 }
-
-
 
 model MedReachLabReview {
   id             String                  @id @default(cuid())
@@ -2342,19 +2340,19 @@ model MedReachLabReview {
 }
 
 model MedReachLabNetwork {
-  id                   String                         @id @default(cuid())
+  id                   String                    @id @default(cuid())
   legalName            String
   displayName          String?
-  networkType          MedReachLabNetworkType         @default(INDEPENDENT_GROUP)
-  country              String                         @default("ZA") @db.VarChar(2)
-  currency             String                         @default("ZAR") @db.VarChar(3)
+  networkType          MedReachLabNetworkType    @default(INDEPENDENT_GROUP)
+  country              String                    @default("ZA") @db.VarChar(2)
+  currency             String                    @default("ZAR") @db.VarChar(3)
   ownerUserId          String?
-  status               MedReachPartnerStatus          @default(PENDING)
-  active               Boolean                        @default(true)
+  status               MedReachPartnerStatus     @default(PENDING)
+  active               Boolean                   @default(true)
   profileMeta          Json?
   verifiedIdentityMeta Json?
-  createdAt            DateTime                       @default(now())
-  updatedAt            DateTime                       @updatedAt
+  createdAt            DateTime                  @default(now())
+  updatedAt            DateTime                  @updatedAt
   branches             LabPartner[]
   staffMembers         MedReachLabNetworkStaff[]
 
@@ -2365,19 +2363,19 @@ model MedReachLabNetwork {
 }
 
 model MedReachLabNetworkStaff {
-  id          String                         @id @default(cuid())
-  userId      String
-  networkId   String
-  role        MedReachLabNetworkStaffRole
-  active      Boolean                        @default(true)
-  status      MedReachStaffStatus            @default(PENDING)
-  invitedBy   String?
-  approvedBy  String?
-  invitedAt   DateTime?
-  approvedAt  DateTime?
-  createdAt   DateTime                       @default(now())
-  updatedAt   DateTime                       @updatedAt
-  network     MedReachLabNetwork             @relation(fields: [networkId], references: [id], onDelete: Cascade)
+  id         String                      @id @default(cuid())
+  userId     String
+  networkId  String
+  role       MedReachLabNetworkStaffRole
+  active     Boolean                     @default(true)
+  status     MedReachStaffStatus         @default(PENDING)
+  invitedBy  String?
+  approvedBy String?
+  invitedAt  DateTime?
+  approvedAt DateTime?
+  createdAt  DateTime                    @default(now())
+  updatedAt  DateTime                    @updatedAt
+  network    MedReachLabNetwork          @relation(fields: [networkId], references: [id], onDelete: Cascade)
 
   @@unique([userId, networkId])
   @@index([networkId, role])
@@ -2894,11 +2892,11 @@ model CarePortOrder {
 
   chosenPharmacy PharmacyPartner? @relation("ChosenPharmacy", fields: [chosenPharmacyId], references: [id])
 
-  items      CarePortOrderItem[]
-  offers     CarePortOffer[]
-  selections CarePortSelection[]
-  payments   CarePortPaymentIntent[]
-  assignment CarePortRiderAssignment?
+  items              CarePortOrderItem[]
+  offers             CarePortOffer[]
+  selections         CarePortSelection[]
+  payments           CarePortPaymentIntent[]
+  assignment         CarePortRiderAssignment?
   providerFeeLedgers CarePortProviderFeeLedger[]
 
   @@unique([erxOrderId, refillNo])
@@ -2929,30 +2927,30 @@ model CarePortOrderItem {
 }
 
 model CarePortPharmacySku {
-  id         String          @id @default(cuid())
-  orgId      String          @default("org-default")
-  pharmacyId String
-  name       String
-  drugCode   String?
-  skuCode    String?
-  isGeneric  Boolean         @default(false)
+  id                   String  @id @default(cuid())
+  orgId                String  @default("org-default")
+  pharmacyId           String
+  name                 String
+  drugCode             String?
+  skuCode              String?
+  isGeneric            Boolean @default(false)
   // Universal CarePort catalogue classification.
   // Supports prescription medicines, OTC items and general pharmacy merchandise.
-  productType          String   @default("MEDICATION") @db.VarChar(60)
-  category             String?  @db.VarChar(120)
-  subcategory          String?  @db.VarChar(120)
-  otc                  Boolean  @default(false)
-  prescriptionRequired Boolean  @default(true)
-  marketplaceVisible   Boolean  @default(false)
-  sellableOnline       Boolean  @default(true)
+  productType          String  @default("MEDICATION") @db.VarChar(60)
+  category             String? @db.VarChar(120)
+  subcategory          String? @db.VarChar(120)
+  otc                  Boolean @default(false)
+  prescriptionRequired Boolean @default(true)
+  marketplaceVisible   Boolean @default(false)
+  sellableOnline       Boolean @default(true)
 
   // Retail merchandising and catalogue enrichment.
   brand        String? @db.VarChar(160)
   manufacturer String? @db.VarChar(160)
   barcode      String? @db.VarChar(120)
   description  String?
-  imageUrl      String?
-  packSize      String? @db.VarChar(120)
+  imageUrl     String?
+  packSize     String? @db.VarChar(120)
 
   // Variant support for size, colour, flavour, strength, bundle size, etc.
   variantGroupKey   String? @db.VarChar(160)
@@ -2961,13 +2959,13 @@ model CarePortPharmacySku {
   attributes        Json?
 
   // Stock and retail guardrails.
-  stockOnHand       Int?
-  reservedStock     Int     @default(0)
-  lowStockThreshold Int?
-  maxOrderQty       Int?
-  ageRestricted     Boolean @default(false)
-  regulatedSchedule String? @db.VarChar(80)
-  taxCategory       String? @db.VarChar(80)
+  stockOnHand             Int?
+  reservedStock           Int       @default(0)
+  lowStockThreshold       Int?
+  maxOrderQty             Int?
+  ageRestricted           Boolean   @default(false)
+  regulatedSchedule       String?   @db.VarChar(80)
+  taxCategory             String?   @db.VarChar(80)
   // Catalogue normalisation and governance.
   catalogueSource         String    @default("PHARMACY_SUPPLIED") @db.VarChar(80)
   normalisationStatus     String    @default("RAW_PHARMACY_SUPPLIED") @db.VarChar(80)
@@ -3088,25 +3086,25 @@ model CarePortSelection {
 }
 
 model CarePortPaymentIntent {
-  id             String                @id @default(cuid())
-  orgId          String                @default("org-default")
-  orderId        String
-  method         CarePortPaymentMethod
-  status         CarePortPaymentStatus @default(CREATED)
-  amountCents    Int
-  currency       String                @default("ZAR")
-  idempotencyKey String?
-  provider       String?
-  providerRef    String?
-  providerStatus String?
-  providerPayload Json?
-  metadata       Json?
-  paidAt         DateTime?
-  failedAt       DateTime?
-  failureReason  String?
-  createdAt      DateTime              @default(now())
-  updatedAt      DateTime              @updatedAt
-  order          CarePortOrder         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  id                 String                      @id @default(cuid())
+  orgId              String                      @default("org-default")
+  orderId            String
+  method             CarePortPaymentMethod
+  status             CarePortPaymentStatus       @default(CREATED)
+  amountCents        Int
+  currency           String                      @default("ZAR")
+  idempotencyKey     String?
+  provider           String?
+  providerRef        String?
+  providerStatus     String?
+  providerPayload    Json?
+  metadata           Json?
+  paidAt             DateTime?
+  failedAt           DateTime?
+  failureReason      String?
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+  order              CarePortOrder               @relation(fields: [orderId], references: [id], onDelete: Cascade)
   providerFeeLedgers CarePortProviderFeeLedger[]
 
   @@index([orderId, status])
@@ -3116,32 +3114,32 @@ model CarePortPaymentIntent {
 }
 
 model CarePortRiderProfile {
-  id                String                    @id @default(cuid())
-  orgId             String                    @default("org-default")
-  userId            String                    @unique
-  lat               Float?
-  lng               Float?
-  country           String                    @default("ZA") @db.VarChar(2)
-  currency          String                    @default("ZAR") @db.VarChar(3)
-  isActive          Boolean                   @default(true)
-  isOnJob           Boolean                   @default(false)
-  kyiStatus         String                    @default("PENDING")
-  kyiSchemaKey      String?                   @db.VarChar(64)
-  kyiPayload        Json?
-  kyiSubmittedAt    DateTime?
-  kyiVerifiedAt     DateTime?
-  kyiRejectedReason String?
-  bankAccountMasked String?
-  accountStatus      String                    @default("AWAITING_ACTIVATION")
-  payoutCycle        String                    @default("WEEKLY")
-  payoutMethod       String?
-  suspensionReason   String?
-  lastPayoutAt       DateTime?
-  totalTrips         Int                       @default(0)
-  failedDeliveryCount Int                      @default(0)
-  createdAt         DateTime                  @default(now())
-  updatedAt         DateTime                  @updatedAt
-  assignments       CarePortRiderAssignment[]
+  id                  String                    @id @default(cuid())
+  orgId               String                    @default("org-default")
+  userId              String                    @unique
+  lat                 Float?
+  lng                 Float?
+  country             String                    @default("ZA") @db.VarChar(2)
+  currency            String                    @default("ZAR") @db.VarChar(3)
+  isActive            Boolean                   @default(true)
+  isOnJob             Boolean                   @default(false)
+  kyiStatus           String                    @default("PENDING")
+  kyiSchemaKey        String?                   @db.VarChar(64)
+  kyiPayload          Json?
+  kyiSubmittedAt      DateTime?
+  kyiVerifiedAt       DateTime?
+  kyiRejectedReason   String?
+  bankAccountMasked   String?
+  accountStatus       String                    @default("AWAITING_ACTIVATION")
+  payoutCycle         String                    @default("WEEKLY")
+  payoutMethod        String?
+  suspensionReason    String?
+  lastPayoutAt        DateTime?
+  totalTrips          Int                       @default(0)
+  failedDeliveryCount Int                       @default(0)
+  createdAt           DateTime                  @default(now())
+  updatedAt           DateTime                  @updatedAt
+  assignments         CarePortRiderAssignment[]
 
   @@index([orgId])
   @@index([isActive, isOnJob])
@@ -3151,39 +3149,39 @@ model CarePortRiderProfile {
 }
 
 model CarePortSettlementBatch {
-  id                         String   @id @default(cuid())
-  orgId                      String   @default("org-default")
-  kind                       String   @default("CAREPORT")
-  periodStart                DateTime
-  periodEnd                  DateTime
-  currency                   String   @default("ZAR") @db.VarChar(3)
-  status                     String   @default("DRAFT")
+  id          String   @id @default(cuid())
+  orgId       String   @default("org-default")
+  kind        String   @default("CAREPORT")
+  periodStart DateTime
+  periodEnd   DateTime
+  currency    String   @default("ZAR") @db.VarChar(3)
+  status      String   @default("DRAFT")
 
-  totalGrossMinor            Int      @default(0)
-  pharmacyGrossMinor         Int      @default(0)
-  riderGrossMinor            Int      @default(0)
-  platformFeeMinor           Int      @default(0)
-  paymentProviderFeeMinor    Int      @default(0)
-  subscriptionFeeMinor       Int      @default(0)
-  inventoryHostingFeeMinor   Int      @default(0)
-  pharmacyNetPayableMinor    Int      @default(0)
-  riderNetPayableMinor       Int      @default(0)
-  lineCount                  Int      @default(0)
+  totalGrossMinor          Int @default(0)
+  pharmacyGrossMinor       Int @default(0)
+  riderGrossMinor          Int @default(0)
+  platformFeeMinor         Int @default(0)
+  paymentProviderFeeMinor  Int @default(0)
+  subscriptionFeeMinor     Int @default(0)
+  inventoryHostingFeeMinor Int @default(0)
+  pharmacyNetPayableMinor  Int @default(0)
+  riderNetPayableMinor     Int @default(0)
+  lineCount                Int @default(0)
 
-  generatedByUserId          String?
-  approvedByUserId           String?
-  paidByUserId               String?
-  failedByUserId             String?
-  approvedAt                 DateTime?
-  paidAt                     DateTime?
-  failedAt                   DateTime?
-  failureReason              String?
-  remittanceRef              String?
-  metadata                   Json?
+  generatedByUserId String?
+  approvedByUserId  String?
+  paidByUserId      String?
+  failedByUserId    String?
+  approvedAt        DateTime?
+  paidAt            DateTime?
+  failedAt          DateTime?
+  failureReason     String?
+  remittanceRef     String?
+  metadata          Json?
 
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
-  lines                      CarePortSettlementLine[]
+  createdAt DateTime                 @default(now())
+  updatedAt DateTime                 @updatedAt
+  lines     CarePortSettlementLine[]
 
   @@index([orgId, status, periodStart, periodEnd])
   @@index([periodStart, periodEnd])
@@ -3191,36 +3189,36 @@ model CarePortSettlementBatch {
 }
 
 model CarePortSettlementLine {
-  id                         String   @id @default(cuid())
-  orgId                      String   @default("org-default")
-  batchId                    String
-  recipientType              String
-  recipientId                String
-  recipientName              String?
-  orderIds                   String[] @default([])
-  tripCount                  Int      @default(0)
-  orderCount                 Int      @default(0)
+  id            String   @id @default(cuid())
+  orgId         String   @default("org-default")
+  batchId       String
+  recipientType String
+  recipientId   String
+  recipientName String?
+  orderIds      String[] @default([])
+  tripCount     Int      @default(0)
+  orderCount    Int      @default(0)
 
-  grossMinor                 Int      @default(0)
-  platformFeeMinor           Int      @default(0)
-  paymentProviderFeeMinor    Int      @default(0)
-  subscriptionFeeMinor       Int      @default(0)
-  inventoryHostingFeeMinor   Int      @default(0)
-  riderFeeMinor              Int      @default(0)
-  refundMinor                Int      @default(0)
-  netPayableMinor            Int      @default(0)
-  currency                   String   @default("ZAR") @db.VarChar(3)
-  status                     String   @default("PENDING")
+  grossMinor               Int    @default(0)
+  platformFeeMinor         Int    @default(0)
+  paymentProviderFeeMinor  Int    @default(0)
+  subscriptionFeeMinor     Int    @default(0)
+  inventoryHostingFeeMinor Int    @default(0)
+  riderFeeMinor            Int    @default(0)
+  refundMinor              Int    @default(0)
+  netPayableMinor          Int    @default(0)
+  currency                 String @default("ZAR") @db.VarChar(3)
+  status                   String @default("PENDING")
 
-  remittanceRef              String?
-  paidAt                     DateTime?
-  failedAt                   DateTime?
-  failureReason              String?
-  metadata                   Json?
+  remittanceRef String?
+  paidAt        DateTime?
+  failedAt      DateTime?
+  failureReason String?
+  metadata      Json?
 
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
-  batch                      CarePortSettlementBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  createdAt DateTime                @default(now())
+  updatedAt DateTime                @updatedAt
+  batch     CarePortSettlementBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
 
   @@unique([batchId, recipientType, recipientId])
   @@index([orgId, recipientType, recipientId, status])
@@ -3229,31 +3227,31 @@ model CarePortSettlementLine {
 }
 
 model CarePortSubscriptionInvoice {
-  id                         String   @id @default(cuid())
-  orgId                      String   @default("org-default")
-  pharmacyId                 String
-  invoiceType                String   @default("MONTHLY_PLATFORM")
-  status                     String   @default("OPEN")
-  periodStart                DateTime?
-  periodEnd                  DateTime?
-  currency                   String   @default("ZAR") @db.VarChar(3)
+  id          String    @id @default(cuid())
+  orgId       String    @default("org-default")
+  pharmacyId  String
+  invoiceType String    @default("MONTHLY_PLATFORM")
+  status      String    @default("OPEN")
+  periodStart DateTime?
+  periodEnd   DateTime?
+  currency    String    @default("ZAR") @db.VarChar(3)
 
-  onboardingFeeCents         Int      @default(0)
-  monthlyPlatformFeeCents    Int      @default(0)
-  inventoryHostingFeeCents   Int      @default(0)
-  otherFeeCents              Int      @default(0)
-  totalDueCents              Int      @default(0)
-  paidCents                  Int      @default(0)
+  onboardingFeeCents       Int @default(0)
+  monthlyPlatformFeeCents  Int @default(0)
+  inventoryHostingFeeCents Int @default(0)
+  otherFeeCents            Int @default(0)
+  totalDueCents            Int @default(0)
+  paidCents                Int @default(0)
 
-  dueAt                      DateTime?
-  paidAt                     DateTime?
-  failedAt                   DateTime?
-  externalRef                String?
-  metadata                   Json?
+  dueAt       DateTime?
+  paidAt      DateTime?
+  failedAt    DateTime?
+  externalRef String?
+  metadata    Json?
 
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
-  pharmacy                   PharmacyPartner @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  pharmacy  PharmacyPartner @relation(fields: [pharmacyId], references: [id], onDelete: Cascade)
 
   @@index([orgId, pharmacyId, status])
   @@index([periodStart, periodEnd])
@@ -3261,29 +3259,28 @@ model CarePortSubscriptionInvoice {
 }
 
 model CarePortProviderFeeLedger {
-  id                         String   @id @default(cuid())
-  orgId                      String   @default("org-default")
-  orderId                    String?
-  paymentIntentId            String?
-  provider                   String
-  providerRef                String?
-  category                   String   @default("PAYMENT_PROCESSING")
-  amountMinor                Int
-  currency                   String   @default("ZAR") @db.VarChar(3)
-  status                     String   @default("RECORDED")
-  metadata                   Json?
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  id              String   @id @default(cuid())
+  orgId           String   @default("org-default")
+  orderId         String?
+  paymentIntentId String?
+  provider        String
+  providerRef     String?
+  category        String   @default("PAYMENT_PROCESSING")
+  amountMinor     Int
+  currency        String   @default("ZAR") @db.VarChar(3)
+  status          String   @default("RECORDED")
+  metadata        Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  order                      CarePortOrder? @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  paymentIntent              CarePortPaymentIntent? @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
+  order         CarePortOrder?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  paymentIntent CarePortPaymentIntent? @relation(fields: [paymentIntentId], references: [id], onDelete: SetNull)
 
   @@index([orgId, provider, createdAt])
   @@index([orderId])
   @@index([paymentIntentId])
   @@index([status])
 }
-
 
 model CarePortRiderAssignment {
   id                     String                   @id @default(cuid())
@@ -3722,16 +3719,17 @@ model AdminUserProfile {
 }
 
 model AdminAuthCredential {
-  id                String   @id @default(cuid())
-  email             String   @unique
+  id                String    @id @default(cuid())
+  email             String    @unique
   passwordHash      String
-  mustResetPassword Boolean  @default(false)
+  mustResetPassword Boolean   @default(false)
   lastLoginAt       DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
   @@index([email])
 }
+
 model UserRole {
   id          String           @id @default(cuid())
   adminUserId String
@@ -3845,52 +3843,53 @@ model PopulationStat {
 }
 
 model ClinicianOnboarding {
-  id             String                 @id @default(cuid())
-  clinicianId    String                 @unique
-  status         String                 @default("pending")
+  id             String    @id @default(cuid())
+  clinicianId    String    @unique
+  status         String    @default("pending")
   paymentPlan    String?
-  depositPaid    Boolean                @default(false)
+  depositPaid    Boolean   @default(false)
   nextPaymentAt  DateTime?
   trainingSlotId String?
+  trainingMode   String?
   trainingNotes  String?
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
 
   dispatches       ClinicianDispatch[]
   payments         ClinicianOnboardingPayment[]
   payLaterRequests ClinicianOnboardingPayLaterRequest[]
-  trainingSlot     ClinicianTrainingSlot? @relation(fields: [trainingSlotId], references: [id])
+  trainingSlot     ClinicianTrainingSlot?               @relation(fields: [trainingSlotId], references: [id])
 
   @@index([status])
 }
 
 model ClinicianOnboardingPayLaterRequest {
-  id                  String   @id @default(cuid())
-  clinicianId         String
-  onboardingId        String
+  id           String @id @default(cuid())
+  clinicianId  String
+  onboardingId String
 
-  pathwayKey          String   @default("START_NOW_PAY_LATER")
-  status              String   @default("pending") // pending | approved | rejected | withdrawn | cancelled
+  pathwayKey String @default("START_NOW_PAY_LATER")
+  status     String @default("pending") // pending | approved | rejected | withdrawn | cancelled
 
-  requestReason       String?
-  requestedByUserId   String?
-  requestedAt         DateTime @default(now())
+  requestReason     String?
+  requestedByUserId String?
+  requestedAt       DateTime @default(now())
 
-  reviewedByUserId    String?
-  reviewedAt          DateTime?
-  reviewNotes         String?
+  reviewedByUserId String?
+  reviewedAt       DateTime?
+  reviewNotes      String?
 
   // Set while the request is active and cleared when reviewed or withdrawn.
   // The nullable unique value prevents duplicate active requests while preserving history.
-  activeRequestKey    String?  @unique
+  activeRequestKey String? @unique
 
-  approvalPaymentId   String?
-  meta                Json?
+  approvalPaymentId String?
+  meta              Json?
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  onboarding          ClinicianOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+  onboarding ClinicianOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
 
   @@index([clinicianId, status, requestedAt])
   @@index([onboardingId, requestedAt])
@@ -3898,39 +3897,40 @@ model ClinicianOnboardingPayLaterRequest {
   @@index([reviewedAt])
   @@index([approvalPaymentId])
 }
+
 model ClinicianOnboardingPayment {
-  id                    String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  clinicianId            String
-  onboardingId           String
+  clinicianId  String
+  onboardingId String
 
-  amountCents            Int
-  currency               String   @default("ZAR")
+  amountCents Int
+  currency    String @default("ZAR")
 
-  provider               String   // paystack | eft | manual | internal
-  status                 String   @default("pending") // pending | confirmed | captured | failed | cancelled | redeemed
+  provider String // paystack | eft | manual | internal
+  status   String @default("pending") // pending | confirmed | captured | failed | cancelled | redeemed
 
-  providerReference      String?  @unique
-  paymentReference       String?
-  payerName              String?
-  originBank             String?
-  paymentDate            DateTime?
-  proofOfPaymentUrl      String?
+  providerReference String?   @unique
+  paymentReference  String?
+  payerName         String?
+  originBank        String?
+  paymentDate       DateTime?
+  proofOfPaymentUrl String?
 
-  authorisationCodeHash  String?  @unique
+  authorisationCodeHash  String?   @unique
   authorisationCodeHint  String?
   authorisationExpiresAt DateTime?
   authorisationUsedAt    DateTime?
 
-  confirmedByUserId      String?
-  confirmedAt            DateTime?
+  confirmedByUserId String?
+  confirmedAt       DateTime?
 
-  meta                   Json?
+  meta Json?
 
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  onboarding             ClinicianOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
+  onboarding ClinicianOnboarding @relation(fields: [onboardingId], references: [id], onDelete: Cascade)
 
   @@index([clinicianId])
   @@index([onboardingId])
@@ -3941,47 +3941,70 @@ model ClinicianOnboardingPayment {
 }
 
 model ClinicianOnboardingSetting {
-  id                   String   @id @default("default")
+  id String @id @default("default")
 
-  trainingFeeCents          Int     @default(0)
+  trainingFeeCents           Int     @default(0)
   minimumInitialPaymentCents Int     @default(0)
   allowPartialPayment        Boolean @default(false)
   balanceRecoveryMode        String  @default("manual") // manual | payout_deduction | disabled
   balanceRecoveryNotes       String?
-  currency                  String  @default("ZAR") @db.VarChar(3)
-  paymentProvider      String   @default("paystack")
+  currency                   String  @default("ZAR") @db.VarChar(3)
+  paymentProvider            String  @default("paystack")
 
-  cardPaymentEnabled   Boolean  @default(true)
-  manualPaymentEnabled Boolean  @default(true)
+  cardPaymentEnabled   Boolean @default(true)
+  manualPaymentEnabled Boolean @default(true)
 
-  starterKitItems      Json?
-  bankInstructions     Json?
-  commercialPathways  Json?
-  notes                String?
+  starterKitItems        Json?
+  starterKitDepositItems Json?
+  bankInstructions       Json?
+  commercialPathways     Json?
+  trainingPolicy         Json?
+  notes                  String?
 
-  updatedByUserId      String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([paymentProvider])
   @@index([cardPaymentEnabled])
   @@index([manualPaymentEnabled])
 }
-model ClinicianTrainingSlot {
-  id          String                @id @default(cuid())
-  startsAt    DateTime
-  endsAt      DateTime
-  capacity    Int                   @default(1)
-  usedCount   Int                   @default(0)
-  mode        String                @default("virtual")
-  meetingUrl  String?
-  trainerName String?
-  createdAt   DateTime              @default(now())
-  updatedAt   DateTime              @updatedAt
-  onboardings ClinicianOnboarding[]
 
+model ClinicianTrainingSlot {
+  id                   String                @id @default(cuid())
+  title                String                @default("Mandatory Clinician Training")
+  summary              String?
+  status               String                @default("draft")
+  startsAt             DateTime
+  endsAt               DateTime
+  timezone             String                @default("Africa/Johannesburg")
+  durationDays         Int                   @default(1)
+  totalDurationMinutes Int                   @default(60)
+  capacity             Int                   @default(1)
+  usedCount            Int                   @default(0)
+  mode                 String                @default("virtual")
+  allowedModes         Json?
+  sessions             Json?
+  meetingUrl           String?
+  trainerName          String?
+  venueName            String?
+  venueAddress         String?
+  virtualInstructions  String?
+  inPersonInstructions String?
+  bookingOpensAt       DateTime?
+  bookingClosesAt      DateTime?
+  publishedAt          DateTime?
+  publishedByUserId    String?
+  cancelledAt          DateTime?
+  cancelledByUserId    String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  onboardings          ClinicianOnboarding[]
+
+  @@index([status, startsAt])
   @@index([startsAt])
   @@index([mode])
+  @@index([publishedAt])
 }
 
 model ClinicianDispatch {
@@ -4382,8 +4405,6 @@ enum MedReachEarningActorType {
   LAB
   PHLEB
 }
-
-
 
 enum MedReachLabReviewStatus {
   PENDING
@@ -6225,10 +6246,10 @@ model ClientOrgApiClient {
 }
 
 model CarePortGlobalProduct {
-  id               String   @id @default(cuid())
-  orgId            String   @default("org-default")
-  globalProductKey String   @unique @db.VarChar(180)
-  canonicalName    String   @db.VarChar(500)
+  id               String @id @default(cuid())
+  orgId            String @default("org-default")
+  globalProductKey String @unique @db.VarChar(180)
+  canonicalName    String @db.VarChar(500)
 
   productType          String  @default("MEDICATION") @db.VarChar(60)
   category             String? @db.VarChar(120)
@@ -6241,8 +6262,8 @@ model CarePortGlobalProduct {
   brand        String? @db.VarChar(160)
   manufacturer String? @db.VarChar(160)
   description  String?
-  imageUrl      String?
-  packSize      String? @db.VarChar(120)
+  imageUrl     String?
+  packSize     String? @db.VarChar(120)
 
   dosageForm String? @db.VarChar(120)
   strength   String? @db.VarChar(120)
@@ -6284,10 +6305,10 @@ model CarePortGlobalProduct {
 }
 
 model CarePortGlobalProductCode {
-  id               String   @id @default(cuid())
-  orgId            String   @default("org-default")
-  globalProductId  String   @db.VarChar(191)
-  globalProductKey String   @db.VarChar(180)
+  id               String @id @default(cuid())
+  orgId            String @default("org-default")
+  globalProductId  String @db.VarChar(191)
+  globalProductKey String @db.VarChar(180)
 
   system  String  @db.VarChar(80)
   code    String  @db.VarChar(180)
@@ -6312,15 +6333,15 @@ model CarePortGlobalProductCode {
 }
 
 model CarePortPharmacySkuGlobalProductMap {
-  id               String   @id @default(cuid())
-  orgId            String   @default("org-default")
+  id               String  @id @default(cuid())
+  orgId            String  @default("org-default")
   pharmacyId       String
   skuId            String
-  globalProductId  String?  @db.VarChar(191)
-  globalProductKey String   @db.VarChar(180)
+  globalProductId  String? @db.VarChar(191)
+  globalProductKey String  @db.VarChar(180)
 
-  matchSource String @default("NORMALISATION") @db.VarChar(80)
-  matchStatus String @default("ACTIVE") @db.VarChar(80)
+  matchSource String  @default("NORMALISATION") @db.VarChar(80)
+  matchStatus String  @default("ACTIVE") @db.VarChar(80)
   confidence  Float?
   notes       String?
 
@@ -6355,41 +6376,41 @@ model CarePortPharmacySkuGlobalProductMap {
 // existing auth/user/provider models while the operational APIs are built.
 
 model StaffPayrollProfile {
-  id                    String   @id @default(cuid())
-  staffUserId            String
-  staffDisplayName       String?
-  staffEmail             String?
-  staffRole              String?  @db.VarChar(120)
-  departmentId           String?
-  designationId          String?
+  id               String  @id @default(cuid())
+  staffUserId      String
+  staffDisplayName String?
+  staffEmail       String?
+  staffRole        String? @db.VarChar(120)
+  departmentId     String?
+  designationId    String?
 
-  employmentType         String   @default("permanent") @db.VarChar(80)
-  payrollStatus          String   @default("draft") @db.VarChar(80)
-  country                String   @default("ZA") @db.VarChar(2)
-  currency               String   @default("ZAR") @db.VarChar(3)
+  employmentType String @default("permanent") @db.VarChar(80)
+  payrollStatus  String @default("draft") @db.VarChar(80)
+  country        String @default("ZA") @db.VarChar(2)
+  currency       String @default("ZAR") @db.VarChar(3)
 
-  baseSalaryCents        Int      @default(0)
-  hourlyRateCents        Int      @default(0)
-  defaultHoursPerPeriod  Decimal? @db.Decimal(10, 2)
-  payFrequency           String   @default("monthly") @db.VarChar(80)
+  baseSalaryCents       Int      @default(0)
+  hourlyRateCents       Int      @default(0)
+  defaultHoursPerPeriod Decimal? @db.Decimal(10, 2)
+  payFrequency          String   @default("monthly") @db.VarChar(80)
 
-  commissionEligible     Boolean  @default(false)
-  commissionMode         String   @default("none") @db.VarChar(80)
+  commissionEligible Boolean @default(false)
+  commissionMode     String  @default("none") @db.VarChar(80)
 
-  taxNumber              String?
-  payrollNumber          String?
-  employerReference      String?
-  startDate              DateTime?
-  endDate                DateTime?
+  taxNumber         String?
+  payrollNumber     String?
+  employerReference String?
+  startDate         DateTime?
+  endDate           DateTime?
 
-  profileMeta            Json?
-  payrollMeta            Json?
-  approvalStatus         String   @default("pending") @db.VarChar(80)
-  approvedByUserId       String?
-  approvedAt             DateTime?
+  profileMeta      Json?
+  payrollMeta      Json?
+  approvalStatus   String    @default("pending") @db.VarChar(80)
+  approvedByUserId String?
+  approvedAt       DateTime?
 
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([staffUserId])
   @@index([staffEmail])
@@ -6400,9 +6421,9 @@ model StaffPayrollProfile {
 }
 
 model StaffBankAccount {
-  id                    String   @id @default(cuid())
-  staffUserId            String
-  payrollProfileId       String?
+  id               String  @id @default(cuid())
+  staffUserId      String
+  payrollProfileId String?
 
   accountHolderName      String?
   bankName               String?
@@ -6410,23 +6431,23 @@ model StaffBankAccount {
   branchCode             String?
   accountNumberMasked    String?
   accountNumberEncrypted String?
-  accountType            String?  @db.VarChar(80)
-  country                String   @default("ZA") @db.VarChar(2)
-  currency               String   @default("ZAR") @db.VarChar(3)
+  accountType            String? @db.VarChar(80)
+  country                String  @default("ZA") @db.VarChar(2)
+  currency               String  @default("ZAR") @db.VarChar(3)
 
-  paystackRecipientCode  String?
-  verificationStatus     String   @default("unverified") @db.VarChar(80)
-  verificationProvider   String?
-  verifiedAt             DateTime?
+  paystackRecipientCode String?
+  verificationStatus    String    @default("unverified") @db.VarChar(80)
+  verificationProvider  String?
+  verifiedAt            DateTime?
 
-  isPrimary              Boolean  @default(false)
-  active                 Boolean  @default(true)
+  isPrimary Boolean @default(false)
+  active    Boolean @default(true)
 
-  meta                   Json?
-  createdByUserId        String?
-  updatedByUserId        String?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  meta            Json?
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([staffUserId])
   @@index([payrollProfileId])
@@ -6435,22 +6456,22 @@ model StaffBankAccount {
 }
 
 model PayrollPeriod {
-  id              String   @id @default(cuid())
-  label           String
-  periodType      String   @default("monthly") @db.VarChar(80)
-  startsAt        DateTime
-  endsAt          DateTime
-  payDate         DateTime?
-  country         String   @default("ZA") @db.VarChar(2)
-  currency        String   @default("ZAR") @db.VarChar(3)
+  id         String    @id @default(cuid())
+  label      String
+  periodType String    @default("monthly") @db.VarChar(80)
+  startsAt   DateTime
+  endsAt     DateTime
+  payDate    DateTime?
+  country    String    @default("ZA") @db.VarChar(2)
+  currency   String    @default("ZAR") @db.VarChar(3)
 
-  status          String   @default("draft") @db.VarChar(80)
-  lockedAt        DateTime?
-  lockedByUserId  String?
+  status         String    @default("draft") @db.VarChar(80)
+  lockedAt       DateTime?
+  lockedByUserId String?
 
-  meta            Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([startsAt, endsAt])
   @@index([status])
@@ -6458,31 +6479,31 @@ model PayrollPeriod {
 }
 
 model PayrollRun {
-  id              String   @id @default(cuid())
+  id              String @id @default(cuid())
   payrollPeriodId String
-  runType         String   @default("regular") @db.VarChar(80)
-  status          String   @default("draft") @db.VarChar(80)
+  runType         String @default("regular") @db.VarChar(80)
+  status          String @default("draft") @db.VarChar(80)
 
-  staffCount      Int      @default(0)
-  grossCents      Int      @default(0)
-  allowanceCents  Int      @default(0)
-  commissionCents Int      @default(0)
-  deductionCents  Int      @default(0)
-  employerCostCents Int    @default(0)
-  netPayCents     Int      @default(0)
-  arrearsCreatedCents Int  @default(0)
-  arrearsPaidCents    Int  @default(0)
-  currency        String   @default("ZAR") @db.VarChar(3)
+  staffCount          Int    @default(0)
+  grossCents          Int    @default(0)
+  allowanceCents      Int    @default(0)
+  commissionCents     Int    @default(0)
+  deductionCents      Int    @default(0)
+  employerCostCents   Int    @default(0)
+  netPayCents         Int    @default(0)
+  arrearsCreatedCents Int    @default(0)
+  arrearsPaidCents    Int    @default(0)
+  currency            String @default("ZAR") @db.VarChar(3)
 
   generatedByUserId String?
-  generatedAt     DateTime?
-  approvedByUserId String?
-  approvedAt      DateTime?
-  paidAt          DateTime?
+  generatedAt       DateTime?
+  approvedByUserId  String?
+  approvedAt        DateTime?
+  paidAt            DateTime?
 
-  meta            Json?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([payrollPeriodId])
   @@index([status])
@@ -6491,39 +6512,39 @@ model PayrollRun {
 }
 
 model Payslip {
-  id                String   @id @default(cuid())
-  payrollRunId       String?
-  payrollPeriodId    String
-  staffUserId        String
-  payrollProfileId   String?
+  id               String  @id @default(cuid())
+  payrollRunId     String?
+  payrollPeriodId  String
+  staffUserId      String
+  payrollProfileId String?
 
-  payslipNumber      String?  @unique
-  status             String   @default("draft") @db.VarChar(80)
+  payslipNumber String? @unique
+  status        String  @default("draft") @db.VarChar(80)
 
-  grossSalaryCents   Int      @default(0)
-  allowanceCents     Int      @default(0)
-  commissionCents    Int      @default(0)
-  arrearsPaidCents   Int      @default(0)
-  deductionCents     Int      @default(0)
-  taxWithholdingCents Int     @default(0)
-  uifCents           Int      @default(0)
-  pensionCents       Int      @default(0)
-  netPayCents        Int      @default(0)
-  unpaidBalanceCents Int      @default(0)
-  currency           String   @default("ZAR") @db.VarChar(3)
+  grossSalaryCents    Int    @default(0)
+  allowanceCents      Int    @default(0)
+  commissionCents     Int    @default(0)
+  arrearsPaidCents    Int    @default(0)
+  deductionCents      Int    @default(0)
+  taxWithholdingCents Int    @default(0)
+  uifCents            Int    @default(0)
+  pensionCents        Int    @default(0)
+  netPayCents         Int    @default(0)
+  unpaidBalanceCents  Int    @default(0)
+  currency            String @default("ZAR") @db.VarChar(3)
 
-  documentUrl        String?
-  pdfObjectKey       String?
-  issuedAt           DateTime?
-  approvedByUserId   String?
-  approvedAt         DateTime?
-  paidAt             DateTime?
+  documentUrl      String?
+  pdfObjectKey     String?
+  issuedAt         DateTime?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  paidAt           DateTime?
 
-  employerNote       String?
-  staffNote          String?
-  meta               Json?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  employerNote String?
+  staffNote    String?
+  meta         Json?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([staffUserId])
   @@index([payrollPeriodId])
@@ -6533,21 +6554,21 @@ model Payslip {
 }
 
 model PayslipLineItem {
-  id              String   @id @default(cuid())
-  payslipId        String
-  staffUserId      String?
-  lineType         String   @db.VarChar(80)
-  label            String
-  description      String?
-  amountCents      Int
-  currency         String   @default("ZAR") @db.VarChar(3)
-  taxable          Boolean  @default(false)
-  affectsNetPay    Boolean  @default(true)
-  sourceType       String?  @db.VarChar(120)
-  sourceId         String?
-  meta             Json?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id            String   @id @default(cuid())
+  payslipId     String
+  staffUserId   String?
+  lineType      String   @db.VarChar(80)
+  label         String
+  description   String?
+  amountCents   Int
+  currency      String   @default("ZAR") @db.VarChar(3)
+  taxable       Boolean  @default(false)
+  affectsNetPay Boolean  @default(true)
+  sourceType    String?  @db.VarChar(120)
+  sourceId      String?
+  meta          Json?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   @@index([payslipId])
   @@index([staffUserId])
@@ -6556,28 +6577,28 @@ model PayslipLineItem {
 }
 
 model StaffSalaryAccrual {
-  id              String   @id @default(cuid())
+  id               String  @id @default(cuid())
   staffUserId      String
   payrollProfileId String?
   payrollPeriodId  String?
   payslipId        String?
 
-  accrualType      String   @default("salary") @db.VarChar(80)
-  status           String   @default("accrued") @db.VarChar(80)
-  earnedFrom       DateTime
-  earnedTo         DateTime
+  accrualType String   @default("salary") @db.VarChar(80)
+  status      String   @default("accrued") @db.VarChar(80)
+  earnedFrom  DateTime
+  earnedTo    DateTime
 
-  grossCents       Int      @default(0)
-  netExpectedCents Int      @default(0)
-  paidCents        Int      @default(0)
-  unpaidCents      Int      @default(0)
-  currency         String   @default("ZAR") @db.VarChar(3)
+  grossCents       Int    @default(0)
+  netExpectedCents Int    @default(0)
+  paidCents        Int    @default(0)
+  unpaidCents      Int    @default(0)
+  currency         String @default("ZAR") @db.VarChar(3)
 
-  sourceType       String?  @db.VarChar(120)
-  sourceId         String?
-  meta             Json?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  sourceType String?  @db.VarChar(120)
+  sourceId   String?
+  meta       Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
   @@index([staffUserId])
   @@index([payrollPeriodId])
@@ -6587,34 +6608,34 @@ model StaffSalaryAccrual {
 }
 
 model StaffArrearsLedger {
-  id                String   @id @default(cuid())
-  staffUserId        String
-  payrollProfileId   String?
-  payrollPeriodId    String?
-  payslipId          String?
-  salaryAccrualId    String?
+  id               String  @id @default(cuid())
+  staffUserId      String
+  payrollProfileId String?
+  payrollPeriodId  String?
+  payslipId        String?
+  salaryAccrualId  String?
 
-  entryType          String   @db.VarChar(80)
-  status             String   @default("open") @db.VarChar(80)
-  description        String?
+  entryType   String  @db.VarChar(80)
+  status      String  @default("open") @db.VarChar(80)
+  description String?
 
-  debitCents         Int      @default(0)
-  creditCents        Int      @default(0)
-  balanceAfterCents  Int      @default(0)
-  currency           String   @default("ZAR") @db.VarChar(3)
+  debitCents        Int    @default(0)
+  creditCents       Int    @default(0)
+  balanceAfterCents Int    @default(0)
+  currency          String @default("ZAR") @db.VarChar(3)
 
-  dueDate            DateTime?
-  effectiveAt        DateTime @default(now())
+  dueDate     DateTime?
+  effectiveAt DateTime  @default(now())
 
-  sourceType         String?  @db.VarChar(120)
-  sourceId           String?
-  batchId            String?
-  approvedByUserId   String?
-  approvedAt         DateTime?
+  sourceType       String?   @db.VarChar(120)
+  sourceId         String?
+  batchId          String?
+  approvedByUserId String?
+  approvedAt       DateTime?
 
-  meta               Json?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([staffUserId])
   @@index([status])
@@ -6625,33 +6646,33 @@ model StaffArrearsLedger {
 }
 
 model PayrollPaymentBatch {
-  id                String   @id @default(cuid())
-  label             String
-  batchType         String   @default("payroll") @db.VarChar(80)
-  status            String   @default("draft") @db.VarChar(80)
+  id        String @id @default(cuid())
+  label     String
+  batchType String @default("payroll") @db.VarChar(80)
+  status    String @default("draft") @db.VarChar(80)
 
-  staffCount        Int      @default(0)
-  allocationCount   Int      @default(0)
-  totalAmountCents  Int      @default(0)
-  paidAmountCents   Int      @default(0)
-  failedAmountCents Int      @default(0)
-  currency          String   @default("ZAR") @db.VarChar(3)
+  staffCount        Int    @default(0)
+  allocationCount   Int    @default(0)
+  totalAmountCents  Int    @default(0)
+  paidAmountCents   Int    @default(0)
+  failedAmountCents Int    @default(0)
+  currency          String @default("ZAR") @db.VarChar(3)
 
-  paymentMethod     String   @default("manual") @db.VarChar(80)
-  paystackBatchRef  String?
-  manualReference   String?
+  paymentMethod    String  @default("manual") @db.VarChar(80)
+  paystackBatchRef String?
+  manualReference  String?
 
-  createdByUserId   String?
-  approvedByUserId  String?
-  approvedAt        DateTime?
-  submittedAt       DateTime?
-  completedAt       DateTime?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  submittedAt      DateTime?
+  completedAt      DateTime?
 
-  filtersMeta       Json?
-  resultMeta        Json?
-  meta              Json?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  filtersMeta Json?
+  resultMeta  Json?
+  meta        Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([status])
   @@index([batchType])
@@ -6660,32 +6681,32 @@ model PayrollPaymentBatch {
 }
 
 model PayrollPaymentAllocation {
-  id                   String   @id @default(cuid())
-  paymentBatchId        String?
-  staffUserId           String
-  payslipId             String?
-  arrearsLedgerEntryId  String?
-  salaryAccrualId       String?
+  id                   String  @id @default(cuid())
+  paymentBatchId       String?
+  staffUserId          String
+  payslipId            String?
+  arrearsLedgerEntryId String?
+  salaryAccrualId      String?
 
-  allocationType        String   @default("arrears_payment") @db.VarChar(80)
-  status                String   @default("pending") @db.VarChar(80)
-  amountCents           Int
-  currency              String   @default("ZAR") @db.VarChar(3)
+  allocationType String @default("arrears_payment") @db.VarChar(80)
+  status         String @default("pending") @db.VarChar(80)
+  amountCents    Int
+  currency       String @default("ZAR") @db.VarChar(3)
 
-  paymentMethod         String   @default("manual") @db.VarChar(80)
-  paymentReference      String?
-  paystackTransferCode  String?
-  paystackReference     String?
-  failureReason         String?
+  paymentMethod        String  @default("manual") @db.VarChar(80)
+  paymentReference     String?
+  paystackTransferCode String?
+  paystackReference    String?
+  failureReason        String?
 
-  allocatedAt           DateTime?
-  paidAt                DateTime?
-  reconciledByUserId    String?
-  reconciledAt          DateTime?
+  allocatedAt        DateTime?
+  paidAt             DateTime?
+  reconciledByUserId String?
+  reconciledAt       DateTime?
 
-  meta                  Json?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([paymentBatchId])
   @@index([staffUserId])
@@ -6696,24 +6717,24 @@ model PayrollPaymentAllocation {
 }
 
 model StaffPayrollDispute {
-  id                String   @id @default(cuid())
-  staffUserId        String
-  payslipId          String?
+  id                   String  @id @default(cuid())
+  staffUserId          String
+  payslipId            String?
   arrearsLedgerEntryId String?
 
-  disputeType        String   @default("payroll_query") @db.VarChar(80)
-  status             String   @default("open") @db.VarChar(80)
-  subject            String
-  message            String
-  resolutionNote     String?
+  disputeType    String  @default("payroll_query") @db.VarChar(80)
+  status         String  @default("open") @db.VarChar(80)
+  subject        String
+  message        String
+  resolutionNote String?
 
-  raisedAt           DateTime @default(now())
-  resolvedAt         DateTime?
-  resolvedByUserId   String?
+  raisedAt         DateTime  @default(now())
+  resolvedAt       DateTime?
+  resolvedByUserId String?
 
-  meta               Json?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([staffUserId])
   @@index([status])
@@ -6722,29 +6743,29 @@ model StaffPayrollDispute {
 }
 
 model CommissionPolicy {
-  id                  String   @id @default(cuid())
-  name                String
-  description         String?
-  sourceType          String   @db.VarChar(120)
-  appliesToRole       String?  @db.VarChar(120)
+  id            String  @id @default(cuid())
+  name          String
+  description   String?
+  sourceType    String  @db.VarChar(120)
+  appliesToRole String? @db.VarChar(120)
 
-  calculationMode     String   @default("manual") @db.VarChar(80)
-  rateBps             Int      @default(0)
-  flatAmountCents     Int      @default(0)
-  thresholdCents      Int      @default(0)
-  currency            String   @default("ZAR") @db.VarChar(3)
+  calculationMode String @default("manual") @db.VarChar(80)
+  rateBps         Int    @default(0)
+  flatAmountCents Int    @default(0)
+  thresholdCents  Int    @default(0)
+  currency        String @default("ZAR") @db.VarChar(3)
 
-  active              Boolean  @default(true)
-  requiresApproval    Boolean  @default(true)
-  startsAt            DateTime?
-  endsAt              DateTime?
+  active           Boolean   @default(true)
+  requiresApproval Boolean   @default(true)
+  startsAt         DateTime?
+  endsAt           DateTime?
 
-  ruleMeta            Json?
-  createdByUserId     String?
-  approvedByUserId    String?
-  approvedAt          DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  ruleMeta         Json?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([sourceType])
   @@index([active])
@@ -6752,24 +6773,24 @@ model CommissionPolicy {
 }
 
 model CommissionEvent {
-  id                    String   @id @default(cuid())
-  sourceType             String   @db.VarChar(120)
-  sourceId               String
-  staffUserId            String?
+  id          String  @id @default(cuid())
+  sourceType  String  @db.VarChar(120)
+  sourceId    String
+  staffUserId String?
 
-  eventStatus            String   @default("pending_review") @db.VarChar(80)
-  occurredAt             DateTime @default(now())
+  eventStatus String   @default("pending_review") @db.VarChar(80)
+  occurredAt  DateTime @default(now())
 
-  grossSourceValueCents  Int      @default(0)
-  calculatedCommissionCents Int   @default(0)
-  currency               String   @default("ZAR") @db.VarChar(3)
+  grossSourceValueCents     Int    @default(0)
+  calculatedCommissionCents Int    @default(0)
+  currency                  String @default("ZAR") @db.VarChar(3)
 
-  policyId               String?
-  module                 String?  @db.VarChar(80)
-  attributionMeta        Json?
-  sourceMeta             Json?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  policyId        String?
+  module          String?  @db.VarChar(80)
+  attributionMeta Json?
+  sourceMeta      Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@unique([sourceType, sourceId, staffUserId])
   @@index([staffUserId])
@@ -6779,29 +6800,29 @@ model CommissionEvent {
 }
 
 model CommissionAward {
-  id                    String   @id @default(cuid())
-  commissionEventId      String?
-  staffUserId            String
+  id                String  @id @default(cuid())
+  commissionEventId String?
+  staffUserId       String
 
-  status                 String   @default("draft") @db.VarChar(80)
-  calculatedAmountCents  Int      @default(0)
-  approvedAmountCents    Int      @default(0)
-  paidAmountCents        Int      @default(0)
-  currency               String   @default("ZAR") @db.VarChar(3)
+  status                String @default("draft") @db.VarChar(80)
+  calculatedAmountCents Int    @default(0)
+  approvedAmountCents   Int    @default(0)
+  paidAmountCents       Int    @default(0)
+  currency              String @default("ZAR") @db.VarChar(3)
 
-  payrollPeriodId        String?
-  payslipId              String?
-  paymentAllocationId    String?
+  payrollPeriodId     String?
+  payslipId           String?
+  paymentAllocationId String?
 
-  approvedByUserId       String?
-  approvedAt             DateTime?
-  rejectedByUserId       String?
-  rejectedAt             DateTime?
-  rejectionReason        String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  rejectedByUserId String?
+  rejectedAt       DateTime?
+  rejectionReason  String?
 
-  meta                   Json?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([staffUserId])
   @@index([commissionEventId])
@@ -6811,44 +6832,44 @@ model CommissionAward {
 }
 
 model RevenueLedgerEntry {
-  id                  String   @id @default(cuid())
-  entryType            String   @db.VarChar(100)
-  inflowCategory       String   @default("operating_revenue") @db.VarChar(100)
-  module               String?  @db.VarChar(80)
+  id             String  @id @default(cuid())
+  entryType      String  @db.VarChar(100)
+  inflowCategory String  @default("operating_revenue") @db.VarChar(100)
+  module         String? @db.VarChar(80)
 
-  sourceType           String?  @db.VarChar(120)
-  sourceId             String?
-  externalReference    String?
-  paymentProvider      String?
-  providerEventId      String?
+  sourceType        String? @db.VarChar(120)
+  sourceId          String?
+  externalReference String?
+  paymentProvider   String?
+  providerEventId   String?
 
-  description          String?
-  counterpartyName     String?
-  counterpartyEmail    String?
+  description       String?
+  counterpartyName  String?
+  counterpartyEmail String?
 
-  grossAmountCents     Int      @default(0)
-  refundAmountCents    Int      @default(0)
-  providerFeeCents     Int      @default(0)
-  platformFeeCents     Int      @default(0)
-  netPlatformRevenueCents Int   @default(0)
-  amountReceivedCents  Int      @default(0)
-  currency             String   @default("ZAR") @db.VarChar(3)
+  grossAmountCents        Int    @default(0)
+  refundAmountCents       Int    @default(0)
+  providerFeeCents        Int    @default(0)
+  platformFeeCents        Int    @default(0)
+  netPlatformRevenueCents Int    @default(0)
+  amountReceivedCents     Int    @default(0)
+  currency                String @default("ZAR") @db.VarChar(3)
 
-  recognitionStatus    String   @default("pending") @db.VarChar(80)
-  paymentStatus        String   @default("unreconciled") @db.VarChar(80)
-  occurredAt           DateTime @default(now())
-  recognisedAt         DateTime?
-  reconciledAt         DateTime?
-  reconciledByUserId   String?
+  recognitionStatus  String    @default("pending") @db.VarChar(80)
+  paymentStatus      String    @default("unreconciled") @db.VarChar(80)
+  occurredAt         DateTime  @default(now())
+  recognisedAt       DateTime?
+  reconciledAt       DateTime?
+  reconciledByUserId String?
 
-  manualEntry          Boolean  @default(false)
-  createdByUserId      String?
-  approvedByUserId     String?
-  approvedAt           DateTime?
+  manualEntry      Boolean   @default(false)
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
 
-  meta                 Json?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([entryType])
   @@index([inflowCategory])
@@ -6861,31 +6882,31 @@ model RevenueLedgerEntry {
 }
 
 model FinanceReportSnapshot {
-  id                       String   @id @default(cuid())
-  reportType                String   @db.VarChar(120)
-  label                     String
-  periodStart               DateTime?
-  periodEnd                 DateTime?
-  currency                  String   @default("ZAR") @db.VarChar(3)
+  id          String    @id @default(cuid())
+  reportType  String    @db.VarChar(120)
+  label       String
+  periodStart DateTime?
+  periodEnd   DateTime?
+  currency    String    @default("ZAR") @db.VarChar(3)
 
-  grossRevenueCents          Int      @default(0)
-  netPlatformRevenueCents    Int      @default(0)
-  manualInflowCents          Int      @default(0)
-  investmentInflowCents      Int      @default(0)
-  contractorPayableCents     Int      @default(0)
-  payrollLiabilityCents      Int      @default(0)
-  salaryArrearsCents         Int      @default(0)
-  commissionPayableCents     Int      @default(0)
-  cashOutCents               Int      @default(0)
+  grossRevenueCents       Int @default(0)
+  netPlatformRevenueCents Int @default(0)
+  manualInflowCents       Int @default(0)
+  investmentInflowCents   Int @default(0)
+  contractorPayableCents  Int @default(0)
+  payrollLiabilityCents   Int @default(0)
+  salaryArrearsCents      Int @default(0)
+  commissionPayableCents  Int @default(0)
+  cashOutCents            Int @default(0)
 
-  snapshotMeta               Json?
-  generatedByUserId          String?
-  generatedAt                DateTime @default(now())
-  approvedByUserId           String?
-  approvedAt                 DateTime?
+  snapshotMeta      Json?
+  generatedByUserId String?
+  generatedAt       DateTime  @default(now())
+  approvedByUserId  String?
+  approvedAt        DateTime?
 
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([reportType])
   @@index([periodStart, periodEnd])
@@ -6893,18 +6914,18 @@ model FinanceReportSnapshot {
 }
 
 model PayrollAuditEvent {
-  id              String   @id @default(cuid())
-  eventType        String   @db.VarChar(120)
-  actorUserId      String?
-  actorRole        String?  @db.VarChar(120)
-  subjectType      String?  @db.VarChar(120)
-  subjectId        String?
-  staffUserId      String?
+  id          String  @id @default(cuid())
+  eventType   String  @db.VarChar(120)
+  actorUserId String?
+  actorRole   String? @db.VarChar(120)
+  subjectType String? @db.VarChar(120)
+  subjectId   String?
+  staffUserId String?
 
-  beforeMeta       Json?
-  afterMeta        Json?
-  meta             Json?
-  occurredAt       DateTime @default(now())
+  beforeMeta Json?
+  afterMeta  Json?
+  meta       Json?
+  occurredAt DateTime @default(now())
 
   @@index([eventType])
   @@index([actorUserId])
@@ -6914,58 +6935,58 @@ model PayrollAuditEvent {
 }
 
 model ShareClass {
-  id                    String   @id @default(cuid())
-  code                  String   @unique
-  name                  String
-  description           String?
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  description String?
 
-  authorisedShares      Decimal  @default(0) @db.Decimal(24, 6)
-  issuedShares          Decimal  @default(0) @db.Decimal(24, 6)
-  allocatedShares       Decimal  @default(0) @db.Decimal(24, 6)
-  unallocatedShares     Decimal  @default(0) @db.Decimal(24, 6)
+  authorisedShares  Decimal @default(0) @db.Decimal(24, 6)
+  issuedShares      Decimal @default(0) @db.Decimal(24, 6)
+  allocatedShares   Decimal @default(0) @db.Decimal(24, 6)
+  unallocatedShares Decimal @default(0) @db.Decimal(24, 6)
 
-  votingRights          String   @default("standard") @db.VarChar(120)
-  votesPerShare         Decimal  @default(1) @db.Decimal(18, 6)
+  votingRights          String  @default("standard") @db.VarChar(120)
+  votesPerShare         Decimal @default(1) @db.Decimal(18, 6)
   dividendRights        String?
   liquidationPreference String?
   transferRestrictions  String?
   conversionRights      String?
   antiDilutionRights    String?
 
-  active                Boolean  @default(true)
-  termsMeta             Json?
-  createdByUserId       String?
-  approvedByUserId      String?
-  approvedAt            DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  active           Boolean   @default(true)
+  termsMeta        Json?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([active])
 }
 
 model Shareholder {
-  id                  String   @id @default(cuid())
-  userId              String?
-  shareholderType     String   @default("individual") @db.VarChar(80)
-  displayName         String
-  legalName           String?
-  email               String?
-  phone               String?
-  country             String?  @db.VarChar(2)
+  id              String  @id @default(cuid())
+  userId          String?
+  shareholderType String  @default("individual") @db.VarChar(80)
+  displayName     String
+  legalName       String?
+  email           String?
+  phone           String?
+  country         String? @db.VarChar(2)
 
   taxIdentifierMasked String?
-  investorStatus      String   @default("active") @db.VarChar(80)
-  kycStatus           String   @default("unverified") @db.VarChar(80)
+  investorStatus      String  @default("active") @db.VarChar(80)
+  kycStatus           String  @default("unverified") @db.VarChar(80)
 
-  communicationOptIn  Boolean  @default(true)
-  portalEnabled       Boolean  @default(false)
+  communicationOptIn Boolean @default(true)
+  portalEnabled      Boolean @default(false)
 
-  profileMeta         Json?
-  createdByUserId     String?
-  approvedByUserId    String?
-  approvedAt          DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  profileMeta      Json?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([userId])
   @@index([email])
@@ -6975,31 +6996,31 @@ model Shareholder {
 }
 
 model InvestmentRound {
-  id                    String   @id @default(cuid())
-  name                  String
-  roundType             String   @default("seed") @db.VarChar(80)
-  status                String   @default("draft") @db.VarChar(80)
+  id        String @id @default(cuid())
+  name      String
+  roundType String @default("seed") @db.VarChar(80)
+  status    String @default("draft") @db.VarChar(80)
 
-  openedAt              DateTime?
-  closedAt              DateTime?
-  currency              String   @default("ZAR") @db.VarChar(3)
+  openedAt DateTime?
+  closedAt DateTime?
+  currency String    @default("ZAR") @db.VarChar(3)
 
-  targetRaiseCents       Int      @default(0)
-  committedAmountCents   Int      @default(0)
-  receivedAmountCents    Int      @default(0)
-  preMoneyValuationCents Int      @default(0)
-  postMoneyValuationCents Int     @default(0)
+  targetRaiseCents        Int @default(0)
+  committedAmountCents    Int @default(0)
+  receivedAmountCents     Int @default(0)
+  preMoneyValuationCents  Int @default(0)
+  postMoneyValuationCents Int @default(0)
 
-  instrumentType         String   @default("equity") @db.VarChar(80)
-  shareClassId           String?
-  pricePerShareCents     Int      @default(0)
+  instrumentType     String  @default("equity") @db.VarChar(80)
+  shareClassId       String?
+  pricePerShareCents Int     @default(0)
 
-  termsMeta              Json?
-  createdByUserId        String?
-  approvedByUserId       String?
-  approvedAt             DateTime?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  termsMeta        Json?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([roundType])
   @@index([status])
@@ -7008,33 +7029,33 @@ model InvestmentRound {
 }
 
 model CapitalContribution {
-  id                  String   @id @default(cuid())
-  shareholderId        String?
-  investorName         String?
-  investmentRoundId    String?
+  id                String  @id @default(cuid())
+  shareholderId     String?
+  investorName      String?
+  investmentRoundId String?
 
-  contributionType     String   @default("investment") @db.VarChar(100)
-  status               String   @default("pending") @db.VarChar(80)
+  contributionType String @default("investment") @db.VarChar(100)
+  status           String @default("pending") @db.VarChar(80)
 
   amountCents          Int
-  currency             String   @default("ZAR") @db.VarChar(3)
+  currency             String    @default("ZAR") @db.VarChar(3)
   receivedAt           DateTime?
-  paymentMethod        String?  @db.VarChar(80)
+  paymentMethod        String?   @db.VarChar(80)
   externalReference    String?
   revenueLedgerEntryId String?
 
-  sharesIssued         Decimal? @db.Decimal(24, 6)
-  shareClassId         String?
-  pricePerShareCents   Int?
+  sharesIssued       Decimal? @db.Decimal(24, 6)
+  shareClassId       String?
+  pricePerShareCents Int?
 
-  description          String?
-  documentUrl          String?
-  meta                 Json?
-  createdByUserId      String?
-  approvedByUserId     String?
-  approvedAt           DateTime?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  description      String?
+  documentUrl      String?
+  meta             Json?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([shareholderId])
   @@index([investmentRoundId])
@@ -7045,25 +7066,25 @@ model CapitalContribution {
 }
 
 model Shareholding {
-  id                    String   @id @default(cuid())
-  shareholderId          String
-  shareClassId           String
+  id            String @id @default(cuid())
+  shareholderId String
+  shareClassId  String
 
-  sharesHeld             Decimal  @default(0) @db.Decimal(24, 6)
-  allocatedShares        Decimal  @default(0) @db.Decimal(24, 6)
-  vestedShares           Decimal  @default(0) @db.Decimal(24, 6)
-  unvestedShares         Decimal  @default(0) @db.Decimal(24, 6)
+  sharesHeld      Decimal @default(0) @db.Decimal(24, 6)
+  allocatedShares Decimal @default(0) @db.Decimal(24, 6)
+  vestedShares    Decimal @default(0) @db.Decimal(24, 6)
+  unvestedShares  Decimal @default(0) @db.Decimal(24, 6)
 
-  ownershipPercent       Decimal? @db.Decimal(10, 6)
-  fullyDilutedPercent    Decimal? @db.Decimal(10, 6)
-  votingPercent          Decimal? @db.Decimal(10, 6)
+  ownershipPercent    Decimal? @db.Decimal(10, 6)
+  fullyDilutedPercent Decimal? @db.Decimal(10, 6)
+  votingPercent       Decimal? @db.Decimal(10, 6)
 
-  status                 String   @default("active") @db.VarChar(80)
-  asOfDate               DateTime @default(now())
+  status   String   @default("active") @db.VarChar(80)
+  asOfDate DateTime @default(now())
 
-  meta                   Json?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([shareholderId])
   @@index([shareClassId])
@@ -7072,27 +7093,27 @@ model Shareholding {
 }
 
 model ShareIssuance {
-  id                  String   @id @default(cuid())
-  shareholderId        String
-  shareClassId         String
-  investmentRoundId    String?
+  id                    String  @id @default(cuid())
+  shareholderId         String
+  shareClassId          String
+  investmentRoundId     String?
   capitalContributionId String?
 
-  sharesIssued         Decimal  @db.Decimal(24, 6)
-  pricePerShareCents   Int      @default(0)
-  totalConsiderationCents Int   @default(0)
-  currency             String   @default("ZAR") @db.VarChar(3)
+  sharesIssued            Decimal @db.Decimal(24, 6)
+  pricePerShareCents      Int     @default(0)
+  totalConsiderationCents Int     @default(0)
+  currency                String  @default("ZAR") @db.VarChar(3)
 
-  issuanceType         String   @default("subscription") @db.VarChar(100)
-  status               String   @default("draft") @db.VarChar(80)
-  issuedAt             DateTime?
-  approvedByUserId     String?
-  approvedAt           DateTime?
+  issuanceType     String    @default("subscription") @db.VarChar(100)
+  status           String    @default("draft") @db.VarChar(80)
+  issuedAt         DateTime?
+  approvedByUserId String?
+  approvedAt       DateTime?
 
-  documentUrl          String?
-  meta                 Json?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  documentUrl String?
+  meta        Json?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([shareholderId])
   @@index([shareClassId])
@@ -7102,27 +7123,27 @@ model ShareIssuance {
 }
 
 model ShareTransfer {
-  id                    String   @id @default(cuid())
-  fromShareholderId      String?
-  toShareholderId        String
-  shareClassId           String
+  id                String  @id @default(cuid())
+  fromShareholderId String?
+  toShareholderId   String
+  shareClassId      String
 
-  sharesTransferred      Decimal  @db.Decimal(24, 6)
-  considerationCents     Int      @default(0)
-  currency               String   @default("ZAR") @db.VarChar(3)
+  sharesTransferred  Decimal @db.Decimal(24, 6)
+  considerationCents Int     @default(0)
+  currency           String  @default("ZAR") @db.VarChar(3)
 
-  transferType           String   @default("secondary_sale") @db.VarChar(100)
-  status                 String   @default("draft") @db.VarChar(80)
+  transferType               String  @default("secondary_sale") @db.VarChar(100)
+  status                     String  @default("draft") @db.VarChar(80)
   transferRestrictionCleared Boolean @default(false)
 
-  effectiveAt            DateTime?
-  approvedByUserId       String?
-  approvedAt             DateTime?
-  documentUrl            String?
+  effectiveAt      DateTime?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  documentUrl      String?
 
-  meta                   Json?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([fromShareholderId])
   @@index([toShareholderId])
@@ -7132,31 +7153,31 @@ model ShareTransfer {
 }
 
 model ShareOptionGrant {
-  id                  String   @id @default(cuid())
-  shareholderId        String?
-  staffUserId          String?
-  shareClassId         String
+  id            String  @id @default(cuid())
+  shareholderId String?
+  staffUserId   String?
+  shareClassId  String
 
-  grantType            String   @default("option") @db.VarChar(80)
-  status               String   @default("draft") @db.VarChar(80)
+  grantType String @default("option") @db.VarChar(80)
+  status    String @default("draft") @db.VarChar(80)
 
-  grantedShares        Decimal  @db.Decimal(24, 6)
-  vestedShares         Decimal  @default(0) @db.Decimal(24, 6)
-  exercisedShares      Decimal  @default(0) @db.Decimal(24, 6)
-  exercisePriceCents   Int      @default(0)
-  currency             String   @default("ZAR") @db.VarChar(3)
+  grantedShares      Decimal @db.Decimal(24, 6)
+  vestedShares       Decimal @default(0) @db.Decimal(24, 6)
+  exercisedShares    Decimal @default(0) @db.Decimal(24, 6)
+  exercisePriceCents Int     @default(0)
+  currency           String  @default("ZAR") @db.VarChar(3)
 
-  grantDate            DateTime?
-  vestingStartDate     DateTime?
-  vestingCliffDate     DateTime?
-  vestingEndDate       DateTime?
+  grantDate        DateTime?
+  vestingStartDate DateTime?
+  vestingCliffDate DateTime?
+  vestingEndDate   DateTime?
 
-  vestingMeta          Json?
-  documentUrl          String?
-  approvedByUserId     String?
-  approvedAt           DateTime?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  vestingMeta      Json?
+  documentUrl      String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([shareholderId])
   @@index([staffUserId])
@@ -7165,28 +7186,28 @@ model ShareOptionGrant {
 }
 
 model CapTableSnapshot {
-  id                    String   @id @default(cuid())
-  label                 String
-  snapshotDate           DateTime @default(now())
-  status                String   @default("draft") @db.VarChar(80)
+  id           String   @id @default(cuid())
+  label        String
+  snapshotDate DateTime @default(now())
+  status       String   @default("draft") @db.VarChar(80)
 
-  totalAuthorisedShares  Decimal  @default(0) @db.Decimal(24, 6)
-  totalIssuedShares      Decimal  @default(0) @db.Decimal(24, 6)
-  totalAllocatedShares   Decimal  @default(0) @db.Decimal(24, 6)
-  totalUnallocatedShares Decimal  @default(0) @db.Decimal(24, 6)
-  fullyDilutedShares     Decimal  @default(0) @db.Decimal(24, 6)
+  totalAuthorisedShares  Decimal @default(0) @db.Decimal(24, 6)
+  totalIssuedShares      Decimal @default(0) @db.Decimal(24, 6)
+  totalAllocatedShares   Decimal @default(0) @db.Decimal(24, 6)
+  totalUnallocatedShares Decimal @default(0) @db.Decimal(24, 6)
+  fullyDilutedShares     Decimal @default(0) @db.Decimal(24, 6)
 
   ordinarySharePercent   Decimal? @db.Decimal(10, 6)
   preferenceSharePercent Decimal? @db.Decimal(10, 6)
   optionPoolPercent      Decimal? @db.Decimal(10, 6)
 
-  snapshotMeta           Json?
-  publishedToShareholders Boolean @default(false)
-  generatedByUserId      String?
-  approvedByUserId       String?
-  approvedAt             DateTime?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  snapshotMeta            Json?
+  publishedToShareholders Boolean   @default(false)
+  generatedByUserId       String?
+  approvedByUserId        String?
+  approvedAt              DateTime?
+  createdAt               DateTime  @default(now())
+  updatedAt               DateTime  @updatedAt
 
   @@index([snapshotDate])
   @@index([status])
@@ -7194,27 +7215,27 @@ model CapTableSnapshot {
 }
 
 model CompanyValuationSnapshot {
-  id                    String   @id @default(cuid())
-  label                 String
-  valuationDate          DateTime @default(now())
-  valuationType          String   @default("internal") @db.VarChar(80)
-  status                String   @default("draft") @db.VarChar(80)
+  id            String   @id @default(cuid())
+  label         String
+  valuationDate DateTime @default(now())
+  valuationType String   @default("internal") @db.VarChar(80)
+  status        String   @default("draft") @db.VarChar(80)
 
-  preMoneyValuationCents Int      @default(0)
-  postMoneyValuationCents Int     @default(0)
-  enterpriseValueCents   Int      @default(0)
-  currency              String   @default("ZAR") @db.VarChar(3)
+  preMoneyValuationCents  Int    @default(0)
+  postMoneyValuationCents Int    @default(0)
+  enterpriseValueCents    Int    @default(0)
+  currency                String @default("ZAR") @db.VarChar(3)
 
-  methodology           String?
-  notes                 String?
-  valuationMeta         Json?
+  methodology             String?
+  notes                   String?
+  valuationMeta           Json?
   publishedToShareholders Boolean @default(false)
 
-  createdByUserId       String?
-  approvedByUserId      String?
-  approvedAt            DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([valuationDate])
   @@index([valuationType])
@@ -7223,24 +7244,24 @@ model CompanyValuationSnapshot {
 }
 
 model ShareholderAnnouncement {
-  id                    String   @id @default(cuid())
-  title                 String
-  body                  String
-  announcementType      String   @default("general") @db.VarChar(100)
-  status                String   @default("draft") @db.VarChar(80)
+  id               String @id @default(cuid())
+  title            String
+  body             String
+  announcementType String @default("general") @db.VarChar(100)
+  status           String @default("draft") @db.VarChar(80)
 
-  visibleToShareholders Boolean  @default(false)
+  visibleToShareholders Boolean   @default(false)
   visibleFrom           DateTime?
   expiresAt             DateTime?
 
-  createdByUserId       String?
-  approvedByUserId      String?
-  approvedAt            DateTime?
-  publishedAt           DateTime?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  publishedAt      DateTime?
 
-  meta                  Json?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([announcementType])
   @@index([status])
@@ -7249,28 +7270,28 @@ model ShareholderAnnouncement {
 }
 
 model ShareholderDocument {
-  id                    String   @id @default(cuid())
-  title                 String
-  documentType          String   @db.VarChar(100)
-  objectKey             String?
-  fileUrl               String?
-  status                String   @default("draft") @db.VarChar(80)
+  id           String  @id @default(cuid())
+  title        String
+  documentType String  @db.VarChar(100)
+  objectKey    String?
+  fileUrl      String?
+  status       String  @default("draft") @db.VarChar(80)
 
-  shareholderId         String?
-  investmentRoundId     String?
-  annualReturnId        String?
-  boardResolutionId     String?
+  shareholderId     String?
+  investmentRoundId String?
+  annualReturnId    String?
+  boardResolutionId String?
 
-  visibleToShareholders Boolean  @default(false)
-  downloadable          Boolean  @default(true)
+  visibleToShareholders Boolean @default(false)
+  downloadable          Boolean @default(true)
 
-  documentMeta          Json?
-  uploadedByUserId      String?
-  approvedByUserId      String?
-  approvedAt            DateTime?
-  publishedAt           DateTime?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  documentMeta     Json?
+  uploadedByUserId String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  publishedAt      DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   @@index([documentType])
   @@index([shareholderId])
@@ -7279,22 +7300,22 @@ model ShareholderDocument {
 }
 
 model AnnualReturn {
-  id                    String   @id @default(cuid())
-  financialYear         String
-  status                String   @default("draft") @db.VarChar(80)
+  id            String @id @default(cuid())
+  financialYear String
+  status        String @default("draft") @db.VarChar(80)
 
-  preparedByUserId      String?
-  approvedByUserId      String?
-  approvedAt            DateTime?
-  filedAt               DateTime?
+  preparedByUserId String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  filedAt          DateTime?
 
   reportSnapshotId      String?
   documentUrl           String?
   annualReturnMeta      Json?
-  visibleToShareholders Boolean  @default(false)
+  visibleToShareholders Boolean @default(false)
 
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([financialYear])
   @@index([status])
@@ -7302,24 +7323,24 @@ model AnnualReturn {
 }
 
 model BoardResolution {
-  id                    String   @id @default(cuid())
-  title                 String
-  resolutionType        String   @default("board") @db.VarChar(100)
-  status                String   @default("draft") @db.VarChar(80)
+  id             String @id @default(cuid())
+  title          String
+  resolutionType String @default("board") @db.VarChar(100)
+  status         String @default("draft") @db.VarChar(80)
 
-  resolutionDate        DateTime?
-  effectiveDate         DateTime?
-  summary               String?
-  documentUrl           String?
+  resolutionDate DateTime?
+  effectiveDate  DateTime?
+  summary        String?
+  documentUrl    String?
 
-  visibleToShareholders Boolean  @default(false)
+  visibleToShareholders Boolean   @default(false)
   passedByUserId        String?
   approvedByUserId      String?
   approvedAt            DateTime?
 
-  meta                  Json?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([resolutionType])
   @@index([status])
@@ -7328,25 +7349,25 @@ model BoardResolution {
 }
 
 model AGMNotice {
-  id                    String   @id @default(cuid())
-  title                 String
-  meetingDate           DateTime
-  status                String   @default("draft") @db.VarChar(80)
+  id          String   @id @default(cuid())
+  title       String
+  meetingDate DateTime
+  status      String   @default("draft") @db.VarChar(80)
 
-  venue                 String?
-  virtualJoinUrl        String?
-  agenda                String?
-  documentUrl           String?
+  venue          String?
+  virtualJoinUrl String?
+  agenda         String?
+  documentUrl    String?
 
-  visibleToShareholders Boolean  @default(false)
+  visibleToShareholders Boolean   @default(false)
   publishedAt           DateTime?
   createdByUserId       String?
   approvedByUserId      String?
   approvedAt            DateTime?
 
-  meta                  Json?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([meetingDate])
   @@index([status])
@@ -7354,30 +7375,30 @@ model AGMNotice {
 }
 
 model ShareSaleNotice {
-  id                    String   @id @default(cuid())
-  title                 String
-  shareClassId           String?
-  sellerShareholderId    String?
+  id                  String  @id @default(cuid())
+  title               String
+  shareClassId        String?
+  sellerShareholderId String?
 
-  sharesAvailable        Decimal? @db.Decimal(24, 6)
+  sharesAvailable          Decimal? @db.Decimal(24, 6)
   askingPricePerShareCents Int?
-  currency               String   @default("ZAR") @db.VarChar(3)
-  status                 String   @default("draft") @db.VarChar(80)
+  currency                 String   @default("ZAR") @db.VarChar(3)
+  status                   String   @default("draft") @db.VarChar(80)
 
-  saleTerms              String?
-  restrictionNotes       String?
-  visibleToShareholders  Boolean  @default(false)
-  opensAt                DateTime?
-  closesAt               DateTime?
+  saleTerms             String?
+  restrictionNotes      String?
+  visibleToShareholders Boolean   @default(false)
+  opensAt               DateTime?
+  closesAt              DateTime?
 
-  createdByUserId        String?
-  approvedByUserId       String?
-  approvedAt             DateTime?
-  publishedAt            DateTime?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  publishedAt      DateTime?
 
-  meta                   Json?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([shareClassId])
   @@index([sellerShareholderId])
@@ -7387,28 +7408,28 @@ model ShareSaleNotice {
 }
 
 model ShareholderAccessGrant {
-  id                    String   @id @default(cuid())
-  shareholderId          String
-  userId                 String?
-  email                  String?
+  id            String  @id @default(cuid())
+  shareholderId String
+  userId        String?
+  email         String?
 
-  accessStatus           String   @default("pending") @db.VarChar(80)
-  accessScope            String   @default("shareholder_read_only") @db.VarChar(120)
+  accessStatus String @default("pending") @db.VarChar(80)
+  accessScope  String @default("shareholder_read_only") @db.VarChar(120)
 
-  canViewCapTable        Boolean  @default(true)
-  canViewValuations      Boolean  @default(true)
-  canViewAnnualReturns   Boolean  @default(true)
-  canViewAnnouncements   Boolean  @default(true)
-  canDownloadDocuments   Boolean  @default(true)
+  canViewCapTable      Boolean @default(true)
+  canViewValuations    Boolean @default(true)
+  canViewAnnualReturns Boolean @default(true)
+  canViewAnnouncements Boolean @default(true)
+  canDownloadDocuments Boolean @default(true)
 
-  grantedByUserId        String?
-  grantedAt              DateTime?
-  revokedByUserId        String?
-  revokedAt              DateTime?
+  grantedByUserId String?
+  grantedAt       DateTime?
+  revokedByUserId String?
+  revokedAt       DateTime?
 
-  meta                   Json?
-  createdAt              DateTime @default(now())
-  updatedAt              DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([shareholderId])
   @@index([userId])
@@ -7421,25 +7442,25 @@ model ShareholderAccessGrant {
 // These models intentionally use string foreign-key references first to avoid unsafe relation assumptions across existing app modules.
 
 model OpsVendor {
-  id                  String   @id @default(cuid())
-  vendorType          String   @default("supplier") @db.VarChar(100)
-  status              String   @default("pending") @db.VarChar(80)
+  id         String @id @default(cuid())
+  vendorType String @default("supplier") @db.VarChar(100)
+  status     String @default("pending") @db.VarChar(80)
 
-  legalName           String
-  registeredName      String?
-  tradingName         String?
+  legalName                   String
+  registeredName              String?
+  tradingName                 String?
   tradingNameSameAsRegistered Boolean @default(false)
-  email               String?
-  phone               String?
-  website             String?
-  industry            String?  @db.VarChar(160)
-  products            Json?
-  addressLine1        String?
-  addressLine2        String?
-  city                String?  @db.VarChar(160)
-  province            String?  @db.VarChar(160)
-  postalCode          String?  @db.VarChar(40)
-  country             String?  @db.VarChar(2)
+  email                       String?
+  phone                       String?
+  website                     String?
+  industry                    String? @db.VarChar(160)
+  products                    Json?
+  addressLine1                String?
+  addressLine2                String?
+  city                        String? @db.VarChar(160)
+  province                    String? @db.VarChar(160)
+  postalCode                  String? @db.VarChar(40)
+  country                     String? @db.VarChar(2)
 
   contactName         String?
   contactEmail        String?
@@ -7453,33 +7474,33 @@ model OpsVendor {
   contactPerson2Email String?
   contactPerson2Phone String?
 
-  manufacturer        Boolean  @default(false)
-  supplier            Boolean  @default(true)
-  payoutEligible      Boolean  @default(false)
+  manufacturer          Boolean @default(false)
+  supplier              Boolean @default(true)
+  payoutEligible        Boolean @default(false)
   preferredPayoutMethod String? @db.VarChar(80)
 
-  bankAccountMasked   String?
-  bankName            String?
-  bankAccountName     String?
+  bankAccountMasked       String?
+  bankName                String?
+  bankAccountName         String?
   bankAccountNumberMasked String?
-  bankBranchCode      String?
-  bankSwiftCode       String?
-  paypalEmail         String?
-  taxIdentifierMasked String?
-  vatRegistered       Boolean  @default(false)
-  vatNumber           String?
+  bankBranchCode          String?
+  bankSwiftCode           String?
+  paypalEmail             String?
+  taxIdentifierMasked     String?
+  vatRegistered           Boolean @default(false)
+  vatNumber               String?
 
-  registrationSource  String   @default("public_vendor_registration") @db.VarChar(120)
-  documents           Json?
-  vendorMeta          Json?
+  registrationSource String @default("public_vendor_registration") @db.VarChar(120)
+  documents          Json?
+  vendorMeta         Json?
 
-  createdByUserId     String?
-  approvedByUserId    String?
-  approvedAt          DateTime?
-  archivedAt          DateTime?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  archivedAt       DateTime?
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([vendorType])
   @@index([status])
@@ -7494,52 +7515,52 @@ model OpsVendor {
 }
 
 model OpsVendorInvoice {
-  id                         String   @id @default(cuid())
-  vendorId                   String?
-  vendorName                 String?
+  id         String  @id @default(cuid())
+  vendorId   String?
+  vendorName String?
 
-  invoiceNumber              String?
-  invoiceStatus              String   @default("draft") @db.VarChar(80)
-  invoiceDate                DateTime?
-  dueDate                    DateTime?
+  invoiceNumber String?
+  invoiceStatus String    @default("draft") @db.VarChar(80)
+  invoiceDate   DateTime?
+  dueDate       DateTime?
 
-  currency                   String   @default("ZAR") @db.VarChar(3)
-  subtotalCents              Int      @default(0)
-  taxCents                   Int      @default(0)
-  totalCents                 Int      @default(0)
-  amountPaidCents            Int      @default(0)
-  balanceCents               Int      @default(0)
+  currency        String @default("ZAR") @db.VarChar(3)
+  subtotalCents   Int    @default(0)
+  taxCents        Int    @default(0)
+  totalCents      Int    @default(0)
+  amountPaidCents Int    @default(0)
+  balanceCents    Int    @default(0)
 
-  invoiceUrl                 String?
-  invoiceObjectKey           String?
-  invoiceUploadedAt          DateTime?
-  invoiceVerifiedAt          DateTime?
-  invoiceVerifiedByUserId    String?
-  proofOfPaymentUrl          String?
-  proofOfPaymentObjectKey    String?
-  proofOfPaymentUploadedAt   DateTime?
-  proofOfPaymentVerifiedAt   DateTime?
+  invoiceUrl                     String?
+  invoiceObjectKey               String?
+  invoiceUploadedAt              DateTime?
+  invoiceVerifiedAt              DateTime?
+  invoiceVerifiedByUserId        String?
+  proofOfPaymentUrl              String?
+  proofOfPaymentObjectKey        String?
+  proofOfPaymentUploadedAt       DateTime?
+  proofOfPaymentVerifiedAt       DateTime?
   proofOfPaymentVerifiedByUserId String?
 
-  paymentMethod              String?  @db.VarChar(80)
-  paymentReference           String?
-  paymentDate                DateTime?
-  registeredVendorRequired   Boolean  @default(true)
-  invoiceRequired            Boolean  @default(true)
-  proofOfPaymentRequired     Boolean  @default(false)
-  paymentInitiationMode      String?  @db.VarChar(80)
+  paymentMethod            String?   @db.VarChar(80)
+  paymentReference         String?
+  paymentDate              DateTime?
+  registeredVendorRequired Boolean   @default(true)
+  invoiceRequired          Boolean   @default(true)
+  proofOfPaymentRequired   Boolean   @default(false)
+  paymentInitiationMode    String?   @db.VarChar(80)
 
-  expenditureLedgerEntryId   String?
-  importOrderId              String?
-  vendorPayoutId             String?
+  expenditureLedgerEntryId String?
+  importOrderId            String?
+  vendorPayoutId           String?
 
-  invoiceMeta                Json?
-  createdByUserId            String?
-  approvedByUserId           String?
-  approvedAt                 DateTime?
+  invoiceMeta      Json?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
 
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([vendorId])
   @@index([invoiceStatus])
@@ -7554,60 +7575,60 @@ model OpsVendorInvoice {
 }
 
 model OpsExpenditureLedgerEntry {
-  id                         String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  expenditureType            String   @default("operating_expense") @db.VarChar(120)
-  category                   String   @default("general") @db.VarChar(120)
-  subcategory                String?  @db.VarChar(120)
-  status                     String   @default("pending") @db.VarChar(80)
-  module                     String?  @db.VarChar(80)
+  expenditureType String  @default("operating_expense") @db.VarChar(120)
+  category        String  @default("general") @db.VarChar(120)
+  subcategory     String? @db.VarChar(120)
+  status          String  @default("pending") @db.VarChar(80)
+  module          String? @db.VarChar(80)
 
-  sourceType                 String?  @db.VarChar(120)
-  sourceId                   String?
-  externalReference          String?
+  sourceType        String? @db.VarChar(120)
+  sourceId          String?
+  externalReference String?
 
-  vendorId                   String?
-  vendorName                 String?
-  vendorInvoiceId            String?
-  importOrderId              String?
-  inventoryItemId            String?
-  vendorPayoutId             String?
+  vendorId        String?
+  vendorName      String?
+  vendorInvoiceId String?
+  importOrderId   String?
+  inventoryItemId String?
+  vendorPayoutId  String?
 
-  narration                  String?
-  description                String?
+  narration   String?
+  description String?
 
-  amountCents                Int      @default(0)
-  currency                   String   @default("ZAR") @db.VarChar(3)
-  amountUsdCents             Int      @default(0)
-  zarEquivalentCents         Int      @default(0)
-  fxRate                     Float?
+  amountCents        Int    @default(0)
+  currency           String @default("ZAR") @db.VarChar(3)
+  amountUsdCents     Int    @default(0)
+  zarEquivalentCents Int    @default(0)
+  fxRate             Float?
 
-  paymentMethod              String?  @db.VarChar(80)
-  paymentProvider            String?  @db.VarChar(80)
-  paymentReference           String?
+  paymentMethod               String?   @db.VarChar(80)
+  paymentProvider             String?   @db.VarChar(80)
+  paymentReference            String?
   companyBankAccountReference String?
-  paymentStatus              String   @default("unpaid") @db.VarChar(80)
-  paidAt                     DateTime?
-  occurredAt                 DateTime @default(now())
+  paymentStatus               String    @default("unpaid") @db.VarChar(80)
+  paidAt                      DateTime?
+  occurredAt                  DateTime  @default(now())
 
-  invoiceUrl                 String?
-  invoiceObjectKey           String?
-  proofOfPaymentUrl          String?
-  proofOfPaymentObjectKey    String?
-  proofOfPaymentUploadedAt   DateTime?
-  proofOfPaymentVerifiedAt   DateTime?
+  invoiceUrl                     String?
+  invoiceObjectKey               String?
+  proofOfPaymentUrl              String?
+  proofOfPaymentObjectKey        String?
+  proofOfPaymentUploadedAt       DateTime?
+  proofOfPaymentVerifiedAt       DateTime?
   proofOfPaymentVerifiedByUserId String?
 
-  manualEntry                Boolean  @default(true)
-  createdByUserId            String?
-  approvedByUserId           String?
-  approvedAt                 DateTime?
-  voidedByUserId             String?
-  voidedAt                   DateTime?
+  manualEntry      Boolean   @default(true)
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  voidedByUserId   String?
+  voidedAt         DateTime?
 
-  meta                       Json?
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([expenditureType])
   @@index([category])
@@ -7627,28 +7648,28 @@ model OpsExpenditureLedgerEntry {
 }
 
 model OpsInventoryCategory {
-  id                 String   @id @default(cuid())
-  code               String   @unique
-  name               String
-  description        String?
-  parentCategoryId   String?
+  id               String  @id @default(cuid())
+  code             String  @unique
+  name             String
+  description      String?
+  parentCategoryId String?
 
-  imageUrl           String?
-  imageObjectKey     String?
+  imageUrl       String?
+  imageObjectKey String?
 
-  patientVisible     Boolean  @default(false)
-  clinicianVisible   Boolean  @default(false)
-  medreachVisible    Boolean  @default(false)
-  careportVisible    Boolean  @default(false)
-  adminVisible       Boolean  @default(true)
+  patientVisible   Boolean @default(false)
+  clinicianVisible Boolean @default(false)
+  medreachVisible  Boolean @default(false)
+  careportVisible  Boolean @default(false)
+  adminVisible     Boolean @default(true)
 
-  active             Boolean  @default(true)
-  sortOrder          Int      @default(0)
-  meta               Json?
+  active    Boolean @default(true)
+  sortOrder Int     @default(0)
+  meta      Json?
 
-  createdByUserId    String?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([parentCategoryId])
   @@index([active])
@@ -7660,52 +7681,52 @@ model OpsInventoryCategory {
 }
 
 model OpsInventoryItem {
-  id                    String   @id @default(cuid())
-  sku                   String?  @unique
-  itemCode              String?  @unique
-  categoryId            String?
+  id         String  @id @default(cuid())
+  sku        String? @unique
+  itemCode   String? @unique
+  categoryId String?
 
-  name                  String
-  description           String?
-  itemType              String   @default("item") @db.VarChar(100)
+  name        String
+  description String?
+  itemType    String  @default("item") @db.VarChar(100)
 
-  manufacturer          String?
-  manufacturerContact   String?
-  brand                 String?
-  model                 String?
-  barcode               String?
+  manufacturer        String?
+  manufacturerContact String?
+  brand               String?
+  model               String?
+  barcode             String?
 
   images                Json?
   primaryImageUrl       String?
   primaryImageObjectKey String?
 
-  currency              String   @default("ZAR") @db.VarChar(3)
-  unitCostCents         Int      @default(0)
-  unitPriceCents        Int      @default(0)
-  lastLandingCostCents  Int      @default(0)
+  currency             String @default("ZAR") @db.VarChar(3)
+  unitCostCents        Int    @default(0)
+  unitPriceCents       Int    @default(0)
+  lastLandingCostCents Int    @default(0)
 
-  quantityOnHand        Int      @default(0)
-  reservedQuantity      Int      @default(0)
-  availableQuantity     Int      @default(0)
-  lowStockThreshold     Int      @default(0)
+  quantityOnHand    Int @default(0)
+  reservedQuantity  Int @default(0)
+  availableQuantity Int @default(0)
+  lowStockThreshold Int @default(0)
 
-  patientVisible        Boolean  @default(false)
-  clinicianVisible      Boolean  @default(false)
-  medreachVisible       Boolean  @default(false)
-  careportVisible       Boolean  @default(false)
-  adminVisible          Boolean  @default(true)
+  patientVisible   Boolean @default(false)
+  clinicianVisible Boolean @default(false)
+  medreachVisible  Boolean @default(false)
+  careportVisible  Boolean @default(false)
+  adminVisible     Boolean @default(true)
 
-  active                Boolean  @default(true)
+  active Boolean @default(true)
 
-  shopProductId         String?
-  shopVariantId         String?
-  carePortSkuId         String?
-  deviceCatalogSlug     String?
+  shopProductId     String?
+  shopVariantId     String?
+  carePortSkuId     String?
+  deviceCatalogSlug String?
 
-  meta                  Json?
-  createdByUserId       String?
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  meta            Json?
+  createdByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([categoryId])
   @@index([itemType])
@@ -7724,76 +7745,76 @@ model OpsInventoryItem {
 }
 
 model OpsImportOrder {
-  id                         String   @id @default(cuid())
-  orderNumber                String?  @unique
-  status                     String   @default("draft") @db.VarChar(80)
+  id          String  @id @default(cuid())
+  orderNumber String? @unique
+  status      String  @default("draft") @db.VarChar(80)
 
-  vendorId                   String?
-  vendorName                 String?
+  vendorId   String?
+  vendorName String?
 
-  inventoryItemId            String?
-  inventoryCategoryId        String?
+  inventoryItemId     String?
+  inventoryCategoryId String?
 
-  itemName                   String
-  itemDescription            String?
-  itemType                   String   @default("item") @db.VarChar(100)
+  itemName        String
+  itemDescription String?
+  itemType        String  @default("item") @db.VarChar(100)
 
-  manufacturer               String?
-  manufacturerContact        String?
+  manufacturer        String?
+  manufacturerContact String?
 
-  quantityOrdered            Int      @default(0)
-  quantityReceived           Int      @default(0)
-  quantityAccepted           Int      @default(0)
-  quantityRejected           Int      @default(0)
+  quantityOrdered  Int @default(0)
+  quantityReceived Int @default(0)
+  quantityAccepted Int @default(0)
+  quantityRejected Int @default(0)
 
-  totalCostUsdCents          Int      @default(0)
-  zarEquivalentCents         Int      @default(0)
-  fxRate                     Float?
+  totalCostUsdCents  Int    @default(0)
+  zarEquivalentCents Int    @default(0)
+  fxRate             Float?
 
-  invoiceUrl                 String?
-  invoiceObjectKey           String?
-  paymentMethod              String?  @db.VarChar(80)
-  paymentReference           String?
-  proofOfPaymentUrl          String?
-  proofOfPaymentObjectKey    String?
+  invoiceUrl              String?
+  invoiceObjectKey        String?
+  paymentMethod           String? @db.VarChar(80)
+  paymentReference        String?
+  proofOfPaymentUrl       String?
+  proofOfPaymentObjectKey String?
 
-  orderDate                  DateTime?
-  paymentDate                DateTime?
-  expectedDeliveryDate       DateTime?
-  shippedAt                  DateTime?
-  deliveredAt                DateTime?
-  receivedAt                 DateTime?
-  inspectedAt                DateTime?
+  orderDate            DateTime?
+  paymentDate          DateTime?
+  expectedDeliveryDate DateTime?
+  shippedAt            DateTime?
+  deliveredAt          DateTime?
+  receivedAt           DateTime?
+  inspectedAt          DateTime?
 
-  receivedByUserId           String?
-  inspectedByUserId          String?
-  qualityStatus              String?  @db.VarChar(80)
-  inspectionNotes            String?
-  discrepancyNotes           String?
+  receivedByUserId  String?
+  inspectedByUserId String?
+  qualityStatus     String? @db.VarChar(80)
+  inspectionNotes   String?
+  discrepancyNotes  String?
 
-  importDutyCents            Int      @default(0)
-  taxCents                   Int      @default(0)
-  vatCents                   Int      @default(0)
-  mspCents                   Int      @default(0)
-  shippingCents              Int      @default(0)
-  clearingCents              Int      @default(0)
-  handlingCents              Int      @default(0)
-  otherLandingCostCents      Int      @default(0)
-  totalLandingCostCents      Int      @default(0)
-  landingCostPerUnitCents    Int      @default(0)
+  importDutyCents         Int @default(0)
+  taxCents                Int @default(0)
+  vatCents                Int @default(0)
+  mspCents                Int @default(0)
+  shippingCents           Int @default(0)
+  clearingCents           Int @default(0)
+  handlingCents           Int @default(0)
+  otherLandingCostCents   Int @default(0)
+  totalLandingCostCents   Int @default(0)
+  landingCostPerUnitCents Int @default(0)
 
-  expenditureLedgerEntryId   String?
-  vendorInvoiceId            String?
-  stockMovementId            String?
-  stockPostedAt              DateTime?
+  expenditureLedgerEntryId String?
+  vendorInvoiceId          String?
+  stockMovementId          String?
+  stockPostedAt            DateTime?
 
-  createdByUserId            String?
-  approvedByUserId           String?
-  approvedAt                 DateTime?
+  createdByUserId  String?
+  approvedByUserId String?
+  approvedAt       DateTime?
 
-  meta                       Json?
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([status])
   @@index([vendorId])
@@ -7812,33 +7833,33 @@ model OpsImportOrder {
 }
 
 model OpsInventoryMovement {
-  id                 String   @id @default(cuid())
-  movementType       String   @default("adjustment") @db.VarChar(100)
-  status             String   @default("posted") @db.VarChar(80)
+  id           String @id @default(cuid())
+  movementType String @default("adjustment") @db.VarChar(100)
+  status       String @default("posted") @db.VarChar(80)
 
-  inventoryItemId    String
-  sourceType         String?  @db.VarChar(120)
-  sourceId           String?
-  importOrderId      String?
-  shopOrderId        String?
-  shopOrderItemId    String?
+  inventoryItemId String
+  sourceType      String? @db.VarChar(120)
+  sourceId        String?
+  importOrderId   String?
+  shopOrderId     String?
+  shopOrderItemId String?
 
-  quantityDelta      Int      @default(0)
-  quantityBefore     Int      @default(0)
-  quantityAfter      Int      @default(0)
+  quantityDelta  Int @default(0)
+  quantityBefore Int @default(0)
+  quantityAfter  Int @default(0)
 
-  unitCostCents      Int      @default(0)
-  totalCostCents     Int      @default(0)
-  currency           String   @default("ZAR") @db.VarChar(3)
+  unitCostCents  Int    @default(0)
+  totalCostCents Int    @default(0)
+  currency       String @default("ZAR") @db.VarChar(3)
 
-  narration          String?
-  reference          String?
-  performedByUserId  String?
-  occurredAt         DateTime @default(now())
+  narration         String?
+  reference         String?
+  performedByUserId String?
+  occurredAt        DateTime @default(now())
 
-  meta               Json?
-  createdAt          DateTime @default(now())
-  updatedAt          DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([movementType])
   @@index([status])
@@ -7852,37 +7873,37 @@ model OpsInventoryMovement {
 }
 
 model OpsVendorPayout {
-  id                         String   @id @default(cuid())
+  id String @id @default(cuid())
 
-  vendorId                   String?
-  vendorName                 String?
-  vendorInvoiceId            String?
-  expenditureLedgerEntryId   String?
+  vendorId                 String?
+  vendorName               String?
+  vendorInvoiceId          String?
+  expenditureLedgerEntryId String?
 
-  status                     String   @default("pending") @db.VarChar(80)
-  payoutMethod               String?  @db.VarChar(80)
-  currency                   String   @default("ZAR") @db.VarChar(3)
-  amountCents                Int      @default(0)
+  status       String  @default("pending") @db.VarChar(80)
+  payoutMethod String? @db.VarChar(80)
+  currency     String  @default("ZAR") @db.VarChar(3)
+  amountCents  Int     @default(0)
 
-  paymentReference           String?
-  paymentProvider            String?
-  paystackRecipientCode      String?
-  paystackTransferCode       String?
-  proofOfPaymentUrl          String?
-  proofOfPaymentObjectKey    String?
-  invoiceRequired            Boolean  @default(true)
-  registeredVendorRequired   Boolean  @default(true)
-  initiatedViaPaystack       Boolean  @default(false)
+  paymentReference         String?
+  paymentProvider          String?
+  paystackRecipientCode    String?
+  paystackTransferCode     String?
+  proofOfPaymentUrl        String?
+  proofOfPaymentObjectKey  String?
+  invoiceRequired          Boolean @default(true)
+  registeredVendorRequired Boolean @default(true)
+  initiatedViaPaystack     Boolean @default(false)
 
-  scheduledAt                DateTime?
-  paidAt                     DateTime?
-  approvedByUserId           String?
-  approvedAt                 DateTime?
-  createdByUserId            String?
+  scheduledAt      DateTime?
+  paidAt           DateTime?
+  approvedByUserId String?
+  approvedAt       DateTime?
+  createdByUserId  String?
 
-  meta                       Json?
-  createdAt                  DateTime @default(now())
-  updatedAt                  DateTime @updatedAt
+  meta      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   @@index([vendorId])
   @@index([vendorInvoiceId])
@@ -7939,26 +7960,26 @@ enum LegalPublicationEventType {
 }
 
 model LegalDocument {
-  id                        String                       @id @default(cuid())
-  orgId                     String                       @default("org-default")
+  id                        String                   @id @default(cuid())
+  orgId                     String                   @default("org-default")
   key                       String
   title                     String
   category                  String
-  ownerDepartment           String                       @default("legal")
-  status                    LegalDocumentStatus          @default(ACTIVE)
-  acknowledgementMode       LegalAcknowledgementMode     @default(NONE)
+  ownerDepartment           String                   @default("legal")
+  status                    LegalDocumentStatus      @default(ACTIVE)
+  acknowledgementMode       LegalAcknowledgementMode @default(NONE)
   audiences                 Json
   applications              Json
   surfaces                  Json?
-  currentPublishedVersionId String?                      @unique
+  currentPublishedVersionId String?                  @unique
   metadata                  Json?
   createdByUserId           String?
-  createdAt                 DateTime                     @default(now())
-  updatedAt                 DateTime                     @updatedAt
+  createdAt                 DateTime                 @default(now())
+  updatedAt                 DateTime                 @updatedAt
 
-  versions                  LegalDocumentVersion[]       @relation("LegalDocumentVersions")
-  currentPublishedVersion   LegalDocumentVersion?        @relation("CurrentPublishedLegalVersion", fields: [currentPublishedVersionId], references: [id], onDelete: SetNull)
-  publicationEvents         LegalPublicationEvent[]
+  versions                LegalDocumentVersion[]  @relation("LegalDocumentVersions")
+  currentPublishedVersion LegalDocumentVersion?   @relation("CurrentPublishedLegalVersion", fields: [currentPublishedVersionId], references: [id], onDelete: SetNull)
+  publicationEvents       LegalPublicationEvent[]
 
   @@unique([orgId, key])
   @@index([orgId, status])
@@ -7967,45 +7988,45 @@ model LegalDocument {
 }
 
 model LegalDocumentVersion {
-  id                       String                       @id @default(cuid())
-  orgId                    String                       @default("org-default")
-  documentId               String
-  versionNumber            Int
-  versionLabel             String?
-  locale                   String                       @default("en-ZA")
-  contentFormat            String                       @default("markdown")
-  content                  String
-  renderedHtml             String?
-  checksum                 String                       @db.VarChar(128)
-  status                   LegalDocumentVersionStatus   @default(DRAFT)
-  changeSummary            String?
-  authorUserId             String?
-  submittedByUserId        String?
-  submittedAt              DateTime?
-  approvedByUserId         String?
-  approvedAt               DateTime?
-  scheduledByUserId        String?
-  scheduledAt              DateTime?
-  effectiveAt              DateTime?
-  publishedByUserId        String?
-  publishedAt              DateTime?
-  supersededByUserId       String?
-  supersededAt             DateTime?
-  supersededByVersionId    String?
-  retiredByUserId          String?
-  retiredAt                DateTime?
-  retirementReason         String?
-  metadata                 Json?
-  createdAt                DateTime                     @default(now())
-  updatedAt                DateTime                     @updatedAt
+  id                    String                     @id @default(cuid())
+  orgId                 String                     @default("org-default")
+  documentId            String
+  versionNumber         Int
+  versionLabel          String?
+  locale                String                     @default("en-ZA")
+  contentFormat         String                     @default("markdown")
+  content               String
+  renderedHtml          String?
+  checksum              String                     @db.VarChar(128)
+  status                LegalDocumentVersionStatus @default(DRAFT)
+  changeSummary         String?
+  authorUserId          String?
+  submittedByUserId     String?
+  submittedAt           DateTime?
+  approvedByUserId      String?
+  approvedAt            DateTime?
+  scheduledByUserId     String?
+  scheduledAt           DateTime?
+  effectiveAt           DateTime?
+  publishedByUserId     String?
+  publishedAt           DateTime?
+  supersededByUserId    String?
+  supersededAt          DateTime?
+  supersededByVersionId String?
+  retiredByUserId       String?
+  retiredAt             DateTime?
+  retirementReason      String?
+  metadata              Json?
+  createdAt             DateTime                   @default(now())
+  updatedAt             DateTime                   @updatedAt
 
-  document                 LegalDocument                @relation("LegalDocumentVersions", fields: [documentId], references: [id], onDelete: Restrict)
-  currentForDocuments      LegalDocument[]              @relation("CurrentPublishedLegalVersion")
-  supersededByVersion      LegalDocumentVersion?        @relation("LegalVersionSupersession", fields: [supersededByVersionId], references: [id], onDelete: SetNull)
-  supersedesVersions       LegalDocumentVersion[]       @relation("LegalVersionSupersession")
-  acknowledgements         LegalAcknowledgement[]
-  publicationEvents        LegalPublicationEvent[]
-  televisitConsents        TelevisitConsent[]
+  document            LegalDocument           @relation("LegalDocumentVersions", fields: [documentId], references: [id], onDelete: Restrict)
+  currentForDocuments LegalDocument[]         @relation("CurrentPublishedLegalVersion")
+  supersededByVersion LegalDocumentVersion?   @relation("LegalVersionSupersession", fields: [supersededByVersionId], references: [id], onDelete: SetNull)
+  supersedesVersions  LegalDocumentVersion[]  @relation("LegalVersionSupersession")
+  acknowledgements    LegalAcknowledgement[]
+  publicationEvents   LegalPublicationEvent[]
+  televisitConsents   TelevisitConsent[]
 
   @@unique([documentId, versionNumber])
   @@unique([documentId, checksum])
@@ -8018,27 +8039,27 @@ model LegalDocumentVersion {
 }
 
 model LegalAcknowledgement {
-  id                       String                       @id @default(cuid())
-  orgId                    String                       @default("org-default")
-  legalDocumentVersionId   String
-  documentKeySnapshot      String
-  versionLabelSnapshot     String?
-  checksumSnapshot         String                       @db.VarChar(128)
-  subjectType              String                       @db.VarChar(80)
-  subjectUserId            String?
-  subjectId                String?
-  application              String                       @db.VarChar(120)
-  surface                  String?                      @db.VarChar(160)
-  action                   LegalAcknowledgementAction   @default(ACCEPTED)
-  acknowledgedAt           DateTime                     @default(now())
-  locale                   String?
-  ipHash                   String?                      @db.VarChar(128)
-  userAgent                String?
-  evidence                 Json?
-  idempotencyKey           String?                      @unique
-  createdAt                DateTime                     @default(now())
+  id                     String                     @id @default(cuid())
+  orgId                  String                     @default("org-default")
+  legalDocumentVersionId String
+  documentKeySnapshot    String
+  versionLabelSnapshot   String?
+  checksumSnapshot       String                     @db.VarChar(128)
+  subjectType            String                     @db.VarChar(80)
+  subjectUserId          String?
+  subjectId              String?
+  application            String                     @db.VarChar(120)
+  surface                String?                    @db.VarChar(160)
+  action                 LegalAcknowledgementAction @default(ACCEPTED)
+  acknowledgedAt         DateTime                   @default(now())
+  locale                 String?
+  ipHash                 String?                    @db.VarChar(128)
+  userAgent              String?
+  evidence               Json?
+  idempotencyKey         String?                    @unique
+  createdAt              DateTime                   @default(now())
 
-  legalDocumentVersion     LegalDocumentVersion         @relation(fields: [legalDocumentVersionId], references: [id], onDelete: Restrict)
+  legalDocumentVersion LegalDocumentVersion @relation(fields: [legalDocumentVersionId], references: [id], onDelete: Restrict)
 
   @@index([orgId, acknowledgedAt])
   @@index([legalDocumentVersionId, acknowledgedAt])
@@ -8048,21 +8069,21 @@ model LegalAcknowledgement {
 }
 
 model LegalPublicationEvent {
-  id                       String                       @id @default(cuid())
-  orgId                    String                       @default("org-default")
-  documentId               String
-  versionId                String?
-  eventType                LegalPublicationEventType
-  actorUserId              String?
-  actorRole                String?
-  fromStatus               LegalDocumentVersionStatus?
-  toStatus                 LegalDocumentVersionStatus?
-  reason                   String?
-  metadata                 Json?
-  createdAt                DateTime                     @default(now())
+  id          String                      @id @default(cuid())
+  orgId       String                      @default("org-default")
+  documentId  String
+  versionId   String?
+  eventType   LegalPublicationEventType
+  actorUserId String?
+  actorRole   String?
+  fromStatus  LegalDocumentVersionStatus?
+  toStatus    LegalDocumentVersionStatus?
+  reason      String?
+  metadata    Json?
+  createdAt   DateTime                    @default(now())
 
-  document                 LegalDocument                @relation(fields: [documentId], references: [id], onDelete: Restrict)
-  version                  LegalDocumentVersion?        @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  document LegalDocument         @relation(fields: [documentId], references: [id], onDelete: Restrict)
+  version  LegalDocumentVersion? @relation(fields: [versionId], references: [id], onDelete: Restrict)
 
   @@index([orgId, createdAt])
   @@index([documentId, createdAt])
@@ -8070,4 +8091,3 @@ model LegalPublicationEvent {
   @@index([eventType, createdAt])
   @@index([actorUserId, createdAt])
 }
-

@@ -1,6 +1,9 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { verifyAdminRequest } from '../../../../utils/auth';
+import {
+  resolveClinicianOnboardingEntitlements,
+} from '@/src/clinicians/onboarding/entitlements';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -159,6 +162,44 @@ export async function POST(
       );
     }
 
+    const onboarding =
+      await prisma.clinicianOnboarding
+        .findUnique({
+          where: {
+            clinicianId,
+          },
+        });
+
+    const entitlements =
+      await resolveClinicianOnboardingEntitlements(
+        prisma,
+        clinicianId,
+        onboarding,
+      );
+
+    if (
+      !entitlements.practiceActivation
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            'commercial_practice_activation_not_granted',
+          message:
+            'The effective Admin-configured onboarding pathway does not grant practice activation.',
+          entitlements: {
+            pathwayKey:
+              entitlements.pathwayKey,
+            privileges:
+              entitlements.privileges,
+            paymentState:
+              entitlements.paymentState,
+          },
+        },
+        409,
+      );
+    }
+
     const simulationRows = await prisma.appointment.findMany({
       where: {
         clinicianId,
@@ -254,6 +295,14 @@ export async function POST(
       realPatientApprovedAt: nextMeta.realPatientApproval.approvedAt,
       requiredSessions: 3,
       completedCount,
+      entitlements: {
+        pathwayKey:
+          entitlements.pathwayKey,
+        privileges:
+          entitlements.privileges,
+        paymentState:
+          entitlements.paymentState,
+      },
       clinician: updated,
     });
   } catch (err: any) {

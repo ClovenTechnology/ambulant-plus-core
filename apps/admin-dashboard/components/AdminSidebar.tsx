@@ -23,6 +23,7 @@ import {
   BarChart3,
   FileText,
   ClipboardList,
+  CalendarDays,
   Settings,
   Store,
   ChevronLeft,
@@ -46,7 +47,7 @@ const COLLAPSE_KEY = 'admin.sidebar-collapsed';
 
 // TEMP: show everything in the sidebar regardless of scopes.
 // Flip this to false once your Gateway returns superadmin scopes reliably.
-const FORCE_SHOW_ALL = true;
+const FORCE_SHOW_ALL = false;
 
 // Scopes that should unlock EVERYTHING in the UI (you still must enforce on the API too)
 const SUPER_SCOPES = ['superadmin', 'admin:all', '*'] as const;
@@ -102,8 +103,10 @@ export default function AdminSidebar() {
     (async () => {
       try {
         // The cookie (adm.profile) is read on the Gateway; include credentials so cookies flow.
-        const base = process.env.NEXT_PUBLIC_APIGW_BASE || 'http://localhost:3010';
-        const r = await fetch(`${base}/api/auth/me`, { credentials: 'include', cache: 'no-store' });
+        const r = await fetch('/api/auth/me', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
         const j = await r.json().catch(() => null);
         if (!cancelled) {
           const s: string[] = j?.user?.scopes ?? [];
@@ -205,8 +208,11 @@ export default function AdminSidebar() {
         label: 'Admin',
         icon: Store,
         defaultOpen: true,
-        requires: ['hr', 'manageRoles', 'compliance'],
+        requires: ['hr', 'manageRoles', 'compliance', 'medical'],
         items: [
+          { href: '/admin/training', label: 'Training control', icon: CalendarDays, requires: ['medical', 'hr', 'manageRoles'] },
+          { href: '/admin/calendar', label: 'Training calendar', icon: CalendarDays, requires: ['medical', 'hr', 'manageRoles'] },
+          { href: '/admin/clinicians/onboarding', label: 'Clinician onboarding', icon: Stethoscope, requires: ['medical', 'hr', 'manageRoles', 'finance'] },
           { href: '/admin/legal', label: 'Legal Department', icon: Shield, requires: ['manageRoles', 'compliance'] },
           { href: '/admin/clinicians', label: 'Admin Clinicians', icon: Stethoscope, requires: ['hr', 'manageRoles'] },
           { href: '/admin/patients', label: 'Admin Patients', icon: Users, requires: ['hr', 'manageRoles'] },
@@ -349,5 +355,3 @@ export default function AdminSidebar() {
     </aside>
   );
 }
-
-

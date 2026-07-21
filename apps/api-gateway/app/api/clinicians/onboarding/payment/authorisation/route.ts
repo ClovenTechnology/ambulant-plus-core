@@ -4,6 +4,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { finaliseClinicianTrainingPayment } from '@/src/clinicians/onboarding/finalise-training-payment';
 import { getClinicianOnboardingSettings } from '@/src/clinicians/onboarding/settings';
+import {
+  resolveAuthenticatedClinician,
+} from '@/src/clinicians/onboarding/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,6 +55,16 @@ export async function POST(req: NextRequest) {
     if (!slotId) return NextResponse.json({ ok: false, error: 'slotId_required' }, { status: 400 });
     if (!code) return NextResponse.json({ ok: false, error: 'authorisation_code_required' }, { status: 400 });
 
+    const identity =
+      await resolveAuthenticatedClinician(
+        req,
+        clinicianId,
+      );
+
+    if (!identity.ok) {
+      return identity.response;
+    }
+
     const settings = await getClinicianOnboardingSettings();
     if (!settings.manualPaymentEnabled) {
       return NextResponse.json({ ok: false, error: 'manual_payment_disabled' }, { status: 409 });
@@ -77,7 +90,7 @@ export async function POST(req: NextRequest) {
     }
 
     const meta = readMeta(payment.meta);
-    const expectedSlotId = cleanStr(meta.slotId, 120);
+    const expectedSlotId = cleanStr(meta.slotId || meta.selectedSlotId, 120);
     if (expectedSlotId && expectedSlotId !== slotId) {
       return NextResponse.json({ ok: false, error: 'authorisation_slot_mismatch' }, { status: 409 });
     }

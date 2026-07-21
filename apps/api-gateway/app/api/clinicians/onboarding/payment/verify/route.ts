@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { getProvider } from '@/src/payments';
 import { finaliseClinicianTrainingPayment } from '@/src/clinicians/onboarding/finalise-training-payment';
+import {
+  resolveAuthenticatedClinician,
+} from '@/src/clinicians/onboarding/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +39,17 @@ export async function POST(req: NextRequest) {
       : await prisma.clinicianOnboardingPayment.findUnique({ where: { providerReference: reference as string } });
 
     if (!payment) return NextResponse.json({ ok: false, error: 'payment_not_found' }, { status: 404 });
+
+    const identity =
+      await resolveAuthenticatedClinician(
+        req,
+        String(payment.clinicianId),
+      );
+
+    if (!identity.ok) {
+      return identity.response;
+    }
+
     if (payment.provider !== 'paystack') {
       return NextResponse.json({ ok: false, error: 'payment_provider_not_paystack' }, { status: 409 });
     }

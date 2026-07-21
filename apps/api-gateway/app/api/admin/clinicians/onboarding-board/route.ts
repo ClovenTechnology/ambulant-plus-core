@@ -1,14 +1,22 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { prisma } from '@/src/lib/prisma';
-import { verifyAdminRequest } from '../../utils/auth';
 import {
-  calculateOnboardingPaymentState,
+  NextRequest,
+  NextResponse,
+} from 'next/server';
+import { prisma } from '@/src/lib/prisma';
+import {
+  verifyAdminRequest,
+} from '../../utils/auth';
+import {
   getClinicianOnboardingSettings,
   publicClinicianOnboardingSettings,
 } from '@/src/clinicians/onboarding/settings';
 import {
   adminClinicianPayLaterRequest,
 } from '@/src/clinicians/onboarding/pay-later';
+import {
+  resolveClinicianOnboardingEntitlementsFromEvidence,
+  resolvePermanentStarterKitFulfilment,
+} from '@/src/clinicians/onboarding/entitlements';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,151 +29,384 @@ type UiStage =
   | 'training_scheduled'
   | 'training_completed';
 
-function cleanStr(v: unknown, max = 240): string | null {
-  const s = String(v ?? '').trim();
-  if (!s) return null;
-  return s.length > max ? s.slice(0, max) : s;
+function cleanStr(
+  value: unknown,
+  max = 240,
+): string | null {
+  const text =
+    String(value ?? '').trim();
+
+  if (!text) return null;
+
+  return text.length > max
+    ? text.slice(0, max)
+    : text;
 }
 
-function asIso(v: unknown): string | null {
-  if (!v) return null;
-  const d = new Date(String(v));
-  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+function asIso(
+  value: unknown,
+): string | null {
+  if (!value) return null;
+
+  const date =
+    new Date(String(value));
+
+  return Number.isFinite(
+    date.getTime(),
+  )
+    ? date.toISOString()
+    : null;
 }
 
-function outwardStage(status: unknown): UiStage {
-  const s = String(status ?? '').trim().toLowerCase();
+function outwardStage(
+  status: unknown,
+): UiStage {
+  const value =
+    String(status ?? '')
+      .trim()
+      .toLowerCase();
 
-  if (s === 'screened') return 'screened';
-  if (s === 'approved') return 'approved';
-  if (s === 'rejected') return 'rejected';
-  if (s === 'training_scheduled') return 'training_scheduled';
-  if (s === 'training_completed') return 'training_completed';
+  if (value === 'screened') {
+    return 'screened';
+  }
 
-  // schema default/status seed is "pending"; admin UI expects "applied"
+  if (value === 'approved') {
+    return 'approved';
+  }
+
+  if (value === 'rejected') {
+    return 'rejected';
+  }
+
+  if (
+    value === 'training_scheduled'
+  ) {
+    return 'training_scheduled';
+  }
+
+  if (
+    value === 'training_completed'
+  ) {
+    return 'training_completed';
+  }
+
   return 'applied';
 }
 
-function outwardTrainingStatus(status: unknown): 'scheduled' | 'completed' | 'canceled' {
-  const s = String(status ?? '').trim().toLowerCase();
-  if (s === 'completed') return 'completed';
-  if (s === 'canceled' || s === 'cancelled') return 'canceled';
+function outwardTrainingStatus(
+  status: unknown,
+):
+  | 'scheduled'
+  | 'completed'
+  | 'canceled' {
+  const value =
+    String(status ?? '')
+      .trim()
+      .toLowerCase();
+
+  if (value === 'completed') {
+    return 'completed';
+  }
+
+  if (
+    value === 'canceled' ||
+    value === 'cancelled'
+  ) {
+    return 'canceled';
+  }
+
   return 'scheduled';
 }
 
 function outwardDispatchStatus(
   status: unknown,
-): 'pending' | 'packed' | 'shipped' | 'delivered' | 'canceled' {
-  const s = String(status ?? '').trim().toLowerCase();
+):
+  | 'pending'
+  | 'packed'
+  | 'shipped'
+  | 'delivered'
+  | 'canceled' {
+  const value =
+    String(status ?? '')
+      .trim()
+      .toLowerCase();
 
-  if (s === 'packed') return 'packed';
-  if (s === 'shipped') return 'shipped';
-  if (s === 'delivered') return 'delivered';
-  if (s === 'canceled' || s === 'cancelled') return 'canceled';
+  if (value === 'packed') {
+    return 'packed';
+  }
 
-  // schema/create-dispatch path may still use "prepared"; UI expects "pending"
+  if (value === 'shipped') {
+    return 'shipped';
+  }
+
+  if (value === 'delivered') {
+    return 'delivered';
+  }
+
+  if (
+    value === 'canceled' ||
+    value === 'cancelled'
+  ) {
+    return 'canceled';
+  }
+
   return 'pending';
 }
 
-export async function GET(req: NextRequest) {
+function publicEntitlements(
+  entitlements: any,
+  fulfilment: any,
+) {
+  return {
+    resolvedAt:
+      entitlements.resolvedAt,
+    pathwayKey:
+      entitlements.pathwayKey,
+    pathwayLabel:
+      entitlements.pathwayLabel,
+    approvedPayLater:
+      entitlements.approvedPayLater,
+    depositQualified:
+      entitlements.depositQualified,
+    privileges:
+      entitlements.privileges,
+    trainingAccess:
+      entitlements.trainingAccess,
+    practiceActivation:
+      entitlements.practiceActivation,
+    starterKitRelease:
+      entitlements.starterKitRelease,
+    authorisedStarterKitItems:
+      fulfilment.authorisedItems,
+    releasedStarterKitItems:
+      fulfilment.releasedItems,
+    missingStarterKitItems:
+      fulfilment.missingItems,
+    starterKitReleaseSatisfied:
+      fulfilment.releaseSatisfied,
+    platformIndemnityEligible:
+      entitlements
+        .platformIndemnityEligible,
+    balanceRecoveryApplies:
+      entitlements
+        .balanceRecoveryApplies,
+    outstandingCents:
+      entitlements.outstandingCents,
+    conditions:
+      entitlements.conditions,
+  };
+}
+
+export async function GET(
+  request: NextRequest,
+) {
   try {
-    const admin = await verifyAdminRequest(req);
+    const admin =
+      await verifyAdminRequest(
+        request,
+      );
+
     if (!admin.ok) {
       return admin.response;
     }
 
     const db: any = prisma;
 
-    const clinicians = await db.clinicianProfile.findMany({
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        displayName: true,
-        email: true,
-        phone: true,
-        specialty: true,
-        createdAt: true,
-        status: true,
-        trainingCompleted: true,
-        archived: true,
-      },
-    });
-
-    const visibleClinicians = Array.isArray(clinicians)
-      ? clinicians.filter((c: any) => !c?.archived)
-      : [];
-
-    const clinicianIds = visibleClinicians.map((c: any) => String(c.id));
-
-    const onboardings = clinicianIds.length
-      ? await db.clinicianOnboarding.findMany({
-          where: { clinicianId: { in: clinicianIds } },
-          orderBy: { createdAt: 'desc' },
-        })
-      : [];
-
-    const onboardingByClinicianId = new Map<string, any>();
-    for (const o of onboardings || []) {
-      const cid = String(o.clinicianId);
-      if (!onboardingByClinicianId.has(cid)) onboardingByClinicianId.set(cid, o);
-    }
-
-    const trainingSlotIds = Array.from(
-      new Set(
-        (onboardings || [])
-          .map((o: any) => cleanStr(o.trainingSlotId, 120))
-          .filter(Boolean),
-      ),
-    ) as string[];
-
-    const trainingSlots = trainingSlotIds.length
-      ? await db.clinicianTrainingSlot.findMany({
-          where: { id: { in: trainingSlotIds } },
-        })
-      : [];
-
-    const trainingSlotById = new Map<string, any>();
-    for (const t of trainingSlots || []) {
-      trainingSlotById.set(String(t.id), t);
-    }
-
-    const dispatches = clinicianIds.length
-      ? await db.clinicianDispatch.findMany({
-          where: { clinicianId: { in: clinicianIds } },
-          orderBy: [{ createdAt: 'desc' }],
-        })
-      : [];
-
-    const payments = clinicianIds.length
-      ? await db.clinicianOnboardingPayment.findMany({
-          where: {
-            clinicianId: { in: clinicianIds },
-            status: { in: ['confirmed', 'paid', 'captured'] },
+    const clinicians =
+      await db.clinicianProfile
+        .findMany({
+          orderBy: {
+            createdAt: 'desc',
           },
-          orderBy: [{ confirmedAt: 'desc' }, { createdAt: 'desc' }],
-        })
-      : [];
+          select: {
+            id: true,
+            displayName: true,
+            email: true,
+            phone: true,
+            specialty: true,
+            createdAt: true,
+            status: true,
+            trainingCompleted: true,
+            archived: true,
+          },
+        });
 
-    let payLaterRequests: any[] = [];
+    const visibleClinicians =
+      Array.isArray(clinicians)
+        ? clinicians.filter(
+            (clinician: any) =>
+              !clinician?.archived,
+          )
+        : [];
+
+    const clinicianIds =
+      visibleClinicians.map(
+        (clinician: any) =>
+          String(clinician.id),
+      );
+
+    const onboardings =
+      clinicianIds.length
+        ? await db
+            .clinicianOnboarding
+            .findMany({
+              where: {
+                clinicianId: {
+                  in: clinicianIds,
+                },
+              },
+              orderBy: {
+                createdAt: 'desc',
+              },
+            })
+        : [];
+
+    const onboardingByClinicianId =
+      new Map<string, any>();
+
+    for (
+      const onboarding of
+      onboardings || []
+    ) {
+      const clinicianId =
+        String(
+          onboarding.clinicianId,
+        );
+
+      if (
+        !onboardingByClinicianId.has(
+          clinicianId,
+        )
+      ) {
+        onboardingByClinicianId.set(
+          clinicianId,
+          onboarding,
+        );
+      }
+    }
+
+    const trainingSlotIds =
+      Array.from(
+        new Set(
+          (onboardings || [])
+            .map(
+              (onboarding: any) =>
+                cleanStr(
+                  onboarding
+                    .trainingSlotId,
+                  120,
+                ),
+            )
+            .filter(Boolean),
+        ),
+      ) as string[];
+
+    const trainingSlots =
+      trainingSlotIds.length
+        ? await db
+            .clinicianTrainingSlot
+            .findMany({
+              where: {
+                id: {
+                  in:
+                    trainingSlotIds,
+                },
+              },
+            })
+        : [];
+
+    const trainingSlotById =
+      new Map<string, any>();
+
+    for (
+      const training of
+      trainingSlots || []
+    ) {
+      trainingSlotById.set(
+        String(training.id),
+        training,
+      );
+    }
+
+    const dispatches =
+      clinicianIds.length
+        ? await db
+            .clinicianDispatch
+            .findMany({
+              where: {
+                clinicianId: {
+                  in: clinicianIds,
+                },
+              },
+              include: {
+                items: true,
+              },
+              orderBy: [
+                {
+                  createdAt: 'desc',
+                },
+              ],
+            })
+        : [];
+
+    const payments =
+      clinicianIds.length
+        ? await db
+            .clinicianOnboardingPayment
+            .findMany({
+              where: {
+                clinicianId: {
+                  in: clinicianIds,
+                },
+                status: {
+                  in: [
+                    'confirmed',
+                    'paid',
+                    'captured',
+                    'redeemed',
+                  ],
+                },
+              },
+              orderBy: [
+                {
+                  confirmedAt: 'desc',
+                },
+                {
+                  createdAt: 'desc',
+                },
+              ],
+            })
+        : [];
+
+    let payLaterRequests: any[] =
+      [];
 
     if (clinicianIds.length) {
       try {
         payLaterRequests =
-          await db.clinicianOnboardingPayLaterRequest.findMany({
-            where: {
-              clinicianId: {
-                in: clinicianIds,
+          await db
+            .clinicianOnboardingPayLaterRequest
+            .findMany({
+              where: {
+                clinicianId: {
+                  in: clinicianIds,
+                },
               },
-            },
-            orderBy: [
-              { requestedAt: 'desc' },
-              { createdAt: 'desc' },
-            ],
-          });
-      } catch (error: any) {
-        const code = String(
-          error?.code || '',
-        );
+              orderBy: [
+                {
+                  requestedAt: 'desc',
+                },
+                {
+                  createdAt: 'desc',
+                },
+              ],
+            });
+      }
+      catch (error: any) {
+        const code =
+          String(
+            error?.code || '',
+          );
 
         if (
           code !== 'P2021' &&
@@ -176,146 +417,460 @@ export async function GET(req: NextRequest) {
       }
     }
 
-    const paymentsByClinicianId = new Map<string, any[]>();
-    for (const payment of payments || []) {
-      const cid = String(payment.clinicianId);
-      const existing = paymentsByClinicianId.get(cid) || [];
+    const paymentsByClinicianId =
+      new Map<string, any[]>();
+
+    for (
+      const payment of
+      payments || []
+    ) {
+      const clinicianId =
+        String(payment.clinicianId);
+
+      const existing =
+        paymentsByClinicianId.get(
+          clinicianId,
+        ) || [];
+
       existing.push(payment);
-      paymentsByClinicianId.set(cid, existing);
+
+      paymentsByClinicianId.set(
+        clinicianId,
+        existing,
+      );
     }
 
-    const latestPayLaterRequestByClinicianId =
+    const dispatchesByClinicianId =
+      new Map<string, any[]>();
+
+    for (
+      const dispatch of
+      dispatches || []
+    ) {
+      const clinicianId =
+        String(dispatch.clinicianId);
+
+      const existing =
+        dispatchesByClinicianId.get(
+          clinicianId,
+        ) || [];
+
+      existing.push(dispatch);
+
+      dispatchesByClinicianId.set(
+        clinicianId,
+        existing,
+      );
+    }
+
+    const latestPayLaterByClinicianId =
       new Map<string, any>();
 
-    for (const request of payLaterRequests || []) {
+    const latestApprovedPayLaterByClinicianId =
+      new Map<string, any>();
+
+    for (
+      const payLaterRequest of
+      payLaterRequests || []
+    ) {
       const clinicianId =
-        String(request.clinicianId);
+        String(
+          payLaterRequest
+            .clinicianId,
+        );
 
       if (
-        !latestPayLaterRequestByClinicianId.has(
-          clinicianId,
-        )
+        !latestPayLaterByClinicianId
+          .has(clinicianId)
       ) {
-        latestPayLaterRequestByClinicianId.set(
-          clinicianId,
-          request,
-        );
+        latestPayLaterByClinicianId
+          .set(
+            clinicianId,
+            payLaterRequest,
+          );
+      }
+
+      if (
+        String(
+          payLaterRequest.status ||
+          '',
+        )
+          .trim()
+          .toLowerCase() ===
+          'approved' &&
+        !latestApprovedPayLaterByClinicianId
+          .has(clinicianId)
+      ) {
+        latestApprovedPayLaterByClinicianId
+          .set(
+            clinicianId,
+            payLaterRequest,
+          );
       }
     }
 
-    const settings = await getClinicianOnboardingSettings();
-    const publicSettings = publicClinicianOnboardingSettings(settings);
+    const settings =
+      await getClinicianOnboardingSettings();
 
-    const latestDispatchByClinicianId = new Map<string, any>();
-    for (const d of dispatches || []) {
-      const cid = String(d.clinicianId);
-      if (!latestDispatchByClinicianId.has(cid)) latestDispatchByClinicianId.set(cid, d);
-    }
+    const publicSettings =
+      publicClinicianOnboardingSettings(
+        settings,
+      );
 
-    const rows = visibleClinicians.map((clinician: any) => {
-      const onboarding = onboardingByClinicianId.get(String(clinician.id)) || null;
-      const training =
-        onboarding?.trainingSlotId
-          ? trainingSlotById.get(String(onboarding.trainingSlotId)) || null
-          : null;
-      const dispatch = latestDispatchByClinicianId.get(String(clinician.id)) || null;
-      const confirmedPayments = paymentsByClinicianId.get(String(clinician.id)) || [];
-      const amountPaidCents = confirmedPayments.reduce((sum: number, payment: any) => {
-        const provider = String(payment?.provider || '').toLowerCase();
-        if (provider === 'waiver' || provider === 'deferred') return sum;
-        return sum + Math.max(0, Math.round(Number(payment?.amountCents || 0)));
-      }, 0);
-      const paymentState = calculateOnboardingPaymentState({
-        trainingFeeCents: settings.trainingFeeCents,
-        minimumInitialPaymentCents: settings.minimumInitialPaymentCents,
-        amountPaidCents,
-      });
-      const paymentPlan = cleanStr(onboarding?.paymentPlan, 120);
-      const waiverActive =
-        paymentPlan === 'WAIVER_TRAIN_NOW_PAY_LATER' ||
-        confirmedPayments.some((payment: any) =>
-          ['waiver', 'deferred'].includes(String(payment?.provider || '').toLowerCase()),
-        );
-      const latestPayment = confirmedPayments[0] || null;
-      const latestPayLaterRequest =
-        latestPayLaterRequestByClinicianId.get(
-          String(clinician.id),
-        ) || null;
+    const rows =
+      visibleClinicians.map(
+        (clinician: any) => {
+          const clinicianId =
+            String(clinician.id);
 
-      return {
-        clinicianId: String(clinician.id),
-        displayName: cleanStr(clinician.displayName, 240) || 'Clinician',
-        email: cleanStr(clinician.email, 320),
-        phone: cleanStr(clinician.phone, 80),
-        specialty: cleanStr(clinician.specialty, 240),
-        createdAt: asIso(clinician.createdAt) || new Date().toISOString(),
+          const onboarding =
+            onboardingByClinicianId
+              .get(clinicianId) ||
+            null;
 
-        onboarding: {
-          id: onboarding?.id
-            ? String(onboarding.id)
-            : `virtual-onboarding-${String(clinician.id)}`,
-          stage: outwardStage(onboarding?.status),
-          notes: cleanStr(onboarding?.trainingNotes, 2000),
-          depositPaid: onboarding?.depositPaid === true,
-          paymentPlan,
-          nextPaymentAt: asIso(onboarding?.nextPaymentAt),
-          waiverActive,
+          const training =
+            onboarding?.trainingSlotId
+              ? trainingSlotById
+                  .get(
+                    String(
+                      onboarding
+                        .trainingSlotId,
+                    ),
+                  ) || null
+              : null;
+
+          const clinicianDispatches =
+            dispatchesByClinicianId
+              .get(clinicianId) ||
+            [];
+
+          const dispatch =
+            clinicianDispatches[0] ||
+            null;
+
+          const confirmedPayments =
+            paymentsByClinicianId
+              .get(clinicianId) ||
+            [];
+
+          const latestPayLaterRequest =
+            latestPayLaterByClinicianId
+              .get(clinicianId) ||
+            null;
+
+          const latestApprovedPayLater =
+            latestApprovedPayLaterByClinicianId
+              .get(clinicianId) ||
+            null;
+
+          const entitlements =
+            resolveClinicianOnboardingEntitlementsFromEvidence(
+              {
+                settings,
+                onboarding,
+                payments:
+                  confirmedPayments,
+                latestApprovedPayLater,
+              },
+            );
+
+          const fulfilment =
+            resolvePermanentStarterKitFulfilment(
+              entitlements,
+              clinicianDispatches,
+            );
+
+          const paymentState =
+            entitlements
+              .paymentState;
+
+          const paymentPlan =
+            cleanStr(
+              onboarding
+                ?.paymentPlan,
+              120,
+            );
+
+          const payLaterPathwayActive =
+            entitlements
+              .pathwayKey ===
+            'START_NOW_PAY_LATER';
+
+          const latestPayment =
+            confirmedPayments[0] ||
+            null;
+
+          return {
+            clinicianId,
+            displayName:
+              cleanStr(
+                clinician
+                  .displayName,
+                240,
+              ) ||
+              'Clinician',
+            email:
+              cleanStr(
+                clinician.email,
+                320,
+              ),
+            phone:
+              cleanStr(
+                clinician.phone,
+                80,
+              ),
+            specialty:
+              cleanStr(
+                clinician
+                  .specialty,
+                240,
+              ),
+            createdAt:
+              asIso(
+                clinician.createdAt,
+              ) ||
+              new Date()
+                .toISOString(),
+            onboarding: {
+              id:
+                onboarding?.id
+                  ? String(
+                      onboarding.id,
+                    )
+                  : `virtual-onboarding-${clinicianId}`,
+              stage:
+                outwardStage(
+                  onboarding
+                    ?.status,
+                ),
+              notes:
+                cleanStr(
+                  onboarding
+                    ?.trainingNotes,
+                  2000,
+                ),
+              depositPaid:
+                entitlements
+                  .depositQualified,
+              paymentPlan,
+              nextPaymentAt:
+                asIso(
+                  onboarding
+                    ?.nextPaymentAt,
+                ),
+              waiverActive:
+                payLaterPathwayActive,
+            },
+            payment: {
+              amountPaidCents:
+                paymentState
+                  .amountPaidCents,
+              outstandingCents:
+                paymentState
+                  .outstandingCents,
+              initialRequirementMet:
+                paymentState
+                  .initialRequirementMet,
+              fullyPaid:
+                paymentState
+                  .fullyPaid,
+              paymentStatus:
+                payLaterPathwayActive
+                  ? 'waiver'
+                  : paymentState
+                      .paymentStatus,
+              waiverActive:
+                payLaterPathwayActive,
+              latestConfirmedPayment:
+                latestPayment
+                  ? {
+                      id:
+                        String(
+                          latestPayment.id,
+                        ),
+                      provider:
+                        cleanStr(
+                          latestPayment
+                            .provider,
+                          80,
+                        ),
+                      status:
+                        cleanStr(
+                          latestPayment
+                            .status,
+                          80,
+                        ),
+                      amountCents:
+                        Math.max(
+                          0,
+                          Math.round(
+                            Number(
+                              latestPayment
+                                .amountCents ||
+                              0,
+                            ),
+                          ),
+                        ),
+                      currency:
+                        cleanStr(
+                          latestPayment
+                            .currency,
+                          8,
+                        ),
+                      paymentReference:
+                        cleanStr(
+                          latestPayment
+                            .paymentReference,
+                          180,
+                        ),
+                      proofOfPaymentUrl:
+                        cleanStr(
+                          latestPayment
+                            .proofOfPaymentUrl,
+                          1000,
+                        ),
+                      authorisationCodeHint:
+                        cleanStr(
+                          latestPayment
+                            .authorisationCodeHint,
+                          20,
+                        ),
+                      authorisationExpiresAt:
+                        asIso(
+                          latestPayment
+                            .authorisationExpiresAt,
+                        ),
+                      confirmedAt:
+                        asIso(
+                          latestPayment
+                            .confirmedAt,
+                        ),
+                    }
+                  : null,
+            },
+            payLaterRequest:
+              adminClinicianPayLaterRequest(
+                latestPayLaterRequest,
+              ),
+            entitlements:
+              publicEntitlements(
+                entitlements,
+                fulfilment,
+              ),
+            trainingSlot:
+              training
+                ? {
+                    id:
+                      String(
+                        training.id,
+                      ),
+                    startAt:
+                      asIso(
+                        training
+                          .startsAt,
+                      ),
+                    endAt:
+                      asIso(
+                        training
+                          .endsAt,
+                      ),
+                    mode:
+                      String(
+                        training
+                          .mode ||
+                        '',
+                      )
+                        .trim()
+                        .toLowerCase() ===
+                      'in_person'
+                        ? 'in_person'
+                        : 'virtual',
+                    status:
+                      outwardTrainingStatus(
+                        training
+                          .status,
+                      ),
+                    joinUrl:
+                      cleanStr(
+                        training
+                          .meetingUrl,
+                        1000,
+                      ),
+                  }
+                : null,
+            dispatch:
+              dispatch
+                ? {
+                    id:
+                      String(
+                        dispatch.id,
+                      ),
+                    status:
+                      outwardDispatchStatus(
+                        dispatch
+                          .status,
+                      ),
+                    courierName:
+                      cleanStr(
+                        dispatch
+                          .courier,
+                        240,
+                      ),
+                    trackingCode:
+                      cleanStr(
+                        dispatch
+                          .trackingCode,
+                        240,
+                      ),
+                    shippedAt:
+                      asIso(
+                        dispatch
+                          .shippedAt,
+                      ),
+                    deliveredAt:
+                      asIso(
+                        dispatch
+                          .deliveredAt,
+                      ),
+                    items:
+                      Array.isArray(
+                        dispatch.items,
+                      )
+                        ? dispatch
+                            .items
+                            .map(
+                              (
+                                item: any,
+                              ) => ({
+                                label:
+                                  cleanStr(
+                                    item
+                                      ?.label,
+                                    240,
+                                  ),
+                                quantity:
+                                  Math.max(
+                                    1,
+                                    Math.round(
+                                      Number(
+                                        item
+                                          ?.quantity ||
+                                        1,
+                                      ),
+                                    ),
+                                  ),
+                                shipped:
+                                  item
+                                    ?.isShipped ===
+                                  true,
+                              }),
+                            )
+                        : [],
+                  }
+                : null,
+          };
         },
-
-        payment: {
-          amountPaidCents: paymentState.amountPaidCents,
-          outstandingCents: paymentState.outstandingCents,
-          initialRequirementMet: paymentState.initialRequirementMet,
-          fullyPaid: paymentState.fullyPaid,
-          paymentStatus: waiverActive ? 'waiver' : paymentState.paymentStatus,
-          waiverActive,
-          latestConfirmedPayment: latestPayment
-            ? {
-                id: String(latestPayment.id),
-                provider: cleanStr(latestPayment.provider, 80),
-                status: cleanStr(latestPayment.status, 80),
-                amountCents: Math.max(0, Math.round(Number(latestPayment.amountCents || 0))),
-                currency: cleanStr(latestPayment.currency, 8),
-                paymentReference: cleanStr(latestPayment.paymentReference, 180),
-                proofOfPaymentUrl: cleanStr(latestPayment.proofOfPaymentUrl, 1000),
-                authorisationCodeHint: cleanStr(latestPayment.authorisationCodeHint, 20),
-                authorisationExpiresAt: asIso(latestPayment.authorisationExpiresAt),
-                confirmedAt: asIso(latestPayment.confirmedAt),
-              }
-            : null,
-        },
-
-        payLaterRequest:
-          adminClinicianPayLaterRequest(
-            latestPayLaterRequest,
-          ),
-
-        trainingSlot: training
-          ? {
-              id: String(training.id),
-              startAt: asIso(training.startsAt),
-              endAt: asIso(training.endsAt),
-              mode:
-                String(training.mode || '').trim().toLowerCase() === 'in_person'
-                  ? 'in_person'
-                  : 'virtual',
-              status: outwardTrainingStatus(training.status),
-              joinUrl: cleanStr(training.meetingUrl, 1000),
-            }
-          : null,
-
-        dispatch: dispatch
-          ? {
-              id: String(dispatch.id),
-              status: outwardDispatchStatus(dispatch.status),
-              courierName: cleanStr(dispatch.courier, 240),
-              trackingCode: cleanStr(dispatch.trackingCode, 240),
-              shippedAt: asIso(dispatch.shippedAt),
-              deliveredAt: asIso(dispatch.deliveredAt),
-            }
-          : null,
-      };
-    });
+      );
 
     return NextResponse.json(
       {
@@ -327,16 +882,32 @@ export async function GET(req: NextRequest) {
       },
       {
         headers: {
-          'cache-control': 'no-store',
-          'access-control-allow-origin': '*',
+          'cache-control':
+            'no-store',
+          'access-control-allow-origin':
+            '*',
         },
       },
     );
-  } catch (err: any) {
-    console.error('[api-gateway][admin][clinicians][onboarding-board] error', err);
+  }
+  catch (error: any) {
+    console.error(
+      '[api-gateway][admin][clinicians][onboarding-board] error',
+      error,
+    );
+
     return NextResponse.json(
-      { ok: false, error: String(err?.message || 'onboarding_board_failed') },
-      { status: 500 },
+      {
+        ok: false,
+        error:
+          String(
+            error?.message ||
+            'onboarding_board_failed',
+          ),
+      },
+      {
+        status: 500,
+      },
     );
   }
 }

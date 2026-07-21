@@ -1,4 +1,4 @@
-﻿// apps/api-gateway/app/api/clinicians/onboarding/payment/init/route.ts
+// apps/api-gateway/app/api/clinicians/onboarding/payment/init/route.ts
 import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
@@ -8,6 +8,9 @@ import {
   getClinicianOnboardingSettings,
   type ClinicianOnboardingPathwayKey,
 } from '@/src/clinicians/onboarding/settings';
+import {
+  resolveAuthenticatedClinician,
+} from '@/src/clinicians/onboarding/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -125,6 +128,17 @@ export async function POST(req: NextRequest) {
     if (!clinicianId) return NextResponse.json({ ok: false, error: 'clinicianId_required' }, { status: 400 });
     if (!slotId) return NextResponse.json({ ok: false, error: 'slotId_required' }, { status: 400 });
 
+    const identity =
+      await resolveAuthenticatedClinician(
+        req,
+        clinicianId,
+      );
+
+    if (!identity.ok) {
+      return identity.response;
+    }
+
+    const clinician = identity.clinician;
     const settings = await getClinicianOnboardingSettings();
     if (!settings.cardPaymentEnabled) {
       return NextResponse.json({ ok: false, error: 'card_payment_disabled' }, { status: 409 });
@@ -190,11 +204,25 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const clinician = await prisma.clinicianProfile.findUnique({ where: { id: clinicianId } });
-    if (!clinician) return NextResponse.json({ ok: false, error: 'clinician_not_found' }, { status: 404 });
-
     const slot = await prisma.clinicianTrainingSlot.findUnique({ where: { id: slotId } });
     if (!slot) return NextResponse.json({ ok: false, error: 'training_slot_not_found' }, { status: 404 });
+
+    if (String(slot.status || '').toLowerCase() !== 'published') {
+      return NextResponse.json(
+        { ok: false, error: 'training_slot_not_published' },
+        { status: 409 },
+      );
+    }
+
+    if (
+      slot.bookingClosesAt &&
+      slot.bookingClosesAt.getTime() <= Date.now()
+    ) {
+      return NextResponse.json(
+        { ok: false, error: 'training_slot_booking_closed' },
+        { status: 409 },
+      );
+    }
 
     const onboarding = await prisma.clinicianOnboarding.upsert({
       where: { clinicianId },
@@ -359,4 +387,3 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: false, error: err?.message || 'payment_init_failed' }, { status: 500 });
   }
 }
-

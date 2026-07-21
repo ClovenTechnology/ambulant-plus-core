@@ -12,17 +12,11 @@ export async function POST(req: NextRequest) {
   const courierName = body?.courierName ? String(body.courierName) : '';
   const trackingCode = body?.trackingCode ? String(body.trackingCode) : null;
   const trackingUrl = body?.trackingUrl ? String(body.trackingUrl) : null;
-  const kitItems = Array.isArray(body?.kitItems) ? body.kitItems.map(String) : [];
   const notifyClinician = body?.notifyClinician !== false;
-  const dispatchKind = body?.dispatchKind ? String(body.dispatchKind) : 'starter_kit';
 
   if (!clinicianId || !onboardingId || !courierName) {
     return new Response('clinicianId, onboardingId, courierName required', { status: 400 });
   }
-  if (!kitItems.length) {
-    return new Response('kitItems required', { status: 400 });
-  }
-
   // 1) Create dispatch in gateway
   const res = await forwardToGateway(req, '/api/admin/clinicians/onboarding/create-dispatch', {
     clinicianId,
@@ -31,32 +25,93 @@ export async function POST(req: NextRequest) {
     courierName,
     trackingCode,
     trackingUrl,
-    kitItems,
-    dispatchKind,
+    dispatchKind: 'starter_kit',
+    notifyClinician,
   });
 
-  // If gateway failed, forwardToGateway already returns JSON response
-  // We need to detect that and return early.
-  // forwardToGateway returns a NextResponse; check status by cloning.
-  const status = (res as any)?.status ?? 200;
-  if (status !== 200) return res;
+  if (!res.ok) {
+    return res;
+  }
 
-  // 2) Bulletproof notification: only attempt if requested AND tracking exists.
-  if (notifyClinician && (trackingUrl || trackingCode)) {
-    const notify = await bestEffortNotifyDispatch({
-      clinicianId,
-      onboardingId,
-      courierName,
-      trackingCode,
-      trackingUrl,
-      kitItems,
-      dispatchKind,
-      // idempotency hint: gateway can use these to de-dupe
-      idempotencyKey: `dispatch:${clinicianId}:${trackingCode || trackingUrl || 'no_tracking'}`,
-    });
+  const payload =
+    await res
+      .clone()
+      .json()
+      .catch(() => null);
 
-    // Never break the main save if notify fails.
-    return NextResponse.json({ ok: true, notify }, { status: 200 });
+  const responseBody =
+    payload &&
+    typeof payload === 'object'
+      ? payload
+      : {
+          ok: true,
+        };
+
+  const newlyReleasedItems =
+    Array.isArray(
+      payload?.entitlements
+        ?.newlyReleasedItems,
+    )
+      ? payload
+          .entitlements
+          .newlyReleasedItems
+      : [];
+
+  const authorisedItems =
+    Array.isArray(
+      payload?.entitlements
+        ?.authorisedItems,
+    )
+      ? payload
+          .entitlements
+          .authorisedItems
+      : [];
+
+  const authoritativeKitItems =
+    newlyReleasedItems.length
+      ? newlyReleasedItems
+      : authorisedItems;
+
+  if (
+    notifyClinician &&
+    (
+      trackingUrl ||
+      trackingCode
+    )
+  ) {
+    const notify =
+      await bestEffortNotifyDispatch({
+        clinicianId,
+        onboardingId,
+        courierName,
+        trackingCode,
+        trackingUrl,
+        kitItems:
+          authoritativeKitItems.length
+            ? authoritativeKitItems
+            : undefined,
+        dispatchKind:
+          'starter_kit',
+        idempotencyKey:
+          'dispatch:' +
+          clinicianId +
+          ':' +
+          (
+            trackingCode ||
+            trackingUrl ||
+            'no_tracking'
+          ),
+      });
+
+    return NextResponse.json(
+      {
+        ...responseBody,
+        notify,
+      },
+      {
+        status: res.status,
+      },
+    );
   }
 
   return res;
