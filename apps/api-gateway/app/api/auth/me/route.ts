@@ -2,6 +2,7 @@
 import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { prisma } from '@/lib/prisma';
+import { verifyLegacyAdminSessionToken } from '@/src/lib/admin-session-compat';
 
 function canonicalAuthority(value: unknown) {
   return String(value || '')
@@ -98,21 +99,107 @@ async function resolveEffectiveRolesAndScopes(userId?: string, email?: string) {
 
 export async function GET() {
   const raw = cookies().get('adm.profile')?.value;
-  if (!raw) return NextResponse.json({ authenticated: false }, { status: 200 });
 
-  let parsed: any = {};
-  try { parsed = JSON.parse(decodeURIComponent(raw)); } catch {}
+  if (!raw) {
+    return NextResponse.json(
+      {
+        authenticated: false,
+      },
+      {
+        status: 200,
+      },
+    );
+  }
 
-  const { roles, scopes, profile } = await resolveEffectiveRolesAndScopes(parsed.userId, parsed.email);
+  let parsed: Record<string, any> | null =
+    null;
+
+  try {
+    const candidate =
+      JSON.parse(
+        decodeURIComponent(
+          raw,
+        ),
+      );
+
+    if (
+      candidate &&
+      typeof candidate ===
+        'object' &&
+      (
+        candidate.userId ||
+        candidate.email
+      )
+    ) {
+      parsed =
+        candidate;
+    }
+  }
+  catch {
+    parsed =
+      null;
+  }
+
+  if (!parsed) {
+    const legacy =
+      verifyLegacyAdminSessionToken(
+        raw,
+      );
+
+    if (legacy) {
+      parsed = {
+        userId:
+          legacy.sub,
+        email:
+          legacy.email,
+        name:
+          legacy.name,
+      };
+    }
+  }
+
+  if (!parsed) {
+    return NextResponse.json(
+      {
+        authenticated: false,
+      },
+      {
+        status: 200,
+      },
+    );
+  }
+
+  const {
+    roles,
+    scopes,
+    profile,
+  } =
+    await resolveEffectiveRolesAndScopes(
+      parsed.userId,
+      parsed.email,
+    );
 
   return NextResponse.json({
     authenticated: true,
     user: {
-      id: profile?.userId ?? parsed.userId ?? null,
-      email: profile?.email ?? parsed.email ?? null,
-      name: profile?.name ?? parsed.name ?? null,
-      departmentId: profile?.departmentId ?? null,
-      designationId: profile?.designationId ?? null,
+      id:
+        profile?.userId ??
+        parsed.userId ??
+        null,
+      email:
+        profile?.email ??
+        parsed.email ??
+        null,
+      name:
+        profile?.name ??
+        parsed.name ??
+        null,
+      departmentId:
+        profile?.departmentId ??
+        null,
+      designationId:
+        profile?.designationId ??
+        null,
       roles,
       scopes,
     },

@@ -49,6 +49,7 @@ function response(
 function forwardedHeaders(
   request: NextRequest,
   includeContentType = false,
+  actor: any = null,
 ) {
   const headers =
     new Headers();
@@ -93,6 +94,34 @@ function forwardedHeaders(
     );
   }
 
+  const actorId =
+    String(
+      actor?.id ||
+        '',
+    ).trim();
+
+  const actorEmail =
+    String(
+      actor?.email ||
+        '',
+    )
+      .trim()
+      .toLowerCase();
+
+  if (actorId) {
+    headers.set(
+      'x-admin-actor-id',
+      actorId,
+    );
+  }
+
+  if (actorEmail) {
+    headers.set(
+      'x-admin-actor-email',
+      actorEmail,
+    );
+  }
+
   headers.set(
     'accept',
     'application/json',
@@ -126,6 +155,8 @@ async function authenticate(
         500,
       error:
         'api_gateway_base_missing',
+      user:
+        null,
     };
   }
 
@@ -168,6 +199,8 @@ async function authenticate(
       error:
         body?.error ||
         'admin_authentication_required',
+      user:
+        null,
     };
   }
 
@@ -177,6 +210,9 @@ async function authenticate(
     status:
       200,
     error:
+      null,
+    user:
+      body?.user ||
       null,
   };
 }
@@ -260,6 +296,7 @@ async function forward(
             request,
             method !==
               'GET',
+            auth.user,
           ),
         body:
           body ||

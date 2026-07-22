@@ -3,6 +3,9 @@ import {
   NextResponse,
 } from 'next/server';
 import {
+  verifyAdminRequest,
+} from '../../utils/auth';
+import {
   readIdentity,
   requireTrustedIdentityInProduction,
 } from '@/src/lib/identity';
@@ -55,9 +58,54 @@ function actorFromIdentity(
   };
 }
 
-function requireLegalAdmin(
+function actorFromVerifiedAdmin(
+  verified: {
+    uid: string;
+    role: string;
+    source?: string;
+  },
   request: NextRequest,
 ) {
+  const proxyActor =
+    verified.source ===
+      'admin-api-key'
+      ? String(
+          request.headers.get(
+            'x-admin-actor-id',
+          ) ||
+            request.headers.get(
+              'x-admin-actor-email',
+            ) ||
+            '',
+        ).trim()
+      : '';
+
+  return {
+    userId:
+      proxyActor ||
+      verified.uid ||
+      null,
+    role:
+      verified.role ||
+      null,
+  };
+}
+
+async function requireLegalAdmin(
+  request: NextRequest,
+) {
+  const verified =
+    await verifyAdminRequest(
+      request,
+    );
+
+  if (verified.ok) {
+    return actorFromVerifiedAdmin(
+      verified,
+      request,
+    );
+  }
+
   const who =
     readIdentity(
       request.headers,
@@ -76,14 +124,16 @@ function requireLegalAdmin(
     ],
   );
 
-  return who;
+  return actorFromIdentity(
+    who,
+  );
 }
 
 export async function GET(
   request: NextRequest,
 ) {
   try {
-    requireLegalAdmin(
+    await requireLegalAdmin(
       request,
     );
 
@@ -153,8 +203,8 @@ export async function POST(
   request: NextRequest,
 ) {
   try {
-    const who =
-      requireLegalAdmin(
+    const actor =
+      await requireLegalAdmin(
         request,
       );
 
@@ -171,10 +221,7 @@ export async function POST(
           orgIdFromHeaders(
             request.headers,
           ),
-        actor:
-          actorFromIdentity(
-            who,
-          ),
+        actor,
         action:
           String(
             body?.action ||
