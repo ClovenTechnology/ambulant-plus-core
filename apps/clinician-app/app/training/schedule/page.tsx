@@ -389,7 +389,7 @@ function modeLabel(mode?: SessionMode | null) {
 function releaseLabel(release?: StarterKitRelease | null) {
   if (release === 'full') return 'Full C-Med package';
   if (release === 'deposit') return 'Deposit C-Med package';
-  return 'No permanent kit release';
+  return 'No C-Med Kit dispatch';
 }
 
 function titleCaseKey(value: string) {
@@ -763,12 +763,14 @@ function CMedPackageCard({
   released,
   missing,
   dispatch,
+  preview,
 }: {
   release: StarterKitRelease;
   items: string[];
   released: string[];
   missing: string[];
   dispatch?: TrainingContext['dispatch'];
+  preview: boolean;
 }) {
   return (
     <section className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm" aria-labelledby="cmed-package-heading">
@@ -777,7 +779,11 @@ function CMedPackageCard({
           <div className="flex items-center gap-3">
             <div className="rounded-2xl bg-white/10 p-2"><PackageCheck className="h-5 w-5" /></div>
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-200">Admin-configured fulfilment</div>
+              <div className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-200">
+                {preview
+                  ? 'Selected payment option preview'
+                  : 'Admin-configured C-Med dispatch'}
+              </div>
               <h2 id="cmed-package-heading" className="mt-0.5 text-lg font-black">C-Med package</h2>
             </div>
           </div>
@@ -790,7 +796,7 @@ function CMedPackageCard({
       <div className="p-5">
         {release === 'none' ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
-            This option does not release a permanent C-Med package. Admin may grant training access independently under the selected pathway.
+            This option does not include a C-Med Kit dispatch. Admin may grant training access independently under the selected pathway.
           </div>
         ) : items.length ? (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -1356,23 +1362,47 @@ function TrainingSchedulePageContent() {
       ? `/training/room/${encodeURIComponent(`training-slot-${trainingSlotIdForRoom}`)}?trainingSlotId=${encodeURIComponent(trainingSlotIdForRoom)}`
       : null;
 
-  const effectiveRelease: StarterKitRelease =
-    ctx?.entitlements?.starterKitRelease ||
+  const entitlementPathwayKey =
+    ctx?.entitlements?.pathwayKey || null;
+  const previewingDifferentPathway =
+    Boolean(selectedPathway) &&
+    selectedPathway?.key !== entitlementPathwayKey;
+  const selectedRelease =
     selectedPathway?.privileges.starterKitRelease ||
     'none';
+  const effectiveRelease: StarterKitRelease =
+    previewingDifferentPathway
+      ? selectedRelease
+      : ctx?.entitlements?.starterKitRelease ||
+        selectedRelease;
   const fullKit = stringList(ctx?.starterKitItems);
   const depositKit = stringList(ctx?.starterKitDepositItems);
-  const authorisedKit = stringList(ctx?.entitlements?.authorisedStarterKitItems);
+  const authorisedKit = stringList(
+    ctx?.entitlements?.authorisedStarterKitItems,
+  );
+  const configuredKit =
+    effectiveRelease === 'full'
+      ? fullKit
+      : effectiveRelease === 'deposit'
+        ? depositKit
+        : [];
   const packageItems =
-    ctx?.entitlements?.pathwayKey
-      ? authorisedKit
-      : effectiveRelease === 'full'
-        ? fullKit
-        : effectiveRelease === 'deposit'
-          ? depositKit
-          : [];
-  const releasedKit = stringList(ctx?.entitlements?.releasedStarterKitItems);
-  const missingKit = stringList(ctx?.entitlements?.missingStarterKitItems);
+    previewingDifferentPathway || !entitlementPathwayKey
+      ? configuredKit
+      : authorisedKit;
+  const releasedKit = previewingDifferentPathway
+    ? []
+    : stringList(
+        ctx?.entitlements?.releasedStarterKitItems,
+      );
+  const missingKit = previewingDifferentPathway
+    ? []
+    : stringList(
+        ctx?.entitlements?.missingStarterKitItems,
+      );
+  const packageDispatch = previewingDifferentPathway
+    ? undefined
+    : ctx?.dispatch;
   const selectedModeInstructions =
     mode === 'in_person'
       ? selectedSlot?.inPersonInstructions
@@ -1420,7 +1450,7 @@ function TrainingSchedulePageContent() {
 
           <div className="grid gap-4 px-6 py-5 text-sm text-slate-600 sm:grid-cols-3 sm:px-8 lg:px-10">
             <div className="flex gap-3"><ShieldCheck className="h-5 w-5 shrink-0 text-indigo-700" /><span>Patient visibility starts only after Admin certification.</span></div>
-            <div className="flex gap-3"><Truck className="h-5 w-5 shrink-0 text-indigo-700" /><span>C-Med fulfilment follows your effective payment privileges.</span></div>
+            <div className="flex gap-3"><Truck className="h-5 w-5 shrink-0 text-indigo-700" /><span>C-Med StarterKit dispatch follows your effective payment privileges.</span></div>
             <div className="flex gap-3"><CheckCircle2 className="h-5 w-5 shrink-0 text-indigo-700" /><span>All schedules and terms are published by Admin.</span></div>
           </div>
         </header>
@@ -1486,7 +1516,7 @@ function TrainingSchedulePageContent() {
                 <div>
                   <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-700">Training programme</div>
                   <h2 className="mt-1 text-xl font-black text-slate-950">Choose a published programme</h2>
-                  <p className="mt-1 text-sm text-slate-600">Times are shown in {trainingPolicy.timezone}.</p>
+                  <p className="mt-1 text-sm text-slate-600">Times are shown in {trainingPolicy.timezone} time zone.</p>
                   <div className="mt-5 space-y-4">
                     {!slots.length ? (
                       <div className="rounded-3xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
@@ -1599,12 +1629,36 @@ function TrainingSchedulePageContent() {
         ) : null}
 
         {ctx ? (
-          <CMedPackageCard release={effectiveRelease} items={packageItems} released={releasedKit} missing={missingKit} dispatch={ctx.dispatch} />
+          <CMedPackageCard
+            release={effectiveRelease}
+            items={packageItems}
+            released={releasedKit}
+            missing={missingKit}
+            dispatch={packageDispatch}
+            preview={previewingDifferentPathway}
+          />
         ) : null}
 
         {ctx && !alreadyCompleted ? (
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border bg-white p-5 text-sm text-slate-600">
-            <span>Need help? {trainingPolicy.supportMessage || 'Contact Ambulant+ support for onboarding assistance.'}</span>
+            <span>
+              Need help? Contact Ambulant+ support for onboarding assistance at{' '}
+              <a
+                href="mailto:support@ambulantplus.co.za"
+                className="font-semibold text-indigo-700 hover:underline"
+              >
+                support@ambulantplus.co.za
+              </a>{' '}
+              or{' '}
+              <a
+                href="https://wa.me/27696690899"
+                target="_blank"
+                rel="noreferrer"
+                className="font-semibold text-indigo-700 hover:underline"
+              >
+                WhatsApp +27 69 669 0899
+              </a>.
+            </span>
             {alreadyPaid ? <button type="button" onClick={() => router.push('/auth/login')} className="rounded-xl bg-slate-950 px-4 py-2 font-semibold text-white hover:bg-black">Continue to clinician portal</button> : null}
           </div>
         ) : null}

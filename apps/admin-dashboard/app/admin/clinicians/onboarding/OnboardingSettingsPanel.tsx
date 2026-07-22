@@ -89,7 +89,7 @@ const DEFAULT_PATHWAYS: Pathway[] = [
     featured: true,
     conditions: [
       'Training access begins after Admin approval.',
-      'The permanent C-Med Kit requires a qualifying payment.',
+      'A C-Med Kit dispatch requires a qualifying payment.',
     ],
     privileges: {
       trainingAccess: true,
@@ -1371,7 +1371,7 @@ export default function OnboardingSettingsPanel() {
                           className="mt-1 w-full rounded-lg border bg-white px-2 py-2"
                         >
                           <option value="none">
-                            No permanent kit
+                            No C-Med Kit dispatch
                           </option>
                           <option value="deposit">
                             Deposit-kit subset

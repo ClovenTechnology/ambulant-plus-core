@@ -777,7 +777,7 @@ setBusyId(schedRow.clinicianId);
       setNotice({
         tone: 'err',
         text:
-          'The effective Admin-configured payment pathway does not authorise a permanent C-Med release.',
+          'The effective Admin-configured payment pathway does not authorise a C-Med Kit dispatch.',
       });
       return;
     }
@@ -1467,7 +1467,7 @@ setBusyId(schedRow.clinicianId);
                           ? 'All currently authorised items have already been released.'
                           : releaseAllowed
                             ? 'Prepare only the server-authorised outstanding C-Med items.'
-                            : 'The effective payment pathway does not authorise a permanent kit release.'
+                            : 'The effective payment pathway does not authorise a C-Med Kit dispatch.'
                       }
                       className="rounded bg-teal-600 px-3 py-1 text-[11px] font-medium text-white hover:bg-teal-700 disabled:opacity-50"
                     >

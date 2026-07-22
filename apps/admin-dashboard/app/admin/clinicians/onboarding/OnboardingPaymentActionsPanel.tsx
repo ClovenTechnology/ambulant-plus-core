@@ -679,7 +679,7 @@ export default function OnboardingPaymentActionsPanel({
       setNotice({
         tone: 'err',
         text:
-          'The effective Admin-configured pathway does not authorise a permanent C-Med release.',
+          'The effective Admin-configured pathway does not authorise a C-Med Kit dispatch.',
       });
       return;
     }
@@ -1093,7 +1093,7 @@ export default function OnboardingPaymentActionsPanel({
                       ? 'All currently authorised items have already been released.'
                       : canPermanentDispatch
                         ? 'Prepare only the server-authorised outstanding C-Med items.'
-                        : 'The effective pathway does not authorise a permanent kit release.'
+                        : 'The effective pathway does not authorise a C-Med Kit dispatch.'
                   }
                 >
                   {releaseSatisfied
@@ -1283,7 +1283,7 @@ export default function OnboardingPaymentActionsPanel({
                     />
 
                     <span>
-                      Admin confirms that approval permits the Pay Later training pathway and temporary training-device arrangements only. It does not mark the qualifying deposit as paid or release the permanent C-Med StarterKit.
+                      Admin confirms that approval permits the Pay Later training pathway and temporary training-device arrangements only. It does not mark the qualifying deposit as paid or authorise a C-Med Kit dispatch.
                     </span>
                   </label>
 
@@ -1309,7 +1309,7 @@ export default function OnboardingPaymentActionsPanel({
                   </label>
                   <label className="flex gap-2 rounded-lg border bg-amber-50 p-3 text-xs text-amber-900">
                     <input type="checkbox" checked={termsConfirmed} onChange={(e) => setTermsConfirmed(e.target.checked)} />
-                    <span>Admin confirms waiver T&C: temporary training devices only; permanent C-Med StarterKit release requires deposit or full payment.</span>
+                    <span>Admin confirms waiver T&C: temporary training devices only; a C-Med Kit dispatch requires a qualifying deposit or full payment.</span>
                   </label>
                 </>
               ) : null}

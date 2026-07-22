@@ -66,7 +66,7 @@ export const DEFAULT_CLINICIAN_ONBOARDING_PATHWAYS:
       featured: true,
       conditions: [
         'Training access begins after Admin approval.',
-        'No permanent C-Med Kit is released until a qualifying payment is received.',
+        'No C-Med Kit is dispatched/released until a qualifying payment is received.',
         'Platform-wide Professional Indemnity eligibility begins only after a qualifying payment and applicable policy requirements.',
         'The outstanding onboarding balance remains payable.',
       ],

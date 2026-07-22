@@ -316,7 +316,7 @@ export async function POST(
               error:
                 'starter_kit_release_not_authorised',
               message:
-                'The effective Admin-configured payment pathway does not authorise a permanent C-Med Kit release.',
+                'The effective Admin-configured payment pathway does not authorise a C-Med Kit dispatch.',
               entitlements,
             };
           }

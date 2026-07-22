@@ -84,7 +84,7 @@ export default async function AdminTrainingPage() {
             Commercial and training policy
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Configure programme defaults, modes, payment pathways, privileges, notices and C-Med fulfilment.
+            Configure programme defaults, modes, payment pathways, privileges, notices and C-Med dispatch.
           </p>
         </div>
         <OnboardingSettingsPanel />
