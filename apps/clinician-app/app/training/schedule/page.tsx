@@ -1367,13 +1367,17 @@ function TrainingSchedulePageContent() {
 
       const js = await res.json().catch(() => null);
       if (!res.ok || !js?.ok) {
-        throw new Error(js?.error || `HTTP ${res.status}`);
+        throw new Error(
+          'proof_of_payment_upload_failed',
+        );
       }
 
       setPopNotice('Proof of Payment uploaded. Admin will review and issue an authorization code.');
       setPopFile(null);
-    } catch (err: any) {
-      setPopNotice('Upload failed: ' + (err?.message || 'unknown error'));
+    } catch {
+      setPopNotice(
+        'We could not complete the Proof of Payment upload. Please try again or contact Ambulant+ support.',
+      );
     } finally {
       setPopUploading(false);
     }

@@ -896,10 +896,16 @@ export async function POST(
       {
         ok: false,
         error:
-          error?.message ||
           'proof_of_payment_upload_failed',
+        message:
+          'We could not complete the Proof of Payment upload. Please try again or contact Ambulant+ support.',
       },
-      { status: 500 },
+      {
+        status: 500,
+        headers: {
+          'cache-control': 'no-store',
+        },
+      },
     );
   }
 }

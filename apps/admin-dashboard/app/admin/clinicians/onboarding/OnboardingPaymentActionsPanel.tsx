@@ -1364,9 +1364,14 @@ export default function OnboardingPaymentActionsPanel({
       </div>
 
       {activeRow && activeAction ? (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/40 p-4">
-          <div className="w-full max-w-xl rounded-2xl border bg-white shadow-2xl">
-            <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
+        <div className="fixed inset-0 z-[90] flex items-start justify-center overflow-y-auto bg-slate-950/40 p-4 sm:items-center sm:p-6">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Clinician onboarding action"
+            className="flex max-h-[calc(100dvh-2rem)] w-full max-w-xl flex-col overflow-hidden rounded-2xl border bg-white shadow-2xl sm:max-h-[calc(100dvh-3rem)]"
+          >
+            <div className="shrink-0 flex items-start justify-between gap-3 border-b bg-white px-4 py-3">
               <div>
                 <div className="text-sm font-black text-gray-900">
                   {activeAction === 'confirm-payment'
@@ -1388,7 +1393,20 @@ export default function OnboardingPaymentActionsPanel({
               </button>
             </div>
 
-            <div className="space-y-3 px-4 py-4">
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-4">
+              {notice ? (
+                <div
+                  role="alert"
+                  className={
+                    notice.tone === 'ok'
+                      ? 'rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-xs font-semibold text-emerald-950'
+                      : 'rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-950'
+                  }
+                >
+                  {notice.text}
+                </div>
+              ) : null}
+
               {activeAction === 'confirm-payment' ? (
                 <>
                   <label className="block space-y-1 text-xs">
@@ -1396,8 +1414,28 @@ export default function OnboardingPaymentActionsPanel({
                     <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="Example: 7950" className="w-full rounded-lg border px-3 py-2 text-sm" />
                   </label>
                   <label className="block space-y-1 text-xs">
-                    <span className="font-semibold">Payment reference</span>
-                    <input value={paymentReference} onChange={(e) => setPaymentReference(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
+                    <span className="font-semibold">
+                      Payment reference{' '}
+                      <span className="text-rose-600" aria-hidden="true">
+                        *
+                      </span>
+                    </span>
+
+                    <input
+                      required
+                      value={paymentReference}
+                      onChange={(event) =>
+                        setPaymentReference(
+                          event.target.value,
+                        )
+                      }
+                      placeholder="Enter the EFT/bank reference shown on the receipt"
+                      className="w-full rounded-lg border px-3 py-2 text-sm"
+                    />
+
+                    <span className="text-[11px] leading-relaxed text-slate-500">
+                      Required for reconciliation. Use the genuine bank or EFT transaction reference—not the upload filename.
+                    </span>
                   </label>
                   <label className="block space-y-1 text-xs">
                     <span className="font-semibold">Payer name</span>
@@ -1706,7 +1744,7 @@ export default function OnboardingPaymentActionsPanel({
               ) : null}
             </div>
 
-            <div className="flex justify-end gap-2 border-t px-4 py-3">
+            <div className="shrink-0 flex flex-wrap justify-end gap-2 border-t bg-white px-4 py-3">
               <button type="button" onClick={closeModal} className="rounded-lg border bg-white px-3 py-2 text-xs font-semibold hover:bg-gray-50">
                 Cancel
               </button>

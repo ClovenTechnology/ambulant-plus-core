@@ -207,6 +207,32 @@ export async function POST(request: NextRequest) {
 
     const text = await upstream.text();
 
+    if (upstream.status >= 500) {
+      console.error(
+        '[clinician-app][payment-pop proxy] upstream failure',
+        {
+          status: upstream.status,
+          body: text,
+        },
+      );
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'proof_of_payment_upload_failed',
+          message:
+            'We could not complete the Proof of Payment upload. Please try again or contact Ambulant+ support.',
+        },
+        {
+          status: upstream.status,
+          headers: {
+            'cache-control': 'no-store',
+          },
+        },
+      );
+    }
+
     return new NextResponse(text, {
       status: upstream.status,
       headers: {
@@ -218,6 +244,11 @@ export async function POST(request: NextRequest) {
     });
   }
   catch (error: any) {
+    console.error(
+      '[clinician-app][payment-pop proxy] error',
+      error,
+    );
+
     const status =
       typeof error?.status === 'number'
         ? error.status
@@ -227,10 +258,16 @@ export async function POST(request: NextRequest) {
       {
         ok: false,
         error:
-          error?.message ||
           'proof_of_payment_proxy_failed',
+        message:
+          'We could not complete the Proof of Payment upload. Please try again or contact Ambulant+ support.',
       },
-      { status },
+      {
+        status,
+        headers: {
+          'cache-control': 'no-store',
+        },
+      },
     );
   }
 }
