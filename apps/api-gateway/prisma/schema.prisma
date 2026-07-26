@@ -3971,40 +3971,145 @@ model ClinicianOnboardingSetting {
 }
 
 model ClinicianTrainingSlot {
-  id                   String                @id @default(cuid())
-  title                String                @default("Mandatory Clinician Training")
-  summary              String?
-  status               String                @default("draft")
-  startsAt             DateTime
-  endsAt               DateTime
-  timezone             String                @default("Africa/Johannesburg")
-  durationDays         Int                   @default(1)
-  totalDurationMinutes Int                   @default(60)
-  capacity             Int                   @default(1)
-  usedCount            Int                   @default(0)
-  mode                 String                @default("virtual")
-  allowedModes         Json?
-  sessions             Json?
-  meetingUrl           String?
-  trainerName          String?
-  venueName            String?
-  venueAddress         String?
-  virtualInstructions  String?
-  inPersonInstructions String?
-  bookingOpensAt       DateTime?
-  bookingClosesAt      DateTime?
-  publishedAt          DateTime?
-  publishedByUserId    String?
-  cancelledAt          DateTime?
-  cancelledByUserId    String?
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  onboardings          ClinicianOnboarding[]
+  id                     String                                   @id @default(cuid())
+  title                  String                                   @default("Mandatory Clinician Training")
+  summary                String?
+  status                 String                                   @default("draft")
+  startsAt               DateTime
+  endsAt                 DateTime
+  timezone               String                                   @default("Africa/Johannesburg")
+  durationDays           Int                                      @default(1)
+  totalDurationMinutes   Int                                      @default(60)
+  capacity               Int                                      @default(1)
+  usedCount              Int                                      @default(0)
+  mode                   String                                   @default("virtual")
+  allowedModes           Json?
+  sessions               Json?
+  meetingUrl             String?
+  trainerName            String?
+  venueName              String?
+  venueAddress           String?
+  virtualInstructions    String?
+  inPersonInstructions   String?
+  bookingOpensAt         DateTime?
+  bookingClosesAt        DateTime?
+  publishedAt            DateTime?
+  publishedByUserId      String?
+  cancelledAt            DateTime?
+  cancelledByUserId      String?
+  createdAt              DateTime                                 @default(now())
+  updatedAt              DateTime                                 @updatedAt
+  onboardings            ClinicianOnboarding[]
+  participantAssignments ClinicianTrainingParticipantAssignment[]
+  admissions             ClinicianTrainingAdmission[]
+  attendanceSessions     ClinicianTrainingAttendanceSession[]
 
   @@index([status, startsAt])
   @@index([startsAt])
   @@index([mode])
   @@index([publishedAt])
+}
+
+model ClinicianTrainingParticipantAssignment {
+  id                  String                               @id @default(cuid())
+  trainingSlotId      String
+  sessionKey          String                               @default("slot") @db.VarChar(160)
+  principalType       String                               @db.VarChar(40)
+  principalKey        String                               @db.VarChar(400)
+  principalId         String?                              @db.VarChar(240)
+  email               String?                              @db.VarChar(320)
+  name                String                               @db.VarChar(240)
+  organisation        String?                              @db.VarChar(240)
+  department          String?                              @db.VarChar(240)
+  designation         String?                              @db.VarChar(240)
+  role                String                               @db.VarChar(40)
+  permissions         Json?
+  scopeSnapshot       Json?
+  status              String                               @default("assigned") @db.VarChar(40)
+  assignedByUserId    String?                              @db.VarChar(240)
+  assignedAt          DateTime                             @default(now())
+  invitedAt           DateTime?
+  acceptedAt          DateTime?
+  revokedAt           DateTime?
+  expiresAt           DateTime?
+  invitationTokenHash String?                              @unique(map: "ctpa_invite_hash_key") @db.VarChar(128)
+  lastNotifiedAt      DateTime?
+  metadata            Json?
+  createdAt           DateTime                             @default(now())
+  updatedAt           DateTime                             @updatedAt
+  trainingSlot        ClinicianTrainingSlot                @relation(fields: [trainingSlotId], references: [id], onDelete: Cascade)
+  admissions          ClinicianTrainingAdmission[]
+  attendanceSessions  ClinicianTrainingAttendanceSession[]
+
+  @@unique([trainingSlotId, sessionKey, principalKey], map: "ctpa_slot_session_principal_key")
+  @@index([trainingSlotId, sessionKey, role, status], map: "ctpa_slot_session_role_status_idx")
+  @@index([principalType, principalId], map: "ctpa_principal_idx")
+  @@index([email], map: "ctpa_email_idx")
+  @@index([status, expiresAt], map: "ctpa_status_expiry_idx")
+}
+
+model ClinicianTrainingAdmission {
+  id                 String                                  @id @default(cuid())
+  assignmentId       String?
+  trainingSlotId     String
+  sessionKey         String                                  @default("slot") @db.VarChar(160)
+  subjectId          String                                  @db.VarChar(240)
+  role               String                                  @db.VarChar(40)
+  uid                String                                  @db.VarChar(240)
+  displayName        String                                  @db.VarChar(240)
+  orgId              String?                                 @db.VarChar(240)
+  permissions        Json?
+  jti                String                                  @unique(map: "cta_jti_key") @db.VarChar(128)
+  tokenHash          String                                  @unique(map: "cta_token_hash_key") @db.VarChar(128)
+  issuedAt           DateTime                                @default(now())
+  notBeforeAt        DateTime
+  expiresAt          DateTime
+  revokedAt          DateTime?
+  lastUsedAt         DateTime?
+  issuedByUserId     String?                                 @db.VarChar(240)
+  userAgent          String?
+  ipHash             String?                                 @db.VarChar(128)
+  metadata           Json?
+  createdAt          DateTime                                @default(now())
+  updatedAt          DateTime                                @updatedAt
+  assignment         ClinicianTrainingParticipantAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  trainingSlot       ClinicianTrainingSlot                   @relation(fields: [trainingSlotId], references: [id], onDelete: Cascade)
+  attendanceSessions ClinicianTrainingAttendanceSession[]
+
+  @@index([trainingSlotId, sessionKey, role, expiresAt], map: "cta_slot_session_role_expiry_idx")
+  @@index([assignmentId, expiresAt], map: "cta_assignment_expiry_idx")
+  @@index([subjectId, expiresAt], map: "cta_subject_expiry_idx")
+  @@index([revokedAt, expiresAt], map: "cta_revoked_expiry_idx")
+}
+
+model ClinicianTrainingAttendanceSession {
+  id               String                                  @id @default(cuid())
+  assignmentId     String?
+  admissionId      String?
+  trainingSlotId   String
+  sessionKey       String                                  @default("slot") @db.VarChar(160)
+  subjectId        String                                  @db.VarChar(240)
+  participantRole  String                                  @db.VarChar(40)
+  clientSessionId  String                                  @unique(map: "ctas_client_session_key") @db.VarChar(128)
+  joinedAt         DateTime                                @default(now())
+  lastHeartbeatAt  DateTime                                @default(now())
+  leftAt           DateTime?
+  durationSeconds  Int                                     @default(0)
+  disconnectReason String?                                 @db.VarChar(240)
+  userAgent        String?
+  ipHash           String?                                 @db.VarChar(128)
+  metadata         Json?
+  createdAt        DateTime                                @default(now())
+  updatedAt        DateTime                                @updatedAt
+  assignment       ClinicianTrainingParticipantAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  admission        ClinicianTrainingAdmission?             @relation(fields: [admissionId], references: [id], onDelete: SetNull)
+  trainingSlot     ClinicianTrainingSlot                   @relation(fields: [trainingSlotId], references: [id], onDelete: Cascade)
+
+  @@index([trainingSlotId, sessionKey, joinedAt], map: "ctas_slot_session_joined_idx")
+  @@index([assignmentId, joinedAt], map: "ctas_assignment_joined_idx")
+  @@index([admissionId], map: "ctas_admission_idx")
+  @@index([subjectId, joinedAt], map: "ctas_subject_joined_idx")
+  @@index([participantRole, joinedAt], map: "ctas_role_joined_idx")
 }
 
 model ClinicianDispatch {
