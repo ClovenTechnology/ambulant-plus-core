@@ -54,12 +54,26 @@ type OnboardingRow = {
     fullyPaid?: boolean | null;
     paymentStatus?: string | null;
     waiverActive?: boolean | null;
+    pendingProofOfPayment?: {
+      id: string;
+      provider?: string | null;
+      status?: string | null;
+      amountCents?: number | null;
+      currency?: string | null;
+      submittedAt?: string | null;
+      filename?: string | null;
+      mimeType?: string | null;
+      sizeBytes?: number | null;
+      pathwayKey?: string | null;
+      trainingMode?: string | null;
+    } | null;
     latestConfirmedPayment?: {
       id?: string | null;
       provider?: string | null;
       paymentReference?: string | null;
       authorisationCodeHint?: string | null;
       authorisationExpiresAt?: string | null;
+      proofOfPaymentAttached?: boolean | null;
     } | null;
   } | null;
   entitlements?: OnboardingEntitlementSummary | null;
@@ -267,6 +281,7 @@ export default function OnboardingPaymentActionsPanel({
   const [payerName, setPayerName] = useState('');
   const [originBank, setOriginBank] = useState('');
   const [proofOfPaymentUrl, setProofOfPaymentUrl] = useState('');
+  const [viewingPaymentId, setViewingPaymentId] = useState<string | null>(null);
   const [adminNotes, setAdminNotes] = useState('');
 
   const [waiverReason, setWaiverReason] = useState('');
@@ -296,7 +311,28 @@ export default function OnboardingPaymentActionsPanel({
     setActiveRow(row);
     setActiveAction(action);
 
-    setAmount('');
+    const pendingProof =
+      action === 'confirm-payment'
+        ? row.payment
+            ?.pendingProofOfPayment ||
+          null
+        : null;
+
+    setAmount(
+      pendingProof
+        ? (
+            Math.max(
+              0,
+              Number(
+                pendingProof
+                  .amountCents ||
+                0,
+              ),
+            ) / 100
+          ).toFixed(2)
+        : '',
+    );
+
     setPaymentReference('');
     setPayerName(row.displayName || '');
     setOriginBank('');
@@ -339,6 +375,96 @@ export default function OnboardingPaymentActionsPanel({
     return js;
   }
 
+  async function viewProofOfPayment(
+    row: OnboardingRow,
+  ) {
+    const payment =
+      row.payment
+        ?.pendingProofOfPayment;
+
+    if (!payment?.id) {
+      setNotice({
+        tone: 'err',
+        text:
+          'No pending proof of payment is available for this clinician.',
+      });
+      return;
+    }
+
+    const popup =
+      window.open(
+        '',
+        '_blank',
+      );
+
+    if (!popup) {
+      setNotice({
+        tone: 'err',
+        text:
+          'Your browser blocked the receipt window. Allow pop-ups for the Admin Dashboard and try again.',
+      });
+      return;
+    }
+
+    popup.document.title =
+      'Opening proof of payment';
+
+    popup.document.body.textContent =
+      'Opening the secure proof of payment...';
+
+    setViewingPaymentId(
+      payment.id,
+    );
+
+    try {
+      const response =
+        await fetch(
+          `/api/admin/clinicians/onboarding/payment-pop/${encodeURIComponent(payment.id)}`,
+          {
+            method: 'GET',
+            headers: {
+              accept:
+                'application/json',
+            },
+            cache: 'no-store',
+          },
+        );
+
+      const body =
+        await response
+          .json()
+          .catch(() => null);
+
+      if (
+        !response.ok ||
+        body?.ok === false ||
+        !body?.url
+      ) {
+        throw new Error(
+          body?.error ||
+            `HTTP ${response.status}`,
+        );
+      }
+
+      popup.opener = null;
+
+      popup.location.replace(
+        String(body.url),
+      );
+    } catch (error: any) {
+      popup.close();
+
+      setNotice({
+        tone: 'err',
+        text:
+          error?.message ||
+          'The proof of payment could not be opened.',
+      });
+    } finally {
+      setViewingPaymentId(null);
+    }
+  }
+
   async function confirmPayment() {
     if (!activeRow) return;
     if (!activeRow.trainingSlot?.id) {
@@ -357,6 +483,11 @@ export default function OnboardingPaymentActionsPanel({
     setBusyId(activeRow.clinicianId);
     try {
       const js = await postJson('/api/admin/clinicians/onboarding/confirm-payment', {
+        paymentId:
+          activeRow.payment
+            ?.pendingProofOfPayment
+            ?.id ||
+          undefined,
         clinicianId: activeRow.clinicianId,
         onboardingId: activeRow.onboarding?.id,
         slotId: activeRow.trainingSlot.id,
@@ -825,6 +956,11 @@ export default function OnboardingPaymentActionsPanel({
           const trainingScheduled = !!row.trainingSlot?.id;
           const hasConfirmedPayment = !!row.payment?.latestConfirmedPayment?.id;
 
+          const pendingProof =
+            row.payment
+              ?.pendingProofOfPayment ||
+            null;
+
           const activeAuthorisation =
             hasActiveAuthorisation(
               row,
@@ -933,6 +1069,77 @@ export default function OnboardingPaymentActionsPanel({
                 </div>
               </div>
 
+              {pendingProof ? (
+                <div className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-3 text-xs text-amber-950">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <div className="font-black">
+                        Proof of Payment awaiting review
+                      </div>
+
+                      <div className="mt-1">
+                        Submitted:{' '}
+                        {dateTimeLabel(
+                          pendingProof.submittedAt,
+                        )}
+                      </div>
+
+                      <div className="mt-1">
+                        Amount declared:{' '}
+                        <strong>
+                          {money(
+                            pendingProof.amountCents,
+                            pendingProof.currency ||
+                              currency,
+                          )}
+                        </strong>
+                      </div>
+
+                      <div className="mt-1">
+                        File:{' '}
+                        <strong>
+                          {pendingProof.filename ||
+                            'Uploaded receipt'}
+                        </strong>
+                      </div>
+
+                      {pendingProof.pathwayKey ? (
+                        <div className="mt-1">
+                          Pathway:{' '}
+                          {pendingProof.pathwayKey}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={
+                        busy ||
+                        viewingPaymentId ===
+                          pendingProof.id
+                      }
+                      onClick={() =>
+                        viewProofOfPayment(
+                          row,
+                        )
+                      }
+                      className="rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold text-amber-950 hover:bg-amber-100 disabled:opacity-50"
+                    >
+                      {viewingPaymentId ===
+                      pendingProof.id
+                        ? 'Opening receipt...'
+                        : 'View receipt'}
+                    </button>
+                  </div>
+
+                  {!trainingScheduled ? (
+                    <div className="mt-2 rounded-lg border border-amber-200 bg-white/70 p-2">
+                      Schedule training before confirming this payment.
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
               {row.payLaterRequest ? (
                 <div
                   className={
@@ -1009,7 +1216,9 @@ export default function OnboardingPaymentActionsPanel({
                   onClick={() => openAction(row, 'confirm-payment')}
                   className="rounded-lg border bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-100 disabled:opacity-50"
                 >
-                  Confirm payment
+                  {pendingProof
+                    ? 'Review and confirm PoP'
+                    : 'Confirm payment'}
                 </button>
 
                 {payLaterPending ? (
@@ -1198,10 +1407,72 @@ export default function OnboardingPaymentActionsPanel({
                     <span className="font-semibold">Origin bank / accountant note</span>
                     <input value={originBank} onChange={(e) => setOriginBank(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
                   </label>
-                  <label className="block space-y-1 text-xs">
-                    <span className="font-semibold">Proof-of-payment URL</span>
-                    <input value={proofOfPaymentUrl} onChange={(e) => setProofOfPaymentUrl(e.target.value)} className="w-full rounded-lg border px-3 py-2 text-sm" />
-                  </label>
+                  {activeRow.payment
+                    ?.pendingProofOfPayment ? (
+                    <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-950">
+                      <div className="font-black">
+                        Clinician-uploaded Proof of Payment
+                      </div>
+
+                      <div className="mt-1">
+                        {activeRow.payment
+                          .pendingProofOfPayment
+                          .filename ||
+                          'Uploaded receipt'}
+                        {' · '}
+                        {dateTimeLabel(
+                          activeRow.payment
+                            .pendingProofOfPayment
+                            .submittedAt,
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={
+                          viewingPaymentId ===
+                          activeRow.payment
+                            .pendingProofOfPayment
+                            .id
+                        }
+                        onClick={() =>
+                          viewProofOfPayment(
+                            activeRow,
+                          )
+                        }
+                        className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-2 font-semibold hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        {viewingPaymentId ===
+                        activeRow.payment
+                          .pendingProofOfPayment
+                          .id
+                          ? 'Opening receipt...'
+                          : 'View receipt securely'}
+                      </button>
+
+                      <p className="mt-2 text-amber-800">
+                        Confirming this form updates the pending EFT record; it does not create a duplicate payment.
+                      </p>
+                    </div>
+                  ) : (
+                    <label className="block space-y-1 text-xs">
+                      <span className="font-semibold">
+                        Proof-of-payment URL
+                      </span>
+
+                      <input
+                        value={
+                          proofOfPaymentUrl
+                        }
+                        onChange={(event) =>
+                          setProofOfPaymentUrl(
+                            event.target.value,
+                          )
+                        }
+                        className="w-full rounded-lg border px-3 py-2 text-sm"
+                      />
+                    </label>
+                  )}
                 </>
               ) : null}
 

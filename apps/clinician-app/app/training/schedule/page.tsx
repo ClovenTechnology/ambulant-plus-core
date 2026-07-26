@@ -19,6 +19,7 @@ import {
   PlayCircle,
   ShieldCheck,
   Truck,
+  Upload,
   Users,
   Video,
 } from 'lucide-react';
@@ -854,6 +855,9 @@ function TrainingSchedulePageContent() {
   const [err, setErr] = useState<string | null>(null);
   const [step, setStep] = useState<'pick' | 'pay' | 'done'>('pick');
   const [authorisationCode, setAuthorisationCode] = useState('');
+  const [popFile, setPopFile] = useState<File | null>(null);
+  const [popUploading, setPopUploading] = useState(false);
+  const [popNotice, setPopNotice] = useState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
   const [payLaterReason, setPayLaterReason] = useState('');
   const [selectedCommercialPathway, setSelectedCommercialPathway] =
@@ -893,9 +897,9 @@ function TrainingSchedulePageContent() {
 
     try {
       const [contextResponse, slotResponse, legalResponse] = await Promise.all([
-        fetch(`/api/training/context${clinicianQuery}`, { cache: 'no-store' }),
-        fetch(`/api/training/slots${clinicianQuery}`, { cache: 'no-store' }),
-        fetch(`/api/training/legal/published${legalQuery}`, { cache: 'no-store' }),
+        fetch(`/api/training/context${clinicianQuery}`, { cache: 'no-store', credentials: 'include' }),
+        fetch(`/api/training/slots${clinicianQuery}`, { cache: 'no-store', credentials: 'include' }),
+        fetch(`/api/training/legal/published${legalQuery}`, { cache: 'no-store', credentials: 'include' }),
       ]);
 
       const context = (await contextResponse.json().catch(() => null)) as TrainingContext | null;
@@ -1103,13 +1107,14 @@ function TrainingSchedulePageContent() {
       const response = await fetch('/api/training/legal/acknowledgements', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           legalDocumentVersionId: document.version.id,
           documentKey: document.key,
           subjectType: 'clinician',
           subjectId: clinicianId,
           application: 'clinician-app',
-          surface: 'payment-pathway-selection',
+          surface: 'clinician-onboarding',
           action: 'ACCEPTED',
           idempotencyKey: [
             'clinician-onboarding',
@@ -1172,6 +1177,7 @@ function TrainingSchedulePageContent() {
       const response = await fetch('/api/training/pay-later/request', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           clinicianId,
           pathwayKey: 'START_NOW_PAY_LATER',
@@ -1218,6 +1224,7 @@ function TrainingSchedulePageContent() {
       const response = await fetch('/api/training/payment/init', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           clinicianId,
           slotId: selectedSlot?.id,
@@ -1252,6 +1259,7 @@ function TrainingSchedulePageContent() {
       const response = await fetch('/api/training/payment/verify', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           clinicianId,
           slotId: slotId || searchParams.get('slotId') || undefined,
@@ -1285,6 +1293,7 @@ function TrainingSchedulePageContent() {
       const response = await fetch('/api/training/payment/authorisation', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           clinicianId,
           slotId: selectedSlot?.id,
@@ -1302,6 +1311,71 @@ function TrainingSchedulePageContent() {
       setErr(errorToMessage(error, 'Authorization failed.'));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function uploadProofOfPayment() {
+    if (!popFile) {
+      setPopNotice('Select a Proof of Payment file first.');
+      return;
+    }
+    if (!clinicianId) {
+      setPopNotice('Clinician identity required.');
+      return;
+    }
+
+    const pathwayKey =
+      selectedCommercialPathway;
+
+    if (
+      !pathwayKey ||
+      pathwayKey ===
+        'START_NOW_PAY_LATER'
+    ) {
+      setPopNotice(
+        'Select Deposit or Full Payment before uploading Proof of Payment.',
+      );
+      return;
+    }
+
+    if (
+      popFile.size >
+      3 * 1024 * 1024
+    ) {
+      setPopNotice(
+        'The Proof of Payment file must not exceed 3 MB.',
+      );
+      return;
+    }
+
+    setPopUploading(true);
+    setPopNotice(null);
+
+    try {
+      const formData = new FormData();
+      formData.append('file', popFile);
+      formData.append('clinicianId', clinicianId);
+      if (selectedSlot?.id) formData.append('slotId', selectedSlot.id);
+      formData.append('pathwayKey', pathwayKey);
+      formData.append('trainingMode', mode);
+
+      const res = await fetch('/api/training/payment/pop', {
+        method: 'POST',
+        body: formData,
+        credentials: 'include',
+      });
+
+      const js = await res.json().catch(() => null);
+      if (!res.ok || !js?.ok) {
+        throw new Error(js?.error || `HTTP ${res.status}`);
+      }
+
+      setPopNotice('Proof of Payment uploaded. Admin will review and issue an authorization code.');
+      setPopFile(null);
+    } catch (err: any) {
+      setPopNotice('Upload failed: ' + (err?.message || 'unknown error'));
+    } finally {
+      setPopUploading(false);
     }
   }
 
@@ -1602,6 +1676,35 @@ function TrainingSchedulePageContent() {
                         {bankEntries.map(([key, value]) => <div key={key}><dt className="text-[10px] font-black uppercase tracking-wide text-slate-500">{titleCaseKey(key)}</dt><dd className="mt-1 break-words font-semibold text-slate-900">{String(value)}</dd></div>)}
                       </dl>
                     ) : null}
+
+                    {!selectedPathwayIsPayLater && pricing?.manualPaymentEnabled !== false ? (
+                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                      <div className="text-sm font-black text-amber-950">Upload Proof of Payment</div>
+                      <p className="mt-1 text-xs text-amber-800">
+                        If you paid by EFT or bank deposit, upload your receipt here. Admin will verify and issue your authorization code.
+                      </p>
+                      <input
+                        type="file"
+                        accept=".pdf,.png,.jpg,.jpeg"
+                        onChange={(e) => setPopFile(e.target.files?.[0] || null)}
+                        className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-amber-700 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-amber-800"
+                      />
+                      <button
+                        type="button"
+                        disabled={popUploading || !popFile || !requiredLegalAccepted}
+                        onClick={uploadProofOfPayment}
+                        className="mt-3 inline-flex items-center gap-2 rounded-xl bg-amber-700 px-4 py-2 text-xs font-black text-white hover:bg-amber-800 disabled:opacity-50"
+                      >
+                        {popUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                        {popUploading ? 'Uploading…' : 'Submit PoP'}
+                      </button>
+                      {popNotice ? (
+                        <div className="mt-2 text-xs text-amber-900">{popNotice}</div>
+                      ) : null}
+                    </div>
+
+                    ) : null}
+
                     <div className="mt-4 flex flex-col gap-2 sm:flex-row">
                       <input id="authorisationCode" value={authorisationCode} onChange={(event) => setAuthorisationCode(event.target.value)} placeholder="AMB-ABC123-DEF456" className="min-w-0 flex-1 rounded-xl border bg-white px-4 py-3 text-sm outline-none focus:border-indigo-500" />
                       <button type="button" disabled={busy || pricing?.manualPaymentEnabled === false || !requiredLegalAccepted} onClick={redeemAuthorisationCode} className="rounded-xl border bg-white px-4 py-3 text-sm font-black text-slate-800 hover:bg-slate-100 disabled:opacity-50">Verify code</button>

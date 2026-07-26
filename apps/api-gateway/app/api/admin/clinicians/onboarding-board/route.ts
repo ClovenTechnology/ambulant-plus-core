@@ -378,6 +378,37 @@ export async function GET(
             })
         : [];
 
+    const pendingProofPayments =
+      clinicianIds.length
+        ? await db
+            .clinicianOnboardingPayment
+            .findMany({
+              where: {
+                clinicianId: {
+                  in: clinicianIds,
+                },
+                status: 'pending',
+                provider: {
+                  in: [
+                    'eft',
+                    'manual',
+                  ],
+                },
+                proofOfPaymentUrl: {
+                  not: null,
+                },
+              },
+              orderBy: [
+                {
+                  updatedAt: 'desc',
+                },
+                {
+                  createdAt: 'desc',
+                },
+              ],
+            })
+        : [];
+
     let payLaterRequests: any[] =
       [];
 
@@ -438,6 +469,28 @@ export async function GET(
         clinicianId,
         existing,
       );
+    }
+
+    const latestPendingProofByClinicianId =
+      new Map<string, any>();
+
+    for (
+      const payment of
+      pendingProofPayments || []
+    ) {
+      const clinicianId =
+        String(payment.clinicianId);
+
+      if (
+        !latestPendingProofByClinicianId
+          .has(clinicianId)
+      ) {
+        latestPendingProofByClinicianId
+          .set(
+            clinicianId,
+            payment,
+          );
+      }
     }
 
     const dispatchesByClinicianId =
@@ -552,6 +605,35 @@ export async function GET(
             paymentsByClinicianId
               .get(clinicianId) ||
             [];
+
+          const pendingProofPayment =
+            latestPendingProofByClinicianId
+              .get(clinicianId) ||
+            null;
+
+          const pendingPaymentMeta =
+            pendingProofPayment?.meta &&
+            typeof pendingProofPayment.meta ===
+              'object' &&
+            !Array.isArray(
+              pendingProofPayment.meta,
+            )
+              ? pendingProofPayment.meta
+              : {};
+
+          const pendingProofMeta =
+            pendingPaymentMeta
+              ?.proofOfPayment &&
+            typeof pendingPaymentMeta
+              .proofOfPayment ===
+              'object' &&
+            !Array.isArray(
+              pendingPaymentMeta
+                .proofOfPayment,
+            )
+              ? pendingPaymentMeta
+                  .proofOfPayment
+              : {};
 
           const latestPayLaterRequest =
             latestPayLaterByClinicianId
@@ -681,6 +763,94 @@ export async function GET(
                       .paymentStatus,
               waiverActive:
                 payLaterPathwayActive,
+              pendingProofOfPayment:
+                pendingProofPayment
+                  ? {
+                      id:
+                        String(
+                          pendingProofPayment.id,
+                        ),
+                      provider:
+                        cleanStr(
+                          pendingProofPayment
+                            .provider,
+                          80,
+                        ),
+                      status:
+                        cleanStr(
+                          pendingProofPayment
+                            .status,
+                          80,
+                        ),
+                      amountCents:
+                        Math.max(
+                          0,
+                          Math.round(
+                            Number(
+                              pendingProofPayment
+                                .amountCents ||
+                              0,
+                            ),
+                          ),
+                        ),
+                      currency:
+                        cleanStr(
+                          pendingProofPayment
+                            .currency,
+                          8,
+                        ),
+                      submittedAt:
+                        asIso(
+                          pendingProofMeta
+                            .uploadedAt ||
+                          pendingProofPayment
+                            .updatedAt ||
+                          pendingProofPayment
+                            .createdAt,
+                        ),
+                      filename:
+                        cleanStr(
+                          pendingProofMeta
+                            .filename,
+                          240,
+                        ),
+                      mimeType:
+                        cleanStr(
+                          pendingProofMeta
+                            .mimeType,
+                          120,
+                        ),
+                      sizeBytes:
+                        Number.isFinite(
+                          Number(
+                            pendingProofMeta
+                              .sizeBytes,
+                          ),
+                        )
+                          ? Math.max(
+                              0,
+                              Math.round(
+                                Number(
+                                  pendingProofMeta
+                                    .sizeBytes,
+                                ),
+                              ),
+                            )
+                          : null,
+                      pathwayKey:
+                        cleanStr(
+                          pendingPaymentMeta
+                            .pathwayKey,
+                          80,
+                        ),
+                      trainingMode:
+                        cleanStr(
+                          pendingPaymentMeta
+                            .trainingMode,
+                          40,
+                        ),
+                    }
+                  : null,
               latestConfirmedPayment:
                 latestPayment
                   ? {
@@ -723,11 +893,10 @@ export async function GET(
                             .paymentReference,
                           180,
                         ),
-                      proofOfPaymentUrl:
-                        cleanStr(
+                      proofOfPaymentAttached:
+                        Boolean(
                           latestPayment
                             .proofOfPaymentUrl,
-                          1000,
                         ),
                       authorisationCodeHint:
                         cleanStr(
