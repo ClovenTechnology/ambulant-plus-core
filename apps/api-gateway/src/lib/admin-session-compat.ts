@@ -241,3 +241,107 @@ export function verifyLegacyAdminSessionToken(
     return null;
   }
 }
+export type SignLegacyAdminSessionInput = {
+  sub: string;
+  email: string;
+  name?: string | null;
+  role?: LegacyAdminSessionPayload['role'];
+};
+
+function encodeSessionJson(
+  value: Record<string, unknown>,
+) {
+  return Buffer.from(
+    JSON.stringify(value),
+    'utf8',
+  ).toString('base64url');
+}
+
+export function signLegacyAdminSessionToken(
+  input: SignLegacyAdminSessionInput,
+  ttlSeconds = 60 * 60 * 8,
+) {
+  const secret =
+    sessionSecret();
+
+  if (!secret) {
+    throw new Error(
+      'admin_session_secret_not_configured',
+    );
+  }
+
+  const sub =
+    String(input.sub || '').trim();
+
+  const email =
+    String(input.email || '')
+      .trim()
+      .toLowerCase();
+
+  const role =
+    input.role || 'admin_staff';
+
+  if (
+    !sub ||
+    !email ||
+    !isAdminRole(role)
+  ) {
+    throw new Error(
+      'invalid_admin_session_subject',
+    );
+  }
+
+  const now =
+    Math.floor(
+      Date.now() / 1000,
+    );
+
+  const safeTtl =
+    Math.max(
+      300,
+      Math.min(
+        Math.floor(ttlSeconds),
+        60 * 60 * 24,
+      ),
+    );
+
+  const encodedHeader =
+    encodeSessionJson({
+      alg: 'HS256',
+      typ: 'JWT',
+    });
+
+  const encodedPayload =
+    encodeSessionJson({
+      sub,
+      email,
+      name:
+        String(input.name || '').trim() ||
+        null,
+      role,
+      iss: SESSION_ISSUER,
+      aud: SESSION_AUDIENCE,
+      iat: now,
+      exp: now + safeTtl,
+    });
+
+  const unsignedToken =
+    encodedHeader +
+    '.' +
+    encodedPayload;
+
+  const signature =
+    crypto
+      .createHmac(
+        'sha256',
+        secret,
+      )
+      .update(unsignedToken)
+      .digest('base64url');
+
+  return (
+    unsignedToken +
+    '.' +
+    signature
+  );
+}
