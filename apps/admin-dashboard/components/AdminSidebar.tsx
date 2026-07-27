@@ -344,7 +344,7 @@ export default function AdminSidebar() {
 
       <div className="p-2 border-t">
         <Link
-          href="/signout"
+          href="/auth/signout"
           title={collapsed ? 'Sign Out' : undefined}
           className="flex items-center gap-2 rounded px-3 py-2 text-sm text-black/70 hover:bg-black/5 hover:text-black"
         >

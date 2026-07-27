@@ -2,6 +2,7 @@
 import { HOME_WIDGETS } from '@/src/lib/widgets';
 import { hasAnyScope } from '@/src/lib/acl';
 import { getSessionFromGateway } from '@/src/lib/session';
+import { redirect } from 'next/navigation';
 import { ArrowRight, Activity, BarChart2, Pill, FlaskConical, Truck, Settings2 } from 'lucide-react';
 
 export const metadata = {
@@ -49,6 +50,11 @@ function Badge({ children }: { children: React.ReactNode }) {
 export default async function AdminHome() {
   const session = await getSessionFromGateway(); // calls APIGW /api/auth/me with cookies
   const user = session?.user ?? null;
+
+  if (!user?.email) {
+    redirect('/auth/signin?next=%2F');
+  }
+
   const tenant = (session as { tenant?: unknown } | null | undefined)?.tenant;
   const scopes: string[] = user?.scopes ?? [];
   const can = (need: string | string[]) => hasAnyScope(scopes, need as any);

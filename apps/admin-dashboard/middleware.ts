@@ -141,6 +141,7 @@ function isPublicPath(
     pathname.startsWith('/favicon') ||
     pathname.startsWith('/auth/signin') ||
     pathname.startsWith('/auth/signup') ||
+    pathname.startsWith('/auth/signout') ||
     pathname.startsWith('/signout') ||
     pathname.startsWith('/forbidden')
   );
