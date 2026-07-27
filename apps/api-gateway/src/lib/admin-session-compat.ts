@@ -9,6 +9,7 @@ const SESSION_AUDIENCE =
 export type LegacyAdminSessionPayload = {
   sub: string;
   role: 'admin' | 'admin_staff';
+  authMethod?: 'password' | 'legacy';
   email: string;
   name?: string | null;
   iat?: number;
@@ -246,6 +247,7 @@ export type SignLegacyAdminSessionInput = {
   email: string;
   name?: string | null;
   role?: LegacyAdminSessionPayload['role'];
+  authMethod?: 'password' | 'legacy';
 };
 
 function encodeSessionJson(
@@ -319,6 +321,9 @@ export function signLegacyAdminSessionToken(
         String(input.name || '').trim() ||
         null,
       role,
+      authMethod:
+        input.authMethod ||
+        'legacy',
       iss: SESSION_ISSUER,
       aud: SESSION_AUDIENCE,
       iat: now,

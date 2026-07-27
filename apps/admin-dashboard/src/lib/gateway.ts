@@ -56,6 +56,7 @@ export const AuthApi = {
     name?: string;
     departmentId?: string;
     designationId?: string;
+    roleNames?: RoleName[];
   }) {
     return localFetch('/api/auth/signup', { method: 'POST', json: input });
   },
@@ -109,23 +110,55 @@ export const OrgApi = {
 };
 
 export const RoleReqApi = {
-  async list(status?: 'pending' | 'approved' | 'denied') {
-    const qs = status ? `?status=${encodeURIComponent(status)}` : '';
-    return gwFetch(`/api/roles/requests${qs}`, { method: 'GET' });
+  async list(
+    status?:
+      | 'pending'
+      | 'approved'
+      | 'denied',
+  ) {
+    const query =
+      status
+        ? `?status=${encodeURIComponent(status)}`
+        : '';
+
+    return localFetch(
+      `/api/roles/requests${query}`,
+      {
+        method: 'GET',
+      },
+    );
   },
 
-  async decide(id: string, input: { status: 'approved' | 'denied'; decidedBy?: string; reason?: string }) {
-    return gwFetch(`/api/roles/requests/${id}`, { method: 'PATCH', json: input });
+  async decide(
+    id: string,
+    input: {
+      status:
+        | 'approved'
+        | 'denied';
+      reason?: string;
+    },
+  ) {
+    return localFetch(
+      `/api/roles/requests/${encodeURIComponent(id)}`,
+      {
+        method: 'PATCH',
+        json: input,
+      },
+    );
   },
 
-  async create(input: {
-    email: string;
-    name?: string;
-    userId?: string;
-    departmentId?: string | null;
-    designationId?: string | null;
-    roleNames: RoleName[];
-  }) {
-    return gwFetch('/api/roles/requests', { method: 'POST', json: input });
+  async create(
+    input: {
+      roleNames?: RoleName[];
+      roleIds?: string[];
+    },
+  ) {
+    return localFetch(
+      '/api/roles/requests',
+      {
+        method: 'POST',
+        json: input,
+      },
+    );
   },
 };

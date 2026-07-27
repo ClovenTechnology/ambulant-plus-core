@@ -1,67 +1,120 @@
-//apps/admin-dashboard/components/widgets/PendingSignupsTile.tsx
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Users } from 'lucide-react';
+import {
+  useEffect,
+  useState,
+} from 'react';
+import {
+  Users,
+} from 'lucide-react';
 
-type PendingCount = { signups: number; roleRequests: number };
-
-const APIGW = process.env.NEXT_PUBLIC_APIGW_BASE || 'http://localhost:3010';
-
-/**
- * PendingSignupsTile
- * - Uses role-requests as a proxy for "pending approvals / signups"
- * - If you later add a dedicated endpoint (e.g. /api/admin/pending-signups), wire it below.
- */
 export default function PendingSignupsTile() {
-  const [data, setData] = useState<PendingCount | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [
+    pendingApprovals,
+    setPendingApprovals,
+  ] =
+    useState<number | null>(
+      null,
+    );
+
+  const [
+    error,
+    setError,
+  ] =
+    useState(false);
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        // 1) Role requests pending
-        const r1 = await fetch(`${APIGW}/api/roles/requests?status=pending`, {
-          credentials: 'include',
-          cache: 'no-store',
-        });
-        const j1 = await r1.json().catch(() => ({}));
-        const pendingRoleReq = Array.isArray(j1?.items) ? j1.items.length : (j1?.count ?? 0);
+    let active = true;
 
-        // 2) Optionally: dedicated pending signups endpoint (wire later)
-        // const r2 = await fetch(`${APIGW}/api/admin/pending-signups`, { credentials: 'include', cache: 'no-store' });
-        // const j2 = await r2.json().catch(() => ({}));
-        const pendingSignups = 0; // fallback until endpoint exists
+    void (
+      async () => {
+        try {
+          const response =
+            await fetch(
+              '/api/roles/requests?status=pending',
+              {
+                credentials:
+                  'include',
+                cache:
+                  'no-store',
+              },
+            );
 
-        if (alive) setData({ signups: pendingSignups, roleRequests: pendingRoleReq });
-      } catch (e: any) {
-        if (alive) setErr(e?.message || 'failed');
+          const data =
+            await response
+              .json()
+              .catch(
+                () => ({}),
+              );
+
+          if (!response.ok) {
+            throw new Error(
+              data?.error ||
+              'request_failed',
+            );
+          }
+
+          const count =
+            Array.isArray(
+              data?.items,
+            )
+              ? data.items.length
+              : Number(
+                  data?.count ||
+                  0,
+                );
+
+          if (active) {
+            setPendingApprovals(
+              Number.isFinite(
+                count,
+              )
+                ? count
+                : 0,
+            );
+          }
+        }
+        catch {
+          if (active) {
+            setError(true);
+            setPendingApprovals(
+              null,
+            );
+          }
+        }
       }
-    })();
-    return () => { alive = false; };
-  }, []);
+    )();
 
-  const total = (data?.signups ?? 0) + (data?.roleRequests ?? 0);
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <div className="text-2xl font-semibold">{Number.isFinite(total) ? total : '—'}</div>
+        <div className="text-2xl font-semibold">
+          {pendingApprovals ??
+            '—'}
+        </div>
+
         <div className="rounded-lg border bg-gray-50 p-2">
           <Users className="h-5 w-5 text-gray-700" />
         </div>
       </div>
+
       <div className="text-xs text-gray-600">
-        {err ? (
-          <span className="text-rose-600">Could not load pending approvals.</span>
+        {error ? (
+          <span className="text-rose-600">
+            Pending approvals are unavailable.
+          </span>
         ) : (
-          <>
-            <span className="inline-block mr-3">Role requests: <b>{data?.roleRequests ?? 0}</b></span>
-            <span className="inline-block">Signups: <b>{data?.signups ?? 0}</b></span>
-          </>
+          <span>
+            New Admin accounts awaiting Super Admin review
+          </span>
         )}
       </div>
+
       <div className="mt-2">
         <a
           href="/settings/people/role-requests"

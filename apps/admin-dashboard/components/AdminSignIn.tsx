@@ -12,7 +12,11 @@ export default function AdminSignIn() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(
+    qs?.get('approval') === 'pending'
+      ? 'Your application has been submitted and is awaiting Super Admin approval. You cannot sign in until it is approved.'
+      : null,
+  );
   const [loading, setLoading] = useState(false);
 
   async function submit(e: React.FormEvent) {
@@ -31,8 +35,12 @@ export default function AdminSignIn() {
       window.location.href = next;
     } catch (err: any) {
       const raw = String(err?.message || 'Sign in failed');
-      if (raw.includes('password_not_set')) {
-        setMsg('This admin account does not have a password yet. Use Create account with the same email to set one.');
+      if (raw.includes('admin_approval_pending')) {
+        setMsg('Your application is awaiting Super Admin approval. You cannot sign in yet.');
+      } else if (raw.includes('admin_application_denied')) {
+        setMsg('This application was not approved. Please contact the Super Admin if you need a review.');
+      } else if (raw.includes('password_not_set')) {
+        setMsg('This existing Admin account requires secure credential setup. Please contact the Super Admin.');
       } else if (raw.includes('invalid_credentials')) {
         setMsg('Invalid email or password.');
       } else {

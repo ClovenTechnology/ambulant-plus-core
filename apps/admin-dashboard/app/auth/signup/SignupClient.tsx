@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { RoleName } from '@/src/lib/gateway';
-import { AuthApi, RoleReqApi } from '@/src/lib/gateway';
+import { AuthApi } from '@/src/lib/gateway';
 import {
   AlertTriangle,
   Building2,
@@ -88,7 +88,7 @@ function isValidEmail(v: string): boolean {
 function passwordChecks(pw: string) {
   const v = pw || '';
   return {
-    len10: v.length >= 10,
+    len12: v.length >= 12,
     lower: /[a-z]/.test(v),
     upper: /[A-Z]/.test(v),
     num: /[0-9]/.test(v),
@@ -102,7 +102,7 @@ function passwordStrength(pw: string) {
   const c = passwordChecks(v);
 
   let score = 0;
-  if (v.length >= 10) score += 1;
+  if (v.length >= 12) score += 1;
   if (v.length >= 14) score += 1;
   if (/[a-z]/.test(v) && /[A-Z]/.test(v)) score += 1;
   if (/[0-9]/.test(v) && /[^A-Za-z0-9]/.test(v)) score += 1;
@@ -408,7 +408,7 @@ export default function AdminSignupPage() {
     if (!password) e.password = 'Password is required.';
     else if (!pwCheck.noSpaces) e.password = 'Password must not contain spaces.';
     else {
-      const minimumOk = pwCheck.len10 && pwCheck.lower && pwCheck.upper && pwCheck.num && pwCheck.sym;
+      const minimumOk = pwCheck.len12 && pwCheck.lower && pwCheck.upper && pwCheck.num && pwCheck.sym;
       if (!minimumOk) e.password = 'Meet all password requirements below.';
     }
 
@@ -443,6 +443,7 @@ export default function AdminSignupPage() {
         name?: string;
         departmentId?: string;
         designationId?: string;
+        roleNames?: RoleName[];
       }) => Promise<unknown>;
 
       await adminSignup({
@@ -451,23 +452,11 @@ export default function AdminSignupPage() {
         name: name.trim(),
         departmentId,
         designationId,
+        roleNames: Array.from(new Set([...effectiveRoles, ...requestedRoleNames])),
       });
 
-      if (requestedRoleNames.length) {
-        try {
-          await RoleReqApi.create({
-            email: email.trim(),
-            name: name.trim(),
-            departmentId,
-            designationId,
-            roleNames: requestedRoleNames,
-          });
-        } catch (roleErr) {
-          console.warn('[admin signup] account created, but optional role request failed', roleErr);
-        }
-      }
-
-      window.location.href = next || '/';
+      window.location.href =
+        '/auth/signin?approval=pending';
     } catch (err: any) {
       setMsg(err?.message || 'Signup failed');
     } finally {
@@ -605,7 +594,7 @@ export default function AdminSignupPage() {
                         <div className="mt-2 text-xs text-slate-600">{pwStrength.hint}</div>
 
                         <div className="mt-3 grid gap-2 sm:grid-cols-3">
-                          <Req ok={pwCheck.len10} label="10+ chars" />
+                          <Req ok={pwCheck.len12} label="12+ chars" />
                           <Req ok={pwCheck.noSpaces} label="No spaces" />
                           <Req ok={pwCheck.lower} label="Lowercase" />
                           <Req ok={pwCheck.upper} label="Uppercase" />
