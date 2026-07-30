@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apigwBase } from '@/app/api/_apigw';
+import { gatewayProxyHeaders } from '@/src/lib/gateway-proxy';
 
 type ProxyOpts = {
   path: string; // relative upstream path e.g. "/api/settings/shop"
@@ -8,12 +9,6 @@ type ProxyOpts = {
   stripQueryKeys?: string[];
   headers?: Record<string, string>;
 };
-
-function mustEnv(name: string) {
-  const v = process.env[name];
-  if (!v) throw new Error(`Missing env: ${name}`);
-  return v;
-}
 
 async function safeReadJson(res: Response) {
   const text = await res.text();
@@ -34,7 +29,7 @@ export async function proxyAdminJsonGET(req: NextRequest, opts: ProxyOpts) {
     const base = apigwBase();
     if (!base) return NextResponse.json({ ok: false, error: 'Missing API gateway base (apigwBase())' }, { status: 500 });
 
-    const key = mustEnv('API_GATEWAY_ADMIN_KEY');
+
 
     const src = new URL(req.url);
     const forwardQuery = opts.forwardQuery !== false;
@@ -46,11 +41,12 @@ export async function proxyAdminJsonGET(req: NextRequest, opts: ProxyOpts) {
 
     const res = await fetch(upstream.toString(), {
       cache: 'no-store',
-      headers: {
-        accept: 'application/json',
-        'x-admin-key': key,
-        ...(opts.headers ?? {}),
-      },
+      headers: gatewayProxyHeaders(
+        req,
+        {
+          ...(opts.headers ?? {}),
+        },
+      ),
     });
 
     const js = await safeReadJson(res);
@@ -74,7 +70,7 @@ export async function proxyAdminTextGET(req: NextRequest, opts: ProxyOpts) {
     const base = apigwBase();
     if (!base) return NextResponse.json({ ok: false, error: 'Missing API gateway base (apigwBase())' }, { status: 500 });
 
-    const key = mustEnv('API_GATEWAY_ADMIN_KEY');
+
 
     const src = new URL(req.url);
     const forwardQuery = opts.forwardQuery !== false;
@@ -86,7 +82,12 @@ export async function proxyAdminTextGET(req: NextRequest, opts: ProxyOpts) {
 
     const res = await fetch(upstream.toString(), {
       cache: 'no-store',
-      headers: { 'x-admin-key': key, ...(opts.headers ?? {}) },
+      headers: gatewayProxyHeaders(
+        req,
+        {
+          ...(opts.headers ?? {}),
+        },
+      ),
     });
 
     const body = await res.text();
@@ -117,7 +118,7 @@ export async function proxyAdminJsonBody(req: NextRequest, method: 'POST' | 'PAT
     const base = apigwBase();
     if (!base) return NextResponse.json({ ok: false, error: 'Missing API gateway base (apigwBase())' }, { status: 500 });
 
-    const key = mustEnv('API_GATEWAY_ADMIN_KEY');
+
     const body = await req.json().catch(() => ({}));
 
     const upstream = new URL(`${base}${opts.path}`);
@@ -125,12 +126,13 @@ export async function proxyAdminJsonBody(req: NextRequest, method: 'POST' | 'PAT
     const res = await fetch(upstream.toString(), {
       method,
       cache: 'no-store',
-      headers: {
-        accept: 'application/json',
-        'content-type': 'application/json',
-        'x-admin-key': key,
-        ...(opts.headers ?? {}),
-      },
+      headers: gatewayProxyHeaders(
+        req,
+        {
+          'content-type': 'application/json',
+          ...(opts.headers ?? {}),
+        },
+      ),
       body: jsonOrEmpty(body),
     });
 

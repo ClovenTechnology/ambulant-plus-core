@@ -5,6 +5,7 @@ import OnboardingDispatchBoard from './OnboardingDispatchBoard';
 import OnboardingSettingsPanel from './OnboardingSettingsPanel';
 import OnboardingPaymentActionsPanel from './OnboardingPaymentActionsPanel';
 import { getSessionFromGateway } from '@/src/lib/session';
+import { gatewayFetch } from '@/src/lib/gateway-fetch';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -109,13 +110,13 @@ async function fetchOnboardingBoard(): Promise<BoardResponse> {
   }
 
   const url = `${gateway}/api/admin/clinicians/onboarding-board`;
-  const adminKey = process.env.ADMIN_API_KEY ?? '';
+
 
   try {
-    const res = await fetch(url, {
+    const res = await gatewayFetch(url, {
       headers: {
         accept: 'application/json',
-        'x-admin-key': adminKey,
+
       },
       cache: 'no-store',
     });

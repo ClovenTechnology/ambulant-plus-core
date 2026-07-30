@@ -1,73 +1,134 @@
 // apps/admin-dashboard/app/api/admin/clinicians/approve/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
+import { apigwBase } from '@/app/api/_apigw';
+import { gatewayProxyHeaders } from '@/src/lib/gateway-proxy';
 
 export const runtime = 'edge';
 
 async function readId(req: NextRequest) {
   const ct = req.headers.get('content-type') || '';
+
   if (ct.includes('application/json')) {
     const body = await req.json().catch(() => ({} as any));
     return body?.id ? String(body.id) : null;
   }
+
   const fd = await req.formData().catch(() => null);
   const id = fd?.get('id');
+
   return id ? String(id) : null;
 }
 
-function redirectBack(req: NextRequest, fallbackPath = '/admin/clinicians') {
+function redirectBack(
+  req: NextRequest,
+  fallbackPath = '/admin/clinicians',
+) {
   const ref = req.headers.get('referer');
   const origin = new URL(req.url).origin;
+
   if (ref) {
     try {
       const u = new URL(ref);
-      if (u.origin === origin) return NextResponse.redirect(u);
+      if (u.origin === origin) {
+        return NextResponse.redirect(u);
+      }
     } catch {}
   }
-  return NextResponse.redirect(new URL(fallbackPath, req.url));
+
+  return NextResponse.redirect(
+    new URL(fallbackPath, req.url),
+  );
 }
 
 export async function POST(req: NextRequest) {
   try {
     const id = await readId(req);
+
     if (!id) {
-      return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'id required',
+        },
+        {
+          status: 400,
+        },
+      );
     }
 
-    const gatewayBase =
-      process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-      process.env.APIGW_BASE ??
-      process.env.NEXT_PUBLIC_GATEWAY_BASE ??
-      process.env.GATEWAY_URL ??
-      ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
+    const base = apigwBase();
 
-    const url = `${gatewayBase}/api/clinicians`;
+    if (!base) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Missing API gateway base',
+        },
+        {
+          status: 500,
+        },
+      );
+    }
 
-    const res = await fetch(url, {
-      method: 'PATCH',
-      headers: {
-        'content-type': 'application/json',
-        'x-admin-key': process.env.ADMIN_API_KEY ?? '',
+    const res = await fetch(
+      `${base}/api/clinicians`,
+      {
+        method: 'PATCH',
+        cache: 'no-store',
+        headers: gatewayProxyHeaders(
+          req,
+          {
+            'content-type':
+              'application/json',
+          },
+        ),
+        body: JSON.stringify({
+          id,
+          status: 'active',
+
+          // IMPORTANT:
+          // approval != training completion
+        }),
       },
-      body: JSON.stringify({
-        id,
-        status: 'active',
-        // IMPORTANT: approval != training completion
-        // leave trainingCompleted alone (or explicitly false if you prefer)
-      }),
-    });
+    );
 
-    const text = await res.text().catch(() => '');
+    const text =
+      await res.text().catch(() => '');
+
     if (!res.ok) {
-      return new NextResponse(text || 'approve_failed', { status: res.status });
+      return new NextResponse(
+        text || 'approve_failed',
+        {
+          status: res.status,
+        },
+      );
     }
 
-    // Form submit UX: redirect back
-    const ct = req.headers.get('content-type') || '';
-    if (!ct.includes('application/json')) return redirectBack(req);
+    const ct =
+      req.headers.get('content-type') || '';
 
-    return NextResponse.json({ ok: true });
+    if (!ct.includes('application/json')) {
+      return redirectBack(req);
+    }
+
+    return NextResponse.json({
+      ok: true,
+    });
   } catch (err: any) {
-    console.error('admin/clinicians/approve error', err);
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+    console.error(
+      'admin/clinicians/approve error',
+      err,
+    );
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: String(err),
+      },
+      {
+        status: 500,
+      },
+    );
   }
 }

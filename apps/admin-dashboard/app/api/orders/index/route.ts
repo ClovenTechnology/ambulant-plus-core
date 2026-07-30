@@ -76,17 +76,7 @@ function gatewayHeaders(
     }
   }
 
-  const adminKey =
-    process.env
-      .ADMIN_API_KEY
-      ?.trim();
 
-  if (adminKey) {
-    headers.set(
-      'x-admin-key',
-      adminKey,
-    );
-  }
 
   return headers;
 }

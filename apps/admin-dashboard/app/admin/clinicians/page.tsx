@@ -4,6 +4,7 @@ import React from 'react';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { verifyAdminToken } from '@/src/lib/auth';
+import { gatewayFetch } from '@/src/lib/gateway-fetch';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -25,7 +26,7 @@ type CliniciansResp =
   | { items?: Clinician[]; total?: number; page?: number; pageSize?: number }
   | any;
 
-async function fetchClinicians(status?: string, adminKey?: string) {
+async function fetchClinicians(status?: string) {
   const gateway =
     process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
     process.env.APIGW_BASE ??
@@ -39,11 +40,14 @@ async function fetchClinicians(status?: string, adminKey?: string) {
   // Make sure we get enough rows (your gateway defaults to 20)
   url.searchParams.set('page', '1');
   url.searchParams.set('pageSize', '100');
-
-  const headersObj: Record<string, string> = { 'content-type': 'application/json' };
-  if (adminKey) headersObj['x-admin-key'] = adminKey;
-
-  const res = await fetch(url.toString(), { headers: headersObj, cache: 'no-store' });
+  const res = await gatewayFetch(
+    url.toString(),
+    {
+      headers: {
+        'content-type': 'application/json',
+      },
+    },
+  );
   const js = (await res.json().catch(() => ({}))) as CliniciansResp;
 
   if (!res.ok || js?.ok === false) {
@@ -72,18 +76,17 @@ export default async function AdminCliniciansPage() {
         <h1 className="text-2xl font-bold">Admin — Clinicians</h1>
         <div className="mt-4 text-sm text-rose-600">Access denied: {v.error}</div>
         <div className="mt-3 text-sm">
-          To access this page you must sign in with an admin Auth0 account and provide a valid Access Token.
+          Please sign in with your Ambulant Admin account.
         </div>
       </main>
     );
   }
 
-  const adminKey = process.env.ADMIN_API_KEY ?? '';
   let clinicians: Clinician[] = [];
   let meta: { total: number; page: number; pageSize: number } | null = null;
 
   try {
-    const out = await fetchClinicians('pending', adminKey);
+    const out = await fetchClinicians('pending');
     clinicians = out.items;
     meta = out.meta;
   } catch (err) {

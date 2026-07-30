@@ -3,6 +3,7 @@ import React from 'react';
 import Link from 'next/link';
 import { headers } from 'next/headers';
 import { verifyAdminToken } from '@/src/lib/auth';
+import { gatewayFetch } from '@/src/lib/gateway-fetch';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -105,13 +106,13 @@ function prettyStage(stage: OnboardingStage) {
   return stage.charAt(0).toUpperCase() + stage.slice(1);
 }
 
-async function fetchOnboardingBoard(gateway: string, adminKey: string): Promise<BoardResponse> {
+async function fetchOnboardingBoard(gateway: string): Promise<BoardResponse> {
   const url = `${gateway}/api/admin/clinicians/onboarding-board`;
   try {
-    const res = await fetch(url, {
+    const res = await gatewayFetch(url, {
       headers: {
         'content-type': 'application/json',
-        'x-admin-key': adminKey,
+
       },
       cache: 'no-store',
     });
@@ -135,15 +136,14 @@ async function fetchOnboardingBoard(gateway: string, adminKey: string): Promise<
 
 async function fetchFeesExtended(
   gateway: string,
-  adminKey: string,
   clinicianId: string,
 ): Promise<FeesExtendedVM | null> {
   const url = `${gateway}/api/admin/clinicians/${encodeURIComponent(clinicianId)}/fees/extended`;
   try {
-    const res = await fetch(url, {
+    const res = await gatewayFetch(url, {
       headers: {
         'content-type': 'application/json',
-        'x-admin-key': adminKey,
+
       },
       cache: 'no-store',
     });
@@ -164,10 +164,10 @@ export default async function AdminClinicianDetailPage({ params }: { params: { i
   if (!v.ok) {
     return (
       <main className="mx-auto max-w-4xl p-6">
-        <h1 className="text-2xl font-bold">Admin — Clinician</h1>
+        <h1 className="text-2xl font-bold">Admin â€” Clinician</h1>
         <div className="mt-4 text-sm text-rose-600">Access denied: {v.error}</div>
         <div className="mt-3 text-sm text-gray-700">
-          Sign in with an admin Auth0 account and include a valid Access Token.
+          Please sign in with your Ambulant Admin account.
         </div>
       </main>
     );
@@ -181,13 +181,13 @@ export default async function AdminClinicianDetailPage({ params }: { params: { i
     process.env.GATEWAY_URL ??
     (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
-  const adminKey = process.env.ADMIN_API_KEY ?? '';
 
-  const board = await fetchOnboardingBoard(gateway, adminKey);
+
+  const board = await fetchOnboardingBoard(gateway);
   const row = board.ok ? board.rows.find((r) => r.clinicianId === clinicianId) : null;
 
   // Best-effort: fees summary (optional)
-  const fees = await fetchFeesExtended(gateway, adminKey, clinicianId);
+  const fees = await fetchFeesExtended(gateway, clinicianId);
 
   const base = fees?.services?.find((s) => s.kind === 'base_consult') ?? null;
   const followup = fees?.services?.find((s) => s.kind === 'followup') ?? null;
@@ -230,7 +230,7 @@ export default async function AdminClinicianDetailPage({ params }: { params: { i
           Couldn&apos;t load onboarding board from the gateway.
           <div className="mt-1">
             Check <code className="font-mono">GET /api/admin/clinicians/onboarding-board</code> and{' '}
-            <code className="font-mono">ADMIN_API_KEY</code>. Error: {board.error}
+            Gateway error: {board.error}
           </div>
         </div>
       )}
@@ -243,11 +243,11 @@ export default async function AdminClinicianDetailPage({ params }: { params: { i
           </div>
           <div className="mt-3 text-xs text-gray-600 space-y-1">
             <div>
-              • If this clinician is older / pre-onboarding-model, you may need a dedicated endpoint like{' '}
+              â€¢ If this clinician is older / pre-onboarding-model, you may need a dedicated endpoint like{' '}
               <code className="font-mono">GET /api/admin/clinicians/:id</code>.
             </div>
             <div>
-              • Or confirm the clinician exists in DB and is included by the onboarding-board route.
+              â€¢ Or confirm the clinician exists in DB and is included by the onboarding-board route.
             </div>
           </div>
 
@@ -313,10 +313,10 @@ export default async function AdminClinicianDetailPage({ params }: { params: { i
                 <div className="mt-2 space-y-1">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-700">
-                      {row.trainingSlot.mode === 'virtual' ? 'Virtual' : 'In person'} • {row.trainingSlot.status}
+                      {row.trainingSlot.mode === 'virtual' ? 'Virtual' : 'In person'} â€¢ {row.trainingSlot.status}
                     </span>
                     <span className="text-[11px] text-gray-600">
-                      {new Date(row.trainingSlot.startAt).toLocaleString()} →{' '}
+                      {new Date(row.trainingSlot.startAt).toLocaleString()} â†’{' '}
                       {new Date(row.trainingSlot.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </span>
                   </div>
@@ -356,7 +356,7 @@ export default async function AdminClinicianDetailPage({ params }: { params: { i
                     {row.dispatch.shippedAt && (
                       <span>Shipped: {new Date(row.dispatch.shippedAt).toLocaleString()}</span>
                     )}
-                    {row.dispatch.shippedAt && row.dispatch.deliveredAt && <span> • </span>}
+                    {row.dispatch.shippedAt && row.dispatch.deliveredAt && <span> â€¢ </span>}
                     {row.dispatch.deliveredAt && (
                       <span>Delivered: {new Date(row.dispatch.deliveredAt).toLocaleString()}</span>
                     )}
@@ -384,13 +384,13 @@ export default async function AdminClinicianDetailPage({ params }: { params: { i
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[11px] text-gray-600">Base consult</span>
                       <span className="font-mono text-[11px]">
-                        {base ? money(base.amountCents, base.currency) : '—'}
+                        {base ? money(base.amountCents, base.currency) : 'â€”'}
                       </span>
                     </div>
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-[11px] text-gray-600">Follow-up</span>
                       <span className="font-mono text-[11px]">
-                        {followup ? money(followup.amountCents, followup.currency) : '—'}
+                        {followup ? money(followup.amountCents, followup.currency) : 'â€”'}
                       </span>
                     </div>
                     <div className="pt-1 text-[11px] text-gray-500">

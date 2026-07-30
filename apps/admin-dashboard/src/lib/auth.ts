@@ -1,111 +1,97 @@
 // apps/admin-dashboard/src/lib/auth.ts
-// Legacy Auth0 helper retained for compatibility.
-// Primary production admin access now falls back to the API Gateway session cookie.
+//
+// Native Ambulant Admin authentication.
+// Auth0 has been retired as an authentication dependency.
+// Admin access is established through the signed API Gateway session.
 
-import { createRemoteJWKSet, jwtVerify, type JWTPayload } from 'jose';
+import type { JWTPayload } from 'jose';
 import { getSessionFromGateway } from './session';
 
-const AUTH0_DOMAIN = process.env.AUTH0_DOMAIN;
-const AUTH0_AUDIENCE = process.env.AUTH0_AUDIENCE;
-
-const jwksUri = AUTH0_DOMAIN
-  ? new URL('https://' + AUTH0_DOMAIN + '/.well-known/jwks.json').toString()
-  : undefined;
-
-const JWKS = jwksUri ? createRemoteJWKSet(new URL(jwksUri)) : null;
 
 type VerifyAdminResult =
-  | { ok: true; payload: JWTPayload }
-  | { ok: false; error: string; payload?: JWTPayload };
+  | {
+      ok: true;
+      payload: JWTPayload;
+    }
+  | {
+      ok: false;
+      error: string;
+      payload?: JWTPayload;
+    };
 
-function hasAdminAccessFromSession(session: Awaited<ReturnType<typeof getSessionFromGateway>>) {
-  /*
-   * Transitional admin auth rule:
-   * The Admin Dashboard currently uses the API Gateway adm.profile session cookie.
-   * Some legacy pages still call verifyAdminToken(), but normal browser navigation
-   * does not provide an Auth0 bearer token.
-   *
-   * If API Gateway confirms an authenticated admin-dashboard session with a user
-   * identity, allow access. Role/scope enforcement can be tightened later after
-   * admin signup + role assignment are fully stable.
-   */
-  return Boolean(session?.authenticated && session.user && session.user.email);
-}
 
-async function verifyGatewaySessionFallback(originalError: string): Promise<VerifyAdminResult> {
+export async function verifyAdminToken(
+  _token?: string,
+): Promise<VerifyAdminResult> {
+
   try {
-    const session = await getSessionFromGateway();
 
-    if (!hasAdminAccessFromSession(session)) {
-      return { ok: false, error: originalError };
+    const session =
+      await getSessionFromGateway();
+
+
+    if (
+      !session.authenticated ||
+      !session.user?.email
+    ) {
+      return {
+        ok: false,
+        error: 'missing_admin_session',
+      };
     }
 
-    const user = session.user;
+
+    const roles =
+      session.user.roles || [];
+
+
+    const isAdmin =
+      roles.includes('admin') ||
+      roles.includes('superadmin') ||
+      roles.includes('admin_staff');
+
+
+    if (!isAdmin) {
+      return {
+        ok: false,
+        error: 'insufficient_role',
+      };
+    }
+
 
     return {
       ok: true,
       payload: {
-        sub: user?.id || user?.email || 'gateway-admin-session',
-        email: user?.email || undefined,
-        name: user?.name || undefined,
-        roles: user?.roles || [],
-        permissions: user?.scopes || [],
-        source: 'gateway-session',
+        sub:
+          session.user.id ||
+          session.user.email,
+
+        email:
+          session.user.email,
+
+        name:
+          session.user.name,
+
+        roles,
+
+        permissions:
+          session.user.scopes || [],
+
+        source:
+          'gateway-session',
+
       } as JWTPayload,
     };
-  } catch {
-    return { ok: false, error: originalError };
+
   }
-}
+  catch (error: any) {
 
-/**
- * Verifies Auth0 bearer token when supplied.
- * If no bearer token is supplied, falls back to the current Admin Dashboard
- * session cookie via API Gateway /api/auth/me.
- */
-export async function verifyAdminToken(token?: string): Promise<VerifyAdminResult> {
-  if (!token) {
-    return verifyGatewaySessionFallback('missing_token');
-  }
+    return {
+      ok: false,
+      error:
+        error?.message ||
+        'gateway_session_failed',
+    };
 
-  if (!JWKS) {
-    return verifyGatewaySessionFallback('jwks_missing');
-  }
-
-  try {
-    const cleaned = token.trim().replace(/^Bearer\s+/i, '');
-
-    const { payload } = await jwtVerify(cleaned, JWKS, {
-      audience: AUTH0_AUDIENCE,
-      issuer: AUTH0_DOMAIN ? 'https://' + AUTH0_DOMAIN + '/' : undefined,
-    });
-
-    const roles =
-      (payload as any)['https://ambulant.example/roles'] ??
-      (payload as any).roles ??
-      null;
-
-    const scope = (payload as any).scope ?? '';
-    const permissions = (payload as any).permissions ?? [];
-
-    const isAdmin =
-      (Array.isArray(roles) && roles.includes('admin')) ||
-      (typeof scope === 'string' && scope.split(' ').includes('admin')) ||
-      (Array.isArray(permissions) && permissions.includes('admin'));
-
-    if (!isAdmin) {
-      const fallback = await verifyGatewaySessionFallback('insufficient_role');
-      if (fallback.ok) return fallback;
-
-      return { ok: false, error: 'insufficient_role', payload: payload as JWTPayload };
-    }
-
-    return { ok: true, payload: payload as JWTPayload };
-  } catch (err: any) {
-    const message = err?.message || String(err) || 'auth0_verification_failed';
-    const fallback = await verifyGatewaySessionFallback(message);
-    if (fallback.ok) return fallback;
-
-    return { ok: false, error: message };
   }
 }

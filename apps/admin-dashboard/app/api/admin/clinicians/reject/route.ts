@@ -1,5 +1,8 @@
 // apps/admin-dashboard/app/api/admin/clinicians/reject/route.ts
+
 import { NextRequest, NextResponse } from 'next/server';
+import { apigwBase } from '@/app/api/_apigw';
+import { gatewayProxyHeaders } from '@/src/lib/gateway-proxy';
 
 export const runtime = 'edge';
 
@@ -12,7 +15,10 @@ type ReasonKey =
 
 const REASONS: Record<
   ReasonKey,
-  { label: string; template: (countryName: string) => string }
+  {
+    label: string;
+    template: (countryName: string) => string;
+  }
 > = {
   incomplete_documents: {
     label: 'Incomplete document',
@@ -43,6 +49,7 @@ const REASONS: Record<
 
 async function readFormOrJson(req: NextRequest) {
   const ct = req.headers.get('content-type') || '';
+
   if (ct.includes('application/json')) {
     const body = await req.json().catch(() => ({} as any));
     return body ?? {};
@@ -62,80 +69,161 @@ async function readFormOrJson(req: NextRequest) {
 
 function isBrowserForm(req: NextRequest) {
   const ct = req.headers.get('content-type') || '';
-  return ct.includes('application/x-www-form-urlencoded') || ct.includes('multipart/form-data');
+
+  return (
+    ct.includes('application/x-www-form-urlencoded') ||
+    ct.includes('multipart/form-data')
+  );
 }
 
-function redirectBack(req: NextRequest, fallback = '/admin/clinicians') {
+function redirectBack(
+  req: NextRequest,
+  fallback = '/admin/clinicians',
+) {
   const ref = req.headers.get('referer');
   const origin = new URL(req.url).origin;
+
   if (ref) {
     try {
       const u = new URL(ref);
-      if (u.origin === origin) return NextResponse.redirect(u);
+
+      if (u.origin === origin) {
+        return NextResponse.redirect(u);
+      }
     } catch {}
   }
-  return NextResponse.redirect(new URL(fallback, req.url));
+
+  return NextResponse.redirect(
+    new URL(fallback, req.url),
+  );
 }
 
 export async function POST(req: NextRequest) {
   try {
     const body = await readFormOrJson(req);
 
-    const id = body?.id ? String(body.id) : '';
+    const id = body?.id
+      ? String(body.id)
+      : '';
+
     if (!id) {
-      return NextResponse.json({ ok: false, error: 'id required' }, { status: 400 });
-    }
-
-    const reasonKey = (body?.reasonKey ? String(body.reasonKey) : 'other') as ReasonKey;
-    const countryName = body?.countryName ? String(body.countryName) : 'South Africa';
-
-    const preset = REASONS[reasonKey] ?? REASONS.other;
-
-    const customMessage = body?.message ? String(body.message).trim() : '';
-    const finalMessage = customMessage.length > 0 ? customMessage : preset.template(countryName);
-
-    const gatewayBase =
-      process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-      process.env.APIGW_BASE ??
-      process.env.NEXT_PUBLIC_GATEWAY_BASE ??
-      process.env.GATEWAY_URL ??
-      ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
-
-    const res = await fetch(`${gatewayBase}/api/clinicians`, {
-      method: 'PATCH',
-      headers: {
-        'content-type': 'application/json',
-        'x-admin-key': process.env.ADMIN_API_KEY ?? '',
-      },
-      body: JSON.stringify({
-        id,
-        status: 'rejected',
-        // Gateway can store these in ClinicianProfile.meta or a future ClinicianVerification model.
-        rejection: {
-          reasonKey,
-          reasonLabel: preset.label,
-          message: finalMessage,
-          countryName,
-          at: new Date().toISOString(),
-        },
-        notifyApplicant: true, // if gateway supports sending email/SMS, it should use this
-      }),
-    });
-
-    const text = await res.text().catch(() => '');
-    if (!res.ok) {
       return NextResponse.json(
-        { ok: false, error: text || `HTTP ${res.status} reject failed` },
-        { status: res.status },
+        {
+          ok: false,
+          error: 'id required',
+        },
+        {
+          status: 400,
+        },
       );
     }
 
-    // If the action came from a <form>, bounce admin back to where they were
-    if (isBrowserForm(req)) return redirectBack(req);
+    const reasonKey = (
+      body?.reasonKey
+        ? String(body.reasonKey)
+        : 'other'
+    ) as ReasonKey;
 
-    return NextResponse.json({ ok: true });
+    const countryName = body?.countryName
+      ? String(body.countryName)
+      : 'South Africa';
+
+    const preset =
+      REASONS[reasonKey] ??
+      REASONS.other;
+
+    const customMessage = body?.message
+      ? String(body.message).trim()
+      : '';
+
+    const finalMessage =
+      customMessage.length > 0
+        ? customMessage
+        : preset.template(countryName);
+
+    const base = apigwBase();
+
+    if (!base) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'Missing API gateway base',
+        },
+        {
+          status: 500,
+        },
+      );
+    }
+
+    const res = await fetch(
+      `${base}/api/clinicians`,
+      {
+        method: 'PATCH',
+        cache: 'no-store',
+        headers: gatewayProxyHeaders(
+          req,
+          {
+            'content-type':
+              'application/json',
+          },
+        ),
+        body: JSON.stringify({
+          id,
+          status: 'rejected',
+
+          rejection: {
+            reasonKey,
+            reasonLabel:
+              preset.label,
+            message:
+              finalMessage,
+            countryName,
+            at: new Date().toISOString(),
+          },
+
+          notifyApplicant: true,
+        }),
+      },
+    );
+
+    const text =
+      await res.text().catch(() => '');
+
+    if (!res.ok) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            text ||
+            `HTTP ${res.status} reject failed`,
+        },
+        {
+          status: res.status,
+        },
+      );
+    }
+
+    if (isBrowserForm(req)) {
+      return redirectBack(req);
+    }
+
+    return NextResponse.json({
+      ok: true,
+    });
   } catch (err: any) {
-    console.error('admin/clinicians/reject error', err);
-    return NextResponse.json({ ok: false, error: String(err) }, { status: 500 });
+    console.error(
+      'admin/clinicians/reject error',
+      err,
+    );
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: String(err),
+      },
+      {
+        status: 500,
+      },
+    );
   }
 }

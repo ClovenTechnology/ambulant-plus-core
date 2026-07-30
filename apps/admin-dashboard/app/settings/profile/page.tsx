@@ -1,29 +1,25 @@
 // apps/admin-dashboard/app/settings/profile/page.tsx
-import { cookies } from 'next/headers';
-import {
-  NEXT_AUTHZ_COOKIE,
-  NEXT_PROFILE_COOKIE,
-  parseAuthzCookie,
-  parseProfileCookie,
-  normalizeScopes,
-} from '../../../lib/authz';
-import { clearAuthz } from '../../actions/authz';
+import { getSessionFromGateway } from '../../../src/lib/session';
 
 export const metadata = {
   title: 'My Profile',
 };
 
 export default async function ProfilePage() {
-  const rawAuth = cookies().get(NEXT_AUTHZ_COOKIE)?.value;
-  const rawProf = cookies().get(NEXT_PROFILE_COOKIE)?.value;
+  const session = await getSessionFromGateway();
 
-  const authz = parseAuthzCookie(rawAuth);
-  const profile = parseProfileCookie(rawProf);
-  const scopes = normalizeScopes(authz?.scopes || []);
+  const profile = session.user;
+
+  const scopes = new Set(
+    session.user?.scopes || [],
+  );
 
   async function signOut() {
     'use server';
-    await clearAuthz();
+
+    await fetch('/auth/signout', {
+      method: 'POST',
+    });
   }
 
   return (
@@ -50,7 +46,7 @@ export default async function ProfilePage() {
 
             <div>
               <span className="text-gray-500">Role:</span>{' '}
-              <span className="font-medium">{authz?.role || '—'}</span>
+              <span className="font-medium">{profile?.roles?.join(', ') || '—'}</span>
             </div>
           </div>
 

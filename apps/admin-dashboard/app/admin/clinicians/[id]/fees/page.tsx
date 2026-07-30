@@ -2,6 +2,7 @@
 import React from 'react';
 import { headers } from 'next/headers';
 import { verifyAdminToken } from '@/src/lib/auth';
+import { gatewayFetch } from '@/src/lib/gateway-fetch';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -62,7 +63,7 @@ export default async function AdminClinicianFeesPage({
   if (!v.ok) {
     return (
       <main className="p-6">
-        <h1 className="text-2xl font-bold">Admin — Clinician Fees</h1>
+        <h1 className="text-2xl font-bold">Admin â€” Clinician Fees</h1>
         <div className="mt-4 text-sm text-rose-600">
           Access denied: {v.error}
         </div>
@@ -81,7 +82,7 @@ export default async function AdminClinicianFeesPage({
     process.env.GATEWAY_URL ??
     (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
 
-  const adminKey = process.env.ADMIN_API_KEY ?? '';
+
 
   let data: AdminClinicianFeesVM | null = null;
   let error: string | null = null;
@@ -90,10 +91,10 @@ export default async function AdminClinicianFeesPage({
     const url = `${gateway}/api/admin/clinicians/${encodeURIComponent(
       clinicianId,
     )}/fees/extended`;
-    const res = await fetch(url, {
+    const res = await gatewayFetch(url, {
       headers: {
         'content-type': 'application/json',
-        'x-admin-key': adminKey,
+
       },
       cache: 'no-store',
     });
@@ -116,7 +117,7 @@ export default async function AdminClinicianFeesPage({
         {error ? (
           <div className="mt-4 text-sm text-rose-600">{error}</div>
         ) : (
-          <div className="mt-4 text-sm text-gray-600">Loading…</div>
+          <div className="mt-4 text-sm text-gray-600">Loadingâ€¦</div>
         )}
       </main>
     );
@@ -184,7 +185,7 @@ export default async function AdminClinicianFeesPage({
                     {base.minMinutes && base.maxMinutes
                       ? `${base.minMinutes}-${base.maxMinutes} min`
                       : base.minMinutes
-                      ? `≥ ${base.minMinutes} min`
+                      ? `â‰¥ ${base.minMinutes} min`
                       : 'Duration not specified'}
                   </div>
                 </div>
@@ -195,7 +196,7 @@ export default async function AdminClinicianFeesPage({
                 )}
                 <div className="mt-2 text-[11px] text-gray-500">
                   Kind:{' '}
-                  <span className="font-mono">base_consult</span> • Active:{' '}
+                  <span className="font-mono">base_consult</span> â€¢ Active:{' '}
                   <span className="font-mono">
                     {base.active ? 'true' : 'false'}
                   </span>
@@ -222,7 +223,7 @@ export default async function AdminClinicianFeesPage({
                     {followup.minMinutes && followup.maxMinutes
                       ? `${followup.minMinutes}-${followup.maxMinutes} min`
                       : followup.minMinutes
-                      ? `≥ ${followup.minMinutes} min`
+                      ? `â‰¥ ${followup.minMinutes} min`
                       : 'Duration not specified'}
                   </div>
                 </div>
@@ -233,7 +234,7 @@ export default async function AdminClinicianFeesPage({
                 )}
                 <div className="mt-2 text-[11px] text-gray-500">
                   Kind:{' '}
-                  <span className="font-mono">followup</span> • Active:{' '}
+                  <span className="font-mono">followup</span> â€¢ Active:{' '}
                   <span className="font-mono">
                     {followup.active ? 'true' : 'false'}
                   </span>
@@ -273,7 +274,7 @@ export default async function AdminClinicianFeesPage({
                     <tr key={s.id} className="border-t">
                       <td className="px-2 py-1 align-top">{s.name}</td>
                       <td className="px-2 py-1 align-top text-gray-600">
-                        {s.description || '—'}
+                        {s.description || 'â€”'}
                       </td>
                       <td className="px-2 py-1 align-top font-mono">
                         {centsToMoney(s.amountCents, s.currency)}
@@ -282,8 +283,8 @@ export default async function AdminClinicianFeesPage({
                         {s.minMinutes && s.maxMinutes
                           ? `${s.minMinutes}-${s.maxMinutes} min`
                           : s.minMinutes
-                          ? `≥ ${s.minMinutes} min`
-                          : '—'}
+                          ? `â‰¥ ${s.minMinutes} min`
+                          : 'â€”'}
                       </td>
                       <td className="px-2 py-1 align-top text-[11px]">
                         {s.includesMedicalStaff ? 'Yes' : 'No / N/A'}
@@ -343,23 +344,23 @@ export default async function AdminClinicianFeesPage({
                       {s.type.replace('-', ' ')}
                     </td>
                     <td className="px-2 py-1 align-top">
-                      {s.role || '—'}
+                      {s.role || 'â€”'}
                     </td>
                     <td className="px-2 py-1 align-top font-mono">
                       {s.flatMonthlyCents != null
                         ? centsToMoney(s.flatMonthlyCents, data.currency)
-                        : '—'}
+                        : 'â€”'}
                     </td>
                     <td className="px-2 py-1 align-top">
                       {s.sharePercentOfClinician != null
                         ? `${s.sharePercentOfClinician.toFixed(1)}%`
-                        : '—'}
+                        : 'â€”'}
                     </td>
                     <td className="px-2 py-1 align-top">
                       {s.type === 'medical'
                         ? s.servicesSharePercent != null
                           ? `${s.servicesSharePercent.toFixed(1)}%`
-                          : '—'
+                          : 'â€”'
                         : 'N/A (non-medical)'}
                     </td>
                   </tr>
@@ -373,11 +374,11 @@ export default async function AdminClinicianFeesPage({
           <div className="font-semibold">Model recap</div>
           <ul className="list-disc pl-4 space-y-0.5">
             <li>
-              <span className="font-medium">Non-medical staff</span> — flat
+              <span className="font-medium">Non-medical staff</span> â€” flat
               monthly and/or % of clinician/practice earnings.
             </li>
             <li>
-              <span className="font-medium">Medical staff</span> — same
+              <span className="font-medium">Medical staff</span> â€” same
               flat/% model <em>plus</em> optional % share of services where
               they&apos;re actively involved (e.g. remote monitoring).
             </li>
