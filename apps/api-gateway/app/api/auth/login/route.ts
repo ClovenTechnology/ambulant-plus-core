@@ -263,6 +263,16 @@ export async function POST(
           headers: {
             'cache-control':
               'no-store',
+
+            /*
+             * Server-to-server compatibility carrier.
+             *
+             * The Admin Dashboard login proxy consumes this
+             * value and creates its own host-only HttpOnly
+             * cookie. It is not forwarded in dashboard JSON.
+             */
+            'x-ambulant-admin-session':
+              sessionToken,
           },
         },
       );
