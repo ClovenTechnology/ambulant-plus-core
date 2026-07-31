@@ -34,6 +34,12 @@ export type Who = {
 };
 
 const COOKIE_CANDIDATES = [
+  /*
+   * Native Admin dashboard session.
+   * Must win when multiple cookies are present.
+   */
+  'adm.profile',
+
   '__Host-ambulant_session',
   'ambulant_session',
   'ambulant.session',

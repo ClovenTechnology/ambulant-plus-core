@@ -1,4 +1,4 @@
-﻿import crypto from 'node:crypto';
+import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { readIdentity } from '@/src/lib/identity';
 
@@ -30,6 +30,34 @@ function hasTrustedAdminKey(req: NextRequest) {
 }
 
 export async function verifyAdminRequest(req: NextRequest): Promise<AdminAuthResult> {
+  /*
+   * Human Admin sessions take priority.
+   *
+   * The dashboard session represents the real operator.
+   * Do not replace this identity with the machine key identity.
+   */
+  const who = readIdentity(req.headers);
+
+  if (
+    who.trusted === true &&
+    who.uid &&
+    (
+      who.role === 'admin' ||
+      who.role === 'admin_staff'
+    )
+  ) {
+    return {
+      ok: true,
+      uid: who.uid,
+      role: who.role,
+      source: 'identity',
+    };
+  }
+
+  /*
+   * Machine authentication remains available only
+   * for trusted service-to-service callers.
+   */
   if (hasTrustedAdminKey(req)) {
     return {
       ok: true,
@@ -39,14 +67,16 @@ export async function verifyAdminRequest(req: NextRequest): Promise<AdminAuthRes
     };
   }
 
-  const who = readIdentity(req.headers);
-
-  if (!who.uid || who.role !== 'admin') {
-    return {
-      ok: false,
-      response: NextResponse.json({ ok: false, error: 'unauthorized' }, { status: 401 }),
-    };
-  }
-
-  return { ok: true, uid: who.uid, role: who.role, source: 'identity' };
+  return {
+    ok: false,
+    response: NextResponse.json(
+      {
+        ok: false,
+        error: 'unauthorized',
+      },
+      {
+        status: 401,
+      },
+    ),
+  };
 }
