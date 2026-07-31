@@ -1,18 +1,11 @@
-﻿// apps/admin-dashboard/src/lib/gateway-fetch.ts
+// apps/admin-dashboard/src/lib/gateway-fetch.ts
 
-import { cookies } from 'next/headers';
+import { headers } from 'next/headers';
 
-function serializeCookies(): string {
+function requestCookieHeader() {
   try {
-    return cookies()
-      .getAll()
-      .map(
-        (cookie) =>
-          `${cookie.name}=${encodeURIComponent(cookie.value)}`
-      )
-      .join('; ');
-  }
-  catch {
+    return headers().get('cookie') || '';
+  } catch {
     return '';
   }
 }
@@ -21,22 +14,24 @@ export async function gatewayFetch(
   url: string,
   init: RequestInit = {},
 ): Promise<Response> {
+  const outgoingHeaders =
+    new Headers(init.headers);
 
   const cookieHeader =
-    serializeCookies();
+    requestCookieHeader();
+
+  if (cookieHeader) {
+    outgoingHeaders.set(
+      'cookie',
+      cookieHeader,
+    );
+  }
 
   return fetch(
     url,
     {
       ...init,
-      headers: {
-        ...(init.headers || {}),
-        ...(cookieHeader
-          ? {
-              cookie: cookieHeader,
-            }
-          : {}),
-      },
+      headers: outgoingHeaders,
       cache:
         init.cache ||
         'no-store',

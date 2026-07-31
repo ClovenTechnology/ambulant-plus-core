@@ -3,16 +3,27 @@ import { NextRequest, NextResponse } from 'next/server';
 
 export function gatewayBaseFromEnv() {
   const raw =
-    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-    process.env.APIGW_BASE ??
-    process.env.GATEWAY_URL ??
-    process.env.API_GATEWAY_BASE_URL ??
-    process.env.API_GATEWAY_URL ??
-    process.env.NEXT_PUBLIC_APIGW_BASE ??
-    process.env.NEXT_PUBLIC_PATIENT_BASE ??
-    '';
+    process.env.APIGW_BASE ||
+    process.env.APIGW_BASE_URL ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.API_GATEWAY_URL ||
+    process.env.GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+    (
+      process.env.NODE_ENV === 'production' ||
+      process.env.VERCEL_ENV === 'production'
+        ? 'https://api-gateway.ambulantplus.co.za'
+        : 'http://localhost:3010'
+    );
 
-  const gateway = raw.trim().replace(/\/+$/, '');
+  const gateway =
+    String(raw || '')
+      .trim()
+      .replace(/\/+$/, '');
+
   if (!gateway) {
     throw new Error('gateway_base_not_configured');
   }
@@ -235,16 +246,55 @@ export async function forwardToGateway(req: NextRequest, path: string, body: any
   }
 
   const gateway = gatewayBaseFromEnv();
-  const adminKey = process.env.ADMIN_API_KEY ?? '';
+  const adminKey =
+    String(process.env.ADMIN_API_KEY || '')
+      .trim();
 
   const url = `${gateway}${path.startsWith('/') ? path : `/${path}`}`;
 
+  /*
+   * Preserve both supported authentication carriers:
+   *
+   * - the signed human Admin session for operator identity;
+   * - ADMIN_API_KEY for trusted service compatibility.
+   */
+  const upstreamHeaders =
+    new Headers({
+      'content-type': 'application/json',
+      accept: 'application/json',
+      'x-admin-origin': req.nextUrl.origin,
+    });
+
+  const cookie =
+    req.headers.get('cookie') || '';
+
+  const authorization =
+    req.headers.get('authorization') || '';
+
+  if (cookie) {
+    upstreamHeaders.set(
+      'cookie',
+      cookie,
+    );
+  }
+
+  if (authorization) {
+    upstreamHeaders.set(
+      'authorization',
+      authorization,
+    );
+  }
+
+  if (adminKey) {
+    upstreamHeaders.set(
+      'x-admin-key',
+      adminKey,
+    );
+  }
+
   const res = await fetch(url, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-admin-key': adminKey,
-    },
+    headers: upstreamHeaders,
     body: JSON.stringify(body ?? {}),
     cache: 'no-store',
   });

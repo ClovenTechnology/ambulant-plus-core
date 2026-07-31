@@ -1,12 +1,10 @@
 // apps/admin-dashboard/src/lib/auth.ts
 //
 // Native Ambulant Admin authentication.
-// Auth0 has been retired as an authentication dependency.
-// Admin access is established through the signed API Gateway session.
+// Auth0 is not an authentication dependency.
 
 import type { JWTPayload } from 'jose';
 import { getSessionFromGateway } from './session';
-
 
 type VerifyAdminResult =
   | {
@@ -19,17 +17,21 @@ type VerifyAdminResult =
       payload?: JWTPayload;
     };
 
-
 export async function verifyAdminToken(
   _token?: string,
 ): Promise<VerifyAdminResult> {
-
   try {
-
     const session =
       await getSessionFromGateway();
 
-
+    /*
+     * The API Gateway returns authenticated=true only
+     * after verifying the signed adm.profile cookie and
+     * resolving the matching live AdminUserProfile.
+     *
+     * Department and route-specific authorisation remains
+     * enforced through scopes by middleware and API routes.
+     */
     if (
       !session.authenticated ||
       !session.user?.email
@@ -40,24 +42,15 @@ export async function verifyAdminToken(
       };
     }
 
-
     const roles =
-      session.user.roles || [];
+      Array.isArray(session.user.roles)
+        ? session.user.roles
+        : [];
 
-
-    const isAdmin =
-      roles.includes('admin') ||
-      roles.includes('superadmin') ||
-      roles.includes('admin_staff');
-
-
-    if (!isAdmin) {
-      return {
-        ok: false,
-        error: 'insufficient_role',
-      };
-    }
-
+    const scopes =
+      Array.isArray(session.user.scopes)
+        ? session.user.scopes
+        : [];
 
     return {
       ok: true,
@@ -65,33 +58,23 @@ export async function verifyAdminToken(
         sub:
           session.user.id ||
           session.user.email,
-
         email:
           session.user.email,
-
         name:
           session.user.name,
-
         roles,
-
         permissions:
-          session.user.scopes || [],
-
+          scopes,
         source:
           'gateway-session',
-
       } as JWTPayload,
     };
-
-  }
-  catch (error: any) {
-
+  } catch (error: any) {
     return {
       ok: false,
       error:
         error?.message ||
         'gateway_session_failed',
     };
-
   }
 }
