@@ -1,32 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
-import {
-  gatewayBaseFromEnv,
-  requireAdminCaller,
-} from '../../../clinicians/onboarding/_helpers';
+import { gatewayBaseFromEnv, requireAdminCaller } from '../../../clinicians/onboarding/_helpers';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-export async function POST(request: NextRequest) {
+async function forward(request: NextRequest) {
   const caller = await requireAdminCaller(request);
   if (!caller.ok) return caller.response;
 
   const upstream = new URL('/api/admin/training/patients/invite', gatewayBaseFromEnv());
-  const body = await request.text();
+  upstream.search = request.nextUrl.search;
+  const method = request.method.toUpperCase();
+  const body = method === 'GET' || method === 'HEAD' ? undefined : await request.text();
   const cookie = request.headers.get('cookie');
   const authorization = request.headers.get('authorization');
   const adminKey = process.env.ADMIN_API_KEY?.trim();
 
   const response = await fetch(upstream, {
-    method: 'POST',
+    method,
     headers: {
       accept: 'application/json',
-      'content-type': 'application/json',
+      ...(body ? { 'content-type': 'application/json' } : {}),
       ...(cookie ? { cookie } : {}),
       ...(authorization ? { authorization } : {}),
       ...(adminKey ? { 'x-admin-key': adminKey } : {}),
     },
-    body: body || '{}',
+    body,
     cache: 'no-store',
   });
 
@@ -38,3 +37,6 @@ export async function POST(request: NextRequest) {
     },
   });
 }
+
+export async function GET(request: NextRequest) { return forward(request); }
+export async function POST(request: NextRequest) { return forward(request); }

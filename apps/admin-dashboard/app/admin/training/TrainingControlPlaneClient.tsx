@@ -1387,6 +1387,13 @@ export default function TrainingControlPlaneClient() {
                     </div>
 
                     <div className="flex shrink-0 flex-wrap gap-2">
+                      <a
+                        href={`/admin/training/patients?slotId=${encodeURIComponent(slot.id)}`}
+                        className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-black text-indigo-800"
+                      >
+                        Manage patients
+                      </a>
+
                       <button
                         type="button"
                         disabled={

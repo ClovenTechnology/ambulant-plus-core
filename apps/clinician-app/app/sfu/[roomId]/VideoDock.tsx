@@ -9,6 +9,7 @@ import { RoomEvent } from 'livekit-client';
 import { Card, Badge, Icon, IconBtn } from '@/components/ui';
 import CaptionOverlay from '@/src/components/rtc/CaptionOverlay';
 import CaptionsPanel from '@/src/components/rtc/CaptionsPanel';
+import TrainingParticipantGrid from './TrainingParticipantGrid';
 
 type Vitals = {
   ts?: number;
@@ -292,44 +293,7 @@ export default function VideoDock({
           presentation ? 'cursor-zoom-out' : 'cursor-default'
         }`}
       >
-        <video
-          ref={remoteVideoRef}
-          autoPlay
-          playsInline
-          className={`w-full h-full object-cover ring-1 ring-black/10 ${
-            remoteSpeaking ? 'outline outline-4 outline-emerald-400 outline-offset-0 transition-[outline] duration-200' : ''
-          }`}
-        />
-
-        {/* Local PiP (draggable only when unlocked) */}
-        <video
-          ref={localVideoRef}
-          autoPlay
-          playsInline
-          muted
-          className={`absolute rounded border border-white/80 shadow-lg object-cover w-40 h-28 ${
-            videoFloatLocked ? 'cursor-default' : 'cursor-grab active:cursor-grabbing'
-          }`}
-          style={{
-            left: `${videoFloating ? videoPos.xPct : pip.x}%`,
-            top: `${videoFloating ? videoPos.yPct : pip.y}%`,
-          }}
-          title="Local preview"
-          onMouseDown={(e) => startDragPip(e.clientX, e.clientY)}
-          onMouseMove={(e) => moveDragPip(e.clientX, e.clientY)}
-          onMouseUp={() => endDragPip()}
-          onTouchStart={(e) => {
-            const t = e.touches[0];
-            startDragPip(t.clientX, t.clientY);
-            touchKick();
-          }}
-          onTouchMove={(e) => {
-            const t = e.touches[0];
-            moveDragPip(t.clientX, t.clientY);
-          }}
-        />
-
-        <audio ref={audioSinkRef} autoPlay />
+        <TrainingParticipantGrid room={room} />
 
         <CaptionOverlay lines={captionLines} enabled={captionsOn} />
 
