@@ -343,14 +343,19 @@ export default function AdminSidebar() {
       </nav>
 
       <div className="p-2 border-t">
-        <Link
-          href="/auth/signout"
-          title={collapsed ? 'Sign Out' : undefined}
-          className="flex items-center gap-2 rounded px-3 py-2 text-sm text-black/70 hover:bg-black/5 hover:text-black"
+        <form
+          action="/auth/signout"
+          method="post"
         >
-          <LogOut className="h-4 w-4 text-black/50" />
-          {!collapsed && 'Sign Out'}
-        </Link>
+          <button
+            type="submit"
+            title={collapsed ? 'Sign Out' : undefined}
+            className="flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm text-black/70 hover:bg-black/5 hover:text-black"
+          >
+            <LogOut className="h-4 w-4 text-black/50" />
+            {!collapsed && 'Sign Out'}
+          </button>
+        </form>
       </div>
     </aside>
   );

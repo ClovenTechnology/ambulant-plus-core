@@ -52,11 +52,19 @@ function signOut(
   return response;
 }
 
-export async function GET(
-  request: NextRequest,
-) {
-  return signOut(
-    request,
+export async function GET() {
+  return NextResponse.json(
+    {
+      ok: false,
+      error: 'method_not_allowed',
+    },
+    {
+      status: 405,
+      headers: {
+        allow: 'POST',
+        'cache-control': 'no-store',
+      },
+    },
   );
 }
 
