@@ -5,7 +5,11 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { createHash } from 'crypto';
 import { PrismaClient } from '@prisma/client';
-import { jwtVerify } from 'jose';
+import { decodeJwt, jwtVerify } from 'jose';
+import {
+  TrainingAdmissionError,
+  verifyTrainingAdmissionToken,
+} from '@/src/clinicians/onboarding/training-admission';
 
 // -----------------------------
 // Prisma (local, safe singleton)
@@ -194,6 +198,81 @@ function buildParticipantMetadata(body: any, args: {
   };
 }
 
+async function mintTrainingRoomToken(
+  admission: Awaited<ReturnType<typeof verifyTrainingAdmissionToken>>,
+) {
+  const livekitKey = envFirst(['LIVEKIT_API_KEY', 'LK_API_KEY']);
+  const livekitSecret = envFirst(['LIVEKIT_API_SECRET', 'LK_API_SECRET']);
+  const livekitUrl = envFirst(['LIVEKIT_WS_URL', 'LIVEKIT_URL', 'LK_WS_URL', 'LK_URL']);
+
+  if (!livekitKey || !livekitSecret || !livekitUrl) {
+    throw new TrainingAdmissionError('server_misconfig', 500);
+  }
+
+  const remainingSeconds = Math.floor(
+    (admission.expiresAt.getTime() - Date.now()) / 1000,
+  );
+
+  if (remainingSeconds <= 0) {
+    throw new TrainingAdmissionError('invalid_training_admission', 401);
+  }
+
+  const permissions = Array.isArray(admission.permissions)
+    ? admission.permissions.map((permission) => String(permission))
+    : [];
+  const canPublish = admission.role !== 'observer';
+  const canPublishData =
+    canPublish &&
+    (admission.role !== 'patient' || permissions.includes('training:iomt:publish'));
+  const metadata = {
+    kind: 'training_admission',
+    admissionId: admission.admissionId,
+    assignmentId: admission.assignmentId,
+    trainingSlotId: admission.trainingSlotId,
+    sessionKey: admission.sessionKey,
+    subjectId: admission.subjectId,
+    ...(admission.role === 'patient' ? { patientId: admission.subjectId } : {}),
+    uid: admission.uid,
+    roomId: admission.roomId,
+    visitId: admission.trainingSlotId,
+    displayName: admission.displayName,
+    participantName: admission.displayName,
+    speakerName: admission.displayName,
+    participantRole: admission.role,
+    speakerRole: admission.role,
+    authRole: admission.role,
+    orgId: admission.orgId || undefined,
+    permissions,
+  };
+
+  const { AccessToken } = await import('livekit-server-sdk');
+  const accessToken = new AccessToken(livekitKey, livekitSecret, {
+    identity: admission.uid,
+    name: admission.displayName || admission.uid,
+    ttl: Math.max(1, Math.min(remainingSeconds, 6 * 60 * 60)),
+    metadata: JSON.stringify(metadata),
+    attributes: {
+      participantRole: admission.role,
+      authRole: admission.role,
+      trainingSlotId: admission.trainingSlotId,
+    },
+  });
+
+  accessToken.addGrant({
+    room: admission.roomId,
+    roomJoin: true,
+    canPublish,
+    canPublishData,
+    canSubscribe: true,
+  });
+
+  return {
+    rtcToken: await accessToken.toJwt(),
+    livekitUrl,
+    metadata,
+  };
+}
+
 // -----------------------------
 // POST /api/rtc/token
 // Requires: x-join-token (JWT join ticket)
@@ -225,7 +304,41 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Verify join-ticket JWT (signature + nbf/exp)
+    let unverifiedPayload: any = {};
+
+    try {
+      unverifiedPayload = decodeJwt(joinJwt);
+    } catch {
+      unverifiedPayload = {};
+    }
+
+    if (unverifiedPayload.kind === 'training_admission') {
+      const expectedRoomId = pickBodyString(body, ['roomId', 'room', 'rid']) || null;
+      const admission = await verifyTrainingAdmissionToken(joinJwt, expectedRoomId);
+      const minted = await mintTrainingRoomToken(admission);
+
+      return NextResponse.json(
+        {
+          ok: true,
+          provider: 'livekit',
+          wsUrl: minted.livekitUrl,
+          token: minted.rtcToken,
+          url: minted.livekitUrl,
+          livekitUrl: minted.livekitUrl,
+          roomId: admission.roomId,
+          identity: admission.uid,
+          role: admission.role,
+          participantRole: admission.role,
+          metadata: minted.metadata,
+          visitId: admission.trainingSlotId,
+          orgId: admission.orgId,
+          ticketExpiresAt: admission.expiresAt.toISOString(),
+        },
+        { status: 200, headers: h },
+      );
+    }
+
+    // Verify legacy Televisit join-ticket JWT (signature + nbf/exp)
     const joinSecret = envFirst(['TELEVISIT_JOIN_JWT_SECRET', 'RTC_JOIN_JWT_SECRET', 'JOIN_TICKET_JWT_SECRET']);
     if (!joinSecret) {
       return NextResponse.json(
@@ -447,6 +560,13 @@ export async function POST(req: NextRequest) {
       { status: 200, headers: h },
     );
   } catch (e: any) {
+    if (e instanceof TrainingAdmissionError) {
+      return NextResponse.json(
+        { ok: false, error: e.code, ...(e.details || {}) },
+        { status: e.status, headers: h },
+      );
+    }
+
     const msg = asString(e?.message) || 'Unknown error';
     const status = msg.toLowerCase().includes('jwt') || msg.toLowerCase().includes('token') ? 401 : 400;
 

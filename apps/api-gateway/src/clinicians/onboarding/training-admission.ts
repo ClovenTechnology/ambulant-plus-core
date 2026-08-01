@@ -7,6 +7,7 @@ import { prisma } from '@/src/lib/prisma';
 
 export type TrainingParticipantRole =
   | 'clinician'
+  | 'patient'
   | 'trainer'
   | 'observer'
   | 'admin';
@@ -198,6 +199,7 @@ function isParticipantRole(
 ): value is TrainingParticipantRole {
   return (
     value === 'clinician' ||
+    value === 'patient' ||
     value === 'trainer' ||
     value === 'observer' ||
     value === 'admin'
@@ -284,6 +286,7 @@ function safeUserAgent(
 export function trainingPrincipalKey(
   principalType:
     | 'clinician'
+    | 'patient'
     | 'org_user',
   principalId: string,
 ) {

@@ -2,6 +2,7 @@
 // apps/api-gateway/app/api/admin/patients/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
+import { verifyAdminRequest } from '../utils/auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -204,6 +205,9 @@ function filterLabel(key: string) {
 }
 
 export async function GET(req: NextRequest) {
+  const admin = await verifyAdminRequest(req);
+  if (!admin.ok) return admin.response;
+
   try {
     const url = new URL(req.url);
     const q = clean(url.searchParams.get('q'), 120);

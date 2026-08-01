@@ -1,4 +1,4 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -438,7 +438,11 @@ async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
     - Without a joinToken and outside training, real clinician-owned rooms can use direct authenticated minting.
   */
   if (!joinToken && isTrainingRoom(body)) {
-    return mintTrainingToken(body);
+    return safeJson(401, {
+      ok: false,
+      error: 'training_admission_required',
+      message: 'A signed training admission is required to join this room.',
+    });
   }
 
   if (!joinToken) {
