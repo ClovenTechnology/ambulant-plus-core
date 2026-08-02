@@ -105,6 +105,7 @@ function roomErrorMessage(
 
   if (
     code === 'unauthorized' ||
+    code === 'untrusted_clinician_identity' ||
     code === 'clinician_identity_required' ||
     code === 'clinician_not_found'
   ) {

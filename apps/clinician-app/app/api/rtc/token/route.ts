@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -418,6 +419,11 @@ async function issueSignedTrainingAdmission(
   // Never let caller-supplied identity headers override that authority.
   headers.delete('x-uid');
   headers.delete('x-role');
+
+  headers.set(
+    'x-ambulant-identity',
+    createTrustedClinicianIdentityHeader(req),
+  );
 
   const response = await fetch(
     `${trimSlash(base)}/api/clinicians/me/training/admission`,
