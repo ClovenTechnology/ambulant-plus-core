@@ -315,6 +315,22 @@ export async function bookClinicianTrainingSlot(input: {
         },
       });
 
+    if (
+      String(existing?.status || '')
+        .trim()
+        .toLowerCase() ===
+      'training_completed'
+    ) {
+      return {
+        status: 409,
+        body: {
+          ok: false,
+          error:
+            'completed_training_cannot_be_rescheduled',
+        },
+      };
+    }
+
     const access =
       await resolveClinicianOnboardingEntitlements(
         tx,
@@ -403,7 +419,150 @@ export async function bookClinicianTrainingSlot(input: {
         },
       });
 
+    const nowDate = new Date();
+    const principalKey =
+      `clinician:${String(
+        input.clinicianId,
+      )}`;
+    const displayName =
+      cleanText(
+        clinician.displayName ||
+          clinician.fullName ||
+          clinician.name ||
+          clinician.email,
+        240,
+      ) || 'Clinician';
+
+    await tx
+      .clinicianTrainingParticipantAssignment
+      .upsert({
+        where: {
+          trainingSlotId_sessionKey_principalKey: {
+            trainingSlotId:
+              String(slot.id),
+            sessionKey: 'slot',
+            principalKey,
+          },
+        },
+        create: {
+          trainingSlotId:
+            String(slot.id),
+          sessionKey: 'slot',
+          principalType: 'clinician',
+          principalKey,
+          principalId:
+            String(input.clinicianId),
+          email:
+            cleanText(
+              clinician.email,
+              320,
+            ),
+          name: displayName,
+          role: 'clinician',
+          permissions: [
+            'training:join',
+            'training:attendance:self',
+          ],
+          status: 'assigned',
+          assignedAt: nowDate,
+          metadata: {
+            source:
+              switchingFrom
+                ? 'clinician_reschedule'
+                : 'clinician_booking',
+            onboardingId:
+              String(onboarding.id),
+          },
+        },
+        update: {
+          email:
+            cleanText(
+              clinician.email,
+              320,
+            ),
+          name: displayName,
+          permissions: [
+            'training:join',
+            'training:attendance:self',
+          ],
+          status: 'assigned',
+          assignedAt: nowDate,
+          revokedAt: null,
+          expiresAt: null,
+          metadata: {
+            source:
+              switchingFrom
+                ? 'clinician_reschedule'
+                : 'clinician_booking',
+            onboardingId:
+              String(onboarding.id),
+          },
+        },
+      });
+
     if (switchingFrom) {
+      const oldAssignments =
+        await tx
+          .clinicianTrainingParticipantAssignment
+          .findMany({
+            where: {
+              trainingSlotId:
+                switchingFrom,
+              principalType:
+                'clinician',
+              principalId:
+                String(
+                  input.clinicianId,
+                ),
+              status: {
+                in: [
+                  'assigned',
+                  'accepted',
+                  'invited',
+                ],
+              },
+            },
+            select: {
+              id: true,
+            },
+          });
+
+      const oldAssignmentIds =
+        oldAssignments.map(
+          (assignment: any) =>
+            String(assignment.id),
+        );
+
+      if (oldAssignmentIds.length) {
+        await tx
+          .clinicianTrainingAdmission
+          .updateMany({
+            where: {
+              assignmentId: {
+                in: oldAssignmentIds,
+              },
+              revokedAt: null,
+            },
+            data: {
+              revokedAt: nowDate,
+            },
+          });
+
+        await tx
+          .clinicianTrainingParticipantAssignment
+          .updateMany({
+            where: {
+              id: {
+                in: oldAssignmentIds,
+              },
+            },
+            data: {
+              status: 'revoked',
+              revokedAt: nowDate,
+            },
+          });
+      }
+
       await tx.$executeRaw`
         UPDATE "ClinicianTrainingSlot"
         SET

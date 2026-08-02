@@ -406,6 +406,79 @@ async function mintAuthenticatedClinicianRtcToken(req: NextRequest, body: any) {
   });
 }
 
+async function issueSignedTrainingAdmission(
+  req: NextRequest,
+  base: string,
+) {
+  const headers = new Headers(
+    forwardHeaders(req) as HeadersInit,
+  );
+
+  // The API Gateway resolves the clinician from the signed session.
+  // Never let caller-supplied identity headers override that authority.
+  headers.delete('x-uid');
+  headers.delete('x-role');
+
+  const response = await fetch(
+    `${trimSlash(base)}/api/clinicians/me/training/admission`,
+    {
+      method: 'POST',
+      headers,
+      body: '{}',
+      cache: 'no-store',
+    },
+  );
+
+  const text = await response.text().catch(() => '');
+
+  if (!response.ok) {
+    return {
+      ok: false as const,
+      response: new NextResponse(
+        text ||
+          JSON.stringify({
+            ok: false,
+            error: 'training_admission_unavailable',
+          }),
+        {
+          status: response.status,
+          headers: {
+            'content-type':
+              response.headers.get('content-type') ||
+              'application/json; charset=utf-8',
+            'cache-control': 'no-store, max-age=0',
+          },
+        },
+      ),
+    };
+  }
+
+  const payload = (() => {
+    try {
+      return JSON.parse(text || '{}');
+    } catch {
+      return null;
+    }
+  })();
+
+  const token = String(payload?.admission?.token || '').trim();
+
+  if (!token) {
+    return {
+      ok: false as const,
+      response: safeJson(502, {
+        ok: false,
+        error: 'training_admission_token_missing',
+      }),
+    };
+  }
+
+  return {
+    ok: true as const,
+    token,
+  };
+}
+
 
 async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
   const refererJoinToken = (() => {
@@ -427,7 +500,16 @@ async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
     refererJoinToken ||
     '';
 
-  const joinToken = rtcIsCompactJws(rawJoinToken) ? String(rawJoinToken).trim() : '';
+  let joinToken = rtcIsCompactJws(rawJoinToken) ? String(rawJoinToken).trim() : '';
+
+  const base = pickBase();
+
+  if (!base) {
+    return safeJson(503, {
+      ok: false,
+      error: 'Video room service is not configured yet. Please contact Ambulant+ support.',
+    });
+  }
 
   /*
     Important production ordering:
@@ -438,11 +520,13 @@ async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
     - Without a joinToken and outside training, real clinician-owned rooms can use direct authenticated minting.
   */
   if (!joinToken && isTrainingRoom(body)) {
-    return safeJson(401, {
-      ok: false,
-      error: 'training_admission_required',
-      message: 'A signed training admission is required to join this room.',
-    });
+    const admission = await issueSignedTrainingAdmission(req, base);
+
+    if (!admission.ok) {
+      return admission.response;
+    }
+
+    joinToken = admission.token;
   }
 
   if (!joinToken) {
@@ -450,15 +534,6 @@ async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
     if (clinicianDirect) {
       return clinicianDirect;
     }
-  }
-
-  const base = pickBase();
-
-  if (!base) {
-    return safeJson(503, {
-      ok: false,
-      error: 'Video room service is not configured yet. Please contact Ambulant+ support.',
-    });
   }
 
   const upstreamHeaders = new Headers(forwardHeaders(req) as HeadersInit);

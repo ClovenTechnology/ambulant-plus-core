@@ -21,6 +21,9 @@ import {
   normaliseTrainingMode,
   publicTrainingSlot,
 } from '@/src/clinicians/onboarding/training';
+import {
+  trainingRoomLifecycle,
+} from '@/src/clinicians/onboarding/training-admission';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -479,6 +482,20 @@ export async function GET(
         trainingSlot?.mode,
       );
 
+    const roomLifecycle =
+      trainingSlot
+        ? trainingRoomLifecycle({
+            startsAt:
+              new Date(
+                trainingSlot.startsAt,
+              ),
+            endsAt:
+              new Date(
+                trainingSlot.endsAt,
+              ),
+          })
+        : null;
+
     return NextResponse.json(
       {
         ok: true,
@@ -606,6 +623,22 @@ export async function GET(
                     .institution,
                 certificateAvailable,
                 certificateUrl,
+                roomState:
+                  roomLifecycle?.state ||
+                  null,
+                canJoin:
+                  roomLifecycle?.canJoin ||
+                  false,
+                joinOpensAt:
+                  roomLifecycle
+                    ?.joinOpensAt
+                    .toISOString() ||
+                  null,
+                joinClosesAt:
+                  roomLifecycle
+                    ?.joinClosesAt
+                    .toISOString() ||
+                  null,
               }
             : {
                 slotId: null,
@@ -645,6 +678,10 @@ export async function GET(
                 bookingOpensAt: null,
                 bookingClosesAt: null,
                 joinUrl: null,
+                roomState: null,
+                canJoin: false,
+                joinOpensAt: null,
+                joinClosesAt: null,
                 paid:
                   entitlements
                     .trainingAccess,

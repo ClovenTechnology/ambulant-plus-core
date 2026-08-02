@@ -241,93 +241,207 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    /*
-     * Cohort rule:
-     * - Always create one new shared slot for the selected participant set.
-     * - This avoids accidentally overwriting an older single-person slot and guarantees
-     *   all selected clinicians share one room and one meetingUrl.
-     */
-    let slot = await db.clinicianTrainingSlot.create({
-      data: {
-        title:
-          cleanStr(body.title, 240) ||
-          'Mandatory Clinician Training',
-        summary:
-          cleanStr(body.summary, 2000),
-        status: 'published',
-        startsAt: startAt,
-        endsAt: endAt,
-        timezone:
-          cleanStr(body.timezone, 120) ||
-          'Africa/Johannesburg',
-        durationDays: 1,
-        totalDurationMinutes: Math.max(
-          1,
-          Math.round(
-            (endAt.getTime() - startAt.getTime()) /
-              60000,
-          ),
-        ),
-        capacity: Math.max(participants.length, 1),
-        usedCount: participants.length,
-        mode,
-        allowedModes: [mode],
-        sessions: [
-          {
-            id: 'session-1',
-            dayNumber: 1,
-            startAt: startAt.toISOString(),
-            endAt: endAt.toISOString(),
-            mode,
-          },
-        ],
-        meetingUrl: null,
-        trainerName: trainerName || null,
-        publishedAt: new Date(),
-        publishedByUserId: isAdmin.uid,
-      },
-    });
-
-    const autoJoinUrl =
-      mode === 'virtual'
-        ? requestedJoinUrl || buildTrainingJoinUrl(String(slot.id))
-        : null;
-
-    if (mode === 'virtual' && autoJoinUrl) {
-      slot = await db.clinicianTrainingSlot.update({
-        where: { id: slot.id },
-        data: { meetingUrl: autoJoinUrl },
-      });
-    }
-
-    const updated: any[] = [];
-
-    for (const p of participants) {
-      const clinician = cliniciansById.get(p.clinicianId);
-      const onboarding = onboardingsById.get(p.onboardingId);
-
-      const updatedOnboarding = await db.clinicianOnboarding.update({
-        where: { id: onboarding.id },
+    const outcome = await db.$transaction(async (tx: any) => {
+      /*
+       * Cohort rule:
+       * - Create one shared slot for the selected participant set.
+       * - Reassignment releases each old seat and revokes old clinician admissions.
+       * - Patient invitations remain on their consented slot and are not silently moved.
+       */
+      let slot = await tx.clinicianTrainingSlot.create({
         data: {
-          status: 'training_scheduled',
-          trainingSlotId: slot.id,
-          trainingMode: mode,
-          trainingNotes: [
-            cleanStr(onboarding.trainingNotes, 2000),
-            `Training scheduled ${new Date().toISOString()}`,
-            participants.length > 1 ? `Cohort training slot: ${slot.id}` : null,
-          ]
-            .filter(Boolean)
-            .join('\n'),
+          title:
+            cleanStr(body.title, 240) ||
+            'Mandatory Clinician Training',
+          summary:
+            cleanStr(body.summary, 2000),
+          status: 'published',
+          startsAt: startAt,
+          endsAt: endAt,
+          timezone:
+            cleanStr(body.timezone, 120) ||
+            'Africa/Johannesburg',
+          durationDays: 1,
+          totalDurationMinutes: Math.max(
+            1,
+            Math.round(
+              (endAt.getTime() - startAt.getTime()) /
+                60000,
+            ),
+          ),
+          capacity: Math.max(participants.length, 1),
+          usedCount: participants.length,
+          mode,
+          allowedModes: [mode],
+          sessions: [
+            {
+              id: 'session-1',
+              dayNumber: 1,
+              startAt: startAt.toISOString(),
+              endAt: endAt.toISOString(),
+              mode,
+            },
+          ],
+          meetingUrl: null,
+          trainerName: trainerName || null,
+          publishedAt: new Date(),
+          publishedByUserId: isAdmin.uid,
         },
       });
 
+      const autoJoinUrl =
+        mode === 'virtual'
+          ? requestedJoinUrl || buildTrainingJoinUrl(String(slot.id))
+          : null;
+
+      if (mode === 'virtual' && autoJoinUrl) {
+        slot = await tx.clinicianTrainingSlot.update({
+          where: { id: slot.id },
+          data: { meetingUrl: autoJoinUrl },
+        });
+      }
+
+      const updated: any[] = [];
+      const changedAt = new Date();
+
+      for (const p of participants) {
+        const clinician = cliniciansById.get(p.clinicianId);
+        const onboarding = onboardingsById.get(p.onboardingId);
+        const previousSlotId = cleanStr(onboarding.trainingSlotId, 120);
+
+        if (previousSlotId && previousSlotId !== String(slot.id)) {
+          const oldAssignments =
+            await tx.clinicianTrainingParticipantAssignment.findMany({
+              where: {
+                trainingSlotId: previousSlotId,
+                principalType: 'clinician',
+                principalId: p.clinicianId,
+                status: {
+                  in: ['assigned', 'accepted', 'invited'],
+                },
+              },
+              select: { id: true },
+            });
+          const oldAssignmentIds = oldAssignments.map((assignment: any) => String(assignment.id));
+
+          if (oldAssignmentIds.length) {
+            await tx.clinicianTrainingAdmission.updateMany({
+              where: {
+                assignmentId: { in: oldAssignmentIds },
+                revokedAt: null,
+              },
+              data: { revokedAt: changedAt },
+            });
+            await tx.clinicianTrainingParticipantAssignment.updateMany({
+              where: { id: { in: oldAssignmentIds } },
+              data: {
+                status: 'revoked',
+                revokedAt: changedAt,
+              },
+            });
+          }
+
+          await tx.$executeRaw`
+            UPDATE "ClinicianTrainingSlot"
+            SET
+              "usedCount" = GREATEST(0, "usedCount" - 1),
+              "updatedAt" = NOW()
+            WHERE "id" = ${previousSlotId}
+          `;
+        }
+
+        const updatedOnboarding = await tx.clinicianOnboarding.update({
+          where: { id: onboarding.id },
+          data: {
+            status: 'training_scheduled',
+            trainingSlotId: slot.id,
+            trainingMode: mode,
+            trainingNotes: [
+              cleanStr(onboarding.trainingNotes, 2000),
+              `${previousSlotId ? 'Training reassigned' : 'Training scheduled'} ${changedAt.toISOString()}`,
+              participants.length > 1 ? `Cohort training slot: ${slot.id}` : null,
+            ]
+              .filter(Boolean)
+              .join('\n'),
+          },
+        });
+
+        const principalKey = `clinician:${p.clinicianId}`;
+        const displayName =
+          cleanStr(
+            clinician.displayName ||
+              clinician.fullName ||
+              clinician.name ||
+              clinician.email,
+            240,
+          ) || 'Clinician';
+
+        await tx.clinicianTrainingParticipantAssignment.upsert({
+          where: {
+            trainingSlotId_sessionKey_principalKey: {
+              trainingSlotId: String(slot.id),
+              sessionKey: 'slot',
+              principalKey,
+            },
+          },
+          create: {
+            trainingSlotId: String(slot.id),
+            sessionKey: 'slot',
+            principalType: 'clinician',
+            principalKey,
+            principalId: p.clinicianId,
+            email: cleanStr(clinician.email, 320),
+            name: displayName,
+            role: 'clinician',
+            permissions: ['training:join', 'training:attendance:self'],
+            status: 'assigned',
+            assignedAt: changedAt,
+            metadata: {
+              source: previousSlotId ? 'admin_reassignment' : 'admin_scheduling',
+              onboardingId: String(updatedOnboarding.id),
+            },
+          },
+          update: {
+            email: cleanStr(clinician.email, 320),
+            name: displayName,
+            permissions: ['training:join', 'training:attendance:self'],
+            status: 'assigned',
+            assignedAt: changedAt,
+            revokedAt: null,
+            expiresAt: null,
+            metadata: {
+              source: previousSlotId ? 'admin_reassignment' : 'admin_scheduling',
+              onboardingId: String(updatedOnboarding.id),
+            },
+          },
+        });
+
+        updated.push({
+          clinicianId: p.clinicianId,
+          previousTrainingSlotId: previousSlotId,
+          onboarding: {
+            id: String(updatedOnboarding.id),
+            stage: 'training_scheduled',
+            notes: cleanStr(updatedOnboarding.trainingNotes, 2000),
+          },
+        });
+      }
+
+      return { slot, autoJoinUrl, updated, changedAt };
+    }, { timeout: 30_000 });
+
+    const { slot, autoJoinUrl, updated, changedAt } = outcome;
+
+    // Legacy profile JSON is a compatibility projection, not scheduling authority.
+    // Keep it best-effort and outside the relational transaction so fallback writes
+    // cannot poison an otherwise valid transaction after a schema-specific failure.
+    for (const p of participants) {
+      const clinician = cliniciansById.get(p.clinicianId);
       const rawBase =
         safeParseJson((clinician as any)?.meta?.rawProfile) ||
         safeParseJson((clinician as any)?.meta?.rawProfileJson) ||
         safeParseJson((clinician as any)?.metadata?.rawProfile) ||
         safeParseJson((clinician as any)?.metadata?.rawProfileJson);
-
       const merged = mergeRawProfileTraining(rawBase, {
         startAt: slot.startsAt.toISOString(),
         endAt: slot.endsAt.toISOString(),
@@ -336,19 +450,10 @@ export async function POST(req: NextRequest) {
         trainerName: trainerName || null,
         trainingSlotId: slot.id,
         cohortSize: participants.length,
-        bookedAt: new Date().toISOString(),
+        bookedAt: changedAt.toISOString(),
       });
 
       await persistRawProfileJson(db, p.clinicianId, clinician, merged);
-
-      updated.push({
-        clinicianId: p.clinicianId,
-        onboarding: {
-          id: String(updatedOnboarding.id),
-          stage: 'training_scheduled',
-          notes: cleanStr(updatedOnboarding.trainingNotes, 2000),
-        },
-      });
     }
 
     return NextResponse.json(

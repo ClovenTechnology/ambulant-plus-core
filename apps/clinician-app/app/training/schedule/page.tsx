@@ -1,7 +1,7 @@
 'use client';
 
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import {
   BadgeCheck,
   Banknote,
@@ -190,6 +190,10 @@ type TrainingContext = {
     certificateInstitution?: string | null;
     certificateAvailable?: boolean | null;
     certificateUrl?: string | null;
+    roomState?: 'not_open' | 'open' | 'closed' | null;
+    canJoin?: boolean | null;
+    joinOpensAt?: string | null;
+    joinClosesAt?: string | null;
   }) | null;
   dispatch?: {
     status?: string | null;
@@ -252,6 +256,18 @@ function errorToMessage(
         'Pay Later is not available because a qualifying onboarding payment has already been recorded.',
       clinician_identity_mismatch:
         'Your signed-in clinician identity does not match this onboarding record.',
+      training_slot_has_ended:
+        'That training programme has ended. Choose another available date.',
+      training_slot_booking_not_open:
+        'Booking for that training programme has not opened yet.',
+      training_slot_booking_closed:
+        'Booking for that training programme has closed. Choose another date.',
+      training_slot_full:
+        'That training programme is full. Choose another available date.',
+      training_mode_not_available:
+        'That training mode is not offered by the selected programme.',
+      completed_training_cannot_be_rescheduled:
+        'Completed training cannot be moved to another programme.',
     };
     if (known[message]) return known[message];
     if (message.includes('DATABASE_URL') || message.toLowerCase().includes('prisma')) {
@@ -453,6 +469,14 @@ function certificateHref(clinicianId: string) {
   return clinicianId
     ? `/api/training/certificate?clinicianId=${encodeURIComponent(clinicianId)}&download=1`
     : null;
+}
+
+function trainingSlotIdForContext(context: TrainingContext | null) {
+  return String(
+    context?.training?.trainingSlotId ||
+      context?.training?.slotId ||
+      '',
+  );
 }
 
 function StepPill({
@@ -843,7 +867,6 @@ function CMedPackageCard({
 }
 
 function TrainingSchedulePageContent() {
-  const router = useRouter();
   const searchParams = useSearchParams() ?? new URLSearchParams();
   const [identityReady, setIdentityReady] = useState(false);
   const [clinicianId, setClinicianId] = useState('');
@@ -865,6 +888,9 @@ function TrainingSchedulePageContent() {
   const [legalDocuments, setLegalDocuments] = useState<LegalDocument[]>([]);
   const [legalAccepted, setLegalAccepted] = useState<Record<string, boolean>>({});
   const [legalStatus, setLegalStatus] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [rescheduleOpen, setRescheduleOpen] = useState(false);
+  const [rescheduleSlotId, setRescheduleSlotId] = useState('');
+  const [rescheduleMode, setRescheduleMode] = useState<TrainingMode>('virtual');
 
   useEffect(() => {
     const queryClinicianId = searchParams.get('clinicianId') || '';
@@ -1085,6 +1111,16 @@ function TrainingSchedulePageContent() {
   const alreadyCompleted =
     trainingStatus === 'completed' || ctx?.onboarding?.stage === 'training_completed';
   const alreadyPaid = ctx?.training?.paid === true;
+  const alternativeSlots = useMemo(
+    () =>
+      slots.filter(
+        (candidate) =>
+          candidate.id !== trainingSlotIdForContext(ctx) &&
+          candidate.seatsLeft > 0 &&
+          new Date(candidate.endAt).getTime() > Date.now(),
+      ),
+    [ctx, slots],
+  );
   const requiredLegalDocuments = legalDocuments.filter(
     (document) => document.acknowledgementMode === 'REQUIRED',
   );
@@ -1135,6 +1171,59 @@ function TrainingSchedulePageContent() {
       if (!response.ok || !payload?.ok) {
         throw new Error(apiError(payload, 'Unable to record your acknowledgement.'));
       }
+    }
+  }
+
+  async function rescheduleTraining() {
+    setErr(null);
+    setPaymentNotice(null);
+
+    const nextSlot = alternativeSlots.find(
+      (candidate) => candidate.id === rescheduleSlotId,
+    );
+
+    if (!nextSlot) {
+      setErr('Select an available future training programme.');
+      return;
+    }
+
+    const nextModes = nextSlot.allowedModes || [];
+    if (!nextModes.includes(rescheduleMode)) {
+      setErr('Select a training mode offered by the new programme.');
+      return;
+    }
+
+    setBusy(true);
+
+    try {
+      const response = await fetch('/api/training/book', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          clinicianId,
+          slotId: nextSlot.id,
+          mode: rescheduleMode,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || !payload?.ok) {
+        throw new Error(
+          apiError(payload, 'Unable to change your training date.'),
+        );
+      }
+
+      await load();
+      setRescheduleOpen(false);
+      setRescheduleSlotId('');
+      setPaymentNotice(
+        'Your training date was changed. The previous seat was released.',
+      );
+    } catch (error) {
+      setErr(errorToMessage(error, 'Unable to change your training date.'));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -1439,6 +1528,15 @@ function TrainingSchedulePageContent() {
     trainingSlotIdForRoom
       ? `/training/room/${encodeURIComponent(`training-slot-${trainingSlotIdForRoom}`)}?trainingSlotId=${encodeURIComponent(trainingSlotIdForRoom)}`
       : null;
+  const trainingRoomCanJoin =
+    Boolean(trainingRoomHref) &&
+    ctx?.training?.canJoin === true;
+  const selectedRescheduleSlot =
+    alternativeSlots.find(
+      (candidate) => candidate.id === rescheduleSlotId,
+    ) || null;
+  const rescheduleModes =
+    selectedRescheduleSlot?.allowedModes || [];
 
   const entitlementPathwayKey =
     ctx?.entitlements?.pathwayKey || null;
@@ -1562,10 +1660,104 @@ function TrainingSchedulePageContent() {
               </div>
               <div className="flex flex-wrap gap-2">
                 {trainingIcsHref && !alreadyCompleted ? <a href={trainingIcsHref} download="ambulant-training.ics" className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50">Add to calendar</a> : null}
-                {trainingRoomHref && !alreadyCompleted ? <a href={trainingRoomHref} className="inline-flex items-center gap-2 rounded-xl bg-indigo-700 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-800"><PlayCircle className="h-4 w-4" />Open training room</a> : null}
+                {trainingRoomCanJoin && trainingRoomHref && !alreadyCompleted ? <a href={trainingRoomHref} className="inline-flex items-center gap-2 rounded-xl bg-indigo-700 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-800"><PlayCircle className="h-4 w-4" />Open training room</a> : null}
+                {trainingRoomHref && !trainingRoomCanJoin && !alreadyCompleted ? (
+                  <span className="inline-flex cursor-not-allowed items-center gap-2 rounded-xl bg-slate-200 px-3 py-2 text-sm font-semibold text-slate-600" aria-disabled="true">
+                    <Clock3 className="h-4 w-4" />Room unavailable
+                  </span>
+                ) : null}
+                {!alreadyCompleted ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const first = alternativeSlots[0] || null;
+                      setRescheduleOpen((open) => !open);
+                      if (!rescheduleSlotId && first) {
+                        setRescheduleSlotId(first.id);
+                        setRescheduleMode(first.allowedModes[0] || 'virtual');
+                      }
+                    }}
+                    className="rounded-xl border px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+                  >
+                    Choose another date
+                  </button>
+                ) : null}
                 {ctx.training?.certificateAvailable && certificateDownloadHref ? <a href={certificateDownloadHref} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><Download className="h-4 w-4" />Certificate</a> : null}
               </div>
             </div>
+
+            {!alreadyCompleted && ctx.training?.roomState === 'not_open' ? (
+              <div className="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+                Your booking is valid. The room opens {fmt(ctx.training.joinOpensAt)}.
+              </div>
+            ) : null}
+
+            {!alreadyCompleted && ctx.training?.roomState === 'closed' ? (
+              <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
+                This training room has closed. Choose another available date below; your payment or approved Pay Later entitlement remains in place.
+              </div>
+            ) : null}
+
+            {rescheduleOpen && !alreadyCompleted ? (
+              <div className="mt-5 rounded-2xl border border-indigo-200 bg-indigo-50 p-4">
+                <div className="font-black text-indigo-950">Change training date</div>
+                <p className="mt-1 text-xs leading-relaxed text-indigo-900">
+                  Confirming a new programme releases your previous seat. Patient invitations are not moved because each patient must consent to the specific session; Admin can invite them to the new slot.
+                </p>
+
+                {alternativeSlots.length ? (
+                  <div className="mt-4 grid gap-3 lg:grid-cols-[1fr_180px_auto]">
+                    <label className="text-xs font-bold text-slate-700">
+                      Future programme
+                      <select
+                        value={rescheduleSlotId}
+                        onChange={(event) => {
+                          const nextId = event.target.value;
+                          const next = alternativeSlots.find((candidate) => candidate.id === nextId);
+                          setRescheduleSlotId(nextId);
+                          setRescheduleMode(next?.allowedModes[0] || 'virtual');
+                        }}
+                        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                      >
+                        {alternativeSlots.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.title} — {fmt(candidate.startAt)} ({candidate.seatsLeft} seats)
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <label className="text-xs font-bold text-slate-700">
+                      Mode
+                      <select
+                        value={rescheduleMode}
+                        onChange={(event) => setRescheduleMode(event.target.value as TrainingMode)}
+                        className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm"
+                      >
+                        {rescheduleModes.map((candidate) => (
+                          <option key={candidate} value={candidate}>
+                            {modeLabel(candidate)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={rescheduleTraining}
+                      disabled={busy || !selectedRescheduleSlot}
+                      className="self-end rounded-xl bg-indigo-700 px-4 py-2 text-sm font-black text-white hover:bg-indigo-800 disabled:opacity-50"
+                    >
+                      {busy ? 'Changing…' : 'Confirm new date'}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-xl border border-amber-200 bg-white p-3 text-sm text-amber-950">
+                    No future programme with an available seat is currently published. Contact Ambulant+ Admin for reassignment.
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             {ctx.training?.sessions?.length ? (
               <div className="mt-6 grid gap-3 md:grid-cols-2">
@@ -1766,7 +1958,11 @@ function TrainingSchedulePageContent() {
                 WhatsApp +27 69 669 0899
               </a>.
             </span>
-            {alreadyPaid ? <button type="button" onClick={() => router.push('/auth/login')} className="rounded-xl bg-slate-950 px-4 py-2 font-semibold text-white hover:bg-black">Continue to clinician portal</button> : null}
+            {alreadyPaid && !alreadyCompleted ? (
+              <div className="max-w-md rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-xs leading-relaxed text-amber-950">
+                Your clinician workspace unlocks after Ambulant+ Admin certifies your completed training.
+              </div>
+            ) : null}
           </div>
         ) : null}
       </div>

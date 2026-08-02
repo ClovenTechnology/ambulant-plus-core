@@ -53,6 +53,10 @@ type TrainingContext = {
     joinUrl?: string | null;
     certificateAvailable?: boolean | null;
     certificateUrl?: string | null;
+    roomState?: 'not_open' | 'open' | 'closed' | null;
+    canJoin?: boolean | null;
+    joinOpensAt?: string | null;
+    joinClosesAt?: string | null;
   } | null;
 };
 
@@ -79,27 +83,35 @@ function fmtDateTime(iso?: string | null) {
   }).format(d);
 }
 
-function readLocalClinicianId() {
-  if (typeof window === 'undefined') return '';
+function roomErrorMessage(
+  value: unknown,
+  training?: TrainingContext['training'],
+) {
+  const code = String(value || '').trim();
 
-  const keys = [
-    'ambulant.clinician.profile',
-    'ambulant.profile',
-  ];
-
-  for (const key of keys) {
-    try {
-      const raw = localStorage.getItem(key);
-      if (!raw) continue;
-      const parsed = JSON.parse(raw);
-      const id = parsed?.id || parsed?.clinicianId || parsed?.profile?.id;
-      if (id) return String(id);
-    } catch {
-      // ignore
-    }
+  if (code === 'training_room_not_open') {
+    return training?.joinOpensAt
+      ? `This room opens ${fmtDateTime(training.joinOpensAt)}. Your booking is valid; please return when the admission window opens.`
+      : 'This training room is not open yet. Your booking remains valid.';
   }
 
-  return '';
+  if (code === 'training_room_closed') {
+    return 'This training room has closed. Return to your training schedule to choose another available date.';
+  }
+
+  if (code === 'training_booking_required') {
+    return 'A current training booking is required before you can join this room.';
+  }
+
+  if (
+    code === 'unauthorized' ||
+    code === 'clinician_identity_required' ||
+    code === 'clinician_not_found'
+  ) {
+    return 'Your signed-in clinician profile could not be verified. Sign in again from the clinician application, then return to your training schedule.';
+  }
+
+  return code || 'Unable to join the training room right now.';
 }
 
 function TrainingRoomInner({
@@ -127,6 +139,7 @@ function TrainingRoomInner({
   } = useSFUClient();
 
   const [ctx, setCtx] = useState<TrainingContext | null>(null);
+  const [resolvedClinicianId, setResolvedClinicianId] = useState(clinicianId);
   const [materials, setMaterials] = useState<TrainingMaterial[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -188,8 +201,10 @@ function TrainingRoomInner({
 
       let nextCtx: TrainingContext | null = null;
 
-      if (clinicianId) {
-        const contextUrl = `/api/training/context?clinicianId=${encodeURIComponent(clinicianId)}`;
+      if (!isStaffJoin) {
+        const contextUrl = clinicianId
+          ? `/api/training/context?clinicianId=${encodeURIComponent(clinicianId)}`
+          : '/api/training/context';
         const ctxRes = await fetch(contextUrl, {
           cache: 'no-store',
           credentials: 'include',
@@ -202,6 +217,13 @@ function TrainingRoomInner({
         }
 
         nextCtx = c;
+        const identityId = String(c.clinician?.id || '').trim();
+
+        if (!identityId) {
+          throw new Error('clinician_not_found');
+        }
+
+        setResolvedClinicianId(identityId);
       } else if (isStaffJoin) {
         nextCtx = {
           ok: true,
@@ -226,9 +248,6 @@ function TrainingRoomInner({
             certificateUrl: null,
           },
         };
-      } else {
-        setErr('Unable to identify your clinician profile. Please return to the training schedule from your signed-in account.');
-        return;
       }
 
       setCtx(nextCtx);
@@ -255,7 +274,7 @@ function TrainingRoomInner({
           body: JSON.stringify({
             trainingSlotId,
             roomId,
-            clinicianId,
+            clinicianId: resolvedClinicianId,
             action,
             at: new Date().toISOString(),
           }),
@@ -265,7 +284,7 @@ function TrainingRoomInner({
       }
     };
 
-    if (status === 'connected' && clinicianId) {
+    if (status === 'connected' && resolvedClinicianId) {
       postAttendance('join');
       const id = window.setInterval(() => postAttendance('heartbeat'), 60_000);
 
@@ -274,7 +293,7 @@ function TrainingRoomInner({
         postAttendance('leave');
       };
     }
-  }, [status, roomId, trainingSlotId, clinicianId]);
+  }, [status, roomId, trainingSlotId, resolvedClinicianId]);
 
   async function joinLiveRoom() {
     setErr(null);
@@ -283,8 +302,8 @@ function TrainingRoomInner({
     try {
       await connect();
       setNotice('Connected to the training room.');
-    } catch {
-      setErr('Unable to join the training room. Please check your connection and try again.');
+    } catch (joinError: any) {
+      setErr(roomErrorMessage(joinError?.message, ctx?.training));
     }
   }
 
@@ -349,6 +368,7 @@ function TrainingRoomInner({
   );
 
   const patientName = ctx?.clinician?.name || 'Training participant';
+  const joinPermitted = isStaffJoin || ctx?.training?.canJoin === true;
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(79,70,229,0.10),_transparent_30%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_42%,_#ffffff_100%)]">
@@ -408,7 +428,7 @@ function TrainingRoomInner({
                 <button
                   type="button"
                   onClick={handleConnect}
-                  disabled={status === 'connecting'}
+                  disabled={status === 'connecting' || !joinPermitted}
                   className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-700 disabled:opacity-60"
                 >
                   {status === 'connecting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
@@ -436,6 +456,18 @@ function TrainingRoomInner({
           {notice ? (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
               {notice}
+            </div>
+          ) : null}
+
+          {!isStaffJoin && ctx?.training?.roomState === 'not_open' ? (
+            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950">
+              {roomErrorMessage('training_room_not_open', ctx.training)}
+            </div>
+          ) : null}
+
+          {!isStaffJoin && ctx?.training?.roomState === 'closed' ? (
+            <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-900">
+              {roomErrorMessage('training_room_closed', ctx.training)}
             </div>
           ) : null}
 
@@ -735,17 +767,7 @@ function TrainingRoomPageContent() {
       ? roleFromQuery
       : 'clinician';
 
-  const [clinicianId, setClinicianId] = useState(clinicianIdFromQuery);
-
-  useEffect(() => {
-    if (clinicianIdFromQuery) {
-      setClinicianId(clinicianIdFromQuery);
-      return;
-    }
-
-    const localId = readLocalClinicianId();
-    if (localId) setClinicianId(localId);
-  }, [clinicianIdFromQuery]);
+  const clinicianId = clinicianIdFromQuery;
 
   const uid = uidFromQuery || (
     clinicianId

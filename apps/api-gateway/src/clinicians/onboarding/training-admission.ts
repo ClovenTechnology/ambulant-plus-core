@@ -58,6 +58,13 @@ type ErrorDetails = {
   joinClosesAt?: string;
 };
 
+export type TrainingRoomLifecycle = {
+  state: 'not_open' | 'open' | 'closed';
+  canJoin: boolean;
+  joinOpensAt: Date;
+  joinClosesAt: Date;
+};
+
 export class TrainingAdmissionError extends Error {
   readonly code: string;
   readonly status: number;
@@ -212,7 +219,7 @@ function roomIdForTrainingSlot(
   return `training-slot-${trainingSlotId}`;
 }
 
-function joinWindow(slot: {
+export function trainingJoinWindow(slot: {
   startsAt: Date;
   endsAt: Date;
 }) {
@@ -242,6 +249,29 @@ function joinWindow(slot: {
   };
 }
 
+export function trainingRoomLifecycle(
+  slot: {
+    startsAt: Date;
+    endsAt: Date;
+  },
+  now = new Date(),
+): TrainingRoomLifecycle {
+  const window = trainingJoinWindow(slot);
+  const state =
+    now < window.opensAt
+      ? 'not_open'
+      : now > window.closesAt
+        ? 'closed'
+        : 'open';
+
+  return {
+    state,
+    canJoin: state === 'open',
+    joinOpensAt: window.opensAt,
+    joinClosesAt: window.closesAt,
+  };
+}
+
 function requireJoinWindow(
   slot: {
     startsAt: Date;
@@ -249,7 +279,7 @@ function requireJoinWindow(
   },
   now: Date,
 ) {
-  const window = joinWindow(slot);
+  const window = trainingJoinWindow(slot);
 
   const details = {
     joinOpensAt:
