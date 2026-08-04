@@ -4,7 +4,6 @@
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
-import { usePlan } from '@/components/context/PlanContext';
 import RefundPolicyPanel from '@/components/RefundPolicyPanel';
 
 type SlotStatus = 'available' | 'limited' | 'blocked' | 'booked' | 'past';
@@ -73,6 +72,7 @@ type BookingProfile = {
     timezone?: string;
     rating?: number;
     ratingCount?: number;
+    acceptsMedicalAid?: boolean;
     operational?: {
       canBeListed?: boolean;
       canBeBooked?: boolean;
@@ -93,6 +93,44 @@ type BookingProfile = {
   rules?: {
     followUpRequiresOpenCase?: boolean;
     followUpFromCaseContextOnly?: boolean;
+  };
+};
+
+type AppointmentWarning = {
+  code: string;
+  severity: 'info' | 'warning' | 'blocking';
+  title: string;
+  message: string;
+  requiresAck: boolean;
+};
+
+type AppointmentConflict = {
+  code?: string;
+  reason?: string | null;
+  appointmentId?: string;
+  startsAt?: string;
+  endsAt?: string;
+};
+
+type AppointmentPreflight = {
+  ok?: boolean;
+  canProceed?: boolean;
+  error?: string;
+  decisionToken?: string;
+  expiresAt?: string;
+  warnings?: AppointmentWarning[];
+  conflicts?: {
+    details?: AppointmentConflict[];
+    clinicianOverlap?: boolean;
+    patientOverlap?: boolean;
+    roomOverlap?: boolean;
+    scheduleBlocked?: boolean;
+  };
+  priceLock?: {
+    token?: string;
+    amountMinor?: number;
+    currency?: string;
+    expiresInSeconds?: number;
   };
 };
 
@@ -183,6 +221,41 @@ async function readJsonSafe(r: Response) {
   return r.json().catch(() => null);
 }
 
+function normalizePreflightPayload(
+  value: any,
+  retainedPriceLock?: AppointmentPreflight['priceLock'],
+): AppointmentPreflight | null {
+  if (!value || typeof value !== 'object') return null;
+
+  const source = value.preflight && typeof value.preflight === 'object' ? value.preflight : value;
+  const warnings = Array.isArray(source.warnings)
+    ? source.warnings
+        .map((warning: any) => ({
+          code: String(warning?.code || ''),
+          severity: ['info', 'warning', 'blocking'].includes(String(warning?.severity))
+            ? (String(warning.severity) as AppointmentWarning['severity'])
+            : 'warning',
+          title: String(warning?.title || 'Booking notice'),
+          message: String(warning?.message || ''),
+          requiresAck: Boolean(warning?.requiresAck),
+        }))
+        .filter((warning: AppointmentWarning) => warning.code || warning.message)
+    : [];
+
+  const conflictDetails = Array.isArray(source?.conflicts?.details) ? source.conflicts.details : [];
+  const priceLock = value.priceLock || source.priceLock || retainedPriceLock;
+
+  return {
+    ...source,
+    warnings,
+    conflicts: {
+      ...(source.conflicts || {}),
+      details: conflictDetails,
+    },
+    priceLock,
+  };
+}
+
 function normalizeFeeProfile(p: Partial<FeeProfile> | null | undefined, fallback: FeeProfile): FeeProfile {
   const priceCents = Number.isFinite(Number(p?.priceCents)) ? Number(p!.priceCents) : fallback.priceCents;
   const durationMin = Number.isFinite(Number(p?.durationMin)) ? Number(p!.durationMin) : fallback.durationMin;
@@ -209,6 +282,10 @@ function normalizeBookingProfile(p: any, fallback: BookingProfile): BookingProfi
       safeNum(p?.clinician?.reviewCount) ??
       safeNum(p?.clinician?.totalRatings) ??
       fallback.clinician.ratingCount,
+    acceptsMedicalAid:
+      typeof p?.clinician?.acceptsMedicalAid === 'boolean'
+        ? p.clinician.acceptsMedicalAid
+        : fallback.clinician.acceptsMedicalAid,
     operational:
       p?.clinician?.operational && typeof p.clinician.operational === 'object'
         ? {
@@ -328,8 +405,19 @@ function dayKey(iso: string) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function dayLabel(iso: string) {
-  const d = new Date(iso);
+function dateFromLocalDate(localDate?: string) {
+  if (!localDate) return null;
+  const [year, month, day] = localDate.split('-').map(Number);
+  if (![year, month, day].every(Number.isFinite)) return null;
+  return new Date(year, month - 1, day);
+}
+
+function slotDayKey(slot: NormalizedSlot) {
+  return slot.localDate || dayKey(slot.start);
+}
+
+function slotDayLabel(slot: NormalizedSlot) {
+  const d = dateFromLocalDate(slot.localDate) || new Date(slot.start);
   return new Intl.DateTimeFormat(undefined, {
     weekday: 'short',
     day: '2-digit',
@@ -337,8 +425,8 @@ function dayLabel(iso: string) {
   }).format(d);
 }
 
-function fullDayLabel(iso: string) {
-  const d = new Date(iso);
+function slotFullDayLabel(slot: NormalizedSlot) {
+  const d = dateFromLocalDate(slot.localDate) || new Date(slot.start);
   return new Intl.DateTimeFormat(undefined, {
     weekday: 'long',
     day: '2-digit',
@@ -411,11 +499,11 @@ function statusLabel(status: SlotStatus) {
 }
 
 function statusExplanation(status: SlotStatus) {
-  if (status === 'available') return 'Open clinical window.';
-  if (status === 'limited') return 'Bookable, but there is a timing or pathway warning.';
-  if (status === 'blocked') return 'Not bookable because of clinician or pathway state.';
-  if (status === 'booked') return 'Already reserved or booked.';
-  return 'Elapsed time.';
+  if (status === 'available') return 'Available to book.';
+  if (status === 'limited') return 'Available, with an additional booking notice.';
+  if (status === 'blocked') return 'Unavailable to book.';
+  if (status === 'booked') return 'Already booked.';
+  return 'This time has passed.';
 }
 
 function statusClasses(status: SlotStatus, selected: boolean) {
@@ -465,12 +553,12 @@ function groupSlots(slots: NormalizedSlot[]) {
   >();
 
   for (const slot of slots) {
-    const key = dayKey(slot.start);
+    const key = slotDayKey(slot);
     if (!map.has(key)) {
       map.set(key, {
         key,
-        label: dayLabel(slot.start),
-        fullLabel: fullDayLabel(slot.start),
+        label: slotDayLabel(slot),
+        fullLabel: slotFullDayLabel(slot),
         slots: [],
         groups: { overnight: [], morning: [], afternoon: [], evening: [], night: [] },
         counts: { available: 0, limited: 0, blocked: 0, booked: 0, past: 0 },
@@ -501,7 +589,7 @@ function bestNextSlot(slots: NormalizedSlot[], apiEnabled: boolean, canBeBooked:
     .sort((a, b) => new Date(a.start).getTime() - new Date(b.start).getTime())[0];
 }
 
-function quietestWindow(slots: NormalizedSlot[], apiEnabled: boolean, canBeBooked: boolean) {
+function mostOptionsWindow(slots: NormalizedSlot[], apiEnabled: boolean, canBeBooked: boolean) {
   const buckets = new Map<
     string,
     {
@@ -517,10 +605,10 @@ function quietestWindow(slots: NormalizedSlot[], apiEnabled: boolean, canBeBooke
 
   for (const slot of slots) {
     const phase = phaseOfSlot(slot);
-    const key = `${dayKey(slot.start)}:${phase}`;
+    const key = `${slotDayKey(slot)}:${phase}`;
     if (!buckets.has(key)) {
       buckets.set(key, {
-        label: `${dayLabel(slot.start)} - ${phaseLabel(phase)}`,
+        label: `${slotDayLabel(slot)} - ${phaseLabel(phase)}`,
         first: slot.start,
         selectable: 0,
         limited: 0,
@@ -547,7 +635,7 @@ function quietestWindow(slots: NormalizedSlot[], apiEnabled: boolean, canBeBooke
     })[0];
 }
 
-function availabilityLoad(day: ReturnType<typeof groupSlots>[number]) {
+function availabilityPercent(day: ReturnType<typeof groupSlots>[number]) {
   const bookable = day.counts.available + day.counts.limited;
   const constrained = day.counts.booked + day.counts.blocked;
   const total = Math.max(1, bookable + constrained);
@@ -555,7 +643,6 @@ function availabilityLoad(day: ReturnType<typeof groupSlots>[number]) {
 }
 
 export default function ClinicianCalendar({ params }: { params: { id: string } }) {
-  const { isPremium } = usePlan();
   const router = useRouter();
   const sp = useSearchParams();
   const { push, Toasts } = useToasts();
@@ -566,15 +653,23 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
   const queryType = sp?.get('type') === 'followup' ? 'followup' : 'standard';
   const [consultType, setConsultType] = useState<ConsultType>(queryType === 'followup' && !caseId ? 'standard' : queryType);
-  const [showUnavailable, setShowUnavailable] = useState(true);
+  const [showUnavailable, setShowUnavailable] = useState(false);
 
   const [profile, setProfile] = useState<BookingProfile | null>(null);
   const [slots, setSlots] = useState<NormalizedSlot[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [profileBusy, setProfileBusy] = useState(true);
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
+  const [bookingBusy, setBookingBusy] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(null);
   const [selectedSlot, setSelectedSlot] = useState<NormalizedSlot | null>(null);
+  const [preflight, setPreflight] = useState<AppointmentPreflight | null>(null);
+  const [ackedWarningCodes, setAckedWarningCodes] = useState<string[]>([]);
+  const [bookingRequestKey, setBookingRequestKey] = useState('');
 
-  const fallbackProfile = useMemo<BookingProfile>(
+  // Structural defaults only. These values are never shown or used for a booking unless
+  // a real booking profile has loaded successfully.
+  const emptyProfile = useMemo<BookingProfile>(
     () => ({
       clinician: {
         id: params.id,
@@ -582,17 +677,17 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         timezone: 'Africa/Johannesburg',
         rating: undefined,
         ratingCount: undefined,
-        operational: undefined,
+        operational: { canBeBooked: false },
       },
       fees: {
-        standard: { priceCents: 60000, currency: 'ZAR', durationMin: 45, bufferMin: 5 },
-        followUp: { priceCents: 35000, currency: 'ZAR', durationMin: 25, bufferMin: 5 },
+        standard: { priceCents: 0, currency: 'ZAR', durationMin: 0, bufferMin: 0 },
+        followUp: { priceCents: 0, currency: 'ZAR', durationMin: 0, bufferMin: 0 },
       },
       refundPolicy: {
-        within24hPercent: 50,
+        within24hPercent: 0,
         noShowPercent: 0,
-        clinicianMissPercent: 100,
-        networkProrate: true,
+        clinicianMissPercent: 0,
+        networkProrate: false,
       },
       rules: { followUpRequiresOpenCase: true, followUpFromCaseContextOnly: true },
     }),
@@ -605,10 +700,10 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     if (consultType === 'followup' && !followUpAllowed) setConsultType('standard');
   }, [consultType, followUpAllowed]);
 
-  const normalizedForUi = useMemo(() => {
-    const src = profile ?? fallbackProfile;
-    return normalizeBookingProfile(src as any, fallbackProfile);
-  }, [profile, fallbackProfile]);
+  const normalizedForUi = useMemo(
+    () => (profile ? normalizeBookingProfile(profile as any, emptyProfile) : emptyProfile),
+    [profile, emptyProfile],
+  );
 
   const fee: FeeProfile = useMemo(() => {
     const src = normalizedForUi;
@@ -622,15 +717,9 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
     async function loadProfile() {
       try {
-        setErr(null);
-
-        if (!apiEnabled) {
-          if (!canceled) {
-            setProfile(fallbackProfile);
-            setErr('Live booking is currently available for South Africa (ZA) only. Showing default fee profile.');
-          }
-          return;
-        }
+        setProfileBusy(true);
+        setProfileError(null);
+        setProfile(null);
 
         const url = localApiUrl(`/api/clinicians/${encodeURIComponent(params.id)}/booking-profile`);
         const r = await fetch(url, {
@@ -639,23 +728,30 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         });
 
         const j = await readJsonSafe(r);
-
-        if (r.ok && j) {
-          const normalized = normalizeBookingProfile(j, fallbackProfile);
-          if (!canceled) setProfile(normalized);
-          return;
+        if (!r.ok || !j) {
+          throw new Error(j?.error || j?.message || `Failed to load clinician profile (HTTP ${r.status})`);
         }
 
-        const msg = j?.error || `Failed to load clinician profile (HTTP ${r.status})`;
-        if (!canceled) {
-          setErr(String(msg));
-          setProfile(fallbackProfile);
+        const standardFeeComplete =
+          Number.isFinite(Number(j?.fees?.standard?.priceCents)) &&
+          Number.isFinite(Number(j?.fees?.standard?.durationMin));
+        const followUpFeeComplete =
+          Number.isFinite(Number(j?.fees?.followUp?.priceCents)) &&
+          Number.isFinite(Number(j?.fees?.followUp?.durationMin));
+
+        if (!standardFeeComplete || !followUpFeeComplete) {
+          throw new Error('This clinician’s current consultation fees could not be confirmed. Please try again later.');
         }
+
+        const normalized = normalizeBookingProfile(j, emptyProfile);
+        if (!canceled) setProfile(normalized);
       } catch (e: any) {
         if (!canceled) {
-          setErr(e?.message || 'Failed to load clinician profile');
-          setProfile(fallbackProfile);
+          setProfileError(e?.message || 'Failed to load clinician profile');
+          setProfile(null);
         }
+      } finally {
+        if (!canceled) setProfileBusy(false);
       }
     }
 
@@ -664,11 +760,11 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     return () => {
       canceled = true;
     };
-  }, [params.id, apiEnabled, fallbackProfile]);
+  }, [params.id, emptyProfile]);
 
   const c = normalizedForUi.clinician;
   const operational = c.operational ?? null;
-  const canBeBooked = operational ? operational.canBeBooked !== false : true;
+  const canBeBooked = Boolean(profile) && (operational ? operational.canBeBooked !== false : true);
   const ratingValue = typeof c.rating === 'number' && Number.isFinite(c.rating) ? c.rating : null;
   const ratingCount = typeof c.ratingCount === 'number' && Number.isFinite(c.ratingCount) ? c.ratingCount : null;
 
@@ -677,12 +773,11 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
     async function loadSlots() {
       try {
-        setBusy(true);
+        setAvailabilityBusy(true);
+        setAvailabilityError(null);
+        setSlots([]);
 
-        if (!apiEnabled) {
-          if (!canceled) setSlots([]);
-          return;
-        }
+        if (!apiEnabled || !profile || !canBeBooked) return;
 
         const from = new Date();
         const q = new URLSearchParams({
@@ -690,7 +785,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
           days: '14',
           slot: String(tileMinutes),
           type: consultType,
-          includeUnavailable: '1',
+          includeUnavailable: showUnavailable ? '1' : '0',
         });
         if (caseId) q.set('caseId', caseId);
 
@@ -709,11 +804,11 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         if (!canceled) setSlots(normalized);
       } catch (e: any) {
         if (!canceled) {
-          setErr(e?.message || 'Failed to load availability');
+          setAvailabilityError(e?.message || 'Failed to load availability');
           setSlots([]);
         }
       } finally {
-        if (!canceled) setBusy(false);
+        if (!canceled) setAvailabilityBusy(false);
       }
     }
 
@@ -722,13 +817,45 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     return () => {
       canceled = true;
     };
-  }, [params.id, consultType, caseId, tileMinutes, apiEnabled, fee]);
+  }, [params.id, consultType, caseId, tileMinutes, apiEnabled, fee, profile, canBeBooked, showUnavailable]);
+
+  useEffect(() => {
+    setSelectedSlot(null);
+    setPreflight(null);
+    setAckedWarningCodes([]);
+    setBookingRequestKey('');
+  }, [consultType, caseId, params.id]);
 
   useEffect(() => {
     if (!selectedSlot) return;
-    const stillExists = slots.some((slot) => slot.start === selectedSlot.start && slot.status === selectedSlot.status);
-    if (!stillExists) setSelectedSlot(null);
-  }, [slots, selectedSlot]);
+
+    const current = slots.find(
+      (slot) =>
+        slot.start === selectedSlot.start &&
+        slot.status === selectedSlot.status &&
+        slot.consultType === consultType,
+    );
+
+    if (!current) {
+      setSelectedSlot(null);
+      setPreflight(null);
+      setAckedWarningCodes([]);
+      setBookingRequestKey('');
+      return;
+    }
+
+    const changed =
+      current.end !== selectedSlot.end ||
+      current.feeCents !== selectedSlot.feeCents ||
+      current.currency !== selectedSlot.currency ||
+      current.durationMin !== selectedSlot.durationMin;
+
+    if (changed) {
+      setSelectedSlot(current);
+      setPreflight(null);
+      setAckedWarningCodes([]);
+    }
+  }, [slots, selectedSlot, consultType]);
 
   const visibleSlots = useMemo(() => {
     if (showUnavailable) return slots;
@@ -737,24 +864,90 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
   const days = useMemo(() => groupSlots(visibleSlots), [visibleSlots]);
   const bestSlot = useMemo(() => bestNextSlot(slots, apiEnabled, canBeBooked), [slots, apiEnabled, canBeBooked]);
-  const quietWindow = useMemo(() => quietestWindow(slots, apiEnabled, canBeBooked), [slots, apiEnabled, canBeBooked]);
+  const optionsWindow = useMemo(() => mostOptionsWindow(slots, apiEnabled, canBeBooked), [slots, apiEnabled, canBeBooked]);
 
-  const title = consultType === 'followup' ? 'Follow-up booking command' : 'New consultation booking command';
+  const title = consultType === 'followup' ? 'Book a follow-up consultation' : 'Book a new consultation';
   const helperText =
     consultType === 'followup'
       ? `Follow-up for Case: ${caseId ?? 'case context missing'}`
-      : 'This creates a first consultation for a new case.';
+      : 'Choose an available date and time for a new consultation.';
 
   const selectedEndsAt = selectedSlot?.end;
+  const preflightWarnings = Array.isArray(preflight?.warnings) ? preflight.warnings : [];
+  const blockingWarnings = preflightWarnings.filter((warning) => warning.severity === 'blocking');
+  const acknowledgementWarnings = preflightWarnings.filter(
+    (warning) => warning.requiresAck && warning.severity !== 'blocking',
+  );
+  const conflictDetails = Array.isArray(preflight?.conflicts?.details) ? preflight.conflicts.details : [];
+  const allRequiredWarningsAcknowledged = acknowledgementWarnings.every((warning) =>
+    ackedWarningCodes.includes(warning.code),
+  );
+  const lockedFeeCents = Number.isFinite(Number(preflight?.priceLock?.amountMinor))
+    ? Number(preflight?.priceLock?.amountMinor)
+    : null;
+  const displayedFeeCents = lockedFeeCents ?? selectedSlot?.feeCents ?? 0;
+  const displayedFeeCurrency = preflight?.priceLock?.currency || selectedSlot?.currency || fee.currency;
+  const feeChangedDuringReview =
+    lockedFeeCents !== null && selectedSlot !== null && lockedFeeCents !== selectedSlot.feeCents;
+
+  function clearPreflightReview() {
+    setPreflight(null);
+    setAckedWarningCodes([]);
+  }
+
+  function toggleWarningAcknowledgement(code: string) {
+    setAckedWarningCodes((current) =>
+      current.includes(code) ? current.filter((item) => item !== code) : [...current, code],
+    );
+  }
+
+  async function runBookingPreflight(payload: Record<string, unknown>) {
+    const r = await fetch('/api/appointments/preflight', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const j = await readJsonSafe(r);
+    const normalized = normalizePreflightPayload(j);
+
+    if (!r.ok || !normalized || normalized.ok === false) {
+      if (r.status === 401 || ['patient_session_required', 'unauthorized'].includes(String(j?.error || ''))) {
+        throw new Error('Please sign in to your patient account before booking.');
+      }
+
+      if (normalized && (j?.error === 'PRECHECK_REQUIRED' || normalized.error === 'PRECHECK_REQUIRED')) {
+        setPreflight(normalized);
+        setAckedWarningCodes([]);
+        return normalized;
+      }
+      throw new Error(j?.message || j?.error || `Booking review failed (HTTP ${r.status})`);
+    }
+
+    if (!normalized.priceLock?.token) {
+      throw new Error('Booking review did not return a valid fee lock. Please try again.');
+    }
+
+    setPreflight(normalized);
+    setAckedWarningCodes([]);
+    return normalized;
+  }
 
   async function confirmBooking() {
+    if (bookingBusy) return;
+
     if (!selectedSlot || !selectedEndsAt) {
       push('Choose a slot first.', 'error');
       return;
     }
 
-    if (!isSelectableSlot(selectedSlot, apiEnabled, canBeBooked)) {
-      push(selectedSlot.reason || 'This slot is not bookable.', 'error');
+    if (!isSelectableSlot(selectedSlot, apiEnabled, canBeBooked) || selectedSlot.consultType !== consultType) {
+      push('This appointment time is no longer valid for the selected consultation type. Please choose another time.', 'error');
+      setSelectedSlot(null);
+      clearPreflightReview();
+      setBookingRequestKey('');
       return;
     }
 
@@ -764,10 +957,13 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     }
 
     try {
-      const payload: any = {
+      setBookingBusy(true);
+
+      const basePayload: Record<string, unknown> = {
         clinicianId: params.id,
         startsAt: selectedSlot.start,
         endsAt: selectedSlot.end,
+        paymentMethod: 'card',
         reason: consultType === 'followup' ? 'Follow-up consultation' : 'New consultation',
         kind: consultType,
         visitMode: 'televisit',
@@ -775,15 +971,63 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
       };
 
       if (consultType === 'followup' && caseId) {
-        payload.caseId = caseId;
+        basePayload.caseId = caseId;
       }
+
+      const alreadyReviewed = Boolean(preflight?.priceLock?.token);
+      const reviewed = alreadyReviewed ? preflight : await runBookingPreflight(basePayload);
+      const reviewedWarnings = Array.isArray(reviewed?.warnings) ? reviewed.warnings : [];
+      const reviewedBlocking = reviewedWarnings.filter((warning) => warning.severity === 'blocking');
+      const reviewedConflicts = Array.isArray(reviewed?.conflicts?.details) ? reviewed.conflicts.details : [];
+      const reviewedRequiredCodes = reviewedWarnings
+        .filter((warning) => warning.requiresAck && warning.severity !== 'blocking')
+        .map((warning) => warning.code);
+
+      if (reviewedBlocking.length > 0 || reviewedConflicts.length > 0 || reviewed?.canProceed === false) {
+        push('This appointment cannot proceed. Review the booking notices shown below.', 'error');
+        return;
+      }
+
+      const reviewedAmountMinor = Number(reviewed?.priceLock?.amountMinor);
+      if (!alreadyReviewed) {
+        if (Number.isFinite(reviewedAmountMinor) && reviewedAmountMinor !== selectedSlot.feeCents) {
+          push('The confirmed consultation fee differs from the earlier slot estimate. Please review the updated fee.', 'info');
+        } else if (reviewedRequiredCodes.length > 0) {
+          push('Please review and acknowledge the booking notices before continuing.', 'info');
+        } else {
+          push('Appointment details confirmed. Review the fee and continue to secure card payment.', 'info');
+        }
+        return;
+      }
+
+      if (reviewedRequiredCodes.some((code) => !ackedWarningCodes.includes(code))) {
+        push('Please review and acknowledge the booking notices before continuing.', 'info');
+        return;
+      }
+
+      if (!reviewed?.priceLock?.token) {
+        clearPreflightReview();
+        throw new Error('The booking fee lock is unavailable. Please review the appointment again.');
+      }
+
+      const requestId =
+        bookingRequestKey ||
+        globalThis.crypto?.randomUUID?.() ||
+        `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      if (!bookingRequestKey) setBookingRequestKey(requestId);
+
+      const payload = {
+        ...basePayload,
+        priceLock: reviewed.priceLock.token,
+        decisionToken: reviewed.decisionToken || undefined,
+        ackedWarningCodes: reviewedRequiredCodes,
+      };
 
       const r = await fetch('/api/appointments/new', {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          'x-role': 'patient',
-          'x-uid': getUid(),
+          'x-idempotency-key': requestId,
         },
         body: JSON.stringify(payload),
       });
@@ -791,20 +1035,31 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
       const j = await readJsonSafe(r);
 
       if (r.status === 409 && j?.error === 'PRECHECK_REQUIRED') {
-        const warningText = Array.isArray(j?.preflight?.warnings)
-          ? j.preflight.warnings.map((w: any) => w?.title || w?.message).filter(Boolean).join(' - ')
-          : 'Booking needs confirmation before proceeding.';
-        push(warningText || 'Booking needs confirmation before proceeding.', 'error');
+        const refreshed = normalizePreflightPayload(j, reviewed.priceLock);
+        if (refreshed) setPreflight(refreshed);
+        setAckedWarningCodes([]);
+        push('The booking conditions changed. Please review the updated notices before continuing.', 'error');
         return;
       }
 
-      if (!r.ok) {
-        throw new Error(j?.error || `Booking failed (HTTP ${r.status})`);
+      if (r.status === 409 && ['PRICE_LOCK_REQUIRED', 'PRICE_LOCK_MISMATCH'].includes(String(j?.error || ''))) {
+        clearPreflightReview();
+        throw new Error('The confirmed fee expired or changed. Please review the appointment again.');
+      }
+
+      if (!r.ok || j?.ok === false) {
+        if (r.status === 401 || ['patient_session_required', 'unauthorized'].includes(String(j?.error || ''))) {
+          throw new Error('Please sign in to your patient account before booking.');
+        }
+        throw new Error(j?.message || j?.error || `Booking failed (HTTP ${r.status})`);
       }
 
       setSelectedSlot(null);
+      clearPreflightReview();
+      setBookingRequestKey('');
 
-      if (j?.redirectUrl) {
+      const redirectUrl = j?.redirectUrl || j?.redirect_url;
+      if (redirectUrl) {
         try {
           sessionStorage.setItem(
             'ambulant:lastPaymentAttempt',
@@ -812,7 +1067,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
               appointmentId: j.appointmentId ?? j.appointment_id ?? '',
               encounterId: j.encounterId ?? j.encounter_id ?? '',
               paymentRef: j.payment?.ref ?? j.paymentRef ?? j.payment_ref ?? '',
-              redirectUrl: j.redirectUrl,
+              redirectUrl,
               clinicianId: params.id,
               createdAt: new Date().toISOString(),
             }),
@@ -820,17 +1075,17 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         } catch {}
 
         push('Redirecting to secure payment...', 'info');
-        window.location.href = j.redirectUrl;
+        window.location.href = redirectUrl;
         return;
       }
 
-      if (j?.payment?.status === 'PENDING') {
+      if (String(j?.payment?.status || j?.paymentStatus || '').toUpperCase() === 'PENDING') {
         push('Booking created. Payment is pending.', 'info');
         router.push('/appointments');
         return;
       }
 
-      if (j?.sponsor?.decision === 'COVERED') {
+      if (String(j?.sponsor?.decision || '').toUpperCase() === 'COVERED') {
         push('Appointment booked and covered.', 'success');
         router.push('/appointments');
         return;
@@ -840,19 +1095,54 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
       router.push('/appointments');
     } catch (e: any) {
       push(e?.message || 'Failed to book appointment', 'error');
+    } finally {
+      setBookingBusy(false);
     }
   }
 
   function selectSlot(slot: NormalizedSlot) {
     if (!isSelectableSlot(slot, apiEnabled, canBeBooked)) {
-      push(slot.reason || statusExplanation(slot.status), 'error');
+      push(statusExplanation(slot.status), 'error');
       return;
     }
 
     setSelectedSlot(slot);
+    clearPreflightReview();
+    setBookingRequestKey(
+      globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
   }
 
   const totalBookable = slots.filter((slot) => isSelectableSlot(slot, apiEnabled, canBeBooked)).length;
+
+  if (profileBusy) {
+    return (
+      <main data-p-ui="patient-clinician-calendar-page" className="min-h-screen bg-slate-50 px-4 py-12">
+        <div className="mx-auto max-w-2xl rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500 shadow-sm">
+          Loading clinician and booking details...
+        </div>
+      </main>
+    );
+  }
+
+  if (profileError || !profile) {
+    return (
+      <main data-p-ui="patient-clinician-calendar-page" className="min-h-screen bg-slate-50 px-4 py-12">
+        <div className="mx-auto max-w-2xl rounded-3xl border border-rose-200 bg-rose-50 p-8 text-center">
+          <h1 className="text-lg font-semibold text-rose-900">Booking details unavailable</h1>
+          <p className="mt-2 text-sm text-rose-700">{profileError || 'The clinician booking profile could not be loaded.'}</p>
+          <div className="mt-5 flex justify-center gap-3">
+            <button onClick={() => window.location.reload()} className="rounded-full bg-rose-600 px-4 py-2 text-sm font-semibold text-white">
+              Try again
+            </button>
+            <button onClick={() => router.back()} className="rounded-full border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-900">
+              Go back
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
 
   return (
     <main data-p-ui="patient-clinician-calendar-page" className="min-w-0 overflow-x-clip min-h-screen bg-slate-50 px-4 py-5 sm:px-6 lg:px-8">
@@ -870,7 +1160,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
               </button>
 
               <div className="min-w-0 flex-1 text-center">
-                <div className="text-xs uppercase tracking-[0.25em] text-emerald-200">Ambulant+ clinical booking command</div>
+                <div className="text-xs uppercase tracking-[0.25em] text-emerald-200">Ambulant+ appointment booking</div>
                 <h1 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">{title}</h1>
                 <p className="mt-1 text-sm text-slate-200">{helperText}</p>
               </div>
@@ -902,15 +1192,15 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
               <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
                 <div className="text-xs text-slate-300">Best next slot</div>
-                <div className="mt-1 text-lg font-semibold">{bestSlot ? timeLabel(bestSlot.start) : 'None open'}</div>
-                <div className="text-xs text-slate-300">{bestSlot ? dayLabel(bestSlot.start) : 'Try another window later'}</div>
+                <div className="mt-1 text-lg font-semibold">{bestSlot ? slotStartLabel(bestSlot) : 'None open'}</div>
+                <div className="text-xs text-slate-300">{bestSlot ? slotDayLabel(bestSlot) : 'Try again later'}</div>
               </div>
 
               <div className="rounded-2xl border border-white/10 bg-white/10 p-4 backdrop-blur">
-                <div className="text-xs text-slate-300">Quietest window</div>
-                <div className="mt-1 text-lg font-semibold">{quietWindow ? quietWindow.label : 'Not enough data'}</div>
+                <div className="text-xs text-slate-300">Most appointment options</div>
+                <div className="mt-1 text-lg font-semibold">{optionsWindow ? optionsWindow.label : 'No open times'}</div>
                 <div className="text-xs text-slate-300">
-                  {quietWindow ? `${quietWindow.selectable} bookable options` : 'Calculated from open slots'}
+                  {optionsWindow ? `${optionsWindow.selectable} available times` : 'Check again later'}
                 </div>
               </div>
             </div>
@@ -998,19 +1288,19 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
             <section className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
               <div className="rounded-3xl border border-slate-200 bg-white p-4">
-                <div className="text-xs text-slate-500">Committed fee</div>
+                <div className="text-xs text-slate-500">Consultation fee</div>
                 <div className="mt-1 text-xl font-semibold text-slate-950">{formatMoney(fee.priceCents, fee.currency)}</div>
-                <div className="text-xs text-slate-500">{fee.currency} locked at booking</div>
+                <div className="text-xs text-slate-500">Confirmed before payment</div>
               </div>
               <div className="rounded-3xl border border-slate-200 bg-white p-4">
                 <div className="text-xs text-slate-500">Consult duration</div>
                 <div className="mt-1 text-xl font-semibold text-slate-950">{fee.durationMin} min</div>
-                <div className="text-xs text-slate-500">Clinical time with clinician</div>
+                <div className="text-xs text-slate-500">Scheduled consultation time</div>
               </div>
               <div className="rounded-3xl border border-slate-200 bg-white p-4">
-                <div className="text-xs text-slate-500">Buffer protected</div>
+                <div className="text-xs text-slate-500">Appointment spacing</div>
                 <div className="mt-1 text-xl font-semibold text-slate-950">{fee.bufferMin} min</div>
-                <div className="text-xs text-slate-500">Tile size {tileMinutes} min</div>
+                <div className="text-xs text-slate-500">Managed by the clinician</div>
               </div>
             </section>
           </div>
@@ -1018,18 +1308,13 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
         {!apiEnabled && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Live booking is currently available for South Africa (ZA) only. You can still view the booking layout.
+            Live booking is currently available for South Africa (ZA) only.
           </div>
         )}
 
         {!canBeBooked && (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-            Booking is temporarily unavailable for this clinician.
-            {Array.isArray(operational?.blockers) && operational.blockers.length ? (
-              <div className="mt-1 text-xs">
-                Reason: <b>{operational.blockers.join(', ')}</b>
-              </div>
-            ) : null}
+            Booking is temporarily unavailable for this clinician. Please choose another clinician or try again later.
           </div>
         )}
 
@@ -1038,9 +1323,9 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
             <div className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-lg font-semibold text-slate-950">Availability intelligence</h2>
+                  <h2 className="text-lg font-semibold text-slate-950">Choose an appointment time</h2>
                   <p className="mt-1 text-sm text-slate-600">
-                    Showing clinical windows, constraints, booking pressure, fees, duration and buffer context.
+                    Select an available date and time. Your consultation fee and duration are shown before booking.
                   </p>
                 </div>
 
@@ -1050,7 +1335,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                     onClick={() => setShowUnavailable((v) => !v)}
                     className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
                   >
-                    {showUnavailable ? 'Hide closed slots' : 'Show closed slots'}
+                    {showUnavailable ? 'Show available times only' : 'Show unavailable times'}
                   </button>
                   <span className="rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white">
                     {totalBookable} bookable
@@ -1068,12 +1353,12 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
               </div>
             </div>
 
-            {busy ? (
+            {availabilityBusy ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-                Loading clinical availability...
+                Loading available appointment times...
               </div>
-            ) : err ? (
-              <div className="rounded-3xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-900">{err}</div>
+            ) : availabilityError ? (
+              <div className="rounded-3xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-900">{availabilityError}</div>
             ) : days.length === 0 ? (
               <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
                 {apiEnabled ? 'No slots in this window.' : 'Live availability is not available for this country.'}
@@ -1081,7 +1366,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
             ) : (
               <div className="space-y-4">
                 {days.map((day) => {
-                  const load = availabilityLoad(day);
+                  const load = availabilityPercent(day);
                   const dayFirstBookable = day.slots.find((slot) => isSelectableSlot(slot, apiEnabled, canBeBooked));
 
                   return (
@@ -1102,7 +1387,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                               </span>
                             )}
                             <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-slate-700">
-                              Load {load}%
+                              Availability {load}%
                             </span>
                           </div>
                         </div>
@@ -1113,7 +1398,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                       </div>
 
                       <div className="space-y-5 p-4">
-                        {DAY_PHASES.map((phase) => {
+                        {DAY_PHASES.filter((phase) => day.groups[phase].length > 0).map((phase) => {
                           const phaseSlots = day.groups[phase];
 
                           return (
@@ -1125,12 +1410,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                                 <div className="text-xs text-slate-500">{phaseSlots.length} windows</div>
                               </div>
 
-                              {phaseSlots.length === 0 ? (
-                                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-xs text-slate-500">
-                                  No windows in this period.
-                                </div>
-                              ) : (
-                                <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                              <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
                                   {phaseSlots.map((slot) => {
                                     const selected = selectedSlot?.start === slot.start;
                                     const selectable = isSelectableSlot(slot, apiEnabled, canBeBooked);
@@ -1142,7 +1422,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                                           className={statusClasses(slot.status, selected)}
                                           onClick={() => selectSlot(slot)}
                                           disabled={!selectable}
-                                          title={slot.reason || statusExplanation(slot.status)}
+                                          title={statusExplanation(slot.status)}
                                         >
                                           <div className="flex items-start justify-between gap-2">
                                             <div>
@@ -1156,22 +1436,18 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                                             </span>
                                           </div>
 
-                                          <div className="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                                            <div className="rounded-xl bg-white/60 px-2 py-1">
-                                              Fee: {formatMoney(slot.feeCents, slot.currency)}
-                                            </div>
-                                            <div className="rounded-xl bg-white/60 px-2 py-1">Buffer: {slot.bufferMin} min</div>
+                                          <div className="mt-3 rounded-xl bg-white/60 px-2 py-1 text-[11px]">
+                                            Fee: {formatMoney(slot.feeCents, slot.currency)}
                                           </div>
 
-                                          {slot.reason && (
-                                            <div className="mt-2 line-clamp-2 text-[11px] opacity-80">{slot.reason}</div>
+                                          {slot.status === 'limited' && (
+                                            <div className="mt-2 text-[11px] opacity-80">Additional booking notice applies.</div>
                                           )}
                                         </button>
                                       </li>
                                     );
                                   })}
                                 </ul>
-                              )}
                             </section>
                           );
                         })}
@@ -1185,23 +1461,23 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
 
           <aside className="space-y-4 lg:sticky lg:top-5 lg:h-fit">
             <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Booking command</div>
+              <div className="text-xs uppercase tracking-[0.2em] text-slate-500">Booking summary</div>
               <h2 className="mt-1 text-xl font-semibold text-slate-950">
-                {selectedSlot ? 'Review selected slot' : 'Select a clinical window'}
+                {selectedSlot ? 'Review your appointment' : 'Choose an appointment time'}
               </h2>
 
               {selectedSlot ? (
                 <div className="mt-4 space-y-3 text-sm">
                   <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                    <div className="text-xs text-slate-500">Selected window</div>
+                    <div className="text-xs text-slate-500">Selected appointment</div>
                     <div className="mt-1 font-semibold text-slate-950">{slotDateTimeLabel(selectedSlot)}</div>
                     <div className="text-xs text-slate-600">Ends {slotEndDateTimeLabel(selectedSlot)}</div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     <div className="rounded-2xl border border-slate-200 p-3">
-                      <div className="text-xs text-slate-500">Fee</div>
-                      <div className="font-semibold">{formatMoney(selectedSlot.feeCents, selectedSlot.currency)}</div>
+                      <div className="text-xs text-slate-500">{lockedFeeCents !== null ? 'Confirmed fee' : 'Fee'}</div>
+                      <div className="font-semibold">{formatMoney(displayedFeeCents, displayedFeeCurrency)}</div>
                     </div>
                     <div className="rounded-2xl border border-slate-200 p-3">
                       <div className="text-xs text-slate-500">Type</div>
@@ -1211,15 +1487,18 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                       <div className="text-xs text-slate-500">Duration</div>
                       <div className="font-semibold">{selectedSlot.durationMin} min</div>
                     </div>
-                    <div className="rounded-2xl border border-slate-200 p-3">
-                      <div className="text-xs text-slate-500">Buffer</div>
-                      <div className="font-semibold">{selectedSlot.bufferMin} min</div>
-                    </div>
+
                   </div>
+
+                  {feeChangedDuringReview && (
+                    <div className="rounded-2xl border border-sky-200 bg-sky-50 p-3 text-xs text-sky-900">
+                      The confirmed fee is {formatMoney(displayedFeeCents, displayedFeeCurrency)}. Review this amount before continuing.
+                    </div>
+                  )}
 
                   {selectedSlot.status === 'limited' && (
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                      {selectedSlot.reason || 'This slot has a timing or pathway warning.'}
+                      Please review any additional notice shown during booking.
                     </div>
                   )}
 
@@ -1229,18 +1508,86 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                     </div>
                   )}
 
+                  {preflight && (preflightWarnings.length > 0 || conflictDetails.length > 0) && (
+                    <div className="space-y-2 rounded-2xl border border-amber-200 bg-amber-50 p-3">
+                      <div className="text-xs font-semibold uppercase tracking-wide text-amber-950">Booking notices</div>
+
+                      {conflictDetails.map((conflict, index) => (
+                        <div
+                          key={`${conflict.code || 'conflict'}-${index}`}
+                          className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900"
+                        >
+                          <div className="font-semibold">This time is no longer available</div>
+                          <div className="mt-1">Choose another appointment time.</div>
+                        </div>
+                      ))}
+
+                      {preflightWarnings.map((warning) => {
+                        const blocking = warning.severity === 'blocking';
+                        return (
+                          <label
+                            key={warning.code || warning.title}
+                            className={cx(
+                              'block rounded-xl border p-3 text-xs',
+                              blocking
+                                ? 'border-rose-200 bg-rose-50 text-rose-900'
+                                : 'border-amber-200 bg-white text-amber-950',
+                            )}
+                          >
+                            <div className="flex items-start gap-2">
+                              {warning.requiresAck && !blocking ? (
+                                <input
+                                  type="checkbox"
+                                  className="mt-0.5 h-4 w-4 rounded border-amber-300"
+                                  checked={ackedWarningCodes.includes(warning.code)}
+                                  onChange={() => toggleWarningAcknowledgement(warning.code)}
+                                />
+                              ) : null}
+                              <div>
+                                <div className="font-semibold">{warning.title}</div>
+                                {warning.message ? <div className="mt-1 leading-5">{warning.message}</div> : null}
+                                {warning.requiresAck && !blocking ? (
+                                  <div className="mt-1 font-medium">
+                                    Tick to confirm that you have read and understood this notice.
+                                  </div>
+                                ) : null}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  )}
+
                   <button
                     type="button"
                     onClick={confirmBooking}
-                    disabled={!isSelectableSlot(selectedSlot, apiEnabled, canBeBooked)}
+                    disabled={
+                      bookingBusy ||
+                      !isSelectableSlot(selectedSlot, apiEnabled, canBeBooked) ||
+                      selectedSlot.consultType !== consultType ||
+                      blockingWarnings.length > 0 ||
+                      conflictDetails.length > 0 ||
+                      (preflight !== null && !allRequiredWarningsAcknowledged)
+                    }
                     className="w-full rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
-                    Confirm and book
+                    {bookingBusy
+                      ? preflight?.priceLock?.token
+                        ? 'Processing booking...'
+                        : 'Reviewing appointment...'
+                      : preflight?.priceLock?.token
+                        ? 'Continue to secure card payment'
+                        : 'Review card booking'}
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => setSelectedSlot(null)}
+                    onClick={() => {
+                      setSelectedSlot(null);
+                      clearPreflightReview();
+                      setBookingRequestKey('');
+                    }}
                     className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
                   >
                     Clear selection
@@ -1248,8 +1595,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
                 </div>
               ) : (
                 <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-slate-50 p-4 text-sm text-slate-600">
-                  Choose an available or limited slot. The booking command will lock the selected time, price, duration,
-                  and buffer before checkout.
+                  Choose an available or limited slot. Your selected time, fee and duration will be confirmed before secure card payment.
                 </div>
               )}
             </section>
@@ -1265,14 +1611,22 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
             </section>
 
             <section className="rounded-[1.75rem] border border-slate-200 bg-white p-5 shadow-sm">
-              <div className="font-semibold text-slate-950">Clinical rules</div>
+              <div className="font-semibold text-slate-950">Booking information</div>
               <ul className="mt-3 space-y-2 text-xs text-slate-700">
-                <li>- Standard bookings create a new case first consultation.</li>
+                <li>- A new consultation creates a new case.</li>
                 <li>- Follow-ups require an active case and must be launched from case context.</li>
-                <li>- Appointment price is committed at booking time.</li>
-                <li>- Buffer time protects clinician transition and documentation time.</li>
-                <li>- {isPremium ? 'Premium account detected.' : 'Upgrade benefits can be surfaced at checkout where applicable.'}</li>
+                <li>- This streamlined calendar continues to secure card payment.</li>
+                <li>- The consultation fee is confirmed before payment.</li>
+                <li>- Appointment times include any spacing required by the clinician.</li>
               </ul>
+              <Link
+                href={`/appointments/new?clinicianId=${encodeURIComponent(params.id)}`}
+                className="mt-4 block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-center text-xs font-semibold text-slate-800 transition hover:bg-slate-100"
+              >
+                {c.acceptsMedicalAid
+                  ? 'Use Medical Aid, family booking or additional participants'
+                  : 'Use family booking or additional participants'}
+              </Link>
             </section>
           </aside>
         </div>
@@ -1284,17 +1638,27 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
             <div className="min-w-0">
               <div className="truncate text-sm font-semibold text-slate-950">{slotDateTimeLabel(selectedSlot)}</div>
               <div className="text-xs text-slate-600">
-                {formatMoney(selectedSlot.feeCents, selectedSlot.currency)} - {selectedSlot.durationMin} min - buffer{' '}
-                {selectedSlot.bufferMin} min
+                {formatMoney(displayedFeeCents, displayedFeeCurrency)} - {selectedSlot.durationMin} min
               </div>
             </div>
             <button
               type="button"
               onClick={confirmBooking}
-              disabled={!isSelectableSlot(selectedSlot, apiEnabled, canBeBooked)}
+              disabled={
+                bookingBusy ||
+                !isSelectableSlot(selectedSlot, apiEnabled, canBeBooked) ||
+                selectedSlot.consultType !== consultType ||
+                blockingWarnings.length > 0 ||
+                conflictDetails.length > 0 ||
+                (preflight !== null && !allRequiredWarningsAcknowledged)
+              }
               className="shrink-0 rounded-2xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
             >
-              Book
+              {bookingBusy
+                ? 'Processing...'
+                : preflight?.priceLock?.token
+                  ? 'Pay by card'
+                  : 'Review card booking'}
             </button>
           </div>
         </div>
