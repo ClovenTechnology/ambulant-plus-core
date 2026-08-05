@@ -213,8 +213,9 @@ model Encounter {
   labOrders                LabOrder[]
   payments                 Payment[]
   documents                PatientDocument[]
-  consultationInviteQuotes ConsultationSessionInviteQuote[]
-  collaborativeDrafts      CollaborativeAppointmentDraft[]  @relation("DraftsFromEncounter")
+  consultationInviteQuotes  ConsultationSessionInviteQuote[]
+  collaborativeDrafts       CollaborativeAppointmentDraft[]  @relation("DraftsFromEncounter")
+  appointmentCareRecipients AppointmentCareRecipient[]       @relation("AppointmentCareRecipientEncounter")
 
   diagnoses         EncounterDiagnosis[]
   labResults        LabResult[]
@@ -475,9 +476,12 @@ model Appointment {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  encounter                Encounter                        @relation(fields: [encounterId], references: [id])
+  encounter                Encounter                         @relation(fields: [encounterId], references: [id])
   consultationInviteQuotes ConsultationSessionInviteQuote[]
-  collaborativeDrafts      CollaborativeAppointmentDraft[]  @relation("DraftsFromAppointment")
+  collaborativeDrafts      CollaborativeAppointmentDraft[]   @relation("DraftsFromAppointment")
+  participants             AppointmentParticipant[]
+  careRecipients           AppointmentCareRecipient[]
+  participantInvitations   AppointmentParticipantInvitation[]
 
   @@index([clinicianId, startsAt])
   @@index([patientId, startsAt])
@@ -490,6 +494,176 @@ model Appointment {
   @@index([clientId, startsAt])
   @@index([clientMemberId, startsAt])
   @@index([coverageAuthorizationId])
+}
+
+
+model ClinicianMultiCarePolicy {
+  id                                         String               @id @default(cuid())
+  clinicianUserId                            String
+  feeKind                                    ClinicianFeeKind
+  visitMode                                  VisitMode             @default(televisit)
+  enabled                                    Boolean               @default(false)
+  pricingMode                                MultiCarePricingMode   @default(BASE_PLUS_ADDITIONAL)
+  currency                                   String                @db.VarChar(3)
+  includedCareRecipients                     Int                   @default(1)
+  additionalRecipientAmountMinor             Int?
+  additionalRecipientPercentBps              Int?
+  packageAmountMinor                         Int?
+  maxCareRecipients                          Int                   @default(2)
+  additionalMinutesPerRecipient              Int                   @default(0)
+  maxAdditionalMinutes                       Int?
+  requireAllRecipientsVerifiedBeforeCheckout Boolean               @default(true)
+  allowPendingAdultInvitations                Boolean               @default(false)
+  allowProvisionalDependentProfiles           Boolean               @default(true)
+  effectiveFrom                              DateTime              @default(now())
+  effectiveTo                                DateTime?
+  version                                    Int                   @default(1)
+  metadata                                   Json?
+  orgId                                      String                @default("org-default")
+  createdAt                                  DateTime              @default(now())
+  updatedAt                                  DateTime              @updatedAt
+
+  clinician     ClinicianProfile          @relation(fields: [clinicianUserId], references: [userId], onDelete: Cascade)
+  careRecipients AppointmentCareRecipient[]
+
+  @@unique([clinicianUserId, feeKind, visitMode, version])
+  @@index([clinicianUserId, feeKind, visitMode, enabled, effectiveFrom])
+  @@index([orgId, clinicianUserId])
+}
+
+model AppointmentCareRecipient {
+  id                     String                         @id @default(cuid())
+  appointmentId          String
+  patientId              String?
+  encounterId            String?                        @unique
+  pricingPolicyId        String?
+  role                   AppointmentCareRecipientRole
+  sequence               Int                            @default(0)
+  hostUserId             String?
+  familyRelationshipId   String?
+  required               Boolean                        @default(true)
+  status                 AppointmentCareRecipientStatus @default(READY)
+  identityVerifiedAt     DateTime?
+  identityVerifiedByUserId String?
+  reason                 String?
+  baseAmountMinor        Int                            @default(0)
+  additionalAmountMinor  Int                            @default(0)
+  discountMinor          Int                            @default(0)
+  grossAmountMinor       Int                            @default(0)
+  sponsorAmountMinor     Int                            @default(0)
+  patientPayableMinor    Int                            @default(0)
+  currency               String                         @db.VarChar(3)
+  coverageDecision       String?
+  coverageAuthorizationId String?
+  pricingSnapshot        Json?
+  coverageSnapshot       Json?
+  metadata               Json?
+  orgId                  String                         @default("org-default")
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
+
+  appointment       Appointment               @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  patient           PatientProfile?            @relation("AppointmentCareRecipientPatient", fields: [patientId], references: [id], onDelete: SetNull)
+  encounter         Encounter?                 @relation("AppointmentCareRecipientEncounter", fields: [encounterId], references: [id], onDelete: SetNull)
+  pricingPolicy     ClinicianMultiCarePolicy?  @relation(fields: [pricingPolicyId], references: [id], onDelete: SetNull)
+  familyRelationship FamilyRelationship?       @relation("AppointmentCareRecipientFamilyRelationship", fields: [familyRelationshipId], references: [id], onDelete: SetNull)
+  participants      AppointmentParticipant[]
+  invitations       AppointmentParticipantInvitation[]
+
+  @@unique([appointmentId, patientId])
+  @@unique([appointmentId, sequence])
+  @@index([appointmentId, role, status])
+  @@index([patientId])
+  @@index([hostUserId])
+  @@index([familyRelationshipId])
+  @@index([pricingPolicyId])
+  @@index([coverageAuthorizationId])
+  @@index([orgId, appointmentId])
+}
+
+model AppointmentParticipant {
+  id                  String                       @id @default(cuid())
+  appointmentId       String
+  careRecipientId     String?
+  partyId             String
+  role                AppointmentParticipantRole
+  patientId           String?
+  clinicianId         String?
+  userId              String?
+  hostUserId          String?
+  familyRelationshipId String?
+  displayName         String?
+  email               String?
+  phone               String?
+  required            Boolean                      @default(false)
+  status              AppointmentParticipantStatus @default(ACCEPTED)
+  consentRequired     Boolean                      @default(true)
+  canJoinTelevisit    Boolean                      @default(true)
+  canViewHealth       Boolean                      @default(false)
+  canBookAppointments Boolean                      @default(false)
+  acceptedAt          DateTime?
+  declinedAt          DateTime?
+  revokedAt           DateTime?
+  metadata            Json?
+  orgId               String                       @default("org-default")
+  createdAt           DateTime                     @default(now())
+  updatedAt           DateTime                     @updatedAt
+
+  appointment       Appointment               @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  careRecipient     AppointmentCareRecipient? @relation(fields: [careRecipientId], references: [id], onDelete: SetNull)
+  patient           PatientProfile?            @relation("AppointmentParticipantPatient", fields: [patientId], references: [id], onDelete: SetNull)
+  clinician         ClinicianProfile?          @relation("AppointmentParticipantClinician", fields: [clinicianId], references: [id], onDelete: SetNull)
+  familyRelationship FamilyRelationship?       @relation("AppointmentParticipantFamilyRelationship", fields: [familyRelationshipId], references: [id], onDelete: SetNull)
+  invitations       AppointmentParticipantInvitation[]
+
+  @@unique([appointmentId, partyId])
+  @@index([appointmentId, role, status])
+  @@index([careRecipientId])
+  @@index([patientId])
+  @@index([clinicianId])
+  @@index([userId])
+  @@index([hostUserId])
+  @@index([familyRelationshipId])
+  @@index([orgId, appointmentId])
+}
+
+model AppointmentParticipantInvitation {
+  id               String                      @id @default(cuid())
+  appointmentId    String
+  participantId    String
+  careRecipientId  String?
+  tokenHash        String                      @unique @db.VarChar(128)
+  channel          NotificationChannel
+  invitedEmail     String?
+  invitedPhone     String?
+  status           AppointmentInvitationStatus @default(PENDING)
+  expiresAt        DateTime
+  openedAt         DateTime?
+  acceptedAt       DateTime?
+  declinedAt       DateTime?
+  revokedAt        DateTime?
+  acceptedByUserId String?
+  linkedPatientId  String?
+  verificationState String?
+  sendAttempts     Int                         @default(0)
+  lastSentAt       DateTime?
+  metadata         Json?
+  orgId            String                      @default("org-default")
+  createdAt        DateTime                    @default(now())
+  updatedAt        DateTime                    @updatedAt
+
+  appointment   Appointment               @relation(fields: [appointmentId], references: [id], onDelete: Cascade)
+  participant   AppointmentParticipant    @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  careRecipient AppointmentCareRecipient? @relation(fields: [careRecipientId], references: [id], onDelete: SetNull)
+  linkedPatient PatientProfile?            @relation("AppointmentInvitationLinkedPatient", fields: [linkedPatientId], references: [id], onDelete: SetNull)
+
+  @@index([appointmentId, status, expiresAt])
+  @@index([participantId])
+  @@index([careRecipientId])
+  @@index([invitedEmail])
+  @@index([invitedPhone])
+  @@index([linkedPatientId])
+  @@index([orgId, appointmentId])
 }
 
 model ScheduleBlock {
@@ -1351,6 +1525,8 @@ model ClinicianProfile {
   ratingSum                Int               @default(0)
   feesV2                   ClinicianFee[]
   ratings                  ClinicianRating[]
+  multiCarePolicies        ClinicianMultiCarePolicy[]
+  appointmentParticipants  AppointmentParticipant[] @relation("AppointmentParticipantClinician")
 
   commercialProfile   ClinicianCommercialProfile?
   feeScheduleVersions FeeScheduleVersion[]
@@ -1506,6 +1682,9 @@ model PatientProfile {
   conditions                     Condition[]
   subjectFamilyInvitations       FamilyInvitation[]
   subjectFamilyRelationships     FamilyRelationship[]
+  appointmentParticipants        AppointmentParticipant[]          @relation("AppointmentParticipantPatient")
+  appointmentCareRecipients      AppointmentCareRecipient[]        @relation("AppointmentCareRecipientPatient")
+  appointmentInvitations         AppointmentParticipantInvitation[] @relation("AppointmentInvitationLinkedPatient")
   ladyCenterDayLogs              LadyCenterDayLog[]
   ladyCenterDocuments            LadyCenterDocument[]
   ladyCenterNotes                LadyCenterNote[]
@@ -1722,7 +1901,9 @@ model FamilyRelationship {
   updatedAt        DateTime                 @updatedAt
   revokedAt        DateTime?
   revokedByUserId  String?
-  subjectPatient   PatientProfile           @relation(fields: [subjectPatientId], references: [id], onDelete: Cascade)
+  subjectPatient                PatientProfile             @relation(fields: [subjectPatientId], references: [id], onDelete: Cascade)
+  appointmentParticipants        AppointmentParticipant[]    @relation("AppointmentParticipantFamilyRelationship")
+  appointmentCareRecipients      AppointmentCareRecipient[]  @relation("AppointmentCareRecipientFamilyRelationship")
 
   @@index([hostUserId])
   @@index([subjectPatientId])
@@ -4233,6 +4414,59 @@ enum AppointmentPaymentStatus {
   FAILED
   CANCELLED
   REFUNDED
+}
+
+enum MultiCarePricingMode {
+  FULL_FEE_PER_RECIPIENT
+  BASE_PLUS_ADDITIONAL
+  FIXED_PACKAGE
+  NO_ADDITIONAL_FEE
+}
+
+enum AppointmentParticipantRole {
+  LEAD_CLINICIAN
+  CO_CLINICIAN
+  ADVISOR
+  PRIMARY_PATIENT
+  DEPENDANT_PATIENT
+  SECOND_PATIENT_PARTICIPANT
+  GUARDIAN
+  CARE_ALLY
+  INTERPRETER
+  OBSERVER
+}
+
+enum AppointmentParticipantStatus {
+  PENDING_INVITATION
+  PENDING_ACCEPTANCE
+  ACCEPTED
+  DECLINED
+  REVOKED
+  REMOVED
+}
+
+enum AppointmentCareRecipientRole {
+  PRIMARY
+  DEPENDANT
+  ADDITIONAL
+}
+
+enum AppointmentCareRecipientStatus {
+  PENDING_INVITATION
+  PENDING_IDENTITY_VERIFICATION
+  READY
+  DECLINED
+  REMOVED
+  CANCELLED
+}
+
+enum AppointmentInvitationStatus {
+  PENDING
+  OPENED
+  ACCEPTED
+  DECLINED
+  EXPIRED
+  REVOKED
 }
 
 enum ConsultationSessionState {
