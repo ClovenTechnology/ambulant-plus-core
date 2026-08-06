@@ -477,6 +477,7 @@ model Appointment {
   updatedAt DateTime @updatedAt
 
   encounter                Encounter                         @relation(fields: [encounterId], references: [id])
+  bookingIntent            BookingIntent?
   consultationInviteQuotes ConsultationSessionInviteQuote[]
   collaborativeDrafts      CollaborativeAppointmentDraft[]   @relation("DraftsFromAppointment")
   participants             AppointmentParticipant[]
@@ -529,6 +530,198 @@ model ClinicianMultiCarePolicy {
   @@unique([clinicianUserId, feeKind, visitMode, version])
   @@index([clinicianUserId, feeKind, visitMode, enabled, effectiveFrom])
   @@index([orgId, clinicianUserId])
+}
+
+model BookingIntent {
+  id                 String              @id
+  requestFingerprint String              @db.VarChar(64)
+  idempotencyKeyHash String              @db.VarChar(64)
+  hostUserId         String
+  actorPatientId     String
+  clinicianId        String
+  status             BookingIntentStatus @default(DRAFT)
+  fundingMethod      AppointmentPaymentMethod?
+  kind               AppointmentKind      @default(STANDARD)
+  visitMode          AppointmentVisitMode @default(TELEVISIT)
+
+  startsAt DateTime
+  endsAt   DateTime
+  slotKey  String   @db.VarChar(191)
+
+  slotOfferHash      String?   @db.VarChar(64)
+  slotOfferExpiresAt DateTime?
+  priceLockHash      String?   @db.VarChar(64)
+  priceLockExpiresAt DateTime?
+  holdExpiresAt      DateTime?
+
+  amountMinor          Int @default(0)
+  subtotalMinor        Int @default(0)
+  taxMinor             Int @default(0)
+  discountMinor        Int @default(0)
+  totalMinor           Int @default(0)
+  sponsorAmountMinor   Int @default(0)
+  patientPayableMinor  Int @default(0)
+  currency             String @db.VarChar(3)
+  coverageDecision     String?
+  coverageAuthorizationId String?
+
+  reason        String?
+  caseId        String?
+  appointmentId String? @unique
+  authorizedAt  DateTime?
+  confirmedAt   DateTime?
+  expiredAt     DateTime?
+  cancelledAt   DateTime?
+  failureCode   String?
+  version       Int      @default(1)
+
+  quoteSnapshot     Json?
+  coverageSnapshot  Json?
+  recipientSnapshot Json?
+  metadata          Json?
+
+  orgId     String   @default("org-default")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  appointment     Appointment?             @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  slotLease       BookingSlotLease?
+  recipients      BookingIntentRecipient[]
+  paymentAttempts BookingPaymentAttempt[]
+  auditEvents     BookingIntentAuditEvent[]
+
+  @@unique([hostUserId, idempotencyKeyHash])
+  @@index([clinicianId, startsAt, endsAt])
+  @@index([hostUserId, status, createdAt])
+  @@index([actorPatientId, status, createdAt])
+  @@index([status, holdExpiresAt])
+  @@index([slotKey, status])
+  @@index([orgId, status, createdAt])
+}
+
+model BookingIntentRecipient {
+  id                   String                       @id @default(cuid())
+  bookingIntentId      String
+  patientId            String?
+  patientUserId        String?
+  hostUserId           String
+  familyRelationshipId String?
+  role                 AppointmentCareRecipientRole
+  sequence             Int                          @default(0)
+  status               BookingIntentRecipientStatus @default(READY)
+  identityVerifiedAt   DateTime?
+  reason               String?
+  caseId               String?
+
+  baseAmountMinor       Int @default(0)
+  additionalAmountMinor Int @default(0)
+  discountMinor         Int @default(0)
+  grossAmountMinor      Int @default(0)
+  sponsorAmountMinor    Int @default(0)
+  patientPayableMinor   Int @default(0)
+  currency              String @db.VarChar(3)
+
+  coverageDecision        String?
+  coverageAuthorizationId String?
+  pricingSnapshot         Json?
+  coverageSnapshot        Json?
+  metadata                Json?
+
+  orgId     String   @default("org-default")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  bookingIntent BookingIntent @relation(fields: [bookingIntentId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingIntentId, patientId])
+  @@unique([bookingIntentId, sequence])
+  @@index([patientId])
+  @@index([patientUserId])
+  @@index([hostUserId])
+  @@index([familyRelationshipId])
+  @@index([coverageAuthorizationId])
+  @@index([orgId, bookingIntentId])
+}
+
+model BookingSlotLease {
+  id              String                 @id @default(cuid())
+  bookingIntentId String                 @unique
+  slotKey         String                 @db.VarChar(191)
+  clinicianId     String
+  startsAt        DateTime
+  endsAt          DateTime
+  status          BookingSlotLeaseStatus @default(ACTIVE)
+  holdTokenHash   String                 @db.VarChar(64)
+  expiresAt       DateTime
+  acquiredAt      DateTime               @default(now())
+  consumedAt      DateTime?
+  releasedAt      DateTime?
+  releaseReason   String?
+  version         Int                    @default(1)
+  metadata        Json?
+  orgId           String                 @default("org-default")
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  bookingIntent BookingIntent @relation(fields: [bookingIntentId], references: [id], onDelete: Cascade)
+
+  @@index([slotKey, status, expiresAt])
+  @@index([clinicianId, startsAt, endsAt])
+  @@index([status, expiresAt])
+  @@index([orgId, status, expiresAt])
+}
+
+model BookingPaymentAttempt {
+  id                 String                      @id
+  bookingIntentId    String
+  sequence           Int                         @default(1)
+  method             AppointmentPaymentMethod
+  status             BookingPaymentAttemptStatus @default(CREATED)
+  provider           String?
+  providerRef        String?                     @unique @db.VarChar(160)
+  idempotencyKeyHash String                       @db.VarChar(64)
+  amountMinor        Int
+  currency           String                      @db.VarChar(3)
+  expiresAt          DateTime?
+  authorizedAt       DateTime?
+  capturedAt         DateTime?
+  failedAt           DateTime?
+  cancelledAt        DateTime?
+  failureCode        String?
+  providerSnapshot   Json?
+  verificationSnapshot Json?
+  metadata           Json?
+  orgId              String                      @default("org-default")
+  createdAt          DateTime                    @default(now())
+  updatedAt          DateTime                    @updatedAt
+
+  bookingIntent BookingIntent @relation(fields: [bookingIntentId], references: [id], onDelete: Cascade)
+
+  @@unique([bookingIntentId, sequence])
+  @@unique([bookingIntentId, idempotencyKeyHash])
+  @@index([bookingIntentId, status, createdAt])
+  @@index([status, expiresAt])
+  @@index([orgId, status, createdAt])
+}
+
+model BookingIntentAuditEvent {
+  id              String               @id @default(cuid())
+  bookingIntentId String
+  action          String
+  fromStatus      BookingIntentStatus?
+  toStatus        BookingIntentStatus?
+  actorType       String?
+  actorUserId     String?
+  reason          String?
+  beforeJson      Json?
+  afterJson       Json?
+  orgId           String               @default("org-default")
+  createdAt       DateTime             @default(now())
+
+  bookingIntent BookingIntent @relation(fields: [bookingIntentId], references: [id], onDelete: Cascade)
+
+  @@index([bookingIntentId, createdAt])
+  @@index([orgId, createdAt])
 }
 
 model AppointmentCareRecipient {
@@ -4414,6 +4607,52 @@ enum AppointmentPaymentStatus {
   FAILED
   CANCELLED
   REFUNDED
+}
+
+enum BookingIntentStatus {
+  DRAFT
+  QUOTED
+  SLOT_HELD
+  PAYMENT_ACTION_REQUIRED
+  PAYMENT_PROCESSING
+  SPONSOR_REVIEW
+  COPAY_REQUIRED
+  AUTHORIZED
+  CONFIRMED
+  PAYMENT_FAILED
+  EXPIRED
+  CANCELLED
+}
+
+enum BookingSlotLeaseStatus {
+  ACTIVE
+  CONSUMED
+  RELEASED
+  EXPIRED
+  CANCELLED
+}
+
+enum BookingPaymentAttemptStatus {
+  CREATED
+  PENDING_REDIRECT
+  PROCESSING
+  AUTHORIZED
+  CAPTURED
+  PENDING_REVIEW
+  FAILED
+  CANCELLED
+  EXPIRED
+}
+
+enum BookingIntentRecipientStatus {
+  PENDING_IDENTITY_VERIFICATION
+  READY
+  PENDING_COVERAGE
+  COVERED
+  COPAY_REQUIRED
+  DECLINED
+  REMOVED
+  CANCELLED
 }
 
 enum MultiCarePricingMode {
