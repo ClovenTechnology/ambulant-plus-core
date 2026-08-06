@@ -333,7 +333,7 @@ export async function syncVerifiedPaymentToAppointment(args: {
             paymentRef:
               appointment.paymentRef,
           },
-          afterJson: {
+          afterJson: jsonSafe({
             status:
               updatedAppointment.status,
             paymentStatus:
@@ -344,7 +344,7 @@ export async function syncVerifiedPaymentToAppointment(args: {
               updatedAppointment.paymentRef,
             verification:
               verificationSnapshot,
-          },
+          }),
           orgId:
             appointment.orgId || 'org-default',
         },
