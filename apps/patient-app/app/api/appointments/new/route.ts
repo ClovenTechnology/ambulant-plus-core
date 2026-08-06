@@ -1,18 +1,16 @@
 // apps/patient-app/app/api/appointments/new/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  type PatientGatewayIdentity,
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+  resolveGatewayIdempotencyKey,
+} from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 type PaymentMethod = 'card' | 'medical_aid' | 'voucher';
-
-type PatientSessionIdentity = {
-  uid: string;
-  patientId: string;
-  orgId: string;
-  email: string;
-  name: string;
-};
 
 const CANONICAL_API_GATEWAY = 'https://api-gateway.ambulantplus.co.za';
 
@@ -79,118 +77,19 @@ function normalizePaymentMethod(value: unknown): PaymentMethod {
   return 'card';
 }
 
-function pickUserPayload(payload: any) {
-  return payload?.user && typeof payload.user === 'object' ? payload.user : payload;
-}
-
-async function readPatientSession(req: NextRequest): Promise<PatientSessionIdentity | null> {
-  const authUrl = new URL('/api/auth/me', req.url);
-
-  const res = await fetch(authUrl.toString(), {
-    method: 'GET',
-    headers: {
-      cookie: req.headers.get('cookie') || '',
-      authorization: req.headers.get('authorization') || '',
-      accept: 'application/json',
-    },
-    cache: 'no-store',
-  }).catch(() => null);
-
-  if (!res || !res.ok) return null;
-
-  const json = await res.json().catch(() => null);
-  if (!json || json.ok === false) return null;
-
-  const user = pickUserPayload(json);
-
-  const actorType = clean(json.actorType || user.actorType || user.actor_type, 80).toUpperCase();
-  if (actorType && actorType !== 'PATIENT') return null;
-
-  const uid = clean(
-    json.uid ||
-      json.userId ||
-      json.id ||
-      user.uid ||
-      user.userId ||
-      user.id ||
-      user.sub,
-    160,
-  );
-
-  const patientId = clean(
-    json.actorRefId ||
-      json.actor_ref_id ||
-      json.patientId ||
-      json.patient_id ||
-      user.actorRefId ||
-      user.actor_ref_id ||
-      user.patientId ||
-      user.patient_id,
-    160,
-  );
-
-  if (!uid || !patientId) return null;
-
-  return {
-    uid,
-    patientId,
-    orgId: clean(json.orgId || json.org_id || user.orgId || user.org_id, 120),
-    email: clean(json.email || user.email || user.contactEmail, 240),
-    name: clean(json.name || json.displayName || user.name || user.displayName, 240),
-  };
-}
-
-function forwardHeaders(req: NextRequest, identity: PatientSessionIdentity, includeJson = true) {
-  const headers = new Headers();
-
-  for (const key of [
-    'authorization',
-    'cookie',
-    'x-ambulant-identity',
-    'x-correlation-id',
-    'x-request-id',
-    'idempotency-key',
-    'x-idempotency-key',
-  ]) {
-    const value = req.headers.get(key);
-    if (value) headers.set(key, value);
-  }
-
-  headers.set('accept', 'application/json');
-  if (includeJson) headers.set('content-type', 'application/json');
-
-  headers.set('x-role', 'patient');
-  headers.set('x-ambulant-role', 'patient');
-  headers.set('x-uid', identity.uid);
-  headers.set('x-user-id', identity.uid);
-  headers.set('x-ambulant-user-id', identity.uid);
-  headers.set('x-actor-ref-id', identity.patientId);
-  headers.set('x-patient-id', identity.patientId);
-  headers.set('x-current-patient-id', identity.patientId);
-
-  if (identity.orgId) {
-    headers.set('x-org-id', identity.orgId);
-    headers.set('x-ambulant-org-id', identity.orgId);
-  }
-
-  if (identity.email) headers.set('x-email', identity.email);
-  if (identity.name) {
-    headers.set('x-name', identity.name);
-    headers.set('x-display-name', identity.name);
-  }
-
-  return headers;
-}
-
 async function readPatientProfileContact(
   req: NextRequest,
-  identity: PatientSessionIdentity,
+  identity: PatientGatewayIdentity,
 ): Promise<{ email: string; name: string }> {
   const profileUrl = new URL('/api/profile', req.url);
 
   const res = await fetch(profileUrl.toString(), {
     method: 'GET',
-    headers: forwardHeaders(req, identity, false),
+    headers: patientGatewayHeaders({
+      req,
+      identity,
+      includeJson: false,
+    }),
     cache: 'no-store',
   }).catch(() => null);
 
@@ -250,25 +149,22 @@ async function readPayload(res: Response) {
   }
 }
 
-function pickAmountMinor(data: any, appointment: any, body: any) {
+function pickAmountMinor(data: any, appointment: any) {
   const candidates = [
-    body?.amountCents,
-    body?.amount_cents,
-    body?.amountMinor,
-    body?.amount_minor,
-    body?.patientPayableMinor,
-    body?.patient_payable_minor,
-    body?.reimbursementIntent?.patientPayableMinor,
-    body?.reimbursementIntent?.patient_payable_minor,
-    body?.priceLock?.amountCents,
-    body?.priceLock?.amount_cents,
-    body?.priceLock?.patientPayableMinor,
+    data?.patientCopayMinor,
+    data?.patient_payable_minor,
+    data?.totalMinor,
+    data?.total_minor,
     data?.amountCents,
     data?.amount_cents,
     data?.amountMinor,
     data?.amount_minor,
     data?.priceCents,
     data?.price_cents,
+    appointment?.patientCopayMinor,
+    appointment?.patient_payable_minor,
+    appointment?.totalMinor,
+    appointment?.total_minor,
     appointment?.amountCents,
     appointment?.amount_cents,
     appointment?.amountMinor,
@@ -278,22 +174,23 @@ function pickAmountMinor(data: any, appointment: any, body: any) {
   ];
 
   for (const value of candidates) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n >= 0) return Math.round(n);
+    const amount = Number(value);
+    if (Number.isFinite(amount) && amount >= 0) {
+      return Math.round(amount);
+    }
   }
 
   return 0;
 }
 
-function pickCurrency(data: any, appointment: any, body: any) {
-  return clean(
-    body?.currency ||
-      body?.reimbursementIntent?.currency ||
-      body?.priceLock?.currency ||
+function pickCurrency(data: any, appointment: any) {
+  return (
+    clean(
       data?.currency ||
-      appointment?.currency,
-    3,
-  ).toUpperCase() || 'ZAR';
+        appointment?.currency,
+      3,
+    ).toUpperCase() || 'ZAR'
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -303,7 +200,7 @@ export async function POST(req: NextRequest) {
     return noStore({ ok: false, error: 'api_gateway_base_not_configured' }, 503);
   }
 
-  const identity = await readPatientSession(req);
+  const identity = await readPatientGatewayIdentity(req);
 
   if (!identity) {
     return noStore({ ok: false, error: 'patient_session_required' }, 401);
@@ -315,6 +212,13 @@ export async function POST(req: NextRequest) {
   } catch {
     return noStore({ ok: false, error: 'invalid_json_body' }, 400);
   }
+
+  const idempotencyKey =
+    resolveGatewayIdempotencyKey(
+      req,
+      body.idempotencyKey ||
+        body.idempotency_key,
+    );
 
   const clinicianId = clean(body.clinicianId || body.clinician_id);
   const startsAt = clean(body.startsAt || body.starts_at);
@@ -359,63 +263,104 @@ export async function POST(req: NextRequest) {
 
   const isFamily = body?.person?.mode === 'FAMILY';
 
-  const payload: any = {
-    ...body,
+  const subjectPatientId = isFamily
+    ? clean(
+        body?.person?.subjectPatientId ||
+          body.subjectPatientId ||
+          body.subject_patient_id,
+      )
+    : patientId;
+  const familyRelationshipId = isFamily
+    ? clean(
+        body?.person?.relationshipId ||
+          body.familyRelationshipId ||
+          body.family_relationship_id,
+      )
+    : clean(
+        body.familyRelationshipId ||
+          body.family_relationship_id,
+      );
 
+  const payload: any = {
     clinicianId,
     clinician_id: clinicianId,
-
     patientId,
     patient_id: patientId,
-
-    subjectPatientId: isFamily
-      ? clean(body?.person?.subjectPatientId || body.subjectPatientId || body.subject_patient_id)
-      : patientId,
-    subject_patient_id: isFamily
-      ? clean(body?.person?.subjectPatientId || body.subjectPatientId || body.subject_patient_id)
-      : patientId,
-
-    familyRelationshipId: isFamily
-      ? clean(body?.person?.relationshipId || body.familyRelationshipId || body.family_relationship_id)
-      : clean(body.familyRelationshipId || body.family_relationship_id),
-    family_relationship_id: isFamily
-      ? clean(body?.person?.relationshipId || body.familyRelationshipId || body.family_relationship_id)
-      : clean(body.familyRelationshipId || body.family_relationship_id),
-
+    subjectPatientId:
+      subjectPatientId || patientId,
+    subject_patient_id:
+      subjectPatientId || patientId,
+    familyRelationshipId:
+      familyRelationshipId || null,
+    family_relationship_id:
+      familyRelationshipId || null,
     hostUserId,
     host_user_id: hostUserId,
-
     startsAt,
     starts_at: startsAt,
     endsAt,
     ends_at: endsAt,
-
-    roomId,
-    room_id: roomId,
-
     paymentMethod,
     payment_method: paymentMethod,
-
     patientEmail: patientEmail || null,
     patient_email: patientEmail || null,
     patientName: patientName || null,
     patient_name: patientName || null,
-
-    callbackUrl: body.callbackUrl || body.callback_url || null,
-    callback_url: body.callbackUrl || body.callback_url || null,
-
-    reason: clean(body.reason || body.title || body.notes) || 'Televisit consultation',
+    reason:
+      clean(
+        body.reason ||
+          body.title ||
+          body.notes,
+      ) || 'Televisit consultation',
     kind: body.kind || 'standard',
-    visitMode: body.visitMode || body.visit_mode || 'televisit',
-    visit_mode: body.visitMode || body.visit_mode || 'televisit',
-
-    source: body.source || 'patient-app-calendar',
+    visitMode:
+      body.visitMode ||
+      body.visit_mode ||
+      'televisit',
+    visit_mode:
+      body.visitMode ||
+      body.visit_mode ||
+      'televisit',
+    caseId:
+      body.caseId ||
+      body.case_id ||
+      null,
+    case_id:
+      body.caseId ||
+      body.case_id ||
+      null,
+    careRecipients:
+      Array.isArray(body.careRecipients)
+        ? body.careRecipients
+        : Array.isArray(body.care_recipients)
+          ? body.care_recipients
+          : undefined,
+    care_recipients:
+      Array.isArray(body.careRecipients)
+        ? body.careRecipients
+        : Array.isArray(body.care_recipients)
+          ? body.care_recipients
+          : undefined,
+    priceLock:
+      body.priceLock ||
+      body.price_lock ||
+      null,
+    price_lock:
+      body.priceLock ||
+      body.price_lock ||
+      null,
+    source: 'patient-app-calendar',
   };
 
   try {
     const appointmentRes = await fetch(new URL('/api/appointments', base).toString(), {
       method: 'POST',
-      headers: forwardHeaders(req, identity, true),
+      headers: patientGatewayHeaders({
+        req,
+        identity,
+        includeJson: true,
+        idempotencyKey,
+      }),
       body: JSON.stringify(payload),
       cache: 'no-store',
     });
@@ -454,8 +399,8 @@ export async function POST(req: NextRequest) {
       appointment?.case_id ||
       '';
 
-    const amountCents = pickAmountMinor(data, appointment, body);
-    const currency = pickCurrency(data, appointment, body);
+    const amountCents = pickAmountMinor(data, appointment);
+    const currency = pickCurrency(data, appointment);
 
     let payment: any = null;
     let paymentRef =
@@ -495,23 +440,24 @@ export async function POST(req: NextRequest) {
 
       const paymentRes = await fetch(new URL('/api/payments', base).toString(), {
         method: 'POST',
-        headers: forwardHeaders(req, identity, true),
+        headers: patientGatewayHeaders({
+          req,
+          identity,
+          includeJson: true,
+          idempotencyKey,
+        }),
         body: JSON.stringify({
           action: 'initialize',
           appointmentId,
-          encounterId: encounterId || null,
-          caseId: caseId || null,
-          amountCents,
-          currency,
           paymentMethod: 'CARD',
           email: patientEmail,
-          callbackUrl: payload.callbackUrl || null,
-          patientId,
-          clinicianId,
+          callbackUrl:
+            body.callbackUrl ||
+            body.callback_url ||
+            null,
           meta: {
-            source: 'patient-app-appointments-new',
-            priceLock: body.priceLock || body.price_lock || null,
-            reimbursementIntent: body.reimbursementIntent || null,
+            source:
+              'patient-app-appointments-new',
           },
         }),
         cache: 'no-store',
@@ -586,12 +532,19 @@ export async function POST(req: NextRequest) {
       appointmentRes.status === 201 ? 201 : 200,
     );
   } catch (error: any) {
+    const message =
+      error?.message ||
+      'appointments_gateway_failed';
+
     return noStore(
       {
         ok: false,
-        error: error?.message || 'appointments_gateway_failed',
+        error: message,
       },
-      502,
+      message ===
+      'internal_identity_secret_unavailable'
+        ? 503
+        : 502,
     );
   }
 }

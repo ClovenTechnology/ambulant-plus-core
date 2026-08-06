@@ -4,19 +4,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { Prisma } from '@prisma/client';
 import { prisma } from '@/src/lib/db';
 import { emitEvent } from '@/src/lib/events';
-import { readIdentity } from '@/src/lib/identity';
-import { beginCheckout, verifyCheckout } from '@/src/payments/checkout-core';
-import { syncVerifiedPaymentToAppointment } from '@/src/payments/payment-sync';
+import {
+  readIdentity,
+  requireAuthenticatedIdentity,
+  requireTrustedIdentityInProduction,
+} from '@/src/lib/identity';
+import {
+  beginCheckout,
+  verifyCheckout,
+} from '@/src/payments/checkout-core';
+import {
+  resolvePaymentReference,
+  syncVerifiedPaymentToAppointment,
+} from '@/src/payments/payment-sync';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-function randomId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
-}
-
 function jsonSafe(value: unknown): Prisma.InputJsonValue {
-  return JSON.parse(JSON.stringify(value ?? null)) as Prisma.InputJsonValue;
+  return JSON.parse(
+    JSON.stringify(value ?? null),
+  ) as Prisma.InputJsonValue;
 }
 
 function readMeta(value: unknown): Record<string, any> {
@@ -25,257 +33,854 @@ function readMeta(value: unknown): Record<string, any> {
     : {};
 }
 
+function clean(value: unknown, max = 240) {
+  return String(value ?? '').trim().slice(0, max);
+}
+
+function sha256Hex(value: string) {
+  return crypto
+    .createHash('sha256')
+    .update(value)
+    .digest('hex');
+}
+
+function normalizeIdempotencyKey(req: NextRequest) {
+  const value = clean(
+    req.headers.get('idempotency-key') ||
+      req.headers.get('x-idempotency-key'),
+    180,
+  );
+
+  if (!value) {
+    throw Object.assign(
+      new Error('idempotency_key_required'),
+      { status: 428 },
+    );
+  }
+
+  if (!/^[A-Za-z0-9._:-]{8,180}$/.test(value)) {
+    throw Object.assign(
+      new Error('invalid_idempotency_key'),
+      { status: 400 },
+    );
+  }
+
+  return value;
+}
+
 function paymentStatusFromCheckout(status: string) {
   if (status === 'authorized') return 'captured';
-  if (status === 'pending_redirect' || status === 'pending_review') return 'pending';
+  if (
+    status === 'pending_redirect' ||
+    status === 'pending_review'
+  ) {
+    return 'pending';
+  }
   return 'failed';
 }
 
-type StoredPaymentProvider = 'paystack' | 'payfast' | 'mock' | 'internal';
+type StoredPaymentProvider =
+  | 'paystack'
+  | 'payfast'
+  | 'mock'
+  | 'internal';
 
 function isProductionRuntime() {
-  return process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production';
-}
-
-function cleanPaymentProvider(value: unknown): StoredPaymentProvider {
-  const s = String(value || '').trim().toLowerCase();
-  if (s === 'payfast') return 'payfast';
-  if (s === 'paystack') return 'paystack';
-  if (s === 'internal') return 'internal';
-  if (s === 'mock') return 'mock';
-  return 'paystack';
-}
-
-function isInternalProviderReference(provider: StoredPaymentProvider, reference: string | null | undefined) {
-  const ref = String(reference || '').trim();
   return (
-    provider === 'internal' ||
-    (provider === 'mock' && /^(zero|voucher|medicalaid)_/.test(ref))
+    process.env.NODE_ENV === 'production' ||
+    process.env.VERCEL_ENV === 'production'
   );
 }
 
-function externalProviderOrNull(provider: StoredPaymentProvider) {
+function cleanPaymentProvider(
+  value: unknown,
+): StoredPaymentProvider {
+  const provider = clean(value, 40).toLowerCase();
+  if (provider === 'payfast') return 'payfast';
+  if (provider === 'paystack') return 'paystack';
+  if (provider === 'internal') return 'internal';
+  if (provider === 'mock') return 'mock';
+  return 'paystack';
+}
+
+function isInternalProviderReference(
+  provider: StoredPaymentProvider,
+  reference: string | null | undefined,
+) {
+  const value = clean(reference, 200);
+  return (
+    provider === 'internal' ||
+    (
+      provider === 'mock' &&
+      /^(zero|voucher|medicalaid)_/.test(value)
+    )
+  );
+}
+
+function externalProviderOrNull(
+  provider: StoredPaymentProvider,
+) {
   if (provider === 'payfast') return 'payfast' as const;
   if (provider === 'paystack') return 'paystack' as const;
-  if (provider === 'mock' && !isProductionRuntime()) return 'mock' as const;
+  if (provider === 'mock' && !isProductionRuntime()) {
+    return 'mock' as const;
+  }
   return null;
+}
+
+function patientAppOrigin() {
+  const configured = clean(
+    process.env.PATIENT_APP_ORIGIN ||
+      process.env.NEXT_PUBLIC_PATIENT_APP_ORIGIN ||
+      'https://patient.ambulantplus.co.za',
+    500,
+  );
+
+  try {
+    return new URL(configured).origin;
+  } catch {
+    return 'https://patient.ambulantplus.co.za';
+  }
+}
+
+function safeCallbackUrl(value: unknown) {
+  const allowedOrigin = patientAppOrigin();
+  const fallback =
+    `${allowedOrigin}/appointments?payment=return`;
+
+  const candidate = clean(value, 2000);
+  if (!candidate) return fallback;
+
+  try {
+    const url = new URL(candidate);
+    return url.origin === allowedOrigin
+      ? url.toString()
+      : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function appointmentAmountCents(appointment: any) {
+  const candidates = [
+    appointment?.patientCopayMinor,
+    appointment?.totalMinor,
+    appointment?.amountMinor,
+    appointment?.priceCents,
+  ];
+
+  for (const candidate of candidates) {
+    const amount = Number(candidate);
+    if (Number.isFinite(amount) && amount >= 0) {
+      return Math.round(amount);
+    }
+  }
+
+  throw Object.assign(
+    new Error('appointment_amount_unavailable'),
+    { status: 409 },
+  );
+}
+
+function appointmentCurrency(appointment: any) {
+  const currency = clean(
+    appointment?.currency ||
+      appointment?.sponsorCurrency ||
+      'ZAR',
+    3,
+  ).toUpperCase();
+
+  if (!/^[A-Z]{3}$/.test(currency)) {
+    throw Object.assign(
+      new Error('appointment_currency_invalid'),
+      { status: 409 },
+    );
+  }
+
+  return currency;
+}
+
+async function loadAppointmentForPayment(
+  appointmentId: string,
+) {
+  const appointment =
+    await prisma.appointment.findUnique({
+      where: { id: appointmentId },
+      include: {
+        careRecipients: {
+          select: {
+            patientId: true,
+          },
+        },
+      },
+    });
+
+  if (!appointment) {
+    throw Object.assign(
+      new Error('appointment_not_found'),
+      { status: 404 },
+    );
+  }
+
+  return appointment as any;
+}
+
+function appointmentAccessible(
+  appointment: any,
+  who: ReturnType<typeof readIdentity>,
+) {
+  if (
+    who.role === 'admin' ||
+    who.role === 'admin_staff' ||
+    who.role === 'system'
+  ) {
+    return true;
+  }
+
+  if (who.role !== 'patient' || !who.uid) return false;
+
+  const actorPatientId = clean(who.actorRefId);
+  const authorizedPatientIds = new Set(
+    [
+      appointment.patientId,
+      appointment.subjectPatientId,
+      ...(Array.isArray(appointment.careRecipients)
+        ? appointment.careRecipients.map(
+            (recipient: any) => recipient.patientId,
+          )
+        : []),
+    ]
+      .map((value) => clean(value))
+      .filter(Boolean),
+  );
+
+  return (
+    clean(appointment.hostUserId) === clean(who.uid) ||
+    (
+      Boolean(actorPatientId) &&
+      authorizedPatientIds.has(actorPatientId)
+    )
+  );
+}
+
+function assertAppointmentAccessible(
+  appointment: any,
+  who: ReturnType<typeof readIdentity>,
+) {
+  if (!appointmentAccessible(appointment, who)) {
+    throw Object.assign(
+      new Error('payment_appointment_forbidden'),
+      { status: 403 },
+    );
+  }
+}
+
+async function existingPaymentResponse(
+  appointment: any,
+) {
+  const paymentIntentId = clean(
+    appointment.paymentIntentId,
+    160,
+  );
+  const paymentRef = clean(
+    appointment.paymentRef,
+    160,
+  );
+
+  const payment = paymentIntentId &&
+    !paymentIntentId.startsWith('init-')
+    ? await prisma.payment.findUnique({
+        where: { id: paymentIntentId },
+      })
+    : paymentRef
+      ? await prisma.payment.findFirst({
+          where: { providerRef: paymentRef },
+        })
+      : null;
+
+  if (!payment) return null;
+
+  const meta = readMeta(payment.meta);
+  return {
+    ok: true,
+    idempotentReplay: true,
+    payment,
+    redirectUrl: meta.redirectUrl || null,
+    providerRef: payment.providerRef || null,
+    status: payment.status,
+  };
 }
 
 export async function POST(req: NextRequest) {
   try {
     const who = readIdentity(req.headers);
-    if (who.role !== 'patient' && who.role !== 'admin') {
-      return NextResponse.json({ ok: false, error: 'forbidden' }, { status: 403 });
+    requireTrustedIdentityInProduction(req.headers, who);
+    requireAuthenticatedIdentity(who);
+
+    if (
+      who.role !== 'patient' &&
+      who.role !== 'admin' &&
+      who.role !== 'admin_staff' &&
+      who.role !== 'system'
+    ) {
+      return NextResponse.json(
+        { ok: false, error: 'forbidden' },
+        { status: 403 },
+      );
     }
 
-    const b = await req.json().catch(() => ({} as any));
-    const action = String(b.action || 'initialize').toLowerCase();
+    const body =
+      await req.json().catch(() => ({} as any));
+    const action =
+      clean(body.action || 'initialize', 40).toLowerCase();
 
     if (action === 'verify') {
-      const paymentRef = String(b.paymentRef || b.reference || '').trim();
+      const paymentRef = clean(
+        body.paymentRef || body.reference,
+        160,
+      );
+
       if (!paymentRef) {
-        return NextResponse.json({ ok: false, error: 'paymentRef required' }, { status: 400 });
+        return NextResponse.json(
+          { ok: false, error: 'paymentRef_required' },
+          { status: 400 },
+        );
       }
 
-      const payment = await prisma.payment.findFirst({
-        where: { OR: [{ id: paymentRef }, { providerRef: paymentRef }] },
-      });
+      const resolved =
+        await resolvePaymentReference(paymentRef);
+      const payment = resolved.payment;
 
       if (!payment) {
-        return NextResponse.json({ ok: false, error: 'payment_not_found' }, { status: 404 });
+        return NextResponse.json(
+          { ok: false, error: 'payment_not_found' },
+          { status: 404 },
+        );
       }
+
+      const appointment = resolved.appointment ||
+        (
+          resolved.appointmentId
+            ? await loadAppointmentForPayment(
+                resolved.appointmentId,
+              )
+            : null
+        );
+
+      if (!appointment) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'payment_appointment_not_found',
+          },
+          { status: 409 },
+        );
+      }
+
+      assertAppointmentAccessible(appointment, who);
 
       const meta = readMeta(payment.meta);
-      const providerName = cleanPaymentProvider(meta.provider || 'paystack');
-      const providerRef = payment.providerRef || paymentRef;
+      const providerName = cleanPaymentProvider(
+        meta.provider || appointment.paymentProvider,
+      );
+      const providerRef =
+        clean(payment.providerRef || paymentRef, 160);
 
-      if (isInternalProviderReference(providerName, providerRef)) {
-        const updated = await prisma.payment.update({
-          where: { id: payment.id },
-          data: {
-            meta: jsonSafe({
-              ...meta,
-              provider: 'internal',
-              verification: { internal: true, providerRef },
-              verifiedAt: new Date().toISOString(),
-            }),
-          },
-        });
-
+      if (
+        isInternalProviderReference(
+          providerName,
+          providerRef,
+        )
+      ) {
         return NextResponse.json(
-          { ok: true, payment: updated, appointmentId: null, internal: true },
-          { status: 200, headers: { 'Cache-Control': 'no-store' } },
+          {
+            ok: false,
+            error:
+              'internal_payment_requires_authoritative_authorization_flow',
+          },
+          {
+            status: 409,
+            headers: { 'Cache-Control': 'no-store' },
+          },
         );
       }
 
-      const externalProvider = externalProviderOrNull(providerName);
+      const externalProvider =
+        externalProviderOrNull(providerName);
+
       if (!externalProvider) {
         return NextResponse.json(
-          { ok: false, error: 'mock_payment_provider_disabled' },
-          { status: 409, headers: { 'Cache-Control': 'no-store' } },
+          {
+            ok: false,
+            error: 'mock_payment_provider_disabled',
+          },
+          {
+            status: 409,
+            headers: { 'Cache-Control': 'no-store' },
+          },
         );
       }
 
+      const expectedAmountCents =
+        appointmentAmountCents(appointment);
+      const expectedCurrency =
+        appointmentCurrency(appointment);
       const verified = await verifyCheckout({
         provider: externalProvider,
         reference: providerRef,
-        expectedAmountCents: payment.amountCents,
-        expectedCurrency: payment.currency,
+        expectedAmountCents,
+        expectedCurrency,
       });
 
-      const nextStatus =
-        verified.status === 'captured'
-          ? 'captured'
-          : verified.status === 'pending'
-            ? 'pending'
-            : 'failed';
-
-      const updated = await prisma.payment.update({
-        where: { id: payment.id },
-        data: {
-          status: nextStatus,
-          meta: jsonSafe({
-            ...meta,
-            verification: verified.raw || null,
-            verifiedAt: new Date().toISOString(),
-          }),
-        },
-      });
-
-      let syncedAppointmentId: string | null = null;
-
-      try {
-        const synced = await syncVerifiedPaymentToAppointment({
+      const synced =
+        await syncVerifiedPaymentToAppointment({
           reference: providerRef,
           provider: externalProvider,
-          state:
-            nextStatus === 'captured'
-              ? 'captured'
-              : nextStatus === 'pending'
-                ? 'pending'
-                : 'failed',
-          amountCents: verified.amountCents ?? payment.amountCents,
-          currency: verified.currency ?? payment.currency,
-          raw: (verified.raw as Record<string, unknown>) || null,
+          state: verified.status,
+          amountCents: verified.amountCents,
+          currency: verified.currency,
+          raw:
+            (verified.raw as Record<string, unknown>) ||
+            null,
         });
 
-        syncedAppointmentId = synced.appointment?.id ?? null;
-      } catch {
-        // keep payment verification response alive; appointment sync is best-effort here
-      }
-
-      if (nextStatus === 'captured') {
+      if (verified.status === 'captured') {
         try {
           emitEvent({
             kind: 'payment_captured',
-            encounterId: payment.encounterId,
-            patientId: b.patientId || who.uid || null,
-            clinicianId: b.clinicianId || null,
-            payload: { paymentId: updated.id, amount: updated.amountCents },
+            encounterId: appointment.encounterId,
+            patientId: appointment.patientId,
+            clinicianId: appointment.clinicianId,
+            payload: {
+              paymentId: synced.payment.id,
+              amount: synced.payment.amountCents,
+            },
           } as any);
         } catch {
-          // best-effort runtime event
+          // Runtime notification is best-effort.
         }
       }
 
       return NextResponse.json(
-        { ok: true, payment: updated, appointmentId: syncedAppointmentId },
+        {
+          ok: true,
+          payment: synced.payment,
+          appointmentId: synced.appointment?.id || null,
+          verificationStatus: verified.status,
+        },
+        {
+          status: 200,
+          headers: { 'Cache-Control': 'no-store' },
+        },
+      );
+    }
+
+    const idempotencyKey = normalizeIdempotencyKey(req);
+    const appointmentId = clean(
+      body.appointmentId || body.appointment_id,
+      160,
+    );
+
+    if (!appointmentId) {
+      return NextResponse.json(
+        { ok: false, error: 'appointmentId_required' },
+        { status: 400 },
+      );
+    }
+
+    let appointment =
+      await loadAppointmentForPayment(appointmentId);
+    assertAppointmentAccessible(appointment, who);
+
+    if (
+      ['CAPTURED', 'PAID', 'SETTLED', 'NOT_REQUIRED'].includes(
+        clean(appointment.paymentStatus, 40).toUpperCase(),
+      )
+    ) {
+      return NextResponse.json(
+        {
+          ok: true,
+          alreadySettled: true,
+          appointmentId: appointment.id,
+          paymentStatus: appointment.paymentStatus,
+        },
         { status: 200 },
       );
     }
 
-    const amountCents = Math.max(0, Math.round(Number(b.amountCents ?? 0)));
-    const currency = String(b.currency || 'ZAR').toUpperCase();
-    const encounterId = b.encounterId ?? null;
-    const appointmentId = String(b.appointmentId || '').trim();
-    const paymentMethod = String(b.paymentMethod || 'CARD').toUpperCase() as
-      | 'CARD'
-      | 'MEDICAL_AID'
-      | 'VOUCHER';
-
-    if (!appointmentId) {
-      return NextResponse.json({ ok: false, error: 'appointmentId required' }, { status: 400 });
+    const replay = await existingPaymentResponse(appointment);
+    if (replay) {
+      return NextResponse.json(replay, { status: 200 });
     }
 
-    const checkout = await beginCheckout({
-      method: paymentMethod,
-      appointmentId,
-      amountCents,
-      currency,
-      email: b.email || null,
-      callbackUrl: b.callbackUrl || null,
-      metadata: b.meta || {},
-    });
+    const requestedMethod = clean(
+      body.paymentMethod || body.payment_method || 'CARD',
+      40,
+    ).toUpperCase();
+    const appointmentMethod = clean(
+      appointment.paymentMethod || requestedMethod,
+      40,
+    ).toUpperCase();
 
-    const payment = await prisma.payment.create({
+    if (
+      requestedMethod !== 'CARD' ||
+      appointmentMethod !== 'CARD'
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'payment_method_requires_authoritative_authorization_flow',
+        },
+        { status: 409 },
+      );
+    }
+
+    const amountCents =
+      appointmentAmountCents(appointment);
+    const currency =
+      appointmentCurrency(appointment);
+
+    if (amountCents <= 0) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'appointment_payment_not_required',
+        },
+        { status: 409 },
+      );
+    }
+
+    const keyHash = sha256Hex(
+      `${appointment.id}\u0000${who.uid}\u0000${idempotencyKey}`,
+    );
+    const reservationId =
+      `init-${keyHash.slice(0, 48)}`;
+    const appointmentMeta =
+      readMeta(appointment.meta);
+    const initialization =
+      readMeta(appointmentMeta.paymentInitialization);
+    const initializedAt = Date.parse(
+      clean(initialization.reservedAt, 80),
+    );
+    const reservationStale =
+      Number.isFinite(initializedAt) &&
+      Date.now() - initializedAt > 10 * 60_000;
+
+    if (
+      clean(appointment.paymentIntentId).startsWith('init-') &&
+      reservationStale
+    ) {
+      await prisma.appointment.updateMany({
+        where: {
+          id: appointment.id,
+          paymentIntentId: appointment.paymentIntentId,
+        },
+        data: {
+          paymentIntentId: null,
+          meta: jsonSafe({
+            ...appointmentMeta,
+            paymentInitialization: {
+              ...initialization,
+              state: 'STALE_RESERVATION_RELEASED',
+              releasedAt: new Date().toISOString(),
+            },
+          }),
+        },
+      });
+
+      appointment =
+        await loadAppointmentForPayment(appointment.id);
+    }
+
+    const reservedAt = new Date().toISOString();
+    const reservation = await prisma.appointment.updateMany({
+      where: {
+        id: appointment.id,
+        paymentIntentId: null,
+      },
       data: {
-        id: randomId('pay'),
-        encounterId,
-        caseId: b.caseId ?? null,
-        amountCents,
-        currency,
-        status: paymentStatusFromCheckout(checkout.status),
-        providerRef: checkout.reference,
+        paymentIntentId: reservationId,
+        paymentMethod: 'CARD',
         meta: jsonSafe({
-          ...(b.meta ?? {}),
-          appointmentId,
-          encounterId,
-          caseId: b.caseId ?? null,
-          provider: checkout.provider,
-          providerRef: checkout.reference,
-          paymentMethod,
-          redirectUrl: checkout.redirectUrl,
-          checkout: checkout.raw ?? null,
-        }),
-      } as any,
-    });
-
-    await prisma.appointment.update({
-      where: { id: appointmentId },
-      data: {
-        paymentProvider: checkout.provider,
-        paymentRef: checkout.reference,
-        paymentStatus:
-          payment.status === 'captured'
-            ? 'CAPTURED'
-            : payment.status === 'pending'
-              ? 'PENDING'
-              : 'FAILED',
-      } as any,
-    }).catch(() => null);
-
-    await prisma.auditEvent.create({
-      data: {
-        kind: 'payment_initiated',
-        actorId: who.uid,
-        actorRole: who.role,
-        subjectId: payment.id,
-        meta: jsonSafe({
-          appointmentId,
-          encounterId,
-          amountCents,
-          currency,
-          providerRef: checkout.reference,
-          paymentMethod,
+          ...readMeta(appointment.meta),
+          paymentInitialization: {
+            state: 'RESERVED',
+            reservationId,
+            idempotencyKeyHash: keyHash,
+            reservedAt,
+            actorUserId: who.uid,
+          },
         }),
       },
     });
 
+    if (reservation.count !== 1) {
+      const current =
+        await loadAppointmentForPayment(appointment.id);
+      const existing =
+        await existingPaymentResponse(current);
+
+      if (existing) {
+        return NextResponse.json(
+          existing,
+          { status: 200 },
+        );
+      }
+
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'payment_initialization_in_progress',
+        },
+        { status: 409 },
+      );
+    }
+
+    const paymentId =
+      `pay-${sha256Hex(
+        `${appointment.id}\u0000${idempotencyKey}`,
+      ).slice(0, 32)}`;
+    let checkout:
+      Awaited<ReturnType<typeof beginCheckout>> | null = null;
+
+    try {
+      checkout = await beginCheckout({
+        method: 'CARD',
+        appointmentId: appointment.id,
+        amountCents,
+        currency,
+        email: clean(body.email, 320) || null,
+        callbackUrl: safeCallbackUrl(
+          body.callbackUrl || body.callback_url,
+        ),
+        metadata: {
+          appointmentId: appointment.id,
+          encounterId: appointment.encounterId,
+          caseId: appointment.caseId,
+          clinicianId: appointment.clinicianId,
+          patientId: appointment.patientId,
+          source: 'patient_appointment_checkout',
+          idempotencyKeyHash: keyHash,
+          priceLockHash: clean(
+            readMeta(appointment.meta)
+              .bookingIntegrity?.priceLockHash,
+            128,
+          ) || null,
+        },
+      });
+    } catch (error) {
+      await prisma.appointment.updateMany({
+        where: {
+          id: appointment.id,
+          paymentIntentId: reservationId,
+        },
+        data: {
+          paymentIntentId: null,
+          meta: jsonSafe({
+            ...readMeta(appointment.meta),
+            paymentInitialization: {
+              state: 'PROVIDER_INITIALIZATION_FAILED',
+              reservationId,
+              idempotencyKeyHash: keyHash,
+              failedAt: new Date().toISOString(),
+            },
+          }),
+        },
+      });
+      throw error;
+    }
+
+    await prisma.appointment.updateMany({
+      where: {
+        id: appointment.id,
+        paymentIntentId: reservationId,
+      },
+      data: {
+        paymentProvider: checkout.provider,
+        paymentRef: checkout.reference,
+        meta: jsonSafe({
+          ...readMeta(appointment.meta),
+          paymentInitialization: {
+            state: 'PROVIDER_INITIALIZED',
+            reservationId,
+            provider: checkout.provider,
+            providerRef: checkout.reference,
+            idempotencyKeyHash: keyHash,
+            initializedAt: new Date().toISOString(),
+          },
+        }),
+      },
+    });
+
+    const paymentStatus =
+      paymentStatusFromCheckout(checkout.status);
+    const paymentMeta = jsonSafe({
+      appointmentId: appointment.id,
+      encounterId: appointment.encounterId,
+      caseId: appointment.caseId,
+      provider: checkout.provider,
+      providerRef: checkout.reference,
+      paymentMethod: 'CARD',
+      redirectUrl: checkout.redirectUrl,
+      checkout: checkout.raw ?? null,
+      idempotencyKeyHash: keyHash,
+      initializedAt: new Date().toISOString(),
+    });
+
+    const result = await prisma.$transaction(
+      async (tx: any) => {
+        const payment = await tx.payment.upsert({
+          where: { id: paymentId },
+          create: {
+            id: paymentId,
+            encounterId: appointment.encounterId,
+            caseId: appointment.caseId,
+            amountCents,
+            currency,
+            status: paymentStatus,
+            providerRef: checkout!.reference,
+            meta: paymentMeta,
+            orgId: appointment.orgId,
+          },
+          update: {
+            status: paymentStatus,
+            providerRef: checkout!.reference,
+            meta: paymentMeta,
+          },
+        });
+
+        const updatedAppointment =
+          await tx.appointment.update({
+            where: { id: appointment.id },
+            data: {
+              paymentIntentId: payment.id,
+              paymentMethod: 'CARD',
+              paymentProvider: checkout!.provider,
+              paymentRef: checkout!.reference,
+              paymentStatus:
+                payment.status === 'captured'
+                  ? 'CAPTURED'
+                  : payment.status === 'pending'
+                    ? 'PENDING'
+                    : 'FAILED',
+              status:
+                payment.status === 'captured' &&
+                appointment.status === 'pending_payment'
+                  ? 'confirmed'
+                  : appointment.status,
+              confirmedAt:
+                payment.status === 'captured'
+                  ? appointment.confirmedAt || new Date()
+                  : appointment.confirmedAt,
+              meta: jsonSafe({
+                ...readMeta(appointment.meta),
+                paymentInitialization: {
+                  state: 'INITIALIZED',
+                  reservationId,
+                  paymentId: payment.id,
+                  providerRef: checkout!.reference,
+                  idempotencyKeyHash: keyHash,
+                  initializedAt:
+                    new Date().toISOString(),
+                },
+              }),
+            },
+          });
+
+        await tx.appointmentAuditEvent
+          .create({
+            data: {
+              appointmentId: appointment.id,
+              action: 'payment_initialized',
+              actorType: who.role,
+              actorUserId: who.uid,
+              reason: 'appointment_card_checkout',
+              beforeJson: {
+                paymentIntentId:
+                  appointment.paymentIntentId,
+                paymentStatus:
+                  appointment.paymentStatus,
+              },
+              afterJson: {
+                paymentIntentId: payment.id,
+                paymentStatus:
+                  updatedAppointment.paymentStatus,
+                provider:
+                  checkout!.provider,
+                providerRef:
+                  checkout!.reference,
+                amountCents,
+                currency,
+                idempotencyKeyHash: keyHash,
+              },
+              orgId:
+                appointment.orgId || 'org-default',
+            },
+          })
+          .catch(() => null);
+
+        return {
+          payment,
+          appointment: updatedAppointment,
+        };
+      },
+    );
+
+    await prisma.auditEvent
+      .create({
+        data: {
+          kind: 'payment_initiated',
+          actorId: who.uid,
+          actorRole: who.role,
+          subjectId: result.payment.id,
+          meta: jsonSafe({
+            appointmentId: appointment.id,
+            encounterId: appointment.encounterId,
+            amountCents,
+            currency,
+            providerRef: checkout.reference,
+            paymentMethod: 'CARD',
+            idempotencyKeyHash: keyHash,
+          }),
+        },
+      })
+      .catch(() => null);
+
     return NextResponse.json(
       {
         ok: true,
-        payment,
+        payment: result.payment,
+        appointmentId: result.appointment.id,
         redirectUrl: checkout.redirectUrl,
         providerRef: checkout.reference,
         status: checkout.status,
       },
       { status: 201 },
     );
-  } catch (err: any) {
-    console.error('[api-gateway][payments] error', err);
+  } catch (error: any) {
+    console.error(
+      '[api-gateway][payments] error',
+      error,
+    );
+
+    const message = String(
+      error?.message || 'payment_failed',
+    );
+    const status = Number(error?.status) ||
+      (
+        message.toLowerCase().includes('unauthorized')
+          ? 401
+          : message.toLowerCase().includes('forbidden')
+            ? 403
+            : message.toLowerCase().includes('not_found')
+              ? 404
+              : 500
+      );
+
     return NextResponse.json(
-      { ok: false, error: String(err?.message || 'payment_failed') },
-      { status: 500 },
+      { ok: false, error: message },
+      { status },
     );
   }
 }

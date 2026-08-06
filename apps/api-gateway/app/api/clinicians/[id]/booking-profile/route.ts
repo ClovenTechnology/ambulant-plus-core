@@ -3,6 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { computeClinicianOperationalState } from '@/src/lib/clinician-operational-state';
 import { loadClinicianComplianceChecks } from '@/src/lib/credentialing/loadChecks';
+import {
+  isMultiCareFoundationUnavailable,
+  loadClinicianMultiCarePolicies,
+} from '@/src/clinicians/multi-care-policy';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -250,6 +254,65 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
     const { meta, profile } = readProfileJson(clinician);
     const fees = buildFeeProfile(clinician, profile);
 
+    let multiCare: any = {
+      available: false,
+      reason: 'clinician_user_identity_unavailable',
+      policies: [],
+    };
+
+    if (clinician.userId) {
+      try {
+        const loaded = await loadClinicianMultiCarePolicies({
+          clinicianUserId: String(clinician.userId),
+          currency: fees.standard.currency,
+        });
+
+        multiCare = {
+          available: true,
+          ...loaded,
+          policies: loaded.policies.map((policy) => ({
+            id: policy.id,
+            feeKind: policy.feeKind,
+            visitMode: policy.visitMode,
+            enabled: policy.enabled,
+            pricingMode: policy.pricingMode,
+            currency: policy.currency,
+            includedCareRecipients:
+              policy.includedCareRecipients,
+            additionalRecipientAmountMinor:
+              policy.additionalRecipientAmountMinor,
+            additionalRecipientPercentBps:
+              policy.additionalRecipientPercentBps,
+            packageAmountMinor: policy.packageAmountMinor,
+            maxCareRecipients: policy.maxCareRecipients,
+            additionalMinutesPerRecipient:
+              policy.additionalMinutesPerRecipient,
+            maxAdditionalMinutes:
+              policy.maxAdditionalMinutes,
+            requireAllRecipientsVerifiedBeforeCheckout:
+              policy.requireAllRecipientsVerifiedBeforeCheckout,
+            allowPendingAdultInvitations:
+              policy.allowPendingAdultInvitations,
+            allowProvisionalDependentProfiles:
+              policy.allowProvisionalDependentProfiles,
+            version: policy.version,
+            effectiveFrom: policy.effectiveFrom,
+            persisted: policy.persisted,
+          })),
+        };
+      } catch (error: any) {
+        if (!isMultiCareFoundationUnavailable(error)) {
+          throw error;
+        }
+
+        multiCare = {
+          available: false,
+          reason: 'multi_care_foundation_unavailable',
+          policies: [],
+        };
+      }
+    }
+
     const acceptedSchemes = [
       ...splitSchemes(clinician.acceptedSchemes),
       ...splitSchemes(profile.acceptedSchemes),
@@ -352,6 +415,7 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
       ok: true,
       clinician: clinicianOut,
       fees,
+      multiCare,
       refundPolicy: DEFAULT_REFUND_POLICY,
       rules: {
         followUpRequiresOpenCase: true,

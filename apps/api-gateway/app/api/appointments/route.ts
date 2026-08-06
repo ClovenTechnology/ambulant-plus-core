@@ -1,10 +1,20 @@
 // apps/api-gateway/app/api/appointments/route.ts
 import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
-import { TelevisitRole } from '@prisma/client';
 import { prisma } from '@/src/lib/db';
-import { readIdentity } from '@/src/lib/identity';
-import { upsertTicket } from '@/src/lib/join';
+import {
+  readIdentity,
+  requireAuthenticatedIdentity,
+  requireTrustedIdentityInProduction,
+} from '@/src/lib/identity';
+import {
+  MultiCareBookingError,
+  assertMultiCarePriceLock,
+  findMultiCareConflicts,
+  resolveAuthorizedCareRecipients,
+  resolveMultiCareQuote,
+  verifyMultiCarePriceLock,
+} from '@/src/appointments/multi-care';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -28,6 +38,88 @@ function json(data: any, status = 200) {
 
 function clean(value: unknown, max = 240) {
   return String(value ?? '').trim().slice(0, max);
+}
+
+function readMeta(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, any>)
+    : {};
+}
+
+function sha256Hex(value: string) {
+  return crypto
+    .createHash('sha256')
+    .update(value)
+    .digest('hex');
+}
+
+function normalizeIdempotencyKey(req: NextRequest) {
+  const value = clean(
+    req.headers.get('idempotency-key') ||
+      req.headers.get('x-idempotency-key'),
+    180,
+  );
+
+  if (!value) {
+    throw new MultiCareBookingError(
+      'idempotency_key_required',
+      428,
+    );
+  }
+
+  if (!/^[A-Za-z0-9._:-]{8,180}$/.test(value)) {
+    throw new MultiCareBookingError(
+      'invalid_idempotency_key',
+      400,
+    );
+  }
+
+  return value;
+}
+
+function deterministicId(
+  prefix: string,
+  ...components: string[]
+) {
+  return `${prefix}-${sha256Hex(components.join('\u0000')).slice(0, 32)}`;
+}
+
+function bookingRequestFingerprint(value: {
+  clinicianId: string;
+  hostUserId: string;
+  actorPatientId: string;
+  startsAt: Date;
+  requestedEndsAt: Date;
+  finalEndsAt: Date;
+  appointmentKind: string;
+  paymentMethod: string | null;
+  recipientIds: string[];
+  relationshipIds: Array<string | null>;
+  totalAmountMinor: number;
+  currency: string;
+  policyId: string | null;
+  policyVersion: number | null;
+}) {
+  return sha256Hex(
+    JSON.stringify({
+      clinicianId: value.clinicianId,
+      hostUserId: value.hostUserId,
+      actorPatientId: value.actorPatientId,
+      startsAt: value.startsAt.toISOString(),
+      requestedEndsAt: value.requestedEndsAt.toISOString(),
+      finalEndsAt: value.finalEndsAt.toISOString(),
+      appointmentKind: value.appointmentKind,
+      paymentMethod: value.paymentMethod,
+      recipientIds: [...value.recipientIds].sort(),
+      relationshipIds: [...value.relationshipIds]
+        .map((item) => item || '')
+        .sort(),
+      totalAmountMinor: value.totalAmountMinor,
+      currency: value.currency,
+      policyId: value.policyId,
+      policyVersion: value.policyVersion,
+    }),
+  );
 }
 
 function cents(value: unknown, fallback = 0) {
@@ -97,18 +189,23 @@ async function revalidateSelectedAvailabilitySlot(args: {
   url.searchParams.set('type', type);
   if (args.caseId) url.searchParams.set('caseId', args.caseId);
 
+  const headers = new Headers();
+  for (const key of [
+    'authorization',
+    'cookie',
+    'x-ambulant-identity',
+    'x-request-id',
+    'x-correlation-id',
+  ]) {
+    const value = args.req.headers.get(key);
+    if (value) headers.set(key, value);
+  }
+  headers.set('accept', 'application/json');
+
   const res = await fetch(url.toString(), {
     method: 'GET',
     cache: 'no-store',
-    headers: {
-      accept: 'application/json',
-      'x-role': 'patient',
-      'x-uid': args.hostUserId || args.patientId,
-      'x-user-id': args.hostUserId || args.patientId,
-      'x-actor-ref-id': args.patientId,
-      'x-patient-id': args.patientId,
-      'x-current-patient-id': args.patientId,
-    },
+    headers,
   });
 
   const data: any = await readJsonSafe(res);
@@ -299,42 +396,111 @@ export async function OPTIONS() {
 export async function GET(req: NextRequest) {
   try {
     const who = readIdentity(req.headers);
-    const u = new URL(req.url);
+    requireTrustedIdentityInProduction(req.headers, who);
+    requireAuthenticatedIdentity(who);
 
-    let patientId = clean(u.searchParams.get('patientId')) || undefined;
-    const subjectPatientId = clean(u.searchParams.get('subjectPatientId')) || undefined;
-    const clinicianId = clean(u.searchParams.get('clinicianId')) || undefined;
-
-    if (!patientId && who.role === 'patient') {
-      patientId = clean(who.actorRefId || who.uid) || undefined;
-    }
-
+    const url = new URL(req.url);
     const excludeSimulation =
-      u.searchParams.get('excludeSimulation') === '1' ||
-      u.searchParams.get('production') === '1' ||
-      u.searchParams.get('production-check') === '1';
+      url.searchParams.get('excludeSimulation') === '1' ||
+      url.searchParams.get('production') === '1' ||
+      url.searchParams.get('production-check') === '1';
 
     const where: any = {};
+    const role = clean(who.role, 80).toLowerCase();
 
-    if (clinicianId) where.clinicianId = clinicianId;
+    if (role === 'patient') {
+      const actorPatientId = clean(who.actorRefId);
+      const hostUserId = clean(who.uid);
 
-    const patientOr: any[] = [];
-    if (patientId) {
-      patientOr.push({ patientId });
-      patientOr.push({ hostUserId: patientId });
+      if (!actorPatientId || !hostUserId) {
+        return json(
+          { ok: false, error: 'patient_identity_required' },
+          401,
+        );
+      }
+
+      where.OR = [
+        { hostUserId },
+        { patientId: actorPatientId },
+        { subjectPatientId: actorPatientId },
+        {
+          careRecipients: {
+            some: { patientId: actorPatientId },
+          },
+        },
+      ];
+    } else if (
+      role === 'clinician' ||
+      role === 'clinician_staff_medical' ||
+      role === 'clinician_staff_non_medical'
+    ) {
+      const identityRefs = uniqueClean([
+        who.actorRefId,
+        who.uid,
+      ]);
+      const clinician = await prisma.clinicianProfile.findFirst({
+        where: {
+          OR: identityRefs.flatMap((identityRef) => [
+            { id: identityRef },
+            { userId: identityRef },
+          ]),
+        },
+        select: { id: true },
+      });
+
+      if (!clinician) {
+        return json(
+          { ok: false, error: 'clinician_identity_required' },
+          401,
+        );
+      }
+
+      where.clinicianId = clinician.id;
+    } else if (
+      role === 'admin' ||
+      role === 'admin_staff' ||
+      role === 'system'
+    ) {
+      const clinicianId =
+        clean(url.searchParams.get('clinicianId')) || undefined;
+      const patientId =
+        clean(url.searchParams.get('patientId')) || undefined;
+      const subjectPatientId =
+        clean(url.searchParams.get('subjectPatientId')) || undefined;
+
+      if (clinicianId) where.clinicianId = clinicianId;
+
+      const patientScope: any[] = [];
+      if (patientId) {
+        patientScope.push(
+          { patientId },
+          { hostUserId: patientId },
+          {
+            careRecipients: {
+              some: { patientId },
+            },
+          },
+        );
+      }
+      if (subjectPatientId) {
+        patientScope.push({ subjectPatientId });
+      }
+      if (patientScope.length > 0) where.OR = patientScope;
+    } else {
+      return json(
+        { ok: false, error: 'forbidden' },
+        403,
+      );
     }
-    if (subjectPatientId) {
-      patientOr.push({ subjectPatientId });
-    }
 
-    if (patientOr.length === 1) {
-      Object.assign(where, patientOr[0]);
-    } else if (patientOr.length > 1) {
-      where.OR = patientOr;
-    }
-
-    const from = dateFrom(u.searchParams.get('from') || u.searchParams.get('dateFrom'));
-    const to = dateFrom(u.searchParams.get('to') || u.searchParams.get('dateTo'));
+    const from = dateFrom(
+      url.searchParams.get('from') ||
+        url.searchParams.get('dateFrom'),
+    );
+    const to = dateFrom(
+      url.searchParams.get('to') ||
+        url.searchParams.get('dateTo'),
+    );
 
     if (from || to) {
       where.startsAt = {};
@@ -354,13 +520,23 @@ export async function GET(req: NextRequest) {
 
     const visitRows = filtered.length
       ? await prisma.televisit.findMany({
-          where: { appointmentId: { in: filtered.map((item) => item.id) } },
+          where: {
+            appointmentId: {
+              in: filtered.map((item) => item.id),
+            },
+          },
         })
       : [];
 
-    const clinicianIds = uniqueClean(filtered.map((item) => item.clinicianId));
+    const clinicianIds = uniqueClean(
+      filtered.map((item) => item.clinicianId),
+    );
     const patientIds = uniqueClean(
-      filtered.flatMap((item) => [item.patientId, item.subjectPatientId, item.hostUserId]),
+      filtered.flatMap((item) => [
+        item.patientId,
+        item.subjectPatientId,
+        item.hostUserId,
+      ]),
     );
 
     const [clinicianRows, patientRows] = await Promise.all([
@@ -404,17 +580,34 @@ export async function GET(req: NextRequest) {
         : Promise.resolve([]),
     ]);
 
-    const visitByAppt = new Map(visitRows.map((v) => [String(v.appointmentId), v]));
-    const clinicianById = new Map(clinicianRows.map((c) => [String(c.id), c]));
+    const visitByAppt = new Map(
+      visitRows.map((visit) => [
+        String(visit.appointmentId),
+        visit,
+      ]),
+    );
+    const clinicianById = new Map(
+      clinicianRows.map((clinician) => [
+        String(clinician.id),
+        clinician,
+      ]),
+    );
+    const patientById = new Map<string, any>();
 
-    const patientById = new Map();
-    for (const p of patientRows as any[]) {
-      patientById.set(String(p.id), p);
-      if (p.userId) patientById.set(String(p.userId), p);
+    for (const patient of patientRows as any[]) {
+      patientById.set(String(patient.id), patient);
+      if (patient.userId) {
+        patientById.set(String(patient.userId), patient);
+      }
     }
 
     const items = filtered.map((item) =>
-      shapeAppointment(item, visitByAppt, clinicianById, patientById),
+      shapeAppointment(
+        item,
+        visitByAppt,
+        clinicianById,
+        patientById,
+      ),
     );
 
     return json({
@@ -423,77 +616,142 @@ export async function GET(req: NextRequest) {
       items,
       total: items.length,
     });
-  } catch (err: any) {
-    console.error('[api-gateway][appointments.GET] error', err);
-    return json({ ok: false, error: err?.message || 'appointments_load_failed' }, 500);
+  } catch (error: any) {
+    console.error(
+      '[api-gateway][appointments.GET] error',
+      error,
+    );
+
+    const message = String(
+      error?.message || 'appointments_load_failed',
+    );
+    const lowerMessage = message.toLowerCase();
+    const status =
+      lowerMessage.includes('unauthorized') ||
+      lowerMessage.includes('untrusted')
+        ? 401
+        : 500;
+
+    return json(
+      { ok: false, error: message },
+      status,
+    );
   }
 }
 
 export async function POST(req: NextRequest) {
   try {
     const who = readIdentity(req.headers);
+    requireTrustedIdentityInProduction(req.headers, who);
+    requireAuthenticatedIdentity(who);
+
+    if (who.role !== 'patient' || !who.uid || !who.actorRefId) {
+      throw new MultiCareBookingError(
+        'patient_identity_required',
+        401,
+      );
+    }
+
+    const idempotencyKey = normalizeIdempotencyKey(req);
     const body = await req.json().catch(() => ({} as any));
 
     const clinicianRef = clean(
       body.clinicianId ||
-      body.clinician_id ||
-      body.providerId ||
-      body.provider_id,
+        body.clinician_id ||
+        body.providerId ||
+        body.provider_id,
     );
 
-    const patientId = clean(
-      body.patientId ||
-      body.patient_id ||
-      who.actorRefId ||
-      who.uid,
-    );
+    const actorPatientId = clean(who.actorRefId);
 
-    if (!clinicianRef) return json({ ok: false, error: 'clinicianId_required' }, 400);
-    if (!patientId) return json({ ok: false, error: 'patient_identity_required' }, 401);
+    if (!clinicianRef) {
+      return json({ ok: false, error: 'clinicianId_required' }, 400);
+    }
 
-    const hostUserId = clean(body.hostUserId || body.host_user_id || who.uid || patientId);
-    const subjectPatientId = clean(
+    if (!actorPatientId) {
+      return json(
+        { ok: false, error: 'patient_identity_required' },
+        401,
+      );
+    }
+
+    const hostUserId = clean(who.uid);
+    const fallbackSubjectPatientId = clean(
       body.subjectPatientId ||
         body.subject_patient_id ||
         body.person?.subjectPatientId ||
-        patientId,
+        actorPatientId,
     );
 
-    const startsAt = dateFrom(body.startsAt || body.starts_at || body.start || body.startTime);
-    if (!startsAt) return json({ ok: false, error: 'startsAt_required' }, 400);
+    const startsAt = dateFrom(
+      body.startsAt ||
+        body.starts_at ||
+        body.start ||
+        body.startTime,
+    );
 
-    const durationMin = Math.max(
+    if (!startsAt) {
+      return json({ ok: false, error: 'startsAt_required' }, 400);
+    }
+
+    const requestedDurationMin = Math.max(
       5,
       Math.min(
         240,
-        Number(body.durationMin || body.durationMinutes || body.duration_min || 30) || 30,
+        Number(
+          body.durationMin ||
+            body.durationMinutes ||
+            body.duration_min ||
+            30,
+        ) || 30,
       ),
     );
 
-    const endsAt =
-      dateFrom(body.endsAt || body.ends_at || body.end || body.endTime) ||
-      new Date(startsAt.getTime() + durationMin * 60 * 1000);
+    const requestedEndsAt =
+      dateFrom(
+        body.endsAt ||
+          body.ends_at ||
+          body.end ||
+          body.endTime,
+      ) ||
+      new Date(
+        startsAt.getTime() +
+          requestedDurationMin * 60_000,
+      );
 
-    if (endsAt <= startsAt) return json({ ok: false, error: 'invalid_time_range' }, 400);
-
-    const appointmentKind = clean(body.kind).toUpperCase() === 'FOLLOWUP' ? 'FOLLOWUP' : 'STANDARD';
-    const requestedCaseId = clean(body.caseId || body.case_id);
-
-    if (appointmentKind === 'FOLLOWUP' && !requestedCaseId) {
-      return json({ ok: false, error: 'followup_case_required' }, 400);
+    if (requestedEndsAt <= startsAt) {
+      return json(
+        { ok: false, error: 'invalid_time_range' },
+        400,
+      );
     }
 
-    const joinClosesAtPreview = new Date(endsAt.getTime() + 60 * 60 * 1000);
+    const appointmentKind =
+      clean(body.kind).toUpperCase() === 'FOLLOWUP'
+        ? 'FOLLOWUP'
+        : 'STANDARD';
+    const requestedCaseId = clean(
+      body.caseId || body.case_id,
+    );
 
-    if (joinClosesAtPreview.getTime() <= Date.now() + 30_000) {
+    const joinClosesAtPreview = new Date(
+      requestedEndsAt.getTime() + 60 * 60 * 1000,
+    );
+
+    if (
+      joinClosesAtPreview.getTime() <=
+      Date.now() + 30_000
+    ) {
       return json(
         {
           ok: false,
           error: 'appointment_window_expired',
-          message: 'This slot is no longer available. Please choose a future slot.',
+          message:
+            'This slot is no longer available. Please choose a future slot.',
           startsAt: startsAt.toISOString(),
-          endsAt: endsAt.toISOString(),
-          joinClosesAt: joinClosesAtPreview.toISOString(),
+          endsAt: requestedEndsAt.toISOString(),
+          joinClosesAt:
+            joinClosesAtPreview.toISOString(),
         },
         400,
       );
@@ -504,7 +762,6 @@ export async function POST(req: NextRequest) {
         OR: [
           { id: clinicianRef },
           { userId: clinicianRef },
-          { email: clinicianRef },
         ],
       },
       select: {
@@ -525,26 +782,36 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    if (!clinician) return json({ ok: false, error: 'unknown_clinician' }, 404);
+    if (!clinician) {
+      return json(
+        { ok: false, error: 'unknown_clinician' },
+        404,
+      );
+    }
 
     if (
       clinician.disabled ||
       clinician.archived ||
-      String(clinician.status || '').toLowerCase() !== 'active'
+      String(clinician.status || '').toLowerCase() !==
+        'active'
     ) {
-      return json({ ok: false, error: 'clinician_not_bookable' }, 409);
+      return json(
+        { ok: false, error: 'clinician_not_bookable' },
+        409,
+      );
     }
 
-    const slotRevalidation: any = await revalidateSelectedAvailabilitySlot({
-      req,
-      clinicianId: clinician.id,
-      patientId,
-      hostUserId,
-      startsAt,
-      endsAt,
-      kind: appointmentKind,
-      caseId: requestedCaseId,
-    });
+    const slotRevalidation: any =
+      await revalidateSelectedAvailabilitySlot({
+        req,
+        clinicianId: clinician.id,
+        patientId: actorPatientId,
+        hostUserId,
+        startsAt,
+        endsAt: requestedEndsAt,
+        kind: appointmentKind,
+        caseId: requestedCaseId,
+      });
 
     if (!slotRevalidation.ok) {
       return json(
@@ -557,404 +824,1097 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const validatedSlot = slotRevalidation.slot || {};
-    const availabilityMeta = slotRevalidation.availabilityMeta || null;
+    const validatedSlot =
+      slotRevalidation.slot || {};
+    const availabilityMeta =
+      slotRevalidation.availabilityMeta || null;
 
-    const patientProfile = subjectPatientId
-      ? await prisma.patientProfile.findFirst({
-          where: {
-            OR: [
-              { id: subjectPatientId },
-              { userId: subjectPatientId },
-              { id: patientId },
-              { userId: patientId },
-            ],
-          },
-          select: { id: true, userId: true, name: true, gender: true, dob: true, photoUrl: true },
-        }).catch(() => null)
-      : null;
+    const recipients =
+      await resolveAuthorizedCareRecipients({
+        rawRecipients:
+          body.careRecipients ||
+          body.care_recipients,
+        actorPatientId,
+        hostUserId,
+        fallbackSubjectPatientId,
+        fallbackRelationshipId:
+          clean(
+            body.familyRelationshipId ||
+              body.family_relationship_id ||
+              body.person?.relationshipId,
+          ) || null,
+        fallbackCaseId:
+          requestedCaseId || null,
+      });
 
-    const activeStatuses = ['cancelled', 'canceled', 'Cancelled', 'completed', 'Completed'];
+    if (
+      appointmentKind === 'FOLLOWUP' &&
+      recipients.some((recipient) => !recipient.caseId)
+    ) {
+      throw new MultiCareBookingError(
+        'followup_case_required_for_each_care_recipient',
+        400,
+      );
+    }
 
-    const conflict = await prisma.appointment.findFirst({
-      where: {
-        clinicianId: clinician.id,
-        startsAt: { lt: endsAt },
-        endsAt: { gt: startsAt },
-        status: { notIn: activeStatuses },
-      },
-      select: { id: true },
+    const baseAmountMinor = cents(
+      validatedSlot.feeCents,
+      clinician.feeCents || 0,
+    );
+    const currency =
+      clean(
+        validatedSlot.currency ||
+          clinician.currency ||
+          'ZAR',
+        3,
+      ).toUpperCase() || 'ZAR';
+    const baseDurationMin = Math.max(
+      5,
+      Number(
+        validatedSlot.durationMin ||
+          Math.round(
+            (
+              requestedEndsAt.getTime() -
+              startsAt.getTime()
+            ) /
+              60_000,
+          ),
+      ) || requestedDurationMin,
+    );
+
+    const quote = await resolveMultiCareQuote({
+      clinicianUserId: clean(
+        clinician.userId || clinician.id,
+      ),
+      recipients,
+      feeKind: appointmentKind,
+      visitMode: 'televisit',
+      baseAmountMinor,
+      currency,
+      baseDurationMin,
     });
 
-    if (conflict) return json({ ok: false, error: 'clinician_conflict', appointmentId: conflict.id }, 409);
+    const finalEndsAt = new Date(
+      startsAt.getTime() +
+        quote.durationMin * 60_000,
+    );
 
-    const patientConflictOr: any[] = [];
-    if (patientId) patientConflictOr.push({ patientId }, { hostUserId: patientId });
-    if (hostUserId) patientConflictOr.push({ hostUserId });
-    if (subjectPatientId) patientConflictOr.push({ subjectPatientId });
+    const suppliedPriceLock =
+      typeof body.priceLock === 'string'
+        ? body.priceLock
+        : typeof body.price_lock === 'string'
+          ? body.price_lock
+          : body.priceLock?.token ||
+            body.price_lock?.token;
 
-    const patientConflict = patientConflictOr.length
-      ? await prisma.appointment.findFirst({
-          where: {
-            OR: patientConflictOr,
-            startsAt: { lt: endsAt },
-            endsAt: { gt: startsAt },
-            status: { notIn: activeStatuses },
-          },
-          select: { id: true, startsAt: true, endsAt: true, clinicianId: true },
-        })
-      : null;
+    if (!suppliedPriceLock) {
+      throw new MultiCareBookingError(
+        'price_lock_required',
+        409,
+      );
+    }
 
-    if (patientConflict) {
+    const lockPayload =
+      verifyMultiCarePriceLock(suppliedPriceLock);
+
+    assertMultiCarePriceLock({
+      payload: lockPayload,
+      clinicianId: clinician.id,
+      hostUserId,
+      actorPatientId,
+      startsAt,
+      requestedEndsAt,
+      finalEndsAt,
+      quote,
+      recipientIds: recipients.map(
+        (recipient) => recipient.patientId,
+      ),
+    });
+
+    const paymentMethodRaw = clean(
+      body.paymentMethod || body.payment_method,
+    ).toUpperCase();
+    const paymentMethod =
+      paymentMethodRaw === 'MEDICAL_AID' ||
+      paymentMethodRaw === 'VOUCHER' ||
+      paymentMethodRaw === 'MPESA'
+        ? paymentMethodRaw
+        : paymentMethodRaw === 'CARD'
+          ? 'CARD'
+          : null;
+
+    const appointmentId = deterministicId(
+      'appt',
+      hostUserId,
+      idempotencyKey,
+    );
+    const requestFingerprint = bookingRequestFingerprint({
+      clinicianId: clinician.id,
+      hostUserId,
+      actorPatientId,
+      startsAt,
+      requestedEndsAt,
+      finalEndsAt,
+      appointmentKind,
+      paymentMethod,
+      recipientIds: recipients.map(
+        (recipient) => recipient.patientId,
+      ),
+      relationshipIds: recipients.map(
+        (recipient) => recipient.familyRelationshipId,
+      ),
+      totalAmountMinor: quote.totalAmountMinor,
+      currency: quote.currency,
+      policyId: quote.policy?.id || null,
+      policyVersion: quote.policy?.version ?? null,
+    });
+
+    const existingAppointment =
+      await prisma.appointment.findUnique({
+        where: { id: appointmentId },
+      });
+
+    if (existingAppointment) {
+      const existingMeta = readMeta(existingAppointment.meta);
+      const existingIntegrity = readMeta(
+        existingMeta.bookingIntegrity,
+      );
+
+      if (
+        clean(existingIntegrity.requestFingerprint, 128) !==
+        requestFingerprint
+      ) {
+        throw new MultiCareBookingError(
+          'idempotency_key_reused_with_different_booking',
+          409,
+        );
+      }
+
+      const [existingVisit, existingRecipients] =
+        await Promise.all([
+          prisma.televisit.findFirst({
+            where: {
+              appointmentId: existingAppointment.id,
+            },
+          }),
+          (prisma as any).appointmentCareRecipient.findMany({
+            where: {
+              appointmentId: existingAppointment.id,
+            },
+            orderBy: { sequence: 'asc' },
+          }),
+        ]);
+
+      const replayAppointment = {
+        ...existingAppointment,
+        startsAt:
+          existingAppointment.startsAt.toISOString(),
+        endsAt:
+          existingAppointment.endsAt.toISOString(),
+        createdAt:
+          existingAppointment.createdAt.toISOString(),
+        updatedAt:
+          existingAppointment.updatedAt.toISOString(),
+        visitId: existingVisit?.id || null,
+        televisitId: existingVisit?.id || null,
+        roomId:
+          existingAppointment.roomId ||
+          existingVisit?.roomId ||
+          null,
+        clinicianJoinUrl:
+          existingMeta.clinicianJoinUrl || null,
+        patientJoinUrl:
+          existingMeta.patientJoinUrl || null,
+        clinicianParticipantId:
+          existingMeta.clinicianParticipantId || null,
+        patientParticipantId:
+          existingMeta.patientParticipantId || null,
+        patientName:
+          existingMeta.patientDisplayName || null,
+        patientDisplayName:
+          existingMeta.patientDisplayName || null,
+        patientAvatarUrl:
+          existingMeta.patientAvatarUrl || null,
+        clinicianName:
+          existingMeta.clinicianDisplayName || null,
+        clinicianDisplayName:
+          existingMeta.clinicianDisplayName || null,
+        clinicianAvatarUrl:
+          existingMeta.clinicianAvatarUrl || null,
+        clinicianSpecialty:
+          existingMeta.clinicianSpecialty || null,
+        clinicianLocation:
+          existingMeta.clinicianLocation || null,
+        multiCare:
+          existingMeta.multiCare || null,
+      };
+
+      return json(
+        {
+          ok: true,
+          idempotentReplay: true,
+          appointment: replayAppointment,
+          appointmentId: existingAppointment.id,
+          appointment_id: existingAppointment.id,
+          encounterId: existingAppointment.encounterId,
+          encounter_id: existingAppointment.encounterId,
+          encounterIds: existingRecipients
+            .map((recipient: any) => recipient.encounterId)
+            .filter(Boolean),
+          visitId: existingVisit?.id || null,
+          televisitId: existingVisit?.id || null,
+          roomId:
+            existingAppointment.roomId ||
+            existingVisit?.roomId ||
+            null,
+          clinicianJoinUrl:
+            existingMeta.clinicianJoinUrl || null,
+          patientJoinUrl:
+            existingMeta.patientJoinUrl || null,
+          paymentStatus:
+            existingAppointment.paymentStatus,
+          status: existingAppointment.status,
+          multiCare: existingMeta.multiCare || null,
+        },
+        200,
+      );
+    }
+
+    const conflicts = await findMultiCareConflicts({
+      clinicianId: clinician.id,
+      hostUserId,
+      actorPatientId,
+      recipientPatientIds: recipients.map(
+        (recipient) => recipient.patientId,
+      ),
+      startsAt,
+      endsAt: finalEndsAt,
+    });
+
+    if (conflicts.clinicianConflict) {
+      return json(
+        {
+          ok: false,
+          error: 'clinician_conflict',
+          appointmentId:
+            conflicts.clinicianConflict.id,
+        },
+        409,
+      );
+    }
+
+    if (conflicts.patientConflict) {
       return json(
         {
           ok: false,
           error: 'patient_conflict',
-          appointmentId: patientConflict.id,
-          startsAt: patientConflict.startsAt,
-          endsAt: patientConflict.endsAt,
-          clinicianId: patientConflict.clinicianId,
+          appointmentId:
+            conflicts.patientConflict.id,
+          startsAt:
+            conflicts.patientConflict.startsAt,
+          endsAt:
+            conflicts.patientConflict.endsAt,
+          clinicianId:
+            conflicts.patientConflict.clinicianId,
+          patientId:
+            conflicts.patientConflict.patientId ||
+            null,
         },
         409,
       );
     }
 
     const now = new Date();
-    const orgId = clean(body.orgId || body.org_id || req.headers.get('x-org-id')) || 'org-default';
-
-    const appointmentId = clean(body.id || body.appointmentId) || 'appt-' + crypto.randomUUID();
-    const encounterId = clean(body.encounterId || body.encounter_id) || 'enc-' + crypto.randomUUID();
-    const caseId = requestedCaseId || 'case-' + crypto.randomUUID();
-    const roomId = clean(body.roomId || body.room_id) || 'room-' + crypto.randomUUID();
-
-    const patientParticipantId = 'pat-' + patientId;
-    const clinicianParticipantId = 'clin-' + clinician.id;
-
-    const priceCents = cents(
-      validatedSlot.feeCents ?? body.priceCents ?? body.price_cents ?? body.amountMinor,
-      clinician.feeCents || 0,
+    const orgId = clean(who.orgId) || 'org-default';
+    const primaryRecipient = recipients[0];
+    const primaryEncounterId = deterministicId(
+      'enc',
+      appointmentId,
+      primaryRecipient.patientId,
     );
-    const currency = clean(validatedSlot.currency || body.currency, 3) || clinician.currency || 'ZAR';
-    const platformFeeCents = Math.round(priceCents * 0.2);
-    const clinicianTakeCents = Math.max(0, priceCents - platformFeeCents);
+    const roomId = deterministicId(
+      'room',
+      appointmentId,
+    );
+    const patientParticipantId =
+      `pat-${primaryRecipient.patientId}`;
+    const clinicianParticipantId =
+      `clin-${clinician.id}`;
 
-    const paymentMethodRaw = clean(body.paymentMethod || body.payment_method).toUpperCase();
-    const paymentMethod =
-      paymentMethodRaw === 'MEDICAL_AID' || paymentMethodRaw === 'VOUCHER' || paymentMethodRaw === 'MPESA'
-        ? paymentMethodRaw
-        : paymentMethodRaw === 'CARD'
-          ? 'CARD'
-          : null;
+    const runtimeRecipients = recipients.map(
+      (recipient, sequence) => {
+        const allocation = quote.allocations[sequence];
+
+        return {
+          ...recipient,
+          encounterId:
+            sequence === 0
+              ? primaryEncounterId
+              : deterministicId(
+                  'enc',
+                  appointmentId,
+                  recipient.patientId,
+                ),
+          caseId:
+            recipient.caseId ||
+            (
+              sequence === 0 &&
+              requestedCaseId
+            ) ||
+            deterministicId(
+              'case',
+              appointmentId,
+              recipient.patientId,
+            ),
+          partyId:
+            `pat-${recipient.patientId}`,
+          allocation,
+        };
+      },
+    );
+
+    const primaryRuntimeRecipient =
+      runtimeRecipients[0];
+    const primaryCaseId =
+      primaryRuntimeRecipient.caseId;
+
+    const priceCents = quote.totalAmountMinor;
+    const platformFeeCents =
+      Math.round(priceCents * 0.2);
+    const clinicianTakeCents =
+      Math.max(0, priceCents - platformFeeCents);
 
     const paymentStatus =
-      priceCents <= 0 || paymentMethod === 'VOUCHER'
+      priceCents <= 0
         ? 'NOT_REQUIRED'
-        : body.paymentStatus === 'AUTHORIZED'
-          ? 'AUTHORIZED'
-          : body.paymentStatus === 'CAPTURED'
-            ? 'CAPTURED'
-            : 'PENDING';
-
+        : 'PENDING';
     const appointmentStatus =
-      paymentStatus === 'PENDING' ? 'pending_payment' : 'confirmed';
+      paymentStatus === 'NOT_REQUIRED'
+        ? 'confirmed'
+        : 'pending_payment';
 
-    const joinOpensAt = new Date(startsAt.getTime() - 15 * 60 * 1000);
-    const joinClosesAt = new Date(endsAt.getTime() + 60 * 60 * 1000);
+    const joinOpensAt = new Date(
+      startsAt.getTime() - 15 * 60 * 1000,
+    );
+    const joinClosesAt = new Date(
+      finalEndsAt.getTime() + 60 * 60 * 1000,
+    );
 
-    const baseMeta = {
-      source: 'patient.booking',
-      roomId,
-      appointmentId,
-      encounterId,
-      caseId,
-      patientParticipantId,
-      clinicianParticipantId,
-      patientDisplayName:
-        clean(body.patientName || body.patient_name) ||
-        clean(patientProfile?.name) ||
-        'Patient',
-      patientAvatarUrl: patientProfile?.photoUrl || null,
-      patientGender: patientProfile?.gender || null,
-      clinicianDisplayName: clinician.displayName || 'Clinician',
-      clinicianAvatarUrl: clinician.photoUrl || null,
-      clinicianSpecialty: clinician.specialty || null,
-      clinicianGender: clinician.gender || null,
-      clinicianLocation: clean(clinician.city) || clean(clinician.practiceName) || clean(clinician.country) || null,
-      slotContract: {
-        source: 'server_revalidated_availability',
-        status: validatedSlot.status || null,
-        utcStart: startsAt.toISOString(),
-        utcEnd: endsAt.toISOString(),
-        localStart: validatedSlot.localStart || null,
-        localEnd: validatedSlot.localEnd || null,
-        localDate: validatedSlot.localDate || null,
-        localStartTime: validatedSlot.localStartTime || null,
-        localEndTime: validatedSlot.localEndTime || null,
-        localTimeLabel: validatedSlot.localTimeLabel || null,
-        timezone: validatedSlot.timezone || availabilityMeta?.timezone || null,
-        durationMin: validatedSlot.durationMin || null,
-        bufferMin: validatedSlot.bufferMin || null,
-        feeCents: validatedSlot.feeCents ?? null,
-        currency: validatedSlot.currency || currency,
-        availabilitySource: availabilityMeta?.source || null,
-        scheduleMatchedUserId: availabilityMeta?.schedule?.matchedUserId || null,
-      },
-      participants: [
-        {
-          partyId: clinicianParticipantId,
-          clinicianId: clinician.id,
-          role: 'LEAD_CLINICIAN',
-          required: true,
-          source: 'appointment',
-          name: clinician.displayName || 'Clinician',
-          specialty: clinician.specialty || null,
-          access: {
-            canJoinTelevisit: true,
-            canViewHealth: true,
-            canBookAppointments: false,
-          },
+    const participantSnapshot = [
+      {
+        partyId: clinicianParticipantId,
+        clinicianId: clinician.id,
+        role: 'LEAD_CLINICIAN',
+        required: true,
+        source: 'appointment',
+        name:
+          clinician.displayName || 'Clinician',
+        specialty:
+          clinician.specialty || null,
+        access: {
+          canJoinTelevisit: true,
+          canViewHealth: true,
+          canBookAppointments: false,
         },
-        {
-          partyId: patientParticipantId,
-          patientId,
-          role: 'PRIMARY_PATIENT',
+      },
+      ...runtimeRecipients.map(
+        (recipient, sequence) => ({
+          partyId: recipient.partyId,
+          patientId: recipient.patientId,
+          careRecipientSequence: sequence,
+          role:
+            sequence === 0
+              ? 'PRIMARY_PATIENT'
+              : recipient.role === 'DEPENDANT'
+                ? 'DEPENDANT_PATIENT'
+                : 'SECOND_PATIENT_PARTICIPANT',
           required: true,
-          source: 'appointment',
-          name:
-            clean(body.patientName || body.patient_name) ||
-            clean(patientProfile?.name) ||
-            'Patient',
+          source: 'appointment_care_recipient',
+          name: recipient.displayName,
+          status: recipient.identityVerified
+            ? 'ACCEPTED'
+            : 'PENDING_IDENTITY_VERIFICATION',
           access: {
-            canJoinTelevisit: true,
+            canJoinTelevisit: recipient.identityVerified,
             canViewHealth: false,
             canBookAppointments: false,
           },
-        },
-      ],
+        }),
+      ),
+    ];
+
+    const careRecipientSnapshot =
+      runtimeRecipients.map((recipient) => ({
+        sequence: recipient.sequence,
+        patientId: recipient.patientId,
+        displayName: recipient.displayName,
+        role: recipient.role,
+        familyRelationshipId:
+          recipient.familyRelationshipId,
+        encounterId: recipient.encounterId,
+        caseId: recipient.caseId,
+        partyId: recipient.partyId,
+        identityVerified:
+          recipient.identityVerified,
+        identityVerificationSource:
+          recipient.identityVerificationSource,
+        status: recipient.identityVerified
+          ? 'READY'
+          : 'PENDING_IDENTITY_VERIFICATION',
+        allocation: recipient.allocation,
+      }));
+
+    const baseMeta = {
+      source: 'patient.booking',
+      bookingIntegrity: {
+        idempotencyKeyHash: sha256Hex(idempotencyKey),
+        requestFingerprint,
+        priceLockHash: sha256Hex(suppliedPriceLock),
+        trustedIdentitySource: who.source,
+      },
+      ticketIssuance: {
+        mode: 'ON_DEMAND_VIA_TELEVISIT_ISSUE',
+        embeddedJoinTokens: false,
+      },
+      roomId,
+      appointmentId,
+      encounterId: primaryEncounterId,
+      encounterIds:
+        runtimeRecipients.map(
+          (recipient) => recipient.encounterId,
+        ),
+      caseId: primaryCaseId,
+      patientParticipantId,
+      clinicianParticipantId,
+      patientDisplayName:
+        clean(
+          body.patientName ||
+            body.patient_name,
+        ) ||
+        primaryRecipient.displayName ||
+        'Patient',
+      patientAvatarUrl:
+        primaryRecipient.photoUrl || null,
+      patientGender:
+        primaryRecipient.gender || null,
+      clinicianDisplayName:
+        clinician.displayName || 'Clinician',
+      clinicianAvatarUrl:
+        clinician.photoUrl || null,
+      clinicianSpecialty:
+        clinician.specialty || null,
+      clinicianGender:
+        clinician.gender || null,
+      clinicianLocation:
+        clean(clinician.city) ||
+        clean(clinician.practiceName) ||
+        clean(clinician.country) ||
+        null,
+      slotContract: {
+        source:
+          'server_revalidated_availability',
+        status:
+          validatedSlot.status || null,
+        utcStart: startsAt.toISOString(),
+        requestedUtcEnd:
+          requestedEndsAt.toISOString(),
+        utcEnd: finalEndsAt.toISOString(),
+        localStart:
+          validatedSlot.localStart || null,
+        localEnd:
+          validatedSlot.localEnd || null,
+        localDate:
+          validatedSlot.localDate || null,
+        localStartTime:
+          validatedSlot.localStartTime || null,
+        localEndTime:
+          validatedSlot.localEndTime || null,
+        localTimeLabel:
+          validatedSlot.localTimeLabel || null,
+        timezone:
+          validatedSlot.timezone ||
+          availabilityMeta?.timezone ||
+          null,
+        baseDurationMin:
+          quote.baseDurationMin,
+        additionalDurationMin:
+          quote.additionalDurationMin,
+        durationMin:
+          quote.durationMin,
+        bufferMin:
+          validatedSlot.bufferMin || null,
+        baseFeeCents:
+          quote.baseAmountMinor,
+        feeCents:
+          quote.totalAmountMinor,
+        currency:
+          quote.currency,
+        availabilitySource:
+          availabilityMeta?.source || null,
+        scheduleMatchedUserId:
+          availabilityMeta?.schedule
+            ?.matchedUserId || null,
+      },
+      multiCare: {
+        enabled: quote.multiCare,
+        recipientCount:
+          quote.recipientCount,
+        policy: quote.policy,
+        allocations:
+          quote.allocations,
+        recipients:
+          careRecipientSnapshot,
+      },
+      participants: participantSnapshot,
     };
 
-    const created = await prisma.$transaction(async (tx) => {
-      const encounter = await tx.encounter.create({
-        data: {
-          id: encounterId,
-          caseId,
-          patientId,
-          clinicianId: clinician.id,
-          sessionId: null,
-          visitMode: 'TELEVISIT',
-          status: 'scheduled',
-          orgId,
-        } as any,
-      });
-
-      const finalClinicianConflict = await tx.appointment.findFirst({
-        where: {
-          clinicianId: clinician.id,
-          startsAt: { lt: endsAt },
-          endsAt: { gt: startsAt },
-          status: { notIn: activeStatuses },
-        },
-        select: { id: true },
-      });
-
-      if (finalClinicianConflict) {
-        throw new Error('clinician_conflict');
-      }
-
-      const finalPatientConflict = patientConflictOr.length
-        ? await tx.appointment.findFirst({
-            where: {
-              OR: patientConflictOr,
-              startsAt: { lt: endsAt },
-              endsAt: { gt: startsAt },
-              status: { notIn: activeStatuses },
-            },
-            select: { id: true },
-          })
-        : null;
-
-      if (finalPatientConflict) {
-        throw new Error('patient_conflict');
-      }
-
-      const appointment = await tx.appointment.create({
-        data: {
-          id: appointmentId,
-          encounterId: encounter.id,
-          sessionId: null,
-          caseId,
-          clinicianId: clinician.id,
-          patientId,
-          hostUserId,
-          subjectPatientId,
-          roomId,
-          reason: clean(body.reason || body.title || body.notes) || 'Televisit consultation',
-          kind: appointmentKind,
-          visitMode: 'TELEVISIT',
-          startsAt,
-          endsAt,
-          status: appointmentStatus,
-          confirmedAt: appointmentStatus === 'confirmed' ? now : null,
-          paymentMethod: paymentMethod as any,
-          paymentStatus: paymentStatus as any,
-          paymentProvider: clean(body.paymentProvider || body.payment_provider) || null,
-          paymentRef: clean(body.paymentRef || body.payment_ref) || null,
-          priceCents,
-          currency,
-          platformFeeCents,
-          clinicianTakeCents,
-          amountMinor: priceCents,
-          subtotalMinor: priceCents,
-          taxMinor: 0,
-          discountMinor: 0,
-          totalMinor: priceCents,
-          patientCopayMinor: priceCents,
-          sponsorAmountMinor: 0,
-          sponsorCurrency: currency,
-          coverageDecision: paymentMethod === 'MEDICAL_AID' ? 'pending_authorisation' : null,
-          bookingSource: 'patient_app',
-          meta: baseMeta,
-          orgId,
-        } as any,
-      });
-
-      const session = await tx.consultationSession.create({
-        data: {
-          appointmentId: appointment.id,
-          encounterId: encounter.id,
-          caseId,
-          clinicianId: clinician.id,
-          patientId,
-          hostUserId,
-          visitMode: 'TELEVISIT',
-          roomId,
-          state: 'READY',
-          currency,
-          amountAuthorizedMinor: priceCents,
-          metadata: baseMeta,
-        } as any,
-      });
-
-      const visit = await tx.televisit.create({
-        data: {
-          appointmentId: appointment.id,
-          encounterId: encounter.id,
-          roomId,
-          scheduledStartAt: startsAt,
-          scheduledEndAt: endsAt,
-          joinOpensAt,
-          joinClosesAt,
-          status: 'planned',
-          orgId,
-        } as any,
-      });
-
-      await tx.appointmentAuditEvent.create({
-        data: {
-          appointmentId: appointment.id,
-          action: 'patient_booking_created',
-          actorType: who.role || 'patient',
-          actorUserId: who.uid || patientId,
-          reason: clean(body.reason || body.title || body.notes) || null,
-          afterJson: {
-            appointmentId: appointment.id,
-            encounterId: encounter.id,
-            consultationSessionId: session.id,
-            televisitId: visit.id,
-            roomId,
+    const created = await prisma.$transaction(
+      async (tx: any) => {
+        const transactionConflicts =
+          await findMultiCareConflicts({
+            db: tx,
             clinicianId: clinician.id,
-            patientId,
-            startsAt: startsAt.toISOString(),
-            endsAt: endsAt.toISOString(),
-            paymentStatus,
-          },
-          orgId,
-        },
-      }).catch(() => null);
+            hostUserId,
+            actorPatientId,
+            recipientPatientIds:
+              recipients.map(
+                (recipient) =>
+                  recipient.patientId,
+              ),
+            startsAt,
+            endsAt: finalEndsAt,
+          });
 
-      await tx.clinicianProfile.update({
-        where: { id: clinician.id },
-        data: {
-          lastBookedAt: now,
-          recentBookedCount: { increment: 1 },
-        } as any,
-      }).catch(() => null);
+        if (
+          transactionConflicts.clinicianConflict
+        ) {
+          throw new MultiCareBookingError(
+            'clinician_conflict',
+            409,
+          );
+        }
 
-      return { encounter, appointment, session, visit };
-    });
+        if (
+          transactionConflicts.patientConflict
+        ) {
+          throw new MultiCareBookingError(
+            'patient_conflict',
+            409,
+          );
+        }
 
-    const ttlSec = Math.max(3600, Math.ceil((joinClosesAt.getTime() - Date.now()) / 1000));
+        const encounterRows: any[] = [];
 
-    const clinicianTicket = await upsertTicket(
-      created.visit.id,
-      clinicianParticipantId,
-      ttlSec,
-      TelevisitRole.clinician,
-      req,
-    );
+        for (
+          const recipient of runtimeRecipients
+        ) {
+          const encounter =
+            await tx.encounter.create({
+              data: {
+                id: recipient.encounterId,
+                caseId: recipient.caseId,
+                patientId:
+                  recipient.patientId,
+                clinicianId:
+                  clinician.id,
+                sessionId: null,
+                visitMode: 'TELEVISIT',
+                status: 'scheduled',
+                orgId,
+              } as any,
+            });
 
-    const patientTicket = await upsertTicket(
-      created.visit.id,
-      patientParticipantId,
-      ttlSec,
-      TelevisitRole.patient,
-      req,
+          encounterRows.push(encounter);
+        }
+
+        const appointment =
+          await tx.appointment.create({
+            data: {
+              id: appointmentId,
+              encounterId:
+                primaryEncounterId,
+              sessionId: null,
+              caseId: primaryCaseId,
+              clinicianId: clinician.id,
+              patientId:
+                primaryRecipient.patientId,
+              hostUserId,
+              subjectPatientId:
+                primaryRecipient.patientId,
+              familyRelationshipId:
+                primaryRecipient
+                  .familyRelationshipId,
+              roomId,
+              reason:
+                clean(
+                  body.reason ||
+                    body.title ||
+                    body.notes,
+                ) ||
+                'Televisit consultation',
+              kind: appointmentKind,
+              visitMode: 'TELEVISIT',
+              startsAt,
+              endsAt: finalEndsAt,
+              status: appointmentStatus,
+              confirmedAt:
+                appointmentStatus ===
+                'confirmed'
+                  ? now
+                  : null,
+              paymentMethod:
+                paymentMethod as any,
+              paymentStatus:
+                paymentStatus as any,
+              paymentProvider: null,
+              paymentRef: null,
+              priceCents,
+              currency: quote.currency,
+              platformFeeCents,
+              clinicianTakeCents,
+              amountMinor: priceCents,
+              subtotalMinor: priceCents,
+              taxMinor: 0,
+              discountMinor: 0,
+              totalMinor: priceCents,
+              patientCopayMinor:
+                priceCents,
+              sponsorAmountMinor: 0,
+              sponsorCurrency:
+                quote.currency,
+              coverageDecision:
+                paymentMethod ===
+                'MEDICAL_AID'
+                  ? 'pending_authorisation'
+                  : null,
+              bookingSource:
+                'patient_app',
+              meta: baseMeta,
+              orgId,
+            } as any,
+          });
+
+        const session =
+          await tx.consultationSession.create({
+            data: {
+              appointmentId:
+                appointment.id,
+              encounterId:
+                primaryEncounterId,
+              caseId: primaryCaseId,
+              clinicianId: clinician.id,
+              patientId:
+                primaryRecipient.patientId,
+              hostUserId,
+              visitMode: 'TELEVISIT',
+              roomId,
+              state: 'READY',
+              currency: quote.currency,
+              amountAuthorizedMinor:
+                priceCents,
+              metadata: baseMeta,
+            } as any,
+          });
+
+        const visit =
+          await tx.televisit.create({
+            data: {
+              appointmentId:
+                appointment.id,
+              encounterId:
+                primaryEncounterId,
+              roomId,
+              scheduledStartAt:
+                startsAt,
+              scheduledEndAt:
+                finalEndsAt,
+              joinOpensAt,
+              joinClosesAt,
+              status: 'planned',
+              orgId,
+            } as any,
+          });
+
+        const careRecipientRows: any[] = [];
+
+        for (
+          const recipient of runtimeRecipients
+        ) {
+          const allocation =
+            recipient.allocation;
+
+          const row =
+            await tx.appointmentCareRecipient.create({
+              data: {
+                appointmentId:
+                  appointment.id,
+                patientId:
+                  recipient.patientId,
+                encounterId:
+                  recipient.encounterId,
+                pricingPolicyId:
+                  quote.policy?.id || null,
+                role:
+                  recipient.sequence === 0
+                    ? 'PRIMARY'
+                    : recipient.role,
+                sequence:
+                  recipient.sequence,
+                hostUserId,
+                familyRelationshipId:
+                  recipient
+                    .familyRelationshipId,
+                required: true,
+                status: recipient.identityVerified
+                  ? 'READY'
+                  : 'PENDING_IDENTITY_VERIFICATION',
+                identityVerifiedAt:
+                  recipient.identityVerified
+                    ? now
+                    : null,
+                identityVerifiedByUserId:
+                  recipient.identityVerified
+                    ? hostUserId
+                    : null,
+                reason:
+                  recipient.reason ||
+                  clean(
+                    body.reason ||
+                      body.title ||
+                      body.notes,
+                  ) ||
+                  null,
+                baseAmountMinor:
+                  allocation
+                    .baseAmountMinor,
+                additionalAmountMinor:
+                  allocation
+                    .additionalAmountMinor,
+                discountMinor:
+                  allocation
+                    .discountMinor,
+                grossAmountMinor:
+                  allocation
+                    .grossAmountMinor,
+                sponsorAmountMinor: 0,
+                patientPayableMinor:
+                  allocation
+                    .patientPayableMinor,
+                currency:
+                  allocation.currency,
+                coverageDecision:
+                  paymentMethod ===
+                  'MEDICAL_AID'
+                    ? 'pending_authorisation'
+                    : 'self_pay',
+                coverageAuthorizationId:
+                  null,
+                pricingSnapshot: {
+                  policyId:
+                    quote.policy?.id || null,
+                  policyVersion:
+                    quote.policy?.version ||
+                    null,
+                  pricingMode:
+                    quote.policy
+                      ?.pricingMode ||
+                    'SINGLE_RECIPIENT',
+                  allocation,
+                },
+                coverageSnapshot: {
+                  paymentMethod,
+                  state:
+                    paymentMethod ===
+                    'MEDICAL_AID'
+                      ? 'pending_authorisation'
+                      : 'self_pay',
+                },
+                metadata: {
+                  displayName:
+                    recipient.displayName,
+                  partyId:
+                    recipient.partyId,
+                  caseId:
+                    recipient.caseId,
+                  identityVerificationSource:
+                    recipient
+                      .identityVerificationSource,
+                },
+                orgId,
+              } as any,
+            });
+
+          careRecipientRows.push(row);
+        }
+
+        const careRecipientByPatient =
+          new Map(
+            careRecipientRows.map(
+              (row: any) => [
+                String(row.patientId),
+                row,
+              ],
+            ),
+          );
+
+        await tx.appointmentParticipant.create({
+          data: {
+            appointmentId:
+              appointment.id,
+            careRecipientId: null,
+            partyId:
+              clinicianParticipantId,
+            role: 'LEAD_CLINICIAN',
+            clinicianId:
+              clinician.id,
+            userId:
+              clinician.userId || null,
+            displayName:
+              clinician.displayName ||
+              'Clinician',
+            required: true,
+            status: 'ACCEPTED',
+            consentRequired: false,
+            canJoinTelevisit: true,
+            canViewHealth: true,
+            canBookAppointments: false,
+            acceptedAt: now,
+            metadata: {
+              source:
+                'appointment_creation',
+              specialty:
+                clinician.specialty ||
+                null,
+            },
+            orgId,
+          } as any,
+        });
+
+        const participantRows: any[] = [];
+
+        for (
+          const recipient of runtimeRecipients
+        ) {
+          const careRecipient =
+            careRecipientByPatient.get(
+              recipient.patientId,
+            );
+
+          const participant =
+            await tx.appointmentParticipant.create({
+              data: {
+                appointmentId:
+                  appointment.id,
+                careRecipientId:
+                  careRecipient?.id || null,
+                partyId:
+                  recipient.partyId,
+                role:
+                  recipient.sequence === 0
+                    ? 'PRIMARY_PATIENT'
+                    : recipient.role ===
+                        'DEPENDANT'
+                      ? 'DEPENDANT_PATIENT'
+                      : 'SECOND_PATIENT_PARTICIPANT',
+                patientId:
+                  recipient.patientId,
+                userId:
+                  recipient.patientUserId,
+                hostUserId,
+                familyRelationshipId:
+                  recipient
+                    .familyRelationshipId,
+                displayName:
+                  recipient.displayName,
+                required: true,
+                status: recipient.identityVerified
+                  ? 'ACCEPTED'
+                  : 'PENDING_ACCEPTANCE',
+                consentRequired: true,
+                canJoinTelevisit:
+                  recipient.identityVerified,
+                canViewHealth: false,
+                canBookAppointments:
+                  false,
+                acceptedAt:
+                  recipient.identityVerified
+                    ? now
+                    : null,
+                metadata: {
+                  source:
+                    'appointment_care_recipient',
+                  sequence:
+                    recipient.sequence,
+                  encounterId:
+                    recipient.encounterId,
+                  caseId:
+                    recipient.caseId,
+                },
+                orgId,
+              } as any,
+            });
+
+          participantRows.push(
+            participant,
+          );
+        }
+
+        await tx.appointmentAuditEvent
+          .create({
+            data: {
+              appointmentId:
+                appointment.id,
+              action:
+                quote.multiCare
+                  ? 'multi_care_booking_created'
+                  : 'patient_booking_created',
+              actorType:
+                who.role || 'patient',
+              actorUserId:
+                who.uid ||
+                actorPatientId,
+              reason:
+                clean(
+                  body.reason ||
+                    body.title ||
+                    body.notes,
+                ) || null,
+              afterJson: {
+                appointmentId:
+                  appointment.id,
+                encounterIds:
+                  encounterRows.map(
+                    (row) => row.id,
+                  ),
+                consultationSessionId:
+                  session.id,
+                televisitId:
+                  visit.id,
+                roomId,
+                clinicianId:
+                  clinician.id,
+                hostUserId,
+                careRecipients:
+                  careRecipientSnapshot,
+                startsAt:
+                  startsAt.toISOString(),
+                endsAt:
+                  finalEndsAt.toISOString(),
+                paymentStatus,
+                totalAmountMinor:
+                  priceCents,
+              },
+              orgId,
+            },
+          })
+          .catch(() => null);
+
+        await tx.clinicianProfile
+          .update({
+            where: {
+              id: clinician.id,
+            },
+            data: {
+              lastBookedAt: now,
+              recentBookedCount: {
+                increment: 1,
+              },
+            } as any,
+          })
+          .catch(() => null);
+
+        return {
+          encounter:
+            encounterRows[0],
+          encounters:
+            encounterRows,
+          appointment,
+          session,
+          visit,
+          careRecipients:
+            careRecipientRows,
+          participants:
+            participantRows,
+        };
+      },
     );
 
     const clinicianOrigin = appOrigin(
       req,
-      ['CLINICIAN_APP_ORIGIN', 'NEXT_PUBLIC_CLINICIAN_APP_ORIGIN'],
+      [
+        'CLINICIAN_APP_ORIGIN',
+        'NEXT_PUBLIC_CLINICIAN_APP_ORIGIN',
+      ],
       'https://clinician.ambulantplus.co.za',
     );
-
     const patientOrigin = appOrigin(
       req,
-      ['PATIENT_APP_ORIGIN', 'NEXT_PUBLIC_PATIENT_APP_ORIGIN'],
+      [
+        'PATIENT_APP_ORIGIN',
+        'NEXT_PUBLIC_PATIENT_APP_ORIGIN',
+      ],
       'https://patient.ambulantplus.co.za',
     );
-
     const sharedParams = {
       visitId: created.visit.id,
       appointmentId: created.appointment.id,
       encounterId: created.encounter.id,
       clinicianId: clinician.id,
-      patientId,
+      patientId: primaryRecipient.patientId,
       reason: created.appointment.reason || '',
       patientName: baseMeta.patientDisplayName,
       clinicianName: baseMeta.clinicianDisplayName,
     };
+    const clinicianJoinUrl = buildJoinUrl(
+      clinicianOrigin,
+      roomId,
+      {
+        ...sharedParams,
+        participantId: clinicianParticipantId,
+      },
+    );
+    const patientJoinUrl = buildJoinUrl(
+      patientOrigin,
+      roomId,
+      {
+        ...sharedParams,
+        participantId: patientParticipantId,
+      },
+    );
 
-    const clinicianJoinUrl = buildJoinUrl(clinicianOrigin, roomId, {
-      ...sharedParams,
-      participantId: clinicianParticipantId,
-      joinToken: clinicianTicket.token || '',
-    });
-
-    const patientJoinUrl = buildJoinUrl(patientOrigin, roomId, {
-      ...sharedParams,
-      participantId: patientParticipantId,
-      joinToken: patientTicket.token || '',
-    });
-
-    await prisma.appointment.update({
-      where: { id: created.appointment.id },
-      data: {
-        meta: {
-          ...baseMeta,
-          visitId: created.visit.id,
-          televisitId: created.visit.id,
-          clinicianJoinUrl,
-          patientJoinUrl,
-        },
-      } as any,
-    }).catch(() => null);
+    await prisma.appointment
+      .update({
+        where: { id: created.appointment.id },
+        data: {
+          meta: {
+            ...baseMeta,
+            visitId: created.visit.id,
+            televisitId: created.visit.id,
+            clinicianJoinUrl,
+            patientJoinUrl,
+            ticketIssuance: {
+              mode: 'ON_DEMAND_VIA_TELEVISIT_ISSUE',
+              embeddedJoinTokens: false,
+            },
+            additionalRecipientAdmission:
+              quote.multiCare
+                ? 'PERSISTED_PARTICIPANTS_PENDING_SWEEP_3_ADMISSION'
+                : 'ON_DEMAND_VIA_TELEVISIT_ISSUE',
+          },
+        } as any,
+      })
+      .catch(() => null);
 
     const appointment = {
       ...created.appointment,
-      startsAt: created.appointment.startsAt.toISOString(),
-      endsAt: created.appointment.endsAt.toISOString(),
-      createdAt: created.appointment.createdAt.toISOString(),
-      updatedAt: created.appointment.updatedAt.toISOString(),
+      startsAt:
+        created.appointment.startsAt.toISOString(),
+      endsAt:
+        created.appointment.endsAt.toISOString(),
+      createdAt:
+        created.appointment.createdAt.toISOString(),
+      updatedAt:
+        created.appointment.updatedAt.toISOString(),
       visitId: created.visit.id,
       televisitId: created.visit.id,
       roomId,
@@ -962,42 +1922,108 @@ export async function POST(req: NextRequest) {
       patientJoinUrl,
       clinicianParticipantId,
       patientParticipantId,
-      patientName: baseMeta.patientDisplayName,
-      patientDisplayName: baseMeta.patientDisplayName,
-      patientAvatarUrl: baseMeta.patientAvatarUrl,
-      clinicianName: baseMeta.clinicianDisplayName,
-      clinicianDisplayName: baseMeta.clinicianDisplayName,
-      clinicianAvatarUrl: baseMeta.clinicianAvatarUrl,
-      clinicianSpecialty: baseMeta.clinicianSpecialty,
-      clinicianLocation: baseMeta.clinicianLocation,
+      patientName:
+        baseMeta.patientDisplayName,
+      patientDisplayName:
+        baseMeta.patientDisplayName,
+      patientAvatarUrl:
+        baseMeta.patientAvatarUrl,
+      clinicianName:
+        baseMeta.clinicianDisplayName,
+      clinicianDisplayName:
+        baseMeta.clinicianDisplayName,
+      clinicianAvatarUrl:
+        baseMeta.clinicianAvatarUrl,
+      clinicianSpecialty:
+        baseMeta.clinicianSpecialty,
+      clinicianLocation:
+        baseMeta.clinicianLocation,
+      multiCare:
+        baseMeta.multiCare,
     };
 
-    return json({
-      ok: true,
-      appointment,
-      appointmentId: created.appointment.id,
-      appointment_id: created.appointment.id,
-      encounterId: created.encounter.id,
-      encounter_id: created.encounter.id,
-      consultationSessionId: created.session.id,
-      visitId: created.visit.id,
-      televisitId: created.visit.id,
-      roomId,
-      clinicianJoinUrl,
-      patientJoinUrl,
-      paymentStatus,
-      status: appointmentStatus,
-    }, 201);
-  } catch (err: any) {
-    console.error('[api-gateway][appointments.POST] error', err);
-    const msg = String(err?.message || 'appointment_create_failed');
-    const status =
-      msg.includes('Unique constraint') ? 409 :
-      msg.includes('clinician_conflict') ? 409 :
-      msg.includes('patient_conflict') ? 409 :
-      msg.includes('unauthorized') ? 401 :
-      500;
+    return json(
+      {
+        ok: true,
+        appointment,
+        appointmentId:
+          created.appointment.id,
+        appointment_id:
+          created.appointment.id,
+        encounterId:
+          created.encounter.id,
+        encounter_id:
+          created.encounter.id,
+        encounterIds:
+          created.encounters.map(
+            (encounter: any) =>
+              encounter.id,
+          ),
+        consultationSessionId:
+          created.session.id,
+        visitId:
+          created.visit.id,
+        televisitId:
+          created.visit.id,
+        roomId,
+        clinicianJoinUrl,
+        patientJoinUrl,
+        paymentStatus,
+        status:
+          appointmentStatus,
+        multiCare: {
+          ...baseMeta.multiCare,
+          careRecipientIds:
+            created.careRecipients.map(
+              (recipient: any) =>
+                recipient.id,
+            ),
+        },
+      },
+      201,
+    );
+  } catch (error: any) {
+    console.error(
+      '[api-gateway][appointments.POST] error',
+      error,
+    );
 
-    return json({ ok: false, error: msg }, status);
+    if (
+      error instanceof MultiCareBookingError
+    ) {
+      return json(
+        {
+          ok: false,
+          error: error.code,
+          details: error.details,
+        },
+        error.status,
+      );
+    }
+
+    const message = String(
+      error?.message ||
+        'appointment_create_failed',
+    );
+    const lowerMessage = message.toLowerCase();
+    const status =
+      lowerMessage.includes('unique constraint')
+        ? 409
+        : lowerMessage.includes('clinician_conflict')
+          ? 409
+          : lowerMessage.includes('patient_conflict')
+            ? 409
+            : lowerMessage.includes('untrusted') ||
+                lowerMessage.includes('unauthorized')
+              ? 401
+              : 500;
+
+    return json(
+      {
+        ok: false,
+        error: message,
+      },
+      status,
+    );
   }
 }

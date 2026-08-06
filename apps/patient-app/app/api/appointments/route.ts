@@ -1,6 +1,13 @@
 // apps/patient-app/app/api/appointments/route.ts
-import crypto from 'node:crypto';
-import { NextRequest, NextResponse } from 'next/server';
+import {
+  NextRequest,
+  NextResponse,
+} from 'next/server';
+import {
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+  resolveGatewayIdempotencyKey,
+} from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -26,178 +33,10 @@ function gatewayBase() {
 function noStore(body: unknown, status = 200) {
   return NextResponse.json(body, {
     status,
-    headers: { 'Cache-Control': 'no-store, max-age=0' },
+    headers: {
+      'Cache-Control': 'no-store, max-age=0',
+    },
   });
-}
-
-
-const SESSION_COOKIE_CANDIDATES = [
-  '__Host-ambulant_session',
-  'ambulant_session',
-  'ambulant.session',
-  'auth_session',
-  'session',
-  'token',
-];
-
-function cookieValue(req: NextRequest, name: string) {
-  const raw = req.headers.get('cookie') || '';
-  const parts = raw.split(';').map((p) => p.trim()).filter(Boolean);
-
-  for (const part of parts) {
-    const eq = part.indexOf('=');
-    if (eq <= 0) continue;
-
-    const key = part.slice(0, eq).trim();
-    const value = part.slice(eq + 1).trim();
-
-    if (key === name) return decodeURIComponent(value);
-  }
-
-  return '';
-}
-
-function sessionTokenFromRequest(req: NextRequest) {
-  for (const name of SESSION_COOKIE_CANDIDATES) {
-    const token = cookieValue(req, name);
-    if (token) return token;
-  }
-
-  return '';
-}
-
-function b64urlToBuffer(value: string) {
-  const pad = value.length % 4 === 0 ? '' : '='.repeat(4 - (value.length % 4));
-  const b64 = (value + pad).replace(/-/g, '+').replace(/_/g, '/');
-  return Buffer.from(b64, 'base64');
-}
-
-function safeJsonParse(buf: Buffer) {
-  try {
-    return JSON.parse(buf.toString('utf8'));
-  } catch {
-    return null;
-  }
-}
-
-function timingSafeEqualText(a: string, b: string) {
-  const ab = Buffer.from(a);
-  const bb = Buffer.from(b);
-
-  if (ab.length !== bb.length) return false;
-  return crypto.timingSafeEqual(ab, bb);
-}
-
-function verifyPatientSessionToken(token: string) {
-  const secret = process.env.AUTH_SESSION_SECRET || process.env.NEXTAUTH_SECRET || '';
-  if (!secret) return null;
-
-  try {
-    const parts = String(token || '').split('.');
-    if (parts.length !== 3) return null;
-
-    const [h, p, sig] = parts;
-    const expected = crypto.createHmac('sha256', secret).update(h + '.' + p).digest('base64url');
-
-    if (!timingSafeEqualText(sig, expected)) return null;
-
-    const payload = safeJsonParse(b64urlToBuffer(p));
-    if (!payload) return null;
-
-    const now = Math.floor(Date.now() / 1000);
-    if (typeof payload.exp === 'number' && payload.exp <= now) return null;
-
-    const role = String(payload.role || payload.actorRole || payload.actorType || payload.actor_type || '').toLowerCase();
-    if (role && role !== 'patient' && role !== 'pat') return null;
-
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
-function patientSessionIdentity(req: NextRequest) {
-  const token = sessionTokenFromRequest(req);
-  const payload = token ? verifyPatientSessionToken(token) : null;
-
-  if (!payload) {
-    return {
-      token: '',
-      uid: '',
-      actorRefId: '',
-      orgId: process.env.DEFAULT_ORG_ID || process.env.NEXT_PUBLIC_DEFAULT_ORG_ID || 'org-default',
-    };
-  }
-
-  return {
-    token,
-    uid: String(payload.sub || payload.uid || payload.userId || payload.user_id || '').trim(),
-    actorRefId: String(payload.actorRefId || payload.actor_ref_id || payload.patientId || payload.patient_id || '').trim(),
-    orgId: String(payload.orgId || payload.org_id || payload.tenantId || payload.tenant_id || '').trim(),
-  };
-}
-
-function forwardHeaders(req: NextRequest, includeJson = false) {
-  const headers = new Headers();
-
-  for (const key of [
-    'authorization',
-    'cookie',
-    'x-ambulant-identity',
-    'x-ambulant-user-id',
-    'x-ambulant-org-id',
-    'x-ambulant-role',
-    'x-user-id',
-    'x-uid',
-    'x-org',
-    'x-org-id',
-    'x-role',
-    'x-email',
-    'x-name',
-    'x-display-name',
-    'x-correlation-id',
-    'x-request-id',
-    'idempotency-key',
-    'x-idempotency-key',
-  ]) {
-    const value = req.headers.get(key);
-    if (value) headers.set(key, value);
-  }
-
-  const session = patientSessionIdentity(req);
-
-  if (session.token && !headers.get('authorization')) {
-    headers.set('authorization', 'Bearer ' + session.token);
-  }
-
-  if (session.uid && !headers.get('x-uid')) {
-    headers.set('x-uid', session.uid);
-  }
-
-  if (session.uid && !headers.get('x-ambulant-user-id')) {
-    headers.set('x-ambulant-user-id', session.uid);
-  }
-
-  if (session.actorRefId) {
-    headers.set('x-actor-ref-id', session.actorRefId);
-    headers.set('x-patient-id', session.actorRefId);
-  }
-
-  if (session.orgId && !headers.get('x-org-id')) {
-    headers.set('x-org-id', session.orgId);
-  }
-
-  headers.set('accept', 'application/json');
-
-  if (includeJson) {
-    headers.set('content-type', 'application/json');
-  }
-
-  if (!headers.get('x-role') && !headers.get('x-ambulant-role')) {
-    headers.set('x-role', 'patient');
-  }
-
-  return headers;
 }
 
 async function readPayload(res: Response) {
@@ -331,43 +170,55 @@ function appendIncomingQuery(req: NextRequest, upstream: URL) {
 }
 
 export async function GET(req: NextRequest) {
-  const base = gatewayBase();
-
-  if (!base) {
-    return noStore(
-      {
-        ok: false,
-        error: 'api_gateway_base_not_configured',
-        appointments: [],
-      },
-      503,
-    );
-  }
-
   try {
-    const upstream = new URL('/api/appointments', base);
-    appendIncomingQuery(req, upstream);
+    const identity =
+      await readPatientGatewayIdentity(req);
 
-    const session = patientSessionIdentity(req);
-
-    if (!upstream.searchParams.get('patientId') && !upstream.searchParams.get('subjectPatientId')) {
-      const patientId = session.actorRefId || session.uid;
-      if (patientId) upstream.searchParams.set('patientId', patientId);
+    if (!identity) {
+      return noStore(
+        {
+          ok: false,
+          error: 'patient_session_required',
+          appointments: [],
+        },
+        401,
+      );
     }
 
-    const res = await fetch(upstream.toString(), {
-      method: 'GET',
-      headers: forwardHeaders(req),
-      cache: 'no-store',
-    });
+    const upstream = new URL(
+      '/api/appointments',
+      gatewayBase(),
+    );
+    appendIncomingQuery(req, upstream);
 
-    const payload = await readPayload(res);
+    const response = await fetch(
+      upstream.toString(),
+      {
+        method: 'GET',
+        headers: patientGatewayHeaders({
+          req,
+          identity,
+          includeJson: false,
+        }),
+        cache: 'no-store',
+      },
+    );
+    const payload = await readPayload(response);
 
-    if (!res.ok || (payload && typeof payload === 'object' && payload.ok === false)) {
+    if (
+      !response.ok ||
+      (
+        payload &&
+        typeof payload === 'object' &&
+        payload.ok === false
+      )
+    ) {
       const message =
         typeof payload === 'object' && payload
-          ? payload.error || payload.message || `appointments_gateway_http_${res.status}`
-          : `appointments_gateway_http_${res.status}`;
+          ? payload.error ||
+            payload.message ||
+            `appointments_gateway_http_${response.status}`
+          : `appointments_gateway_http_${response.status}`;
 
       return noStore(
         {
@@ -375,11 +226,12 @@ export async function GET(req: NextRequest) {
           error: message,
           appointments: [],
         },
-        res.status,
+        response.status,
       );
     }
 
-    const appointments = normaliseAppointments(payload);
+    const appointments =
+      normaliseAppointments(payload);
 
     return noStore({
       ok: true,
@@ -389,67 +241,139 @@ export async function GET(req: NextRequest) {
       raw: payload,
     });
   } catch (error: any) {
+    const message =
+      error?.message ||
+      'appointments_gateway_failed';
+
     return noStore(
       {
         ok: false,
-        error: error?.message || 'appointments_gateway_failed',
+        error: message,
         appointments: [],
       },
-      502,
+      message ===
+      'internal_identity_secret_unavailable'
+        ? 503
+        : 502,
     );
   }
 }
 
 export async function POST(req: NextRequest) {
-  const base = gatewayBase();
-
-  if (!base) {
-    return noStore(
-      {
-        ok: false,
-        error: 'api_gateway_base_not_configured',
-      },
-      503,
-    );
-  }
-
   try {
-    const body = await req.json().catch(() => ({} as any));
+    const identity =
+      await readPatientGatewayIdentity(req);
 
-    const upstream = new URL('/api/appointments', base);
+    if (!identity) {
+      return noStore(
+        {
+          ok: false,
+          error: 'patient_session_required',
+        },
+        401,
+      );
+    }
 
-    const res = await fetch(upstream.toString(), {
-      method: 'POST',
-      headers: forwardHeaders(req, true),
-      body: JSON.stringify(body),
-      cache: 'no-store',
-    });
+    const body =
+      await req.json().catch(() => ({} as any));
+    const idempotencyKey =
+      resolveGatewayIdempotencyKey(
+        req,
+        body.idempotencyKey ||
+          body.idempotency_key,
+      );
+    const payload: any = {
+      ...body,
+      patientId: identity.patientId,
+      patient_id: identity.patientId,
+      hostUserId: identity.uid,
+      host_user_id: identity.uid,
+    };
 
-    const payload = await readPayload(res);
+    for (const key of [
+      'id',
+      'appointmentId',
+      'appointment_id',
+      'encounterId',
+      'encounter_id',
+      'roomId',
+      'room_id',
+      'orgId',
+      'org_id',
+      'paymentStatus',
+      'payment_status',
+      'paymentProvider',
+      'payment_provider',
+      'paymentRef',
+      'payment_ref',
+    ]) {
+      delete payload[key];
+    }
 
-    if (!res.ok || (payload && typeof payload === 'object' && payload.ok === false)) {
+    const response = await fetch(
+      new URL(
+        '/api/appointments',
+        gatewayBase(),
+      ).toString(),
+      {
+        method: 'POST',
+        headers: patientGatewayHeaders({
+          req,
+          identity,
+          includeJson: true,
+          idempotencyKey,
+        }),
+        body: JSON.stringify(payload),
+        cache: 'no-store',
+      },
+    );
+    const responsePayload =
+      await readPayload(response);
+
+    if (
+      !response.ok ||
+      (
+        responsePayload &&
+        typeof responsePayload === 'object' &&
+        responsePayload.ok === false
+      )
+    ) {
       const message =
-        typeof payload === 'object' && payload
-          ? payload.error || payload.message || `appointments_gateway_http_${res.status}`
-          : `appointments_gateway_http_${res.status}`;
+        typeof responsePayload === 'object' &&
+        responsePayload
+          ? responsePayload.error ||
+            responsePayload.message ||
+            `appointments_gateway_http_${response.status}`
+          : `appointments_gateway_http_${response.status}`;
 
       return noStore(
         {
           ok: false,
           error: message,
+          details: responsePayload,
         },
-        res.status,
+        response.status,
       );
     }
 
-    return noStore(payload ?? { ok: true }, res.status);
+    return noStore(
+      responsePayload ?? { ok: true },
+      response.status,
+    );
   } catch (error: any) {
+    const message =
+      error?.message ||
+      'appointments_gateway_failed';
+
     return noStore(
       {
         ok: false,
-        error: error?.message || 'appointments_gateway_failed',
+        error: message,
       },
-      502,
+      message ===
+      'internal_identity_secret_unavailable'
+        ? 503
+        : 502,
     );
   }
 }
