@@ -1,5 +1,11 @@
+import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
+import {
+  readIdentity,
+  requireAuthenticatedIdentity,
+  requireTrustedIdentityInProduction,
+} from '@/src/lib/identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,6 +42,29 @@ function json(data: any, status = 200) {
   return NextResponse.json(data, { status, headers: corsHeaders() });
 }
 
+function authorizeOwnPatient(req: NextRequest, patientId: string): NextResponse | null {
+  const who = readIdentity(req.headers);
+
+  try {
+    requireTrustedIdentityInProduction(req.headers, who);
+    requireAuthenticatedIdentity(who);
+  } catch {
+    return json({ ok: false, error: 'unauthorized' }, 401);
+  }
+
+  if (who.role !== 'patient') {
+    return json({ ok: false, error: 'patient_role_required' }, 403);
+  }
+
+  const subjectPatientId = clean(who.actorRefId || who.uid, 180);
+
+  if (!subjectPatientId || subjectPatientId !== patientId) {
+    return json({ ok: false, error: 'patient_subject_mismatch' }, 403);
+  }
+
+  return null;
+}
+
 export function OPTIONS() {
   return new NextResponse(null, { status: 204, headers: corsHeaders() });
 }
@@ -56,10 +85,32 @@ function asNumber(value: unknown): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
-function recordedAt(value: unknown) {
+function recordedAt(value: unknown, receivedAt: Date) {
   const raw = clean(value, 80);
-  const d = raw ? new Date(raw) : new Date();
-  return Number.isNaN(d.getTime()) ? new Date() : d;
+
+  if (!raw) {
+    return {
+      t: receivedAt,
+      authority: 'SERVER_RECEIVED_FALLBACK' as const,
+      issue: 'MISSING_RECORDED_AT' as const,
+    };
+  }
+
+  const d = new Date(raw);
+
+  if (Number.isNaN(d.getTime())) {
+    return {
+      t: receivedAt,
+      authority: 'SERVER_RECEIVED_FALLBACK' as const,
+      issue: 'INVALID_RECORDED_AT' as const,
+    };
+  }
+
+  return {
+    t: d,
+    authority: 'SOURCE_REPORTED' as const,
+    issue: null,
+  };
 }
 
 function unitFor(vType: string, payload: Record<string, any>, fallback?: string | null) {
@@ -203,6 +254,13 @@ function shape(row: any) {
     roomId: row.roomId,
     t: row.t instanceof Date ? row.t.toISOString() : row.t,
     recorded_at: row.t instanceof Date ? row.t.toISOString() : row.t,
+    observationId: row.observationId ?? null,
+    receivedAt: row.receivedAt instanceof Date ? row.receivedAt.toISOString() : row.receivedAt ?? null,
+    timeAuthority: row.timeAuthority ?? null,
+    interpretationStatus: row.interpretationStatus ?? null,
+    statusReasonCode: row.statusReasonCode ?? null,
+    statusReasonText: row.statusReasonText ?? null,
+    statusChangedAt: row.statusChangedAt instanceof Date ? row.statusChangedAt.toISOString() : row.statusChangedAt ?? null,
   };
 }
 
@@ -213,12 +271,20 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     return json({ ok: false, error: 'patient_id_required', items: [] }, 400);
   }
 
+  const authError = authorizeOwnPatient(req, patientId);
+  if (authError) return authError;
+
   const url = new URL(req.url);
   const limit = Math.min(Math.max(Number(url.searchParams.get('limit') || 50), 1), 250);
   const type = clean(url.searchParams.get('type'), 120);
   const roomId = clean(url.searchParams.get('roomId'), 180);
 
+  const view = clean(url.searchParams.get('view'), 32).toLowerCase();
   const where: any = { patientId };
+
+  if (view !== 'trust') {
+    where.interpretationStatus = 'ACTIVE';
+  }
 
   if (roomId) where.roomId = roomId;
 
@@ -252,6 +318,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return json({ ok: false, error: 'patient_id_required' }, 400);
   }
 
+  const authError = authorizeOwnPatient(req, patientId);
+  if (authError) return authError;
+
   let body: any;
   try {
     body = await req.json();
@@ -271,7 +340,24 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   const meta = asObj(body?.meta);
   const roomId = clean(body?.roomId || body?.room_id || meta.room_id || meta.roomId || payload.roomId, 180) || null;
-  const t = recordedAt(body?.recorded_at || body?.recordedAt || body?.t || payload.recorded_at);
+  const receivedAt = new Date();
+  const timing = recordedAt(
+    body?.recorded_at || body?.recordedAt || body?.t || payload.recorded_at,
+    receivedAt,
+  );
+
+  const t = timing.t;
+
+  const initialInterpretationStatus =
+    timing.authority === 'SOURCE_REPORTED'
+      ? ('ACTIVE' as const)
+      : ('SUSPECT' as const);
+
+  const observationId =
+    crypto.randomUUID();
+
+  const requestId =
+    clean(req.headers.get('x-request-id') || req.headers.get('x-correlation-id'), 180) || null;
 
   const metrics = metricRows(type, payload);
 
@@ -279,9 +365,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return json({ ok: false, error: 'no_numeric_vital_values', type }, 400);
   }
 
-  const created = await prisma.$transaction(
-    metrics.map((metric) =>
-      prisma.vitalSample.create({
+  const created = await prisma.$transaction(async (tx) => {
+    const rows: any[] = [];
+
+    for (const metric of metrics) {
+      const row = await tx.vitalSample.create({
         data: {
           patientId,
           deviceId,
@@ -291,10 +379,39 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           unit: metric.unit || null,
           roomId,
           metadata: meta,
+          observationId,
+          receivedAt,
+          timeAuthority: timing.authority,
+          interpretationStatus: initialInterpretationStatus,
+          statusChangedAt: timing.issue ? receivedAt : null,
+          statusReasonCode: timing.issue,
         },
-      }),
-    ),
-  );
+      });
+
+      rows.push(row);
+
+      if (timing.issue) {
+        await tx.vitalSampleTrustEvent.create({
+          data: {
+            vitalSampleId: row.id,
+            observationId,
+            patientId,
+            fromStatus: null,
+            toStatus: initialInterpretationStatus,
+            reasonCode: timing.issue,
+            app: 'api-gateway',
+            requestId,
+            meta: {
+              automatic: true,
+              timeAuthority: timing.authority,
+            },
+          },
+        });
+      }
+    }
+
+    return rows;
+  });
 
   return json(
     {

@@ -1,11 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/src/lib/db";
+import {
+  readIdentity,
+  requireAuthenticatedIdentity,
+  requireTrustedIdentityInProduction,
+} from "@/src/lib/identity";
 
-function who(h: Headers) { return { uid: h.get("x-uid"), role: h.get("x-role") }; }
 
 export async function GET(req: NextRequest) {
-  const { uid, role } = who(req.headers);
-  if (!uid || !role) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  const who = readIdentity(req.headers);
+
+  try {
+    requireTrustedIdentityInProduction(req.headers, who);
+    requireAuthenticatedIdentity(who);
+  } catch {
+    return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  }
+
+  const role = who.role;
+  const subjectPatientId = String(who.actorRefId || who.uid || "").trim();
 
   const url = new URL(req.url);
   const deviceId = url.searchParams.get("device_id") ?? undefined;
@@ -15,18 +28,32 @@ export async function GET(req: NextRequest) {
   const limit = Math.max(1, Math.min(500, Number(url.searchParams.get("limit") || 100)));
   const sinceIso = url.searchParams.get("since") ?? undefined;
 
-  // Basic access rules: patient can only read own; clinician/admin unrestricted
-  if (role === "patient" && patientId && patientId !== uid) {
-    return NextResponse.json({ error: "forbidden" }, { status: 403 });
-  }
-  if (role === "patient" && !patientId && deviceId) {
-    const d = await prisma.device.findUnique({ where: { deviceId } });
-    if (!d || d.patientId !== uid) return NextResponse.json({ error: "forbidden" }, { status: 403 });
+  // Patient reads are always narrowed to the authenticated patient subject.
+  // Other authenticated roles retain the pre-existing query semantics here.
+  let effectivePatientId = patientId;
+
+  if (role === "patient") {
+    if (!subjectPatientId) {
+      return NextResponse.json({ error: "patient_subject_required" }, { status: 403 });
+    }
+
+    if (patientId && patientId !== subjectPatientId) {
+      return NextResponse.json({ error: "forbidden" }, { status: 403 });
+    }
+
+    if (deviceId) {
+      const d = await prisma.device.findUnique({ where: { deviceId } });
+      if (!d || d.patientId !== subjectPatientId) {
+        return NextResponse.json({ error: "forbidden" }, { status: 403 });
+      }
+    }
+
+    effectivePatientId = subjectPatientId;
   }
 
-  const where: any = {};
+  const where: any = { interpretationStatus: "ACTIVE" };
   if (deviceId) where.deviceId = deviceId;
-  if (patientId) where.patientId = patientId;
+  if (effectivePatientId) where.patientId = effectivePatientId;
   if (roomId) where.roomId = roomId;
   if (type) where.vType = type;
   if (sinceIso) where.t = { gte: new Date(sinceIso) };

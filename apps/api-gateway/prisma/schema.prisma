@@ -2050,20 +2050,70 @@ model Device {
   @@index([vendor, category, model])
 }
 
+enum VitalSampleInterpretationStatus {
+  ACTIVE
+  SUSPECT
+  EXCLUDED
+}
+
+enum VitalSampleTimeAuthority {
+  UNSPECIFIED
+  SOURCE_REPORTED
+  SERVER_RECEIVED_FALLBACK
+}
+
 model VitalSample {
-  id        String   @id @default(cuid())
-  patientId String
-  deviceId  String
-  t         DateTime
-  vType     String
-  valueNum  Float
-  unit      String?
-  roomId    String?
-  metadata  Json?
+  id                        String                           @id @default(cuid())
+  patientId                 String
+  deviceId                  String
+  t                         DateTime
+  vType                     String
+  valueNum                  Float
+  unit                      String?
+  roomId                    String?
+  metadata                  Json?
+  observationId             String
+  receivedAt                DateTime?
+  timeAuthority             VitalSampleTimeAuthority        @default(UNSPECIFIED)
+  interpretationStatus      VitalSampleInterpretationStatus @default(ACTIVE)
+  statusChangedAt           DateTime?
+  statusChangedByUserId     String?
+  statusChangedByActorRefId String?
+  statusChangedByRole       String?
+  statusReasonCode          String?
+  statusReasonText          String?
+  trustEvents               VitalSampleTrustEvent[]
 
   @@index([patientId, t])
   @@index([roomId, t])
   @@index([deviceId, t])
+  @@index([observationId])
+  @@index([patientId, observationId])
+  @@index([patientId, interpretationStatus, t])
+}
+
+model VitalSampleTrustEvent {
+  id            String                           @id @default(cuid())
+  vitalSampleId String
+  observationId String
+  patientId     String
+  fromStatus    VitalSampleInterpretationStatus?
+  toStatus      VitalSampleInterpretationStatus
+  reasonCode    String?
+  reasonText    String?
+  actorUserId   String?
+  actorRefId    String?
+  actorRole     String?
+  sessionId     String?
+  app           String?
+  requestId     String?
+  createdAt     DateTime                         @default(now())
+  meta          Json?
+  sample        VitalSample                      @relation(fields: [vitalSampleId], references: [id], onDelete: Restrict)
+
+  @@index([vitalSampleId, createdAt])
+  @@index([observationId, createdAt])
+  @@index([patientId, createdAt])
 }
 
 model ConsentGrant {

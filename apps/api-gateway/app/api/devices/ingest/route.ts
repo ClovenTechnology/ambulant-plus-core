@@ -21,7 +21,8 @@ type DeviceMode = 'home' | 'televisit' | 'debug';
 type NormalisedVitalEvent = {
   patient_id?: string;
   device_id: string;
-  t: string | Date;
+  observation_id: string;
+  t?: string | Date | null;
   type: string;
   value: number;
   unit?: string | null;
@@ -32,6 +33,9 @@ type NormalisedVitalEvent = {
   metadata?: Record<string, unknown> | null;
 };
 
+type VitalTimeAuthority = 'SOURCE_REPORTED' | 'SERVER_RECEIVED_FALLBACK';
+type VitalInterpretationStatus = 'ACTIVE' | 'SUSPECT';
+
 type DbVitalRow = {
   patientId: string;
   deviceId: string;
@@ -41,6 +45,11 @@ type DbVitalRow = {
   unit?: string | null;
   roomId?: string | null;
   metadata?: Record<string, unknown> | null;
+  observationId: string;
+  receivedAt: Date;
+  timeAuthority: VitalTimeAuthority;
+  interpretationStatus: VitalInterpretationStatus;
+  statusReasonCode?: string | null;
 };
 
 function verifyHmac(raw: Buffer, signatureHex: string, secret: string) {
@@ -98,22 +107,62 @@ function normalizeMode(value: unknown, fallback: DeviceMode): DeviceMode {
   return fallback;
 }
 
-function safeDate(value: unknown) {
-  const d = value ? new Date(value as any) : new Date();
-  if (Number.isNaN(d.getTime())) return new Date();
-  return d;
+function classifyEventTime(value: unknown, receivedAt: Date) {
+  const raw = firstString(value);
+
+  if (!raw) {
+    return {
+      t: receivedAt,
+      authority: 'SERVER_RECEIVED_FALLBACK' as const,
+      issue: 'MISSING_RECORDED_AT' as const,
+    };
+  }
+
+  const d = new Date(raw);
+
+  if (Number.isNaN(d.getTime())) {
+    return {
+      t: receivedAt,
+      authority: 'SERVER_RECEIVED_FALLBACK' as const,
+      issue: 'INVALID_RECORDED_AT' as const,
+    };
+  }
+
+  return {
+    t: d,
+    authority: 'SOURCE_REPORTED' as const,
+    issue: null,
+  };
 }
 
-function toDbRow(e: NormalisedVitalEvent & { patient_id: string }): DbVitalRow {
+function toDbRow(
+  e: NormalisedVitalEvent & { patient_id: string },
+  receivedAt: Date,
+): DbVitalRow {
+  const timing = classifyEventTime(e.t, receivedAt);
+  const metadata =
+    e.metadata || e.quality || e.status
+      ? {
+          ...(e.metadata ?? {}),
+          ...(e.quality ? { acquisition_quality: e.quality } : {}),
+          ...(e.status ? { measurement_status: e.status } : {}),
+        }
+      : null;
+
   return {
     patientId: e.patient_id,
     deviceId: e.device_id,
-    t: safeDate(e.t),
+    t: timing.t,
     vType: e.type,
     valueNum: Number(e.value),
     unit: e.unit ?? null,
     roomId: e.room_id ?? null,
-    metadata: e.metadata ?? null,
+    metadata,
+    observationId: e.observation_id,
+    receivedAt,
+    timeAuthority: timing.authority,
+    interpretationStatus: timing.issue ? 'SUSPECT' : 'ACTIVE',
+    statusReasonCode: timing.issue,
   };
 }
 
@@ -147,7 +196,8 @@ function eventFromRaw(
   return {
     patient_id: firstString(raw.patient_id, raw.patientId, raw.patient),
     device_id: firstString(raw.device_id, raw.deviceId, deviceId),
-    t: raw.t ?? raw.ts ?? raw.timestamp ?? raw.createdAt ?? new Date().toISOString(),
+    observation_id: nodeCrypto.randomUUID(),
+    t: raw.t ?? raw.ts ?? raw.timestamp ?? raw.createdAt ?? null,
     type,
     value,
     unit: raw.unit ?? null,
@@ -165,6 +215,7 @@ function pushVital(
   type: string,
   value: unknown,
   unit?: string,
+  observationId?: string,
 ) {
   const n = Number(value);
   if (!Number.isFinite(n)) return;
@@ -175,7 +226,8 @@ function pushVital(
   out.push({
     patient_id: firstString(payload.patient_id, payload.patientId, payload.patient),
     device_id: firstString(payload.device_id, payload.deviceId, deviceId),
-    t: payload.t ?? payload.ts ?? payload.timestamp ?? new Date().toISOString(),
+    observation_id: observationId || nodeCrypto.randomUUID(),
+    t: payload.t ?? payload.ts ?? payload.timestamp ?? null,
     type,
     value: n,
     unit: unit ?? null,
@@ -200,6 +252,8 @@ function eventsFromVitalsObject(payload: any, deviceId: string): NormalisedVital
   pushVital(out, payload, deviceId, 'blood_glucose', source.bloodGlucose ?? source.glucose, 'mmol/L');
   pushVital(out, payload, deviceId, 'ecg', source.ecg ?? source.ecgValue, 'mV');
 
+  const bpObservationId = nodeCrypto.randomUUID();
+
   pushVital(
     out,
     payload,
@@ -207,6 +261,7 @@ function eventsFromVitalsObject(payload: any, deviceId: string): NormalisedVital
     'blood_pressure_systolic',
     source.systolic ?? source.bpSystolic ?? source.bloodPressureSystolic,
     'mmHg',
+    bpObservationId,
   );
 
   pushVital(
@@ -216,6 +271,7 @@ function eventsFromVitalsObject(payload: any, deviceId: string): NormalisedVital
     'blood_pressure_diastolic',
     source.diastolic ?? source.bpDiastolic ?? source.bloodPressureDiastolic,
     'mmHg',
+    bpObservationId,
   );
 
   return out;
@@ -264,7 +320,8 @@ function eventsFromAdpReading(reading: any, fallbackDeviceId: string): Normalise
   const base: Omit<NormalisedVitalEvent, 'type' | 'value' | 'unit'> = {
     patient_id: firstString(reading.patientId, reading.patient_id),
     device_id: firstString(reading.deviceId, reading.device_id, fallbackDeviceId),
-    t: firstString(reading.recordedAt, reading.t, reading.timestamp, new Date().toISOString()),
+    observation_id: nodeCrypto.randomUUID(),
+    t: firstString(reading.recordedAt, reading.t, reading.timestamp) || null,
     room_id: roomId,
     mode,
     status,
@@ -470,7 +527,38 @@ export async function POST(req: NextRequest) {
   }
 
   const mapped = runMapper(mapper, payload, deviceId);
-  const events = normalizeEvents(mapped, payload, deviceId);
+  let events = normalizeEvents(mapped, payload, deviceId);
+
+  const assignedPatientId = firstString(device?.patientId);
+
+  if (assignedPatientId) {
+    const mismatched = events.find(
+      (event) =>
+        event.mode !== 'debug' &&
+        Boolean(event.patient_id) &&
+        event.patient_id !== assignedPatientId,
+    );
+
+    if (mismatched) {
+      return NextResponse.json(
+        { error: 'device_patient_mismatch' },
+        { status: 403 },
+      );
+    }
+
+    events = events.map((event) =>
+      event.mode === 'debug'
+        ? event
+        : {
+            ...event,
+            patient_id: event.patient_id || assignedPatientId,
+          },
+    );
+  }
+
+  const receivedAt = new Date();
+  const requestId =
+    firstString(req.headers.get('x-request-id'), req.headers.get('x-correlation-id')) || null;
 
   const dbRows = events
     .filter(
@@ -482,14 +570,21 @@ export async function POST(req: NextRequest) {
         Number.isFinite(e.value),
     )
     .map((e) =>
-      toDbRow({
-        ...e,
-        patient_id: e.patient_id,
-      }),
+      toDbRow(
+        {
+          ...e,
+          patient_id: e.patient_id,
+        },
+        receivedAt,
+      ),
     );
 
   if (dbRows.length > 0) {
-    await storeVitals(dbRows);
+    await storeVitals(dbRows, {
+      requestId,
+      app: 'api-gateway',
+      source: 'device_ingest_hmac',
+    });
   }
 
   for (const e of events) {

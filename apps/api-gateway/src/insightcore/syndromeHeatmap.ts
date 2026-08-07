@@ -343,6 +343,7 @@ export async function computeSyndromeHeatmapForRange(
   // 5) Vitals in window for those patients – risk booster
   const vitalSamples = await prisma.vitalSample.findMany({
     where: {
+      interpretationStatus: 'ACTIVE',
       patientId: {
         in: Array.from(patientIds),
       },
