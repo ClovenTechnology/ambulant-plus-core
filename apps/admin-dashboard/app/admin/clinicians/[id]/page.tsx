@@ -1,434 +1,113 @@
-// apps/admin-dashboard/app/admin/clinicians/[id]/page.tsx
-import React from 'react';
+'use client';
+
 import Link from 'next/link';
-import { headers } from 'next/headers';
-import { verifyAdminToken } from '@/src/lib/auth';
-import { gatewayFetch } from '@/src/lib/gateway-fetch';
+import { useEffect, useState, type ReactNode } from 'react';
+import ClinicianActions from '@/app/clinicians/ClinicianActions';
 
-export const dynamic = 'force-dynamic';
-export const runtime = 'nodejs';
+function value(input: unknown) {
+  const text = String(input ?? '').trim();
+  return text || '—';
+}
 
-type OnboardingStage =
-  | 'applied'
-  | 'screened'
-  | 'approved'
-  | 'rejected'
-  | 'training_scheduled'
-  | 'training_completed';
+function date(input: unknown) {
+  if (!input) return '—';
+  const parsed = new Date(String(input));
+  return Number.isFinite(parsed.getTime()) ? parsed.toLocaleString() : value(input);
+}
 
-type OnboardingBoardRow = {
-  clinicianId: string;
-  displayName: string;
-  email?: string | null;
-  phone?: string | null;
-  specialty?: string | null;
-  createdAt: string;
-
-  onboarding: {
-    id: string;
-    stage: OnboardingStage;
-    notes?: string | null;
-  };
-
-  trainingSlot?: {
-    id: string;
-    startAt: string;
-    endAt: string;
-    mode: 'virtual' | 'in_person';
-    status: 'scheduled' | 'completed' | 'canceled';
-    joinUrl?: string | null;
-  } | null;
-
-  dispatch?: {
-    id: string;
-    status: 'pending' | 'packed' | 'shipped' | 'delivered' | 'canceled';
-    courierName?: string | null;
-    trackingCode?: string | null;
-    shippedAt?: string | null;
-    deliveredAt?: string | null;
-  } | null;
-};
-
-type BoardResponse = {
-  ok: boolean;
-  rows: OnboardingBoardRow[];
-  error?: string;
-};
-
-type ServiceKind = 'base_consult' | 'followup' | 'extra';
-
-type Service = {
-  id: string;
-  kind: ServiceKind;
-  name: string;
-  description?: string | null;
-  amountCents: number;
-  currency: string;
-  minMinutes?: number | null;
-  maxMinutes?: number | null;
-  active: boolean;
-  includesMedicalStaff?: boolean;
-};
-
-type FeesExtendedVM = {
-  ok: boolean;
-  clinicianId: string;
-  clinicianName: string;
-  clinicianStatus?: string | null;
-  currency: string;
-  services: Service[];
-  staff: any[];
-  error?: string;
-};
-
-function money(cents: number, currency: string) {
-  const num = (cents || 0) / 100;
+function money(cents: unknown, currency: unknown) {
+  const amount = Number(cents || 0) / 100;
   try {
-    return new Intl.NumberFormat('en-ZA', { style: 'currency', currency }).format(num);
+    return new Intl.NumberFormat('en-ZA', { style: 'currency', currency: value(currency) === '—' ? 'ZAR' : value(currency) }).format(amount);
   } catch {
-    return `${currency} ${(num).toFixed(2)}`;
+    return `${value(currency)} ${amount.toFixed(2)}`;
   }
 }
 
-function toneForStage(stage: OnboardingStage) {
-  if (stage === 'approved' || stage === 'training_completed') {
-    return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-  }
-  if (stage === 'rejected') {
-    return 'border-rose-200 bg-rose-50 text-rose-700';
-  }
-  return 'border-amber-200 bg-amber-50 text-amber-700';
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return <div className="rounded-2xl border bg-white p-4"><div className="text-xs uppercase tracking-wide text-slate-500">{label}</div><div className="mt-1 break-words text-sm font-medium text-slate-900">{children}</div></div>;
 }
 
-function prettyStage(stage: OnboardingStage) {
-  if (stage === 'training_scheduled') return 'Training scheduled';
-  if (stage === 'training_completed') return 'Training completed';
-  return stage.charAt(0).toUpperCase() + stage.slice(1);
-}
+export default function AdminClinicianDetailPage({ params }: { params: { id: string } }) {
+  const [clinician, setClinician] = useState<any>(null);
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(true);
 
-async function fetchOnboardingBoard(gateway: string): Promise<BoardResponse> {
-  const url = `${gateway}/api/admin/clinicians/onboarding-board`;
-  try {
-    const res = await gatewayFetch(url, {
-      headers: {
-        'content-type': 'application/json',
+  useEffect(() => {
+    let active = true;
+    setBusy(true);
+    setError('');
 
-      },
-      cache: 'no-store',
-    });
+    fetch(`/api/admin/clinicians/${encodeURIComponent(params.id)}`, { cache: 'no-store' })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body?.ok === false) throw new Error(body?.error || `HTTP ${response.status}`);
+        if (active) setClinician(body.clinician || null);
+      })
+      .catch((reason) => {
+        if (active) setError(String(reason?.message || 'clinician_detail_load_failed'));
+      })
+      .finally(() => {
+        if (active) setBusy(false);
+      });
 
-    const js = (await res.json().catch(() => ({}))) as BoardResponse;
+    return () => { active = false; };
+  }, [params.id]);
 
-    if (!res.ok || js.ok === false) {
-      return {
-        ok: false,
-        rows: [],
-        error: js.error || `HTTP ${res.status} loading onboarding board`,
-      };
-    }
-
-    return { ok: true, rows: js.rows || [] };
-  } catch (e: any) {
-    console.error('fetchOnboardingBoard error', e);
-    return { ok: false, rows: [], error: e?.message || 'fetch_failed' };
-  }
-}
-
-async function fetchFeesExtended(
-  gateway: string,
-  clinicianId: string,
-): Promise<FeesExtendedVM | null> {
-  const url = `${gateway}/api/admin/clinicians/${encodeURIComponent(clinicianId)}/fees/extended`;
-  try {
-    const res = await gatewayFetch(url, {
-      headers: {
-        'content-type': 'application/json',
-
-      },
-      cache: 'no-store',
-    });
-    const js = (await res.json().catch(() => ({}))) as FeesExtendedVM;
-    if (!res.ok || !js.ok) return null;
-    return js;
-  } catch (e) {
-    console.error('fetchFeesExtended error', e);
-    return null;
-  }
-}
-
-export default async function AdminClinicianDetailPage({ params }: { params: { id: string } }) {
-  const h = headers();
-  const authHeader = h.get('authorization') || h.get('Authorization') || null;
-
-  const v = await verifyAdminToken(authHeader ?? undefined);
-  if (!v.ok) {
-    return (
-      <main className="mx-auto max-w-4xl p-6">
-        <h1 className="text-2xl font-bold">Admin â€” Clinician</h1>
-        <div className="mt-4 text-sm text-rose-600">Access denied: {v.error}</div>
-        <div className="mt-3 text-sm text-gray-700">
-          Please sign in with your Ambulant Admin account.
-        </div>
-      </main>
-    );
-  }
-
-  const clinicianId = params.id;
-
-  const gateway =
-    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ??
-    process.env.APIGW_BASE ??
-    process.env.GATEWAY_URL ??
-    (process.env.NODE_ENV === 'production' ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
-
-
-
-  const board = await fetchOnboardingBoard(gateway);
-  const row = board.ok ? board.rows.find((r) => r.clinicianId === clinicianId) : null;
-
-  // Best-effort: fees summary (optional)
-  const fees = await fetchFeesExtended(gateway, clinicianId);
-
-  const base = fees?.services?.find((s) => s.kind === 'base_consult') ?? null;
-  const followup = fees?.services?.find((s) => s.kind === 'followup') ?? null;
+  const onboarding = clinician?.onboarding;
+  const slot = onboarding?.trainingSlot;
+  const actionMode: 'pending' | 'active' =
+    String(clinician?.status || '').toLowerCase() === 'pending'
+      ? 'pending'
+      : 'active';
 
   return (
-    <main className="mx-auto max-w-6xl space-y-6 p-6">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div className="space-y-1">
-          <div className="text-xs text-gray-500">
-            <Link href="/admin/clinicians" className="hover:underline">
-              Clinicians
-            </Link>
-            <span className="mx-2">/</span>
-            <span className="font-mono">{clinicianId}</span>
-          </div>
-          <h1 className="text-2xl font-bold">Clinician profile</h1>
-          <p className="text-sm text-gray-600">
-            Single clinician view (onboarding, training, dispatch, and quick links).
-          </p>
+    <main className="mx-auto max-w-7xl space-y-6 p-6">
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <div className="text-sm text-slate-500"><Link href="/admin/clinicians" className="hover:underline">Clinicians</Link> / {params.id}</div>
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">Clinician profile</h1>
+          <p className="mt-1 text-sm text-slate-600">Identity, credentials, practice, onboarding, training, payments and dispatch.</p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            href="/admin/clinicians/onboarding"
-            className="rounded border bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
-          >
-            Onboarding board
-          </Link>
-          <Link
-            href={`/admin/clinicians/${encodeURIComponent(clinicianId)}/fees`}
-            className="rounded border bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
-          >
-            Fees &amp; staff comp
-          </Link>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/admin/clinicians/onboarding" className="rounded-xl border bg-white px-4 py-2 text-sm">Onboarding board</Link>
+          <Link href={`/admin/clinicians/${encodeURIComponent(params.id)}/fees`} className="rounded-xl border bg-white px-4 py-2 text-sm">Fees &amp; staff comp</Link>
         </div>
       </header>
 
-      {!board.ok && (
-        <div className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          Couldn&apos;t load onboarding board from the gateway.
-          <div className="mt-1">
-            Check <code className="font-mono">GET /api/admin/clinicians/onboarding-board</code> and{' '}
-            Gateway error: {board.error}
-          </div>
-        </div>
-      )}
+      {busy ? <div className="rounded-3xl border bg-white p-8 text-sm text-slate-500">Loading clinician…</div> : null}
+      {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div> : null}
+      {!busy && !error && !clinician ? <div className="rounded-3xl border bg-white p-8 text-sm text-slate-500">Clinician not found.</div> : null}
 
-      {!row ? (
-        <section className="rounded-xl border bg-white p-4">
-          <div className="text-sm font-semibold text-gray-900">Clinician not found</div>
-          <div className="mt-1 text-sm text-gray-600">
-            This clinician ID wasn&apos;t found in the onboarding board response.
-          </div>
-          <div className="mt-3 text-xs text-gray-600 space-y-1">
-            <div>
-              â€¢ If this clinician is older / pre-onboarding-model, you may need a dedicated endpoint like{' '}
-              <code className="font-mono">GET /api/admin/clinicians/:id</code>.
-            </div>
-            <div>
-              â€¢ Or confirm the clinician exists in DB and is included by the onboarding-board route.
-            </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            <Link
-              href="/admin/clinicians"
-              className="rounded bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
-            >
-              Back to list
-            </Link>
-            <Link
-              href="/admin/clinicians/onboarding"
-              className="rounded border bg-white px-3 py-1.5 text-xs font-medium text-gray-800 hover:bg-gray-50"
-            >
-              Open onboarding board
-            </Link>
-          </div>
-        </section>
-      ) : (
-        <section className="grid gap-4 lg:grid-cols-3">
-          {/* Left: Identity */}
-          <div className="rounded-xl border bg-white p-4 lg:col-span-2">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-lg font-semibold text-gray-900">{row.displayName}</div>
-                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-gray-600">
-                  <span className="rounded-full border px-2 py-0.5">{row.specialty || 'Unknown specialty'}</span>
-                  <span
-                    className={`inline-flex items-center rounded-full border px-2 py-0.5 font-medium ${toneForStage(
-                      row.onboarding.stage,
-                    )}`}
-                  >
-                    {prettyStage(row.onboarding.stage)}
-                  </span>
-                  <span className="text-[11px] text-gray-400">
-                    Signed up: {new Date(row.createdAt).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-
-              <div className="text-right text-xs text-gray-600">
-                <div>
-                  ID: <span className="font-mono text-[11px]">{row.clinicianId}</span>
-                </div>
-                {row.email && <div className="mt-0.5">{row.email}</div>}
-                {row.phone && <div className="mt-0.5">{row.phone}</div>}
+      {clinician ? (
+        <>
+          <section className="rounded-3xl border bg-white p-6 shadow-sm">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+              <div><h2 className="text-2xl font-semibold">{value(clinician.displayName)}</h2><div className="mt-1 text-sm text-slate-500">{value(clinician.email)} · {value(clinician.phone)}</div><div className="mt-1 font-mono text-xs text-slate-400">{clinician.id}</div></div>
+              <div className="flex flex-col items-end gap-3">
+                <div className="flex flex-wrap justify-end gap-2"><span className="rounded-full border px-3 py-1 text-xs">{value(clinician.status)}</span><span className="rounded-full border px-3 py-1 text-xs">{value(clinician.specialty)}</span><span className="rounded-full border px-3 py-1 text-xs">{clinician.trainingCompleted ? 'training complete' : 'training pending'}</span></div>
+                <ClinicianActions clinicianId={clinician.id} mode={actionMode} />
               </div>
             </div>
+          </section>
 
-            {row.onboarding.notes && (
-              <div className="mt-3 rounded border border-dashed border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-700">
-                <span className="font-semibold">Notes:</span> {row.onboarding.notes}
-              </div>
-            )}
+          <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <Field label="Regulator">{value(clinician.regulatorBody)} · {value(clinician.regulatorRegistration)}</Field>
+            <Field label="Qualification">{value(clinician.qualification)} · {value(clinician.qualificationInstitution)} · {value(clinician.qualificationYear)}</Field>
+            <Field label="Practice">{value(clinician.practiceName)} · {value(clinician.practiceNumber)}</Field>
+            <Field label="Consult fee">{money(clinician.feeCents, clinician.currency)}</Field>
+            <Field label="Board certificate">{value(clinician.boardCertificateNumber)} · expires {date(clinician.boardCertificateExpires)}</Field>
+            <Field label="PI insurance">{value(clinician.piInsuranceProvider)} · {value(clinician.piInsuranceNumber)} · expires {date(clinician.piInsuranceExpiry)}</Field>
+            <Field label="Location">{value([clinician.addressLine1, clinician.addressLine2, clinician.city, clinician.postalCode, clinician.country].filter(Boolean).join(', '))}</Field>
+            <Field label="Activity">Last seen {date(clinician.lastSeenAt)} · {clinician.online ? 'online' : 'offline'} · rating {Number(clinician.ratingAvg || 0).toFixed(1)} ({Number(clinician.ratingCount || 0)})</Field>
+          </section>
 
-            {/* Training */}
-            <div className="mt-4 rounded-lg border bg-slate-50 p-3 text-xs">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold text-gray-900">Training</div>
-                <div className="text-[11px] text-gray-500 font-mono">ClinicianTrainingSlot</div>
-              </div>
-              {row.trainingSlot ? (
-                <div className="mt-2 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-gray-700">
-                      {row.trainingSlot.mode === 'virtual' ? 'Virtual' : 'In person'} â€¢ {row.trainingSlot.status}
-                    </span>
-                    <span className="text-[11px] text-gray-600">
-                      {new Date(row.trainingSlot.startAt).toLocaleString()} â†’{' '}
-                      {new Date(row.trainingSlot.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                  </div>
-                  {row.trainingSlot.joinUrl && (
-                    <div className="text-[11px] text-blue-700 break-all">
-                      Join URL: {row.trainingSlot.joinUrl}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="mt-2 text-[11px] text-gray-600">No training slot scheduled yet.</div>
-              )}
-            </div>
-
-            {/* Dispatch */}
-            <div className="mt-3 rounded-lg border bg-slate-50 p-3 text-xs">
-              <div className="flex items-center justify-between">
-                <div className="font-semibold text-gray-900">Starter kit dispatch</div>
-                <div className="text-[11px] text-gray-500 font-mono">ClinicianDispatch</div>
-              </div>
-
-              {row.dispatch ? (
-                <div className="mt-2 space-y-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="rounded-full bg-white px-2 py-0.5 text-[11px] capitalize text-gray-800">
-                      Status: {row.dispatch.status}
-                    </span>
-                    {row.dispatch.courierName && (
-                      <span className="text-[11px] text-gray-600">Courier: {row.dispatch.courierName}</span>
-                    )}
-                    {row.dispatch.trackingCode && (
-                      <span className="text-[11px] text-gray-600">Tracking: {row.dispatch.trackingCode}</span>
-                    )}
-                  </div>
-
-                  <div className="text-[11px] text-gray-600">
-                    {row.dispatch.shippedAt && (
-                      <span>Shipped: {new Date(row.dispatch.shippedAt).toLocaleString()}</span>
-                    )}
-                    {row.dispatch.shippedAt && row.dispatch.deliveredAt && <span> â€¢ </span>}
-                    {row.dispatch.deliveredAt && (
-                      <span>Delivered: {new Date(row.dispatch.deliveredAt).toLocaleString()}</span>
-                    )}
-                  </div>
-                </div>
-              ) : (
-                <div className="mt-2 text-[11px] text-gray-600">No dispatch created yet.</div>
-              )}
-            </div>
-          </div>
-
-          {/* Right: Quick summary / Fees */}
-          <aside className="rounded-xl border bg-white p-4">
-            <div className="text-sm font-semibold text-gray-900">Quick summary</div>
-
-            <div className="mt-3 space-y-2 text-xs text-gray-700">
-              <div className="rounded border bg-slate-50 p-2">
-                <div className="text-[11px] font-semibold text-gray-800">Fees snapshot</div>
-                {!fees ? (
-                  <div className="mt-1 text-[11px] text-gray-600">
-                    Couldn&apos;t load fees summary (endpoint may not exist yet or clinician has no fees data).
-                  </div>
-                ) : (
-                  <div className="mt-2 space-y-1">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] text-gray-600">Base consult</span>
-                      <span className="font-mono text-[11px]">
-                        {base ? money(base.amountCents, base.currency) : 'â€”'}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="text-[11px] text-gray-600">Follow-up</span>
-                      <span className="font-mono text-[11px]">
-                        {followup ? money(followup.amountCents, followup.currency) : 'â€”'}
-                      </span>
-                    </div>
-                    <div className="pt-1 text-[11px] text-gray-500">
-                      Currency: <span className="font-mono">{fees.currency}</span>
-                    </div>
-                  </div>
-                )}
-
-                <div className="mt-2">
-                  <Link
-                    href={`/admin/clinicians/${encodeURIComponent(clinicianId)}/fees`}
-                    className="inline-flex rounded bg-gray-900 px-3 py-1.5 text-[11px] font-medium text-white hover:bg-gray-800"
-                  >
-                    Open full fees page
-                  </Link>
-                </div>
-              </div>
-
-              <div className="rounded border bg-slate-50 p-2">
-                <div className="text-[11px] font-semibold text-gray-800">Next best actions</div>
-                <ul className="mt-1 list-disc space-y-1 pl-4 text-[11px] text-gray-600">
-                  <li>Schedule training if not scheduled.</li>
-                  <li>Create dispatch after training scheduled.</li>
-                  <li>Mark training complete after attendance.</li>
-                </ul>
-                <div className="mt-2">
-                  <Link
-                    href="/admin/clinicians/onboarding"
-                    className="inline-flex rounded border bg-white px-3 py-1.5 text-[11px] font-medium text-gray-800 hover:bg-gray-50"
-                  >
-                    Do actions on onboarding board
-                  </Link>
-                </div>
-              </div>
-            </div>
-          </aside>
-        </section>
-      )}
+          <section className="grid gap-4 lg:grid-cols-2">
+            <div className="rounded-3xl border bg-white p-5"><h3 className="font-semibold">Onboarding and training</h3><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Stage</dt><dd>{value(onboarding?.status)}</dd></div><div><dt className="text-slate-500">Payment plan</dt><dd>{value(onboarding?.paymentPlan)}</dd></div><div><dt className="text-slate-500">Training mode</dt><dd>{value(onboarding?.trainingMode)}</dd></div><div><dt className="text-slate-500">Scheduled</dt><dd>{date(slot?.startAt || clinician.trainingScheduledAt)}</dd></div><div><dt className="text-slate-500">Slot</dt><dd>{value(slot?.id)}</dd></div><div><dt className="text-slate-500">Notes</dt><dd>{value(onboarding?.trainingNotes)}</dd></div></dl></div>
+            <div className="rounded-3xl border bg-white p-5"><h3 className="font-semibold">Commercial and fulfilment</h3><dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2"><div><dt className="text-slate-500">Payments</dt><dd>{Number(onboarding?.payments?.length || 0)}</dd></div><div><dt className="text-slate-500">Pay Later requests</dt><dd>{Number(onboarding?.payLaterRequests?.length || 0)}</dd></div><div><dt className="text-slate-500">Dispatches</dt><dd>{Number(onboarding?.dispatches?.length || 0)}</dd></div><div><dt className="text-slate-500">Fee entries</dt><dd>{Number(clinician.feesV2?.length || 0)}</dd></div></dl></div>
+          </section>
+        </>
+      ) : null}
     </main>
   );
 }

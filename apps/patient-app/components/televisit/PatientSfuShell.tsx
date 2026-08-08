@@ -59,6 +59,7 @@ import PatientApprovalSheet from './PatientApprovalSheet';
 
 type Props = {
   params: { roomId: string };
+  experience?: 'consultation' | 'training';
 };
 
 type AppointmentMeta = {
@@ -217,7 +218,7 @@ function safeDetachLocal(r: Room, localVideoEl: HTMLVideoElement | null) {
   }
 }
 
-function InnerPatientSfuShell({ params }: Props) {
+function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   const { roomId } = params;
   const router = useRouter();
   const rawSearch = useSearchParams();
@@ -1362,6 +1363,7 @@ function InnerPatientSfuShell({ params }: Props) {
 
       {videoFloating ? (
         <PatientVideoStage
+          trainingRoom={experience === 'training' ? room : null}
           floating
           presentation={presentation}
           activeSpeaking={activeSpeaking}
@@ -1444,6 +1446,7 @@ function InnerPatientSfuShell({ params }: Props) {
             {!videoFloating ? (
               <div className="sticky top-[92px] z-20 lg:top-4">
                 <PatientVideoStage
+          trainingRoom={experience === 'training' ? room : null}
                   presentation={presentation}
                   activeSpeaking={activeSpeaking}
                   remoteVideoRef={remoteVideoRef}

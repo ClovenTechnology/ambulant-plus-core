@@ -1,16 +1,19 @@
 'use client';
 
 import { useState, type RefObject } from 'react';
+import type { Room } from 'livekit-client';
 import type { CaptionEvent } from '@ambulant/rtc';
 
 import HoloVitalsOverlay from '@/components/HoloVitalsOverlay';
 import { Badge, IconBtn } from '@/components/ui';
+import PatientTrainingParticipantGrid from './PatientTrainingParticipantGrid';
 
 type HudVital = { t: string; type: string; value: number; unit?: string };
 type HudDevice = { id: string; vendor?: string; model?: string; lastSeenAt?: string };
 
 type Props = {
   floating?: boolean;
+  trainingRoom?: Room | null;
   presentation: boolean;
   activeSpeaking: boolean;
   remoteVideoRef: RefObject<HTMLVideoElement | null>;
@@ -54,6 +57,7 @@ type Props = {
 
 export default function PatientVideoStage({
   floating = false,
+  trainingRoom = null,
   presentation,
   activeSpeaking,
   remoteVideoRef,
@@ -183,22 +187,28 @@ export default function PatientVideoStage({
           </div>
         ) : null}
 
-        <video
-          ref={setRemoteVideoNode}
-          autoPlay
-          playsInline
-          className="h-full w-full object-cover"
-        />
-        <video
-          ref={setLocalVideoNode}
-          autoPlay
-          playsInline
-          muted
-          className="absolute h-28 w-40 rounded-xl border border-white/80 object-cover shadow-lg"
-          style={{ left: `${pip.x}%`, top: `${pip.y}%` }}
-          title="Local preview"
-        />
-        <audio ref={setAudioSinkNode} autoPlay />
+        {trainingRoom ? (
+          <PatientTrainingParticipantGrid room={trainingRoom} />
+        ) : (
+          <>
+            <video
+              ref={setRemoteVideoNode}
+              autoPlay
+              playsInline
+              className="h-full w-full object-cover"
+            />
+            <video
+              ref={setLocalVideoNode}
+              autoPlay
+              playsInline
+              muted
+              className="absolute h-28 w-40 rounded-xl border border-white/80 object-cover shadow-lg"
+              style={{ left: `${pip.x}%`, top: `${pip.y}%` }}
+              title="Local preview"
+            />
+            <audio ref={setAudioSinkNode} autoPlay />
+          </>
+        )}
 
 
         {captionsOn && visibleCaptions.length > 0 ? (

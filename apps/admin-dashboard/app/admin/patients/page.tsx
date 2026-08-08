@@ -470,7 +470,7 @@ export default function AdminPatientsPage() {
                   </Link>
                 ) : (
                   <Link
-                    href={`/consult?patientId=${encodeURIComponent(row.id)}`}
+                    href={`/admin/patients/${encodeURIComponent(row.id)}`}
                     className="rounded-xl border bg-white px-3 py-2 text-xs font-medium text-slate-700 hover:bg-slate-50"
                   >
                     Open profile
