@@ -4664,6 +4664,16 @@ model Opportunity {
   title                  String                     @db.VarChar(240)
   summary                String?                    @db.VarChar(1200)
   description            String?
+  imageUrl               String?                    @db.VarChar(2048)
+  imageAlt               String?                    @db.VarChar(240)
+  tags                   String[]                   @default([])
+  referenceCode          String?                    @db.VarChar(80)
+  audienceLabel          String?                    @db.VarChar(160)
+  commitmentLabel        String?                    @db.VarChar(160)
+  commercialLabel        String?                    @db.VarChar(200)
+  ctaLabel               String?                    @db.VarChar(80)
+  seoTitle               String?                    @db.VarChar(240)
+  seoDescription         String?                    @db.VarChar(500)
   departmentLabel        String?                    @db.VarChar(160)
   locationMode           OpportunityLocationMode?
   locationLabel          String?                    @db.VarChar(240)

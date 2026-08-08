@@ -55,6 +55,8 @@ export type OpportunityAvailability = 'UPCOMING' | 'OPEN' | 'CLOSED' | 'UNAVAILA
 const KEY_PATTERN = /^[a-z][a-z0-9_-]{0,119}$/;
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const COUNTRY_PATTERN = /^[A-Z]{2}$/;
+const OPPORTUNITY_TAG_MAX_COUNT = 12;
+const OPPORTUNITY_TAG_MAX_LENGTH = 48;
 
 export function cleanOpportunityText(value: unknown, maxLength: number) {
   return String(value ?? '').trim().slice(0, maxLength);
@@ -161,6 +163,55 @@ export function validHttpsUrl(value: unknown) {
   } catch {
     return false;
   }
+}
+
+export function normaliseOpportunityTags(value: unknown) {
+  const source = Array.isArray(value)
+    ? value
+    : typeof value === 'string'
+      ? value.split(',')
+      : [];
+
+  const seen = new Set<string>();
+  const tags: string[] = [];
+
+  for (const item of source) {
+    const tag = cleanOpportunityText(item, OPPORTUNITY_TAG_MAX_LENGTH)
+      .replace(/\s+/g, ' ');
+    if (!tag) continue;
+
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    tags.push(tag);
+
+    if (tags.length >= OPPORTUNITY_TAG_MAX_COUNT) break;
+  }
+
+  return tags;
+}
+
+export function validOpportunityTags(value: unknown) {
+  if (!Array.isArray(value)) return false;
+
+  const original = value.map((item) => String(item));
+  const normalised = normaliseOpportunityTags(original);
+
+  if (original.length !== normalised.length) return false;
+
+  return original.every((item, index) => item === normalised[index]);
+}
+
+export function validOpportunityImage(input: {
+  imageUrl?: string | null;
+  imageAlt?: string | null;
+}) {
+  const imageUrl = cleanOpportunityText(input.imageUrl, 2048);
+  const imageAlt = cleanOpportunityText(input.imageAlt, 240);
+
+  if (!imageUrl) return imageAlt.length === 0;
+  return validHttpsUrl(imageUrl) && imageAlt.length > 0;
 }
 
 export function validateOpportunityApplicationTarget(input: {

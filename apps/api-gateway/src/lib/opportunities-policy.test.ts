@@ -7,10 +7,13 @@ import {
   isPublicOpportunityListVisible,
   normaliseOpportunityKey,
   normaliseOpportunitySlug,
+  normaliseOpportunityTags,
   opportunityAvailability,
   validateOpportunityApplicationTarget,
+  validOpportunityImage,
   validOpportunityKey,
   validOpportunitySlug,
+  validOpportunityTags,
   validOpportunityWindow,
 } from './opportunities-policy';
 
@@ -150,6 +153,58 @@ test('public listing excludes unlisted, internal and expired opportunities', () 
     isPublicOpportunityDetailVisible({
       status: 'PUBLISHED',
       visibility: 'INTERNAL',
+    }),
+    false,
+  );
+});
+
+test('opportunity tags are trimmed, deduplicated and capped deterministically', () => {
+  assert.deepEqual(
+    normaliseOpportunityTags([
+      ' Remote ',
+      'Clinical',
+      'remote',
+      '  South   Africa  ',
+      '',
+    ]),
+    ['Remote', 'Clinical', 'South Africa'],
+  );
+
+  const many = Array.from({ length: 20 }, (_, index) => `tag-${index}`);
+  assert.equal(normaliseOpportunityTags(many).length, 12);
+  assert.equal(validOpportunityTags(['Remote', 'Clinical']), true);
+  assert.equal(validOpportunityTags([' Remote ', 'Clinical']), false);
+  assert.equal(validOpportunityTags(['Remote', 'remote']), false);
+  assert.equal(validOpportunityTags(many), false);
+});
+
+test('opportunity images require HTTPS and accessible alt text', () => {
+  assert.equal(validOpportunityImage({ imageUrl: null, imageAlt: null }), true);
+  assert.equal(
+    validOpportunityImage({
+      imageUrl: 'https://cdn.example.com/opportunity.jpg',
+      imageAlt: 'Clinician working remotely',
+    }),
+    true,
+  );
+  assert.equal(
+    validOpportunityImage({
+      imageUrl: 'http://cdn.example.com/opportunity.jpg',
+      imageAlt: 'Clinician working remotely',
+    }),
+    false,
+  );
+  assert.equal(
+    validOpportunityImage({
+      imageUrl: 'https://cdn.example.com/opportunity.jpg',
+      imageAlt: '',
+    }),
+    false,
+  );
+  assert.equal(
+    validOpportunityImage({
+      imageUrl: null,
+      imageAlt: 'orphan alt text',
     }),
     false,
   );

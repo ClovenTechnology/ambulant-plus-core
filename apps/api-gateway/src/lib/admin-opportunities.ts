@@ -10,12 +10,15 @@ import {
   normaliseCountryCode,
   normaliseOpportunityKey,
   normaliseOpportunitySlug,
+  normaliseOpportunityTags,
   opportunityAvailability,
   parseOpportunityDate,
   validateOpportunityApplicationTarget,
   validCountryCode,
+  validOpportunityImage,
   validOpportunityKey,
   validOpportunitySlug,
+  validOpportunityTags,
   validOpportunityWindow,
   type OpportunityApplicationMode,
 } from '@/src/lib/opportunities-policy';
@@ -96,6 +99,16 @@ export type OpportunityWriteInput = {
   title: string;
   summary: string | null;
   description: string | null;
+  imageUrl: string | null;
+  imageAlt: string | null;
+  tags: string[];
+  referenceCode: string | null;
+  audienceLabel: string | null;
+  commitmentLabel: string | null;
+  commercialLabel: string | null;
+  ctaLabel: string | null;
+  seoTitle: string | null;
+  seoDescription: string | null;
   departmentLabel: string | null;
   locationMode: import('@/src/lib/opportunities-policy').OpportunityLocationMode | null;
   locationLabel: string | null;
@@ -181,6 +194,21 @@ export function parseOpportunityWriteInput(
     throw new OpportunityDomainError('invalid_opportunity_country_code', 400);
   }
 
+  const imageUrl =
+    cleanOpportunityText(
+      body?.imageUrl === undefined ? defaults.imageUrl : body.imageUrl,
+      2048,
+    ) || null;
+  const imageAlt =
+    cleanOpportunityText(
+      body?.imageAlt === undefined ? defaults.imageAlt : body.imageAlt,
+      240,
+    ) || null;
+
+  if (!validOpportunityImage({ imageUrl, imageAlt })) {
+    throw new OpportunityDomainError('invalid_opportunity_image', 400);
+  }
+
   const applicationFormId =
     cleanOpportunityText(
       body?.applicationFormId === undefined
@@ -222,6 +250,25 @@ export function parseOpportunityWriteInput(
     summary: cleanOpportunityText(body?.summary ?? defaults.summary, 1200) || null,
     description:
       cleanOpportunityText(body?.description ?? defaults.description, 50000) || null,
+    imageUrl,
+    imageAlt,
+    tags: normaliseOpportunityTags(
+      body?.tags === undefined ? defaults.tags : body.tags,
+    ),
+    referenceCode:
+      cleanOpportunityText(body?.referenceCode ?? defaults.referenceCode, 80) || null,
+    audienceLabel:
+      cleanOpportunityText(body?.audienceLabel ?? defaults.audienceLabel, 160) || null,
+    commitmentLabel:
+      cleanOpportunityText(body?.commitmentLabel ?? defaults.commitmentLabel, 160) || null,
+    commercialLabel:
+      cleanOpportunityText(body?.commercialLabel ?? defaults.commercialLabel, 200) || null,
+    ctaLabel:
+      cleanOpportunityText(body?.ctaLabel ?? defaults.ctaLabel, 80) || null,
+    seoTitle:
+      cleanOpportunityText(body?.seoTitle ?? defaults.seoTitle, 240) || null,
+    seoDescription:
+      cleanOpportunityText(body?.seoDescription ?? defaults.seoDescription, 500) || null,
     departmentLabel:
       cleanOpportunityText(body?.departmentLabel ?? defaults.departmentLabel, 160) || null,
     locationMode,
@@ -261,6 +308,12 @@ export function assertOpportunityStoredPublishable(input: any) {
   }
   if (!validCountryCode(input?.countryCode)) {
     throw new OpportunityDomainError('invalid_opportunity_country_code', 400);
+  }
+  if (!validOpportunityImage({ imageUrl: input?.imageUrl, imageAlt: input?.imageAlt })) {
+    throw new OpportunityDomainError('invalid_opportunity_image', 400);
+  }
+  if (!validOpportunityTags(input?.tags)) {
+    throw new OpportunityDomainError('invalid_opportunity_tags', 400);
   }
   if (!validOpportunityWindow({ opensAt: input?.opensAt, closesAt: input?.closesAt })) {
     throw new OpportunityDomainError('invalid_opportunity_window', 400);
@@ -391,6 +444,16 @@ export function serializePublicOpportunity(row: any, now = new Date()) {
     title: row.title,
     summary: row.summary,
     description: row.description,
+    imageUrl: row.imageUrl,
+    imageAlt: row.imageAlt,
+    tags: Array.isArray(row.tags) ? row.tags : [],
+    referenceCode: row.referenceCode,
+    audienceLabel: row.audienceLabel,
+    commitmentLabel: row.commitmentLabel,
+    commercialLabel: row.commercialLabel,
+    ctaLabel: row.ctaLabel,
+    seoTitle: row.seoTitle,
+    seoDescription: row.seoDescription,
     departmentLabel: row.departmentLabel,
     locationMode: row.locationMode,
     locationLabel: row.locationLabel,
