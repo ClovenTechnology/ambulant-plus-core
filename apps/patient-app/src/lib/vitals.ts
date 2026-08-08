@@ -33,7 +33,7 @@ export type EmitVitalInput = {
   type: VitalsType;
   payload: any;
   deviceId?: string;
-  recorded_at?: string;
+  recorded_at?: string | null;
   meta?: Record<string, any>;
 };
 
@@ -100,13 +100,19 @@ function inferDeviceClass(source: VitalSource): DeviceClass {
   }
 }
 
+function vitalTimestampMs(value?: string | null) {
+  if (!value) return 0;
+  const ts = Date.parse(value);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
 export function shouldPreferIncomingVital(
   existing: StoredVitalLike | null | undefined,
   incoming: {
     type: VitalsType;
     source: VitalSource;
     deviceClass?: DeviceClass;
-    recorded_at?: string;
+    recorded_at?: string | null;
   },
 ): boolean {
   if (!existing) return true;
@@ -121,8 +127,8 @@ export function shouldPreferIncomingVital(
     return incomingPriority > existingPriority;
   }
 
-  const existingTs = existing.recorded_at ? Date.parse(existing.recorded_at) : 0;
-  const incomingTs = incoming.recorded_at ? Date.parse(incoming.recorded_at) : Date.now();
+  const existingTs = vitalTimestampMs(existing.recorded_at);
+  const incomingTs = vitalTimestampMs(incoming.recorded_at);
 
   return incomingTs >= existingTs;
 }
@@ -163,7 +169,7 @@ export async function emitVital(input: EmitVitalInput) {
           type: input.type,
           payload: input.payload,
           deviceId: input.deviceId,
-          recorded_at: input.recorded_at ?? new Date().toISOString(),
+          recorded_at: input.recorded_at,
           meta: input.meta ?? {},
         }),
       },
@@ -232,7 +238,7 @@ export async function emitNexRingVital(
 export async function emitNexRingMetricSet(input: {
   patientId: string;
   deviceId?: string;
-  recorded_at?: string;
+  recorded_at?: string | null;
   heart_rate?: number;
   spo2?: number;
   steps?: number;

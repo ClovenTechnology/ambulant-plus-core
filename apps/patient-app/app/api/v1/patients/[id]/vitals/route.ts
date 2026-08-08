@@ -112,9 +112,8 @@ function upstreamUrl(req: NextRequest, patientId: string) {
 }
 
 function normalizeRecordedAt(value: unknown) {
-  const raw = String(value || '').trim();
-  const parsed = raw ? new Date(raw) : new Date();
-  return Number.isNaN(parsed.getTime()) ? new Date().toISOString() : parsed.toISOString();
+  const raw = String(value ?? '').trim();
+  return raw || undefined;
 }
 
 function cleanPayload(value: unknown) {

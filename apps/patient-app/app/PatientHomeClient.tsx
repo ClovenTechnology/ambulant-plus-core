@@ -3,16 +3,14 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import {
   Activity,
   ArrowRight,
   Bell,
   BrainCircuit,
   CalendarDays,
-  CheckCircle2,
   ChevronRight,
-  Clock3,
   HeartPulse,
   ScanHeart,
   Shield,
@@ -22,28 +20,20 @@ import {
   Waves,
 } from 'lucide-react';
 
-import type { Allergy, Clinician, Pill, Vitals } from '@/types';
 import type { BpPoint } from '../components/charts/BpChart';
 import { pickPreferredVital, type VitalsType } from '@/src/lib/vitals';
 
-import MeterDonut from '../components/charts/AnimatedMeterDonut';
-import MiniMeterDonut from '../components/charts/MiniMeterDonut';
-import VitalsTrendChart from '../components/charts/VitalsTrendChart';
-
-import RecentActivityStrip from '../components/RecentActivityStrip';
-
-import AllergiesBlockWrapper from '@/components/AllergiesBlockWrapper';
-import PillRemindersWrapper from '@/components/PillRemindersWrapper';
-import ReportsBlockWrapper from '@/components/ReportsBlockWrapper';
-
 type AlertSeverity = 'low' | 'moderate' | 'high' | 'critical';
+type CareState = 'stable' | 'watch' | 'action_required' | 'critical' | 'insufficient';
+type Freshness = 'live' | 'recent' | 'stale' | 'offline' | 'none';
+type MeshState = 'live' | 'recent' | 'ready' | 'offline' | 'available' | 'processing';
 
 type InsightAlert = {
   id: string;
   title: string;
   message: string;
   severity: AlertSeverity;
-  ts: string;
+  ts: string | null;
 };
 
 type MedLike = {
@@ -55,17 +45,13 @@ type MedLike = {
   status?: string;
 };
 
-
 type CaseLike = {
   id?: string;
   title?: string;
   status?: string;
   updatedAt?: string;
-  latestEncounter?: {
-    start?: string;
-  };
+  latestEncounter?: { start?: string };
 };
-
 
 type ProfileResponse = {
   ok?: boolean;
@@ -84,57 +70,111 @@ type AppointmentPreview = {
   clinicianName?: string;
 };
 
+type AppointmentState = {
+  id?: string;
+  startsAt?: string;
+  when: string;
+  with: string;
+  status: string;
+};
+
 type AdherencePoint = {
   label: string;
   value: number;
   ts?: string;
 };
 
+type VitalInterpretationStatus = 'ACTIVE' | 'SUSPECT' | 'EXCLUDED';
+type VitalTimeAuthority = 'SOURCE_REPORTED' | 'SERVER_RECEIVED_FALLBACK' | 'UNSPECIFIED';
+
 type RawVitalRecord = {
   id?: string;
+  patientId?: string;
+  deviceId?: string | null;
   type?: string;
+  vType?: string;
+  value?: number | string | null;
+  valueNum?: number | string | null;
+  unit?: string | null;
+  t?: string | null;
   recorded_at?: string | null;
+  observationId?: string | null;
+  receivedAt?: string | null;
+  timeAuthority?: VitalTimeAuthority | string | null;
+  interpretationStatus?: VitalInterpretationStatus | string | null;
+  statusReasonCode?: string | null;
+  statusReasonText?: string | null;
+  statusChangedAt?: string | null;
   payload?: Record<string, unknown> | null;
   meta?: Record<string, unknown> | null;
 };
 
-type LiveVitals = Omit<Vitals, 'temp' | 'bpSeries'> & {
+type VitalTrustSnapshot = {
+  observationId: string | null;
+  timeAuthority: VitalTimeAuthority | string | null;
+  interpretationStatus: VitalInterpretationStatus | string | null;
+  statusReasonCode: string | null;
+  statusReasonText: string | null;
+};
+
+type VitalKey = 'hr' | 'spo2' | 'temp' | 'bp';
+
+type LiveVitals = {
   hr: number;
   bp: string;
   temp: number;
   spo2: number;
   bpSeries: BpPoint[];
-  lastSync: string;
+  latestAt: string | null;
+  recordedAt: Record<VitalKey, string | null>;
+  source: Record<VitalKey, string | null>;
+  trust: Record<VitalKey, VitalTrustSnapshot | null>;
 };
 
-type UIMood = 'calm' | 'watchful' | 'alert';
-
-const SURFACE =
-  'relative overflow-hidden rounded-[30px] border border-white/60 bg-white/85 backdrop-blur-xl shadow-[0_10px_40px_rgba(15,23,42,0.06)]';
-
-const sectionMotion = {
-  initial: { opacity: 0, y: 18 },
-  animate: { opacity: 1, y: 0 },
-  transition: { duration: 0.42 },
+type ECGSnapshot = {
+  samples: number[];
+  recordedAt: string | null;
+  source: string;
 };
 
-const hoverLift = {
-  whileHover: { y: -6, scale: 1.01 },
-  transition: { type: 'spring', stiffness: 220, damping: 18 },
-} as const;
+type DeviceLike = {
+  id: string;
+  name: string;
+  status: string;
+  lastSync: string | null;
+  battery: number | null;
+  signalQuality: string | null;
+};
+
+type CareJourneyEvent = {
+  id: string;
+  label: string;
+  detail: string;
+  ts: string | null;
+  href?: string;
+  kind: 'telemetry' | 'alert' | 'care' | 'appointment' | 'treatment';
+};
+
+type MeshNode = {
+  id: string;
+  label: string;
+  detail: string;
+  state: MeshState;
+  href: string;
+  icon: React.ElementType;
+};
 
 const EMPTY_VITALS: LiveVitals = {
   hr: 0,
   bp: '—',
   temp: 0,
   spo2: 0,
-  lastSync: 'Sync pending',
   bpSeries: [],
+  latestAt: null,
+  recordedAt: { hr: null, spo2: null, temp: null, bp: null },
+  source: { hr: null, spo2: null, temp: null, bp: null },
+  trust: { hr: null, spo2: null, temp: null, bp: null },
 };
-
-function cn(...classes: Array<string | false | null | undefined>) {
-  return classes.filter(Boolean).join(' ');
-}
 
 const ZA_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
   day: '2-digit',
@@ -149,11 +189,40 @@ const ZA_SHORT_DATE_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
   day: '2-digit',
   month: 'short',
 });
-function formatTimestamp(value?: string) {
+
+const TIME_FORMATTER = new Intl.DateTimeFormat('en-ZA', {
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+});
+
+function cn(...classes: Array<string | false | null | undefined>) {
+  return classes.filter(Boolean).join(' ');
+}
+
+function toNumber(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === 'number' && Number.isFinite(value)) return value;
+    if (typeof value === 'string' && value.trim() !== '') {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) return parsed;
+    }
+  }
+  return null;
+}
+
+function formatTimestamp(value?: string | null) {
+  if (!value) return 'No timestamp';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'No timestamp';
+  return ZA_DATE_TIME_FORMATTER.format(date);
+}
+
+function formatTime(value?: string | null) {
   if (!value) return '—';
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
-  return ZA_DATE_TIME_FORMATTER.format(date);
+  return TIME_FORMATTER.format(date);
 }
 
 function formatHumanDateTime(value?: string) {
@@ -163,10 +232,10 @@ function formatHumanDateTime(value?: string) {
   return ZA_DATE_TIME_FORMATTER.format(date);
 }
 
-function formatRelativeSync(value?: string) {
-  if (!value) return 'Sync pending';
+function formatRelativeSync(value?: string | null) {
+  if (!value) return 'No current data';
   const ts = Date.parse(value);
-  if (!Number.isFinite(ts)) return 'Sync pending';
+  if (!Number.isFinite(ts)) return 'No current data';
 
   const diffMs = Date.now() - ts;
   const diffMin = Math.max(0, Math.floor(diffMs / 60000));
@@ -193,9 +262,31 @@ function hasLiveVitalData(vitals: LiveVitals) {
     vitals.hr > 0 ||
     vitals.spo2 > 0 ||
     vitals.temp > 0 ||
-    (typeof vitals.bp === 'string' && vitals.bp.includes('/')) ||
+    (typeof vitals.bp === 'string' && /^\d+\/\d+/.test(vitals.bp)) ||
     vitals.bpSeries.length > 0
   );
+}
+
+function isCurrentFreshness(freshness: Freshness) {
+  return freshness === 'live' || freshness === 'recent';
+}
+
+function hasVitalValue(vitals: LiveVitals, key: VitalKey) {
+  if (key === 'hr') return vitals.hr > 0;
+  if (key === 'spo2') return vitals.spo2 > 0;
+  if (key === 'temp') return vitals.temp > 0;
+  return /^\d+\/\d+/.test(vitals.bp);
+}
+
+function isCurrentEligibleVital(vitals: LiveVitals, key: VitalKey) {
+  if (!hasVitalValue(vitals, key)) return false;
+  return isCurrentFreshness(resolveFreshness(vitals.recordedAt[key], true));
+}
+
+function countVitalSignals(vitals: LiveVitals) {
+  return (['hr', 'spo2', 'temp', 'bp'] as VitalKey[]).filter((key) =>
+    isCurrentEligibleVital(vitals, key),
+  ).length;
 }
 
 function displayVitalNumber(value: number, suffix = '') {
@@ -205,7 +296,7 @@ function displayVitalNumber(value: number, suffix = '') {
 
 function displayTemp(value: number) {
   if (!Number.isFinite(value) || value <= 0) return '—';
-  return `${value.toFixed(1)} °C`;
+  return `${value.toFixed(1)}°`;
 }
 
 function displayBp(value?: string) {
@@ -213,137 +304,46 @@ function displayBp(value?: string) {
   return value;
 }
 
-function countLiveVitalSignals(vitals: LiveVitals) {
-  let count = 0;
-  if (Number.isFinite(vitals.hr) && vitals.hr > 0) count += 1;
-  if (Number.isFinite(vitals.spo2) && vitals.spo2 > 0) count += 1;
-  if (Number.isFinite(vitals.temp) && vitals.temp > 0) count += 1;
-  if (typeof vitals.bp === 'string' && /^\d+\/\d+/.test(vitals.bp)) count += 1;
-  return count;
+function resolveFreshness(timestamp: string | null, hasData: boolean): Freshness {
+  if (!hasData) return 'none';
+  if (!timestamp) return 'stale';
+
+  const ts = Date.parse(timestamp);
+  if (!Number.isFinite(ts)) return 'stale';
+
+  const ageMin = Math.max(0, (Date.now() - ts) / 60000);
+  if (ageMin <= 2) return 'live';
+  if (ageMin <= 60) return 'recent';
+  return 'stale';
 }
 
-function hasRecoveryBasis(vitals: LiveVitals) {
-  return countLiveVitalSignals(vitals) >= 3;
-}
-
-function hasRecoveryScore(score: number | null | undefined): score is number {
-  return typeof score === 'number' && Number.isFinite(score);
-}
-
-function displayRecoveryScore(score: number | null | undefined) {
-  return hasRecoveryScore(score) ? String(score) : '—';
-}
-function computeRecoveryScore(
-  vitals: LiveVitals,
-  adherencePct: number,
-  alertCount: number,
-): number | null {
-  if (!hasRecoveryBasis(vitals)) {
-    return null;
-  }
-
-  const systolic = parseInt(String(vitals.bp ?? '0/0').split('/')[0] ?? '0', 10);
-  const diastolic = parseInt(String(vitals.bp ?? '0/0').split('/')[1] ?? '0', 10);
-
-  const spo2Score = Math.min(100, Math.max(0, vitals.spo2));
-  const hrScore = Math.max(0, 100 - Math.abs(vitals.hr - 72) * 2);
-  const tempScore = Math.max(0, 100 - Math.abs(vitals.temp - 36.9) * 30);
-  const bpPenalty = Math.max(
-    0,
-    Math.abs(systolic - 120) * 0.8 + Math.abs(diastolic - 80) * 0.6,
-  );
-  const alertsPenalty = Math.min(22, alertCount * 5);
-
-  const raw =
-    spo2Score * 0.28 +
-    hrScore * 0.2 +
-    tempScore * 0.16 +
-    adherencePct * 0.24 +
-    (100 - bpPenalty) * 0.12 -
-    alertsPenalty;
-
-  return Math.max(32, Math.min(99, Math.round(raw)));
-}
-
-function getRecoveryLabel(score: number | null | undefined) {
-  if (!hasRecoveryScore(score)) return 'Calibrating';
-  if (score >= 86) return 'Stable';
-  if (score >= 72) return 'Good';
-  if (score >= 60) return 'Watchful';
-  return 'Needs attention';
-}
-
-function getRecoveryNarrative(
-  score: number | null,
-  vitals: LiveVitals,
-  adherencePct: number,
-) {
-  if (!hasRecoveryScore(score)) {
-    return 'Not enough real vitals are available yet. Sync at least three supported signals to activate your Recovery Index.';
-  }
-
-  const systolic = parseInt(String(vitals.bp ?? '0/0').split('/')[0] ?? '0', 10);
-
-  if (score < 60) {
-    return 'A few signals need closer follow-up today. Review your vitals, medications, and any care-team alerts.';
-  }
-
-  if (vitals.spo2 < 94 || systolic > 140) {
-    return 'Most signals are holding, but one or two readings deserve extra attention and a quick review.';
-  }
-
-  if (adherencePct < 80) {
-    return 'Your vitals look reassuring overall. Staying on schedule with medication can improve your trend further.';
-  }
-
-  return 'Your latest readings and care activity suggest a steady, well-managed day with no immediate concern signals.';
-}
-
-function getPriorityAction(args: {
-  alerts: InsightAlert[];
-  adherencePct: number;
-  nextAppointment: { when: string; with: string; status: string };
-}) {
-  const critical = args.alerts.find(
-    (a) => a.severity === 'critical' || a.severity === 'high',
-  );
-
-  if (critical) {
-    return {
-      title: 'Review priority alert',
-      body: critical.title,
-      href: '/insights',
-      tone: 'rose' as const,
-    };
-  }
-
-  if (args.adherencePct < 85) {
-    return {
-      title: 'Stay on track with treatment',
-      body: 'Medication adherence is the clearest opportunity to improve today.',
-      href: '/medications',
-      tone: 'amber' as const,
-    };
-  }
-
-  return {
-    title: 'Prepare for your next consultation',
-    body: `${args.nextAppointment.with} • ${args.nextAppointment.when}`,
-    href: '/appointments',
-    tone: 'sky' as const,
-  };
-}
-
-function severityChip(severity: AlertSeverity) {
-  switch (severity) {
-    case 'critical':
-      return 'border-rose-200 bg-rose-50/90 text-rose-700';
-    case 'high':
-      return 'border-amber-200 bg-amber-50/90 text-amber-700';
-    case 'moderate':
-      return 'border-yellow-200 bg-yellow-50/90 text-yellow-700';
+function freshnessLabel(freshness: Freshness) {
+  switch (freshness) {
+    case 'live':
+      return 'LIVE';
+    case 'recent':
+      return 'RECENT';
+    case 'stale':
+      return 'STALE';
+    case 'offline':
+      return 'OFFLINE';
     default:
-      return 'border-sky-200 bg-sky-50/90 text-sky-700';
+      return 'NO DATA';
+  }
+}
+
+function freshnessClasses(freshness: Freshness) {
+  switch (freshness) {
+    case 'live':
+      return 'border-cyan-300/60 bg-cyan-50/80 text-cyan-800';
+    case 'recent':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-800';
+    case 'stale':
+      return 'border-slate-200 bg-slate-100 text-slate-600';
+    case 'offline':
+      return 'border-slate-300 bg-white text-slate-500';
+    default:
+      return 'border-slate-200 bg-transparent text-slate-400';
   }
 }
 
@@ -360,25 +360,17 @@ function severityLabel(severity: AlertSeverity) {
   }
 }
 
-function toneClasses(tone: 'rose' | 'amber' | 'sky') {
-  switch (tone) {
-    case 'rose':
-      return 'from-rose-500/18 to-pink-500/8 border-rose-200/70';
-    case 'amber':
-      return 'from-amber-500/18 to-orange-500/8 border-amber-200/70';
+function severityClasses(severity: AlertSeverity) {
+  switch (severity) {
+    case 'critical':
+      return 'border-red-300 bg-red-50 text-red-800';
+    case 'high':
+      return 'border-amber-300 bg-amber-50 text-amber-800';
+    case 'moderate':
+      return 'border-yellow-300 bg-yellow-50 text-yellow-800';
     default:
-      return 'from-sky-500/18 to-cyan-500/8 border-sky-200/70';
+      return 'border-sky-200 bg-sky-50 text-sky-800';
   }
-}
-
-function deriveStablePillId(med: MedLike, index: number) {
-  return (
-    med.id ??
-    med.orderId ??
-    [med.name ?? 'medication', med.time ?? 'time-unknown', med.dose ?? 'dose-unknown', index].join(
-      '::',
-    )
-  );
 }
 
 function normalizeAppointments(payload: unknown): AppointmentPreview[] {
@@ -390,7 +382,6 @@ function normalizeAppointments(payload: unknown): AppointmentPreview[] {
     const record = item as Record<string, unknown>;
     const id = String(record.id ?? '').trim();
     const startsAt = String(record.startsAt ?? record.when ?? '').trim();
-
     if (!id || !startsAt) continue;
 
     mapped.push({
@@ -406,19 +397,34 @@ function normalizeAppointments(payload: unknown): AppointmentPreview[] {
   return mapped.sort((a, b) => new Date(a.startsAt).getTime() - new Date(b.startsAt).getTime());
 }
 
-function normalizeDevicesCount(payload: unknown): number {
-  if (Array.isArray(payload)) return payload.length;
-
+function normalizeDevices(payload: unknown): DeviceLike[] {
   const root = payload as
-    | { items?: unknown[]; devices?: unknown[]; count?: number; total?: number }
+    | { items?: unknown[]; devices?: unknown[] }
     | undefined;
 
-  if (typeof root?.count === 'number') return root.count;
-  if (typeof root?.total === 'number') return root.total;
-  if (Array.isArray(root?.items)) return root.items.length;
-  if (Array.isArray(root?.devices)) return root.devices.length;
+  const raw = Array.isArray(payload)
+    ? payload
+    : Array.isArray(root?.items)
+      ? root.items
+      : Array.isArray(root?.devices)
+        ? root.devices
+        : [];
 
-  return 0;
+  return raw.map((item, index) => {
+    const record = (item && typeof item === 'object' ? item : {}) as Record<string, unknown>;
+    const batteryRaw = toNumber(record.battery, record.batteryPct, record.batteryLevel);
+    const lastSyncRaw = record.lastSync ?? record.lastSeen ?? record.updatedAt ?? record.last_seen;
+    const signalRaw = record.signalQuality ?? record.signal ?? record.quality;
+
+    return {
+      id: String(record.id ?? record.deviceId ?? `device-${index}`),
+      name: String(record.name ?? record.deviceName ?? record.type ?? record.model ?? `Device ${index + 1}`),
+      status: String(record.status ?? record.state ?? 'unknown'),
+      lastSync: lastSyncRaw == null ? null : String(lastSyncRaw),
+      battery: batteryRaw == null ? null : Math.max(0, Math.min(100, Math.round(batteryRaw))),
+      signalQuality: signalRaw == null ? null : String(signalRaw),
+    };
+  });
 }
 
 function normalizeAiMessages(payload: unknown): string[] {
@@ -432,8 +438,10 @@ function normalizeAdherenceSummary(payload: unknown): {
   history: AdherencePoint[];
 } {
   const root = (payload && typeof payload === 'object' ? payload : {}) as Record<string, unknown>;
-
-  const summary = root.summary && typeof root.summary === 'object' ? (root.summary as Record<string, unknown>) : {};
+  const summary =
+    root.summary && typeof root.summary === 'object'
+      ? (root.summary as Record<string, unknown>)
+      : {};
 
   const currentCandidate =
     root.adherencePct ??
@@ -468,12 +476,14 @@ function normalizeAdherenceSummary(payload: unknown): {
   const history = rawHistory
     .map((item, index): AdherencePoint | null => {
       if (typeof item === 'number' && Number.isFinite(item)) {
-        return { label: `Reading ${index + 1}`, value: Math.max(0, Math.min(100, Math.round(item))) };
+        return {
+          label: `Reading ${index + 1}`,
+          value: Math.max(0, Math.min(100, Math.round(item))),
+        };
       }
 
       if (!item || typeof item !== 'object') return null;
       const record = item as Record<string, unknown>;
-
       const valueRaw =
         record.value ??
         record.adherencePct ??
@@ -496,9 +506,7 @@ function normalizeAdherenceSummary(payload: unknown): {
       const label = ts
         ? (() => {
             const d = new Date(ts);
-            return Number.isNaN(d.getTime())
-              ? ts
-              : ZA_SHORT_DATE_FORMATTER.format(d);
+            return Number.isNaN(d.getTime()) ? ts : ZA_SHORT_DATE_FORMATTER.format(d);
           })()
         : `Reading ${index + 1}`;
 
@@ -521,28 +529,16 @@ function normalizeAdherenceSummary(payload: unknown): {
 }
 
 function normalizeMedications(payload: unknown): MedLike[] {
-  if (Array.isArray(payload)) {
-    return payload.map((item, index) => {
-      const record = item as Record<string, unknown>;
-      return {
-        id: String(record.id ?? record.medicationId ?? `med-${index}`).trim(),
-        orderId: record.orderId == null ? undefined : String(record.orderId),
-        name: record.name == null ? undefined : String(record.name),
-        dose: record.dose == null ? undefined : String(record.dose),
-        time: record.time == null ? undefined : String(record.time),
-        status: record.status == null ? undefined : String(record.status),
-      };
-    });
-  }
-
   const root = payload as { medications?: unknown[]; meds?: unknown[]; items?: unknown[] } | undefined;
-  const raw = Array.isArray(root?.medications)
-    ? root.medications
-    : Array.isArray(root?.meds)
-      ? root.meds
-      : Array.isArray(root?.items)
-        ? root.items
-        : [];
+  const raw = Array.isArray(payload)
+    ? payload
+    : Array.isArray(root?.medications)
+      ? root.medications
+      : Array.isArray(root?.meds)
+        ? root.meds
+        : Array.isArray(root?.items)
+          ? root.items
+          : [];
 
   return raw.map((item, index) => {
     const record = item as Record<string, unknown>;
@@ -558,26 +554,14 @@ function normalizeMedications(payload: unknown): MedLike[] {
 }
 
 function normalizeCases(payload: unknown): CaseLike[] {
-  if (Array.isArray(payload)) {
-    return payload.map((item, index) => {
-      const record = item as Record<string, unknown>;
-      const latestEncounter = record.latestEncounter as Record<string, unknown> | undefined;
-      return {
-        id: String(record.id ?? `case-${index}`).trim(),
-        title: record.title == null ? undefined : String(record.title),
-        status: record.status == null ? undefined : String(record.status),
-        updatedAt: record.updatedAt == null ? undefined : String(record.updatedAt),
-        latestEncounter: latestEncounter?.start == null ? undefined : { start: String(latestEncounter.start) },
-      };
-    });
-  }
-
   const root = payload as { cases?: unknown[]; items?: unknown[] } | undefined;
-  const raw = Array.isArray(root?.cases)
-    ? root.cases
-    : Array.isArray(root?.items)
-      ? root.items
-      : [];
+  const raw = Array.isArray(payload)
+    ? payload
+    : Array.isArray(root?.cases)
+      ? root.cases
+      : Array.isArray(root?.items)
+        ? root.items
+        : [];
 
   return raw.map((item, index) => {
     const record = item as Record<string, unknown>;
@@ -587,7 +571,8 @@ function normalizeCases(payload: unknown): CaseLike[] {
       title: record.title == null ? undefined : String(record.title),
       status: record.status == null ? undefined : String(record.status),
       updatedAt: record.updatedAt == null ? undefined : String(record.updatedAt),
-      latestEncounter: latestEncounter?.start == null ? undefined : { start: String(latestEncounter.start) },
+      latestEncounter:
+        latestEncounter?.start == null ? undefined : { start: String(latestEncounter.start) },
     };
   });
 }
@@ -603,15 +588,259 @@ function isVitalsType(value: unknown): value is VitalsType {
   );
 }
 
-function toNumber(...values: unknown[]) {
-  for (const value of values) {
-    if (typeof value === 'number' && Number.isFinite(value)) return value;
-    if (typeof value === 'string' && value.trim() !== '') {
-      const parsed = Number(value);
-      if (Number.isFinite(parsed)) return parsed;
+function vitalRecordType(record: RawVitalRecord) {
+  return String(record.vType ?? record.type ?? '').trim();
+}
+
+function vitalRecordTimestamp(record: RawVitalRecord) {
+  const raw = record.recorded_at ?? record.t ?? null;
+  if (!raw) return null;
+  const value = String(raw);
+  return Number.isFinite(Date.parse(value)) ? value : null;
+}
+
+function vitalRecordValue(record: RawVitalRecord) {
+  return toNumber(record.valueNum, record.value, record.payload?.value);
+}
+
+function isActiveClinicalRecord(record: RawVitalRecord) {
+  const status = String(record.interpretationStatus ?? '').trim().toUpperCase();
+  // Legacy aggregate rows may not carry a trust field. The canonical API's
+  // default GET is ACTIVE-only; an explicit non-ACTIVE status is never allowed
+  // into the Home clinical projection.
+  return !status || status === 'ACTIVE';
+}
+
+function trustFromRecord(record?: RawVitalRecord): VitalTrustSnapshot | null {
+  if (!record) return null;
+
+  const observationId =
+    record.observationId == null ? null : String(record.observationId).trim() || null;
+  const timeAuthority =
+    record.timeAuthority == null ? null : String(record.timeAuthority).trim() || null;
+  const interpretationStatus =
+    record.interpretationStatus == null
+      ? null
+      : String(record.interpretationStatus).trim() || null;
+  const statusReasonCode =
+    record.statusReasonCode == null ? null : String(record.statusReasonCode).trim() || null;
+  const statusReasonText =
+    record.statusReasonText == null ? null : String(record.statusReasonText).trim() || null;
+
+  if (
+    !observationId &&
+    !timeAuthority &&
+    !interpretationStatus &&
+    !statusReasonCode &&
+    !statusReasonText
+  ) {
+    return null;
+  }
+
+  return {
+    observationId,
+    timeAuthority,
+    interpretationStatus,
+    statusReasonCode,
+    statusReasonText,
+  };
+}
+
+function withLogicalPayload(
+  record: RawVitalRecord,
+  type: VitalsType,
+  payload: Record<string, unknown>,
+): RawVitalRecord & { type: VitalsType } {
+  const recordedAt = vitalRecordTimestamp(record);
+  return {
+    ...record,
+    type,
+    recorded_at: recordedAt,
+    payload: {
+      ...(record.payload ?? {}),
+      ...payload,
+    },
+    meta: {
+      ...(record.meta ?? {}),
+      ...(record.deviceId ? { device: record.deviceId } : {}),
+    },
+  };
+}
+
+function normalizeClinicalVitalRecords(items: RawVitalRecord[]) {
+  const active = items.filter(isActiveClinicalRecord);
+  const logical: Array<RawVitalRecord & { type: VitalsType }> = [];
+  const bpGroups = new Map<
+    string,
+    {
+      systolic?: RawVitalRecord;
+      diastolic?: RawVitalRecord;
+    }
+  >();
+
+  for (const record of active) {
+    const type = vitalRecordType(record);
+    const value = vitalRecordValue(record);
+
+    // The canonical gateway projects most measurements as scalar rows. Some
+    // scalar names (heart_rate, spo2, blood_glucose) intentionally overlap the
+    // legacy aggregate API names, so normalize the direct numeric field before
+    // falling back to the legacy payload representation.
+    if (type === 'heart_rate' && value !== null) {
+      const payloadValue = toNumber(
+        record.payload?.bpm,
+        record.payload?.value,
+        record.payload?.hr,
+      );
+      logical.push(
+        payloadValue !== null
+          ? ({
+              ...record,
+              type: 'heart_rate',
+              recorded_at: vitalRecordTimestamp(record),
+            } as RawVitalRecord & { type: VitalsType })
+          : withLogicalPayload(record, 'heart_rate', { bpm: value, value }),
+      );
+      continue;
+    }
+
+    if (type === 'spo2' && value !== null) {
+      const payloadValue = toNumber(
+        record.payload?.pct,
+        record.payload?.value,
+        record.payload?.spo2,
+      );
+      logical.push(
+        payloadValue !== null
+          ? ({
+              ...record,
+              type: 'spo2',
+              recorded_at: vitalRecordTimestamp(record),
+            } as RawVitalRecord & { type: VitalsType })
+          : withLogicalPayload(record, 'spo2', { pct: value, spo2: value, value }),
+      );
+      continue;
+    }
+
+    if (type === 'blood_glucose' && value !== null) {
+      const payloadValue = toNumber(
+        record.payload?.mgDl,
+        record.payload?.mg_dl,
+        record.payload?.glucose,
+        record.payload?.value,
+      );
+      logical.push(
+        payloadValue !== null
+          ? ({
+              ...record,
+              type: 'blood_glucose',
+              recorded_at: vitalRecordTimestamp(record),
+            } as RawVitalRecord & { type: VitalsType })
+          : withLogicalPayload(record, 'blood_glucose', { glucose: value, value }),
+      );
+      continue;
+    }
+
+    if (type === 'temperature_celsius' && value !== null) {
+      logical.push(withLogicalPayload(record, 'temperature', { celsius: value, value }));
+      continue;
+    }
+
+    if (type === 'blood_pressure_systolic' || type === 'blood_pressure_diastolic') {
+      if (value === null) continue;
+      const observationId =
+        record.observationId == null ? '' : String(record.observationId).trim();
+      const recordedAt = vitalRecordTimestamp(record);
+      const key = observationId
+        ? `observation:${observationId}`
+        : `legacy:${record.deviceId ?? ''}:${recordedAt ?? ''}`;
+
+      const group = bpGroups.get(key) ?? {};
+      if (type === 'blood_pressure_systolic') group.systolic = record;
+      if (type === 'blood_pressure_diastolic') group.diastolic = record;
+      bpGroups.set(key, group);
+      continue;
+    }
+
+    if (isVitalsType(type)) {
+      logical.push({
+        ...record,
+        type,
+        recorded_at: vitalRecordTimestamp(record),
+      } as RawVitalRecord & { type: VitalsType });
     }
   }
-  return null;
+
+  for (const group of bpGroups.values()) {
+    if (!group.systolic || !group.diastolic) continue;
+
+    const systolic = vitalRecordValue(group.systolic);
+    const diastolic = vitalRecordValue(group.diastolic);
+    if (systolic === null || diastolic === null) continue;
+
+    const source =
+      Date.parse(vitalRecordTimestamp(group.systolic) ?? '') >=
+      Date.parse(vitalRecordTimestamp(group.diastolic) ?? '')
+        ? group.systolic
+        : group.diastolic;
+
+    logical.push(
+      withLogicalPayload(source, 'blood_pressure', {
+        systolic,
+        diastolic,
+        sys: systolic,
+        dia: diastolic,
+      }),
+    );
+  }
+
+  return logical;
+}
+
+function latestTimestamp(values: Array<string | null>) {
+  return (
+    values
+      .filter((value): value is string => typeof value === 'string' && Number.isFinite(Date.parse(value)))
+      .sort((a, b) => Date.parse(b) - Date.parse(a))[0] ?? null
+  );
+}
+
+function mergeVitals(primary: LiveVitals, fallback: LiveVitals | null): LiveVitals {
+  if (!fallback) return primary;
+
+  const hasPrimaryHr = primary.hr > 0;
+  const hasPrimarySpo2 = primary.spo2 > 0;
+  const hasPrimaryTemp = primary.temp > 0;
+  const hasPrimaryBp = /^\d+\/\d+/.test(primary.bp);
+
+  const recordedAt = {
+    hr: hasPrimaryHr ? primary.recordedAt.hr : fallback.recordedAt.hr,
+    spo2: hasPrimarySpo2 ? primary.recordedAt.spo2 : fallback.recordedAt.spo2,
+    temp: hasPrimaryTemp ? primary.recordedAt.temp : fallback.recordedAt.temp,
+    bp: hasPrimaryBp ? primary.recordedAt.bp : fallback.recordedAt.bp,
+  };
+
+  return {
+    hr: hasPrimaryHr ? primary.hr : fallback.hr,
+    spo2: hasPrimarySpo2 ? primary.spo2 : fallback.spo2,
+    temp: hasPrimaryTemp ? primary.temp : fallback.temp,
+    bp: hasPrimaryBp ? primary.bp : fallback.bp,
+    bpSeries: primary.bpSeries.length ? primary.bpSeries : fallback.bpSeries,
+    latestAt: latestTimestamp(Object.values(recordedAt)),
+    recordedAt,
+    source: {
+      hr: hasPrimaryHr ? primary.source.hr : fallback.source.hr,
+      spo2: hasPrimarySpo2 ? primary.source.spo2 : fallback.source.spo2,
+      temp: hasPrimaryTemp ? primary.source.temp : fallback.source.temp,
+      bp: hasPrimaryBp ? primary.source.bp : fallback.source.bp,
+    },
+    trust: {
+      hr: hasPrimaryHr ? primary.trust.hr : fallback.trust.hr,
+      spo2: hasPrimarySpo2 ? primary.trust.spo2 : fallback.trust.spo2,
+      temp: hasPrimaryTemp ? primary.trust.temp : fallback.trust.temp,
+      bp: hasPrimaryBp ? primary.trust.bp : fallback.trust.bp,
+    },
+  };
 }
 
 function parseBloodPressure(record: RawVitalRecord) {
@@ -628,44 +857,39 @@ function parseBloodPressure(record: RawVitalRecord) {
 
   if ((systolic === null || diastolic === null) && bpString?.includes('/')) {
     const [s, d] = bpString.split('/');
-    return {
-      systolic: toNumber(s),
-      diastolic: toNumber(d),
-    };
+    return { systolic: toNumber(s), diastolic: toNumber(d) };
   }
 
   return { systolic, diastolic };
 }
 
+function sourceFromRecord(record?: RawVitalRecord) {
+  if (!record) return null;
+  const payload = record.payload ?? {};
+  const meta = record.meta ?? {};
+  const source =
+    meta.source ??
+    meta.deviceName ??
+    meta.device ??
+    payload.source ??
+    payload.deviceName ??
+    payload.device ??
+    payload.model ??
+    record.deviceId;
+  return source == null ? null : String(source);
+}
+
 function resolveVitals(items: RawVitalRecord[]): LiveVitals {
-  if (!Array.isArray(items) || items.length === 0) {
-    return EMPTY_VITALS;
-  }
+  if (!Array.isArray(items) || items.length === 0) return EMPTY_VITALS;
+
+  const logicalItems = normalizeClinicalVitalRecords(items);
+  if (logicalItems.length === 0) return EMPTY_VITALS;
 
   const latestByType = new Map<VitalsType, RawVitalRecord & { type: VitalsType }>();
-  const bpSeries: BpPoint[] = items
-    .reduce<BpPoint[]>((acc, item) => {
-      if (item.type !== 'blood_pressure') return acc;
 
-      const { systolic, diastolic } = parseBloodPressure(item);
-      if (typeof systolic !== 'number' || typeof diastolic !== 'number') return acc;
-
-      acc.push({
-        ts: item.recorded_at ?? new Date().toISOString(),
-        sys: Math.round(systolic),
-        dia: Math.round(diastolic),
-      });
-
-      return acc;
-    }, [])
-    .sort((a, b) => new Date(String(a.ts)).getTime() - new Date(String(b.ts)).getTime())
-    .slice(-7);
-
-  for (const item of items) {
-    if (!isVitalsType(item.type)) continue;
-    const typedItem = { ...item, type: item.type } as RawVitalRecord & { type: VitalsType };
+  for (const item of logicalItems) {
     const existing = latestByType.get(item.type);
-    const preferred = pickPreferredVital(existing, typedItem);
+    const preferred = pickPreferredVital(existing, item);
     if (preferred) latestByType.set(item.type, preferred as RawVitalRecord & { type: VitalsType });
   }
 
@@ -674,12 +898,9 @@ function resolveVitals(items: RawVitalRecord[]): LiveVitals {
   const tempRecord = latestByType.get('temperature');
   const bpRecord = latestByType.get('blood_pressure');
 
-  const hr =
-    toNumber(hrRecord?.payload?.bpm, hrRecord?.payload?.value, hrRecord?.payload?.hr) ?? 0;
-
+  const hr = toNumber(hrRecord?.payload?.bpm, hrRecord?.payload?.value, hrRecord?.payload?.hr) ?? 0;
   const spo2 =
     toNumber(spo2Record?.payload?.pct, spo2Record?.payload?.value, spo2Record?.payload?.spo2) ?? 0;
-
   const temp =
     toNumber(
       tempRecord?.payload?.celsius,
@@ -694,10 +915,30 @@ function resolveVitals(items: RawVitalRecord[]): LiveVitals {
       ? `${Math.round(bpParsed.systolic)}/${Math.round(bpParsed.diastolic)}`
       : '—';
 
-  const latestTimestamp = [hrRecord, spo2Record, tempRecord, bpRecord]
-    .map((item) => item?.recorded_at ?? null)
-    .filter((value): value is string => Boolean(value))
-    .sort((a, b) => Date.parse(b) - Date.parse(a))[0];
+  // Clinical truth rule: historical BP points are only shown when both values and a real timestamp exist.
+  const bpSeries: BpPoint[] = logicalItems
+    .reduce<BpPoint[]>((acc, item) => {
+      if (item.type !== 'blood_pressure' || !item.recorded_at) return acc;
+      const { systolic, diastolic } = parseBloodPressure(item);
+      if (typeof systolic !== 'number' || typeof diastolic !== 'number') return acc;
+      acc.push({
+        ts: item.recorded_at,
+        sys: Math.round(systolic),
+        dia: Math.round(diastolic),
+      });
+      return acc;
+    }, [])
+    .sort((a, b) => Date.parse(String(a.ts)) - Date.parse(String(b.ts)))
+    .slice(-14);
+
+  const timestamps = [hrRecord, spo2Record, tempRecord, bpRecord]
+    .map((record) => record?.recorded_at ?? null)
+    .filter(
+      (value): value is string =>
+        typeof value === 'string' &&
+        Number.isFinite(Date.parse(value)),
+    )
+    .sort((a, b) => Date.parse(b) - Date.parse(a));
 
   return {
     hr: Math.round(hr),
@@ -705,14 +946,30 @@ function resolveVitals(items: RawVitalRecord[]): LiveVitals {
     temp: Number(temp.toFixed(1)),
     bp,
     bpSeries,
-    lastSync: formatRelativeSync(latestTimestamp),
+    latestAt: timestamps[0] ?? null,
+    recordedAt: {
+      hr: hrRecord?.recorded_at ?? null,
+      spo2: spo2Record?.recorded_at ?? null,
+      temp: tempRecord?.recorded_at ?? null,
+      bp: bpRecord?.recorded_at ?? null,
+    },
+    source: {
+      hr: sourceFromRecord(hrRecord),
+      spo2: sourceFromRecord(spo2Record),
+      temp: sourceFromRecord(tempRecord),
+      bp: sourceFromRecord(bpRecord),
+    },
+    trust: {
+      hr: trustFromRecord(hrRecord),
+      spo2: trustFromRecord(spo2Record),
+      temp: trustFromRecord(tempRecord),
+      bp: trustFromRecord(bpRecord),
+    },
   };
 }
 
-
 function resolveSummaryVitals(payload: unknown): LiveVitals | null {
   if (!payload || typeof payload !== 'object') return null;
-
   const root = payload as Record<string, any>;
   if (root.ok === false) return null;
 
@@ -727,271 +984,573 @@ function resolveSummaryVitals(payload: unknown): LiveVitals | null {
       ? root.bp.trim()
       : typeof bpNow === 'string' && bpNow.trim()
         ? bpNow.trim()
-        : bpFromObject && bpFromObject.includes('/')
+        : bpFromObject && /^\d+\/\d+/.test(bpFromObject)
           ? bpFromObject
           : '—';
 
   const hr = toNumber(root.hr, root.hrNow, root.heartRate, root.pulse) ?? 0;
   const spo2 = toNumber(root.spo2, root.spo2Now, root.oxygenSaturation) ?? 0;
   const temp = toNumber(root.temp, root.tempNow, root.temperature, root.temperatureC) ?? 0;
+  const latestAtRaw = root.lastSync ?? root.generatedAtISO ?? root.updatedAt ?? null;
+  const latestAt = latestAtRaw == null ? null : String(latestAtRaw);
 
-  const hr24 = Array.isArray(root.hr24) ? root.hr24 : [];
-  const spo224 = Array.isArray(root.spo224) ? root.spo224 : [];
-  const temp24 = Array.isArray(root.temp24) ? root.temp24 : [];
-  const bp24 = Array.isArray(root.bp24) ? root.bp24 : [];
+  if (hr <= 0 && spo2 <= 0 && temp <= 0 && bp === '—') return null;
 
-  const maxLen = Math.max(hr24.length, spo224.length, temp24.length, bp24.length);
-  const windowLen = Math.min(maxLen, 7);
-  const startIndex = Math.max(0, maxLen - windowLen);
-
-  const bpSeries = Array.from({ length: windowLen }).reduce<BpPoint[]>((acc, _, idx) => {
-  const sourceIndex = startIndex + idx;
-  const bpValue = bp24[sourceIndex];
-
-  const sys =
-    typeof bpValue === 'number'
-      ? bpValue
-      : toNumber(
-          (bpValue as any)?.sys,
-          (bpValue as any)?.s,
-          (bpValue as any)?.systolic,
-        );
-
-  const dia =
-    bpValue && typeof bpValue === 'object'
-      ? toNumber(
-          (bpValue as any)?.dia,
-          (bpValue as any)?.d,
-          (bpValue as any)?.diastolic,
-        )
-      : null;
-
-  if (typeof sys !== 'number') return acc;
-
-  acc.push({
-    ts: new Date(Date.now() - (windowLen - idx - 1) * 24 * 60 * 60 * 1000).toISOString(),
-    sys: Math.round(sys),
-    dia: Math.round(dia ?? 80),
-  });
-
-  return acc;
-}, []);
-
-  if (hr <= 0 && spo2 <= 0 && temp <= 0 && bp === '—' && bpSeries.length === 0) {
-    return null;
-  }
-
+  // Do not synthesize timestamps or missing diastolic values from summary arrays.
   return {
     hr: Math.round(hr),
     spo2: Math.round(spo2),
     temp: Number(temp.toFixed(1)),
     bp,
-    bpSeries,
-    lastSync: root.lastSyncHuman || formatRelativeSync(root.lastSync || root.generatedAtISO || root.updatedAt),
+    bpSeries: [],
+    latestAt,
+    recordedAt: {
+      hr: latestAt,
+      spo2: latestAt,
+      temp: latestAt,
+      bp: latestAt,
+    },
+    source: {
+      hr: root.source ? String(root.source) : null,
+      spo2: root.source ? String(root.source) : null,
+      temp: root.source ? String(root.source) : null,
+      bp: root.source ? String(root.source) : null,
+    },
+    // /api/vitals/summary is derived from /api/reports/vitals, which in turn
+    // reads the canonical ACTIVE-only vitals projection. It is retained only
+    // as a value fallback and does not invent per-observation trust metadata.
+    trust: { hr: null, spo2: null, temp: null, bp: null },
   };
 }
 
-function getUIMood(vitals: LiveVitals, alerts: InsightAlert[], score: number | null): UIMood {
-  const systolic = parseInt(String(vitals.bp ?? '0/0').split('/')[0] ?? '0', 10);
-
-  if (
-    alerts.some((a) => a.severity === 'critical' || a.severity === 'high') ||
-    (hasLiveVitalData(vitals) &&
-      (vitals.spo2 < 94 || vitals.hr > 112 || vitals.hr < 52 || systolic > 145)) ||
-    hasRecoveryScore(score) && score < 62
-  ) {
-    return 'alert';
-  }
-
-  if (
-    alerts.length > 0 ||
-    (hasLiveVitalData(vitals) &&
-      (vitals.spo2 < 96 || vitals.hr > 96 || vitals.hr < 58)) ||
-    hasRecoveryScore(score) && score < 78
-  ) {
-    return 'watchful';
-  }
-
-  return 'calm';
+function extractNumericArray(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((sample) => {
+      if (typeof sample === 'number' && Number.isFinite(sample)) return sample;
+      if (typeof sample === 'string' && sample.trim()) {
+        const parsed = Number(sample);
+        return Number.isFinite(parsed) ? parsed : null;
+      }
+      if (sample && typeof sample === 'object') {
+        const record = sample as Record<string, unknown>;
+        return toNumber(record.value, record.mv, record.amplitude, record.y);
+      }
+      return null;
+    })
+    .filter((sample): sample is number => typeof sample === 'number' && Number.isFinite(sample));
 }
 
-function getMoodTheme(mood: UIMood) {
-  if (mood === 'alert') {
+function resolveEcg(items: RawVitalRecord[]): ECGSnapshot | null {
+  const candidates = items
+    .filter((item) => item.type === 'ecg' && isActiveClinicalRecord(item))
+    .sort((a, b) => Date.parse(b.recorded_at ?? '') - Date.parse(a.recorded_at ?? ''));
+
+  for (const item of candidates) {
+    const payload = item.payload ?? {};
+    const samples = [payload.samples, payload.waveform, payload.values, payload.data, payload.ecg]
+      .map(extractNumericArray)
+      .find((arr) => arr.length >= 8);
+
+    if (samples && samples.length >= 8) {
+      return {
+        samples: samples.slice(-500),
+        recordedAt: item.recorded_at ?? null,
+        source: sourceFromRecord(item) ?? 'Health Monitor',
+      };
+    }
+  }
+
+  return null;
+}
+
+function deriveCareState(vitals: LiveVitals): CareState {
+  const activeSignalCount = countVitalSignals(vitals);
+
+  const currentHr = isCurrentEligibleVital(vitals, 'hr') ? vitals.hr : 0;
+  const currentSpo2 = isCurrentEligibleVital(vitals, 'spo2') ? vitals.spo2 : 0;
+  const currentBp = isCurrentEligibleVital(vitals, 'bp') ? vitals.bp : '—';
+  const systolic = /^\d+\/\d+/.test(currentBp) ? Number(currentBp.split('/')[0]) : 0;
+
+  // Temporary client-side fallback mirrors the previous home-page thresholds,
+  // but only CURRENT, ACTIVE-eligible telemetry may enter the calculation.
+  // InsightCore alerts remain visible and actionable separately until alert
+  // lineage can prove whether an alert still depends on an excluded observation.
+  // The long-term source of truth remains a governed backend care-state/protocol service.
+  const thresholdBreach =
+    (currentSpo2 > 0 && currentSpo2 < 94) ||
+    (currentHr > 0 && (currentHr > 112 || currentHr < 52)) ||
+    (systolic > 0 && systolic > 145);
+
+  if (thresholdBreach) return 'action_required';
+
+  const watchSignal =
+    (currentSpo2 > 0 && currentSpo2 < 96) ||
+    (currentHr > 0 && (currentHr > 96 || currentHr < 58));
+
+  if (watchSignal) return 'watch';
+  if (activeSignalCount >= 3) return 'stable';
+  return 'insufficient';
+}
+
+function careStateMeta(state: CareState) {
+  switch (state) {
+    case 'critical':
+      return {
+        label: 'Critical alert',
+        headline: 'Immediate attention is required',
+        description: 'A critical care signal is active. Follow the action shown below.',
+        badge: 'border-red-300 bg-red-50 text-red-800',
+        accent: 'text-red-700',
+      };
+    case 'action_required':
+      return {
+        label: 'Action required',
+        headline: 'A monitored signal needs attention',
+        description: 'Review the current signal and the recommended next action.',
+        badge: 'border-amber-300 bg-amber-50 text-amber-800',
+        accent: 'text-amber-700',
+      };
+    case 'watch':
+      return {
+        label: 'Watch',
+        headline: 'Your care state is being watched more closely',
+        description: 'Most information remains available, with one or more signals worth reviewing.',
+        badge: 'border-yellow-300 bg-yellow-50 text-yellow-800',
+        accent: 'text-yellow-700',
+      };
+    case 'stable':
+      return {
+        label: 'Stable',
+        headline: 'Your monitored care state is stable',
+        description: 'Available signals and current alerts do not indicate an active escalation.',
+        badge: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+        accent: 'text-emerald-700',
+      };
+    default:
+      return {
+        label: 'Insufficient current data',
+        headline: 'More current data is needed',
+        description: 'Sync supported measurements to build a reliable current care picture.',
+        badge: 'border-slate-200 bg-slate-100 text-slate-700',
+        accent: 'text-slate-600',
+      };
+  }
+}
+
+function atmosphereClasses(state: CareState) {
+  if (state === 'critical') {
+    return 'bg-white text-slate-950';
+  }
+  if (state === 'action_required') {
+    return 'bg-[radial-gradient(circle_at_100%_0%,rgba(245,158,11,0.09),transparent_32%),linear-gradient(180deg,#fbfbfa_0%,#f5f7f8_100%)]';
+  }
+  if (state === 'watch') {
+    return 'bg-[radial-gradient(circle_at_90%_0%,rgba(234,179,8,0.06),transparent_30%),linear-gradient(180deg,#fafbfb_0%,#f2f6f7_100%)]';
+  }
+  const evening = new Date().getHours() >= 18 || new Date().getHours() < 6;
+  return evening
+    ? 'bg-[radial-gradient(circle_at_12%_0%,rgba(14,165,233,0.04),transparent_28%),linear-gradient(180deg,#f7f6f3_0%,#f2f4f5_100%)]'
+    : 'bg-[radial-gradient(circle_at_12%_0%,rgba(6,182,212,0.055),transparent_28%),linear-gradient(180deg,#f8fafb_0%,#f1f5f6_100%)]';
+}
+
+function derivePriorityAction(args: {
+  careState: CareState;
+  alerts: InsightAlert[];
+  adherencePct: number | null;
+  nextAppointment: AppointmentState;
+}) {
+  const highestAlert = args.alerts.find(
+    (alert) => alert.severity === 'critical' || alert.severity === 'high',
+  );
+
+  if (highestAlert) {
     return {
-      pageGlow:
-        'before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_18%_0%,rgba(251,113,133,0.09),transparent_34%),radial-gradient(circle_at_100%_10%,rgba(244,114,182,0.07),transparent_26%)] before:pointer-events-none before:-z-10',
-      heroTint: 'from-rose-50/70 via-white/92 to-orange-50/45',
-      heroRingGlow: 'bg-[radial-gradient(circle_at_center,rgba(251,113,133,0.10),transparent_65%)]',
-      badge: 'border-rose-200 bg-rose-50 text-rose-700',
-      softCard: 'from-rose-50/55 to-white',
-      accentText: 'text-rose-700',
-      accentChip: 'border-rose-200 bg-rose-50/90 text-rose-700',
-      signalTitle: 'Elevated attention mode',
-      signalBody: 'A few important signals deserve closer review and tighter follow-through today.',
+      eyebrow: 'Care Now',
+      title: highestAlert.title,
+      body: highestAlert.message,
+      href: '/insights',
+      cta: 'Review alert',
+      severity: highestAlert.severity,
     };
   }
 
-  if (mood === 'watchful') {
+  if (args.careState === 'action_required' || args.careState === 'watch') {
     return {
-      pageGlow:
-        'before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_18%_0%,rgba(245,158,11,0.07),transparent_34%),radial-gradient(circle_at_100%_10%,rgba(34,211,238,0.05),transparent_26%)] before:pointer-events-none before:-z-10',
-      heroTint: 'from-amber-50/65 via-white/92 to-cyan-50/40',
-      heroRingGlow: 'bg-[radial-gradient(circle_at_center,rgba(245,158,11,0.10),transparent_65%)]',
-      badge: 'border-amber-200 bg-amber-50 text-amber-700',
-      softCard: 'from-amber-50/45 to-white',
-      accentText: 'text-amber-700',
-      accentChip: 'border-amber-200 bg-amber-50/90 text-amber-700',
-      signalTitle: 'Watchful mode',
-      signalBody: 'Your overall picture is steady, with a few signals worth keeping in closer view.',
+      eyebrow: 'Care Now',
+      title: 'Review current measurements',
+      body: 'One or more current signals deserve review before the rest of your care journey.',
+      href: '/vitals',
+      cta: 'Open live body',
+      severity: args.careState === 'action_required' ? ('high' as const) : ('moderate' as const),
+    };
+  }
+
+  if (args.adherencePct !== null && args.adherencePct < 85) {
+    return {
+      eyebrow: 'Care Now',
+      title: 'Review today’s treatment schedule',
+      body: `Recorded medication adherence is ${args.adherencePct}%.`,
+      href: '/medications',
+      cta: 'Open medications',
+      severity: 'moderate' as const,
+    };
+  }
+
+  if (args.nextAppointment.status !== 'Not scheduled') {
+    return {
+      eyebrow: 'Care Now',
+      title: 'Prepare for your next consultation',
+      body: `${args.nextAppointment.with} · ${args.nextAppointment.when}`,
+      href: '/appointments',
+      cta: 'Prepare for consultation',
+      severity: 'low' as const,
     };
   }
 
   return {
-    pageGlow:
-      'before:absolute before:inset-0 before:bg-[radial-gradient(circle_at_20%_0%,rgba(99,102,241,0.06),transparent_40%),radial-gradient(circle_at_100%_10%,rgba(34,211,238,0.06),transparent_24%)] before:pointer-events-none before:-z-10',
-    heroTint: 'from-cyan-50/55 via-white/94 to-indigo-50/42',
-    heroRingGlow: 'bg-[radial-gradient(circle_at_center,rgba(34,211,238,0.10),transparent_65%)]',
-    badge: 'border-emerald-200 bg-emerald-50 text-emerald-700',
-    softCard: 'from-cyan-50/35 to-white',
-    accentText: 'text-cyan-700',
-    accentChip: 'border-cyan-200 bg-cyan-50/90 text-cyan-700',
-    signalTitle: 'Calm mode',
-    signalBody: 'Your health picture looks stable and organised, with no major friction in the care journey right now.',
+    eyebrow: 'Care Now',
+    title: 'Your care space is ready',
+    body: 'Book care when you need it or keep supported devices synced for your next clinical interaction.',
+    href: '/clinicians?class=doctor',
+    cta: 'Find a clinician',
+    severity: 'low' as const,
   };
 }
 
-function OrbitalRing({ score, mood }: { score: number | null; mood: UIMood }) {
-  const label = getRecoveryLabel(score);
+function deriveMedicationAdherence(meds: MedLike[]) {
+  if (!Array.isArray(meds) || meds.length === 0) return null;
 
-  const badgeClasses =
-    mood === 'alert'
-      ? 'border-rose-200 bg-rose-50 text-rose-700'
-      : mood === 'watchful'
-        ? 'border-amber-200 bg-amber-50 text-amber-700'
-        : 'border-emerald-200 bg-emerald-50 text-emerald-700';
+  const assessable = meds.filter((med) => {
+    const status = String(med.status ?? '').toLowerCase();
+    return (
+      status.includes('taken') ||
+      status.includes('completed') ||
+      status.includes('administered') ||
+      status.includes('missed') ||
+      status.includes('skipped') ||
+      status.includes('pending') ||
+      status.includes('due')
+    );
+  });
 
+  if (assessable.length === 0) return null;
+
+  const taken = assessable.filter((med) => {
+    const status = String(med.status ?? '').toLowerCase();
+    return status.includes('taken') || status.includes('completed') || status.includes('administered');
+  }).length;
+
+  return Math.round((taken / assessable.length) * 100);
+}
+
+function bpTrajectory(bpSeries: BpPoint[]) {
+  if (bpSeries.length < 2) return { label: 'No trend yet', symbol: '—' };
+  const first = bpSeries[0]?.sys;
+  const last = bpSeries[bpSeries.length - 1]?.sys;
+  if (!Number.isFinite(first) || !Number.isFinite(last)) return { label: 'No trend yet', symbol: '—' };
+  const delta = Number(last) - Number(first);
+  if (Math.abs(delta) <= 3) return { label: 'Steady across recorded readings', symbol: '→' };
+  if (delta > 0) return { label: `+${Math.round(delta)} systolic across recorded readings`, symbol: '↗' };
+  return { label: `${Math.round(delta)} systolic across recorded readings`, symbol: '↘' };
+}
+
+function ecgPath(samples: number[], width = 1000, height = 180) {
+  if (samples.length < 2) return '';
+  const min = Math.min(...samples);
+  const max = Math.max(...samples);
+  const range = max - min || 1;
+  return samples
+    .map((sample, index) => {
+      const x = (index / (samples.length - 1)) * width;
+      const y = height - ((sample - min) / range) * (height * 0.68) - height * 0.16;
+      return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`;
+    })
+    .join(' ');
+}
+
+function stateDotClass(state: MeshState) {
+  switch (state) {
+    case 'live':
+      return 'bg-cyan-500';
+    case 'recent':
+      return 'bg-emerald-500';
+    case 'processing':
+      return 'bg-violet-500';
+    case 'ready':
+      return 'bg-sky-500';
+    case 'offline':
+      return 'bg-slate-400';
+    default:
+      return 'bg-slate-300';
+  }
+}
+
+function meshStateLabel(state: MeshState) {
+  switch (state) {
+    case 'live':
+      return 'Live';
+    case 'recent':
+      return 'Recent';
+    case 'processing':
+      return 'Processing';
+    case 'ready':
+      return 'Ready';
+    case 'offline':
+      return 'Offline';
+    default:
+      return 'Available';
+  }
+}
+
+function matchDevice(devices: DeviceLike[], patterns: RegExp[]) {
+  return devices.find((device) => patterns.some((pattern) => pattern.test(device.name.toLowerCase())));
+}
+
+function deviceMeshState(device?: DeviceLike, fallbackFreshness?: Freshness): MeshState {
+  if (fallbackFreshness === 'live') return 'live';
+  if (fallbackFreshness === 'recent') return 'recent';
+  if (!device) return 'available';
+
+  const status = device.status.toLowerCase();
+  if (status.includes('offline') || status.includes('disconnected')) return 'offline';
+  if (status.includes('online') || status.includes('connected') || status.includes('active')) return 'ready';
+  return 'available';
+}
+
+function CompactFreshness({ freshness, timestamp }: { freshness: Freshness; timestamp: string | null }) {
   return (
-    <div className="relative flex h-[230px] w-[230px] items-center justify-center sm:h-[260px] sm:w-[260px] xl:h-[275px] xl:w-[275px]">
-      <motion.div
-        className="pointer-events-none absolute inset-0 rounded-full bg-gradient-to-br from-cyan-400/16 via-indigo-400/12 to-fuchsia-400/16 blur-3xl"
-        animate={{ scale: [1, 1.035, 1], opacity: [0.55, 0.85, 0.55] }}
-        transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
+    <span
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-semibold tracking-[0.12em]',
+        freshnessClasses(freshness),
+      )}
+    >
+      <span
+        className={cn(
+          'h-1.5 w-1.5 rounded-full',
+          freshness === 'live'
+            ? 'animate-pulse bg-cyan-500'
+            : freshness === 'recent'
+              ? 'bg-emerald-500'
+              : 'bg-slate-400',
+        )}
       />
-      <motion.div
-        className="pointer-events-none absolute inset-[8%] rounded-full border border-cyan-300/35"
-        animate={{ rotate: 360 }}
-        transition={{ duration: 22, repeat: Infinity, ease: 'linear' }}
-      />
-      <motion.div
-        className="pointer-events-none absolute inset-[18%] rounded-full border border-fuchsia-300/22"
-        animate={{ rotate: -360 }}
-        transition={{ duration: 28, repeat: Infinity, ease: 'linear' }}
-      />
-      <div className="relative z-10 flex h-[67%] w-[67%] flex-col items-center justify-center rounded-full border border-white/75 bg-white/92 shadow-[0_24px_80px_rgba(59,130,246,0.10)] backdrop-blur-xl">
-        <div className="text-[10px] font-medium uppercase tracking-[0.3em] text-slate-400 sm:text-[11px]">
-          Recovery index
-        </div>
-        <div className="mt-2 bg-gradient-to-br from-slate-900 via-indigo-700 to-cyan-600 bg-clip-text text-5xl font-semibold text-transparent sm:text-6xl">
-          {displayRecoveryScore(score)}
-        </div>
-        <div className={cn('mt-2 inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm font-medium', badgeClasses)}>
-          <CheckCircle2 className="h-4 w-4" />
-          {label}
-        </div>
-        <div className="mt-3 px-5 text-center text-[11px] leading-5 text-slate-500">
-          {hasRecoveryScore(score)
-            ? 'Continuously shaped by preferred telemetry, adherence and live care signals'
-            : 'Waiting for enough real telemetry to calculate a safe score'}
-        </div>
-      </div>
-    </div>
+      {freshnessLabel(freshness)}
+      {timestamp ? <span className="font-normal tracking-normal opacity-70">· {formatRelativeSync(timestamp)}</span> : null}
+    </span>
   );
 }
 
-function GlassPanel({
-  title,
-  eyebrow,
-  children,
-  action,
-  className,
+function measurementTrustLabel(trust: VitalTrustSnapshot | null) {
+  if (!trust) return 'Included in ACTIVE-only clinical projection';
+
+  const status = String(trust.interpretationStatus ?? 'ACTIVE').toUpperCase();
+  const authority = String(trust.timeAuthority ?? '').toUpperCase();
+
+  if (status !== 'ACTIVE') return 'Not eligible for current interpretation';
+  if (authority === 'SOURCE_REPORTED') return 'Included in active trends · source-reported time';
+  if (authority === 'UNSPECIFIED') return 'Included in active trends · historical time provenance';
+  return 'Included in active trends';
+}
+
+function VitalCell({
+  label,
+  value,
+  unit,
+  timestamp,
+  source,
+  trust,
+  trend,
+  href = '/vitals',
 }: {
-  title: string;
-  eyebrow?: string;
-  children: React.ReactNode;
-  action?: React.ReactNode;
-  className?: string;
+  label: string;
+  value: string;
+  unit?: string;
+  timestamp: string | null;
+  source: string | null;
+  trust?: VitalTrustSnapshot | null;
+  trend?: { symbol: string; label: string };
+  href?: string;
 }) {
+  const hasValue = value !== '—';
+  const freshness = resolveFreshness(timestamp, hasValue);
+
   return (
-    <div className={cn(SURFACE, 'p-5 md:p-6', className)}>
-      <div className="relative z-10 min-w-0">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            {eyebrow ? (
-              <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                {eyebrow}
-              </div>
-            ) : null}
-            <h2 className="mt-1 text-lg font-semibold tracking-tight text-slate-900 md:text-xl">
-              {title}
-            </h2>
+    <Link
+      href={href}
+      className={cn(
+        'group relative min-w-0 rounded-2xl border px-3.5 py-3.5 transition-colors sm:px-4 sm:py-4',
+        freshness === 'live'
+          ? 'border-cyan-200/80 bg-white shadow-[0_0_0_1px_rgba(6,182,212,0.05)]'
+          : freshness === 'stale'
+            ? 'border-slate-200 bg-slate-50/70'
+            : 'border-slate-200/80 bg-white/90',
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-500">{label}</span>
+        <span
+          className={cn(
+            'mt-0.5 h-2 w-2 shrink-0 rounded-full',
+            freshness === 'live'
+              ? 'animate-pulse bg-cyan-500'
+              : freshness === 'recent'
+                ? 'bg-emerald-500'
+                : 'bg-slate-300',
+          )}
+        />
+      </div>
+
+      <div className="mt-3 flex min-w-0 items-end gap-1.5">
+        <span className="truncate text-[1.55rem] font-semibold leading-none tracking-[-0.04em] text-slate-950 [font-variant-numeric:tabular-nums] sm:text-[1.8rem]">
+          {value}
+        </span>
+        {unit && hasValue ? <span className="pb-0.5 text-[11px] font-medium text-slate-400">{unit}</span> : null}
+      </div>
+
+      <div className="mt-3 min-h-[34px] text-[11px] leading-4 text-slate-500">
+        {trend ? (
+          <div className="font-medium text-slate-700">
+            <span className="mr-1 text-sm">{trend.symbol}</span>
+            {trend.label}
           </div>
-          {action}
+        ) : (
+          <div>{timestamp ? formatRelativeSync(timestamp) : 'No current reading'}</div>
+        )}
+        <div className="mt-0.5 truncate">{source ?? 'Source not supplied'}</div>
+        {hasValue ? <div className="mt-0.5 text-[10px] text-slate-400">{measurementTrustLabel(trust ?? null)}</div> : null}
+      </div>
+    </Link>
+  );
+}
+
+function ClinicalEcgStrip({ ecg }: { ecg: ECGSnapshot | null }) {
+  const reducedMotion = useReducedMotion();
+  const path = useMemo(() => (ecg ? ecgPath(ecg.samples) : ''), [ecg]);
+  const freshness = resolveFreshness(ecg?.recordedAt ?? null, Boolean(ecg));
+  const isLive = freshness === 'live';
+
+  return (
+    <div className="relative overflow-hidden rounded-2xl border border-slate-800 bg-[#071017] text-white shadow-[0_16px_40px_rgba(2,8,23,0.14)]">
+      <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(34,211,238,0.10)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.10)_1px,transparent_1px)] [background-size:18px_18px]" />
+      <div className="relative z-10 flex items-center justify-between gap-3 border-b border-white/10 px-4 py-3">
+        <div>
+          <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">Health Monitor ECG</div>
+          <div className="mt-0.5 text-sm font-medium text-white">
+            {ecg ? `${ecg.source} · ${formatTimestamp(ecg.recordedAt)}` : 'ECG-capable · no current trace'}
+          </div>
         </div>
-        {children}
+        <CompactFreshness freshness={freshness} timestamp={ecg?.recordedAt ?? null} />
+      </div>
+
+      <div className="relative z-10 h-[118px] sm:h-[148px]">
+        {ecg && path ? (
+          <svg viewBox="0 0 1000 180" className="h-full w-full" preserveAspectRatio="none" aria-label="Recorded ECG trace">
+            {isLive && !reducedMotion ? (
+              <motion.path
+                d={path}
+                fill="none"
+                stroke="rgb(34 211 238)"
+                strokeWidth="2.6"
+                vectorEffect="non-scaling-stroke"
+                initial={{ pathLength: 0, opacity: 0.45 }}
+                animate={{ pathLength: 1, opacity: 1 }}
+                transition={{ duration: 1.4, ease: 'linear' }}
+              />
+            ) : (
+              <path
+                d={path}
+                fill="none"
+                stroke="rgb(34 211 238)"
+                strokeWidth="2.4"
+                vectorEffect="non-scaling-stroke"
+              />
+            )}
+          </svg>
+        ) : (
+          <div className="flex h-full items-center justify-center px-5 text-center">
+            <div>
+              <Activity className="mx-auto h-5 w-5 text-cyan-300" />
+              <div className="mt-2 text-sm font-medium text-white">No ECG trace available in this session</div>
+              <div className="mt-1 text-xs leading-5 text-slate-400">
+                A real Health Monitor ECG will appear here when the API supplies waveform samples. No simulated waveform is shown.
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-function EmptyState({
-  icon: Icon,
-  title,
-  body,
-  action,
-  tone = 'slate',
-}: {
-  icon: React.ElementType;
-  title: string;
-  body: string;
-  action?: React.ReactNode;
-  tone?: 'slate' | 'emerald' | 'indigo' | 'cyan';
-}) {
-  const toneClass =
-    tone === 'emerald'
-      ? 'border-emerald-100 bg-gradient-to-br from-emerald-50/80 to-white text-emerald-700'
-      : tone === 'indigo'
-        ? 'border-indigo-100 bg-gradient-to-br from-indigo-50/80 to-white text-indigo-700'
-        : tone === 'cyan'
-          ? 'border-cyan-100 bg-gradient-to-br from-cyan-50/80 to-white text-cyan-700'
-          : 'border-slate-200 bg-gradient-to-br from-white to-slate-50 text-slate-700';
-
+function MeshNodeCard({ node }: { node: MeshNode }) {
+  const Icon = node.icon;
   return (
-    <div className={cn('rounded-[28px] border p-5 shadow-sm', toneClass)}>
-      <div className="flex items-start gap-4">
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl border border-white/72 bg-white/84 shadow-sm">
-          <Icon className="h-5 w-5" />
+    <Link
+      href={node.href}
+      className="group flex min-w-[152px] flex-1 items-center gap-3 rounded-2xl border border-slate-200/80 bg-white/88 px-3.5 py-3 transition-colors hover:border-slate-300 sm:min-w-0"
+    >
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-950 text-white">
+        <Icon className="h-4 w-4" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-semibold text-slate-900">{node.label}</div>
+        <div className="mt-0.5 truncate text-[11px] text-slate-500">{node.detail}</div>
+        <div className="mt-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+          <span className={cn('h-1.5 w-1.5 rounded-full', stateDotClass(node.state))} />
+          {meshStateLabel(node.state)}
         </div>
-        <div className="min-w-0">
-          <div className="text-base font-semibold text-slate-900">{title}</div>
-          <p className="mt-2 text-sm leading-6 text-slate-600">{body}</p>
-          {action ? <div className="mt-4">{action}</div> : null}
+      </div>
+    </Link>
+  );
+}
+
+function JourneyRow({ event }: { event: CareJourneyEvent }) {
+  const icon =
+    event.kind === 'alert'
+      ? Bell
+      : event.kind === 'appointment'
+        ? CalendarDays
+        : event.kind === 'treatment'
+          ? Syringe
+          : event.kind === 'care'
+            ? Stethoscope
+            : Waves;
+  const Icon = icon;
+
+  const content = (
+    <div className="flex items-start gap-3 py-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700">
+        <Icon className="h-3.5 w-3.5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-start justify-between gap-3">
+          <div className="text-sm font-semibold text-slate-900">{event.label}</div>
+          <div className="shrink-0 text-[11px] font-medium text-slate-400">
+            {event.ts ? formatTime(event.ts) : '—'}
+          </div>
         </div>
+        <div className="mt-1 text-xs leading-5 text-slate-500">{event.detail}</div>
       </div>
     </div>
   );
+
+  if (!event.href) return content;
+  return <Link href={event.href}>{content}</Link>;
 }
 
 export default function HomePage() {
   const [profile, setProfile] = useState<ProfileResponse | null>(null);
   const [profileLoading, setProfileLoading] = useState(true);
   const [liveVitals, setLiveVitals] = useState<LiveVitals>(EMPTY_VITALS);
-
-  const [nextAppointment, setNextAppointment] = useState({
+  const [ecg, setEcg] = useState<ECGSnapshot | null>(null);
+  const [nextAppointment, setNextAppointment] = useState<AppointmentState>({
     when: 'Plan next consultation',
     with: 'Your care team',
     status: 'Not scheduled',
   });
-  const [deviceCount, setDeviceCount] = useState<number>(0);
+  const [devices, setDevices] = useState<DeviceLike[]>([]);
   const [aiInsights, setAiInsights] = useState<string[]>([]);
   const [alerts, setAlerts] = useState<InsightAlert[]>([]);
   const [alertsLoading, setAlertsLoading] = useState(false);
@@ -1003,29 +1562,19 @@ export default function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadProfile() {
       try {
         setProfileLoading(true);
         const res = await fetch('/api/profile', { cache: 'no-store' });
         const data = await res.json().catch(() => ({}));
-
-        if (!cancelled) {
-          setProfile(data?.ok === false ? null : data);
-        }
+        if (!cancelled) setProfile(data?.ok === false ? null : data);
       } catch {
-        if (!cancelled) {
-          setProfile(null);
-        }
+        if (!cancelled) setProfile(null);
       } finally {
-        if (!cancelled) {
-          setProfileLoading(false);
-        }
+        if (!cancelled) setProfileLoading(false);
       }
     }
-
-    loadProfile();
-
+    void loadProfile();
     return () => {
       cancelled = true;
     };
@@ -1033,40 +1582,34 @@ export default function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadAlerts() {
       try {
         setAlertsLoading(true);
         setAlertsError(null);
-
         const res = await fetch('/api/insightcore/alerts?limit=3', { cache: 'no-store' });
         const data = await res.json().catch(() => ({ alerts: [] }));
         if (cancelled) return;
 
         const incoming = (data.alerts || []) as Array<Record<string, unknown>>;
-        const mapped: InsightAlert[] = incoming.slice(0, 3).map((alert, idx) => ({
-          id: String(alert.id || idx),
-          title: String(alert.title || 'InsightCore alert'),
-          message: String(alert.message || alert.note || 'A care signal is ready for review.'),
-          severity: (alert.severity as AlertSeverity) || 'moderate',
-          ts: String(alert.ts || alert.timestamp || new Date().toISOString()),
-        }));
-
-        setAlerts(mapped);
+        setAlerts(
+          incoming.slice(0, 3).map((alert, idx) => ({
+            id: String(alert.id || idx),
+            title: String(alert.title || 'InsightCore alert'),
+            message: String(alert.message || alert.note || 'A care signal is ready for review.'),
+            severity: (alert.severity as AlertSeverity) || 'moderate',
+            ts: alert.ts != null ? String(alert.ts) : alert.timestamp != null ? String(alert.timestamp) : null,
+          })),
+        );
       } catch (error) {
         if (cancelled) return;
         console.error('Failed to load patient alerts', error);
-        setAlertsError(
-          'InsightCore alert refresh was not completed. The dashboard is showing the current care state available to this session.',
-        );
+        setAlertsError('InsightCore alert refresh could not be completed.');
         setAlerts([]);
       } finally {
         if (!cancelled) setAlertsLoading(false);
       }
     }
-
-    loadAlerts();
-
+    void loadAlerts();
     return () => {
       cancelled = true;
     };
@@ -1074,23 +1617,16 @@ export default function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadDevices() {
       try {
         const res = await fetch('/api/devices/list', { cache: 'no-store' });
         const data = await res.json().catch(() => ({}));
-        if (!cancelled) {
-          setDeviceCount(normalizeDevicesCount(data));
-        }
+        if (!cancelled) setDevices(normalizeDevices(data));
       } catch {
-        if (!cancelled) {
-          setDeviceCount(0);
-        }
+        if (!cancelled) setDevices([]);
       }
     }
-
-    loadDevices();
-
+    void loadDevices();
     return () => {
       cancelled = true;
     };
@@ -1100,24 +1636,20 @@ export default function HomePage() {
     const patientId = typeof profile?.patientId === 'string' ? profile.patientId : '';
     if (!patientId) return;
     const encodedPatientId = encodeURIComponent(patientId);
-
     let cancelled = false;
 
     async function loadAppointment() {
       try {
-        const res = await fetch(
-          `/api/appointments?patientId=${encodedPatientId}`,
-          { cache: 'no-store' },
-        );
-
+        const res = await fetch(`/api/appointments?patientId=${encodedPatientId}`, { cache: 'no-store' });
         const data = await res.json().catch(() => ({}));
         if (cancelled) return;
 
         const items = normalizeAppointments(data);
         const next = items[0];
-
         if (next) {
           setNextAppointment({
+            id: next.id,
+            startsAt: next.startsAt,
             when: formatHumanDateTime(next.startsAt),
             with: next.clinicianName || 'Your clinician',
             status: next.status,
@@ -1140,8 +1672,7 @@ export default function HomePage() {
       }
     }
 
-    loadAppointment();
-
+    void loadAppointment();
     return () => {
       cancelled = true;
     };
@@ -1151,10 +1682,11 @@ export default function HomePage() {
     const patientId = typeof profile?.patientId === 'string' ? profile.patientId : '';
     if (!patientId) {
       setLiveVitals(EMPTY_VITALS);
+      setEcg(null);
       return;
     }
-    const encodedPatientId = encodeURIComponent(patientId);
 
+    const encodedPatientId = encodeURIComponent(patientId);
     let cancelled = false;
 
     async function loadVitals() {
@@ -1170,7 +1702,6 @@ export default function HomePage() {
           recordsRes.status === 'fulfilled'
             ? await recordsRes.value.json().catch(() => ({ items: [] }))
             : { items: [] };
-
         const summaryData =
           summaryRes.status === 'fulfilled'
             ? await summaryRes.value.json().catch(() => null)
@@ -1180,16 +1711,20 @@ export default function HomePage() {
         const recordVitals = resolveVitals(items);
         const summaryVitals = resolveSummaryVitals(summaryData);
 
-        setLiveVitals(hasLiveVitalData(recordVitals) ? recordVitals : summaryVitals ?? recordVitals);
+        // Canonical records are authoritative for observation trust. The summary
+        // route is ACTIVE-only and may fill a missing core value, but it never
+        // fabricates per-observation trust metadata.
+        setLiveVitals(mergeVitals(recordVitals, summaryVitals));
+        setEcg(resolveEcg(items));
       } catch {
         if (!cancelled) {
           setLiveVitals(EMPTY_VITALS);
+          setEcg(null);
         }
       }
     }
 
-    loadVitals();
-
+    void loadVitals();
     return () => {
       cancelled = true;
     };
@@ -1202,8 +1737,8 @@ export default function HomePage() {
       setCases([]);
       return;
     }
-    const encodedPatientId = encodeURIComponent(patientId);
 
+    const encodedPatientId = encodeURIComponent(patientId);
     let cancelled = false;
 
     async function loadPatientLists() {
@@ -1216,15 +1751,15 @@ export default function HomePage() {
         if (cancelled) return;
 
         if (medicationsRes.status === 'fulfilled' && medicationsRes.value.ok) {
-          const medicationsJson = await medicationsRes.value.json().catch(() => ({}));
-          if (!cancelled) setMeds(normalizeMedications(medicationsJson));
+          const data = await medicationsRes.value.json().catch(() => ({}));
+          if (!cancelled) setMeds(normalizeMedications(data));
         } else {
           setMeds([]);
         }
 
         if (casesRes.status === 'fulfilled' && casesRes.value.ok) {
-          const casesJson = await casesRes.value.json().catch(() => ({}));
-          if (!cancelled) setCases(normalizeCases(casesJson));
+          const data = await casesRes.value.json().catch(() => ({}));
+          if (!cancelled) setCases(normalizeCases(data));
         } else {
           setCases([]);
         }
@@ -1236,8 +1771,7 @@ export default function HomePage() {
       }
     }
 
-    loadPatientLists();
-
+    void loadPatientLists();
     return () => {
       cancelled = true;
     };
@@ -1245,7 +1779,6 @@ export default function HomePage() {
 
   useEffect(() => {
     const patientId = typeof profile?.patientId === 'string' ? profile.patientId : '';
-
     if (!patientId) {
       setAdherenceOverride(null);
       setAdherenceHistory([]);
@@ -1260,10 +1793,8 @@ export default function HomePage() {
         const res = await fetch(`/api/patient/adherence-summary?patientId=${encodedPatientId}`, {
           cache: 'no-store',
         });
-
         const data = await res.json().catch(() => ({}));
         if (cancelled || !res.ok) return;
-
         const parsed = normalizeAdherenceSummary(data);
         setAdherenceOverride(parsed.currentPct);
         setAdherenceHistory(parsed.history);
@@ -1276,7 +1807,6 @@ export default function HomePage() {
     }
 
     void loadAdherenceSummary();
-
     return () => {
       cancelled = true;
     };
@@ -1284,7 +1814,6 @@ export default function HomePage() {
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadAiGuidance() {
       try {
         const res = await fetch('/api/insightcore/analyze', {
@@ -1292,12 +1821,12 @@ export default function HomePage() {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             patientName: profile?.name ?? 'patient',
-            vitals: hasLiveVitalData(liveVitals)
+            vitals: countVitalSignals(liveVitals) > 0
               ? {
-                  hr: liveVitals.hr,
-                  bp: liveVitals.bp,
-                  temp: liveVitals.temp,
-                  spo2: liveVitals.spo2,
+                  hr: isCurrentEligibleVital(liveVitals, 'hr') ? liveVitals.hr : null,
+                  bp: isCurrentEligibleVital(liveVitals, 'bp') ? liveVitals.bp : null,
+                  temp: isCurrentEligibleVital(liveVitals, 'temp') ? liveVitals.temp : null,
+                  spo2: isCurrentEligibleVital(liveVitals, 'spo2') ? liveVitals.spo2 : null,
                 }
               : null,
             chronicConditions: profile?.chronicConditions ?? [],
@@ -1306,23 +1835,13 @@ export default function HomePage() {
         });
 
         const data = await res.json().catch(() => ({}));
-        if (!cancelled) {
-          const msgs = normalizeAiMessages(data);
-          setAiInsights(
-            msgs.length > 0
-              ? msgs
-              : ['Latest guidance was not refreshed. Your current care state remains visible.'],
-          );
-        }
+        if (!cancelled) setAiInsights(normalizeAiMessages(data));
       } catch {
-        if (!cancelled) {
-          setAiInsights(['Latest guidance was not refreshed. Your current care state remains visible.']);
-        }
+        if (!cancelled) setAiInsights([]);
       }
     }
 
-    loadAiGuidance();
-
+    void loadAiGuidance();
     return () => {
       cancelled = true;
     };
@@ -1342,1041 +1861,517 @@ export default function HomePage() {
     return raw.split(' ')[0];
   }, [profile?.name, profileLoading]);
 
-  const allergies: Allergy[] = useMemo(() => {
-    const fromProfile = Array.isArray(profile?.allergies) ? profile.allergies : [];
-    return fromProfile.map(
-      (name) =>
-        ({
-          name,
-          status: 'Active',
-          severity: 'mild',
-        }) as Allergy,
-    );
-  }, [profile?.allergies]);
-
-  const medicationDerivedAdherencePct = useMemo(() => {
-    if (!Array.isArray(meds) || meds.length === 0) return 100;
-    const taken = meds.filter((m) => {
-      const status = String(m?.status || '').toLowerCase();
-      return status.includes('completed') || status.includes('taken') || status.includes('active');
-    }).length;
-    return Math.round((taken / meds.length) * 100);
-  }, [meds]);
-
-  const adherencePct = adherenceOverride ?? medicationDerivedAdherencePct;
-  const hasAdherenceHistory = adherenceHistory.length >= 2;
-
-  const todaysPills: Pill[] = useMemo(
-    () =>
-      meds.slice(0, 4).map((m, index) => ({
-        id: deriveStablePillId(m, index),
-        name: m.name ?? 'Medication',
-        dose: m.dose ?? '',
-        time: m.time ?? '',
-        status: (m.status === 'Completed' ? 'Taken' : 'Pending') as Pill['status'],
-      })),
-    [meds],
-  );
-
-
-  const recentCases = Array.isArray(cases) ? cases.slice(0, 3) : [];
-  const recentClinicians: Clinician[] = [];
-
-  const recoveryScore = useMemo(
-    () => computeRecoveryScore(liveVitals, adherencePct, alerts.length),
-    [liveVitals, adherencePct, alerts.length],
-  );
-
-  const recoveryLabel = useMemo(
-    () => getRecoveryLabel(recoveryScore),
-    [recoveryScore],
-  );
-
-  const heroNarrative = useMemo(
-    () => getRecoveryNarrative(recoveryScore, liveVitals, adherencePct),
-    [recoveryScore, liveVitals, adherencePct],
-  );
-
+  const careState = useMemo(() => deriveCareState(liveVitals), [liveVitals]);
+  const careMeta = useMemo(() => careStateMeta(careState), [careState]);
+  const medicationDerivedAdherence = useMemo(() => deriveMedicationAdherence(meds), [meds]);
+  const adherencePct = adherenceOverride ?? medicationDerivedAdherence;
   const priorityAction = useMemo(
-    () => getPriorityAction({ alerts, adherencePct, nextAppointment }),
-    [alerts, adherencePct, nextAppointment],
+    () => derivePriorityAction({ careState, alerts, adherencePct, nextAppointment }),
+    [careState, alerts, adherencePct, nextAppointment],
   );
-
-  const uiMood = useMemo(
-    () => getUIMood(liveVitals, alerts, recoveryScore),
-    [liveVitals, alerts, recoveryScore],
-  );
-
-  const moodTheme = useMemo(() => getMoodTheme(uiMood), [uiMood]);
-
-  const insightHighlights = useMemo(() => {
-    const lines: string[] = [];
-
-    lines.push(
-      hasRecoveryScore(recoveryScore) ? `${getRecoveryLabel(recoveryScore)} recovery posture` : 'Recovery index calibrating',
-    );
-    lines.push(`${deviceCount} active device${deviceCount === 1 ? '' : 's'}`);
-    lines.push(
-      nextAppointment.status === 'Not scheduled'
-        ? 'Care planning ready'
-        : `Next consultation ${nextAppointment.when}`,
-    );
-
-    return lines.slice(0, 3);
-  }, [recoveryScore, deviceCount, nextAppointment, liveVitals]);
-
-  const chartVitals = useMemo(
-    () =>
-      ({
-        ...liveVitals,
-        temp: liveVitals.temp > 0 ? liveVitals.temp.toFixed(1) : '',
-        bpSeries: liveVitals.bpSeries,
-      }) as Vitals & { bpSeries?: BpPoint[] },
+  const signalCount = useMemo(() => countVitalSignals(liveVitals), [liveVitals]);
+  const overallFreshness = useMemo(
+    () => resolveFreshness(liveVitals.latestAt, hasLiveVitalData(liveVitals)),
     [liveVitals],
   );
+  const bpTrend = useMemo(() => bpTrajectory(liveVitals.bpSeries), [liveVitals.bpSeries]);
 
-  const vitalsSummaryPanel = (
-    <div className="rounded-[24px] border border-white/72 bg-white/84 p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-            Vitals summary
-          </div>
-          <div className="mt-1 text-base font-semibold text-slate-900">
-            InsightCore summary
-          </div>
-        </div>
-        <div className="rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[10px] font-medium text-indigo-700">
-          {liveVitals.lastSync}
-        </div>
-      </div>
+  const meshNodes = useMemo<MeshNode[]>(() => {
+    const healthMonitor = matchDevice(devices, [/health monitor/, /monitor/, /hm\b/]);
+    const nexRing = matchDevice(devices, [/nexring/, /ring/]);
+    const stethoscope = matchDevice(devices, [/steth/]);
+    const otoscope = matchDevice(devices, [/otoscope/, /oto/]);
+    const monitorFreshness = resolveFreshness(liveVitals.latestAt, hasLiveVitalData(liveVitals) || Boolean(ecg));
 
-      <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-          <div className="text-slate-400">Pulse</div>
-          <div className="mt-1 font-semibold text-slate-900">{displayVitalNumber(liveVitals.hr, ' bpm')}</div>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-          <div className="text-slate-400">SpO₂</div>
-          <div className="mt-1 font-semibold text-slate-900">{displayVitalNumber(liveVitals.spo2, '%')}</div>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-          <div className="text-slate-400">BP</div>
-          <div className="mt-1 font-semibold text-slate-900">{displayBp(liveVitals.bp)}</div>
-        </div>
-        <div className="rounded-2xl border border-slate-100 bg-slate-50/70 px-3 py-3">
-          <div className="text-slate-400">Temp</div>
-          <div className="mt-1 font-semibold text-slate-900">{displayTemp(liveVitals.temp)}</div>
-        </div>
-      </div>
+    return [
+      {
+        id: 'health-monitor',
+        label: 'Health Monitor',
+        detail: ecg ? 'Vitals + ECG' : 'Vitals + ECG capable',
+        state: deviceMeshState(healthMonitor, monitorFreshness),
+        href: '/myCare/devices',
+        icon: HeartPulse,
+      },
+      {
+        id: 'nexring',
+        label: 'NexRing',
+        detail: nexRing?.battery !== null && nexRing?.battery !== undefined ? `${nexRing.battery}% battery` : 'Wearable telemetry',
+        state: deviceMeshState(nexRing),
+        href: '/myCare/devices',
+        icon: Activity,
+      },
+      {
+        id: 'stethoscope',
+        label: 'Digital Stethoscope',
+        detail: stethoscope?.signalQuality ?? 'Remote auscultation',
+        state: deviceMeshState(stethoscope),
+        href: '/myCare/devices',
+        icon: Stethoscope,
+      },
+      {
+        id: 'otoscope',
+        label: 'HD Otoscope',
+        detail: otoscope?.signalQuality ?? 'Remote visual exam',
+        state: deviceMeshState(otoscope),
+        href: '/myCare/devices',
+        icon: ScanHeart,
+      },
+      {
+        id: 'insightcore',
+        label: 'InsightCore',
+        detail: alertsLoading ? 'Refreshing intelligence' : alerts.length ? `${alerts.length} active signal${alerts.length > 1 ? 's' : ''}` : 'Care intelligence ready',
+        state: alertsLoading ? 'processing' : aiInsights.length || alerts.length ? 'ready' : 'available',
+        href: '/insights',
+        icon: BrainCircuit,
+      },
+      {
+        id: 'clinician',
+        label: 'Care Team',
+        detail: nextAppointment.status === 'Not scheduled' ? 'Available when needed' : nextAppointment.with,
+        state: nextAppointment.status === 'Not scheduled' ? 'available' : 'ready',
+        href: '/clinicians?class=doctor',
+        icon: Stethoscope,
+      },
+    ];
+  }, [devices, liveVitals, ecg, alertsLoading, alerts.length, aiInsights.length, nextAppointment]);
 
-      <div className="mt-4">
-        <Link
-          href="/insights"
-          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm"
-        >
-          Open summary
-          <ChevronRight className="h-4 w-4" />
-        </Link>
-      </div>
-    </div>
-  );
+  const journeyEvents = useMemo<CareJourneyEvent[]>(() => {
+    const events: CareJourneyEvent[] = [];
 
-  const aiGuidancePanel = (
-    <div className="h-full rounded-[24px] border border-indigo-100/80 bg-gradient-to-br from-indigo-50/70 via-white to-cyan-50/50 p-4 shadow-sm">
-      <div className="flex items-start gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-2xl border border-indigo-100 bg-white text-indigo-700 shadow-sm">
-          <BrainCircuit className="h-4 w-4" />
-        </div>
-        <div className="min-w-0">
-          <div className="text-sm font-semibold text-slate-900">AI guidance</div>
-          <div className="mt-1 text-xs leading-5 text-slate-500">
-            InsightCore context for today’s care state.
-          </div>
-        </div>
-      </div>
-      <ul className="mt-3 space-y-2 text-sm leading-6 text-slate-600">
-        {aiInsights.map((item) => (
-          <li key={item} className="flex gap-2">
-            <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-500" />
-            <span>{item}</span>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
+    if (liveVitals.latestAt) {
+      events.push({
+        id: 'latest-telemetry',
+        label: 'Telemetry received',
+        detail: `${signalCount} supported signal${signalCount === 1 ? '' : 's'} reflected in your current care state.`,
+        ts: liveVitals.latestAt,
+        href: '/vitals',
+        kind: 'telemetry',
+      });
+    }
+
+    alerts.forEach((alert) => {
+      events.push({
+        id: `alert-${alert.id}`,
+        label: alert.title,
+        detail: `${severityLabel(alert.severity)} InsightCore signal`,
+        ts: alert.ts,
+        href: '/insights',
+        kind: 'alert',
+      });
+    });
+
+    cases.slice(0, 3).forEach((item, index) => {
+      const ts = item.latestEncounter?.start ?? item.updatedAt ?? null;
+      events.push({
+        id: `case-${item.id ?? index}`,
+        label: item.title ?? 'Care encounter',
+        detail: item.status ? `Encounter status: ${item.status}` : 'Care encounter updated',
+        ts,
+        href: '/encounters',
+        kind: 'care',
+      });
+    });
+
+    if (nextAppointment.status !== 'Not scheduled') {
+      events.push({
+        id: `appointment-${nextAppointment.id ?? 'next'}`,
+        label: 'Upcoming consultation',
+        detail: `${nextAppointment.with} · ${nextAppointment.when}`,
+        ts: nextAppointment.startsAt ?? null,
+        href: '/appointments',
+        kind: 'appointment',
+      });
+    }
+
+    return events
+      .sort((a, b) => {
+        const aTs = a.ts ? Date.parse(a.ts) : 0;
+        const bTs = b.ts ? Date.parse(b.ts) : 0;
+        return bTs - aTs;
+      })
+      .slice(0, 5);
+  }, [liveVitals.latestAt, signalCount, alerts, cases, nextAppointment]);
+
+  const allergyNames = Array.isArray(profile?.allergies) ? profile.allergies.filter(Boolean) : [];
+  const hasAdherenceHistory = adherenceHistory.length >= 2;
+  const safetyOverride = careState === 'critical' || careState === 'action_required';
 
   return (
-    <main data-p-ui="patient-home-page"
+    <main
+      data-p-ui="patient-home-page-v2"
       className={cn(
-        'relative isolate min-h-screen overflow-hidden bg-[radial-gradient(circle_at_top_left,_rgba(34,211,238,0.12),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(99,102,241,0.14),_transparent_24%),linear-gradient(180deg,_#f8fbff_0%,_#eef5ff_42%,_#f8faff_100%)] px-4 pb-12 pt-4 md:px-6 md:pb-14 md:pt-6 lg:px-8',
-        moodTheme.pageGlow,
+        'relative min-h-screen overflow-x-hidden px-3 pb-10 pt-3 text-slate-950 transition-colors duration-500 sm:px-4 md:px-6 md:pb-14 md:pt-5 lg:px-8',
+        atmosphereClasses(careState),
       )}
     >
-      <div className="pointer-events-none absolute inset-0 -z-10 opacity-50">
-        <div className="absolute left-[-12%] top-[-8%] h-[420px] w-[420px] rounded-full bg-cyan-300/20 blur-3xl" />
-        <div className="absolute right-[-8%] top-[10%] h-[360px] w-[360px] rounded-full bg-fuchsia-300/15 blur-3xl" />
-        <div className="absolute bottom-[-10%] left-[18%] h-[300px] w-[300px] rounded-full bg-indigo-300/10 blur-3xl" />
-      </div>
+      {!safetyOverride ? (
+        <div className="pointer-events-none absolute inset-0 overflow-hidden" aria-hidden="true">
+          <div className="absolute left-[-12rem] top-[-14rem] h-[30rem] w-[30rem] rounded-full bg-cyan-300/10 blur-3xl" />
+          <div className="absolute right-[-12rem] top-[8rem] h-[26rem] w-[26rem] rounded-full bg-indigo-300/8 blur-3xl" />
+        </div>
+      ) : null}
 
-      <div className="relative z-0 mx-auto flex w-full max-w-[1600px] flex-col gap-5 md:gap-6">
-        <motion.section {...sectionMotion} transition={{ duration: 0.42, delay: 0.02 }} className="relative z-10">
-          <RecentActivityStrip patientId={profile?.patientId ?? null} />
-        </motion.section>
+      <div className="relative mx-auto w-full max-w-[1540px]">
+        <section className="sticky top-0 z-30 -mx-3 border-b border-slate-200/70 bg-white/88 px-3 py-2.5 backdrop-blur-xl sm:-mx-4 sm:px-4 md:static md:mx-0 md:rounded-2xl md:border md:px-4 md:shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
+          <div className="flex items-center gap-3 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="flex shrink-0 items-center gap-2 text-xs font-semibold text-slate-900">
+              <span className={cn('h-2 w-2 rounded-full', overallFreshness === 'live' ? 'animate-pulse bg-cyan-500' : overallFreshness === 'recent' ? 'bg-emerald-500' : 'bg-slate-400')} />
+              Live Care
+            </div>
+            <div className="h-4 w-px shrink-0 bg-slate-200" />
+            <div className="shrink-0 text-xs text-slate-600">{devices.length} linked device{devices.length === 1 ? '' : 's'}</div>
+            <div className="shrink-0 text-xs text-slate-600">Latest signal {formatRelativeSync(liveVitals.latestAt)}</div>
+            <div className="shrink-0 text-xs text-slate-600">{alerts.length ? `${alerts.length} active alert${alerts.length > 1 ? 's' : ''}` : 'No active alerts'}</div>
+            <div className="ml-auto hidden shrink-0 items-center gap-1.5 text-xs font-medium text-slate-500 md:flex">
+              <Shield className="h-3.5 w-3.5" />
+              Patient care space
+            </div>
+          </div>
+        </section>
 
-        <motion.section {...sectionMotion} className={cn(SURFACE, 'bg-gradient-to-br p-5 md:p-8 xl:p-10', moodTheme.heroTint)}>
-          <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.46),rgba(255,255,255,0.10))]" />
-          <div className={cn('pointer-events-none absolute inset-0 opacity-70', moodTheme.heroRingGlow)} />
-          <div className="pointer-events-none absolute right-0 top-0 h-56 w-56 rounded-full bg-cyan-300/8 blur-3xl" />
-          <div className="pointer-events-none absolute bottom-0 left-[20%] h-56 w-56 rounded-full bg-indigo-400/8 blur-3xl" />
+        <div className="mt-3 grid gap-3 md:mt-4 md:gap-4 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.85fr)]">
+          <section
+            className={cn(
+              'relative overflow-hidden rounded-[24px] border p-4 shadow-[0_18px_50px_rgba(15,23,42,0.06)] sm:p-5 md:rounded-[28px] md:p-7',
+              safetyOverride ? 'border-slate-300 bg-white' : 'border-white/80 bg-white/88',
+            )}
+          >
+            {!safetyOverride ? (
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-cyan-400/60 to-transparent" />
+            ) : null}
 
-          <div className="relative z-10 grid gap-6 md:grid-cols-[minmax(0,1fr)_340px] lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_420px] md:items-center">
-            <div className="relative z-10 min-w-0">
-              <div className={cn('inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] shadow-sm', moodTheme.badge)}>
-                Ambulant+ Daily Health Brief
-              </div>
-
-              <div className="mt-5 max-w-xl">
-                <p className="text-sm font-medium uppercase tracking-[0.28em] text-slate-400">
-                  {getDayPart()}
-                </p>
-                <h1 className="mt-3 max-w-[560px] text-[1.75rem] font-semibold leading-[1.06] tracking-[-0.035em] text-slate-900 sm:text-[2.05rem] md:text-[2.25rem] xl:text-[2.55rem]">
-                  {patientName}, your care journey feels calm, connected, and under control today.
-                </h1>
-                <p className="mt-4 max-w-xl text-[14px] leading-6 text-slate-500 md:text-[15px]">
-                  {heroNarrative}
-                </p>
-              </div>
-
-              <div className="mt-6 flex flex-wrap items-center gap-3">
-                <div className={cn('inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium', moodTheme.accentChip)}>
-                  {moodTheme.signalTitle}
+            <div className="relative z-10">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium text-slate-500">{getDayPart()}, {patientName}</div>
+                  <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Care State</div>
                 </div>
-                <div className="text-sm text-slate-500">{moodTheme.signalBody}</div>
+                <span className={cn('inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold', careMeta.badge)}>
+                  <span className={cn('h-2 w-2 rounded-full', careState === 'critical' ? 'animate-pulse bg-red-600' : careState === 'action_required' ? 'bg-amber-500' : careState === 'watch' ? 'bg-yellow-500' : careState === 'stable' ? 'bg-emerald-500' : 'bg-slate-400')} />
+                  {careMeta.label}
+                </span>
               </div>
 
-              <div className="mt-6 grid max-w-xl gap-3">
-                <motion.div
-                  whileHover={{ y: -3 }}
-                  transition={{ type: 'spring', stiffness: 220, damping: 18 }}
-                  className="rounded-3xl border border-white/72 bg-white/90 p-4 shadow-sm"
-                >
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    <Waves className="h-4 w-4 text-cyan-600" />
-                    Live sync
-                  </div>
-                  <div className="mt-3 text-2xl font-semibold text-slate-900">{liveVitals.lastSync}</div>
-                  <div className="mt-1 text-sm text-slate-500">
-                    Latest telemetry reflected across your health overview.
-                  </div>
-                </motion.div>
+              <div className="mt-4 md:mt-6">
+                <h1 className="max-w-4xl text-[1.8rem] font-semibold leading-[1.04] tracking-[-0.045em] text-slate-950 sm:text-[2.25rem] md:text-[3rem] xl:text-[3.45rem]">
+                  {careMeta.headline}
+                </h1>
+                <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 md:text-[15px]">{careMeta.description}</p>
+              </div>
 
-                <motion.div
-                  whileHover={{ y: -3 }}
-                  transition={{ type: 'spring', stiffness: 220, damping: 18 }}
-                  className="rounded-3xl border border-white/68 bg-white/84 p-4 shadow-sm"
-                >
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    <CalendarDays className="h-4 w-4 text-indigo-600" />
-                    Next care step
-                  </div>
-                  <div className="mt-3 text-lg font-semibold leading-6 text-slate-900">
-                    {nextAppointment.when}
-                  </div>
-                  <div className="mt-1 text-sm text-slate-500">{nextAppointment.with}</div>
-                </motion.div>
+              <div className="mt-5 flex flex-wrap items-center gap-2.5 text-xs text-slate-600">
+                <span className="rounded-full bg-slate-950 px-3 py-1.5 font-semibold text-white">{signalCount} / 4 current signals eligible</span>
+                <CompactFreshness freshness={overallFreshness} timestamp={liveVitals.latestAt} />
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 font-medium">{alerts.length ? `${alerts.length} care signal${alerts.length > 1 ? 's' : ''}` : 'No escalation signal'}</span>
+              </div>
 
-                <motion.div
-                  whileHover={{ y: -3 }}
-                  transition={{ type: 'spring', stiffness: 220, damping: 18 }}
+              <details className="mt-4 rounded-2xl border border-slate-200/80 bg-slate-50/70 px-4 py-3 text-sm">
+                <summary className="cursor-pointer font-semibold text-slate-800">Why this care state?</summary>
+                <div className="mt-3 grid gap-2 text-xs leading-5 text-slate-600 sm:grid-cols-2">
+                  <div>Current eligible telemetry: {signalCount} of 4 core signals.</div>
+                  <div>InsightCore alerts shown separately: {alerts.length}.</div>
+                  <div>Latest ACTIVE telemetry: {formatTimestamp(liveVitals.latestAt)}.</div>
+                  <div>Care State uses current ACTIVE telemetry only. Alerts remain visible separately until observation lineage can be reconciled after exclusions.</div>
+                </div>
+              </details>
+
+              <div className="mt-5 grid grid-cols-2 gap-2.5 sm:gap-3 lg:grid-cols-4">
+                <VitalCell
+                  label="Heart rate"
+                  value={displayVitalNumber(liveVitals.hr)}
+                  unit="bpm"
+                  timestamp={liveVitals.recordedAt.hr}
+                  source={liveVitals.source.hr}
+                  trust={liveVitals.trust.hr}
+                />
+                <VitalCell
+                  label="SpO₂"
+                  value={displayVitalNumber(liveVitals.spo2)}
+                  unit="%"
+                  timestamp={liveVitals.recordedAt.spo2}
+                  source={liveVitals.source.spo2}
+                  trust={liveVitals.trust.spo2}
+                />
+                <VitalCell
+                  label="Blood pressure"
+                  value={displayBp(liveVitals.bp)}
+                  unit="mmHg"
+                  timestamp={liveVitals.recordedAt.bp}
+                  source={liveVitals.source.bp}
+                  trust={liveVitals.trust.bp}
+                  trend={liveVitals.bpSeries.length >= 2 ? bpTrend : undefined}
+                />
+                <VitalCell
+                  label="Temperature"
+                  value={displayTemp(liveVitals.temp)}
+                  unit="C"
+                  timestamp={liveVitals.recordedAt.temp}
+                  source={liveVitals.source.temp}
+                  trust={liveVitals.trust.temp}
+                />
+              </div>
+
+              <div className="mt-3">
+                <ClinicalEcgStrip ecg={ecg} />
+              </div>
+            </div>
+          </section>
+
+          <section
+            className={cn(
+              'relative overflow-hidden rounded-[24px] border p-4 shadow-[0_18px_50px_rgba(15,23,42,0.06)] sm:p-5 md:rounded-[28px] md:p-6',
+              careState === 'critical'
+                ? 'border-red-300 bg-white'
+                : careState === 'action_required'
+                  ? 'border-amber-300 bg-white'
+                  : 'border-slate-900 bg-slate-950 text-white',
+            )}
+          >
+            <div className="relative z-10 flex h-full flex-col">
+              <div className={cn('text-[11px] font-semibold uppercase tracking-[0.18em]', safetyOverride ? 'text-slate-500' : 'text-cyan-200/70')}>
+                {priorityAction.eyebrow}
+              </div>
+              <h2 className={cn('mt-3 text-[1.55rem] font-semibold leading-tight tracking-[-0.035em] sm:text-[1.8rem]', safetyOverride ? 'text-slate-950' : 'text-white')}>
+                {priorityAction.title}
+              </h2>
+              <p className={cn('mt-3 text-sm leading-6', safetyOverride ? 'text-slate-600' : 'text-slate-300')}>
+                {priorityAction.body}
+              </p>
+
+              {nextAppointment.status !== 'Not scheduled' ? (
+                <div className={cn('mt-5 rounded-2xl border p-4', safetyOverride ? 'border-slate-200 bg-slate-50' : 'border-white/10 bg-white/5')}>
+                  <div className={cn('text-[10px] font-semibold uppercase tracking-[0.16em]', safetyOverride ? 'text-slate-400' : 'text-slate-400')}>Next consultation</div>
+                  <div className={cn('mt-2 text-lg font-semibold', safetyOverride ? 'text-slate-950' : 'text-white')}>{nextAppointment.when}</div>
+                  <div className={cn('mt-1 text-sm', safetyOverride ? 'text-slate-600' : 'text-slate-400')}>{nextAppointment.with}</div>
+                </div>
+              ) : null}
+
+              <div className="mt-auto pt-6">
+                <Link
+                  href={priorityAction.href}
                   className={cn(
-                    'rounded-3xl border bg-gradient-to-br p-4 shadow-sm',
-                    toneClasses(priorityAction.tone),
+                    'inline-flex min-h-11 w-full items-center justify-between rounded-xl px-4 py-3 text-sm font-semibold transition-colors',
+                    safetyOverride
+                      ? 'bg-slate-950 text-white hover:bg-slate-800'
+                      : 'bg-white text-slate-950 hover:bg-cyan-50',
                   )}
                 >
-                  <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                    <Bell className="h-4 w-4" />
-                    Priority focus
-                  </div>
-                  <div className="mt-3 text-lg font-semibold text-slate-900">
-                    {priorityAction.title}
-                  </div>
-                  <div className="mt-1 text-sm text-slate-600">{priorityAction.body}</div>
-                </motion.div>
-              </div>
+                  {priorityAction.cta}
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
 
-              <div className="mt-7 flex flex-wrap items-center gap-3">
-                <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
+                <div className="mt-3 grid grid-cols-2 gap-2">
                   <Link
-                    href="/vitals"
-                    className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white shadow-[0_14px_30px_rgba(15,23,42,0.18)]"
-                  >
-                    Open health overview
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </motion.div>
-
-                <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                  <Link
-                    href="/appointments"
-                    className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/92 px-5 py-3 text-sm font-medium text-slate-700 shadow-sm"
-                  >
-                    Manage appointments
-                    <ChevronRight className="h-4 w-4" />
-                  </Link>
-                </motion.div>
-
-                <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                  <Link
-                    href="/find-doctor"
-                    className="inline-flex items-center gap-2 rounded-full border border-cyan-200 bg-cyan-50/90 px-5 py-3 text-sm font-medium text-cyan-700 shadow-sm"
+                    href="/clinicians?class=doctor"
+                    className={cn('inline-flex min-h-11 items-center justify-center rounded-xl border px-3 text-center text-xs font-semibold', safetyOverride ? 'border-slate-200 bg-white text-slate-800' : 'border-white/15 bg-white/5 text-white')}
                   >
                     Find a clinician
-                    <Stethoscope className="h-4 w-4" />
                   </Link>
-                </motion.div>
-              </div>
-            </div>
-
-            <div className="relative z-10 flex items-center justify-center md:justify-end">
-              <div className="relative w-full max-w-[340px] lg:max-w-[360px] xl:max-w-[420px] rounded-[40px] border border-white/72 bg-white/74 p-5 shadow-[0_18px_60px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-6">
-                <div className="pointer-events-none absolute inset-0 rounded-[40px] bg-gradient-to-b from-transparent to-slate-100/35" />
-                <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-cyan-300/80 to-transparent" />
-
-                <div className="relative z-10 mb-2 flex items-center justify-between text-[11px] font-medium uppercase tracking-[0.24em] text-slate-400">
-                  <span>Adaptive care radar</span>
-                  <span>{getRecoveryLabel(recoveryScore)}</span>
-                </div>
-
-                <div className="relative z-10 flex justify-center items-center pt-2 pb-4">
-                  <OrbitalRing score={recoveryScore} mood={uiMood} />
-                </div>
-
-                <div className="relative z-10 mt-1 grid grid-cols-3 gap-3">
-                  <div className="rounded-2xl border border-white/76 bg-white/84 p-3 text-center shadow-sm">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                      SpO₂
-                    </div>
-                    <div className="mt-2 text-xl font-semibold text-slate-900">
-                      {displayVitalNumber(liveVitals.spo2, '%')}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-white/76 bg-white/84 p-3 text-center shadow-sm">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                      Pulse
-                    </div>
-                    <div className="mt-2 text-xl font-semibold text-slate-900">
-                      {displayVitalNumber(liveVitals.hr)}
-                    </div>
-                  </div>
-                  <div className="rounded-2xl border border-white/76 bg-white/84 p-3 text-center shadow-sm">
-                    <div className="text-[11px] uppercase tracking-[0.18em] text-slate-400">
-                      BP
-                    </div>
-                    <div className="mt-2 text-xl font-semibold text-slate-900">
-                      {displayBp(liveVitals.bp)}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="relative z-10 mt-4 rounded-[24px] border border-white/72 bg-white/82 p-4 shadow-sm">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                    InsightCore visible intelligence
-                  </div>
-                  <div className="mt-3 grid gap-2">
-                    {insightHighlights.map((line) => (
-                      <div key={line} className="flex items-start gap-2 text-sm text-slate-600">
-                        <span className={cn('mt-[7px] h-1.5 w-1.5 rounded-full', uiMood === 'alert' ? 'bg-rose-500' : uiMood === 'watchful' ? 'bg-amber-500' : 'bg-cyan-500')} />
-                        <span>{line}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </motion.section>
-
-        <motion.section {...sectionMotion} transition={{ duration: 0.42, delay: 0.05 }}>
-          <div className="relative z-10 grid gap-4">
-            <div className={cn(SURFACE, 'p-5 md:p-6')}>
-              <div className="relative z-10">
-                <div className="mb-5 flex items-center justify-between gap-4">
-                  <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                      Today at a glance
-                    </div>
-                    <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">
-                      Your strongest health signals right now
-                    </h2>
-                  </div>
-                  <Link href="/insights" className="text-sm font-medium text-indigo-600">
-                    View full intelligence
+                  <Link
+                    href="/appointments"
+                    className={cn('inline-flex min-h-11 items-center justify-center rounded-xl border px-3 text-center text-xs font-semibold', safetyOverride ? 'border-slate-200 bg-white text-slate-800' : 'border-white/15 bg-white/5 text-white')}
+                  >
+                    Appointments
                   </Link>
                 </div>
-
-                <div className="grid gap-4 lg:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)] lg:items-stretch">
-                  <motion.div
-                    {...hoverLift}
-                    className={cn(
-                      'rounded-[30px] border bg-gradient-to-br p-5 shadow-sm md:p-6',
-                      uiMood === 'alert'
-                        ? 'border-rose-100 from-rose-50/45 to-white'
-                        : uiMood === 'watchful'
-                          ? 'border-amber-100 from-amber-50/45 to-white'
-                          : 'border-emerald-100 from-emerald-50/70 to-white',
-                    )}
-                  >
-                    <div className="grid h-full gap-6 md:grid-cols-[minmax(0,1fr)_170px] md:items-center">
-                      <div className="min-w-0">
-                        <div className="inline-flex items-center gap-2 rounded-full border border-white/80 bg-white/80 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
-                          <HeartPulse className="h-3.5 w-3.5" />
-                          Recovery index
-                        </div>
-                        <div className="mt-5 flex items-end gap-3">
-                          <div className="bg-gradient-to-br from-slate-950 via-indigo-700 to-cyan-600 bg-clip-text text-5xl font-semibold tracking-tight text-transparent">
-                            {displayRecoveryScore(recoveryScore)}
-                          </div>
-                          <div className="pb-2 text-sm font-semibold text-slate-400">
-                            {hasRecoveryScore(recoveryScore) ? '/100' : 'insufficient data'}
-                          </div>
-                        </div>
-                        <p className="mt-4 max-w-xl text-sm leading-6 text-slate-600">
-                          {hasLiveVitalData(liveVitals)
-                            ? 'Balanced by preferred-source vitals, adherence and live care activity.'
-                            : 'Recovery Index appears after enough real telemetry is available.'}
-                        </p>
-                      </div>
-
-                      <div className="flex justify-center md:justify-end">
-                        <div className="flex h-[150px] w-[150px] items-center justify-center rounded-[30px] border border-white/80 bg-white/82 shadow-sm">
-                          <MiniMeterDonut
-                            value={hasRecoveryScore(recoveryScore) ? recoveryScore : 0}
-                            max={100}
-                            label={recoveryLabel}
-                            unit=""
-                          />
-                        </div>
-                      </div>
-                    </div>
-                  </motion.div>
-
-                  <div className="grid gap-4">
-                    {[
-                      {
-                        icon: TrendingUp,
-                        label: 'Medication adherence',
-                        value: `${adherencePct}%`,
-                        subtext: hasAdherenceHistory
-                          ? 'Calculated from your recorded medication history.'
-                          : 'Current score shown. Trend appears once enough medication history is available.',
-                      },
-                      {
-                        icon: Shield,
-                        label: 'Care confidence',
-                        value: alerts.length
-                          ? `${alerts.length} active alert${alerts.length > 1 ? 's' : ''}`
-                          : 'No active alerts',
-                        subtext: alerts.length
-                          ? 'Active care signals are visible for review.'
-                          : 'No active escalation is visible from the latest care signals.',
-                      },
-                    ].map((item) => (
-                      <motion.div
-                        key={item.label}
-                        {...hoverLift}
-                        className={cn(
-                          'rounded-[26px] border bg-gradient-to-br p-5 shadow-sm',
-                          uiMood === 'alert'
-                            ? 'from-rose-50/30 to-white border-white/76'
-                            : uiMood === 'watchful'
-                              ? 'from-amber-50/30 to-white border-white/76'
-                              : 'from-white to-slate-50 border-white/76',
-                        )}
-                      >
-                        <div className="flex items-start gap-4">
-                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-100 text-slate-700 shadow-sm">
-                            <item.icon className="h-5 w-5" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-slate-500">{item.label}</div>
-                            <div className="mt-1 text-2xl font-semibold text-slate-900">{item.value}</div>
-                            <div className="mt-2 text-sm leading-6 text-slate-600">{item.subtext}</div>
-                          </div>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                </div>
               </div>
             </div>
+          </section>
+        </div>
 
-            <div className={cn(SURFACE, 'p-5 md:p-6')}>
-              <div className="relative z-10">
-                <div className="mb-4 flex items-center justify-between gap-3">
+        {!safetyOverride ? (
+          <>
+            <section className="mt-3 rounded-[24px] border border-white/80 bg-white/82 p-4 shadow-[0_16px_46px_rgba(15,23,42,0.045)] md:mt-4 md:rounded-[28px] md:p-6">
+              <div className="flex items-end justify-between gap-4">
+                <div>
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Care Mesh</div>
+                  <h2 className="mt-1 text-xl font-semibold tracking-[-0.025em] text-slate-950 md:text-2xl">Your connected Contactless Medicine environment</h2>
+                </div>
+                <Link href="/myCare/devices" className="hidden items-center gap-1.5 text-sm font-semibold text-slate-700 sm:inline-flex">
+                  Manage devices <ChevronRight className="h-4 w-4" />
+                </Link>
+              </div>
+
+              <div className="mt-4 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                <div className="flex min-w-max gap-2.5 sm:grid sm:min-w-0 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
+                  {meshNodes.map((node) => <MeshNodeCard key={node.id} node={node} />)}
+                </div>
+              </div>
+            </section>
+
+            <div className="mt-3 grid gap-3 md:mt-4 md:gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(340px,0.8fr)]">
+              <section className="rounded-[24px] border border-white/80 bg-white/84 p-4 shadow-[0_16px_46px_rgba(15,23,42,0.045)] md:rounded-[28px] md:p-6">
+                <div className="flex items-center justify-between gap-4">
                   <div>
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                      Immediate next step
-                    </div>
-                    <h2 className="mt-1 text-xl font-semibold tracking-tight text-slate-900">
-                      Your guided care priority
-                    </h2>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Care Journey</div>
+                    <h2 className="mt-1 text-xl font-semibold tracking-[-0.025em] text-slate-950 md:text-2xl">What moved through your care space</h2>
                   </div>
-                  <div className="rounded-full border border-white/70 bg-white/76 px-3 py-1 text-xs font-medium text-slate-500">
-                    Updated continuously
-                  </div>
+                  <Link href="/encounters" className="hidden text-sm font-semibold text-slate-700 sm:block">Open history</Link>
                 </div>
 
-                <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.88fr)] xl:items-stretch">
-                  <div
-                    className={cn(
-                      'rounded-[28px] border bg-gradient-to-br p-5 shadow-sm',
-                      toneClasses(priorityAction.tone),
-                    )}
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-medium text-slate-500">Recommended now</div>
-                        <div className="mt-2 text-2xl font-semibold text-slate-900">
-                          {priorityAction.title}
-                        </div>
-                        <div className="mt-3 max-w-lg text-sm leading-6 text-slate-600">
-                          {priorityAction.body}
-                        </div>
-                      </div>
-                      <div className="rounded-2xl bg-white/88 p-3 shadow-sm">
-                        <Bell className="h-5 w-5 text-slate-900" />
-                      </div>
-                    </div>
-
-                    <div className="mt-5 flex flex-wrap gap-3">
-                      <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                        <Link
-                          href={priorityAction.href}
-                          className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
-                        >
-                          Take action
-                          <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      </motion.div>
-                      <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                        <Link
-                          href="/myCare"
-                          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
-                        >
-                          Open myCare
-                          <ChevronRight className="h-4 w-4" />
-                        </Link>
-                      </motion.div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-[28px] border border-white/72 bg-white/82 p-4 shadow-sm">
-                    <div className="mb-3 flex items-center justify-between gap-3">
-                      <div>
-                        <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                          InsightCore
-                        </div>
-                        <div className="mt-1 text-base font-semibold text-slate-900">Attention needed</div>
-                      </div>
-                      {alertsError ? <div className="text-xs text-rose-600">Refresh issue</div> : null}
-                    </div>
-
-                    <div className="space-y-3">
-                      {alertsLoading && alerts.length === 0 ? (
-                        <EmptyState
-                          icon={Waves}
-                          title="Refreshing care signals"
-                          body="InsightCore is checking your latest thresholds and care rules for this session."
-                          tone="cyan"
-                        />
-                      ) : alerts.length === 0 ? (
-                        <EmptyState
-                          icon={CheckCircle2}
-                          title="Care signals are clear"
-                          body="Your monitored thresholds are currently within expected ranges. Continue your routine and keep supported devices synced."
-                          tone="emerald"
-                        />
-                      ) : (
-                        alerts.map((alert) => (
-                          <motion.div
-                            key={alert.id}
-                            {...hoverLift}
-                            className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
-                          >
-                            <div className="flex items-start justify-between gap-3">
-                              <div>
-                                <div className="flex flex-wrap items-center gap-2">
-                                  <div className="text-base font-semibold text-slate-900">
-                                    {alert.title}
-                                  </div>
-                                  <span
-                                    className={cn(
-                                      'rounded-full border px-2.5 py-1 text-[11px] font-medium',
-                                      severityChip(alert.severity),
-                                    )}
-                                  >
-                                    {severityLabel(alert.severity)}
-                                  </span>
-                                </div>
-                                <p className="mt-2 text-sm leading-6 text-slate-600">
-                                  {alert.message}
-                                </p>
-                                <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-slate-400">
-                                  <span className="inline-flex items-center gap-1.5">
-                                    <Clock3 className="h-3.5 w-3.5" />
-                                    {formatTimestamp(alert.ts)}
-                                  </span>
-                                  <span>Monitored by your care thresholds</span>
-                                </div>
-                              </div>
-                              <Link
-                                href="/insights"
-                                className="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700"
-                              >
-                                Review
-                              </Link>
-                            </div>
-                          </motion.div>
-                        ))
-                      )}
-
-                      {alertsError ? <div className="text-sm text-rose-600">{alertsError}</div> : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </motion.section>
-
-        <motion.section
-          {...sectionMotion}
-          transition={{ duration: 0.42, delay: 0.1 }}
-          className="relative z-10"
-        >
-          <GlassPanel title="Upcoming care" eyebrow="Continuity">
-            <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(280px,0.7fr)] xl:items-stretch">
-              <div className="rounded-[26px] border border-indigo-100 bg-gradient-to-br from-indigo-50/90 to-cyan-50/70 p-5 shadow-sm">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-medium text-slate-500">
-                      Scheduled consultation
-                    </div>
-                    <div className="mt-2 text-2xl font-semibold leading-8 text-slate-900">
-                      {nextAppointment.when}
-                    </div>
-                    <div className="mt-1 text-sm text-slate-600">{nextAppointment.with}</div>
-                  </div>
-                  <div className="rounded-2xl bg-white/88 p-3 shadow-sm">
-                    <CalendarDays className="h-5 w-5 text-indigo-600" />
-                  </div>
-                </div>
-                <div className="mt-4 text-sm leading-6 text-slate-600">
-                  {nextAppointment.status === 'Not scheduled'
-                    ? 'Choose a clinician or book a consultation when you are ready to continue your care pathway.'
-                    : 'Bring your latest symptoms, medication questions, and device readings to make this consultation even more useful.'}
-                </div>
-                <div className="mt-5 flex flex-wrap gap-3">
-                  <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                    <Link
-                      href="/appointments"
-                      className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
-                    >
-                      {nextAppointment.status === 'Not scheduled' ? 'Book appointment' : 'View appointment'}
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  </motion.div>
-                  <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                    <Link
-                      href="/reports"
-                      className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
-                    >
-                      Open reports
-                      <ChevronRight className="h-4 w-4" />
-                    </Link>
-                  </motion.div>
-                </div>
-              </div>
-
-              <div className="grid gap-3">
-                <div className="rounded-2xl border border-white/72 bg-white/82 p-4">
-                  <div className="text-sm font-medium text-slate-500">Connected devices</div>
-                  <div className="mt-2 text-xl font-semibold text-slate-900">{deviceCount} active</div>
-                  <div className="mt-1 text-sm text-slate-600">
-                    Your latest data is flowing into Ambulant+ and shaping insights in near
-                    real time.
-                  </div>
-                </div>
-                <div className="rounded-2xl border border-white/72 bg-white/82 p-4">
-                  <div className="text-sm font-medium text-slate-500">Care readiness</div>
-                  <div className="mt-2 text-xl font-semibold text-slate-900">
-                    {nextAppointment.status === 'Not scheduled' ? 'Ready to plan' : 'Prepared'}
-                  </div>
-                  <div className="mt-1 text-sm text-slate-600">
-                    Appointments, reports, and medication history are organised for your next
-                    step.
-                  </div>
-                </div>
-              </div>
-            </div>
-          </GlassPanel>
-        </motion.section>
-
-        <motion.section
-          {...sectionMotion}
-          transition={{ duration: 0.42, delay: 0.15 }}
-          className="relative z-10 grid gap-4 2xl:grid-cols-[1fr_1fr] items-start"
-        >
-          <GlassPanel
-            title="Today’s vitals"
-            eyebrow="Live telemetry"
-            action={
-              <Link
-                href="/vitals"
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm"
-              >
-                Check today’s vitals
-                <ChevronRight className="h-4 w-4" />
-              </Link>
-            }
-          >
-            <div className="grid gap-4">
-              {hasLiveVitalData(liveVitals) ? (
-                <>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                    {[
-                      ['Heart Rate', displayVitalNumber(liveVitals.hr, ' bpm')],
-                      ['Blood Pressure', displayBp(liveVitals.bp)],
-                      ['Temperature', displayTemp(liveVitals.temp)],
-                      ['Oxygen Saturation', displayVitalNumber(liveVitals.spo2, '%')],
-                    ].map(([label, value]) => (
-                      <div
-                        key={label}
-                        className="flex items-center justify-between rounded-2xl border border-white/72 bg-white/82 px-4 py-3 text-sm"
-                      >
-                        <span className="text-slate-500">{label}</span>
-                        <span className="font-semibold text-slate-900">{value}</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  <div className="rounded-[28px] border border-white/72 bg-white/82 p-4">
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <div>
-                        <div className="text-sm font-medium text-slate-900">Seven-day trend</div>
-                        <div className="text-sm text-slate-500">
-                          Trend only — headline values are shown once above to avoid duplicate readings.
-                        </div>
-                      </div>
-                      <Link href="/vitals" className="text-sm font-medium text-indigo-600">
-                        Open full vitals view
-                      </Link>
-                    </div>
-                    <VitalsTrendChart vitals={chartVitals} />
-                  </div>
-                </>
-              ) : (
-                <EmptyState
-                  icon={ScanHeart}
-                  title="Vitals workspace ready"
-                  body="Sync a supported Health Monitor reading to activate your live telemetry, trend chart, and InsightCore vitals summary."
-                  tone="cyan"
-                  action={
-                    <Link
-                      href="/myCare/devices"
-                      className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
-                    >
-                      Manage devices
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
-                  }
-                />
-              )}
-
-              {vitalsSummaryPanel}
-              {aiGuidancePanel}
-            </div>
-          </GlassPanel>
-
-          <GlassPanel
-            title="Medication continuity"
-            eyebrow="Treatment plan"
-            action={
-              <Link
-                href="/medications"
-                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm"
-              >
-                Manage medications
-                <ChevronRight className="h-4 w-4" />
-              </Link>
-            }
-          >
-            <div className="grid gap-4">
-              <div className={cn('rounded-[28px] border bg-gradient-to-br p-5', uiMood === 'alert' ? 'border-rose-100 from-rose-50/55 to-white' : uiMood === 'watchful' ? 'border-amber-100 from-amber-50/55 to-white' : 'border-emerald-100 from-emerald-50/75 to-white')}>
-                <div className="text-sm font-medium text-slate-500">Adherence profile</div>
-                <div className="mt-4 flex items-center justify-center">
-                  <MeterDonut
-                    value={adherencePct}
-                    max={100}
-                    label="Adherence"
-                    color="#10B981"
-                    unit="%"
-                  />
-                </div>
-                <div className="mt-4 text-sm leading-6 text-slate-600">
-                  Staying on schedule is one of the fastest ways to keep your progress
-                  steady and reduce avoidable escalations.
-                </div>
-              </div>
-
-              <div className="rounded-[28px] border border-white/72 bg-white/82 p-5">
-                <div className="mb-3 flex items-center gap-2 text-sm font-medium text-slate-900">
-                  <Syringe className="h-4 w-4 text-emerald-600" />
-                  Today’s medication schedule
-                </div>
-
-                <PillRemindersWrapper pills={todaysPills} />
-              </div>
-
-              <div className="rounded-[28px] border border-white/72 bg-white/84 p-5">
-                <div className="text-xs font-medium uppercase tracking-[0.16em] text-slate-400">
-                  Trend
-                </div>
-                {hasAdherenceHistory ? (
-                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {adherenceHistory.slice(-4).map((point) => (
-                      <div key={`${point.label}-${point.value}`} className="flex items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-slate-50/70 px-4 py-3 text-sm">
-                        <span className="text-slate-500">{point.label}</span>
-                        <span className="font-semibold text-slate-900">{point.value}%</span>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-3 text-sm leading-6 text-slate-600">
-                    Adherence trend will appear once enough medication history is available.
-                  </p>
-                )}
-              </div>
-            </div>
-          </GlassPanel>
-
-          <GlassPanel title="Longitudinal care" eyebrow="History & safety" className="2xl:col-span-2">
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-start">
-              <div className="rounded-[24px] border border-white/72 bg-white/82 p-4">
-                <div className="mb-3 text-sm font-medium text-slate-900">
-                  Allergies and risk notes
-                </div>
-                <AllergiesBlockWrapper allergies={allergies} />
-              </div>
-
-              <div className="rounded-[24px] border border-white/72 bg-white/82 p-4">
-                <div className="mb-3 text-sm font-medium text-slate-900">
-                  Recent reports and intelligence
-                </div>
-                <ReportsBlockWrapper />
-              </div>
-            </div>
-          </GlassPanel>
-        </motion.section>
-
-        <motion.section
-          {...sectionMotion}
-          transition={{ duration: 0.42, delay: 0.2 }}
-          className="relative z-10"
-        >
-          <GlassPanel title="Connected care continuity" eyebrow="Care continuity & people around you">
-            <div className="grid gap-4">
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(320px,0.92fr)] xl:items-start">
-                <div className="rounded-[28px] border border-white/72 bg-white/82 p-4">
-                <div className="mb-3 text-sm font-semibold text-slate-900">Recent encounters</div>
-                {recentCases.length === 0 ? (
-                  <EmptyState
-                    icon={Activity}
-                    title="Encounter timeline ready"
-                    body="Completed consultations will appear here with timing, status, and follow-up direction as your care history grows."
-                    tone="indigo"
-                  />
-                ) : (
-                  <div className="space-y-3">
-                    {recentCases.map((item, index) => (
-                      <motion.div
-                        key={item.id ?? index}
-                        {...hoverLift}
-                        className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
-                      >
-                        <div className="flex items-start justify-between gap-4">
-                          <div>
-                            <div className="text-base font-semibold text-slate-900">
-                              {item.title ?? `Encounter ${item.id ?? index + 1}`}
-                            </div>
-                            <div className="mt-2 text-sm text-slate-500">
-                              Updated {formatTimestamp(item.updatedAt)}
-                            </div>
-                            {item.latestEncounter?.start ? (
-                              <div className="mt-2 text-sm text-slate-600">
-                                Most recent interaction:{' '}
-                                {formatTimestamp(item.latestEncounter.start)}
-                              </div>
-                            ) : null}
-                          </div>
-                          <span
-                            className={cn(
-                              'rounded-full px-3 py-1 text-xs font-medium',
-                              item.status === 'Open'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : item.status === 'Referred'
-                                  ? 'bg-amber-100 text-amber-700'
-                                  : 'bg-slate-100 text-slate-700',
-                            )}
-                          >
-                            {item.status ?? 'Updated'}
-                          </span>
-                        </div>
-                        <div className="mt-4">
-                          <Link
-                            href="/encounters"
-                            className="inline-flex items-center gap-2 text-sm font-medium text-indigo-600"
-                          >
-                            Open encounter details
-                            <ArrowRight className="h-4 w-4" />
-                          </Link>
-                        </div>
-                      </motion.div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-                <div className="rounded-[28px] border border-cyan-100 bg-gradient-to-br from-cyan-50/70 to-white p-4">
-                  <div className="mb-3 text-sm font-semibold text-slate-900">Your care network</div>
-                  {recentClinicians.length === 0 ? (
-                    <EmptyState
-                      icon={Stethoscope}
-                      title="Care network ready"
-                      body="Linked clinicians will appear here once your care relationships are connected and active."
-                      tone="cyan"
-                      action={
-                        <Link
-                          href="/find-doctor"
-                          className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-sm"
-                        >
-                          Find a clinician
-                          <ArrowRight className="h-4 w-4" />
-                        </Link>
-                      }
-                    />
+                <div className="mt-3 divide-y divide-slate-100">
+                  {journeyEvents.length > 0 ? (
+                    journeyEvents.map((event) => <JourneyRow key={event.id} event={event} />)
                   ) : (
-                    <div className="grid gap-3">
-                      {recentClinicians.map((clinician, index) => (
-                        <motion.div
-                          key={`${clinician.name}-${index}`}
-                          {...hoverLift}
-                          className="rounded-[24px] border border-white/76 bg-white/88 p-4 shadow-sm"
-                        >
-                          <div className="flex items-start justify-between gap-4">
-                            <div>
-                              <div className="text-base font-semibold text-slate-900">
-                                {clinician.name}
-                              </div>
-                              <div className="mt-1 text-sm text-slate-500">
-                                {clinician.specialty}
-                              </div>
-                              <div className="mt-2 text-sm text-slate-600">
-                                {clinician.location}
-                              </div>
-                            </div>
-                            <div className="rounded-2xl bg-slate-100 p-3">
-                              <Activity className="h-5 w-5 text-slate-700" />
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))}
+                    <div className="py-6 text-sm text-slate-500">No recent care events are available yet.</div>
+                  )}
+                </div>
+              </section>
+
+              <section className="rounded-[24px] border border-slate-900 bg-slate-950 p-4 text-white shadow-[0_20px_60px_rgba(2,8,23,0.14)] md:rounded-[28px] md:p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-violet-200/70">InsightCore</div>
+                    <h2 className="mt-1 text-xl font-semibold tracking-[-0.025em] text-white md:text-2xl">Intelligence, without the noise</h2>
+                  </div>
+                  <BrainCircuit className="h-5 w-5 text-violet-300" />
+                </div>
+
+                <div className="mt-5 space-y-3">
+                  {alertsLoading ? (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">Refreshing current care intelligence…</div>
+                  ) : aiInsights.length > 0 ? (
+                    aiInsights.map((insight, index) => (
+                      <div key={`${insight}-${index}`} className="rounded-2xl border border-white/10 bg-white/5 p-4">
+                        <div className="flex items-start gap-3">
+                          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-violet-400" />
+                          <div className="text-sm leading-6 text-slate-200">{insight}</div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+                      No new InsightCore interpretation is available in this session. Your raw care state remains visible above.
                     </div>
                   )}
                 </div>
-              </div>
 
-              <div className="rounded-[28px] border border-cyan-100 bg-cyan-50/60 p-5">
-                  <div className="text-sm font-medium text-slate-900">
-                    Care is easier when everything is connected
-                  </div>
-                  <div className="mt-2 text-sm leading-6 text-slate-600">
-                    Ambulant+ keeps your vitals, appointments, reports, alerts, and clinicians
-                    in one place so every next action feels clearer.
-                  </div>
-                  <div className="mt-4 flex flex-wrap gap-3">
-                    <motion.div whileHover={{ scale: 1.02, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                      <Link
-                        href="/find-doctor"
-                        className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-5 py-3 text-sm font-medium text-white"
-                      >
-                        Find care
-                        <ArrowRight className="h-4 w-4" />
+                {alerts.length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    {alerts.map((alert) => (
+                      <Link key={alert.id} href="/insights" className="block rounded-xl border border-white/10 bg-white/[0.035] px-3 py-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="truncate text-sm font-semibold text-white">{alert.title}</div>
+                          <span className={cn('shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-semibold', severityClasses(alert.severity))}>{severityLabel(alert.severity)}</span>
+                        </div>
                       </Link>
-                    </motion.div>
-                    <motion.div whileHover={{ scale: 1.01, y: -2 }} transition={{ type: 'spring', stiffness: 220, damping: 18 }}>
-                      <Link
-                        href="/myCare/devices"
-                        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/88 px-5 py-3 text-sm font-medium text-slate-700"
-                      >
-                        Manage devices
-                        <ChevronRight className="h-4 w-4" />
-                      </Link>
-                    </motion.div>
+                    ))}
+                  </div>
+                ) : null}
+
+                {alertsError ? <div className="mt-4 text-xs text-amber-200">{alertsError}</div> : null}
+
+                <Link href="/insights" className="mt-5 inline-flex min-h-11 w-full items-center justify-between rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-950">
+                  Open InsightCore
+                  <ArrowRight className="h-4 w-4" />
+                </Link>
+              </section>
+            </div>
+
+            <section className="mt-3 grid gap-3 md:mt-4 md:grid-cols-2 md:gap-4">
+              <div className="rounded-[24px] border border-white/80 bg-white/84 p-4 shadow-[0_16px_46px_rgba(15,23,42,0.045)] md:rounded-[28px] md:p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Treatment</div>
+                    <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-slate-950">Medication continuity</h2>
+                  </div>
+                  <Syringe className="h-5 w-5 text-emerald-600" />
+                </div>
+
+                <div className="mt-4 grid grid-cols-[auto_1fr] items-center gap-4 rounded-2xl bg-slate-950 p-4 text-white">
+                  <div className="text-[2.25rem] font-semibold tracking-[-0.05em] [font-variant-numeric:tabular-nums]">
+                    {adherencePct === null ? '—' : `${adherencePct}%`}
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold">{adherencePct === null ? 'No adherence score available' : 'Recorded adherence'}</div>
+                    <div className="mt-1 text-xs leading-5 text-slate-400">
+                      {meds.length === 0
+                        ? 'No active medication schedule is represented as 100% adherence.'
+                        : hasAdherenceHistory
+                          ? 'Longitudinal adherence history is available.'
+                          : 'A trend will appear when sufficient medication history exists.'}
+                    </div>
                   </div>
                 </div>
-              </div>
-          </GlassPanel>
-        </motion.section>
-        <motion.section
-          {...sectionMotion}
-          transition={{ duration: 0.42, delay: 0.25 }}
-          className="relative z-10"
-        >
-          <div className="grid gap-4 md:grid-cols-4">
-            {[
-              {
-                label: 'Auto Triage',
-                body: 'Get guided symptom intake and a smarter starting point before care escalation.',
-                href: '/auto-triage',
-              },
-              {
-                label: 'myCare',
-                body: 'Keep your ongoing care journey, history, notes, and follow-ups aligned.',
-                href: '/myCare',
-              },
-              {
-                label: 'Reports',
-                body: 'Open the evidence behind your trends, consultations, and AI-generated observations.',
-                href: '/reports',
-              },
-              {
-                label: 'Appointments',
-                body: 'Stay on time, prepared, and in control of your next clinical conversation.',
-                href: '/appointments',
-              },
-            ].map((item) => (
-              <motion.div
-                key={item.label}
-                whileHover={{ y: -4, scale: 1.01 }}
-                transition={{ type: 'spring', stiffness: 220, damping: 18 }}
-              >
-                <Link
-                  href={item.href}
-                  className="group block rounded-[28px] border border-white/64 bg-white/78 p-5 shadow-sm backdrop-blur-xl"
-                >
-                  <div className="text-lg font-semibold tracking-tight text-slate-900">{item.label}</div>
-                  <div className="mt-2 text-sm leading-6 text-slate-600">{item.body}</div>
-                  <div className="mt-4 inline-flex items-center gap-2 text-sm font-medium text-indigo-600">
-                    Open module
-                    <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />
-                  </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {meds.slice(0, 3).map((med, index) => (
+                    <span key={med.id ?? index} className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-700">
+                      {med.name ?? 'Medication'}{med.time ? ` · ${med.time}` : ''}
+                    </span>
+                  ))}
+                  {meds.length === 0 ? <span className="text-sm text-slate-500">No medication schedule loaded.</span> : null}
+                </div>
+
+                <Link href="/medications" className="mt-4 inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-slate-900">
+                  Open medications <ChevronRight className="h-4 w-4" />
                 </Link>
-              </motion.div>
-            ))}
-          </div>
-        </motion.section>
+              </div>
+
+              <div className="rounded-[24px] border border-white/80 bg-white/84 p-4 shadow-[0_16px_46px_rgba(15,23,42,0.045)] md:rounded-[28px] md:p-6">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">History & Safety</div>
+                    <h2 className="mt-1 text-lg font-semibold tracking-[-0.02em] text-slate-950">Longitudinal record</h2>
+                  </div>
+                  <Shield className="h-5 w-5 text-slate-700" />
+                </div>
+
+                <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Allergies recorded</div>
+                    <div className="mt-2 text-xl font-semibold text-slate-950">{allergyNames.length}</div>
+                    <div className="mt-2 text-xs leading-5 text-slate-500">
+                      {allergyNames.length ? allergyNames.slice(0, 2).join(' · ') : 'No allergy entries returned by the profile API.'}
+                    </div>
+                  </div>
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
+                    <div className="text-xs font-semibold uppercase tracking-[0.12em] text-slate-400">Recent encounters</div>
+                    <div className="mt-2 text-xl font-semibold text-slate-950">{cases.length}</div>
+                    <div className="mt-2 text-xs leading-5 text-slate-500">Clinical history remains available through your care record.</div>
+                  </div>
+                </div>
+
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Link href="/reports" className="inline-flex min-h-11 items-center gap-2 rounded-xl bg-slate-950 px-4 text-sm font-semibold text-white">Reports <ArrowRight className="h-4 w-4" /></Link>
+                  <Link href="/myCare" className="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-800">Open myCare <ChevronRight className="h-4 w-4" /></Link>
+                </div>
+              </div>
+            </section>
+          </>
+        ) : (
+          <section className="mt-3 rounded-[24px] border border-slate-300 bg-white p-4 md:mt-4 md:rounded-[28px] md:p-6">
+            <div className="flex items-start gap-4">
+              <div className={cn('flex h-10 w-10 shrink-0 items-center justify-center rounded-xl', careState === 'critical' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700')}>
+                <Bell className="h-5 w-5" />
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-slate-950">Safety override active</div>
+                <div className="mt-1 text-sm leading-6 text-slate-600">Secondary visual layers are deliberately reduced while a higher-priority care state is active. Resolve the current action before returning to the full care environment.</div>
+              </div>
+            </div>
+          </section>
+        )}
+
+        <section className="mt-3 grid grid-cols-2 gap-2.5 md:mt-4 md:grid-cols-4 md:gap-3">
+          {[
+            { label: 'Auto Triage', href: '/auto-triage', icon: Activity },
+            { label: 'myCare', href: '/myCare', icon: HeartPulse },
+            { label: 'Reports', href: '/reports', icon: TrendingUp },
+            { label: 'Appointments', href: '/appointments', icon: CalendarDays },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link key={item.label} href={item.href} className="group flex min-h-[76px] items-center justify-between rounded-2xl border border-white/80 bg-white/82 px-4 py-3 shadow-[0_12px_34px_rgba(15,23,42,0.04)]">
+                <div>
+                  <div className="text-sm font-semibold text-slate-950">{item.label}</div>
+                  <div className="mt-1 text-[11px] font-medium text-slate-400">Open module</div>
+                </div>
+                <Icon className="h-4 w-4 text-slate-500 transition-transform group-hover:translate-x-0.5" />
+              </Link>
+            );
+          })}
+        </section>
 
         <div className="sr-only" aria-live="polite">
           {alertsLoading ? 'Refreshing alerts' : `${alerts.length} active alerts loaded`}
