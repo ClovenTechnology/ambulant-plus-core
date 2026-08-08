@@ -56,3 +56,26 @@ export function publicApplicationContext(value: unknown) {
   );
   return slug ? { opportunitySlug: slug } : null;
 }
+
+
+export const ADMIN_REVIEW_TRANSITIONS: Partial<
+  Record<ApplicationStatus, readonly ApplicationStatus[]>
+> = {
+  SUBMITTED: ['UNDER_REVIEW', 'DECLINED'],
+  UNDER_REVIEW: ['SHORTLISTED', 'DECLINED'],
+  SHORTLISTED: ['DECLINED'],
+};
+
+export function canAdminTransitionApplication(
+  from: ApplicationStatus,
+  to: ApplicationStatus,
+) {
+  return Boolean(
+    canTransitionApplication(from, to) &&
+      ADMIN_REVIEW_TRANSITIONS[from]?.includes(to),
+  );
+}
+
+export function cleanApplicationReason(value: unknown, max = 1000) {
+  return String(value ?? '').trim().slice(0, max);
+}

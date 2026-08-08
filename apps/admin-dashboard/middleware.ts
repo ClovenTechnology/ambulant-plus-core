@@ -58,6 +58,16 @@ const RULES: Array<{
   },
   {
     prefix:
+      '/admin/applications',
+    required: [
+      'applications.read',
+      'applications.review',
+      'applications.assign',
+      'applications.decision',
+    ],
+  },
+  {
+    prefix:
       '/admin/staff',
     required: [
       'staff.directory.read',

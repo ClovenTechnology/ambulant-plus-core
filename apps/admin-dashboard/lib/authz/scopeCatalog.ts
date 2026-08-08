@@ -38,13 +38,20 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
   {
     key: 'applications-forms',
     title: 'Applications & Enterprise Forms',
-    description: 'Design, publish and govern reusable enterprise forms and their submission data.',
+    description: 'Publish opportunities, review canonical applications and govern reusable enterprise forms and submission data.',
     items: [
       { scope: 'forms.read', label: 'Read enterprise forms', desc: 'View form definitions, versions and publication state.' },
       { scope: 'forms.design', label: 'Design enterprise forms', desc: 'Create forms and edit draft form versions.' },
       { scope: 'forms.publish', label: 'Publish enterprise forms', desc: 'Publish, retire or archive enterprise form versions.', danger: true },
       { scope: 'forms.submissions.read', label: 'Read form submissions', desc: 'Review submitted form data within authorised workflows.' },
       { scope: 'forms.submissions.sensitive.read', label: 'Read sensitive form answers', desc: 'View fields explicitly classified as sensitive.', danger: true },
+      { scope: 'opportunities.read', label: 'Read opportunities', desc: 'View opportunity definitions and publication state.' },
+      { scope: 'opportunities.manage', label: 'Manage opportunities', desc: 'Create and edit opportunity drafts and paused listings.' },
+      { scope: 'opportunities.publish', label: 'Publish opportunities', desc: 'Publish, pause and close public opportunity listings.', danger: true },
+      { scope: 'applications.read', label: 'Read applications', desc: 'View canonical Application records and permitted recruitment metadata.' },
+      { scope: 'applications.review', label: 'Review applications', desc: 'Move applications through governed review and shortlist stages.' },
+      { scope: 'applications.assign', label: 'Assign application reviewers', desc: 'Assign active Staff profiles as application reviewers.' },
+      { scope: 'applications.decision', label: 'Make application decisions', desc: 'Record terminal recruitment decisions such as decline.', danger: true },
     ],
   },
   {

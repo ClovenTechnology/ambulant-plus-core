@@ -2,7 +2,9 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   APPLICATION_STATUSES,
+  canAdminTransitionApplication,
   canTransitionApplication,
+  cleanApplicationReason,
   normaliseApplicationOpportunitySlug,
   publicApplicationContext,
 } from './applications-policy';
@@ -48,4 +50,25 @@ test('public application context accepts only canonical opportunity slugs', () =
   });
   assert.equal(publicApplicationContext({ opportunitySlug: 'not valid!' }), null);
   assert.equal(publicApplicationContext(null), null);
+});
+
+
+test('admin review workspace allows early review progression but not downstream workflow shortcuts', () => {
+  assert.equal(canAdminTransitionApplication('SUBMITTED', 'UNDER_REVIEW'), true);
+  assert.equal(canAdminTransitionApplication('UNDER_REVIEW', 'SHORTLISTED'), true);
+  assert.equal(canAdminTransitionApplication('SUBMITTED', 'DECLINED'), true);
+  assert.equal(canAdminTransitionApplication('SHORTLISTED', 'INTERVIEW_INVITED'), false);
+  assert.equal(canAdminTransitionApplication('INTERVIEW_INVITED', 'INTERVIEW_SCHEDULED'), false);
+});
+
+test('document and interview stages stay reserved for their governed downstream workspaces', () => {
+  assert.equal(canAdminTransitionApplication('UNDER_REVIEW', 'DOCUMENTS_REQUESTED'), false);
+  assert.equal(canAdminTransitionApplication('SHORTLISTED', 'INTERVIEW_INVITED'), false);
+  assert.equal(canAdminTransitionApplication('INTERVIEWED', 'SUCCESSFUL'), false);
+  assert.equal(canAdminTransitionApplication('OFFERED', 'ONBOARDING'), false);
+});
+
+test('application reasons are trimmed and bounded for audit-safe status notes', () => {
+  assert.equal(cleanApplicationReason('  needs review  '), 'needs review');
+  assert.equal(cleanApplicationReason('x'.repeat(1200)).length, 1000);
 });
