@@ -423,7 +423,7 @@ export function serializePublicOpportunity(row: any, now = new Date()) {
     application = {
       mode: 'ENTERPRISE_FORM',
       available,
-      href: available && formSlug ? `/forms/${formSlug}` : null,
+      href: available && formSlug ? `/forms/${formSlug}?opportunity=${encodeURIComponent(row.slug)}` : null,
       formSlug,
     };
   } else if (row.applicationMode === 'EXTERNAL_URL') {

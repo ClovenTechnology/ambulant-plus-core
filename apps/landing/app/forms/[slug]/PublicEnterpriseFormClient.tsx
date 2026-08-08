@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   emptyAnswer,
   fieldByKey,
+  formSessionStorageKey,
   fieldIssueMessage,
   isRecord,
   pageContainsField,
@@ -31,13 +32,10 @@ type ApiError = Error & {
   detail?: unknown;
 };
 
-function storageKey(slug: string) {
-  return `ambulant.enterprise-form.${slug}`;
-}
-
-function readStoredSession(slug: string): PublicSubmissionSession | null {
+function readStoredSession(slug: string, opportunitySlug?: string | null): PublicSubmissionSession | null {
   if (typeof window === 'undefined') return null;
-  const raw = window.localStorage.getItem(storageKey(slug)) || window.sessionStorage.getItem(storageKey(slug));
+  const key = formSessionStorageKey(slug, opportunitySlug);
+  const raw = window.localStorage.getItem(key) || window.sessionStorage.getItem(key);
   if (!raw) return null;
 
   try {
@@ -49,15 +47,17 @@ function readStoredSession(slug: string): PublicSubmissionSession | null {
       token: String(value.token),
       expiresAt: value.expiresAt ? String(value.expiresAt) : null,
       allowSaveResume: Boolean(value.allowSaveResume),
+      applicationReference: value.applicationReference ? String(value.applicationReference) : null,
+      opportunitySlug: value.opportunitySlug ? String(value.opportunitySlug) : null,
     };
   } catch {
     return null;
   }
 }
 
-function persistSession(slug: string, session: PublicSubmissionSession) {
+function persistSession(slug: string, opportunitySlug: string | null | undefined, session: PublicSubmissionSession) {
   if (typeof window === 'undefined') return;
-  const key = storageKey(slug);
+  const key = formSessionStorageKey(slug, opportunitySlug);
   const encoded = JSON.stringify(session);
   window.localStorage.removeItem(key);
   window.sessionStorage.removeItem(key);
@@ -65,9 +65,9 @@ function persistSession(slug: string, session: PublicSubmissionSession) {
   else window.sessionStorage.setItem(key, encoded);
 }
 
-function clearStoredSession(slug: string) {
+function clearStoredSession(slug: string, opportunitySlug?: string | null) {
   if (typeof window === 'undefined') return;
-  const key = storageKey(slug);
+  const key = formSessionStorageKey(slug, opportunitySlug);
   window.localStorage.removeItem(key);
   window.sessionStorage.removeItem(key);
 }
@@ -111,6 +111,9 @@ function errorText(error: unknown) {
     form_upload_size_rejected: 'That file is larger than the allowed size.',
     form_upload_file_limit_reached: 'The maximum number of files has already been uploaded.',
     form_upload_storage_not_configured: 'Secure file upload is temporarily unavailable. Please try again later.',
+    invalid_application_context: 'This application link is invalid. Return to the opportunity page and start again.',
+    opportunity_not_accepting_applications: 'This opportunity is no longer accepting applications.',
+    application_state_changed: 'This application has already changed state. Return to the opportunity page to continue.',
   };
   return map[code] || 'We could not complete that form action. Please try again.';
 }
@@ -156,7 +159,7 @@ function axisItems(value: unknown) {
     .filter((entry): entry is { key: string; label: string } => Boolean(entry));
 }
 
-export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
+export default function PublicEnterpriseFormClient({ slug, opportunitySlug }: { slug: string; opportunitySlug?: string | null }) {
   const [form, setForm] = useState<PublicFormDefinition | null>(null);
   const [session, setSession] = useState<PublicSubmissionSession | null>(null);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
@@ -170,6 +173,7 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
   const [notice, setNotice] = useState('');
   const [fieldIssues, setFieldIssues] = useState<FieldIssues>({});
   const [submitted, setSubmitted] = useState(false);
+  const [applicationReference, setApplicationReference] = useState<string | null>(null);
   const [honeypot, setHoneypot] = useState('');
   const [repeatCounts, setRepeatCounts] = useState<Record<string, number>>({});
   const resumedOnce = useRef(false);
@@ -210,9 +214,9 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
     setFiles(submission.files || []);
     setLocale(submission.locale || submission.form.version.locale || 'en-ZA');
     setSession(activeSession);
-    persistSession(slug, activeSession);
+    persistSession(slug, activeSession.opportunitySlug || opportunitySlug, activeSession);
     initialiseRepeatCounts(submission.form, submission.answers || {});
-  }, [initialiseRepeatCounts, slug]);
+  }, [initialiseRepeatCounts, opportunitySlug, slug]);
 
   const resume = useCallback(async (candidate: PublicSubmissionSession) => {
     const json = await apiJson(
@@ -224,10 +228,12 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
       ...candidate,
       expiresAt: submission.expiresAt || candidate.expiresAt,
       allowSaveResume: submission.form.version.allowSaveResume,
+      applicationReference: submission.application?.referenceCode || candidate.applicationReference || null,
+      opportunitySlug: submission.application?.opportunitySlug || candidate.opportunitySlug || opportunitySlug || null,
     };
     applySubmission(submission, activeSession);
     setNotice('Your saved progress has been restored.');
-  }, [applySubmission]);
+  }, [applySubmission, opportunitySlug]);
 
   useEffect(() => {
     let cancelled = false;
@@ -260,7 +266,7 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
     resumedOnce.current = true;
 
     const fragment = parseResumeFragment(window.location.hash);
-    const stored = readStoredSession(slug);
+    const stored = readStoredSession(slug, opportunitySlug);
     const candidate = fragment
       ? {
           submissionId: fragment.submissionId,
@@ -270,7 +276,7 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
       : stored;
 
     if (fragment) {
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState({}, '', window.location.pathname + window.location.search);
     }
 
     if (!candidate) return;
@@ -278,11 +284,11 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
     setBusy(true);
     resume(candidate)
       .catch(() => {
-        clearStoredSession(slug);
+        clearStoredSession(slug, opportunitySlug);
         setNotice('A previous saved session could not be restored. You can start a new submission.');
       })
       .finally(() => setBusy(false));
-  }, [form, resume, slug]);
+  }, [form, opportunitySlug, resume, slug]);
 
   useEffect(() => {
     if (!pages.length) return;
@@ -367,16 +373,18 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
     try {
       const json = await apiJson(`/api/forms/public/${encodeURIComponent(slug)}/start`, {
         method: 'POST',
-        body: JSON.stringify({ locale, __website: honeypot }),
+        body: JSON.stringify({ locale, __website: honeypot, applicationContext: opportunitySlug ? { opportunitySlug } : undefined }),
       });
       const activeSession: PublicSubmissionSession = {
         submissionId: String(json.submissionId),
         token: String(json.submissionToken),
         expiresAt: json.expiresAt ? String(json.expiresAt) : null,
         allowSaveResume: Boolean(json.allowSaveResume),
+        applicationReference: json.application?.referenceCode ? String(json.application.referenceCode) : null,
+        opportunitySlug: json.application?.opportunitySlug ? String(json.application.opportunitySlug) : opportunitySlug || null,
       };
       setSession(activeSession);
-      persistSession(slug, activeSession);
+      persistSession(slug, opportunitySlug, activeSession);
       setPageKey(pages[0]?.key || '');
       setNotice(activeSession.allowSaveResume ? 'Your secure form session has started. Progress can be saved on this device.' : 'Your secure form session has started.');
     } catch (err) {
@@ -435,7 +443,7 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
 
   async function copyResumeLink() {
     if (!session?.allowSaveResume) return;
-    const url = `${window.location.origin}${window.location.pathname}#submission=${encodeURIComponent(session.submissionId)}&token=${encodeURIComponent(session.token)}`;
+    const url = `${window.location.origin}${window.location.pathname}${window.location.search}#submission=${encodeURIComponent(session.submissionId)}&token=${encodeURIComponent(session.token)}`;
     try {
       await navigator.clipboard.writeText(url);
       setNotice('Secure resume link copied. Anyone with this link can access this draft, so keep it private.');
@@ -451,7 +459,7 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
     setNotice('');
     setFieldIssues({});
     try {
-      await apiJson(
+      const result = await apiJson(
         `/api/forms/public/submissions/${encodeURIComponent(session.submissionId)}/submit`,
         {
           method: 'POST',
@@ -459,10 +467,11 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
           body: JSON.stringify({ answers, __website: honeypot }),
         },
       );
-      clearStoredSession(slug);
+      setApplicationReference(result.applicationReference ? String(result.applicationReference) : session.applicationReference || null);
+      clearStoredSession(slug, session.opportunitySlug || opportunitySlug);
       setSubmitted(true);
       setSession(null);
-      window.history.replaceState({}, '', window.location.pathname);
+      window.history.replaceState({}, '', window.location.pathname + window.location.search);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
       if ((err as ApiError)?.code === 'form_validation_failed') {
@@ -777,6 +786,7 @@ export default function PublicEnterpriseFormClient({ slug }: { slug: string }) {
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-800">✓</div>
           <h1 className="mt-5 text-3xl font-semibold tracking-tight text-slate-950">{String(settings.successTitle || 'Submission received')}</h1>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-600">{String(settings.successMessage || 'Thank you. Your form has been submitted securely.')}</p>
+          {applicationReference ? <div className="mx-auto mt-5 max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Application reference</div><div className="mt-1 font-mono text-base font-semibold">{applicationReference}</div></div> : null}
         </section>
       </main>
     );

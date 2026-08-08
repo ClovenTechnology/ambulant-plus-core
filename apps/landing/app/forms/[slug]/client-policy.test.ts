@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   evaluateCondition,
+  formSessionStorageKey,
+  normaliseOpportunityContextSlug,
   parseResumeFragment,
   publicPageSequence,
   requiredFieldKeys,
@@ -90,4 +92,17 @@ test('resume credential is accepted only from a fragment with an opaque bearer',
     token: 'abcdefghijklmnopqrstuvwxyzABCDEFGH1234_-',
   });
   assert.equal(parseResumeFragment('#submission=sub_1&token=short'), null);
+});
+
+
+test('opportunity context accepts only canonical public slugs', () => {
+  assert.equal(normaliseOpportunityContextSlug('  Clinical-Pilot-2026  '), 'clinical-pilot-2026');
+  assert.equal(normaliseOpportunityContextSlug('../admin'), '');
+  assert.equal(normaliseOpportunityContextSlug('not valid!'), '');
+});
+
+test('form draft storage is isolated per opportunity when a form is reused', () => {
+  assert.equal(formSessionStorageKey('career-application', 'clinical-pilot-2026'), 'ambulant.enterprise-form.career-application.opportunity.clinical-pilot-2026');
+  assert.equal(formSessionStorageKey('career-application', 'other-role'), 'ambulant.enterprise-form.career-application.opportunity.other-role');
+  assert.equal(formSessionStorageKey('career-application'), 'ambulant.enterprise-form.career-application');
 });

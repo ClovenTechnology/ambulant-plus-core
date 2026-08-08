@@ -29,6 +29,13 @@ import {
   publicFormUploadPolicy,
   validatePublicFormAnswers,
 } from './public-forms-policy';
+import {
+  applicationReferenceCode,
+  assertDraftApplicationStillAccepting,
+  PublicApplicationError,
+  resolvePublicApplicationContext,
+  submitDraftApplication,
+} from './public-applications';
 
 const PUBLIC_FORM_TOKEN_BYTES = 32;
 const PUBLIC_FORM_HARD_DRAFT_DAYS = 90;
@@ -310,6 +317,7 @@ export async function startPublicFormSubmission(input: {
   clientKey: string;
   locale?: unknown;
   honeypot?: unknown;
+  applicationContext?: unknown;
 }) {
   if (formAvailability(input.version) !== 'OPEN') {
     throw new PublicFormError('form_not_accepting_submissions', 409);
@@ -331,31 +339,101 @@ export async function startPublicFormSubmission(input: {
   const expiresAt = draftExpiry(input.version);
   const locale = cleanText(input.locale, 20) || input.version.locale || 'en';
 
-  const submission = await prisma.enterpriseFormSubmission.create({
-    data: {
-      formId: input.version.formId,
-      versionId: input.version.id,
-      status: 'DRAFT',
-      resumeTokenHash: sha256(token),
-      resumeTokenExpiresAt: expiresAt,
-      expiresAt,
-      locale,
-      source: 'landing',
-    },
-    select: {
-      id: true,
-      expiresAt: true,
-      startedAt: true,
-    },
-  });
+  try {
+    const created = await prisma.$transaction(async (tx) => {
+      const opportunity = await resolvePublicApplicationContext({
+        tx,
+        value: input.applicationContext,
+        formId: input.version.formId,
+      });
 
-  return {
-    submissionId: submission.id,
-    submissionToken: token,
-    expiresAt: submission.expiresAt,
-    startedAt: submission.startedAt,
-    allowSaveResume: input.version.allowSaveResume,
-  };
+      const submission = await tx.enterpriseFormSubmission.create({
+        data: {
+          formId: input.version.formId,
+          versionId: input.version.id,
+          status: 'DRAFT',
+          resumeTokenHash: sha256(token),
+          resumeTokenExpiresAt: expiresAt,
+          expiresAt,
+          locale,
+          source: opportunity ? 'landing_opportunity' : 'landing',
+          contextType: opportunity ? 'OPPORTUNITY' : null,
+          contextId: opportunity?.id || null,
+        },
+        select: {
+          id: true,
+          expiresAt: true,
+          startedAt: true,
+        },
+      });
+
+      let application: { referenceCode: string; opportunitySlug: string } | null = null;
+
+      if (opportunity) {
+        const referenceCode = applicationReferenceCode();
+        const createdApplication = await tx.application.create({
+          data: {
+            referenceCode,
+            opportunityId: opportunity.id,
+            formSubmissionId: submission.id,
+            formVersionId: input.version.id,
+            source: 'ENTERPRISE_FORM',
+            status: 'DRAFT',
+          },
+          select: { id: true, referenceCode: true },
+        });
+
+        await tx.applicationStatusEvent.create({
+          data: {
+            applicationId: createdApplication.id,
+            fromStatus: null,
+            toStatus: 'DRAFT',
+            actorType: 'EXTERNAL_GUEST',
+            actorRefId: submission.id,
+            metadata: { source: 'enterprise_form_runtime' },
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            actorType: 'EXTERNAL_GUEST',
+            actorRefId: submission.id,
+            app: 'landing',
+            action: 'application.draft_started',
+            entityType: 'Application',
+            entityId: createdApplication.id,
+            meta: {
+              opportunityId: opportunity.id,
+              formSubmissionId: submission.id,
+              formVersionId: input.version.id,
+              referenceCode,
+            },
+          },
+        });
+
+        application = {
+          referenceCode,
+          opportunitySlug: opportunity.slug,
+        };
+      }
+
+      return { submission, application };
+    });
+
+    return {
+      submissionId: created.submission.id,
+      submissionToken: token,
+      expiresAt: created.submission.expiresAt,
+      startedAt: created.submission.startedAt,
+      allowSaveResume: input.version.allowSaveResume,
+      application: created.application,
+    };
+  } catch (error) {
+    if (error instanceof PublicApplicationError) {
+      throw new PublicFormError(error.code, error.status);
+    }
+    throw error;
+  }
 }
 
 export function submissionBearerToken(value: string | null | undefined) {
@@ -386,6 +464,14 @@ async function submissionWithAuthority(submissionId: string, token: string) {
         orderBy: { createdAt: 'asc' },
       },
       consents: true,
+      application: {
+        select: {
+          id: true,
+          referenceCode: true,
+          status: true,
+          opportunity: { select: { slug: true } },
+        },
+      },
     },
   });
 
@@ -422,6 +508,13 @@ export async function getPublicFormSubmission(input: {
       state: file.state,
       availableAt: file.availableAt,
     })),
+    application: submission.application
+      ? {
+          referenceCode: submission.application.referenceCode,
+          status: submission.application.status,
+          opportunitySlug: submission.application.opportunity.slug,
+        }
+      : null,
     form: serializePublicForm(submission.version),
   };
 }
@@ -637,74 +730,120 @@ export async function submitPublicFormSubmission(input: {
   const identityEmailNormalized = extractIdentityEmail(definition, effectiveAnswers);
   const existingMetadata = isRecord(submission.metadata) ? submission.metadata : {};
   const dbFields = new Map(submission.version.fields.map((field: any) => [field.key, field]));
+  const now = new Date();
 
-  const updated = await prisma.$transaction(async (tx) => {
-    for (const [fieldKey, value] of Object.entries(derived.calculations)) {
-      const dbField = dbFields.get(fieldKey) as any;
-      if (!dbField) continue;
-      await tx.enterpriseFormSubmissionAnswer.upsert({
-        where: {
-          submissionId_fieldId: {
+  const updated = await (async () => {
+    try {
+      return await prisma.$transaction(async (tx) => {
+      const draftApplication = await assertDraftApplicationStillAccepting({
+        tx,
+        submissionId: submission.id,
+        formId: submission.formId,
+      });
+
+      for (const [fieldKey, value] of Object.entries(derived.calculations)) {
+        const dbField = dbFields.get(fieldKey) as any;
+        if (!dbField) continue;
+        await tx.enterpriseFormSubmissionAnswer.upsert({
+          where: {
+            submissionId_fieldId: {
+              submissionId: submission.id,
+              fieldId: dbField.id,
+            },
+          },
+          create: {
             submissionId: submission.id,
             fieldId: dbField.id,
+            fieldKey,
+            value: asJson(value),
           },
-        },
-        create: {
-          submissionId: submission.id,
-          fieldId: dbField.id,
-          fieldKey,
-          value: asJson(value),
-        },
-        update: {
-          fieldKey,
-          value: asJson(value),
-        },
-      });
-    }
-
-    const stateChange = await tx.enterpriseFormSubmission.updateMany({
-      where: {
-        id: submission.id,
-        status: 'DRAFT',
-        resumeTokenHash: sha256(input.token),
-      },
-      data: {
-        status: 'SUBMITTED',
-        submittedAt: new Date(),
-        lastSavedAt: new Date(),
-        identityEmailNormalized,
-        resumeTokenHash: null,
-        resumeTokenExpiresAt: null,
-        metadata: asJson({
-          ...existingMetadata,
-          runtime: {
-            calculations: derived.calculations,
-            score: derived.score,
-            submittedVersionId: submission.versionId,
+          update: {
+            fieldKey,
+            value: asJson(value),
           },
-        }),
-      },
-    });
+        });
+      }
 
-    if (stateChange.count === 1) {
-      await tx.auditLog.create({
+      const stateChange = await tx.enterpriseFormSubmission.updateMany({
+        where: {
+          id: submission.id,
+          status: 'DRAFT',
+          resumeTokenHash: sha256(input.token),
+        },
         data: {
-          actorType: 'EXTERNAL_GUEST',
-          actorRefId: submission.id,
-          app: 'landing',
-          action: 'enterprise_form.submitted',
-          entityType: 'EnterpriseFormSubmission',
-          entityId: submission.id,
-          meta: asJson({
-            formId: submission.formId,
-            versionId: submission.versionId,
+          status: 'SUBMITTED',
+          submittedAt: now,
+          lastSavedAt: now,
+          identityEmailNormalized,
+          resumeTokenHash: null,
+          resumeTokenExpiresAt: null,
+          metadata: asJson({
+            ...existingMetadata,
+            runtime: {
+              calculations: derived.calculations,
+              score: derived.score,
+              submittedVersionId: submission.versionId,
+            },
           }),
         },
       });
-    }
 
-    return stateChange;
-  });
+      if (stateChange.count === 1) {
+        if (draftApplication) {
+          await submitDraftApplication({
+            tx,
+            applicationId: draftApplication.id,
+            submissionId: submission.id,
+            applicantEmailNormalized: identityEmailNormalized,
+            now,
+          });
+
+          await tx.auditLog.create({
+            data: {
+              actorType: 'EXTERNAL_GUEST',
+              actorRefId: submission.id,
+              app: 'landing',
+              action: 'application.submitted',
+              entityType: 'Application',
+              entityId: draftApplication.id,
+              meta: {
+                opportunityId: draftApplication.opportunityId,
+                formSubmissionId: submission.id,
+                formVersionId: submission.versionId,
+                referenceCode: draftApplication.referenceCode,
+              },
+            },
+          });
+        }
+
+        await tx.auditLog.create({
+          data: {
+            actorType: 'EXTERNAL_GUEST',
+            actorRefId: submission.id,
+            app: 'landing',
+            action: 'enterprise_form.submitted',
+            entityType: 'EnterpriseFormSubmission',
+            entityId: submission.id,
+            meta: asJson({
+              formId: submission.formId,
+              versionId: submission.versionId,
+            }),
+          },
+        });
+      }
+
+      return {
+        count: stateChange.count,
+        applicationReference: draftApplication?.referenceCode || null,
+      };
+      });
+    } catch (error) {
+      if (error instanceof PublicApplicationError) {
+        throw new PublicFormError(error.code, error.status);
+      }
+      throw error;
+    }
+  })();
 
   if (updated.count !== 1) {
     throw new PublicFormError('form_submission_state_changed', 409);
@@ -714,7 +853,8 @@ export async function submitPublicFormSubmission(input: {
     ok: true,
     submissionId: submission.id,
     status: 'SUBMITTED' as const,
-    submittedAt: new Date().toISOString(),
+    submittedAt: now.toISOString(),
+    applicationReference: updated.applicationReference,
   };
 }
 

@@ -289,3 +289,16 @@ export function parseResumeFragment(hash: string) {
   if (!submissionId || !/^[A-Za-z0-9_-]{32,500}$/.test(token)) return null;
   return { submissionId, token };
 }
+
+export function normaliseOpportunityContextSlug(value: unknown) {
+  const slug = String(value ?? '').trim().toLowerCase().slice(0, 160);
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(slug) ? slug : '';
+}
+
+export function formSessionStorageKey(slug: string, opportunitySlug?: unknown) {
+  const formSlug = String(slug || '').trim().toLowerCase();
+  const opportunity = normaliseOpportunityContextSlug(opportunitySlug);
+  return opportunity
+    ? `ambulant.enterprise-form.${formSlug}.opportunity.${opportunity}`
+    : `ambulant.enterprise-form.${formSlug}`;
+}

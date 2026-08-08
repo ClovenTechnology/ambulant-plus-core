@@ -4169,6 +4169,7 @@ model AdminUserProfile {
   opportunitiesPaused         Opportunity[]                @relation("OpportunityPausedBy")
   opportunitiesClosed         Opportunity[]                @relation("OpportunityClosedBy")
   opportunitiesArchived       Opportunity[]                @relation("OpportunityArchivedBy")
+  applicationsAssigned        Application[]                @relation("ApplicationAssignedReviewer")
 
   @@index([departmentId])
   @@index([designationId])
@@ -4421,6 +4422,7 @@ model EnterpriseFormVersion {
   rules                EnterpriseFormRule[]
   translations         EnterpriseFormTranslation[]
   submissions          EnterpriseFormSubmission[]
+  applications         Application[]
 
   @@unique([formId, versionNumber])
   @@index([formId, state, versionNumber])
@@ -4577,6 +4579,7 @@ model EnterpriseFormSubmission {
   answers                 EnterpriseFormSubmissionAnswer[]
   files                   EnterpriseFormSubmissionFile[]
   consents                EnterpriseFormConsentEvidence[]
+  application             Application?
 
   @@index([formId, status, createdAt])
   @@index([versionId, status, createdAt])
@@ -4704,12 +4707,59 @@ model Opportunity {
   pausedByProfile        AdminUserProfile?          @relation("OpportunityPausedBy", fields: [pausedByProfileId], references: [id], onDelete: SetNull)
   closedByProfile        AdminUserProfile?          @relation("OpportunityClosedBy", fields: [closedByProfileId], references: [id], onDelete: SetNull)
   archivedByProfile      AdminUserProfile?          @relation("OpportunityArchivedBy", fields: [archivedByProfileId], references: [id], onDelete: SetNull)
+  applications           Application[]
 
   @@index([status, visibility, opensAt, closesAt])
   @@index([type, status, createdAt])
   @@index([applicationFormId])
   @@index([featured, sortOrder, publishedAt])
   @@index([createdByProfileId, createdAt])
+}
+
+model Application {
+  id                      String                   @id @default(cuid())
+  referenceCode           String                   @unique @db.VarChar(40)
+  opportunityId           String
+  formSubmissionId        String                   @unique
+  formVersionId           String
+  source                  ApplicationSource        @default(ENTERPRISE_FORM)
+  status                  ApplicationStatus        @default(DRAFT)
+  applicantEmailNormalized String?                 @db.VarChar(320)
+  assignedReviewerProfileId String?
+  statusReason            String?                  @db.VarChar(1000)
+  statusChangedAt         DateTime                 @default(now())
+  submittedAt             DateTime?
+  lastReviewedAt          DateTime?
+  createdAt               DateTime                 @default(now())
+  updatedAt               DateTime                 @updatedAt
+  opportunity             Opportunity              @relation(fields: [opportunityId], references: [id], onDelete: Restrict)
+  formSubmission          EnterpriseFormSubmission @relation(fields: [formSubmissionId], references: [id], onDelete: Restrict)
+  formVersion             EnterpriseFormVersion    @relation(fields: [formVersionId], references: [id], onDelete: Restrict)
+  assignedReviewerProfile AdminUserProfile?        @relation("ApplicationAssignedReviewer", fields: [assignedReviewerProfileId], references: [id], onDelete: SetNull)
+  statusHistory           ApplicationStatusEvent[]
+
+  @@index([opportunityId, status, createdAt])
+  @@index([status, submittedAt])
+  @@index([applicantEmailNormalized, opportunityId, createdAt])
+  @@index([assignedReviewerProfileId, status, createdAt])
+  @@index([formVersionId, status, createdAt])
+}
+
+model ApplicationStatusEvent {
+  id            String            @id @default(cuid())
+  applicationId String
+  fromStatus    ApplicationStatus?
+  toStatus      ApplicationStatus
+  actorType     AuditActorType
+  actorRefId    String?           @db.VarChar(240)
+  reason        String?           @db.VarChar(1000)
+  metadata      Json?
+  createdAt     DateTime          @default(now())
+  application   Application       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, createdAt])
+  @@index([toStatus, createdAt])
+  @@index([actorType, createdAt])
 }
 
 model AdminAuthCredential {
@@ -5992,6 +6042,27 @@ enum EnterpriseFormFileState {
   AVAILABLE
   REJECTED
   REMOVED
+}
+
+enum ApplicationSource {
+  ENTERPRISE_FORM
+}
+
+enum ApplicationStatus {
+  DRAFT
+  SUBMITTED
+  UNDER_REVIEW
+  SHORTLISTED
+  DOCUMENTS_REQUESTED
+  INTERVIEW_INVITED
+  INTERVIEW_SCHEDULED
+  INTERVIEWED
+  SUCCESSFUL
+  OFFERED
+  ONBOARDING
+  DECLINED
+  WITHDRAWN
+  EXPIRED
 }
 
 enum OpportunityType {

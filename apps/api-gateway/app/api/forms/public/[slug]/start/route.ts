@@ -31,6 +31,7 @@ export async function POST(
       clientKey: publicFormRequestClientKey(request),
       locale: body.locale,
       honeypot: body[honeypotField] || body.__website,
+      applicationContext: body.applicationContext,
     });
 
     return publicFormJson({ ok: true, ...result }, 201);

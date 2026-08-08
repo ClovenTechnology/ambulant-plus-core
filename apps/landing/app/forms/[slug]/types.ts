@@ -103,6 +103,11 @@ export type PublicSubmission = {
   expiresAt?: string | null;
   answers: Record<string, unknown>;
   files: PublicSubmissionFile[];
+  application?: {
+    referenceCode: string;
+    status: string;
+    opportunitySlug: string;
+  } | null;
   form: PublicFormDefinition;
 };
 
@@ -111,4 +116,6 @@ export type PublicSubmissionSession = {
   token: string;
   expiresAt?: string | null;
   allowSaveResume: boolean;
+  applicationReference?: string | null;
+  opportunitySlug?: string | null;
 };

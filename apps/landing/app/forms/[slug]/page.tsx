@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import PublicEnterpriseFormClient from './PublicEnterpriseFormClient';
+import { normaliseOpportunityContextSlug } from './client-policy';
 
 export const metadata: Metadata = {
   title: 'Secure form',
@@ -13,8 +14,11 @@ export const metadata: Metadata = {
 
 export default function PublicEnterpriseFormPage({
   params,
+  searchParams,
 }: {
   params: { slug: string };
+  searchParams?: { opportunity?: string };
 }) {
-  return <PublicEnterpriseFormClient slug={params.slug} />;
+  const opportunitySlug = normaliseOpportunityContextSlug(searchParams?.opportunity);
+  return <PublicEnterpriseFormClient slug={params.slug} opportunitySlug={opportunitySlug || null} />;
 }
