@@ -245,7 +245,7 @@ export default function AdminSidebar() {
         label: 'Admin',
         icon: Store,
         defaultOpen: true,
-        requires: ['hr', 'manageRoles', 'compliance', 'medical'],
+        requires: ['hr', 'manageRoles', 'compliance', 'medical', 'forms.read', 'forms.design', 'forms.publish'],
         items: [
           { href: '/admin/training', label: 'Training control', icon: CalendarDays, requires: ['medical', 'hr', 'manageRoles'] },
           { href: '/admin/calendar', label: 'Training calendar', icon: CalendarDays, requires: ['medical', 'hr', 'manageRoles'] },
@@ -253,6 +253,7 @@ export default function AdminSidebar() {
           { href: '/admin/legal', label: 'Legal Department', icon: Shield, requires: ['manageRoles', 'compliance'] },
           { href: '/admin/staff', label: 'Staff Directory', icon: Users, requires: ['staff.directory.read', 'staff.manage', 'hr', 'manageRoles'] },
           { href: '/admin/meetings', label: 'Meetings', icon: CalendarDays, requires: ['meetings.create', 'meetings.moderate', 'meetings.audit.read'] },
+          { href: '/admin/forms', label: 'Enterprise Forms', icon: ClipboardList, requires: ['forms.read', 'forms.design', 'forms.publish'] },
           { href: '/admin/clinicians', label: 'Admin Clinicians', icon: Stethoscope, requires: ['hr', 'manageRoles'] },
           { href: '/admin/patients', label: 'Admin Patients', icon: Users, requires: ['hr', 'manageRoles'] },
           { href: '/admin/shop', label: 'Admin Shop', icon: Store, requires: ['manageRoles'] },

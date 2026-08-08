@@ -40,6 +40,15 @@ const RULES: Array<{
   },
   {
     prefix:
+      '/admin/forms',
+    required: [
+      'forms.read',
+      'forms.design',
+      'forms.publish',
+    ],
+  },
+  {
+    prefix:
       '/admin/staff',
     required: [
       'staff.directory.read',
