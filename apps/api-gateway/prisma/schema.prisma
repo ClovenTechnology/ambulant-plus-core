@@ -4158,6 +4158,11 @@ model AdminUserProfile {
   meetingInvitationsCreated   MeetingInvitation[]        @relation("MeetingInvitationCreatedBy")
   meetingLobbyDecisions       MeetingLobbyEntry[]        @relation("MeetingLobbyDecidedBy")
   meetingsCancelled           Meeting[]                   @relation("MeetingCancelledBy")
+  enterpriseFormsCreated      EnterpriseForm[]            @relation("EnterpriseFormCreatedBy")
+  enterpriseFormsArchived     EnterpriseForm[]            @relation("EnterpriseFormArchivedBy")
+  formVersionsCreated         EnterpriseFormVersion[]     @relation("EnterpriseFormVersionCreatedBy")
+  formVersionsPublished       EnterpriseFormVersion[]     @relation("EnterpriseFormVersionPublishedBy")
+  formVersionsRetired         EnterpriseFormVersion[]     @relation("EnterpriseFormVersionRetiredBy")
 
   @@index([departmentId])
   @@index([designationId])
@@ -4345,6 +4350,286 @@ model MeetingAttendanceSession {
 
   @@index([meetingId, joinedAt])
   @@index([participantId, joinedAt])
+}
+
+model EnterpriseForm {
+  id                 String               @id @default(cuid())
+  key                String               @unique @db.VarChar(120)
+  slug               String               @unique @db.VarChar(160)
+  name               String               @db.VarChar(240)
+  description        String?
+  status             EnterpriseFormStatus @default(ACTIVE)
+  defaultLocale      String               @default("en") @db.VarChar(20)
+  createdByProfileId String
+  archivedAt         DateTime?
+  archivedByProfileId String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  createdByProfile   AdminUserProfile     @relation("EnterpriseFormCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  archivedByProfile  AdminUserProfile?    @relation("EnterpriseFormArchivedBy", fields: [archivedByProfileId], references: [id], onDelete: SetNull)
+  versions           EnterpriseFormVersion[]
+  submissions        EnterpriseFormSubmission[]
+
+  @@index([status, createdAt])
+  @@index([createdByProfileId, createdAt])
+}
+
+model EnterpriseFormVersion {
+  id                   String                     @id @default(cuid())
+  formId               String
+  versionNumber        Int
+  state                EnterpriseFormVersionState @default(DRAFT)
+  accessMode           EnterpriseFormAccessMode   @default(PUBLIC)
+  title                String                     @db.VarChar(240)
+  description          String?
+  locale               String                     @default("en") @db.VarChar(20)
+  fallbackLocale       String?                    @db.VarChar(20)
+  submitLabel          String                     @default("Submit") @db.VarChar(120)
+  allowSaveResume      Boolean                    @default(true)
+  acceptingFrom        DateTime?
+  acceptingUntil       DateTime?
+  retentionDays        Int?
+  branding             Json?
+  settings             Json?
+  notificationRules    Json?
+  antiSpamPolicy       Json?
+  createdFromVersionId String?
+  createdByProfileId   String
+  publishedAt          DateTime?
+  publishedByProfileId String?
+  retiredAt            DateTime?
+  retiredByProfileId   String?
+  createdAt            DateTime                   @default(now())
+  updatedAt            DateTime                   @updatedAt
+  form                 EnterpriseForm             @relation(fields: [formId], references: [id], onDelete: Restrict)
+  createdFromVersion   EnterpriseFormVersion?     @relation("EnterpriseFormVersionClone", fields: [createdFromVersionId], references: [id], onDelete: SetNull)
+  clonedVersions       EnterpriseFormVersion[]    @relation("EnterpriseFormVersionClone")
+  createdByProfile     AdminUserProfile           @relation("EnterpriseFormVersionCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  publishedByProfile   AdminUserProfile?          @relation("EnterpriseFormVersionPublishedBy", fields: [publishedByProfileId], references: [id], onDelete: SetNull)
+  retiredByProfile     AdminUserProfile?          @relation("EnterpriseFormVersionRetiredBy", fields: [retiredByProfileId], references: [id], onDelete: SetNull)
+  pages                EnterpriseFormPage[]
+  sections             EnterpriseFormSection[]
+  fields               EnterpriseFormField[]
+  options              EnterpriseFormFieldOption[]
+  rules                EnterpriseFormRule[]
+  translations         EnterpriseFormTranslation[]
+  submissions          EnterpriseFormSubmission[]
+
+  @@unique([formId, versionNumber])
+  @@index([formId, state, versionNumber])
+  @@index([state, acceptingFrom, acceptingUntil])
+  @@index([createdFromVersionId])
+}
+
+model EnterpriseFormPage {
+  id          String                @id @default(cuid())
+  versionId   String
+  key         String                @db.VarChar(120)
+  title       String                @db.VarChar(240)
+  description String?
+  order       Int
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  version     EnterpriseFormVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  sections    EnterpriseFormSection[]
+
+  @@unique([versionId, key])
+  @@unique([versionId, order])
+  @@index([versionId, order])
+}
+
+model EnterpriseFormSection {
+  id          String                @id @default(cuid())
+  versionId   String
+  pageId      String
+  key         String                @db.VarChar(120)
+  title       String                @db.VarChar(240)
+  description String?
+  order       Int
+  repeatable  Boolean               @default(false)
+  minRepeats  Int?
+  maxRepeats  Int?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  version     EnterpriseFormVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  page        EnterpriseFormPage    @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  fields      EnterpriseFormField[]
+
+  @@unique([versionId, key])
+  @@unique([pageId, order])
+  @@index([versionId, order])
+  @@index([pageId, order])
+}
+
+model EnterpriseFormField {
+  id              String                  @id @default(cuid())
+  versionId       String
+  sectionId       String
+  key             String                  @db.VarChar(120)
+  type            EnterpriseFormFieldType
+  label           String                  @db.VarChar(240)
+  helpText        String?
+  placeholder     String?                 @db.VarChar(500)
+  order           Int
+  required        Boolean                 @default(false)
+  sensitive       Boolean                 @default(false)
+  defaultValue    Json?
+  validation      Json?
+  visibilityLogic Json?
+  calculation     Json?
+  scoring         Json?
+  config          Json?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  version         EnterpriseFormVersion   @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  section         EnterpriseFormSection   @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  options         EnterpriseFormFieldOption[]
+  answers         EnterpriseFormSubmissionAnswer[]
+  files           EnterpriseFormSubmissionFile[]
+  consents        EnterpriseFormConsentEvidence[]
+
+  @@unique([versionId, key])
+  @@unique([sectionId, order])
+  @@index([versionId, type])
+  @@index([sectionId, order])
+}
+
+model EnterpriseFormFieldOption {
+  id        String                @id @default(cuid())
+  versionId String
+  fieldId   String
+  key       String                @db.VarChar(120)
+  label     String                @db.VarChar(240)
+  value     String                @db.VarChar(240)
+  order     Int
+  metadata  Json?
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+  version   EnterpriseFormVersion @relation(fields: [versionId], references: [id], onDelete: Cascade)
+  field     EnterpriseFormField   @relation(fields: [fieldId], references: [id], onDelete: Cascade)
+
+  @@unique([fieldId, key])
+  @@unique([fieldId, value])
+  @@unique([fieldId, order])
+  @@index([versionId, fieldId])
+}
+
+model EnterpriseFormRule {
+  id        String                 @id @default(cuid())
+  versionId String
+  key       String                 @db.VarChar(120)
+  kind      EnterpriseFormRuleKind
+  priority  Int                    @default(0)
+  condition Json
+  effect    Json
+  enabled   Boolean                @default(true)
+  createdAt DateTime               @default(now())
+  updatedAt DateTime               @updatedAt
+  version   EnterpriseFormVersion  @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, key])
+  @@index([versionId, kind, priority])
+}
+
+model EnterpriseFormTranslation {
+  id         String                          @id @default(cuid())
+  versionId  String
+  locale     String                          @db.VarChar(20)
+  targetType EnterpriseFormTranslationTarget
+  targetKey  String                          @db.VarChar(120)
+  values     Json
+  createdAt  DateTime                        @default(now())
+  updatedAt  DateTime                        @updatedAt
+  version    EnterpriseFormVersion           @relation(fields: [versionId], references: [id], onDelete: Cascade)
+
+  @@unique([versionId, locale, targetType, targetKey])
+  @@index([versionId, locale])
+}
+
+model EnterpriseFormSubmission {
+  id                      String                         @id @default(cuid())
+  formId                  String
+  versionId               String
+  status                  EnterpriseFormSubmissionStatus @default(DRAFT)
+  resumeTokenHash         String?                        @unique @db.VarChar(128)
+  resumeTokenExpiresAt    DateTime?
+  identityEmailNormalized String?                        @db.VarChar(320)
+  contextType             String?                        @db.VarChar(80)
+  contextId               String?                        @db.VarChar(240)
+  locale                  String                         @default("en") @db.VarChar(20)
+  source                  String?                        @db.VarChar(80)
+  metadata                Json?
+  startedAt               DateTime                       @default(now())
+  lastSavedAt             DateTime                       @default(now())
+  submittedAt             DateTime?
+  expiresAt               DateTime?
+  createdAt               DateTime                       @default(now())
+  updatedAt               DateTime                       @updatedAt
+  form                    EnterpriseForm                 @relation(fields: [formId], references: [id], onDelete: Restrict)
+  version                 EnterpriseFormVersion          @relation(fields: [versionId], references: [id], onDelete: Restrict)
+  answers                 EnterpriseFormSubmissionAnswer[]
+  files                   EnterpriseFormSubmissionFile[]
+  consents                EnterpriseFormConsentEvidence[]
+
+  @@index([formId, status, createdAt])
+  @@index([versionId, status, createdAt])
+  @@index([identityEmailNormalized, createdAt])
+  @@index([contextType, contextId])
+  @@index([expiresAt, status])
+}
+
+model EnterpriseFormSubmissionAnswer {
+  id           String                   @id @default(cuid())
+  submissionId String
+  fieldId      String
+  fieldKey     String                   @db.VarChar(120)
+  value        Json
+  createdAt    DateTime                 @default(now())
+  updatedAt    DateTime                 @updatedAt
+  submission   EnterpriseFormSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  field        EnterpriseFormField      @relation(fields: [fieldId], references: [id], onDelete: Restrict)
+
+  @@unique([submissionId, fieldId])
+  @@index([fieldId])
+}
+
+model EnterpriseFormSubmissionFile {
+  id             String                    @id @default(cuid())
+  submissionId   String
+  fieldId        String
+  fieldKey       String                    @db.VarChar(120)
+  objectKey      String                    @unique @db.VarChar(512)
+  fileName       String                    @db.VarChar(255)
+  contentType    String                    @db.VarChar(160)
+  sizeBytes      Int
+  checksumSha256 String?                   @db.VarChar(64)
+  state          EnterpriseFormFileState   @default(PENDING)
+  availableAt    DateTime?
+  removedAt      DateTime?
+  createdAt      DateTime                  @default(now())
+  updatedAt      DateTime                  @updatedAt
+  submission     EnterpriseFormSubmission  @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  field          EnterpriseFormField       @relation(fields: [fieldId], references: [id], onDelete: Restrict)
+
+  @@index([submissionId, fieldId])
+  @@index([state, createdAt])
+}
+
+model EnterpriseFormConsentEvidence {
+  id              String                   @id @default(cuid())
+  submissionId    String
+  fieldId         String
+  fieldKey        String                   @db.VarChar(120)
+  accepted        Boolean
+  consentTextHash String                   @db.VarChar(64)
+  acceptedAt      DateTime?
+  evidence        Json?
+  createdAt       DateTime                 @default(now())
+  submission      EnterpriseFormSubmission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  field           EnterpriseFormField      @relation(fields: [fieldId], references: [id], onDelete: Restrict)
+
+  @@unique([submissionId, fieldId])
+  @@index([fieldId, accepted])
 }
 
 model AdminAuthCredential {
@@ -5551,6 +5836,82 @@ enum AdminStaffPreferredContactMethod {
   IN_APP
   EMAIL
   MOBILE
+}
+
+enum EnterpriseFormStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum EnterpriseFormVersionState {
+  DRAFT
+  PUBLISHED
+  RETIRED
+}
+
+enum EnterpriseFormAccessMode {
+  PUBLIC
+  AUTHENTICATED
+  INVITE_ONLY
+  INTERNAL
+}
+
+enum EnterpriseFormFieldType {
+  SHORT_TEXT
+  LONG_TEXT
+  EMAIL
+  PHONE
+  NUMBER
+  CURRENCY
+  DATE
+  DATETIME
+  TIME
+  BOOLEAN
+  SINGLE_SELECT
+  MULTI_SELECT
+  RADIO
+  CHECKBOX
+  CHECKBOX_GROUP
+  FILE_UPLOAD
+  CONSENT
+  URL
+  ADDRESS
+  COUNTRY
+  RATING
+  MATRIX
+  REPEATER
+  HIDDEN
+  INFORMATION
+}
+
+enum EnterpriseFormRuleKind {
+  VISIBILITY
+  REQUIREMENT
+  NAVIGATION
+  CALCULATION
+  SCORING
+}
+
+enum EnterpriseFormTranslationTarget {
+  FORM
+  PAGE
+  SECTION
+  FIELD
+  OPTION
+}
+
+enum EnterpriseFormSubmissionStatus {
+  DRAFT
+  SUBMITTED
+  ABANDONED
+  EXPIRED
+}
+
+enum EnterpriseFormFileState {
+  PENDING
+  AVAILABLE
+  REJECTED
+  REMOVED
 }
 
 enum MeetingKind {

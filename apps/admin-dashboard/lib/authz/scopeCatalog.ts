@@ -36,6 +36,18 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
     ],
   },
   {
+    key: 'applications-forms',
+    title: 'Applications & Enterprise Forms',
+    description: 'Design, publish and govern reusable enterprise forms and their submission data.',
+    items: [
+      { scope: 'forms.read', label: 'Read enterprise forms', desc: 'View form definitions, versions and publication state.' },
+      { scope: 'forms.design', label: 'Design enterprise forms', desc: 'Create forms and edit draft form versions.' },
+      { scope: 'forms.publish', label: 'Publish enterprise forms', desc: 'Publish, retire or archive enterprise form versions.', danger: true },
+      { scope: 'forms.submissions.read', label: 'Read form submissions', desc: 'Review submitted form data within authorised workflows.' },
+      { scope: 'forms.submissions.sensitive.read', label: 'Read sensitive form answers', desc: 'View fields explicitly classified as sensitive.', danger: true },
+    ],
+  },
+  {
     key: 'settings',
     title: 'Settings',
     description: 'Tenant-scoped configuration (identity, branding, defaults).',
@@ -130,6 +142,14 @@ export const SCOPE_ALIASES: Record<string, string> = {
   'meetings.external': 'meetings.invite_external',
   'meetings.audit': 'meetings.audit.read',
 
+  // enterprise forms
+  'forms.view': 'forms.read',
+  'forms.write': 'forms.design',
+  'forms.edit': 'forms.design',
+  'forms.release': 'forms.publish',
+  'forms.submissions': 'forms.submissions.read',
+  'forms.sensitive': 'forms.submissions.sensitive.read',
+
   // reports
   'reports.edit': 'reports.edit_draft',
   'reports.editdraft': 'reports.edit_draft',
@@ -219,6 +239,13 @@ export function deriveScopeFromAuditAction(action: string): string | null {
 
   if (a.includes('role')) return 'settings.write';
   if (a.includes('settings')) return 'settings.write';
+
+  if (a.includes('enterprise_form') || a.includes('form.')) {
+    if (a.includes('submission')) return 'forms.submissions.read';
+    if (a.includes('publish') || a.includes('retire') || a.includes('archive')) return 'forms.publish';
+    if (a.includes('create') || a.includes('update') || a.includes('structure') || a.includes('version')) return 'forms.design';
+    return 'forms.read';
+  }
 
   if (a.includes('report')) {
     if (a.includes('create') || a.includes('draft_create')) return 'reports.create';
