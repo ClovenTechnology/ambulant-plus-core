@@ -20,6 +20,22 @@ export type ScopeGroup = {
  */
 export const SCOPE_GROUPS: ScopeGroup[] = [
   {
+    key: 'staff-communications',
+    title: 'Staff & Communications',
+    description: 'Internal staff identity, collaboration, meetings and communication governance.',
+    items: [
+      { scope: 'staff.directory.read', label: 'Read staff directory', desc: 'Search staff and view authorised staff profile information.' },
+      { scope: 'staff.manage', label: 'Manage staff', desc: 'Update staff organisational data and lifecycle state.', danger: true },
+      { scope: 'staff.roles.manage', label: 'Manage staff roles', desc: 'Assign or revoke direct staff roles and scopes.', danger: true },
+      { scope: 'communications.use', label: 'Use internal communications', desc: 'Message and call eligible staff.' },
+      { scope: 'meetings.create', label: 'Create meetings', desc: 'Create scheduled and instant meetings.' },
+      { scope: 'meetings.moderate', label: 'Moderate meetings', desc: 'Host, admit, mute, remove and end meeting participants.', danger: true },
+      { scope: 'meetings.invite_external', label: 'Invite external guests', desc: 'Invite verified external email guests.', danger: true },
+      { scope: 'meetings.record', label: 'Record meetings', desc: 'Start and stop controlled meeting recordings.', danger: true },
+      { scope: 'meetings.audit.read', label: 'Read meeting audit', desc: 'Review meeting attendance and communication audit evidence.' },
+    ],
+  },
+  {
     key: 'settings',
     title: 'Settings',
     description: 'Tenant-scoped configuration (identity, branding, defaults).',
@@ -104,6 +120,16 @@ export const SCOPE_META = new Map<
  * Add to this as you discover old scope names in rolePresets / DB.
  */
 export const SCOPE_ALIASES: Record<string, string> = {
+  // staff / communications
+  'staff.read': 'staff.directory.read',
+  'staff.directory': 'staff.directory.read',
+  'staff.write': 'staff.manage',
+  'staff.roles': 'staff.roles.manage',
+  'communications': 'communications.use',
+  'meetings.host': 'meetings.moderate',
+  'meetings.external': 'meetings.invite_external',
+  'meetings.audit': 'meetings.audit.read',
+
   // reports
   'reports.edit': 'reports.edit_draft',
   'reports.editdraft': 'reports.edit_draft',

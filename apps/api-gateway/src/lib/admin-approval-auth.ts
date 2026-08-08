@@ -82,6 +82,7 @@ export async function requirePasswordAdmin(
         name: true,
         departmentId: true,
         designationId: true,
+        lifecycleState: true,
         designation: {
           select: {
             roles: {
@@ -117,7 +118,11 @@ export async function requirePasswordAdmin(
       },
     });
 
-  if (!profile) {
+  if (
+    !profile ||
+    profile.lifecycleState === 'SUSPENDED' ||
+    profile.lifecycleState === 'ARCHIVED'
+  ) {
     throw new AdminApprovalAuthError(
       'admin_profile_not_active',
       403,

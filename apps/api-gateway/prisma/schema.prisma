@@ -4126,20 +4126,54 @@ model DesignationRole {
 }
 
 model AdminUserProfile {
-  id            String       @id @default(cuid())
-  userId        String       @unique
-  email         String       @unique
-  name          String?
-  departmentId  String?
-  designationId String?
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  department    Department?  @relation(fields: [departmentId], references: [id])
-  designation   Designation? @relation(fields: [designationId], references: [id])
-  roles         UserRole[]
+  id                     String                           @id @default(cuid())
+  userId                 String                           @unique
+  email                  String                           @unique
+  name                   String?
+  phone                  String?                          @db.VarChar(40)
+  staffIdentifier        String?                          @unique @db.VarChar(120)
+  photoUrl               String?
+  departmentId           String?
+  designationId          String?
+  managerId              String?
+  lifecycleState         AdminStaffLifecycleState         @default(ACTIVE)
+  lifecycleChangedAt     DateTime?
+  lifecycleChangedBy     String?
+  lifecycleReason        String?
+  timezone               String?                          @db.VarChar(120)
+  workingHours           Json?
+  preferredContactMethod AdminStaffPreferredContactMethod?
+  lastActivityAt         DateTime?
+  createdAt              DateTime                         @default(now())
+  updatedAt              DateTime                         @updatedAt
+  department             Department?                      @relation(fields: [departmentId], references: [id])
+  designation            Designation?                     @relation(fields: [designationId], references: [id])
+  manager                AdminUserProfile?                 @relation("AdminStaffReportingLine", fields: [managerId], references: [id], onDelete: SetNull)
+  directReports          AdminUserProfile[]                @relation("AdminStaffReportingLine")
+  presence               AdminStaffPresence?
+  roles                  UserRole[]
 
   @@index([departmentId])
   @@index([designationId])
+  @@index([managerId])
+  @@index([lifecycleState])
+  @@index([lastActivityAt])
+}
+
+model AdminStaffPresence {
+  id              String                  @id @default(cuid())
+  staffProfileId  String                  @unique
+  state           AdminStaffPresenceState @default(OFFLINE)
+  note            String?                 @db.VarChar(240)
+  lastHeartbeatAt DateTime                @default(now())
+  expiresAt       DateTime
+  updatedByUserId String?
+  createdAt       DateTime                @default(now())
+  updatedAt       DateTime                @updatedAt
+  staffProfile    AdminUserProfile        @relation(fields: [staffProfileId], references: [id], onDelete: Cascade)
+
+  @@index([state, expiresAt])
+  @@index([expiresAt])
 }
 
 model AdminAuthCredential {
@@ -5324,6 +5358,27 @@ enum RoleRequestStatus {
   pending
   approved
   denied
+}
+
+enum AdminStaffLifecycleState {
+  ACTIVE
+  LEAVE
+  SUSPENDED
+  ARCHIVED
+}
+
+enum AdminStaffPresenceState {
+  AVAILABLE
+  BUSY
+  IN_MEETING
+  DO_NOT_DISTURB
+  OFFLINE
+}
+
+enum AdminStaffPreferredContactMethod {
+  IN_APP
+  EMAIL
+  MOBILE
 }
 
 enum ClinicianCommercialMode {

@@ -121,6 +121,43 @@ export default function AdminSidebar() {
     };
   }, []);
 
+  // Staff presence heartbeat. The Gateway applies TTL/expiry semantics, so a
+  // closed or stale browser cannot remain permanently online.
+  useEffect(() => {
+    let cancelled = false;
+
+    async function heartbeat(state?: 'AVAILABLE' | 'OFFLINE') {
+      if (cancelled) return;
+      try {
+        await fetch('/api/admin/staff/presence', {
+          method: 'POST',
+          credentials: 'include',
+          cache: 'no-store',
+          keepalive: true,
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(state ? { state } : {}),
+        });
+      } catch {}
+    }
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') void heartbeat('OFFLINE');
+      else void heartbeat();
+    };
+
+    void heartbeat();
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') void heartbeat();
+    }, 60_000);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
+  }, []);
+
   const isActive = (href: string) => pathname === href || pathname?.startsWith(href + '/');
 
   // Top level shortcuts
@@ -214,6 +251,7 @@ export default function AdminSidebar() {
           { href: '/admin/calendar', label: 'Training calendar', icon: CalendarDays, requires: ['medical', 'hr', 'manageRoles'] },
           { href: '/admin/clinicians/onboarding', label: 'Clinician onboarding', icon: Stethoscope, requires: ['medical', 'hr', 'manageRoles', 'finance'] },
           { href: '/admin/legal', label: 'Legal Department', icon: Shield, requires: ['manageRoles', 'compliance'] },
+          { href: '/admin/staff', label: 'Staff Directory', icon: Users, requires: ['staff.directory.read', 'staff.manage', 'hr', 'manageRoles'] },
           { href: '/admin/clinicians', label: 'Admin Clinicians', icon: Stethoscope, requires: ['hr', 'manageRoles'] },
           { href: '/admin/patients', label: 'Admin Patients', icon: Users, requires: ['hr', 'manageRoles'] },
           { href: '/admin/shop', label: 'Admin Shop', icon: Store, requires: ['manageRoles'] },

@@ -93,6 +93,8 @@ export async function GET() {
           name: true,
           departmentId: true,
           designationId: true,
+          lifecycleState: true,
+          lastActivityAt: true,
           designation: {
             select: {
               roles: {
@@ -128,7 +130,11 @@ export async function GET() {
         },
       });
 
-    if (!profile) {
+    if (
+      !profile ||
+      profile.lifecycleState === 'SUSPENDED' ||
+      profile.lifecycleState === 'ARCHIVED'
+    ) {
       return unauthenticated();
     }
 
@@ -228,6 +234,10 @@ export async function GET() {
             profile.departmentId,
           designationId:
             profile.designationId,
+          lifecycleState:
+            profile.lifecycleState,
+          lastActivityAt:
+            profile.lastActivityAt,
           roles: roleNames,
           scopes,
         },

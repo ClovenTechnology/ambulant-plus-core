@@ -31,6 +31,16 @@ const RULES: Array<{
   },
   {
     prefix:
+      '/admin/staff',
+    required: [
+      'staff.directory.read',
+      'staff.manage',
+      'hr',
+      'manageRoles',
+    ],
+  },
+  {
+    prefix:
       '/admin',
     required: [
       'manageRoles',

@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { readIdentity } from '@/src/lib/identity';
+import { prisma } from '@/lib/prisma';
 
 export type AdminAuthResult =
   | { ok: true; uid: string; role: string; source?: string }
@@ -46,12 +47,46 @@ export async function verifyAdminRequest(req: NextRequest): Promise<AdminAuthRes
       who.role === 'admin_staff'
     )
   ) {
-    return {
-      ok: true,
-      uid: who.uid,
-      role: who.role,
-      source: 'identity',
-    };
+    const profile =
+      await prisma.adminUserProfile.findFirst({
+        where: {
+          OR: [
+            { userId: who.uid },
+            { email: who.uid },
+          ],
+        },
+        select: {
+          lifecycleState: true,
+        },
+      });
+
+    if (
+      profile &&
+      profile.lifecycleState !== 'SUSPENDED' &&
+      profile.lifecycleState !== 'ARCHIVED'
+    ) {
+      return {
+        ok: true,
+        uid: who.uid,
+        role: who.role,
+        source: 'identity',
+      };
+    }
+
+    if (profile) {
+      return {
+        ok: false,
+        response: NextResponse.json(
+          {
+            ok: false,
+            error: 'admin_account_unavailable',
+          },
+          {
+            status: 403,
+          },
+        ),
+      };
+    }
   }
 
   /*

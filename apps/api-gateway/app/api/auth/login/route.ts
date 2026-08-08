@@ -160,6 +160,16 @@ export async function POST(
         );
       }
 
+      if (
+        admin.lifecycleState === 'SUSPENDED' ||
+        admin.lifecycleState === 'ARCHIVED'
+      ) {
+        return adminError(
+          'admin_account_unavailable',
+          403,
+        );
+      }
+
       if (credential) {
         if (
           !password ||
@@ -256,6 +266,8 @@ export async function POST(
             designationName:
               admin.designation?.name ??
               null,
+            lifecycleState:
+              admin.lifecycleState,
           },
         },
         {
