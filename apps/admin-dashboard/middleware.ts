@@ -49,6 +49,15 @@ const RULES: Array<{
   },
   {
     prefix:
+      '/admin/opportunities',
+    required: [
+      'opportunities.read',
+      'opportunities.manage',
+      'opportunities.publish',
+    ],
+  },
+  {
+    prefix:
       '/admin/staff',
     required: [
       'staff.directory.read',
