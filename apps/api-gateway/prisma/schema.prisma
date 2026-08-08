@@ -4150,8 +4150,14 @@ model AdminUserProfile {
   designation            Designation?                     @relation(fields: [designationId], references: [id])
   manager                AdminUserProfile?                 @relation("AdminStaffReportingLine", fields: [managerId], references: [id], onDelete: SetNull)
   directReports          AdminUserProfile[]                @relation("AdminStaffReportingLine")
-  presence               AdminStaffPresence?
-  roles                  UserRole[]
+  presence                    AdminStaffPresence?
+  roles                       UserRole[]
+  meetingsCreated             Meeting[]                  @relation("MeetingCreatedBy")
+  meetingsHosted              Meeting[]                  @relation("MeetingHostedBy")
+  meetingParticipants         MeetingParticipant[]       @relation("MeetingParticipantStaff")
+  meetingInvitationsCreated   MeetingInvitation[]        @relation("MeetingInvitationCreatedBy")
+  meetingLobbyDecisions       MeetingLobbyEntry[]        @relation("MeetingLobbyDecidedBy")
+  meetingsCancelled           Meeting[]                   @relation("MeetingCancelledBy")
 
   @@index([departmentId])
   @@index([designationId])
@@ -4174,6 +4180,171 @@ model AdminStaffPresence {
 
   @@index([state, expiresAt])
   @@index([expiresAt])
+}
+
+model Meeting {
+  id                   String                @id @default(cuid())
+  roomId               String                @unique @db.VarChar(180)
+  kind                 MeetingKind           @default(STANDARD)
+  state                MeetingState          @default(DRAFT)
+  title                String                @db.VarChar(240)
+  agenda               String?
+  timezone             String                @default("Africa/Johannesburg") @db.VarChar(120)
+  startsAt             DateTime
+  endsAt               DateTime
+  durationMinutes      Int
+  createdByProfileId   String
+  hostProfileId        String
+  contextType          String?               @db.VarChar(80)
+  contextId            String?               @db.VarChar(240)
+  allowAudio           Boolean               @default(true)
+  allowVideo           Boolean               @default(true)
+  allowChat            Boolean               @default(true)
+  allowFiles           Boolean               @default(true)
+  allowScreenShare     Boolean               @default(true)
+  allowRecording       Boolean               @default(false)
+  lobbyRequired        Boolean               @default(true)
+  lockedAt             DateTime?
+  startedAt            DateTime?
+  endedAt              DateTime?
+  cancelledAt          DateTime?
+  cancelledByProfileId String?
+  cancellationReason   String?
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  createdByProfile     AdminUserProfile      @relation("MeetingCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  hostProfile          AdminUserProfile      @relation("MeetingHostedBy", fields: [hostProfileId], references: [id], onDelete: Restrict)
+  cancelledByProfile   AdminUserProfile?     @relation("MeetingCancelledBy", fields: [cancelledByProfileId], references: [id], onDelete: SetNull)
+  participants         MeetingParticipant[]
+  invitations          MeetingInvitation[]
+  lobbyEntries         MeetingLobbyEntry[]
+  attendanceSessions   MeetingAttendanceSession[]
+
+  @@index([state, startsAt])
+  @@index([createdByProfileId, createdAt])
+  @@index([hostProfileId, startsAt])
+  @@index([contextType, contextId])
+}
+
+model MeetingParticipant {
+  id                 String                  @id @default(cuid())
+  meetingId          String
+  participantType    MeetingParticipantType
+  staffProfileId     String?
+  emailNormalized    String?                 @db.VarChar(320)
+  displayName        String                  @db.VarChar(240)
+  role               MeetingParticipantRole  @default(ATTENDEE)
+  state              MeetingParticipantState @default(INVITED)
+  invitedAt          DateTime                @default(now())
+  acceptedAt         DateTime?
+  declinedAt         DateTime?
+  firstJoinedAt      DateTime?
+  lastLeftAt         DateTime?
+  removedAt          DateTime?
+  createdAt          DateTime                @default(now())
+  updatedAt          DateTime                @updatedAt
+  meeting            Meeting                 @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  staffProfile       AdminUserProfile?       @relation("MeetingParticipantStaff", fields: [staffProfileId], references: [id], onDelete: SetNull)
+  invitations        MeetingInvitation[]
+  lobbyEntries       MeetingLobbyEntry[]
+  attendanceSessions MeetingAttendanceSession[]
+
+  @@unique([meetingId, staffProfileId], map: "meeting_participant_staff_key")
+  @@unique([meetingId, emailNormalized], map: "meeting_participant_email_key")
+  @@index([meetingId, role, state])
+  @@index([emailNormalized, meetingId])
+  @@index([staffProfileId, state])
+}
+
+model MeetingInvitation {
+  id                 String                 @id @default(cuid())
+  meetingId          String
+  participantId      String
+  emailNormalized    String                 @db.VarChar(320)
+  tokenHash          String                 @unique @db.VarChar(128)
+  pinHash            String?                @db.VarChar(320)
+  state              MeetingInvitationState @default(PENDING)
+  expiresAt          DateTime
+  verifiedAt         DateTime?
+  revokedAt          DateTime?
+  lastUsedAt         DateTime?
+  attemptCount       Int                    @default(0)
+  lockedUntil        DateTime?
+  createdByProfileId String
+  subjectOverride    String?                @db.VarChar(240)
+  messageOverride    String?
+  templateKey        String?                @db.VarChar(120)
+  templateVersion    String?                @db.VarChar(80)
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+  meeting            Meeting                @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  participant        MeetingParticipant     @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  createdByProfile   AdminUserProfile       @relation("MeetingInvitationCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  guestSessions      MeetingGuestSession[]
+
+  @@index([meetingId, state, expiresAt])
+  @@index([emailNormalized, createdAt])
+  @@index([participantId, createdAt])
+}
+
+model MeetingGuestSession {
+  id               String            @id @default(cuid())
+  invitationId     String
+  sessionTokenHash String            @unique @db.VarChar(128)
+  expiresAt        DateTime
+  verifiedAt       DateTime          @default(now())
+  revokedAt        DateTime?
+  ipHash           String?           @db.VarChar(128)
+  userAgent        String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  invitation       MeetingInvitation @relation(fields: [invitationId], references: [id], onDelete: Cascade)
+  lobbyEntries     MeetingLobbyEntry[]
+
+  @@index([invitationId, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model MeetingLobbyEntry {
+  id                 String            @id @default(cuid())
+  meetingId          String
+  participantId      String
+  guestSessionId     String?
+  state              MeetingLobbyState @default(WAITING)
+  requestedAt        DateTime          @default(now())
+  decidedAt          DateTime?
+  decidedByProfileId String?
+  decisionReason     String?           @db.VarChar(500)
+  createdAt          DateTime          @default(now())
+  updatedAt          DateTime          @updatedAt
+  meeting            Meeting           @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  participant        MeetingParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+  guestSession       MeetingGuestSession? @relation(fields: [guestSessionId], references: [id], onDelete: SetNull)
+  decidedByProfile   AdminUserProfile? @relation("MeetingLobbyDecidedBy", fields: [decidedByProfileId], references: [id], onDelete: SetNull)
+
+  @@unique([meetingId, participantId], map: "meeting_lobby_participant_key")
+  @@index([meetingId, state, requestedAt])
+  @@index([guestSessionId])
+}
+
+model MeetingAttendanceSession {
+  id               String             @id @default(cuid())
+  meetingId        String
+  participantId    String
+  clientSessionId  String             @unique @db.VarChar(128)
+  joinedAt         DateTime           @default(now())
+  lastHeartbeatAt  DateTime           @default(now())
+  leftAt           DateTime?
+  durationSeconds  Int                @default(0)
+  disconnectReason String?            @db.VarChar(240)
+  metadata         Json?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+  meeting          Meeting            @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  participant      MeetingParticipant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([meetingId, joinedAt])
+  @@index([participantId, joinedAt])
 }
 
 model AdminAuthCredential {
@@ -4929,6 +5100,7 @@ enum AuditActorType {
   ADMIN
   CLINICIAN_STAFF_MEDICAL
   CLINICIAN_STAFF_NON_MEDICAL
+  EXTERNAL_GUEST
   SYSTEM
   LAB
   LAB_STAFF
@@ -5379,6 +5551,58 @@ enum AdminStaffPreferredContactMethod {
   IN_APP
   EMAIL
   MOBILE
+}
+
+enum MeetingKind {
+  STANDARD
+  DIRECT_CALL
+  INTERVIEW
+}
+
+enum MeetingState {
+  DRAFT
+  SCHEDULED
+  RINGING
+  LIVE
+  ENDED
+  CANCELLED
+  EXPIRED
+}
+
+enum MeetingParticipantType {
+  INTERNAL_STAFF
+  EXTERNAL_GUEST
+}
+
+enum MeetingParticipantRole {
+  HOST
+  COHOST
+  PRESENTER
+  ATTENDEE
+  INTERVIEWEE
+}
+
+enum MeetingParticipantState {
+  INVITED
+  ACCEPTED
+  DECLINED
+  JOINED
+  LEFT
+  REMOVED
+}
+
+enum MeetingInvitationState {
+  PENDING
+  VERIFIED
+  REVOKED
+  EXPIRED
+}
+
+enum MeetingLobbyState {
+  WAITING
+  ADMITTED
+  REJECTED
+  LEFT
 }
 
 enum ClinicianCommercialMode {

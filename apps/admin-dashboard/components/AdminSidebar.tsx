@@ -252,6 +252,7 @@ export default function AdminSidebar() {
           { href: '/admin/clinicians/onboarding', label: 'Clinician onboarding', icon: Stethoscope, requires: ['medical', 'hr', 'manageRoles', 'finance'] },
           { href: '/admin/legal', label: 'Legal Department', icon: Shield, requires: ['manageRoles', 'compliance'] },
           { href: '/admin/staff', label: 'Staff Directory', icon: Users, requires: ['staff.directory.read', 'staff.manage', 'hr', 'manageRoles'] },
+          { href: '/admin/meetings', label: 'Meetings', icon: CalendarDays, requires: ['meetings.create', 'meetings.moderate', 'meetings.audit.read'] },
           { href: '/admin/clinicians', label: 'Admin Clinicians', icon: Stethoscope, requires: ['hr', 'manageRoles'] },
           { href: '/admin/patients', label: 'Admin Patients', icon: Users, requires: ['hr', 'manageRoles'] },
           { href: '/admin/shop', label: 'Admin Shop', icon: Store, requires: ['manageRoles'] },

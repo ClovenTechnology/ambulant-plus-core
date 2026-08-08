@@ -31,6 +31,15 @@ const RULES: Array<{
   },
   {
     prefix:
+      '/admin/meetings',
+    required: [
+      'meetings.create',
+      'meetings.moderate',
+      'meetings.audit.read',
+    ],
+  },
+  {
+    prefix:
       '/admin/staff',
     required: [
       'staff.directory.read',
