@@ -4163,6 +4163,12 @@ model AdminUserProfile {
   formVersionsCreated         EnterpriseFormVersion[]     @relation("EnterpriseFormVersionCreatedBy")
   formVersionsPublished       EnterpriseFormVersion[]     @relation("EnterpriseFormVersionPublishedBy")
   formVersionsRetired         EnterpriseFormVersion[]     @relation("EnterpriseFormVersionRetiredBy")
+  opportunitiesCreated        Opportunity[]                @relation("OpportunityCreatedBy")
+  opportunitiesUpdated        Opportunity[]                @relation("OpportunityUpdatedBy")
+  opportunitiesPublished      Opportunity[]                @relation("OpportunityPublishedBy")
+  opportunitiesPaused         Opportunity[]                @relation("OpportunityPausedBy")
+  opportunitiesClosed         Opportunity[]                @relation("OpportunityClosedBy")
+  opportunitiesArchived       Opportunity[]                @relation("OpportunityArchivedBy")
 
   @@index([departmentId])
   @@index([designationId])
@@ -4369,6 +4375,7 @@ model EnterpriseForm {
   archivedByProfile  AdminUserProfile?    @relation("EnterpriseFormArchivedBy", fields: [archivedByProfileId], references: [id], onDelete: SetNull)
   versions           EnterpriseFormVersion[]
   submissions        EnterpriseFormSubmission[]
+  opportunities      Opportunity[]
 
   @@index([status, createdAt])
   @@index([createdByProfileId, createdAt])
@@ -4644,6 +4651,55 @@ model EnterpriseFormRateLimitBucket {
   @@unique([scope, keyHash, windowStart])
   @@index([windowStart])
   @@index([scope, windowStart])
+}
+
+model Opportunity {
+  id                     String                     @id @default(cuid())
+  key                    String                     @unique @db.VarChar(120)
+  slug                   String                     @unique @db.VarChar(160)
+  type                   OpportunityType
+  status                 OpportunityStatus          @default(DRAFT)
+  visibility             OpportunityVisibility      @default(PUBLIC)
+  applicationMode        OpportunityApplicationMode @default(NONE)
+  title                  String                     @db.VarChar(240)
+  summary                String?                    @db.VarChar(1200)
+  description            String?
+  departmentLabel        String?                    @db.VarChar(160)
+  locationMode           OpportunityLocationMode?
+  locationLabel          String?                    @db.VarChar(240)
+  countryCode            String?                    @db.VarChar(2)
+  opensAt                DateTime?
+  closesAt               DateTime?
+  applicationFormId      String?
+  externalApplicationUrl String?                    @db.VarChar(2048)
+  featured               Boolean                    @default(false)
+  sortOrder              Int                        @default(0)
+  statusReason           String?                    @db.VarChar(1000)
+  createdByProfileId     String
+  lastUpdatedByProfileId String
+  publishedByProfileId   String?
+  pausedByProfileId      String?
+  closedByProfileId      String?
+  archivedByProfileId    String?
+  publishedAt            DateTime?
+  pausedAt               DateTime?
+  closedAt               DateTime?
+  archivedAt             DateTime?
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+  applicationForm        EnterpriseForm?            @relation(fields: [applicationFormId], references: [id], onDelete: Restrict)
+  createdByProfile       AdminUserProfile           @relation("OpportunityCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  lastUpdatedByProfile   AdminUserProfile           @relation("OpportunityUpdatedBy", fields: [lastUpdatedByProfileId], references: [id], onDelete: Restrict)
+  publishedByProfile     AdminUserProfile?          @relation("OpportunityPublishedBy", fields: [publishedByProfileId], references: [id], onDelete: SetNull)
+  pausedByProfile        AdminUserProfile?          @relation("OpportunityPausedBy", fields: [pausedByProfileId], references: [id], onDelete: SetNull)
+  closedByProfile        AdminUserProfile?          @relation("OpportunityClosedBy", fields: [closedByProfileId], references: [id], onDelete: SetNull)
+  archivedByProfile      AdminUserProfile?          @relation("OpportunityArchivedBy", fields: [archivedByProfileId], references: [id], onDelete: SetNull)
+
+  @@index([status, visibility, opensAt, closesAt])
+  @@index([type, status, createdAt])
+  @@index([applicationFormId])
+  @@index([featured, sortOrder, publishedAt])
+  @@index([createdByProfileId, createdAt])
 }
 
 model AdminAuthCredential {
@@ -5926,6 +5982,44 @@ enum EnterpriseFormFileState {
   AVAILABLE
   REJECTED
   REMOVED
+}
+
+enum OpportunityType {
+  CAREER_JOB
+  INTERNSHIP_GRADUATE
+  ONBOARDING
+  PARTNERSHIP
+  FRANCHISE
+  VENDOR_PROVIDER
+  RESEARCH_PILOT
+  CUSTOM
+}
+
+enum OpportunityStatus {
+  DRAFT
+  PUBLISHED
+  PAUSED
+  CLOSED
+  ARCHIVED
+}
+
+enum OpportunityVisibility {
+  PUBLIC
+  UNLISTED
+  INTERNAL
+}
+
+enum OpportunityApplicationMode {
+  ENTERPRISE_FORM
+  EXTERNAL_URL
+  NONE
+}
+
+enum OpportunityLocationMode {
+  REMOTE
+  HYBRID
+  ONSITE
+  FLEXIBLE
 }
 
 enum MeetingKind {
