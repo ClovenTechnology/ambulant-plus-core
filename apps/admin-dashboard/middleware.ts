@@ -64,6 +64,9 @@ const RULES: Array<{
       'applications.review',
       'applications.assign',
       'applications.decision',
+      'applications.documents.read',
+      'applications.documents.request',
+      'applications.documents.review',
     ],
   },
   {

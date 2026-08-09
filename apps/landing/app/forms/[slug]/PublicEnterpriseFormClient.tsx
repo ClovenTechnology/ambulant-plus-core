@@ -786,7 +786,13 @@ export default function PublicEnterpriseFormClient({ slug, opportunitySlug }: { 
           <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-emerald-100 text-2xl text-emerald-800">✓</div>
           <h1 className="mt-5 text-3xl font-semibold tracking-tight text-slate-950">{String(settings.successTitle || 'Submission received')}</h1>
           <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-600">{String(settings.successMessage || 'Thank you. Your form has been submitted securely.')}</p>
-          {applicationReference ? <div className="mx-auto mt-5 max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900"><div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Application reference</div><div className="mt-1 font-mono text-base font-semibold">{applicationReference}</div></div> : null}
+          {applicationReference ? (
+            <div className="mx-auto mt-5 max-w-sm rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-900">
+              <div className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Application reference</div>
+              <div className="mt-1 font-mono text-base font-semibold">{applicationReference}</div>
+              <a href={`/applications?reference=${encodeURIComponent(applicationReference)}`} className="mt-3 inline-flex text-sm font-semibold text-emerald-800 underline underline-offset-2">Manage application securely</a>
+            </div>
+          ) : null}
         </section>
       </main>
     );

@@ -4737,6 +4737,10 @@ model Application {
   formVersion             EnterpriseFormVersion    @relation(fields: [formVersionId], references: [id], onDelete: Restrict)
   assignedReviewerProfile AdminUserProfile?        @relation("ApplicationAssignedReviewer", fields: [assignedReviewerProfileId], references: [id], onDelete: SetNull)
   statusHistory           ApplicationStatusEvent[]
+  applicantAccessTokens   ApplicationApplicantAccessToken[]
+  documentCycles          ApplicationDocumentCycle[]
+  documentRequests        ApplicationDocumentRequest[]
+  documentEvents          ApplicationDocumentEvent[]
 
   @@index([opportunityId, status, createdAt])
   @@index([status, submittedAt])
@@ -6042,6 +6046,160 @@ enum EnterpriseFormFileState {
   AVAILABLE
   REJECTED
   REMOVED
+}
+
+model ApplicationApplicantAccessToken {
+  id            String      @id @default(cuid())
+  applicationId String
+  tokenHash     String      @unique @db.VarChar(64)
+  expiresAt     DateTime
+  lastUsedAt    DateTime?
+  revokedAt     DateTime?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+  application   Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@index([applicationId, expiresAt])
+  @@index([expiresAt, revokedAt])
+}
+
+model ApplicationAccessRateLimitBucket {
+  id          String   @id @default(cuid())
+  scope       String   @db.VarChar(180)
+  keyHash     String   @db.VarChar(64)
+  windowStart DateTime
+  count       Int      @default(1)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([scope, keyHash, windowStart])
+  @@index([windowStart])
+  @@index([scope, windowStart])
+}
+
+model ApplicationDocumentCycle {
+  id                   String                         @id @default(cuid())
+  applicationId        String
+  cycleNumber          Int
+  returnStatus         ApplicationStatus
+  status               ApplicationDocumentCycleStatus @default(OPEN)
+  requestedByProfileId String?                        @db.VarChar(240)
+  requestedAt          DateTime                       @default(now())
+  completedByProfileId String?                        @db.VarChar(240)
+  completedAt          DateTime?
+  cancelledByActorRefId String?                        @db.VarChar(240)
+  cancelledAt          DateTime?
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+  application          Application                    @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  requests             ApplicationDocumentRequest[]
+  events               ApplicationDocumentEvent[]
+
+  @@unique([applicationId, cycleNumber])
+  @@index([applicationId, status, createdAt])
+}
+
+model ApplicationDocumentRequest {
+  id                    String                           @id @default(cuid())
+  applicationId         String
+  cycleId               String
+  requestKey            String                           @db.VarChar(120)
+  title                 String                           @db.VarChar(240)
+  instructions          String?                          @db.VarChar(2000)
+  required              Boolean                         @default(true)
+  dueAt                 DateTime?
+  status                ApplicationDocumentRequestStatus @default(REQUESTED)
+  allowedContentTypes   String[]
+  maxFileSizeBytes      Int                              @default(15728640)
+  requestedAt           DateTime                         @default(now())
+  reviewedAt            DateTime?
+  reviewedByProfileId   String?                          @db.VarChar(240)
+  reviewReason          String?                          @db.VarChar(1000)
+  createdAt             DateTime                         @default(now())
+  updatedAt             DateTime                         @updatedAt
+  application           Application                      @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  cycle                 ApplicationDocumentCycle         @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  files                 ApplicationDocumentFile[]
+  events                ApplicationDocumentEvent[]
+
+  @@unique([cycleId, requestKey])
+  @@index([applicationId, status, createdAt])
+  @@index([cycleId, status, createdAt])
+}
+
+model ApplicationDocumentFile {
+  id             String                       @id @default(cuid())
+  requestId      String
+  objectKey      String                       @unique @db.VarChar(512)
+  fileName       String                       @db.VarChar(255)
+  contentType    String                       @db.VarChar(160)
+  sizeBytes      Int
+  checksumSha256 String                       @db.VarChar(64)
+  state          ApplicationDocumentFileState @default(PENDING)
+  availableAt    DateTime?
+  removedAt      DateTime?
+  createdAt      DateTime                     @default(now())
+  updatedAt      DateTime                     @updatedAt
+  request        ApplicationDocumentRequest   @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  events         ApplicationDocumentEvent[]
+
+  @@index([requestId, state, createdAt])
+  @@index([state, createdAt])
+}
+
+model ApplicationDocumentEvent {
+  id            String                       @id @default(cuid())
+  applicationId String
+  cycleId       String
+  requestId     String?
+  fileId        String?
+  action        ApplicationDocumentEventType
+  actorType     AuditActorType
+  actorRefId    String?                      @db.VarChar(240)
+  note          String?                      @db.VarChar(1000)
+  metadata      Json?
+  createdAt     DateTime                     @default(now())
+  application   Application                  @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  cycle         ApplicationDocumentCycle     @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  request       ApplicationDocumentRequest?  @relation(fields: [requestId], references: [id], onDelete: SetNull)
+  file          ApplicationDocumentFile?     @relation(fields: [fileId], references: [id], onDelete: SetNull)
+
+  @@index([applicationId, createdAt])
+  @@index([cycleId, createdAt])
+  @@index([requestId, createdAt])
+}
+
+enum ApplicationDocumentCycleStatus {
+  OPEN
+  COMPLETED
+  CANCELLED
+}
+
+enum ApplicationDocumentRequestStatus {
+  REQUESTED
+  RECEIVED
+  ACCEPTED
+  REJECTED
+  CANCELLED
+}
+
+enum ApplicationDocumentFileState {
+  PENDING
+  AVAILABLE
+  SUPERSEDED
+  REJECTED
+  REMOVED
+}
+
+enum ApplicationDocumentEventType {
+  REQUESTED
+  UPLOADED
+  ACCEPTED
+  REJECTED
+  RE_REQUESTED
+  REMOVED
+  COMPLETED
+  CANCELLED
 }
 
 enum ApplicationSource {

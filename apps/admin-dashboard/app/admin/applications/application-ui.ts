@@ -128,6 +128,58 @@ export type AdminApplicationDetail = AdminApplicationListItem & {
     reason: string | null;
     createdAt: string;
   }>;
+  documents: {
+    canRead: boolean;
+    canRequest: boolean;
+    canReview: boolean;
+    cycles: Array<{
+      id: string;
+      cycleNumber: number;
+      returnStatus: ApplicationStatus;
+      status: 'OPEN' | 'COMPLETED' | 'CANCELLED';
+      requestedByProfileId: string | null;
+      requestedAt: string;
+      completedByProfileId: string | null;
+      completedAt: string | null;
+      createdAt: string;
+      updatedAt: string;
+      requests: Array<{
+        id: string;
+        requestKey: string;
+        title: string;
+        instructions: string | null;
+        required: boolean;
+        dueAt: string | null;
+        status: 'REQUESTED' | 'RECEIVED' | 'ACCEPTED' | 'REJECTED' | 'CANCELLED';
+        allowedContentTypes: string[];
+        maxFileSizeBytes: number;
+        requestedAt: string;
+        reviewedAt: string | null;
+        reviewedByProfileId: string | null;
+        reviewReason: string | null;
+        files: Array<{
+          id: string;
+          fileName: string;
+          contentType: string;
+          sizeBytes: number;
+          checksumSha256: string;
+          state: 'PENDING' | 'AVAILABLE' | 'SUPERSEDED' | 'REJECTED' | 'REMOVED';
+          availableAt: string | null;
+          createdAt: string;
+        }>;
+      }>;
+      events: Array<{
+        id: string;
+        requestId: string | null;
+        fileId: string | null;
+        action: string;
+        actorType: string;
+        actorRefId: string | null;
+        note: string | null;
+        createdAt: string;
+      }>;
+    }>;
+  };
 };
 
 export type ReviewerOption = {
@@ -154,6 +206,17 @@ export function humanizeApplicationError(value: unknown) {
     application_reviewer_list_failed: 'Reviewer options could not be loaded.',
     application_assignment_failed: 'Reviewer assignment failed.',
     application_transition_failed: 'Application status update failed.',
+    application_document_title_required: 'Add a document title before sending the request.',
+    application_document_due_date_invalid: 'Enter a valid document deadline.',
+    application_document_due_date_must_be_future: 'The document deadline must be in the future.',
+    application_document_request_not_available: 'Document requests can only start from an under-review or shortlisted application.',
+    application_document_cycle_state_mismatch: 'The application document workflow changed elsewhere. Refresh before continuing.',
+    application_document_review_reason_required: 'Add an applicant-facing reason before rejecting or requesting a resubmission.',
+    application_document_new_due_date_required: 'This request deadline has passed. Add a new future deadline before reopening it.',
+    application_document_review_not_available: 'That document review action is not available in the current request state.',
+    application_document_file_not_available: 'No current uploaded file is available for this review action.',
+    application_document_cycle_incomplete: 'All required documents must be accepted and no received document may remain unreviewed.',
+    application_document_download_failed: 'The secure document download could not be prepared.',
   };
   return map[code] || code.replace(/_/g, ' ') || 'Something went wrong.';
 }
@@ -181,7 +244,7 @@ export function reviewActions(status: ApplicationStatus) {
 
 export function stageGovernanceNote(status: ApplicationStatus) {
   if (status === 'SHORTLISTED') {
-    return 'Interview invitation and document-request actions are created by their dedicated governed workspaces.';
+    return 'Use the governed Applicant documents section below for document requests. Interview invitation remains owned by the shared Meetings and Interview workflow.';
   }
   if (status === 'DOCUMENTS_REQUESTED') {
     return 'Document-request progression is governed by the secure applicant-document workflow.';
@@ -211,4 +274,30 @@ export function formatApplicationDate(value: string | null | undefined) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString();
+}
+
+export function adminDocumentRequestExpired(
+  dueAt: string | null | undefined,
+  nowMs = Date.now(),
+) {
+  if (!dueAt) return false;
+  const due = new Date(dueAt);
+  return Number.isNaN(due.getTime()) || due.getTime() < nowMs;
+}
+
+export function documentRequestStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    REQUESTED: 'Requested',
+    RECEIVED: 'Received',
+    ACCEPTED: 'Accepted',
+    REJECTED: 'Rejected',
+    CANCELLED: 'Closed',
+  };
+  return labels[status] || status.replace(/_/g, ' ').toLowerCase();
+}
+
+export function canCompleteAdminDocumentCycle(requests: Array<{ required: boolean; status: string }>) {
+  if (!requests.length) return false;
+  if (requests.some((request) => request.status === 'RECEIVED')) return false;
+  return requests.filter((request) => request.required).every((request) => request.status === 'ACCEPTED');
 }

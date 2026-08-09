@@ -110,6 +110,43 @@ export const applicationAdminDetailInclude = {
   statusHistory: {
     orderBy: { createdAt: 'desc' as const },
   },
+  documentCycles: {
+    orderBy: { cycleNumber: 'desc' as const },
+    include: {
+      requests: {
+        orderBy: { createdAt: 'asc' as const },
+        include: {
+          files: {
+            where: { removedAt: null },
+            orderBy: { createdAt: 'desc' as const },
+            select: {
+              id: true,
+              fileName: true,
+              contentType: true,
+              sizeBytes: true,
+              checksumSha256: true,
+              state: true,
+              availableAt: true,
+              createdAt: true,
+            },
+          },
+        },
+      },
+      events: {
+        orderBy: { createdAt: 'desc' as const },
+        select: {
+          id: true,
+          requestId: true,
+          fileId: true,
+          action: true,
+          actorType: true,
+          actorRefId: true,
+          note: true,
+          createdAt: true,
+        },
+      },
+    },
+  },
 } satisfies Prisma.ApplicationInclude;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -121,6 +158,9 @@ export function serializeAdminApplication(
   options: {
     canReadSubmission: boolean;
     canReadSensitive: boolean;
+    canReadDocuments: boolean;
+    canRequestDocuments: boolean;
+    canReviewDocuments: boolean;
   },
 ) {
   const submission = row.formSubmission;
@@ -232,6 +272,44 @@ export function serializeAdminApplication(
         }
       : null,
     statusHistory: Array.isArray(row.statusHistory) ? row.statusHistory : [],
+    documents: {
+      canRead: options.canReadDocuments,
+      canRequest: options.canRequestDocuments,
+      canReview: options.canReviewDocuments,
+      cycles: options.canReadDocuments && Array.isArray(row.documentCycles)
+        ? row.documentCycles.map((cycle: any) => ({
+            id: cycle.id,
+            cycleNumber: cycle.cycleNumber,
+            returnStatus: cycle.returnStatus,
+            status: cycle.status,
+            requestedByProfileId: cycle.requestedByProfileId,
+            requestedAt: cycle.requestedAt,
+            completedByProfileId: cycle.completedByProfileId,
+            completedAt: cycle.completedAt,
+            createdAt: cycle.createdAt,
+            updatedAt: cycle.updatedAt,
+            requests: Array.isArray(cycle.requests)
+              ? cycle.requests.map((request: any) => ({
+                  id: request.id,
+                  requestKey: request.requestKey,
+                  title: request.title,
+                  instructions: request.instructions,
+                  required: request.required,
+                  dueAt: request.dueAt,
+                  status: request.status,
+                  allowedContentTypes: request.allowedContentTypes,
+                  maxFileSizeBytes: request.maxFileSizeBytes,
+                  requestedAt: request.requestedAt,
+                  reviewedAt: request.reviewedAt,
+                  reviewedByProfileId: request.reviewedByProfileId,
+                  reviewReason: request.reviewReason,
+                  files: Array.isArray(request.files) ? request.files : [],
+                }))
+              : [],
+            events: Array.isArray(cycle.events) ? cycle.events : [],
+          }))
+        : [],
+    },
   };
 }
 

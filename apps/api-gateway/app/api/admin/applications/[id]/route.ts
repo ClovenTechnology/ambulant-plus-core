@@ -4,7 +4,7 @@ import {
   adminStaffAuthResponse,
   requireAdminStaffActor,
 } from '@/src/lib/admin-staff-auth';
-import { requireApplicationScope } from '@/src/lib/admin-application-access';
+import { hasApplicationScope, requireApplicationScope } from '@/src/lib/admin-application-access';
 import {
   applicationAdminDetailInclude,
   serializeAdminApplication,
@@ -53,6 +53,9 @@ export async function GET(
       application: serializeAdminApplication(application, {
         canReadSubmission,
         canReadSensitive,
+        canReadDocuments: hasApplicationScope(actor, 'applications.documents.read'),
+        canRequestDocuments: hasApplicationScope(actor, 'applications.documents.request'),
+        canReviewDocuments: hasApplicationScope(actor, 'applications.documents.review'),
       }),
     });
   } catch (error) {

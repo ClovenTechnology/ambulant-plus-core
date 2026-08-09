@@ -5,6 +5,9 @@ import {
   humanizeApplicationError,
   reviewActions,
   stageGovernanceNote,
+  adminDocumentRequestExpired,
+  canCompleteAdminDocumentCycle,
+  documentRequestStatusLabel,
 } from './application-ui';
 
 test('submitted applications expose only governed review actions', () => {
@@ -37,4 +40,25 @@ test('application values render primitives and structured answers predictably', 
 test('concurrency and permission errors are humanized for reviewers', () => {
   assert.match(humanizeApplicationError('application_status_changed_concurrently'), /Refresh/);
   assert.match(humanizeApplicationError('application_scope_required'), /permission/);
+});
+
+
+test('document-cycle completion requires accepted required requests and no unreviewed received file', () => {
+  assert.equal(canCompleteAdminDocumentCycle([{ required: true, status: 'ACCEPTED' }]), true);
+  assert.equal(canCompleteAdminDocumentCycle([{ required: true, status: 'REQUESTED' }]), false);
+  assert.equal(canCompleteAdminDocumentCycle([{ required: true, status: 'ACCEPTED' }, { required: false, status: 'RECEIVED' }]), false);
+});
+
+test('document request status labels remain reviewer-readable', () => {
+  assert.equal(documentRequestStatusLabel('REQUESTED'), 'Requested');
+  assert.equal(documentRequestStatusLabel('ACCEPTED'), 'Accepted');
+});
+
+
+test('document request deadline helper flags only expired or invalid deadlines', () => {
+  const now = Date.parse('2029-01-01T00:00:00.000Z');
+  assert.equal(adminDocumentRequestExpired('2030-01-01T00:00:00.000Z', now), false);
+  assert.equal(adminDocumentRequestExpired('2028-01-01T00:00:00.000Z', now), true);
+  assert.equal(adminDocumentRequestExpired('not-a-date', now), true);
+  assert.equal(adminDocumentRequestExpired(null, now), false);
 });

@@ -52,6 +52,9 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
       { scope: 'applications.review', label: 'Review applications', desc: 'Move applications through governed review and shortlist stages.' },
       { scope: 'applications.assign', label: 'Assign application reviewers', desc: 'Assign active Staff profiles as application reviewers.' },
       { scope: 'applications.decision', label: 'Make application decisions', desc: 'Record terminal recruitment decisions such as decline.', danger: true },
+      { scope: 'applications.documents.read', label: 'Read applicant documents', desc: 'View applicant-requested document metadata and obtain short-lived authorised downloads.', danger: true },
+      { scope: 'applications.documents.request', label: 'Request applicant documents', desc: 'Create governed document requests and move eligible applications into the document-request stage.' },
+      { scope: 'applications.documents.review', label: 'Review applicant documents', desc: 'Accept, reject, re-request and complete governed applicant-document review cycles.', danger: true },
     ],
   },
   {
