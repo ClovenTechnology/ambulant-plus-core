@@ -110,6 +110,28 @@ export const applicationAdminDetailInclude = {
   statusHistory: {
     orderBy: { createdAt: 'desc' as const },
   },
+  staffConversion: {
+    include: {
+      roleRequest: {
+        include: {
+          department: true,
+          designation: true,
+          roles: { include: { role: true } },
+        },
+      },
+      staffProfile: {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          staffIdentifier: true,
+          lifecycleState: true,
+        },
+      },
+      initiatedByProfile: { select: { id: true, name: true, email: true } },
+      activatedByProfile: { select: { id: true, name: true, email: true } },
+    },
+  },
   documentCycles: {
     orderBy: { cycleNumber: 'desc' as const },
     include: {
@@ -272,6 +294,7 @@ export function serializeAdminApplication(
         }
       : null,
     statusHistory: Array.isArray(row.statusHistory) ? row.statusHistory : [],
+    staffConversion: row.staffConversion || null,
     documents: {
       canRead: options.canReadDocuments,
       canRequest: options.canRequestDocuments,

@@ -66,7 +66,7 @@ export default function AdminMeetingsPage() {
             Meetings
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            Shared meeting authority for staff collaboration, direct-call foundations,
+            Shared meeting authority for staff collaboration, direct calls,
             interviews and verified external guests.
           </p>
         </div>
@@ -156,8 +156,7 @@ export default function AdminMeetingsPage() {
 
       <div className="rounded-2xl border border-cyan-100 bg-cyan-50 p-4 text-sm text-cyan-900">
         This batch establishes scheduling, external invitation, lobby and RTC credential
-        authority. The enterprise LiveKit room UI, persistent chat/files and direct-call
-        experience are the next coordinated Sprint C batch and will use these records.
+        authority. Enterprise LiveKit room rendering, persistent internal room chat and direct-call controls now use these canonical records.
       </div>
     </main>
   );

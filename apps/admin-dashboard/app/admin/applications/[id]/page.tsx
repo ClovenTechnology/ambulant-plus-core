@@ -27,10 +27,11 @@ import {
   type ReviewerOption,
 } from '../application-ui';
 import { ApplicationInterviewEvaluationPanel } from './ApplicationInterviewEvaluationPanel';
+import { ApplicationStaffConversionPanel } from './ApplicationStaffConversionPanel';
 
 export const dynamic = 'force-dynamic';
 
-type DetailPayload = { ok: boolean; application?: AdminApplicationDetail; error?: string };
+type DetailPayload = { ok: boolean; application?: AdminApplicationDetail; permissions?: { canConvertApplicant?: boolean }; error?: string };
 type ReviewerPayload = { ok: boolean; reviewers?: ReviewerOption[]; error?: string };
 type InterviewerPayload = { ok: boolean; interviewers?: InterviewerOption[]; error?: string };
 
@@ -54,6 +55,7 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
   const [interviewDuration, setInterviewDuration] = useState('60');
   const [interviewerIds, setInterviewerIds] = useState<string[]>([]);
   const [interviewApplicantMessage, setInterviewApplicantMessage] = useState('');
+  const [canConvertApplicant, setCanConvertApplicant] = useState(false);
 
   async function load() {
     setBusy(true);
@@ -65,6 +67,7 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
         throw new Error(json?.error || 'application_detail_failed');
       }
       setApplication(json.application);
+      setCanConvertApplicant(Boolean(json.permissions?.canConvertApplicant));
       setReviewerId(json.application.assignedReviewer?.id || '');
     } catch (err: any) {
       setError(humanizeApplicationError(err?.message));
@@ -507,6 +510,8 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
           </section>
 
           {application ? <ApplicationInterviewEvaluationPanel applicationId={application.id} onApplicationChanged={async () => { await Promise.all([load(), loadInterview()]); }} /> : null}
+
+          {application ? <ApplicationStaffConversionPanel application={application as any} canConvert={canConvertApplicant} onChanged={load} /> : null}
 
           <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm">
             <div><h2 className="text-lg font-semibold">Submission evidence</h2><p className="mt-1 text-sm text-slate-500">This review view exposes metadata only. Secure file retrieval and re-request actions belong to the applicant-document workflow.</p></div>

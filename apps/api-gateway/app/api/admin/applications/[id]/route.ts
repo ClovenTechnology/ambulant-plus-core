@@ -10,6 +10,7 @@ import {
   serializeAdminApplication,
 } from '@/src/lib/admin-applications';
 import { hasEnterpriseFormScope } from '@/src/lib/admin-form-access';
+import { hasStaffCapability } from '@/src/lib/admin-staff-policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -57,6 +58,9 @@ export async function GET(
         canRequestDocuments: hasApplicationScope(actor, 'applications.documents.request'),
         canReviewDocuments: hasApplicationScope(actor, 'applications.documents.review'),
       }),
+      permissions: {
+        canConvertApplicant: hasStaffCapability(actor, 'applications.onboarding.manage'),
+      },
     });
   } catch (error) {
     const auth = adminStaffAuthResponse(error);

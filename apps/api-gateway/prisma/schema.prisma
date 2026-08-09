@@ -4079,6 +4079,7 @@ model Department {
   adminUsers   AdminUserProfile[]
   designations Designation[]
   roleRequests RoleRequest[]
+  recruitmentTemplates RecruitmentTemplate[]
 }
 
 model Designation {
@@ -4091,6 +4092,7 @@ model Designation {
   department   Department         @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   roles        DesignationRole[]
   roleRequests RoleRequest[]
+  recruitmentTemplates RecruitmentTemplate[]
 
   @@unique([departmentId, name])
 }
@@ -4175,6 +4177,16 @@ model AdminUserProfile {
   applicationInterviewEvaluations                ApplicationInterviewEvaluation[]      @relation("ApplicationInterviewEvaluationEvaluator")
   applicationInterviewEvaluationWaivers          ApplicationInterviewEvaluation[]      @relation("ApplicationInterviewEvaluationWaivedBy")
   applicationRecruitmentDecisions                ApplicationRecruitmentDecision[]      @relation("ApplicationRecruitmentDecisionActor")
+  recruitmentTemplatesCreated                    RecruitmentTemplate[]                   @relation("RecruitmentTemplateCreatedBy")
+  recruitmentTemplatesUpdated                    RecruitmentTemplate[]                   @relation("RecruitmentTemplateUpdatedBy")
+  recruitmentSettingsUpdated                     RecruitmentSettings[]                   @relation("RecruitmentSettingsUpdatedBy")
+  applicationStaffConversionsInitiated           ApplicationStaffConversion[]            @relation("ApplicationStaffConversionInitiatedBy")
+  applicationStaffConversionsActivated           ApplicationStaffConversion[]            @relation("ApplicationStaffConversionActivatedBy")
+  applicationStaffProfileSources                 ApplicationStaffConversion[]            @relation("ApplicationStaffConversionStaffProfile")
+  staffConversationsCreated                      StaffConversation[]                     @relation("StaffConversationCreatedBy")
+  staffConversationMemberships                   StaffConversationMember[]               @relation("StaffConversationMemberProfile")
+  staffMessagesSent                              StaffMessage[]                          @relation("StaffMessageSender")
+  meetingChatMessagesSent                        MeetingChatMessage[]                    @relation("MeetingChatMessageSender")
 
   @@index([departmentId])
   @@index([designationId])
@@ -4237,6 +4249,7 @@ model Meeting {
   lobbyEntries         MeetingLobbyEntry[]
   attendanceSessions   MeetingAttendanceSession[]
   applicationInterviewEvaluationCycle ApplicationInterviewEvaluationCycle?
+  chatMessages                       MeetingChatMessage[]
 
   @@index([state, startsAt])
   @@index([createdByProfileId, createdAt])
@@ -4383,6 +4396,7 @@ model EnterpriseForm {
   versions           EnterpriseFormVersion[]
   submissions        EnterpriseFormSubmission[]
   opportunities      Opportunity[]
+  recruitmentTemplates RecruitmentTemplate[] @relation("RecruitmentTemplateApplicationForm")
 
   @@index([status, createdAt])
   @@index([createdByProfileId, createdAt])
@@ -4430,6 +4444,7 @@ model EnterpriseFormVersion {
   submissions          EnterpriseFormSubmission[]
   applications         Application[]
   applicationInterviewEvaluationCycles ApplicationInterviewEvaluationCycle[]
+  recruitmentEvaluationTemplates RecruitmentTemplate[] @relation("RecruitmentTemplateEvaluationFormVersion")
 
   @@unique([formId, versionNumber])
   @@index([formId, state, versionNumber])
@@ -4751,6 +4766,7 @@ model Application {
   documentEvents          ApplicationDocumentEvent[]
   interviewEvaluationCycles ApplicationInterviewEvaluationCycle[]
   recruitmentDecisions      ApplicationRecruitmentDecision[]
+  staffConversion            ApplicationStaffConversion?
 
   @@index([opportunityId, status, createdAt])
   @@index([status, submittedAt])
@@ -4887,6 +4903,7 @@ model RoleRequest {
   department    Department?       @relation(fields: [departmentId], references: [id])
   designation   Designation?      @relation(fields: [designationId], references: [id])
   roles         RoleRequestRole[]
+  applicationStaffConversion ApplicationStaffConversion?
 }
 
 model RoleRequestRole {
@@ -6301,6 +6318,159 @@ enum ApplicationRecruitmentDecisionType {
 
 enum ApplicationSource {
   ENTERPRISE_FORM
+}
+
+model RecruitmentTemplate {
+  id                          String                    @id @default(cuid())
+  key                         String                    @unique @db.VarChar(120)
+  name                        String                    @db.VarChar(240)
+  description                 String?
+  opportunityType             OpportunityType?
+  opportunityTitle            String?                   @db.VarChar(240)
+  opportunitySummary          String?                   @db.VarChar(1200)
+  opportunityDescription      String?
+  applicationFormId           String?
+  evaluationFormVersionId     String?
+  defaultDepartmentId         String?
+  defaultDesignationId        String?
+  defaultRoleIds              String[]                  @default([])
+  settings                    Json?
+  status                      RecruitmentTemplateStatus @default(ACTIVE)
+  createdByProfileId          String
+  updatedByProfileId          String
+  createdAt                   DateTime                  @default(now())
+  updatedAt                   DateTime                  @updatedAt
+  applicationForm             EnterpriseForm?           @relation("RecruitmentTemplateApplicationForm", fields: [applicationFormId], references: [id], onDelete: SetNull)
+  evaluationFormVersion       EnterpriseFormVersion?    @relation("RecruitmentTemplateEvaluationFormVersion", fields: [evaluationFormVersionId], references: [id], onDelete: SetNull)
+  defaultDepartment           Department?               @relation(fields: [defaultDepartmentId], references: [id], onDelete: SetNull)
+  defaultDesignation          Designation?              @relation(fields: [defaultDesignationId], references: [id], onDelete: SetNull)
+  createdByProfile            AdminUserProfile          @relation("RecruitmentTemplateCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  updatedByProfile            AdminUserProfile          @relation("RecruitmentTemplateUpdatedBy", fields: [updatedByProfileId], references: [id], onDelete: Restrict)
+  recruitmentSettings         RecruitmentSettings[]
+
+  @@index([status, opportunityType, createdAt])
+  @@index([applicationFormId])
+  @@index([evaluationFormVersionId])
+  @@index([defaultDepartmentId, defaultDesignationId])
+}
+
+model RecruitmentSettings {
+  key                             String               @id @default("global") @db.VarChar(120)
+  defaultTemplateId               String?
+  onboardingMessage               String?              @db.VarChar(4000)
+  requireCredentialBeforeApproval Boolean              @default(true)
+  updatedByProfileId              String
+  createdAt                       DateTime              @default(now())
+  updatedAt                       DateTime              @updatedAt
+  defaultTemplate                 RecruitmentTemplate? @relation(fields: [defaultTemplateId], references: [id], onDelete: SetNull)
+  updatedByProfile                AdminUserProfile     @relation("RecruitmentSettingsUpdatedBy", fields: [updatedByProfileId], references: [id], onDelete: Restrict)
+
+  @@index([defaultTemplateId])
+}
+
+model ApplicationStaffConversion {
+  id                   String                            @id @default(cuid())
+  applicationId        String                            @unique
+  roleRequestId        String                            @unique
+  staffProfileId       String?                           @unique
+  status               ApplicationStaffConversionStatus @default(PENDING_APPROVAL)
+  initiatedByProfileId String
+  activatedByProfileId String?
+  notes                String?                           @db.VarChar(2000)
+  createdAt            DateTime                          @default(now())
+  updatedAt            DateTime                          @updatedAt
+  activatedAt          DateTime?
+  application          Application                       @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  roleRequest          RoleRequest                       @relation(fields: [roleRequestId], references: [id], onDelete: Restrict)
+  staffProfile         AdminUserProfile?                 @relation("ApplicationStaffConversionStaffProfile", fields: [staffProfileId], references: [id], onDelete: SetNull)
+  initiatedByProfile   AdminUserProfile                  @relation("ApplicationStaffConversionInitiatedBy", fields: [initiatedByProfileId], references: [id], onDelete: Restrict)
+  activatedByProfile   AdminUserProfile?                 @relation("ApplicationStaffConversionActivatedBy", fields: [activatedByProfileId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([initiatedByProfileId, createdAt])
+}
+
+model StaffConversation {
+  id                 String                @id @default(cuid())
+  kind               StaffConversationKind
+  title              String?               @db.VarChar(240)
+  directKey          String?               @unique @db.VarChar(160)
+  createdByProfileId String
+  lastMessageAt      DateTime?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  createdByProfile   AdminUserProfile      @relation("StaffConversationCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  members            StaffConversationMember[]
+  messages           StaffMessage[]
+
+  @@index([kind, lastMessageAt, updatedAt])
+  @@index([createdByProfileId, createdAt])
+}
+
+model StaffConversationMember {
+  conversationId String
+  profileId      String
+  role           StaffConversationMemberRole @default(MEMBER)
+  joinedAt       DateTime                    @default(now())
+  leftAt         DateTime?
+  lastReadAt     DateTime?
+  conversation   StaffConversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  profile        AdminUserProfile            @relation("StaffConversationMemberProfile", fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@id([conversationId, profileId])
+  @@index([profileId, leftAt, joinedAt])
+}
+
+model StaffMessage {
+  id              String            @id @default(cuid())
+  conversationId  String
+  senderProfileId String
+  body            String            @db.VarChar(8000)
+  createdAt       DateTime          @default(now())
+  editedAt        DateTime?
+  deletedAt       DateTime?
+  conversation    StaffConversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderProfile   AdminUserProfile  @relation("StaffMessageSender", fields: [senderProfileId], references: [id], onDelete: Restrict)
+
+  @@index([conversationId, createdAt])
+  @@index([senderProfileId, createdAt])
+}
+
+model MeetingChatMessage {
+  id              String           @id @default(cuid())
+  meetingId       String
+  senderProfileId String
+  body            String           @db.VarChar(8000)
+  createdAt       DateTime         @default(now())
+  deletedAt       DateTime?
+  meeting         Meeting          @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  senderProfile   AdminUserProfile @relation("MeetingChatMessageSender", fields: [senderProfileId], references: [id], onDelete: Restrict)
+
+  @@index([meetingId, createdAt])
+  @@index([senderProfileId, createdAt])
+}
+
+enum RecruitmentTemplateStatus {
+  ACTIVE
+  INACTIVE
+  ARCHIVED
+}
+
+enum ApplicationStaffConversionStatus {
+  PENDING_APPROVAL
+  ACTIVE
+  REJECTED
+  CANCELLED
+}
+
+enum StaffConversationKind {
+  DIRECT
+  GROUP
+}
+
+enum StaffConversationMemberRole {
+  OWNER
+  MEMBER
 }
 
 enum ApplicationStatus {

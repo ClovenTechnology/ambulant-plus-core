@@ -3,6 +3,10 @@ export type StaffCapability =
   | 'staff.manage'
   | 'staff.roles.manage'
   | 'communications.use'
+  | 'recruitment.templates.read'
+  | 'recruitment.templates.manage'
+  | 'recruitment.settings.manage'
+  | 'applications.onboarding.manage'
   | 'meetings.create'
   | 'meetings.moderate'
   | 'meetings.invite_external'
@@ -34,6 +38,10 @@ const LEGACY_CAPABILITY_ALIASES: Record<StaffCapability, string[]> = {
   'staff.manage': ['hr', 'manageroles'],
   'staff.roles.manage': ['manageroles'],
   'communications.use': [],
+  'recruitment.templates.read': ['hr', 'manageroles', 'opportunitiesread', 'opportunitiesmanage'],
+  'recruitment.templates.manage': ['hr', 'manageroles', 'opportunitiesmanage'],
+  'recruitment.settings.manage': ['hr', 'manageroles'],
+  'applications.onboarding.manage': ['hr', 'manageroles', 'applicationsdecision'],
   'meetings.create': [],
   'meetings.moderate': [],
   'meetings.invite_external': [],

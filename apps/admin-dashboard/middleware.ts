@@ -31,6 +31,25 @@ const RULES: Array<{
   },
   {
     prefix:
+      '/admin/communications',
+    required: [
+      'communications.use',
+    ],
+  },
+  {
+    prefix:
+      '/admin/recruitment',
+    required: [
+      'recruitment.templates.read',
+      'recruitment.templates.manage',
+      'recruitment.settings.manage',
+      'applications.onboarding.manage',
+      'hr',
+      'manageRoles',
+    ],
+  },
+  {
+    prefix:
       '/admin/meetings',
     required: [
       'meetings.create',
@@ -75,6 +94,7 @@ const RULES: Array<{
       'applications.interviews.schedule',
       'applications.interviews.manage',
       'applications.interviews.evaluate',
+      'applications.onboarding.manage',
     ],
   },
   {

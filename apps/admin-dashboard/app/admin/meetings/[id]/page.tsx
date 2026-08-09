@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { ArrowLeft, Lock, RefreshCw, ShieldCheck, Unlock, UserPlus } from 'lucide-react';
+import { MeetingRoomClient } from './MeetingRoomClient';
 
 export const dynamic = 'force-dynamic';
 
@@ -278,9 +279,7 @@ export default function AdminMeetingDetailPage({
               ) : null}
 
               <div className="mt-5 rounded-2xl border border-cyan-100 bg-cyan-50 p-4 text-sm text-cyan-900">
-                The RTC credential authority is installed in this batch. Browser room rendering,
-                persistent meeting chat/files and direct-call controls are activated in Sprint C1B
-                after the LiveKit client dependency boundary is captured and validated.
+                This Meeting remains the canonical lobby, moderation and RTC authority. Media credentials are minted server-side and the room UI never chooses its own participant identity.
               </div>
             </div>
 
@@ -304,6 +303,8 @@ export default function AdminMeetingDetailPage({
               </dl>
             </div>
           </section>
+
+          <MeetingRoomClient meeting={meeting} onMeetingChanged={load} />
 
           <section className="rounded-3xl border bg-white p-5 shadow-sm">
             <h2 className="text-lg font-semibold">Participants</h2>

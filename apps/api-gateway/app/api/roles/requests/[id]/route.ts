@@ -447,6 +447,144 @@ export async function PATCH(
                 409,
               );
             }
+
+            const applicationConversion =
+              await tx.applicationStaffConversion.findUnique({
+                where: {
+                  roleRequestId:
+                    current.id,
+                },
+                select: {
+                  id: true,
+                  applicationId: true,
+                  status: true,
+                },
+              });
+
+            if (
+              applicationConversion &&
+              applicationConversion.status ===
+                'PENDING_APPROVAL'
+            ) {
+              const activatedAt =
+                new Date();
+
+              await tx.applicationStaffConversion.update({
+                where: {
+                  id:
+                    applicationConversion.id,
+                },
+                data: {
+                  status:
+                    'ACTIVE',
+                  staffProfileId:
+                    targetProfile.id,
+                  activatedByProfileId:
+                    actor.profileId,
+                  activatedAt,
+                },
+              });
+
+              const application =
+                await tx.application.findUnique({
+                  where: {
+                    id:
+                      applicationConversion.applicationId,
+                  },
+                  select: {
+                    id: true,
+                    status: true,
+                    referenceCode: true,
+                  },
+                });
+
+              if (
+                application &&
+                (
+                  application.status ===
+                    'SUCCESSFUL' ||
+                  application.status ===
+                    'OFFERED'
+                )
+              ) {
+                const moved =
+                  await tx.application.updateMany({
+                    where: {
+                      id:
+                        application.id,
+                      status:
+                        application.status,
+                    },
+                    data: {
+                      status:
+                        'ONBOARDING',
+                      statusReason:
+                        'Canonical Staff profile activated from successful application',
+                      statusChangedAt:
+                        activatedAt,
+                    },
+                  });
+
+                if (
+                  moved.count ===
+                  1
+                ) {
+                  await tx.applicationStatusEvent.create({
+                    data: {
+                      applicationId:
+                        application.id,
+                      fromStatus:
+                        application.status,
+                      toStatus:
+                        'ONBOARDING',
+                      actorType:
+                        'ADMIN',
+                      actorRefId:
+                        actor.profileId,
+                      reason:
+                        'Canonical Staff profile activated from approved recruitment onboarding',
+                      metadata: {
+                        roleRequestId:
+                          current.id,
+                        conversionId:
+                          applicationConversion.id,
+                        staffProfileId:
+                          targetProfile.id,
+                      },
+                    },
+                  });
+                }
+              }
+
+              await tx.auditLog.create({
+                data: {
+                  actorUserId:
+                    actor.userId,
+                  actorType:
+                    'ADMIN',
+                  actorRefId:
+                    actor.profileId,
+                  app:
+                    'admin-dashboard',
+                  action:
+                    'application.staff_onboarding.activated',
+                  entityType:
+                    'ApplicationStaffConversion',
+                  entityId:
+                    applicationConversion.id,
+                  description:
+                    'Successful applicant activated as canonical Staff profile',
+                  meta: {
+                    applicationId:
+                      applicationConversion.applicationId,
+                    roleRequestId:
+                      current.id,
+                    staffProfileId:
+                      targetProfile.id,
+                  },
+                },
+              });
+            }
           }
           else {
             const claimed =
@@ -477,6 +615,19 @@ export async function PATCH(
                 409,
               );
             }
+
+            await tx.applicationStaffConversion.updateMany({
+              where: {
+                roleRequestId:
+                  current.id,
+                status:
+                  'PENDING_APPROVAL',
+              },
+              data: {
+                status:
+                  'REJECTED',
+              },
+            });
           }
 
           return tx.roleRequest.findUnique({
