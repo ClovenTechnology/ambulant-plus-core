@@ -4170,6 +4170,11 @@ model AdminUserProfile {
   opportunitiesClosed         Opportunity[]                @relation("OpportunityClosedBy")
   opportunitiesArchived       Opportunity[]                @relation("OpportunityArchivedBy")
   applicationsAssigned        Application[]                @relation("ApplicationAssignedReviewer")
+  applicationInterviewEvaluationCyclesOpened    ApplicationInterviewEvaluationCycle[] @relation("ApplicationInterviewEvaluationCycleOpenedBy")
+  applicationInterviewEvaluationCyclesCompleted ApplicationInterviewEvaluationCycle[] @relation("ApplicationInterviewEvaluationCycleCompletedBy")
+  applicationInterviewEvaluations                ApplicationInterviewEvaluation[]      @relation("ApplicationInterviewEvaluationEvaluator")
+  applicationInterviewEvaluationWaivers          ApplicationInterviewEvaluation[]      @relation("ApplicationInterviewEvaluationWaivedBy")
+  applicationRecruitmentDecisions                ApplicationRecruitmentDecision[]      @relation("ApplicationRecruitmentDecisionActor")
 
   @@index([departmentId])
   @@index([designationId])
@@ -4231,6 +4236,7 @@ model Meeting {
   invitations          MeetingInvitation[]
   lobbyEntries         MeetingLobbyEntry[]
   attendanceSessions   MeetingAttendanceSession[]
+  applicationInterviewEvaluationCycle ApplicationInterviewEvaluationCycle?
 
   @@index([state, startsAt])
   @@index([createdByProfileId, createdAt])
@@ -4423,6 +4429,7 @@ model EnterpriseFormVersion {
   translations         EnterpriseFormTranslation[]
   submissions          EnterpriseFormSubmission[]
   applications         Application[]
+  applicationInterviewEvaluationCycles ApplicationInterviewEvaluationCycle[]
 
   @@unique([formId, versionNumber])
   @@index([formId, state, versionNumber])
@@ -4580,6 +4587,7 @@ model EnterpriseFormSubmission {
   files                   EnterpriseFormSubmissionFile[]
   consents                EnterpriseFormConsentEvidence[]
   application             Application?
+  applicationInterviewEvaluation ApplicationInterviewEvaluation?
 
   @@index([formId, status, createdAt])
   @@index([versionId, status, createdAt])
@@ -4741,6 +4749,8 @@ model Application {
   documentCycles          ApplicationDocumentCycle[]
   documentRequests        ApplicationDocumentRequest[]
   documentEvents          ApplicationDocumentEvent[]
+  interviewEvaluationCycles ApplicationInterviewEvaluationCycle[]
+  recruitmentDecisions      ApplicationRecruitmentDecision[]
 
   @@index([opportunityId, status, createdAt])
   @@index([status, submittedAt])
@@ -4764,6 +4774,76 @@ model ApplicationStatusEvent {
   @@index([applicationId, createdAt])
   @@index([toStatus, createdAt])
   @@index([actorType, createdAt])
+}
+
+model ApplicationInterviewEvaluationCycle {
+  id                   String                                    @id @default(cuid())
+  applicationId        String
+  meetingId            String                                    @unique
+  formVersionId        String
+  status               ApplicationInterviewEvaluationCycleStatus @default(OPEN)
+  aggregateScore       Float?
+  openedByProfileId    String
+  completedByProfileId String?
+  openedAt             DateTime                                  @default(now())
+  completedAt          DateTime?
+  createdAt            DateTime                                  @default(now())
+  updatedAt            DateTime                                  @updatedAt
+  application          Application                               @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  meeting              Meeting                                   @relation(fields: [meetingId], references: [id], onDelete: Restrict)
+  formVersion          EnterpriseFormVersion                     @relation(fields: [formVersionId], references: [id], onDelete: Restrict)
+  openedByProfile      AdminUserProfile                          @relation("ApplicationInterviewEvaluationCycleOpenedBy", fields: [openedByProfileId], references: [id], onDelete: Restrict)
+  completedByProfile   AdminUserProfile?                         @relation("ApplicationInterviewEvaluationCycleCompletedBy", fields: [completedByProfileId], references: [id], onDelete: SetNull)
+  evaluations          ApplicationInterviewEvaluation[]
+  decisions            ApplicationRecruitmentDecision[]
+
+  @@index([applicationId, status, createdAt])
+  @@index([formVersionId, status, createdAt])
+  @@index([openedByProfileId, createdAt])
+}
+
+model ApplicationInterviewEvaluation {
+  id                String                              @id @default(cuid())
+  cycleId           String
+  evaluatorProfileId String
+  formSubmissionId  String                              @unique
+  state             ApplicationInterviewEvaluationState @default(DRAFT)
+  score             Float?
+  calculations      Json?
+  submittedAt       DateTime?
+  waivedAt          DateTime?
+  waivedByProfileId String?
+  waiverReason      String?                             @db.VarChar(1000)
+  createdAt         DateTime                            @default(now())
+  updatedAt         DateTime                            @updatedAt
+  cycle             ApplicationInterviewEvaluationCycle @relation(fields: [cycleId], references: [id], onDelete: Cascade)
+  evaluatorProfile  AdminUserProfile                    @relation("ApplicationInterviewEvaluationEvaluator", fields: [evaluatorProfileId], references: [id], onDelete: Restrict)
+  formSubmission    EnterpriseFormSubmission            @relation(fields: [formSubmissionId], references: [id], onDelete: Restrict)
+  waivedByProfile   AdminUserProfile?                   @relation("ApplicationInterviewEvaluationWaivedBy", fields: [waivedByProfileId], references: [id], onDelete: SetNull)
+
+  @@unique([cycleId, evaluatorProfileId])
+  @@index([cycleId, state, createdAt])
+  @@index([evaluatorProfileId, state, createdAt])
+}
+
+model ApplicationRecruitmentDecision {
+  id                String                             @id @default(cuid())
+  applicationId     String
+  evaluationCycleId String?
+  decision          ApplicationRecruitmentDecisionType
+  fromStatus        ApplicationStatus
+  actorProfileId    String
+  reason            String?                            @db.VarChar(1000)
+  applicantMessage  String?                            @db.VarChar(4000)
+  aggregateScore    Float?
+  createdAt         DateTime                           @default(now())
+  application       Application                        @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  evaluationCycle   ApplicationInterviewEvaluationCycle? @relation(fields: [evaluationCycleId], references: [id], onDelete: SetNull)
+  actorProfile      AdminUserProfile                   @relation("ApplicationRecruitmentDecisionActor", fields: [actorProfileId], references: [id], onDelete: Restrict)
+
+  @@index([applicationId, createdAt])
+  @@index([decision, createdAt])
+  @@index([actorProfileId, createdAt])
 }
 
 model AdminAuthCredential {
@@ -6200,6 +6280,23 @@ enum ApplicationDocumentEventType {
   REMOVED
   COMPLETED
   CANCELLED
+}
+
+enum ApplicationInterviewEvaluationCycleStatus {
+  OPEN
+  COMPLETED
+}
+
+enum ApplicationInterviewEvaluationState {
+  DRAFT
+  SUBMITTED
+  WAIVED
+}
+
+enum ApplicationRecruitmentDecisionType {
+  SUCCESSFUL
+  OFFERED
+  DECLINED
 }
 
 enum ApplicationSource {

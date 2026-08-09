@@ -39,6 +39,7 @@ const RULES: Array<{
       'applications.interviews.read',
       'applications.interviews.schedule',
       'applications.interviews.manage',
+      'applications.interviews.evaluate',
     ],
   },
   {
@@ -73,6 +74,7 @@ const RULES: Array<{
       'applications.interviews.read',
       'applications.interviews.schedule',
       'applications.interviews.manage',
+      'applications.interviews.evaluate',
     ],
   },
   {
