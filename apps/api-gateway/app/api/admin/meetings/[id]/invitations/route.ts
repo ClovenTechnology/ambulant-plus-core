@@ -42,6 +42,17 @@ export async function POST(
     const access = await meetingForActor(params.id, actor);
     requireMeetingModeration(access);
 
+    if (
+      access.meeting.kind === 'INTERVIEW' &&
+      access.meeting.contextType === 'APPLICATION_INTERVIEW' &&
+      access.meeting.contextId
+    ) {
+      return json(
+        { ok: false, error: 'application_interview_managed_from_application_workspace' },
+        409,
+      );
+    }
+
     if (['ENDED', 'CANCELLED', 'EXPIRED'].includes(access.meeting.state)) {
       return json({ ok: false, error: 'meeting_closed' }, 409);
     }
@@ -132,6 +143,17 @@ export async function DELETE(
 
     const access = await meetingForActor(params.id, actor);
     requireMeetingModeration(access);
+
+    if (
+      access.meeting.kind === 'INTERVIEW' &&
+      access.meeting.contextType === 'APPLICATION_INTERVIEW' &&
+      access.meeting.contextId
+    ) {
+      return json(
+        { ok: false, error: 'application_interview_managed_from_application_workspace' },
+        409,
+      );
+    }
 
     const body = await request.json().catch(() => ({} as any));
     const invitationId = cleanMeetingText(body?.invitationId, 240);

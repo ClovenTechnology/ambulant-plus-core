@@ -13,6 +13,21 @@ type Payload = {
   error?: string;
 };
 
+function formatMeetingDate(value: string, timezone: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+
+  try {
+    return `${new Intl.DateTimeFormat('en-ZA', {
+      timeZone: timezone,
+      dateStyle: 'full',
+      timeStyle: 'short',
+    }).format(date)} (${timezone})`;
+  } catch {
+    return date.toISOString();
+  }
+}
+
 export default function AdminMeetingDetailPage({
   params,
 }: {
@@ -172,6 +187,11 @@ export default function AdminMeetingDetailPage({
 
   const meeting = data?.meeting;
   const canModerate = Boolean(data?.permissions?.canModerate);
+  const isApplicationInterview = Boolean(
+    meeting?.kind === 'INTERVIEW' &&
+    meeting?.contextType === 'APPLICATION_INTERVIEW' &&
+    meeting?.contextId,
+  );
 
   return (
     <main className="space-y-6 p-4 lg:p-6">
@@ -221,7 +241,7 @@ export default function AdminMeetingDetailPage({
                   </div>
                   <div className="mt-2 text-lg font-semibold">{meeting.title}</div>
                   <div className="mt-2 text-sm text-slate-600">
-                    {new Date(meeting.startsAt).toLocaleString()} · {meeting.durationMinutes} min · {meeting.timezone}
+                    {formatMeetingDate(meeting.startsAt, meeting.timezone)} · {meeting.durationMinutes} min
                   </div>
                 </div>
 
@@ -308,10 +328,26 @@ export default function AdminMeetingDetailPage({
 
           {canModerate ? (
             <section className="grid gap-4 xl:grid-cols-2">
-              <form
-                onSubmit={inviteGuest}
-                className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm"
-              >
+              {isApplicationInterview ? (
+                <div className="rounded-3xl border border-cyan-200 bg-cyan-50 p-5 text-sm text-cyan-950 shadow-sm">
+                  <div className="font-semibold">Application interview governance</div>
+                  <p className="mt-2 leading-6">
+                    Interview scheduling, applicant invitation, rescheduling and cancellation are
+                    governed from the canonical Application workspace. This shared Meeting room
+                    remains the lobby, moderation and RTC authority.
+                  </p>
+                  <Link
+                    href={`/admin/applications/${encodeURIComponent(meeting.contextId)}`}
+                    className="mt-4 inline-flex rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    Open application interview
+                  </Link>
+                </div>
+              ) : (
+                <form
+                  onSubmit={inviteGuest}
+                  className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm"
+                >
                 <div className="flex items-center gap-2">
                   <UserPlus className="h-5 w-5" />
                   <h2 className="text-lg font-semibold">Invite external guest</h2>
@@ -370,7 +406,8 @@ export default function AdminMeetingDetailPage({
                     </div>
                   </div>
                 ) : null}
-              </form>
+                </form>
+              )}
 
               <div className="rounded-3xl border bg-white p-5 shadow-sm">
                 <h2 className="text-lg font-semibold">Lobby</h2>

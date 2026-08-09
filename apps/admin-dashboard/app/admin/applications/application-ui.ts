@@ -191,6 +191,62 @@ export type ReviewerOption = {
   designation?: { id: string; name: string } | null;
 };
 
+export type InterviewerOption = ReviewerOption & {
+  timezone?: string | null;
+};
+
+export type AdminApplicationInterview = {
+  id: string;
+  roomId: string;
+  state: string;
+  title: string;
+  agenda?: string | null;
+  timezone: string;
+  startsAt: string;
+  endsAt: string;
+  durationMinutes: number;
+  createdAt: string;
+  updatedAt: string;
+  cancelledAt?: string | null;
+  cancellationReason?: string | null;
+  interviewee: null | {
+    participantId: string;
+    email: string | null;
+    displayName: string;
+    state: string;
+    acceptedAt?: string | null;
+    declinedAt?: string | null;
+    invitation: null | {
+      id: string;
+      state: string;
+      expiresAt: string;
+      verifiedAt?: string | null;
+      revokedAt?: string | null;
+      lastUsedAt?: string | null;
+      createdAt: string;
+    };
+  };
+  interviewers: Array<{
+    participantId: string;
+    profileId: string | null;
+    displayName: string;
+    role: string;
+    state: string;
+    staff?: InterviewerOption | null;
+  }>;
+};
+
+export type AdminApplicationInterviewPayload = {
+  ok: boolean;
+  permissions?: {
+    canRead: boolean;
+    canSchedule: boolean;
+    canManage: boolean;
+  };
+  interview?: AdminApplicationInterview | null;
+  error?: string;
+};
+
 export function humanizeApplicationError(value: unknown) {
   const code = String(value || '').trim();
   const map: Record<string, string> = {
@@ -217,6 +273,24 @@ export function humanizeApplicationError(value: unknown) {
     application_document_file_not_available: 'No current uploaded file is available for this review action.',
     application_document_cycle_incomplete: 'All required documents must be accepted and no received document may remain unreviewed.',
     application_document_download_failed: 'The secure document download could not be prepared.',
+    application_interview_load_failed: 'Interview details could not be loaded.',
+    application_interview_schedule_failed: 'The interview could not be scheduled.',
+    application_interview_reschedule_failed: 'The interview could not be rescheduled.',
+    application_interview_cancel_failed: 'The interview could not be cancelled.',
+    application_interview_resend_failed: 'The interview invitation could not be resent.',
+    application_interview_interviewer_list_failed: 'Interview panel options could not be loaded.',
+    application_interview_interviewer_required: 'Select at least one active Staff interviewer.',
+    application_interview_interviewer_not_assignable: 'One or more selected interviewers are no longer active Staff.',
+    application_interview_applicant_email_required: 'This application does not have a valid applicant email for an interview invitation.',
+    application_interview_schedule_not_available: 'Interviews can be scheduled only from the shortlisted stage.',
+    application_interview_manage_not_available: "This interview cannot be changed from the application's current stage.",
+    application_interview_already_active: 'An active interview already exists for this application.',
+    application_interview_start_invalid: 'Enter a valid interview date and time.',
+    application_interview_start_must_be_future: 'Schedule the interview at least five minutes in the future.',
+    application_interview_timezone_invalid: 'Select a valid interview timezone.',
+    application_interview_cancel_reason_required: 'Add an internal reason before cancelling the interview.',
+    application_interview_response_not_available: 'The applicant can no longer respond to this interview invitation.',
+    application_interview_meeting_not_manageable: 'This interview has already started or closed and cannot be rescheduled here.',
   };
   return map[code] || code.replace(/_/g, ' ') || 'Something went wrong.';
 }
@@ -244,7 +318,7 @@ export function reviewActions(status: ApplicationStatus) {
 
 export function stageGovernanceNote(status: ApplicationStatus) {
   if (status === 'SHORTLISTED') {
-    return 'Use the governed Applicant documents section below for document requests. Interview invitation remains owned by the shared Meetings and Interview workflow.';
+    return 'Use Applicant documents for secure document requests, or the Interview section below to create a governed interview through the shared Meeting engine.';
   }
   if (status === 'DOCUMENTS_REQUESTED') {
     return 'Document-request progression is governed by the secure applicant-document workflow.';
@@ -300,4 +374,92 @@ export function canCompleteAdminDocumentCycle(requests: Array<{ required: boolea
   if (!requests.length) return false;
   if (requests.some((request) => request.status === 'RECEIVED')) return false;
   return requests.filter((request) => request.required).every((request) => request.status === 'ACCEPTED');
+}
+export function applicationInterviewStateLabel(state: string) {
+  const labels: Record<string, string> = {
+    DRAFT: 'Draft',
+    SCHEDULED: 'Scheduled',
+    RINGING: 'Calling',
+    LIVE: 'Live',
+    ENDED: 'Ended',
+    CANCELLED: 'Cancelled',
+    EXPIRED: 'Expired',
+  };
+  return labels[state] || state.replace(/_/g, ' ').toLowerCase();
+}
+
+export function applicationInterviewResponseLabel(state: string | null | undefined) {
+  const labels: Record<string, string> = {
+    INVITED: 'Awaiting applicant response',
+    ACCEPTED: 'Applicant accepted',
+    DECLINED: 'Applicant declined',
+    JOINED: 'Applicant joined',
+    LEFT: 'Applicant attended',
+    REMOVED: 'Closed',
+  };
+  return labels[String(state || '')] || 'No applicant response';
+}
+
+export function formatApplicationInterviewDate(
+  value: string | null | undefined,
+  timezone: string | null | undefined,
+) {
+  if (!value) return '—';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '—';
+  const zone = String(timezone || 'Africa/Johannesburg').trim() || 'Africa/Johannesburg';
+  try {
+    return `${new Intl.DateTimeFormat('en-ZA', {
+      timeZone: zone,
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      hourCycle: 'h23',
+    }).format(date)} (${zone})`;
+  } catch {
+    return `${date.toISOString()} (${zone})`;
+  }
+}
+
+export function applicationInterviewLocalInputValue(
+  value: string | null | undefined,
+  timezone: string | null | undefined,
+) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const zone = String(timezone || 'Africa/Johannesburg').trim() || 'Africa/Johannesburg';
+  try {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: zone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(date);
+    const part = (type: string) =>
+      parts.find((item) => item.type === type)?.value || '';
+    const year = part('year');
+    const month = part('month');
+    const day = part('day');
+    const hour = part('hour');
+    const minute = part('minute');
+    return year && month && day && hour && minute
+      ? `${year}-${month}-${day}T${hour}:${minute}`
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+export function canScheduleInterviewFromApplication(status: ApplicationStatus) {
+  return status === 'SHORTLISTED';
+}
+
+export function canManageInterviewFromApplication(status: ApplicationStatus, meetingState?: string | null) {
+  return (
+    (status === 'INTERVIEW_INVITED' || status === 'INTERVIEW_SCHEDULED') &&
+    (meetingState === 'SCHEDULED' || meetingState === 'RINGING')
+  );
 }

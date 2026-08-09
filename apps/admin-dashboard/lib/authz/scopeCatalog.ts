@@ -55,6 +55,9 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
       { scope: 'applications.documents.read', label: 'Read applicant documents', desc: 'View applicant-requested document metadata and obtain short-lived authorised downloads.', danger: true },
       { scope: 'applications.documents.request', label: 'Request applicant documents', desc: 'Create governed document requests and move eligible applications into the document-request stage.' },
       { scope: 'applications.documents.review', label: 'Review applicant documents', desc: 'Accept, reject, re-request and complete governed applicant-document review cycles.', danger: true },
+      { scope: 'applications.interviews.read', label: 'Read application interviews', desc: 'View application-linked interview schedules, panel assignments and applicant response state.' },
+      { scope: 'applications.interviews.schedule', label: 'Schedule application interviews', desc: 'Create governed application interview invitations through the shared Meeting engine.' },
+      { scope: 'applications.interviews.manage', label: 'Manage application interviews', desc: 'Reschedule, cancel and resend application interview invitations.', danger: true },
     ],
   },
   {

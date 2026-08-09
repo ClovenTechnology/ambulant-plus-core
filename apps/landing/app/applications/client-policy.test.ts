@@ -4,6 +4,10 @@ import {
   accessTokenFromFragment,
   canUploadForRequest,
   canWithdrawFromPortal,
+  canRespondToInterview,
+  canResendInterviewInvite,
+  interviewResponseLabel,
+  formatPortalInterviewDate,
   normalisePortalReference,
   portalSessionStorageKey,
   portalDocumentRequestExpired,
@@ -48,4 +52,29 @@ test('request labels distinguish action required, review and terminal request st
   assert.equal(requestStatusLabel('REQUESTED'), 'Action required');
   assert.equal(requestStatusLabel('RECEIVED'), 'Submitted for review');
   assert.equal(requestStatusLabel('ACCEPTED'), 'Accepted');
+});
+
+test('interview response is available only for a pending scheduled invitation', () => {
+  assert.equal(canRespondToInterview({ applicationStatus: 'INTERVIEW_INVITED', intervieweeState: 'INVITED', meetingState: 'SCHEDULED' }), true);
+  assert.equal(canRespondToInterview({ applicationStatus: 'INTERVIEW_SCHEDULED', intervieweeState: 'ACCEPTED', meetingState: 'SCHEDULED' }), false);
+  assert.equal(canRespondToInterview({ applicationStatus: 'INTERVIEW_INVITED', intervieweeState: 'INVITED', meetingState: 'CANCELLED' }), false);
+});
+
+test('secure interview invite resend stays limited to active invited or scheduled interviews', () => {
+  assert.equal(canResendInterviewInvite({ applicationStatus: 'INTERVIEW_INVITED', meetingState: 'SCHEDULED' }), true);
+  assert.equal(canResendInterviewInvite({ applicationStatus: 'INTERVIEW_SCHEDULED', meetingState: 'RINGING' }), true);
+  assert.equal(canResendInterviewInvite({ applicationStatus: 'SHORTLISTED', meetingState: 'SCHEDULED' }), false);
+  assert.equal(canResendInterviewInvite({ applicationStatus: 'INTERVIEW_SCHEDULED', meetingState: 'LIVE' }), false);
+});
+
+test('interview response labels are applicant friendly', () => {
+  assert.equal(interviewResponseLabel('INVITED'), 'Awaiting your response');
+  assert.equal(interviewResponseLabel('ACCEPTED'), 'Accepted');
+  assert.equal(interviewResponseLabel('DECLINED'), 'Declined');
+});
+
+test('interview schedule is rendered in the declared IANA timezone', () => {
+  const rendered = formatPortalInterviewDate('2026-08-09T12:00:00.000Z', 'Africa/Johannesburg');
+  assert.match(rendered, /14:00/);
+  assert.match(rendered, /Africa\/Johannesburg/);
 });

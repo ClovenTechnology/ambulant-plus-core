@@ -72,6 +72,21 @@ export async function PATCH(
 
     const body = await request.json().catch(() => ({} as any));
     const current = access.meeting;
+    const applicationInterviewManaged =
+      current.kind === 'INTERVIEW' &&
+      current.contextType === 'APPLICATION_INTERVIEW' &&
+      Boolean(current.contextId);
+
+    if (applicationInterviewManaged) {
+      const forbiddenKeys = Object.keys(body).filter((key) => key !== 'locked');
+      if (forbiddenKeys.length > 0) {
+        return json(
+          { ok: false, error: 'application_interview_managed_from_application_workspace' },
+          409,
+        );
+      }
+    }
+
     const data: any = {};
 
     if (Object.prototype.hasOwnProperty.call(body, 'title')) {

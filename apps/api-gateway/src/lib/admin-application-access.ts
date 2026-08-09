@@ -10,7 +10,10 @@ export type ApplicationScope =
   | 'applications.decision'
   | 'applications.documents.read'
   | 'applications.documents.request'
-  | 'applications.documents.review';
+  | 'applications.documents.review'
+  | 'applications.interviews.read'
+  | 'applications.interviews.schedule'
+  | 'applications.interviews.manage';
 
 const IMPLIED_SCOPES: Record<ApplicationScope, ApplicationScope[]> = {
   'applications.read': [
@@ -21,6 +24,9 @@ const IMPLIED_SCOPES: Record<ApplicationScope, ApplicationScope[]> = {
     'applications.documents.read',
     'applications.documents.request',
     'applications.documents.review',
+    'applications.interviews.read',
+    'applications.interviews.schedule',
+    'applications.interviews.manage',
   ],
   'applications.review': ['applications.review', 'applications.decision'],
   'applications.assign': ['applications.assign'],
@@ -35,6 +41,16 @@ const IMPLIED_SCOPES: Record<ApplicationScope, ApplicationScope[]> = {
     'applications.documents.review',
   ],
   'applications.documents.review': ['applications.documents.review'],
+  'applications.interviews.read': [
+    'applications.interviews.read',
+    'applications.interviews.schedule',
+    'applications.interviews.manage',
+  ],
+  'applications.interviews.schedule': [
+    'applications.interviews.schedule',
+    'applications.interviews.manage',
+  ],
+  'applications.interviews.manage': ['applications.interviews.manage'],
 };
 
 export function hasApplicationScope(

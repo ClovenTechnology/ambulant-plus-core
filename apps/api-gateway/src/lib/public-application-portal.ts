@@ -29,6 +29,13 @@ import {
   safeApplicationDocumentFileName,
 } from './application-documents-storage';
 import type { ApplicationStatus } from './applications-policy';
+import {
+  ApplicationInterviewError,
+  latestApplicationInterview,
+  resendApplicationInterviewInvitation,
+  respondToApplicationInterview,
+  serializePublicApplicationInterview,
+} from './application-interviews';
 
 const ACCESS_REQUEST_LIMIT = 6;
 const ACCESS_REQUEST_WINDOW_SECONDS = 15 * 60;
@@ -191,7 +198,12 @@ export async function issueApplicationAccessLinkForApplication(input: {
   referenceCode: string;
   applicantEmailNormalized: string;
   opportunityTitle?: string | null;
-  reason?: 'access_request' | 'documents_requested' | 'document_resubmission';
+  reason?:
+    | 'access_request'
+    | 'documents_requested'
+    | 'document_resubmission'
+    | 'interview_invited'
+    | 'interview_rescheduled';
   revokeExisting?: boolean;
 }) {
   const token = randomBytes(APPLICATION_PORTAL_TOKEN_BYTES).toString('base64url');
@@ -260,12 +272,20 @@ export async function issueApplicationAccessLinkForApplication(input: {
     ? 'Ambulant+ has requested one or more documents for your application.'
     : input.reason === 'document_resubmission'
       ? 'A document requires resubmission. Open the secure portal to review the applicant-facing reason and upload the replacement.'
-      : 'Use the secure portal to view your application status and any document requests.';
+      : input.reason === 'interview_invited'
+        ? 'You have been invited to an interview. Open the secure application portal to review the schedule and accept or decline the invitation.'
+        : input.reason === 'interview_rescheduled'
+          ? 'Your application interview schedule has been updated. Open the secure portal to review the current interview details.'
+          : 'Use the secure portal to view your application status and any document requests.';
   const subject = input.reason === 'documents_requested'
     ? `Documents requested for your Ambulant+ application — ${input.referenceCode}`
     : input.reason === 'document_resubmission'
       ? `Document resubmission requested — ${input.referenceCode}`
-      : `Secure access to your Ambulant+ application — ${input.referenceCode}`;
+      : input.reason === 'interview_invited'
+        ? `Interview invitation — ${input.referenceCode}`
+        : input.reason === 'interview_rescheduled'
+          ? `Interview rescheduled — ${input.referenceCode}`
+          : `Secure access to your Ambulant+ application — ${input.referenceCode}`;
   const text = [
     'Secure Ambulant+ application access',
     '',
@@ -440,7 +460,7 @@ async function applicationPortalAuthority(input: {
   return access;
 }
 
-function serializePortalApplication(application: any) {
+function serializePortalApplication(application: any, interview: any = null) {
   return {
     referenceCode: application.referenceCode,
     status: application.status,
@@ -455,6 +475,7 @@ function serializePortalApplication(application: any) {
           createdAt: event.createdAt,
         }))
       : [],
+    interview: serializePublicApplicationInterview(interview),
     documentCycles: Array.isArray(application.documentCycles)
       ? application.documentCycles.map((cycle: any) => ({
           id: cycle.id,
@@ -490,10 +511,72 @@ export async function getApplicationPortal(input: {
   token: string;
 }) {
   const access = await applicationPortalAuthority(input);
+  const interview = await latestApplicationInterview(access.applicationId);
   return {
     ok: true,
-    application: serializePortalApplication(access.application),
+    application: serializePortalApplication(access.application, interview),
   };
+}
+
+function rethrowInterviewPortalError(error: unknown): never {
+  if (error instanceof ApplicationInterviewError) {
+    throw new PublicApplicationPortalError(error.code, error.status);
+  }
+  throw error;
+}
+
+export async function respondToApplicationInterviewFromPortal(input: {
+  referenceCode: unknown;
+  token: string;
+  clientKey: string;
+  response: unknown;
+}) {
+  const access = await applicationPortalAuthority(input);
+  await enforceApplicationPortalRateLimit({
+    scope: `application:interview:respond:${access.applicationId}`,
+    clientKey: input.clientKey,
+    limit: 12,
+    windowSeconds: 15 * 60,
+  });
+
+  try {
+    return await respondToApplicationInterview({
+      applicationId: access.applicationId,
+      actor: {
+        actorType: 'EXTERNAL_GUEST',
+        actorRefId: access.id,
+      },
+      response: input.response,
+    });
+  } catch (error) {
+    return rethrowInterviewPortalError(error);
+  }
+}
+
+export async function resendApplicationInterviewFromPortal(input: {
+  referenceCode: unknown;
+  token: string;
+  clientKey: string;
+}) {
+  const access = await applicationPortalAuthority(input);
+  await enforceApplicationPortalRateLimit({
+    scope: `application:interview:resend:${access.applicationId}`,
+    clientKey: input.clientKey,
+    limit: 4,
+    windowSeconds: 15 * 60,
+  });
+
+  try {
+    return await resendApplicationInterviewInvitation({
+      applicationId: access.applicationId,
+      actor: {
+        actorType: 'EXTERNAL_GUEST',
+        actorRefId: access.id,
+      },
+    });
+  } catch (error) {
+    return rethrowInterviewPortalError(error);
+  }
 }
 
 async function deliverWithdrawalConfirmation(application: any) {

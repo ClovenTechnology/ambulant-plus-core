@@ -31,6 +31,22 @@ export type ApplicationPortalFile = {
   createdAt: string;
 };
 
+export type ApplicationPortalInterview = {
+  id: string;
+  state: string;
+  title: string;
+  timezone: string;
+  startsAt: string;
+  endsAt: string;
+  durationMinutes: number;
+  updatedAt: string;
+  intervieweeState: string | null;
+  interviewers: Array<{
+    displayName: string;
+    role: string;
+  }>;
+};
+
 export type ApplicationPortalDocumentRequest = {
   id: string;
   requestKey: string;
@@ -58,6 +74,7 @@ export type ApplicationPortal = {
     referenceCode?: string | null;
     type: string;
   };
+  interview: ApplicationPortalInterview | null;
   statusHistory: Array<{
     id: string;
     fromStatus?: ApplicationStatus | null;

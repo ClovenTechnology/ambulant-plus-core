@@ -2,19 +2,28 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CheckCircle2, Download, FileText, RefreshCw, ShieldAlert, UploadCloud, UserRoundCog, XCircle } from 'lucide-react';
+import { ArrowLeft, CalendarClock, CheckCircle2, Download, FileText, Mail, RefreshCw, ShieldAlert, UploadCloud, UserRoundCog, Video, XCircle } from 'lucide-react';
 import {
   STATUS_LABELS,
   adminDocumentRequestExpired,
   canCompleteAdminDocumentCycle,
   documentRequestStatusLabel,
   formatApplicationDate,
+  formatApplicationInterviewDate,
+  applicationInterviewLocalInputValue,
   formatApplicationValue,
   humanizeApplicationError,
   reviewActions,
   stageGovernanceNote,
+  applicationInterviewResponseLabel,
+  applicationInterviewStateLabel,
+  canManageInterviewFromApplication,
+  canScheduleInterviewFromApplication,
   type AdminApplicationDetail,
+  type AdminApplicationInterview,
+  type AdminApplicationInterviewPayload,
   type ApplicationStatus,
+  type InterviewerOption,
   type ReviewerOption,
 } from '../application-ui';
 
@@ -22,6 +31,7 @@ export const dynamic = 'force-dynamic';
 
 type DetailPayload = { ok: boolean; application?: AdminApplicationDetail; error?: string };
 type ReviewerPayload = { ok: boolean; reviewers?: ReviewerOption[]; error?: string };
+type InterviewerPayload = { ok: boolean; interviewers?: InterviewerOption[]; error?: string };
 
 export default function AdminApplicationDetailPage({ params }: { params: { id: string } }) {
   const [application, setApplication] = useState<AdminApplicationDetail | null>(null);
@@ -35,6 +45,14 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
   const [documentDueAt, setDocumentDueAt] = useState('');
   const [documentRequired, setDocumentRequired] = useState(true);
   const [documentRerequestDueAt, setDocumentRerequestDueAt] = useState<Record<string, string>>({});
+  const [interview, setInterview] = useState<AdminApplicationInterview | null>(null);
+  const [interviewPermissions, setInterviewPermissions] = useState({ canRead: false, canSchedule: false, canManage: false });
+  const [interviewers, setInterviewers] = useState<InterviewerOption[]>([]);
+  const [interviewStartsAt, setInterviewStartsAt] = useState('');
+  const [interviewTimezone, setInterviewTimezone] = useState('Africa/Johannesburg');
+  const [interviewDuration, setInterviewDuration] = useState('60');
+  const [interviewerIds, setInterviewerIds] = useState<string[]>([]);
+  const [interviewApplicantMessage, setInterviewApplicantMessage] = useState('');
 
   async function load() {
     setBusy(true);
@@ -70,9 +88,47 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
     }
   }
 
+  async function loadInterview() {
+    try {
+      const response = await fetch(`/api/admin/applications/${encodeURIComponent(params.id)}/interview`, { cache: 'no-store' });
+      const json = (await response.json().catch(() => null)) as AdminApplicationInterviewPayload | null;
+      if (response.status === 403) {
+        setInterviewPermissions({ canRead: false, canSchedule: false, canManage: false });
+        setInterview(null);
+        return;
+      }
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'application_interview_load_failed');
+      setInterview(json.interview || null);
+      setInterviewPermissions(json.permissions || { canRead: true, canSchedule: false, canManage: false });
+      if (json.interview) {
+        const timezone = json.interview.timezone || 'Africa/Johannesburg';
+        setInterviewTimezone(timezone);
+        setInterviewStartsAt(applicationInterviewLocalInputValue(json.interview.startsAt, timezone));
+        setInterviewDuration(String(json.interview.durationMinutes || 60));
+        setInterviewerIds(json.interview.interviewers.map((item) => item.profileId).filter(Boolean) as string[]);
+      }
+    } catch (err: any) {
+      setError(humanizeApplicationError(err?.message));
+    }
+  }
+
+  async function loadInterviewers() {
+    try {
+      const response = await fetch('/api/admin/applications/interviewers', { cache: 'no-store' });
+      if (response.status === 403) return;
+      const json = (await response.json().catch(() => null)) as InterviewerPayload | null;
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'application_interview_interviewer_list_failed');
+      setInterviewers(Array.isArray(json.interviewers) ? json.interviewers : []);
+    } catch (err: any) {
+      setError(humanizeApplicationError(err?.message));
+    }
+  }
+
   useEffect(() => {
     void load();
     void loadReviewers();
+    void loadInterview();
+    void loadInterviewers();
   }, [params.id]);
 
   const groupedAnswers = useMemo(() => {
@@ -237,6 +293,74 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
     }
   }
 
+  async function saveInterview(mode: 'schedule' | 'reschedule') {
+    if (!application || !interviewStartsAt || interviewerIds.length === 0) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/admin/applications/${encodeURIComponent(application.id)}/interview`, {
+        method: mode === 'schedule' ? 'POST' : 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          startsAtLocal: interviewStartsAt,
+          timezone: interviewTimezone,
+          durationMinutes: Number(interviewDuration || 60),
+          interviewerProfileIds: interviewerIds,
+          applicantMessage: interviewApplicantMessage.trim() || null,
+        }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) throw new Error(json?.error || (mode === 'schedule' ? 'application_interview_schedule_failed' : 'application_interview_reschedule_failed'));
+      setInterviewApplicantMessage('');
+      await Promise.all([load(), loadInterview()]);
+    } catch (err: any) {
+      setError(humanizeApplicationError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendInterviewInvite() {
+    if (!application) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/admin/applications/${encodeURIComponent(application.id)}/interview/resend`, { method: 'POST' });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'application_interview_resend_failed');
+      await loadInterview();
+    } catch (err: any) {
+      setError(humanizeApplicationError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelInterview() {
+    if (!application || !interview) return;
+    const reason = window.prompt('Internal interview cancellation reason (required; not shown to the applicant)') || '';
+    if (!reason.trim()) return;
+    const applicantMessage = window.prompt('Optional applicant-facing cancellation message') || '';
+    if (!window.confirm('Cancel this interview and return the application to Shortlisted?')) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/admin/applications/${encodeURIComponent(application.id)}/interview`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ reason, applicantMessage }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'application_interview_cancel_failed');
+      setInterviewStartsAt('');
+      await Promise.all([load(), loadInterview()]);
+    } catch (err: any) {
+      setError(humanizeApplicationError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function completeDocumentCycle() {
     if (!application?.documents.canReview) return;
     if (!window.confirm('Complete this document review cycle and return the application to its prior review stage?')) return;
@@ -267,6 +391,8 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
     application?.documents.canRequest &&
     ['UNDER_REVIEW', 'SHORTLISTED', 'DOCUMENTS_REQUESTED'].includes(application.status),
   );
+  const canScheduleInterview = Boolean(application && interviewPermissions.canSchedule && canScheduleInterviewFromApplication(application.status));
+  const canManageInterview = Boolean(application && interviewPermissions.canManage && interview && canManageInterviewFromApplication(application.status, interview.state));
 
   return (
     <main className="space-y-6 p-4 lg:p-6">
@@ -277,7 +403,7 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
           <p className="mt-2 text-sm text-slate-500">{application?.opportunity.title || ''}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button type="button" onClick={load} disabled={busy} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm"><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} /> Refresh</button>
+          <button type="button" onClick={() => void Promise.all([load(), loadInterview(), loadInterviewers()])} disabled={busy} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm"><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} /> Refresh</button>
           {actions.map((action) => (
             <button key={action.toStatus} type="button" onClick={() => transition(action.toStatus)} disabled={busy} className={`inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold ${action.kind === 'danger' ? 'border border-rose-200 text-rose-700' : 'bg-slate-950 text-white'}`}>
               {action.kind === 'danger' ? <XCircle className="h-4 w-4" /> : <CheckCircle2 className="h-4 w-4" />}{action.label}
@@ -364,6 +490,19 @@ export default function AdminApplicationDetailPage({ params }: { params: { id: s
             )) : <p className="text-sm text-slate-500">No applicant-document cycle has been opened.</p>) : null}
 
             {canStartOrAddDocumentRequest ? <div className="rounded-2xl border border-dashed p-4"><div className="flex items-center gap-2"><UploadCloud className="h-4 w-4" /><h3 className="text-sm font-semibold">Request a document</h3></div><div className="mt-3 grid gap-3 md:grid-cols-2"><input value={documentTitle} onChange={(event) => setDocumentTitle(event.target.value)} placeholder="Document title" className="rounded-xl border px-3 py-2 text-sm" /><input type="datetime-local" value={documentDueAt} onChange={(event) => setDocumentDueAt(event.target.value)} className="rounded-xl border px-3 py-2 text-sm" /><textarea value={documentInstructions} onChange={(event) => setDocumentInstructions(event.target.value)} placeholder="Applicant-facing instructions" className="min-h-24 rounded-xl border px-3 py-2 text-sm md:col-span-2" /><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={documentRequired} onChange={(event) => setDocumentRequired(event.target.checked)} /> Required document</label><button type="button" onClick={createDocumentRequest} disabled={busy || !documentTitle.trim()} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Send secure document request</button></div><p className="mt-2 text-xs text-slate-500">Accepted file types: PDF, JPEG and PNG. Maximum 15 MB. This action moves eligible applications into Documents requested only when a real request is created.</p></div> : null}
+          </section>
+
+          <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><div className="flex items-center gap-2"><CalendarClock className="h-5 w-5" /><h2 className="text-lg font-semibold">Interview</h2></div><p className="mt-1 text-sm text-slate-500">Application interviews reuse the shared Meeting, guest invitation, lobby and RTC security model. No parallel video room is created.</p></div>
+              {interview ? <Link href={`/admin/meetings/${encodeURIComponent(interview.id)}`} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold"><Video className="h-4 w-4" /> Open meeting workspace</Link> : null}
+            </div>
+
+            {!interviewPermissions.canRead ? <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Your role does not include <code>applications.interviews.read</code>.</div> : null}
+
+            {interviewPermissions.canRead && interview ? <div className="grid gap-3 rounded-2xl border p-4 md:grid-cols-2"><div><div className="text-xs uppercase tracking-wide text-slate-500">Meeting state</div><div className="mt-1 font-semibold">{applicationInterviewStateLabel(interview.state)}</div></div><div><div className="text-xs uppercase tracking-wide text-slate-500">Applicant response</div><div className="mt-1 font-semibold">{applicationInterviewResponseLabel(interview.interviewee?.state)}</div></div><div><div className="text-xs uppercase tracking-wide text-slate-500">Starts</div><div className="mt-1">{formatApplicationInterviewDate(interview.startsAt, interview.timezone)}</div></div><div><div className="text-xs uppercase tracking-wide text-slate-500">Duration</div><div className="mt-1">{interview.durationMinutes} minutes</div></div><div className="md:col-span-2"><div className="text-xs uppercase tracking-wide text-slate-500">Interview panel</div><div className="mt-2 flex flex-wrap gap-2">{interview.interviewers.map((item) => <span key={item.participantId} className="rounded-full bg-slate-100 px-3 py-1 text-xs">{item.displayName} · {item.role}</span>)}</div></div></div> : null}
+
+            {(canScheduleInterview || canManageInterview) ? <div className="rounded-2xl border border-dashed p-4"><div className="grid gap-3 md:grid-cols-2"><label className="text-sm"><span className="mb-1 block font-medium">Interview date and time</span><input type="datetime-local" value={interviewStartsAt} onChange={(event) => setInterviewStartsAt(event.target.value)} className="w-full rounded-xl border px-3 py-2" /></label><label className="text-sm"><span className="mb-1 block font-medium">Timezone</span><input value={interviewTimezone} onChange={(event) => setInterviewTimezone(event.target.value)} className="w-full rounded-xl border px-3 py-2" /></label><label className="text-sm"><span className="mb-1 block font-medium">Duration (minutes)</span><input type="number" min="5" max="1440" value={interviewDuration} onChange={(event) => setInterviewDuration(event.target.value)} className="w-full rounded-xl border px-3 py-2" /></label><label className="text-sm"><span className="mb-1 block font-medium">Interview panel</span><select multiple value={interviewerIds} onChange={(event) => setInterviewerIds(Array.from(event.currentTarget.selectedOptions).map((option) => option.value))} className="min-h-28 w-full rounded-xl border px-3 py-2">{interviewers.map((item) => <option key={item.id} value={item.id}>{item.name || item.email}{item.designation?.name ? ` · ${item.designation.name}` : ''}</option>)}</select></label><label className="text-sm md:col-span-2"><span className="mb-1 block font-medium">Optional applicant message</span><textarea value={interviewApplicantMessage} onChange={(event) => setInterviewApplicantMessage(event.target.value)} className="min-h-20 w-full rounded-xl border px-3 py-2" placeholder="Instructions for the interview" /></label></div><div className="mt-3 flex flex-wrap gap-2">{canScheduleInterview ? <button type="button" onClick={() => saveInterview('schedule')} disabled={busy || !interviewStartsAt || interviewerIds.length === 0} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Create interview invitation</button> : null}{canManageInterview ? <button type="button" onClick={() => saveInterview('reschedule')} disabled={busy || !interviewStartsAt || interviewerIds.length === 0} className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Reschedule</button> : null}{canManageInterview ? <button type="button" onClick={resendInterviewInvite} disabled={busy} className="inline-flex items-center gap-2 rounded-xl border px-4 py-2 text-sm font-semibold"><Mail className="h-4 w-4" /> Resend secure invite</button> : null}{canManageInterview ? <button type="button" onClick={cancelInterview} disabled={busy} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700">Cancel interview</button> : null}</div><p className="mt-2 text-xs text-slate-500">The applicant receives a secure Meeting invitation plus a short-lived application-portal access link. Interview invitations never expose a raw token in this Admin page.</p></div> : null}
           </section>
 
           <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm">

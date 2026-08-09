@@ -6,6 +6,10 @@ import {
   accessTokenFromFragment,
   canUploadForRequest,
   canWithdrawFromPortal,
+  canRespondToInterview,
+  canResendInterviewInvite,
+  interviewResponseLabel,
+  formatPortalInterviewDate,
   humanizePortalError,
   normalisePortalReference,
   portalSessionStorageKey,
@@ -171,6 +175,48 @@ export default function ApplicationPortalClient({ reference }: { reference: stri
     }
   }
 
+  async function respondToInterview(responseValue: 'ACCEPT' | 'DECLINE') {
+    if (!token || !application?.interview) return;
+    if (responseValue === 'DECLINE' && !window.confirm('Decline this interview invitation? Your application will return to the shortlist stage.')) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/applications/public/${encodeURIComponent(canonicalReference)}/interview/respond`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-application-access-token': token,
+        },
+        body: JSON.stringify({ response: responseValue }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'application_interview_response_failed');
+      await load();
+    } catch (err: any) {
+      setError(humanizePortalError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resendInterviewInvite() {
+    if (!token || !application?.interview) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/applications/public/${encodeURIComponent(canonicalReference)}/interview/resend`, {
+        method: 'POST',
+        headers: { 'x-application-access-token': token },
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'application_interview_resend_failed');
+    } catch (err: any) {
+      setError(humanizePortalError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function withdraw() {
     if (!token || !application) return;
     if (!window.confirm('Withdraw this application? This action changes your application status immediately.')) return;
@@ -235,6 +281,8 @@ export default function ApplicationPortalClient({ reference }: { reference: stri
               <div><div className="text-xs uppercase tracking-wide text-slate-500">Submitted</div><div className="mt-1">{formatDate(application.submittedAt)}</div></div>
               <div><div className="text-xs uppercase tracking-wide text-slate-500">Last status change</div><div className="mt-1">{formatDate(application.statusChangedAt)}</div></div>
             </section>
+
+            {application.interview ? <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm"><div><h2 className="text-lg font-semibold">Interview</h2><p className="mt-1 text-sm text-slate-500">This interview uses Ambulant+ secure Meeting access. Your join link is sent separately to your application email.</p></div><div className="grid gap-3 sm:grid-cols-2"><div><div className="text-xs uppercase tracking-wide text-slate-500">Schedule</div><div className="mt-1 font-semibold">{formatPortalInterviewDate(application.interview.startsAt, application.interview.timezone)}</div><div className="text-xs text-slate-500">{application.interview.durationMinutes} minutes</div></div><div><div className="text-xs uppercase tracking-wide text-slate-500">Your response</div><div className="mt-1 font-semibold">{interviewResponseLabel(application.interview.intervieweeState)}</div></div></div>{application.interview.interviewers.length ? <div><div className="text-xs uppercase tracking-wide text-slate-500">Interview panel</div><div className="mt-2 flex flex-wrap gap-2">{application.interview.interviewers.map((item, index) => <span key={`${item.displayName}-${index}`} className="rounded-full bg-slate-100 px-3 py-1 text-xs">{item.displayName}</span>)}</div></div> : null}{canRespondToInterview({ applicationStatus: application.status, intervieweeState: application.interview.intervieweeState, meetingState: application.interview.state }) ? <div className="flex flex-wrap gap-2"><button type="button" onClick={() => respondToInterview('ACCEPT')} disabled={busy} className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Accept interview</button><button type="button" onClick={() => respondToInterview('DECLINE')} disabled={busy} className="rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-50">Decline this slot</button></div> : null}{canResendInterviewInvite({ applicationStatus: application.status, meetingState: application.interview.state }) ? <button type="button" onClick={resendInterviewInvite} disabled={busy} className="w-fit rounded-xl border px-4 py-2 text-sm font-semibold disabled:opacity-50">Resend secure interview link</button> : null}<p className="text-xs text-slate-500">Declining the interview slot does not withdraw your application. It returns the application to the shortlist stage so Ambulant+ can issue another invitation if appropriate.</p></section> : null}
 
             <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm">
               <div><h2 className="text-lg font-semibold">Document requests</h2><p className="mt-1 text-sm text-slate-500">Files are uploaded directly to private storage using short-lived upload authorisation. Accepted documents cannot be replaced unless Ambulant+ requests a resubmission.</p></div>

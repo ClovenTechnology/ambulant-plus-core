@@ -36,6 +36,9 @@ const RULES: Array<{
       'meetings.create',
       'meetings.moderate',
       'meetings.audit.read',
+      'applications.interviews.read',
+      'applications.interviews.schedule',
+      'applications.interviews.manage',
     ],
   },
   {
@@ -67,6 +70,9 @@ const RULES: Array<{
       'applications.documents.read',
       'applications.documents.request',
       'applications.documents.review',
+      'applications.interviews.read',
+      'applications.interviews.schedule',
+      'applications.interviews.manage',
     ],
   },
   {

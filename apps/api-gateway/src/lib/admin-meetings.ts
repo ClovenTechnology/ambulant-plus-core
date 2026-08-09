@@ -394,8 +394,17 @@ export async function verifyGuestInvitation(input: {
   const ip = requestIp(input.headers);
 
   const session = await prisma.$transaction(async (tx) => {
-    await tx.meetingInvitation.update({
-      where: { id: invitation.id },
+    const claimedInvitation = await tx.meetingInvitation.updateMany({
+      where: {
+        id: invitation.id,
+        revokedAt: null,
+        expiresAt: { gt: now },
+        state: { in: ['PENDING', 'VERIFIED'] },
+        OR: [
+          { lockedUntil: null },
+          { lockedUntil: { lte: now } },
+        ],
+      },
       data: {
         state: 'VERIFIED',
         verifiedAt: invitation.verifiedAt || now,
@@ -404,6 +413,10 @@ export async function verifyGuestInvitation(input: {
         lockedUntil: null,
       },
     });
+
+    if (claimedInvitation.count !== 1) {
+      throw new Error('invalid_or_expired_invitation');
+    }
 
     await tx.meetingParticipant.update({
       where: { id: invitation.participantId },
@@ -421,7 +434,7 @@ export async function verifyGuestInvitation(input: {
       data: { revokedAt: now },
     });
 
-    return tx.meetingGuestSession.create({
+    const guestSession = await tx.meetingGuestSession.create({
       data: {
         invitationId: invitation.id,
         sessionTokenHash,
@@ -430,6 +443,59 @@ export async function verifyGuestInvitation(input: {
         userAgent: cleanMeetingText(input.headers.get('user-agent'), 1000) || null,
       },
     });
+
+    if (
+      invitation.meeting.kind === 'INTERVIEW' &&
+      invitation.meeting.contextType === 'APPLICATION_INTERVIEW' &&
+      invitation.meeting.contextId &&
+      invitation.participant.role === 'INTERVIEWEE'
+    ) {
+      const moved = await tx.application.updateMany({
+        where: {
+          id: invitation.meeting.contextId,
+          status: 'INTERVIEW_INVITED',
+        },
+        data: {
+          status: 'INTERVIEW_SCHEDULED',
+          statusReason: null,
+          statusChangedAt: now,
+        },
+      });
+
+      if (moved.count === 1) {
+        await tx.applicationStatusEvent.create({
+          data: {
+            applicationId: invitation.meeting.contextId,
+            fromStatus: 'INTERVIEW_INVITED',
+            toStatus: 'INTERVIEW_SCHEDULED',
+            actorType: 'EXTERNAL_GUEST',
+            actorRefId: guestSession.id,
+            metadata: {
+              source: 'application_interview_meeting_guest_verification',
+              meetingId: invitation.meetingId,
+              invitationId: invitation.id,
+            },
+          },
+        });
+
+        await tx.auditLog.create({
+          data: {
+            actorType: 'EXTERNAL_GUEST',
+            actorRefId: guestSession.id,
+            app: 'api-gateway',
+            action: 'application.interview.accepted_via_meeting_access',
+            entityType: 'Application',
+            entityId: invitation.meeting.contextId,
+            meta: {
+              meetingId: invitation.meetingId,
+              invitationId: invitation.id,
+            },
+          },
+        });
+      }
+    }
+
+    return guestSession;
   });
 
   await writeMeetingAudit({
