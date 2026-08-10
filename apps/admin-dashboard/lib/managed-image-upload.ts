@@ -11,7 +11,7 @@ export class ManagedImageUploadError extends Error {
 function uploadErrorMessage(value: unknown, fallback: string) {
   const code = String(value || '').trim();
   const messages: Record<string, string> = {
-    enterprise_media_storage_not_configured: 'Image uploads are temporarily unavailable. Please contact an administrator.',
+    enterprise_media_storage_not_configured: 'Image storage is not configured for this environment. A platform administrator must configure the managed media bucket and region before images can be uploaded.',
     enterprise_media_image_type_invalid: 'Choose a JPEG, PNG or WebP image.',
     enterprise_media_image_size_invalid: 'Image files must be 8 MB or smaller.',
     enterprise_media_checksum_invalid: 'The image could not be verified. Please choose the file again.',

@@ -23,6 +23,15 @@ export function ApplicationStaffConversionPanel({
   const [designationId, setDesignationId] = useState('');
   const [roleIds, setRoleIds] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
+  const [employmentType, setEmploymentType] = useState('permanent');
+  const [contractType, setContractType] = useState('');
+  const [startDate, setStartDate] = useState(new Date().toISOString().slice(0, 10));
+  const [payFrequency, setPayFrequency] = useState('monthly');
+  const [baseSalaryZar, setBaseSalaryZar] = useState('');
+  const [hourlyRateZar, setHourlyRateZar] = useState('');
+  const [taxNumber, setTaxNumber] = useState('');
+  const [annualLeaveDays, setAnnualLeaveDays] = useState('20');
+  const [benefitsText, setBenefitsText] = useState('');
 
   const eligible = ['SUCCESSFUL', 'OFFERED'].includes(application?.status);
   const conversion = application?.staffConversion || null;
@@ -85,6 +94,15 @@ export function ApplicationStaffConversionPanel({
             designationId: designationId || null,
             roleIds,
             notes: notes.trim() || null,
+            employmentType,
+            contractType: contractType.trim() || null,
+            startDate: startDate || null,
+            payFrequency,
+            baseSalaryCents: Math.max(0, Math.round(Number(baseSalaryZar || 0) * 100)),
+            hourlyRateCents: Math.max(0, Math.round(Number(hourlyRateZar || 0) * 100)),
+            taxNumber: taxNumber.trim() || null,
+            annualLeaveDays: Math.max(0, Number(annualLeaveDays || 0)),
+            benefits: benefitsText.split(/[,\n]/).map((item) => item.trim()).filter(Boolean),
           }),
         },
       );
@@ -132,6 +150,21 @@ export function ApplicationStaffConversionPanel({
           <label className="text-sm"><span className="mb-1 block font-medium">Department</span><select value={departmentId} onChange={(event) => { setDepartmentId(event.target.value); setDesignationId(''); }} className="w-full rounded-xl border px-3 py-2"><option value="">None</option>{(workspace?.support?.departments || []).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label className="text-sm"><span className="mb-1 block font-medium">Designation</span><select value={designationId} onChange={(event) => setDesignationId(event.target.value)} className="w-full rounded-xl border px-3 py-2"><option value="">None</option>{designations.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label className="text-sm"><span className="mb-1 block font-medium">Direct roles</span><select multiple value={roleIds} onChange={(event) => setRoleIds(Array.from(event.currentTarget.selectedOptions).map((option) => option.value))} className="min-h-24 w-full rounded-xl border px-3 py-2">{(workspace?.support?.roles || []).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+          <div className="md:col-span-2 mt-2 rounded-2xl border bg-slate-50 p-4">
+            <div className="font-semibold text-slate-900">Employment & payroll setup</div>
+            <p className="mt-1 text-xs text-slate-500">These details become the initial Staff employment/payroll profile after the onboarding request is approved. They can be reviewed later from the Staff profile.</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              <label className="text-sm"><span className="mb-1 block font-medium">Employment type</span><select value={employmentType} onChange={(event) => setEmploymentType(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2"><option value="permanent">Permanent</option><option value="fixed-term">Fixed term</option><option value="part-time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option></select></label>
+              <label className="text-sm"><span className="mb-1 block font-medium">Contract type</span><input value={contractType} onChange={(event) => setContractType(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2" placeholder="e.g. Permanent employment" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium">Employment start date</span><input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium">Pay frequency</span><select value={payFrequency} onChange={(event) => setPayFrequency(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2"><option value="monthly">Monthly</option><option value="fortnightly">Fortnightly</option><option value="weekly">Weekly</option><option value="hourly">Hourly / timesheet</option></select></label>
+              <label className="text-sm"><span className="mb-1 block font-medium">Base salary (ZAR)</span><input inputMode="decimal" value={baseSalaryZar} onChange={(event) => setBaseSalaryZar(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2" placeholder="0.00" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium">Hourly rate (ZAR)</span><input inputMode="decimal" value={hourlyRateZar} onChange={(event) => setHourlyRateZar(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2" placeholder="0.00" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium">Tax number</span><input value={taxNumber} onChange={(event) => setTaxNumber(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2" placeholder="Optional at onboarding" /></label>
+              <label className="text-sm"><span className="mb-1 block font-medium">Annual leave entitlement (days)</span><input type="number" min="0" step="0.5" value={annualLeaveDays} onChange={(event) => setAnnualLeaveDays(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2" /></label>
+              <label className="text-sm lg:col-span-2"><span className="mb-1 block font-medium">Benefits / privileges</span><textarea value={benefitsText} onChange={(event) => setBenefitsText(event.target.value)} className="min-h-20 w-full rounded-xl border bg-white p-3" placeholder="Medical aid, phone allowance, performance bonus…" /></label>
+            </div>
+          </div>
           <label className="text-sm md:col-span-2"><span className="mb-1 block font-medium">Internal onboarding notes</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} className="min-h-20 w-full rounded-xl border p-3" /></label>
           <div className="md:col-span-2"><button type="button" onClick={startConversion} disabled={busy || !email.trim() || (!roleIds.length && !designationId)} className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Start staff onboarding</button><p className="mt-2 text-xs text-slate-500">The staff profile will be activated after the required approval and account setup are completed.</p></div>
         </div>

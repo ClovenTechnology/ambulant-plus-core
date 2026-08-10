@@ -501,6 +501,19 @@ export async function initiateApplicationStaffConversion(input: {
   const designationId = cleanText(input.body?.designationId ?? template?.defaultDesignationId, 160);
   const notes = cleanText(input.body?.notes, 2000);
   const name = cleanText(input.body?.name, 240);
+  const onboardingMeta = {
+    employmentType: cleanText(input.body?.employmentType || 'permanent', 80) || 'permanent',
+    contractType: cleanText(input.body?.contractType, 120),
+    startDate: cleanText(input.body?.startDate, 40),
+    payFrequency: cleanText(input.body?.payFrequency || 'monthly', 80) || 'monthly',
+    baseSalaryCents: Math.max(0, Math.floor(Number(input.body?.baseSalaryCents) || 0)),
+    hourlyRateCents: Math.max(0, Math.floor(Number(input.body?.hourlyRateCents) || 0)),
+    taxNumber: cleanText(input.body?.taxNumber, 180),
+    annualLeaveDays: Math.max(0, Number(input.body?.annualLeaveDays) || 0),
+    benefits: Array.isArray(input.body?.benefits)
+      ? input.body.benefits.map((item: unknown) => cleanText(item, 240)).filter(Boolean).slice(0, 50)
+      : [],
+  };
 
   const application = await prisma.application.findUnique({
     where: { id: input.applicationId },
@@ -599,6 +612,7 @@ export async function initiateApplicationStaffConversion(input: {
             activatedByProfileId: null,
             activatedAt: null,
             notes,
+            onboardingMeta,
           },
           include: { roleRequest: true, staffProfile: true },
         })
@@ -609,6 +623,7 @@ export async function initiateApplicationStaffConversion(input: {
             status: 'PENDING_APPROVAL',
             initiatedByProfileId: input.actor.profileId,
             notes,
+            onboardingMeta,
           },
           include: { roleRequest: true, staffProfile: true },
         });
@@ -630,6 +645,10 @@ export async function initiateApplicationStaffConversion(input: {
           credentialReady: Boolean(credential),
           existingProfileId: existingProfile?.id || null,
           templateId: template?.id || null,
+          employmentType: onboardingMeta.employmentType,
+          startDate: onboardingMeta.startDate,
+          payFrequency: onboardingMeta.payFrequency,
+          compensationConfigured: onboardingMeta.baseSalaryCents > 0 || onboardingMeta.hourlyRateCents > 0,
         },
       },
     });

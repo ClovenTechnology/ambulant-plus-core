@@ -94,7 +94,20 @@ export default async function OpportunitiesPage({
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           {result.items.map((item) => (
             <article key={item.slug} className="overflow-hidden rounded-3xl border bg-white shadow-sm">
-              {item.imageUrl ? <img src={item.imageUrl} alt={item.imageAlt || ''} className="h-56 w-full object-cover" /> : null}
+              {item.imageUrl ? (
+                (item.galleryImages ?? []).length ? (
+                  <div className="grid h-56 grid-cols-3 gap-px bg-slate-100">
+                    <img src={item.imageUrl} alt={item.imageAlt || ''} className="col-span-2 h-56 w-full object-cover" />
+                    <div className={`grid h-56 ${(item.galleryImages ?? []).length > 1 ? 'grid-rows-2' : 'grid-rows-1'} gap-px`}>
+                      {(item.galleryImages ?? []).slice(0, 2).map((image) => (
+                        image.imageUrl ? <img key={image.id} src={image.imageUrl} alt={image.altText || ''} className="h-full min-h-0 w-full object-cover" /> : null
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <img src={item.imageUrl} alt={item.imageAlt || ''} className="h-56 w-full object-cover" />
+                )
+              ) : null}
               <div className="p-6">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${publicAvailabilityClass(item.availability)}`}>{publicAvailabilityLabel(item.availability)}</span>

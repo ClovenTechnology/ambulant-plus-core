@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { RefreshCw, Search, UsersRound } from 'lucide-react';
+import { BadgeCheck, RefreshCw, Search, UsersRound } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -110,7 +110,7 @@ export default function AdminStaffDirectoryPage() {
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Staff Directory</h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-600">Manage staff profiles, roles, departments, availability and employment status from one directory.</p>
         </div>
-        <button type="button" onClick={load} disabled={busy} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />Refresh</button>
+        <div className="flex flex-wrap gap-2"><Link href="/admin/staff/id-template" className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm font-medium"><BadgeCheck className="h-4 w-4" />Staff ID template</Link><button type="button" onClick={load} disabled={busy} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />Refresh</button></div>
       </header>
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { AdminStaffActor } from '@/src/lib/admin-staff-auth';
 import { isManagedEnterpriseMediaRef } from '@/src/lib/enterprise-media-storage';
+import { generateOpportunityDiscovery } from '@/src/lib/opportunity-discovery';
 import {
   cleanOpportunityText,
   isOpportunityApplicationMode,
@@ -88,6 +89,18 @@ export const opportunityAdminInclude = {
   pausedByProfile: { select: { id: true, name: true, email: true } },
   closedByProfile: { select: { id: true, name: true, email: true } },
   archivedByProfile: { select: { id: true, name: true, email: true } },
+  galleryImages: {
+    orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
+    select: {
+      id: true,
+      mediaRef: true,
+      altText: true,
+      caption: true,
+      sortOrder: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  },
   _count: { select: { applications: true } },
 };
 
@@ -111,6 +124,9 @@ export type OpportunityWriteInput = {
   ctaLabel: string | null;
   seoTitle: string | null;
   seoDescription: string | null;
+  aeoSummary: string | null;
+  aeoQuestions: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  discoveryMeta: Prisma.InputJsonValue | typeof Prisma.JsonNull;
   departmentLabel: string | null;
   locationMode: import('@/src/lib/opportunities-policy').OpportunityLocationMode | null;
   locationLabel: string | null;
@@ -123,9 +139,28 @@ export type OpportunityWriteInput = {
   sortOrder: number;
 };
 
+function normaliseAeoQuestions(value: unknown) {
+  if (!Array.isArray(value)) return null;
+  const items = value
+    .slice(0, 12)
+    .map((item) => {
+      const question = cleanOpportunityText((item as any)?.question, 240);
+      const answer = cleanOpportunityText((item as any)?.answer, 1000);
+      return question && answer ? { question, answer } : null;
+    })
+    .filter(Boolean) as Array<{ question: string; answer: string }>;
+  return items.length ? items : null;
+}
+
+type OpportunityWriteDefaults =
+  Omit<Partial<OpportunityWriteInput>, 'aeoQuestions' | 'discoveryMeta'> & {
+    aeoQuestions?: unknown;
+    discoveryMeta?: unknown;
+  };
+
 export function parseOpportunityWriteInput(
   body: any,
-  defaults: Partial<OpportunityWriteInput> = {},
+  defaults: OpportunityWriteDefaults = {},
 ): OpportunityWriteInput {
   const title = cleanOpportunityText(body?.title ?? defaults.title, 240);
   const key = normaliseOpportunityKey(body?.key ?? defaults.key ?? title);
@@ -242,6 +277,58 @@ export function parseOpportunityWriteInput(
     throw new OpportunityDomainError('invalid_opportunity_sort_order', 400);
   }
 
+  const summary =
+    cleanOpportunityText(body?.summary ?? defaults.summary, 1200) || null;
+  const description =
+    cleanOpportunityText(body?.description ?? defaults.description, 50000) || null;
+  const tags = normaliseOpportunityTags(
+    body?.tags === undefined ? defaults.tags : body.tags,
+  );
+  const audienceLabel =
+    cleanOpportunityText(body?.audienceLabel ?? defaults.audienceLabel, 160) || null;
+  const commitmentLabel =
+    cleanOpportunityText(body?.commitmentLabel ?? defaults.commitmentLabel, 160) || null;
+  const commercialLabel =
+    cleanOpportunityText(body?.commercialLabel ?? defaults.commercialLabel, 200) || null;
+  const ctaLabel =
+    cleanOpportunityText(body?.ctaLabel ?? defaults.ctaLabel, 80) || null;
+  const departmentLabel =
+    cleanOpportunityText(body?.departmentLabel ?? defaults.departmentLabel, 160) || null;
+  const locationLabel =
+    cleanOpportunityText(body?.locationLabel ?? defaults.locationLabel, 240) || null;
+
+  const generated = generateOpportunityDiscovery({
+    title,
+    type,
+    summary,
+    description,
+    tags,
+    audienceLabel,
+    commitmentLabel,
+    commercialLabel,
+    ctaLabel,
+    departmentLabel,
+    locationMode,
+    locationLabel,
+    countryCode,
+    opensAt,
+    closesAt,
+  });
+
+  const explicitSeoTitle =
+    cleanOpportunityText(body?.seoTitle ?? defaults.seoTitle, 240) || null;
+  const explicitSeoDescription =
+    cleanOpportunityText(body?.seoDescription ?? defaults.seoDescription, 500) || null;
+  const explicitAeoSummary =
+    cleanOpportunityText(body?.aeoSummary ?? defaults.aeoSummary, 1200) || null;
+  const explicitAeoQuestions = normaliseAeoQuestions(
+    body?.aeoQuestions === undefined ? defaults.aeoQuestions : body.aeoQuestions,
+  );
+  const existingDiscoveryMeta =
+    (body?.discoveryMeta === undefined ? defaults.discoveryMeta : body.discoveryMeta);
+  const effectiveAeoQuestions =
+    explicitAeoQuestions || generated.aeoQuestions;
+
   return {
     key,
     slug,
@@ -249,33 +336,33 @@ export function parseOpportunityWriteInput(
     visibility,
     applicationMode,
     title,
-    summary: cleanOpportunityText(body?.summary ?? defaults.summary, 1200) || null,
-    description:
-      cleanOpportunityText(body?.description ?? defaults.description, 50000) || null,
+    summary,
+    description,
     imageUrl,
     imageAlt,
-    tags: normaliseOpportunityTags(
-      body?.tags === undefined ? defaults.tags : body.tags,
-    ),
+    tags,
     referenceCode:
       cleanOpportunityText(body?.referenceCode ?? defaults.referenceCode, 80) || null,
-    audienceLabel:
-      cleanOpportunityText(body?.audienceLabel ?? defaults.audienceLabel, 160) || null,
-    commitmentLabel:
-      cleanOpportunityText(body?.commitmentLabel ?? defaults.commitmentLabel, 160) || null,
-    commercialLabel:
-      cleanOpportunityText(body?.commercialLabel ?? defaults.commercialLabel, 200) || null,
-    ctaLabel:
-      cleanOpportunityText(body?.ctaLabel ?? defaults.ctaLabel, 80) || null,
-    seoTitle:
-      cleanOpportunityText(body?.seoTitle ?? defaults.seoTitle, 240) || null,
-    seoDescription:
-      cleanOpportunityText(body?.seoDescription ?? defaults.seoDescription, 500) || null,
-    departmentLabel:
-      cleanOpportunityText(body?.departmentLabel ?? defaults.departmentLabel, 160) || null,
+    audienceLabel,
+    commitmentLabel,
+    commercialLabel,
+    ctaLabel,
+    seoTitle: explicitSeoTitle || generated.seoTitle,
+    seoDescription: explicitSeoDescription || generated.seoDescription,
+    aeoSummary: explicitAeoSummary || generated.aeoSummary,
+    aeoQuestions:
+      effectiveAeoQuestions?.length
+        ? effectiveAeoQuestions
+        : Prisma.JsonNull,
+    discoveryMeta:
+      existingDiscoveryMeta &&
+      typeof existingDiscoveryMeta === 'object' &&
+      !Array.isArray(existingDiscoveryMeta)
+        ? existingDiscoveryMeta as unknown as Prisma.InputJsonObject
+        : generated.discoveryMeta as unknown as Prisma.InputJsonObject,
+    departmentLabel,
     locationMode,
-    locationLabel:
-      cleanOpportunityText(body?.locationLabel ?? defaults.locationLabel, 240) || null,
+    locationLabel,
     countryCode,
     opensAt,
     closesAt,
@@ -292,6 +379,19 @@ export function serializeAdminOpportunity(row: any) {
     imageUrl: isManagedEnterpriseMediaRef(row?.imageUrl)
       ? `/api/admin/opportunities/${encodeURIComponent(String(row.id))}/image`
       : row?.imageUrl || null,
+    galleryImages: Array.isArray(row?.galleryImages)
+      ? row.galleryImages.map((image: any) => ({
+          id: String(image.id),
+          imageUrl: isManagedEnterpriseMediaRef(image.mediaRef)
+            ? `/api/admin/opportunities/${encodeURIComponent(String(row.id))}/gallery/${encodeURIComponent(String(image.id))}`
+            : image.mediaRef || null,
+          altText: image.altText || '',
+          caption: image.caption || null,
+          sortOrder: Number(image.sortOrder || 0),
+          createdAt: image.createdAt,
+          updatedAt: image.updatedAt,
+        }))
+      : [],
   };
 }
 
@@ -457,6 +557,15 @@ export function serializePublicOpportunity(row: any, now = new Date()) {
     description: row.description,
     imageUrl: row.imageUrl,
     imageAlt: row.imageAlt,
+    galleryImages: Array.isArray(row.galleryImages)
+      ? row.galleryImages.map((image: any) => ({
+          id: String(image.id),
+          imageUrl: image.mediaRef || null,
+          altText: image.altText || '',
+          caption: image.caption || null,
+          sortOrder: Number(image.sortOrder || 0),
+        }))
+      : [],
     tags: Array.isArray(row.tags) ? row.tags : [],
     referenceCode: row.referenceCode,
     audienceLabel: row.audienceLabel,
@@ -465,6 +574,9 @@ export function serializePublicOpportunity(row: any, now = new Date()) {
     ctaLabel: row.ctaLabel,
     seoTitle: row.seoTitle,
     seoDescription: row.seoDescription,
+    aeoSummary: row.aeoSummary,
+    aeoQuestions: Array.isArray(row.aeoQuestions) ? row.aeoQuestions : [],
+    discoveryMeta: row.discoveryMeta,
     departmentLabel: row.departmentLabel,
     locationMode: row.locationMode,
     locationLabel: row.locationLabel,

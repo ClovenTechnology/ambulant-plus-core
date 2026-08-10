@@ -27,6 +27,120 @@ export async function generateMetadata({ params }: { params: { slug: string } })
   };
 }
 
+function isoDate(value?: string | null) {
+  if (!value) return undefined;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+}
+
+function countryName(code: unknown) {
+  const countryCode = String(code || '').trim().toUpperCase();
+  if (!countryCode) return '';
+  try {
+    return new Intl.DisplayNames(['en'], { type: 'region' }).of(countryCode) || countryCode;
+  } catch {
+    return countryCode;
+  }
+}
+
+function jobPostingStructuredData(opportunity: any) {
+  if (!['CAREER_JOB', 'INTERNSHIP_GRADUATE'].includes(opportunity.type)) return null;
+
+  const datePosted = isoDate(opportunity.publishedAt);
+  if (!datePosted) return null;
+
+  const commitment = String(opportunity.commitmentLabel || '').toUpperCase();
+  const employmentType = opportunity.type === 'INTERNSHIP_GRADUATE'
+    ? 'INTERN'
+    : commitment.includes('PART')
+      ? 'PART_TIME'
+      : commitment.includes('CONTRACT')
+        ? 'CONTRACTOR'
+        : commitment.includes('TEMP')
+          ? 'TEMPORARY'
+          : 'FULL_TIME';
+
+  const locationMode = String(opportunity.locationMode || '').toUpperCase();
+  const remote = locationMode === 'REMOTE';
+  const applicantCountry = countryName(opportunity.countryCode);
+
+  const data: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': 'JobPosting',
+    title: opportunity.title,
+    description:
+      opportunity.description ||
+      opportunity.aeoSummary ||
+      opportunity.summary ||
+      opportunity.title,
+    datePosted,
+    validThrough: isoDate(opportunity.closesAt),
+    employmentType,
+    identifier: opportunity.referenceCode
+      ? {
+          '@type': 'PropertyValue',
+          name: 'Ambulant+',
+          value: opportunity.referenceCode,
+        }
+      : undefined,
+    directApply: opportunity.application?.mode === 'ENTERPRISE_FORM',
+    hiringOrganization: {
+      '@type': 'Organization',
+      name: 'Ambulant+',
+      sameAs: absoluteUrl('/'),
+    },
+    ...(remote
+      ? {
+          jobLocationType: 'TELECOMMUTE',
+          applicantLocationRequirements: applicantCountry
+            ? {
+                '@type': 'Country',
+                name: applicantCountry,
+              }
+            : undefined,
+        }
+      : opportunity.locationLabel
+        ? {
+            jobLocation: {
+              '@type': 'Place',
+              address: {
+                '@type': 'PostalAddress',
+                addressLocality: opportunity.locationLabel,
+                addressCountry: opportunity.countryCode || 'ZA',
+              },
+            },
+          }
+        : {}),
+  };
+
+  return Object.fromEntries(
+    Object.entries(data).filter(([, value]) => value !== undefined),
+  );
+}
+
+function faqStructuredData(opportunity: any) {
+  const questions = Array.isArray(opportunity.aeoQuestions)
+    ? opportunity.aeoQuestions
+        .filter((item: any) => String(item?.question || '').trim() && String(item?.answer || '').trim())
+        .slice(0, 12)
+    : [];
+
+  if (!questions.length) return null;
+
+  return {
+    '@context': 'https://schema.org',
+    '@type': 'FAQPage',
+    mainEntity: questions.map((item: any) => ({
+      '@type': 'Question',
+      name: String(item.question).trim(),
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: String(item.answer).trim(),
+      },
+    })),
+  };
+}
+
 export default async function OpportunityDetailPage({ params }: { params: { slug: string } }) {
   const opportunity = await fetchPublicOpportunity(params.slug).catch(() => null);
   if (!opportunity) notFound();
@@ -42,8 +156,23 @@ export default async function OpportunityDetailPage({ params }: { params: { slug
         ? 'Applications are closed.'
         : 'Applications are currently unavailable.';
 
+  const structuredJob = jobPostingStructuredData(opportunity);
+  const structuredFaq = faqStructuredData(opportunity);
+
   return (
     <main className="min-h-screen bg-slate-50">
+      {structuredJob ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredJob).replace(/</g, '\\u003c') }}
+        />
+      ) : null}
+      {structuredFaq ? (
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredFaq).replace(/</g, '\\u003c') }}
+        />
+      ) : null}
       <section className="border-b bg-white">
         <div className="mx-auto max-w-7xl px-4 py-8 md:px-6">
           <Link href="/opportunities" className="inline-flex items-center gap-2 text-sm font-medium text-slate-500 hover:text-slate-950"><ArrowLeft className="h-4 w-4" /> All opportunities</Link>
@@ -63,9 +192,47 @@ export default async function OpportunityDetailPage({ params }: { params: { slug
               <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">{opportunity.title}</h1>
               {opportunity.summary ? <p className="mt-5 text-lg leading-8 text-slate-600">{opportunity.summary}</p> : null}
 
+              {opportunity.aeoSummary ? (
+                <section className="mt-7 rounded-2xl border border-cyan-100 bg-cyan-50/50 p-5">
+                  <h2 className="text-sm font-semibold uppercase tracking-[0.14em] text-cyan-800">At a glance</h2>
+                  <p className="mt-2 text-[15px] leading-7 text-slate-700">{opportunity.aeoSummary}</p>
+                </section>
+              ) : null}
+
               {opportunity.tags.length ? <div className="mt-6 flex flex-wrap gap-2">{opportunity.tags.map((tag) => <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{tag}</span>)}</div> : null}
 
               {opportunity.description ? <div className="mt-8 whitespace-pre-wrap border-t pt-8 text-[15px] leading-8 text-slate-700">{opportunity.description}</div> : null}
+
+              {Array.isArray(opportunity.galleryImages) && opportunity.galleryImages.length ? (
+                <section className="mt-8 border-t pt-8">
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Gallery</h2>
+                    <span className="text-sm text-slate-400">{opportunity.galleryImages.length} {opportunity.galleryImages.length === 1 ? 'image' : 'images'}</span>
+                  </div>
+                  <div className="mt-5 grid gap-4 md:grid-cols-2">
+                    {opportunity.galleryImages.map((image) => (
+                      <figure key={image.id} className="overflow-hidden rounded-2xl border bg-slate-50">
+                        {image.imageUrl ? <img src={image.imageUrl} alt={image.altText || ''} className="h-64 w-full object-cover" /> : null}
+                        {image.caption ? <figcaption className="px-4 py-3 text-sm leading-6 text-slate-600">{image.caption}</figcaption> : null}
+                      </figure>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
+
+              {Array.isArray(opportunity.aeoQuestions) && opportunity.aeoQuestions.length ? (
+                <section className="mt-8 border-t pt-8">
+                  <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Common questions</h2>
+                  <div className="mt-4 divide-y rounded-2xl border">
+                    {opportunity.aeoQuestions.map((item, index) => (
+                      <details key={`${item.question}-${index}`} className="group p-4">
+                        <summary className="cursor-pointer list-none font-semibold text-slate-900">{item.question}</summary>
+                        <p className="mt-3 text-sm leading-7 text-slate-600">{item.answer}</p>
+                      </details>
+                    ))}
+                  </div>
+                </section>
+              ) : null}
             </div>
           </article>
         </div>

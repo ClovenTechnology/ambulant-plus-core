@@ -458,6 +458,7 @@ export async function PATCH(
                   id: true,
                   applicationId: true,
                   status: true,
+                  onboardingMeta: true,
                 },
               });
 
@@ -484,6 +485,81 @@ export async function PATCH(
                   activatedAt,
                 },
               });
+
+              const onboardingMeta =
+                applicationConversion.onboardingMeta &&
+                typeof applicationConversion.onboardingMeta === 'object' &&
+                !Array.isArray(applicationConversion.onboardingMeta)
+                  ? applicationConversion.onboardingMeta as Record<string, any>
+                  : {};
+
+              const existingPayroll =
+                await tx.staffPayrollProfile.findFirst({
+                  where: { staffUserId: targetProfile.userId },
+                  orderBy: { updatedAt: 'desc' },
+                });
+
+              const payrollData = {
+                staffDisplayName: current.name || current.email,
+                staffEmail: current.email,
+                departmentId: current.departmentId,
+                designationId: current.designationId,
+                employmentType: String(onboardingMeta.employmentType || 'permanent').slice(0, 80),
+                payrollStatus: 'active',
+                country: 'ZA',
+                currency: 'ZAR',
+                baseSalaryCents: Math.max(0, Math.floor(Number(onboardingMeta.baseSalaryCents) || 0)),
+                hourlyRateCents: Math.max(0, Math.floor(Number(onboardingMeta.hourlyRateCents) || 0)),
+                payFrequency: String(onboardingMeta.payFrequency || 'monthly').slice(0, 80),
+                taxNumber: onboardingMeta.taxNumber ? String(onboardingMeta.taxNumber).slice(0, 180) : null,
+                startDate: onboardingMeta.startDate && Number.isFinite(new Date(String(onboardingMeta.startDate)).getTime())
+                  ? new Date(String(onboardingMeta.startDate))
+                  : activatedAt,
+                profileMeta: {
+                  contractType: onboardingMeta.contractType || null,
+                  benefits: Array.isArray(onboardingMeta.benefits) ? onboardingMeta.benefits : [],
+                  source: 'application_staff_conversion',
+                  applicationStaffConversionId: applicationConversion.id,
+                },
+                approvalStatus: 'approved',
+                approvedByUserId: actor.userId,
+                approvedAt: activatedAt,
+              };
+
+              if (existingPayroll) {
+                await tx.staffPayrollProfile.update({
+                  where: { id: existingPayroll.id },
+                  data: payrollData,
+                });
+              }
+              else {
+                await tx.staffPayrollProfile.create({
+                  data: {
+                    staffUserId: targetProfile.userId,
+                    ...payrollData,
+                  },
+                });
+              }
+
+              const annualLeaveDays = Math.max(0, Number(onboardingMeta.annualLeaveDays) || 0);
+              if (annualLeaveDays > 0) {
+                await tx.staffLeaveBalance.upsert({
+                  where: {
+                    staffProfileId_leaveType_year: {
+                      staffProfileId: targetProfile.id,
+                      leaveType: 'ANNUAL',
+                      year: activatedAt.getUTCFullYear(),
+                    },
+                  },
+                  update: { entitlementDays: annualLeaveDays },
+                  create: {
+                    staffProfileId: targetProfile.id,
+                    leaveType: 'ANNUAL',
+                    year: activatedAt.getUTCFullYear(),
+                    entitlementDays: annualLeaveDays,
+                  },
+                });
+              }
 
               const application =
                 await tx.application.findUnique({

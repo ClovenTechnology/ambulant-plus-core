@@ -32,6 +32,15 @@ type FormOption = {
   versions?: Array<{ id: string; versionNumber: number; state: string; accessMode: string }>;
 };
 
+type GalleryDraft = {
+  key: string;
+  file: File;
+  altText: string;
+  caption: string;
+};
+
+const MAX_GALLERY_IMAGES = 8;
+
 const PUBLIC_SITE = String(process.env.NEXT_PUBLIC_SITE_URL || 'https://ambulantplus.co.za').replace(/\/+$/, '');
 
 function emptyToNull(value: string) {
@@ -54,6 +63,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
   const [imageAlt, setImageAlt] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageNonce, setImageNonce] = useState(0);
+  const [galleryDrafts, setGalleryDrafts] = useState<GalleryDraft[]>([]);
   const [canDelete, setCanDelete] = useState(false);
   const [tags, setTags] = useState('');
   const [referenceCode, setReferenceCode] = useState('');
@@ -74,6 +84,8 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
   const [sortOrder, setSortOrder] = useState('0');
   const [seoTitle, setSeoTitle] = useState('');
   const [seoDescription, setSeoDescription] = useState('');
+  const [aeoSummary, setAeoSummary] = useState('');
+  const [aeoQuestions, setAeoQuestions] = useState<Array<{ question: string; answer: string }>>([]);
 
   function hydrate(row: AdminOpportunity) {
     setOpportunity(row);
@@ -86,6 +98,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
     setDescription(row.description || '');
     setImageAlt(row.imageAlt || '');
     setImageFile(null);
+    setGalleryDrafts([]);
     setTags((row.tags || []).join(', '));
     setReferenceCode(row.referenceCode || '');
     setAudienceLabel(row.audienceLabel || '');
@@ -105,6 +118,8 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
     setSortOrder(String(row.sortOrder ?? 0));
     setSeoTitle(row.seoTitle || '');
     setSeoDescription(row.seoDescription || '');
+    setAeoSummary(row.aeoSummary || '');
+    setAeoQuestions(Array.isArray(row.aeoQuestions) ? row.aeoQuestions : []);
   }
 
   async function load() {
@@ -147,6 +162,8 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
   const imagePreviewUrl = opportunity?.imageUrl
     ? `${opportunity.imageUrl}${opportunity.imageUrl.includes('?') ? '&' : '?'}v=${imageNonce}`
     : '';
+  const galleryImages = opportunity?.galleryImages || [];
+  const gallerySlotsRemaining = Math.max(0, MAX_GALLERY_IMAGES - galleryImages.length);
 
   const readiness = useMemo(() => {
     const items = [
@@ -196,11 +213,34 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
           sortOrder: Number.parseInt(sortOrder || '0', 10) || 0,
           seoTitle: emptyToNull(seoTitle),
           seoDescription: emptyToNull(seoDescription),
+          aeoSummary: emptyToNull(aeoSummary),
+          aeoQuestions,
         }),
       });
       const json = await response.json().catch(() => null);
       if (!response.ok || !json?.ok || !json?.opportunity) {
         throw new Error(json?.error || 'opportunity_update_failed');
+      }
+      hydrate(json.opportunity);
+    } catch (err: any) {
+      setError(humanizeOpportunityError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateDiscovery() {
+    if (!opportunity || !editable) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(
+        `/api/admin/opportunities/${encodeURIComponent(params.id)}/discovery`,
+        { method: 'POST' },
+      );
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok || !json?.opportunity) {
+        throw new Error(json?.error || 'opportunity_discovery_generation_failed');
       }
       hydrate(json.opportunity);
     } catch (err: any) {
@@ -276,6 +316,113 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
       await load();
       setImageNonce((value) => value + 1);
     } catch (err: any) { setError(humanizeOpportunityError(err?.message)); setBusy(false); }
+  }
+
+  function chooseGalleryFiles(files: FileList | null) {
+    const selected = Array.from(files || []).slice(0, gallerySlotsRemaining);
+    setGalleryDrafts(
+      selected.map((file, index) => ({
+        key: `${file.name}-${file.size}-${file.lastModified}-${index}`,
+        file,
+        altText: '',
+        caption: '',
+      })),
+    );
+  }
+
+  async function uploadGalleryImages() {
+    if (!editable || galleryDrafts.length === 0) return;
+    if (galleryDrafts.some((item) => !item.altText.trim())) {
+      setError('Add meaningful alt text for every additional image before uploading.');
+      return;
+    }
+    if (galleryDrafts.length > gallerySlotsRemaining) {
+      setError(`You can add only ${gallerySlotsRemaining} more ${gallerySlotsRemaining === 1 ? 'image' : 'images'}.`);
+      return;
+    }
+
+    setBusy(true);
+    setError('');
+    try {
+      let lastOpportunity: AdminOpportunity | null = null;
+      for (const item of galleryDrafts) {
+        const json = await uploadManagedImage({
+          file: item.file,
+          presignUrl: `/api/admin/opportunities/${encodeURIComponent(params.id)}/gallery/presign`,
+          confirmUrl: `/api/admin/opportunities/${encodeURIComponent(params.id)}/gallery/confirm`,
+          confirmBody: {
+            altText: item.altText.trim(),
+            caption: emptyToNull(item.caption),
+          },
+        });
+        if (json?.opportunity) lastOpportunity = json.opportunity;
+      }
+      if (lastOpportunity) hydrate(lastOpportunity);
+      else await load();
+      setGalleryDrafts([]);
+      setImageNonce((value) => value + 1);
+    } catch (err: any) {
+      setError(humanizeOpportunityError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeGalleryImage(imageId: string) {
+    if (!editable || !window.confirm('Remove this additional image?')) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(
+        `/api/admin/opportunities/${encodeURIComponent(params.id)}/gallery/${encodeURIComponent(imageId)}`,
+        { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}) },
+      );
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) {
+        throw new Error(json?.error || 'opportunity_gallery_delete_failed');
+      }
+      if (json?.opportunity) hydrate(json.opportunity);
+      else await load();
+      setImageNonce((value) => value + 1);
+    } catch (err: any) {
+      setError(humanizeOpportunityError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveGalleryImage(
+    imageId: string,
+    altText: string,
+    caption: string,
+    sortOrder: number,
+  ) {
+    if (!editable) return;
+    if (!altText.trim()) {
+      setError('Add meaningful alt text before saving the image.');
+      return;
+    }
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(
+        `/api/admin/opportunities/${encodeURIComponent(params.id)}/gallery/${encodeURIComponent(imageId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ altText: altText.trim(), caption: emptyToNull(caption), sortOrder }),
+        },
+      );
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok || !json?.opportunity) {
+        throw new Error(json?.error || 'opportunity_gallery_update_failed');
+      }
+      hydrate(json.opportunity);
+    } catch (err: any) {
+      setError(humanizeOpportunityError(err?.message));
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function deleteDraft() {
@@ -359,18 +506,74 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
             <div className="md:col-span-2"><h2 className="text-lg font-semibold">Public content</h2></div>
             <label className="space-y-1 text-sm md:col-span-2"><span className="font-medium">Summary</span><textarea disabled={!editable} value={summary} onChange={(e) => setSummary(e.target.value)} className="min-h-24 w-full rounded-xl border p-3 disabled:bg-slate-50" /></label>
             <label className="space-y-1 text-sm md:col-span-2"><span className="font-medium">Description</span><textarea disabled={!editable} value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-64 w-full rounded-xl border p-3 disabled:bg-slate-50" placeholder="Plain-text opportunity details, eligibility, expectations and next steps." /></label>
+
             <div className="space-y-3 md:col-span-2">
               <div>
                 <div className="text-sm font-medium">Featured image</div>
-                <p className="mt-1 text-xs text-slate-500">Upload a JPEG, PNG or WebP image up to 8 MB. The image is stored securely by Ambulant+.</p>
+                <p className="mt-1 text-xs text-slate-500">This is the lead image used on opportunity cards, social previews and the top of the public page. JPEG, PNG or WebP; maximum 8 MB.</p>
               </div>
               {imagePreviewUrl ? <div className="overflow-hidden rounded-2xl border bg-slate-50"><img src={imagePreviewUrl} alt={imageAlt || 'Opportunity image preview'} className="max-h-72 w-full object-cover" /></div> : null}
               <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
-                <label className="space-y-1 text-sm"><span className="font-medium">Choose image</span><input disabled={!editable || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] || null)} className="block w-full rounded-xl border px-3 py-2 text-sm disabled:bg-slate-50" /></label>
+                <label className="space-y-1 text-sm"><span className="font-medium">Choose featured image</span><input disabled={!editable || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] || null)} className="block w-full rounded-xl border px-3 py-2 text-sm disabled:bg-slate-50" /></label>
                 <button type="button" onClick={uploadOpportunityImage} disabled={!editable || busy || !imageFile || !imageAlt.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><ImagePlus className="h-4 w-4" />{hasImage ? 'Replace image' : 'Upload image'}</button>
                 {hasImage ? <button type="button" onClick={removeOpportunityImage} disabled={!editable || busy} className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-40"><Trash2 className="h-4 w-4" />Remove</button> : null}
               </div>
-              <label className="block space-y-1 text-sm"><span className="font-medium">Image alt text</span><input disabled={!editable} value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50" placeholder="Describe the image for people using screen readers" /></label>
+              <label className="block space-y-1 text-sm"><span className="font-medium">Featured image alt text</span><input disabled={!editable} value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50" placeholder="Describe the image for people using screen readers" /></label>
+            </div>
+
+            <div className="space-y-4 border-t pt-5 md:col-span-2">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-sm font-medium">Additional images</div>
+                  <p className="mt-1 text-xs text-slate-500">Add up to {MAX_GALLERY_IMAGES} more images. They appear as a gallery on the published opportunity and up to two previews can appear on listing cards.</p>
+                </div>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{galleryImages.length}/{MAX_GALLERY_IMAGES} used</span>
+              </div>
+
+              {galleryImages.length ? (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                  {galleryImages.map((image) => (
+                    <GalleryImageEditor
+                      key={image.id}
+                      image={image}
+                      editable={Boolean(editable)}
+                      busy={busy}
+                      nonce={imageNonce}
+                      onSave={saveGalleryImage}
+                      onRemove={removeGalleryImage}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-dashed p-5 text-sm text-slate-500">No additional images yet.</div>
+              )}
+
+              {editable && gallerySlotsRemaining > 0 ? (
+                <div className="space-y-3 rounded-2xl border bg-slate-50 p-4">
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium">Choose additional images</span>
+                    <input
+                      disabled={busy}
+                      type="file"
+                      multiple
+                      accept="image/jpeg,image/png,image/webp"
+                      onChange={(event) => chooseGalleryFiles(event.target.files)}
+                      className="block w-full rounded-xl border bg-white px-3 py-2 text-sm"
+                    />
+                    <span className="text-xs text-slate-500">You can add {gallerySlotsRemaining} more {gallerySlotsRemaining === 1 ? 'image' : 'images'}.</span>
+                  </label>
+
+                  {galleryDrafts.map((item, index) => (
+                    <div key={item.key} className="grid gap-3 rounded-xl border bg-white p-3 md:grid-cols-2">
+                      <div className="text-xs font-medium text-slate-600 md:col-span-2">{item.file.name}</div>
+                      <label className="space-y-1 text-sm"><span>Alt text</span><input value={item.altText} onChange={(event) => setGalleryDrafts((items) => items.map((entry, i) => i === index ? { ...entry, altText: event.target.value } : entry))} className="w-full rounded-xl border px-3 py-2" placeholder="Required accessible description" /></label>
+                      <label className="space-y-1 text-sm"><span>Caption</span><input value={item.caption} onChange={(event) => setGalleryDrafts((items) => items.map((entry, i) => i === index ? { ...entry, caption: event.target.value } : entry))} className="w-full rounded-xl border px-3 py-2" placeholder="Optional public caption" /></label>
+                    </div>
+                  ))}
+
+                  {galleryDrafts.length ? <button type="button" onClick={uploadGalleryImages} disabled={busy || galleryDrafts.some((item) => !item.altText.trim())} className="inline-flex items-center gap-2 rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><ImagePlus className="h-4 w-4" /> Upload {galleryDrafts.length} {galleryDrafts.length === 1 ? 'image' : 'images'}</button> : null}
+                </div>
+              ) : null}
             </div>
           </section>
 
@@ -410,9 +613,27 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
           </section>
 
           <section className="grid gap-4 rounded-3xl border bg-white p-5 shadow-sm md:grid-cols-2">
-            <div className="md:col-span-2"><h2 className="text-lg font-semibold">Search & social metadata</h2></div>
+            <div className="flex flex-wrap items-start justify-between gap-3 md:col-span-2">
+              <div>
+                <h2 className="text-lg font-semibold">Search & answer discovery</h2>
+                <p className="mt-1 max-w-3xl text-sm text-slate-500">Generate people-first SEO and answer-ready content from the opportunity information above. You can edit the generated wording; ordinary saves preserve your edits.</p>
+              </div>
+              {editable ? <button type="button" onClick={generateDiscovery} disabled={busy} className="rounded-xl border bg-white px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">Generate SEO & AEO</button> : null}
+            </div>
             <label className="space-y-1 text-sm"><span className="font-medium">SEO title</span><input disabled={!editable} value={seoTitle} onChange={(e) => setSeoTitle(e.target.value)} maxLength={240} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50" /><span className="text-xs text-slate-400">{seoTitle.length}/240</span></label>
             <label className="space-y-1 text-sm"><span className="font-medium">SEO description</span><textarea disabled={!editable} value={seoDescription} onChange={(e) => setSeoDescription(e.target.value)} maxLength={500} className="min-h-24 w-full rounded-xl border p-3 disabled:bg-slate-50" /><span className="text-xs text-slate-400">{seoDescription.length}/500</span></label>
+            <label className="space-y-1 text-sm md:col-span-2"><span className="font-medium">Answer-ready summary (AEO)</span><textarea disabled={!editable} value={aeoSummary} onChange={(e) => setAeoSummary(e.target.value)} maxLength={1200} className="min-h-28 w-full rounded-xl border p-3 disabled:bg-slate-50" /><span className="text-xs text-slate-400">A concise, visible summary designed to answer the main user question directly. {aeoSummary.length}/1200</span></label>
+            <div className="space-y-3 md:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <div><div className="text-sm font-medium">Common questions</div><p className="mt-1 text-xs text-slate-500">These questions and answers are shown publicly. Keep them factual and consistent with the opportunity.</p></div>
+                {editable ? <button type="button" onClick={() => setAeoQuestions((items) => [...items, { question: '', answer: '' }].slice(0, 12))} className="rounded-lg border px-3 py-1.5 text-xs font-semibold">Add question</button> : null}
+              </div>
+              {aeoQuestions.map((item, index) => <div key={index} className="grid gap-2 rounded-2xl border bg-slate-50 p-3 md:grid-cols-[1fr_2fr_auto]">
+                <input disabled={!editable} value={item.question} onChange={(e) => setAeoQuestions((items) => items.map((entry, i) => i === index ? { ...entry, question: e.target.value } : entry))} placeholder="Question" className="rounded-xl border bg-white px-3 py-2 text-sm" />
+                <textarea disabled={!editable} value={item.answer} onChange={(e) => setAeoQuestions((items) => items.map((entry, i) => i === index ? { ...entry, answer: e.target.value } : entry))} placeholder="Answer" className="min-h-12 rounded-xl border bg-white px-3 py-2 text-sm" />
+                {editable ? <button type="button" onClick={() => setAeoQuestions((items) => items.filter((_, i) => i !== index))} className="self-start rounded-lg border border-rose-200 px-2 py-2 text-xs font-semibold text-rose-700">Remove</button> : null}
+              </div>)}
+            </div>
           </section>
 
           {editable ? <button type="submit" disabled={busy} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white disabled:opacity-50"><Save className="h-4 w-4" /> Save opportunity</button> : null}
@@ -446,3 +667,45 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
     </main>
   );
 }
+
+function GalleryImageEditor({
+  image,
+  editable,
+  busy,
+  nonce,
+  onSave,
+  onRemove,
+}: {
+  image: NonNullable<AdminOpportunity['galleryImages']>[number];
+  editable: boolean;
+  busy: boolean;
+  nonce: number;
+  onSave: (imageId: string, altText: string, caption: string, sortOrder: number) => Promise<void>;
+  onRemove: (imageId: string) => Promise<void>;
+}) {
+  const [altText, setAltText] = useState(image.altText || '');
+  const [caption, setCaption] = useState(image.caption || '');
+  const [sortOrder, setSortOrder] = useState(String(image.sortOrder ?? 0));
+  const url = image.imageUrl
+    ? `${image.imageUrl}${image.imageUrl.includes('?') ? '&' : '?'}v=${nonce}`
+    : '';
+
+  useEffect(() => {
+    setAltText(image.altText || '');
+    setCaption(image.caption || '');
+    setSortOrder(String(image.sortOrder ?? 0));
+  }, [image.id, image.altText, image.caption, image.sortOrder]);
+
+  return (
+    <div className="overflow-hidden rounded-2xl border bg-white">
+      {url ? <img src={url} alt={image.altText || ''} className="h-40 w-full object-cover" /> : null}
+      <div className="space-y-3 p-3">
+        <label className="block space-y-1 text-xs"><span className="font-medium">Alt text</span><input disabled={!editable || busy} value={altText} onChange={(event) => setAltText(event.target.value)} className="w-full rounded-lg border px-2.5 py-2 text-sm disabled:bg-slate-50" /></label>
+        <label className="block space-y-1 text-xs"><span className="font-medium">Caption</span><input disabled={!editable || busy} value={caption} onChange={(event) => setCaption(event.target.value)} className="w-full rounded-lg border px-2.5 py-2 text-sm disabled:bg-slate-50" /></label>
+        <label className="block space-y-1 text-xs"><span className="font-medium">Order</span><input disabled={!editable || busy} type="number" min="0" max="999" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)} className="w-full rounded-lg border px-2.5 py-2 text-sm disabled:bg-slate-50" /></label>
+        {editable ? <div className="flex gap-2"><button type="button" disabled={busy || !altText.trim()} onClick={() => void onSave(image.id, altText, caption, Number.parseInt(sortOrder || '0', 10) || 0)} className="flex-1 rounded-lg border px-2.5 py-2 text-xs font-semibold disabled:opacity-40">Save</button><button type="button" disabled={busy} onClick={() => void onRemove(image.id)} className="rounded-lg border border-rose-200 px-2.5 py-2 text-xs font-semibold text-rose-700 disabled:opacity-40">Remove</button></div> : null}
+      </div>
+    </div>
+  );
+}
+

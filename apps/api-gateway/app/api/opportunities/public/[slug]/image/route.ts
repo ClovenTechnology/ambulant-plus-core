@@ -5,7 +5,8 @@ import {
   enterpriseMediaErrorResponse,
   isManagedEnterpriseMediaRef,
   objectKeyFromManagedEnterpriseMediaRef,
-  presignEnterpriseMediaView,
+  getEnterpriseMediaObject,
+  enterpriseMediaResponseBody,
 } from '@/src/lib/enterprise-media-storage';
 
 export const runtime = 'nodejs';
@@ -29,8 +30,16 @@ export async function GET(_request: NextRequest, context: { params: { slug: stri
     if (isManagedEnterpriseMediaRef(opportunity.imageUrl)) {
       const objectKey = objectKeyFromManagedEnterpriseMediaRef(opportunity.imageUrl);
       if (!objectKey) return json({ ok: false, error: 'opportunity_image_not_found' }, 404);
-      const { viewUrl } = await presignEnterpriseMediaView(objectKey);
-      return NextResponse.redirect(viewUrl, 302);
+      const object = await getEnterpriseMediaObject(objectKey);
+      return new Response(enterpriseMediaResponseBody(object.bytes), {
+        status: 200,
+        headers: {
+          'content-type': object.contentType,
+          'content-length': String(object.contentLength),
+          'cache-control': 'public, max-age=300, s-maxage=3600, stale-while-revalidate=86400',
+          ...(object.etag ? { etag: object.etag } : {}),
+        },
+      });
     }
     if (validHttpsUrl(opportunity.imageUrl)) return NextResponse.redirect(opportunity.imageUrl, 302);
     return json({ ok: false, error: 'opportunity_image_not_found' }, 404);

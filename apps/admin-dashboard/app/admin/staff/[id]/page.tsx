@@ -13,6 +13,7 @@ import {
   Video,
 } from 'lucide-react';
 import { uploadManagedImage } from '@/lib/managed-image-upload';
+import { StaffEmploymentWorkspace } from '@/components/StaffEmploymentWorkspace';
 
 export const dynamic = 'force-dynamic';
 
@@ -333,6 +334,8 @@ export default function AdminStaffProfilePage({ params }: { params: { id: string
               </div>
             </section>
           ) : null}
+
+          <StaffEmploymentWorkspace staffProfileId={item.id} />
 
           {(data?.audit || []).length > 0 ? (
             <section className="rounded-3xl border bg-white p-5 shadow-sm">

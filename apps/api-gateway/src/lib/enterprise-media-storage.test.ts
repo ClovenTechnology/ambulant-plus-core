@@ -34,6 +34,11 @@ test('enterprise media managed references preserve media kind and object ownersh
   assert.equal(managedEnterpriseMediaKind(ref), 'opportunity-image');
   assert.equal(enterpriseMediaObjectBelongsTo({ objectKey: key, kind: 'opportunity-image', ownerId: 'opportunity_1' }), true);
   assert.equal(enterpriseMediaObjectBelongsTo({ objectKey: key, kind: 'opportunity-image', ownerId: 'opportunity_2' }), false);
+
+  const staffIdKey = 'enterprise-media/staff-id-template/template_1/asset_1';
+  const staffIdRef = managedEnterpriseMediaRef(staffIdKey);
+  assert.equal(managedEnterpriseMediaKind(staffIdRef), 'staff-id-template');
+  assert.equal(enterpriseMediaObjectBelongsTo({ objectKey: staffIdKey, kind: 'staff-id-template', ownerId: 'template_1' }), true);
 });
 
 test('enterprise media validates file signatures for allowed image types', () => {

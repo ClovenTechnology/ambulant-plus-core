@@ -6,11 +6,17 @@ import {
 import { hasStaffCapability } from '@/src/lib/admin-staff-policy';
 import {
   cleanMeetingText,
+  mintMeetingRtcAccess,
   randomOpaqueToken,
   writeMeetingAudit,
 } from '@/src/lib/admin-meetings';
 import { normaliseMeetingEmail } from '@/src/lib/admin-meetings-policy';
 import { canonicalDirectConversationKey, normalizeStaffMessageBody, validConversationShape, validDirectCallMode } from './enterprise-completion-policy';
+import {
+  createStaffNotification,
+  listStaffNotifications,
+  markStaffNotifications,
+} from '@/src/lib/staff-notifications';
 
 export class CommunicationsError extends Error {
   status: number;
@@ -88,6 +94,143 @@ const conversationInclude = {
   },
 };
 
+const CALL_RING_SECONDS = 45;
+
+function directCallMode(meeting: any) {
+  return meeting?.allowVideo ? 'VIDEO' : 'AUDIO';
+}
+
+function directCallParticipant(meeting: any, profileId: string) {
+  return (meeting?.participants || []).find(
+    (participant: any) => participant.staffProfileId === profileId,
+  ) || null;
+}
+
+function directCallOtherProfile(meeting: any, profileId: string) {
+  return (meeting?.participants || []).find(
+    (participant: any) => participant.staffProfileId && participant.staffProfileId !== profileId,
+  )?.staffProfile || null;
+}
+
+function directCallSummary(meeting: any, actorProfileId: string) {
+  return {
+    id: meeting.id,
+    state: meeting.state,
+    outcome: meeting.callOutcome || null,
+    endedReason: meeting.callEndedReason || null,
+    mode: directCallMode(meeting),
+    conversationId: meeting.contextId || null,
+    createdAt: meeting.createdAt,
+    startedAt: meeting.startedAt,
+    endedAt: meeting.endedAt,
+    ringExpiresAt: meeting.ringExpiresAt,
+    callerProfileId: meeting.hostProfileId,
+    isCaller: meeting.hostProfileId === actorProfileId,
+    participant: directCallParticipant(meeting, actorProfileId),
+    other: directCallOtherProfile(meeting, actorProfileId),
+  };
+}
+
+const directCallInclude = {
+  participants: {
+    include: {
+      staffProfile: {
+        select: { id: true, name: true, email: true, photoUrl: true },
+      },
+    },
+  },
+} as const;
+
+async function expireDirectCallsForProfile(profileId: string) {
+  const now = new Date();
+  const stale = await prisma.meeting.findMany({
+    where: {
+      kind: 'DIRECT_CALL',
+      state: 'RINGING',
+      ringExpiresAt: { lte: now },
+      participants: {
+        some: { staffProfileId: profileId },
+      },
+    },
+    include: directCallInclude,
+  });
+
+  for (const meeting of stale) {
+    await prisma.$transaction(async (tx) => {
+      const changed = await tx.meeting.updateMany({
+        where: { id: meeting.id, state: 'RINGING' },
+        data: {
+          state: 'ENDED',
+          endedAt: now,
+          callOutcome: 'MISSED',
+          callEndedReason: 'No answer',
+        },
+      });
+      if (!changed.count) return;
+
+      await tx.meetingParticipant.updateMany({
+        where: {
+          meetingId: meeting.id,
+          state: { in: ['INVITED', 'ACCEPTED', 'JOINED'] },
+        },
+        data: { state: 'LEFT', lastLeftAt: now },
+      });
+
+      const caller = meeting.participants.find(
+        (participant) => participant.staffProfileId === meeting.hostProfileId,
+      )?.staffProfile;
+      const recipient = meeting.participants.find(
+        (participant) => participant.staffProfileId !== meeting.hostProfileId,
+      )?.staffProfile;
+
+      if (recipient?.id) {
+        await createStaffNotification(tx as any, {
+          recipientProfileId: recipient.id,
+          actorProfileId: caller?.id || null,
+          conversationId: meeting.contextId,
+          meetingId: meeting.id,
+          type: 'MISSED_CALL',
+          title: `Missed ${meeting.allowVideo ? 'video' : 'audio'} call`,
+          body: caller?.name || caller?.email || 'A colleague called you.',
+          payload: { mode: directCallMode(meeting) },
+          dedupeKey: `missed-call:${meeting.id}:${recipient.id}`,
+        });
+      }
+      if (caller?.id) {
+        await createStaffNotification(tx as any, {
+          recipientProfileId: caller.id,
+          actorProfileId: recipient?.id || null,
+          conversationId: meeting.contextId,
+          meetingId: meeting.id,
+          type: 'CALL_NO_ANSWER',
+          title: 'No answer',
+          body: recipient?.name || recipient?.email || 'The call was not answered.',
+          payload: { mode: directCallMode(meeting) },
+          dedupeKey: `no-answer:${meeting.id}:${caller.id}`,
+        });
+      }
+    });
+  }
+}
+
+async function activeDirectCallForProfile(profileId: string, excludeId?: string) {
+  return prisma.meeting.findFirst({
+    where: {
+      kind: 'DIRECT_CALL',
+      id: excludeId ? { not: excludeId } : undefined,
+      state: { in: ['RINGING', 'LIVE'] },
+      participants: {
+        some: {
+          staffProfileId: profileId,
+          state: { in: ['INVITED', 'ACCEPTED', 'JOINED'] },
+        },
+      },
+    },
+    orderBy: { createdAt: 'desc' },
+    include: directCallInclude,
+  });
+}
+
 async function requireConversationMember(conversationId: string, actor: AdminStaffActor) {
   requireCommunications(actor);
   const member = await prisma.staffConversationMember.findUnique({
@@ -109,6 +252,7 @@ async function requireConversationMember(conversationId: string, actor: AdminSta
 
 export async function listStaffConversations(actor: AdminStaffActor) {
   requireCommunications(actor);
+  await expireDirectCallsForProfile(actor.profileId);
 
   const [conversations, incomingCalls] = await Promise.all([
     prisma.staffConversation.findMany({
@@ -123,42 +267,36 @@ export async function listStaffConversations(actor: AdminStaffActor) {
     prisma.meeting.findMany({
       where: {
         kind: 'DIRECT_CALL',
-        state: { in: ['RINGING', 'LIVE'] },
+        state: 'RINGING',
+        OR: [{ ringExpiresAt: null }, { ringExpiresAt: { gt: new Date() } }],
         participants: {
           some: {
             staffProfileId: actor.profileId,
-            state: { in: ['INVITED', 'ACCEPTED'] },
+            state: 'INVITED',
           },
         },
       },
       orderBy: { createdAt: 'desc' },
       take: 10,
-      include: {
-        participants: {
-          include: {
-            staffProfile: { select: { id: true, name: true, email: true, photoUrl: true } },
-          },
-        },
-      },
+      include: directCallInclude,
     }),
   ]);
 
   return {
     ok: true,
     actorProfileId: actor.profileId,
-    incomingCalls,
+    incomingCalls: incomingCalls.map((meeting) => directCallSummary(meeting, actor.profileId)),
     conversations: conversations.map((conversation) => {
       const latestMessage = conversation.messages[0] || null;
-      const membership = conversation.members.find((member) => member.profileId === actor.profileId);
-      const unread = Boolean(
-        latestMessage &&
-        latestMessage.senderProfileId !== actor.profileId &&
-        (!membership?.lastReadAt || latestMessage.createdAt > membership.lastReadAt),
+      const membership = conversation.members.find(
+        (member) => member.profileId === actor.profileId,
       );
+      const unreadCount = Math.max(0, Number((membership as any)?.unreadCount || 0));
       return {
         ...conversation,
         latestMessage,
-        unread,
+        unread: unreadCount > 0,
+        unreadCount,
         messages: undefined,
       };
     }),
@@ -315,15 +453,27 @@ export async function getStaffConversation(input: {
 
   if (!conversation) throw new CommunicationsError('conversation_not_found', 404);
 
-  await prisma.staffConversationMember.update({
-    where: {
-      conversationId_profileId: {
-        conversationId: input.conversationId,
-        profileId: input.actor.profileId,
+  const now = new Date();
+  await prisma.$transaction(async (tx) => {
+    await tx.staffConversationMember.update({
+      where: {
+        conversationId_profileId: {
+          conversationId: input.conversationId,
+          profileId: input.actor.profileId,
+        },
       },
-    },
-    data: { lastReadAt: new Date() },
-  }).catch(() => null);
+      data: { lastReadAt: now, unreadCount: 0 },
+    });
+    await tx.staffNotification.updateMany({
+      where: {
+        recipientProfileId: input.actor.profileId,
+        conversationId: input.conversationId,
+        type: 'MESSAGE',
+        readAt: null,
+      },
+      data: { readAt: now },
+    });
+  });
 
   return {
     ok: true,
@@ -345,6 +495,15 @@ export async function postStaffMessage(input: {
 
   const now = new Date();
   const message = await prisma.$transaction(async (tx) => {
+    const members = await tx.staffConversationMember.findMany({
+      where: { conversationId: input.conversationId, leftAt: null },
+      include: {
+        profile: {
+          select: { id: true, name: true, email: true },
+        },
+      },
+    });
+
     const created = await tx.staffMessage.create({
       data: {
         conversationId: input.conversationId,
@@ -360,6 +519,7 @@ export async function postStaffMessage(input: {
       where: { id: input.conversationId },
       data: { lastMessageAt: now },
     });
+
     await tx.staffConversationMember.update({
       where: {
         conversationId_profileId: {
@@ -367,8 +527,34 @@ export async function postStaffMessage(input: {
           profileId: input.actor.profileId,
         },
       },
-      data: { lastReadAt: now },
+      data: { lastReadAt: now, unreadCount: 0 },
     });
+
+    const recipients = members.filter(
+      (member) => member.profileId !== input.actor.profileId,
+    );
+
+    for (const recipient of recipients) {
+      await tx.staffConversationMember.update({
+        where: {
+          conversationId_profileId: {
+            conversationId: input.conversationId,
+            profileId: recipient.profileId,
+          },
+        },
+        data: { unreadCount: { increment: 1 } },
+      });
+
+      await createStaffNotification(tx as any, {
+        recipientProfileId: recipient.profileId,
+        actorProfileId: input.actor.profileId,
+        conversationId: input.conversationId,
+        type: 'MESSAGE',
+        title: input.actor.name || input.actor.email,
+        body: body.slice(0, 240),
+        payload: { messageId: created.id },
+      });
+    }
 
     return created;
   });
@@ -464,34 +650,63 @@ export async function startDirectStaffCall(input: {
     throw new CommunicationsError('direct_call_requires_direct_conversation', 409);
   }
 
+  await expireDirectCallsForProfile(input.actor.profileId);
+
   const members = await prisma.staffConversationMember.findMany({
     where: { conversationId: conversation.id, leftAt: null },
     include: {
       profile: {
-        select: { id: true, name: true, email: true, lifecycleState: true },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          lifecycleState: true,
+          presence: true,
+        },
       },
     },
   });
+
   if (members.length !== 2) {
     throw new CommunicationsError('direct_conversation_member_shape_invalid', 409);
   }
 
-  const target = members.find((member) => member.profileId !== input.actor.profileId)?.profile;
+  const target = members.find(
+    (member) => member.profileId !== input.actor.profileId,
+  )?.profile;
+
   if (!target || !['ACTIVE', 'LEAVE'].includes(target.lifecycleState)) {
     throw new CommunicationsError('direct_call_target_unavailable', 409);
   }
 
-  const requestedMode = validDirectCallMode(cleanText(input.mode, 20)?.toLowerCase());
-  if (!requestedMode) throw new CommunicationsError('invalid_direct_call_mode', 400);
+  const existingCallerCall = await activeDirectCallForProfile(input.actor.profileId);
+  if (existingCallerCall) {
+    return {
+      ok: true,
+      reused: true,
+      call: directCallSummary(existingCallerCall, input.actor.profileId),
+      rtc: null,
+    };
+  }
+
+  const requestedMode = validDirectCallMode(
+    cleanText(input.mode, 20)?.toLowerCase(),
+  );
+  if (!requestedMode) {
+    throw new CommunicationsError('invalid_direct_call_mode', 400);
+  }
+
   const mode = requestedMode === 'audio' ? 'AUDIO' : 'VIDEO';
   const now = new Date();
   const durationMinutes = 60;
+  const targetBusy = Boolean(await activeDirectCallForProfile(target.id));
+
   const meeting = await prisma.$transaction(async (tx) => {
     const created = await tx.meeting.create({
       data: {
         roomId: `meeting-${randomOpaqueToken(18)}`,
         kind: 'DIRECT_CALL',
-        state: 'RINGING',
+        state: targetBusy ? 'ENDED' : 'RINGING',
         title: `${mode === 'AUDIO' ? 'Audio' : 'Video'} call with ${target.name || target.email}`,
         timezone: 'Africa/Johannesburg',
         startsAt: now,
@@ -508,6 +723,16 @@ export async function startDirectStaffCall(input: {
         allowScreenShare: mode === 'VIDEO',
         allowRecording: false,
         lobbyRequired: false,
+        ringExpiresAt: targetBusy
+          ? null
+          : new Date(now.getTime() + CALL_RING_SECONDS * 1000),
+        ...(targetBusy
+          ? {
+              endedAt: now,
+              callOutcome: 'BUSY' as const,
+              callEndedReason: 'Recipient is already on another call',
+            }
+          : {}),
       },
     });
 
@@ -520,8 +745,10 @@ export async function startDirectStaffCall(input: {
           emailNormalized: normaliseMeetingEmail(input.actor.email),
           displayName: input.actor.name || input.actor.email,
           role: 'HOST',
-          state: 'ACCEPTED',
+          state: targetBusy ? 'LEFT' : 'JOINED',
           acceptedAt: now,
+          firstJoinedAt: targetBusy ? null : now,
+          lastLeftAt: targetBusy ? now : null,
         },
         {
           meetingId: created.id,
@@ -530,27 +757,455 @@ export async function startDirectStaffCall(input: {
           emailNormalized: normaliseMeetingEmail(target.email),
           displayName: target.name || target.email,
           role: 'ATTENDEE',
-          state: 'INVITED',
+          state: targetBusy ? 'LEFT' : 'INVITED',
+          lastLeftAt: targetBusy ? now : null,
         },
       ],
     });
 
+    if (targetBusy) {
+      await createStaffNotification(tx as any, {
+        recipientProfileId: input.actor.profileId,
+        actorProfileId: target.id,
+        conversationId: conversation.id,
+        meetingId: created.id,
+        type: 'CALL_BUSY',
+        title: 'Call could not connect',
+        body: `${target.name || target.email} is already on another call.`,
+        payload: { mode },
+        dedupeKey: `call-busy:${created.id}:${input.actor.profileId}`,
+      });
+    } else {
+      await createStaffNotification(tx as any, {
+        recipientProfileId: target.id,
+        actorProfileId: input.actor.profileId,
+        conversationId: conversation.id,
+        meetingId: created.id,
+        type: 'INCOMING_CALL',
+        title: `Incoming ${mode === 'VIDEO' ? 'video' : 'audio'} call`,
+        body: input.actor.name || input.actor.email,
+        payload: { mode, callerProfileId: input.actor.profileId },
+        dedupeKey: `incoming-call:${created.id}:${target.id}`,
+      });
+    }
+
     return created;
+  });
+
+  const fullMeeting = await prisma.meeting.findUnique({
+    where: { id: meeting.id },
+    include: directCallInclude,
+  });
+  if (!fullMeeting) {
+    throw new CommunicationsError('direct_call_creation_failed', 500);
+  }
+
+  if (targetBusy) {
+    return {
+      ok: true,
+      reused: false,
+      busy: true,
+      call: directCallSummary(fullMeeting, input.actor.profileId),
+      rtc: null,
+    };
+  }
+
+  const callerParticipant = directCallParticipant(
+    fullMeeting,
+    input.actor.profileId,
+  );
+  if (!callerParticipant) {
+    throw new CommunicationsError('direct_call_participant_missing', 500);
+  }
+
+  const rtc = await mintMeetingRtcAccess({
+    meeting: fullMeeting,
+    participant: callerParticipant,
+    identity: `meeting:${fullMeeting.id}:staff:${input.actor.profileId}`,
+    displayName: input.actor.name || input.actor.email,
   });
 
   await writeMeetingAudit({
     actorUserId: input.actor.userId,
     actorRefId: input.actor.profileId,
     action: 'meeting.direct_call.created',
-    meetingId: meeting.id,
-    description: `${mode} direct staff call created`,
+    meetingId: fullMeeting.id,
+    description: `${mode} staff call started`,
     userAgent: input.userAgent,
     meta: {
       conversationId: conversation.id,
       targetProfileId: target.id,
       mode,
+      callerAutoJoined: true,
     },
   });
 
-  return { ok: true, meeting, target, mode };
+  return {
+    ok: true,
+    reused: false,
+    busy: false,
+    call: directCallSummary(fullMeeting, input.actor.profileId),
+    rtc: { ...rtc, expiresInSeconds: 900 },
+  };
 }
+
+export async function staffCommunicationsSummary(actor: AdminStaffActor) {
+  requireCommunications(actor);
+  await expireDirectCallsForProfile(actor.profileId);
+
+  const now = new Date();
+  const [memberships, incoming, currentCall, notifications, callHistory] = await Promise.all([
+    prisma.staffConversationMember.findMany({
+      where: { profileId: actor.profileId, leftAt: null },
+      select: { unreadCount: true },
+    }),
+    prisma.meeting.findMany({
+      where: {
+        kind: 'DIRECT_CALL',
+        state: 'RINGING',
+        OR: [{ ringExpiresAt: null }, { ringExpiresAt: { gt: now } }],
+        participants: {
+          some: { staffProfileId: actor.profileId, state: 'INVITED' },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      include: directCallInclude,
+    }),
+    prisma.meeting.findFirst({
+      where: {
+        kind: 'DIRECT_CALL',
+        state: { in: ['RINGING', 'LIVE'] },
+        participants: {
+          some: {
+            staffProfileId: actor.profileId,
+            state: { in: ['INVITED', 'ACCEPTED', 'JOINED'] },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: directCallInclude,
+    }),
+    listStaffNotifications(actor.profileId, 50),
+    prisma.meeting.findMany({
+      where: {
+        kind: 'DIRECT_CALL',
+        state: { in: ['ENDED', 'CANCELLED', 'EXPIRED'] },
+        participants: { some: { staffProfileId: actor.profileId } },
+      },
+      orderBy: { createdAt: 'desc' },
+      take: 25,
+      include: directCallInclude,
+    }),
+  ]);
+
+  return {
+    ok: true,
+    actorProfileId: actor.profileId,
+    unreadMessages: memberships.reduce(
+      (sum, member) => sum + Math.max(0, Number((member as any).unreadCount || 0)),
+      0,
+    ),
+    unreadNotifications: notifications.filter((item) => !item.readAt && item.type !== 'MESSAGE').length,
+    incomingCalls: incoming.map((meeting) => directCallSummary(meeting, actor.profileId)),
+    currentCall: currentCall ? directCallSummary(currentCall, actor.profileId) : null,
+    activeCall:
+      currentCall && currentCall.state === 'LIVE'
+        ? directCallSummary(currentCall, actor.profileId)
+        : null,
+    notifications,
+    callHistory: callHistory.map((meeting) => directCallSummary(meeting, actor.profileId)),
+  };
+}
+
+export async function respondToDirectStaffCall(input: {
+  actor: AdminStaffActor;
+  meetingId: string;
+  action: unknown;
+  userAgent?: string | null;
+}) {
+  requireCommunications(input.actor);
+  await expireDirectCallsForProfile(input.actor.profileId);
+
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: input.meetingId },
+    include: directCallInclude,
+  });
+  if (!meeting || meeting.kind !== 'DIRECT_CALL') {
+    throw new CommunicationsError('direct_call_not_found', 404);
+  }
+
+  const participant = directCallParticipant(meeting, input.actor.profileId);
+  if (!participant) throw new CommunicationsError('direct_call_access_denied', 403);
+  if (participant.staffProfileId === meeting.hostProfileId) {
+    throw new CommunicationsError('direct_call_recipient_required', 409);
+  }
+
+  const action = cleanText(input.action, 20)?.toUpperCase();
+  if (!['ACCEPT', 'DECLINE'].includes(action || '')) {
+    throw new CommunicationsError('direct_call_response_invalid', 400);
+  }
+  if (meeting.state !== 'RINGING') {
+    throw new CommunicationsError('direct_call_no_longer_ringing', 409);
+  }
+  if (meeting.ringExpiresAt && meeting.ringExpiresAt.getTime() <= Date.now()) {
+    await expireDirectCallsForProfile(input.actor.profileId);
+    throw new CommunicationsError('direct_call_no_longer_ringing', 409);
+  }
+
+  const caller = directCallOtherProfile(meeting, input.actor.profileId);
+  const now = new Date();
+
+  if (action === 'DECLINE') {
+    await prisma.$transaction(async (tx) => {
+      await tx.meeting.update({
+        where: { id: meeting.id },
+        data: {
+          state: 'ENDED',
+          endedAt: now,
+          callOutcome: 'DECLINED',
+          callEndedReason: 'Recipient declined the call',
+        },
+      });
+      await tx.meetingParticipant.updateMany({
+        where: { meetingId: meeting.id, staffProfileId: input.actor.profileId },
+        data: { state: 'DECLINED', declinedAt: now },
+      });
+      await tx.meetingParticipant.updateMany({
+        where: { meetingId: meeting.id, staffProfileId: meeting.hostProfileId },
+        data: { state: 'LEFT', lastLeftAt: now },
+      });
+      await tx.staffNotification.updateMany({
+        where: {
+          recipientProfileId: input.actor.profileId,
+          meetingId: meeting.id,
+          type: 'INCOMING_CALL',
+        },
+        data: { readAt: now, dismissedAt: now },
+      });
+      await createStaffNotification(tx as any, {
+        recipientProfileId: meeting.hostProfileId,
+        actorProfileId: input.actor.profileId,
+        conversationId: meeting.contextId,
+        meetingId: meeting.id,
+        type: 'CALL_DECLINED',
+        title: 'Call declined',
+        body: input.actor.name || input.actor.email,
+        payload: { mode: directCallMode(meeting) },
+        dedupeKey: `call-declined:${meeting.id}:${meeting.hostProfileId}`,
+      });
+    });
+
+    return { ok: true, action: 'DECLINE', call: { ...directCallSummary(meeting, input.actor.profileId), state: 'ENDED', outcome: 'DECLINED' }, rtc: null };
+  }
+
+  const conflict = await activeDirectCallForProfile(input.actor.profileId, meeting.id);
+  if (conflict) {
+    throw new CommunicationsError('direct_call_target_busy', 409);
+  }
+
+  await prisma.$transaction(async (tx) => {
+    await tx.meeting.update({
+      where: { id: meeting.id },
+      data: {
+        state: 'LIVE',
+        startedAt: meeting.startedAt || now,
+        callOutcome: null,
+        callEndedReason: null,
+      },
+    });
+    await tx.meetingParticipant.update({
+      where: { id: participant.id },
+      data: {
+        state: 'JOINED',
+        acceptedAt: participant.acceptedAt || now,
+        firstJoinedAt: participant.firstJoinedAt || now,
+      },
+    });
+    await tx.staffNotification.updateMany({
+      where: {
+        recipientProfileId: input.actor.profileId,
+        meetingId: meeting.id,
+        type: 'INCOMING_CALL',
+      },
+      data: { readAt: now, dismissedAt: now },
+    });
+    await createStaffNotification(tx as any, {
+      recipientProfileId: meeting.hostProfileId,
+      actorProfileId: input.actor.profileId,
+      conversationId: meeting.contextId,
+      meetingId: meeting.id,
+      type: 'CALL_ACCEPTED',
+      title: 'Call connected',
+      body: input.actor.name || input.actor.email,
+      payload: { mode: directCallMode(meeting) },
+      dedupeKey: `call-accepted:${meeting.id}:${meeting.hostProfileId}`,
+    });
+  });
+
+  const acceptedMeeting = await prisma.meeting.findUnique({
+    where: { id: meeting.id },
+    include: directCallInclude,
+  });
+  if (!acceptedMeeting) throw new CommunicationsError('direct_call_not_found', 404);
+
+  const acceptedParticipant = directCallParticipant(acceptedMeeting, input.actor.profileId);
+  if (!acceptedParticipant) {
+    throw new CommunicationsError('direct_call_participant_missing', 500);
+  }
+  const rtc = await mintMeetingRtcAccess({
+    meeting: acceptedMeeting,
+    participant: acceptedParticipant,
+    identity: `meeting:${acceptedMeeting.id}:staff:${input.actor.profileId}`,
+    displayName: input.actor.name || input.actor.email,
+  });
+
+  await writeMeetingAudit({
+    actorUserId: input.actor.userId,
+    actorRefId: input.actor.profileId,
+    action: 'meeting.direct_call.accepted',
+    meetingId: meeting.id,
+    description: 'Direct staff call accepted',
+    userAgent: input.userAgent,
+    meta: { callerProfileId: caller?.id || meeting.hostProfileId },
+  });
+
+  return {
+    ok: true,
+    action: 'ACCEPT',
+    call: directCallSummary(acceptedMeeting, input.actor.profileId),
+    rtc: { ...rtc, expiresInSeconds: 900 },
+  };
+}
+
+export async function endDirectStaffCall(input: {
+  actor: AdminStaffActor;
+  meetingId: string;
+  reason?: unknown;
+  userAgent?: string | null;
+}) {
+  requireCommunications(input.actor);
+
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: input.meetingId },
+    include: directCallInclude,
+  });
+  if (!meeting || meeting.kind !== 'DIRECT_CALL') {
+    throw new CommunicationsError('direct_call_not_found', 404);
+  }
+
+  const participant = directCallParticipant(meeting, input.actor.profileId);
+  if (!participant) throw new CommunicationsError('direct_call_access_denied', 403);
+
+  if (['ENDED', 'CANCELLED', 'EXPIRED'].includes(meeting.state)) {
+    return { ok: true, call: directCallSummary(meeting, input.actor.profileId) };
+  }
+
+  const now = new Date();
+  const wasLive = meeting.state === 'LIVE';
+  const reason = cleanText(input.reason, 240) || (wasLive ? 'Call ended' : 'Call cancelled');
+  const other = directCallOtherProfile(meeting, input.actor.profileId);
+
+  await prisma.$transaction(async (tx) => {
+    await tx.meeting.update({
+      where: { id: meeting.id },
+      data: {
+        state: 'ENDED',
+        endedAt: now,
+        callOutcome: wasLive ? 'COMPLETED' : 'CANCELLED',
+        callEndedReason: reason,
+      },
+    });
+    await tx.meetingParticipant.updateMany({
+      where: {
+        meetingId: meeting.id,
+        state: { in: ['INVITED', 'ACCEPTED', 'JOINED'] },
+      },
+      data: { state: 'LEFT', lastLeftAt: now },
+    });
+    await tx.staffNotification.updateMany({
+      where: { meetingId: meeting.id, type: 'INCOMING_CALL' },
+      data: { readAt: now, dismissedAt: now },
+    });
+    if (other?.id) {
+      await createStaffNotification(tx as any, {
+        recipientProfileId: other.id,
+        actorProfileId: input.actor.profileId,
+        conversationId: meeting.contextId,
+        meetingId: meeting.id,
+        type: 'CALL_ENDED',
+        title: wasLive ? 'Call ended' : 'Call cancelled',
+        body: input.actor.name || input.actor.email,
+        payload: { mode: directCallMode(meeting), reason },
+        dedupeKey: `call-ended:${meeting.id}:${other.id}`,
+      });
+    }
+  });
+
+  await writeMeetingAudit({
+    actorUserId: input.actor.userId,
+    actorRefId: input.actor.profileId,
+    action: 'meeting.direct_call.ended',
+    meetingId: meeting.id,
+    description: reason,
+    userAgent: input.userAgent,
+    meta: { outcome: wasLive ? 'COMPLETED' : 'CANCELLED' },
+  });
+
+  return {
+    ok: true,
+    call: {
+      ...directCallSummary(meeting, input.actor.profileId),
+      state: 'ENDED',
+      outcome: wasLive ? 'COMPLETED' : 'CANCELLED',
+      endedAt: now,
+    },
+  };
+}
+
+export async function reconnectDirectStaffCall(input: {
+  actor: AdminStaffActor;
+  meetingId: string;
+}) {
+  requireCommunications(input.actor);
+
+  const meeting = await prisma.meeting.findUnique({
+    where: { id: input.meetingId },
+    include: directCallInclude,
+  });
+  if (!meeting || meeting.kind !== 'DIRECT_CALL' || !['RINGING', 'LIVE'].includes(meeting.state)) {
+    throw new CommunicationsError('direct_call_not_available', 409);
+  }
+  const participant = directCallParticipant(meeting, input.actor.profileId);
+  if (!participant || ['REMOVED', 'DECLINED'].includes(participant.state)) {
+    throw new CommunicationsError('direct_call_access_denied', 403);
+  }
+
+  const rtc = await mintMeetingRtcAccess({
+    meeting,
+    participant,
+    identity: `meeting:${meeting.id}:staff:${input.actor.profileId}`,
+    displayName: input.actor.name || input.actor.email,
+  });
+
+  return {
+    ok: true,
+    call: directCallSummary(meeting, input.actor.profileId),
+    rtc: { ...rtc, expiresInSeconds: 900 },
+  };
+}
+
+export async function updateStaffNotifications(input: {
+  actor: AdminStaffActor;
+  body: any;
+}) {
+  requireCommunications(input.actor);
+  const result = await markStaffNotifications({
+    profileId: input.actor.profileId,
+    ids: Array.isArray(input.body?.ids) ? input.body.ids : [],
+    read: input.body?.read === undefined ? undefined : Boolean(input.body.read),
+    dismissed: input.body?.dismissed === undefined ? undefined : Boolean(input.body.dismissed),
+  });
+  return { ok: true, count: result.count };
+}
+

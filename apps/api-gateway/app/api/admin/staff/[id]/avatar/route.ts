@@ -12,7 +12,8 @@ import {
   enterpriseMediaErrorResponse,
   isManagedEnterpriseMediaRef,
   objectKeyFromManagedEnterpriseMediaRef,
-  presignEnterpriseMediaView,
+  getEnterpriseMediaObject,
+  enterpriseMediaResponseBody,
 } from '@/src/lib/enterprise-media-storage';
 
 export const runtime = 'nodejs';
@@ -40,8 +41,16 @@ export async function GET(request: NextRequest, context: { params: { id: string 
     if (isManagedEnterpriseMediaRef(target.photoUrl)) {
       const objectKey = objectKeyFromManagedEnterpriseMediaRef(target.photoUrl);
       if (!objectKey) return json({ ok: false, error: 'staff_avatar_not_found' }, 404);
-      const { viewUrl } = await presignEnterpriseMediaView(objectKey);
-      return NextResponse.redirect(viewUrl, 302);
+      const object = await getEnterpriseMediaObject(objectKey);
+      return new Response(enterpriseMediaResponseBody(object.bytes), {
+        status: 200,
+        headers: {
+          'content-type': object.contentType,
+          'content-length': String(object.contentLength),
+          'cache-control': 'private, no-store',
+          ...(object.etag ? { etag: object.etag } : {}),
+        },
+      });
     }
     if (/^https:\/\//i.test(target.photoUrl)) return NextResponse.redirect(target.photoUrl, 302);
     return json({ ok: false, error: 'staff_avatar_not_found' }, 404);

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   NextRequest,
   NextResponse,
@@ -211,6 +212,8 @@ export async function POST(
         );
       }
 
+      const staffSessionId = randomUUID();
+
       const sessionToken =
         signLegacyAdminSessionToken(
           {
@@ -219,6 +222,7 @@ export async function POST(
             name: admin.name,
             role: 'admin_staff',
             authMethod: credential ? 'password' : 'legacy',
+            sessionId: staffSessionId,
           },
           ADMIN_SESSION_SECONDS,
         );
@@ -236,17 +240,32 @@ export async function POST(
         },
       );
 
-      if (credential) {
-        await prisma.adminAuthCredential.update({
-          where: {
-            email,
-          },
+      const loginAt = new Date();
+
+      await prisma.$transaction(async (tx) => {
+        if (credential) {
+          await tx.adminAuthCredential.update({
+            where: { email },
+            data: { lastLoginAt: loginAt },
+          });
+        }
+
+        await tx.adminStaffSession.create({
           data: {
-            lastLoginAt:
-              new Date(),
+            id: staffSessionId,
+            staffProfileId: admin.id,
+            userId: admin.userId,
+            loginAt,
+            lastHeartbeatAt: loginAt,
+            userAgent: request.headers.get('user-agent') || null,
           },
         });
-      }
+
+        await tx.adminUserProfile.update({
+          where: { id: admin.id },
+          data: { lastActivityAt: loginAt },
+        });
+      });
 
       return NextResponse.json(
         {

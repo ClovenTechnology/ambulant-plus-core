@@ -39,5 +39,7 @@ test('domain errors are translated into actionable admin copy', () => {
     humanizeOpportunityError('opportunity_pause_before_edit'),
     'Pause this published opportunity before editing it.',
   );
-  assert.match(humanizeOpportunityError('invalid_opportunity_image'), /HTTPS/);
+  assert.match(humanizeOpportunityError('invalid_opportunity_image'), /supported image/i);
+  assert.match(humanizeOpportunityError('opportunity_gallery_limit_reached'), /maximum of 8/i);
+  assert.match(humanizeOpportunityError('opportunity_gallery_alt_required'), /alt text/i);
 });

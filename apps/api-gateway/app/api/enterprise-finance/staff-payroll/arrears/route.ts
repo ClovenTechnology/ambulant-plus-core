@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import { automaticSalaryArrearsId, reconcileOverdueSalaryArrears } from '@/src/lib/staff-payroll-arrears';
 import {
   asCents,
   asObject,
@@ -21,6 +22,7 @@ export async function GET(req: NextRequest) {
     const access = await requireEnterpriseFinanceAdmin(req);
     if (!access.ok) return access.response;
 
+    const reconciliation = await reconcileOverdueSalaryArrears();
     const db: any = prisma;
     const { searchParams } = new URL(req.url);
     const limit = Math.min(Math.max(parseInt(searchParams.get('limit') || '100', 10) || 100, 1), 500);
@@ -43,7 +45,7 @@ export async function GET(req: NextRequest) {
       take: limit,
     });
 
-    return json({ ok: true, envelope: access.envelope, items });
+    return json({ ok: true, envelope: access.envelope, items, reconciliation });
   } catch (error: any) {
     return routeError(error, 'enterprise_finance_arrears_list_failed');
   }
@@ -59,11 +61,37 @@ export async function POST(req: NextRequest) {
     const action = text(body.action || 'create_arrear', 80);
     const staffUserId = text(body.staffUserId, 180);
 
+    if (action === 'reconcile_overdue') {
+      const reconciliation = await reconcileOverdueSalaryArrears({
+        staffUserId: staffUserId || null,
+      });
+      await auditEnterpriseFinance('staff_arrears_overdue_reconciled', req, {
+        model: 'StaffArrearsLedger',
+        staffUserId: staffUserId || null,
+        ...reconciliation,
+      });
+      return json({ ok: true, envelope: access.envelope, reconciliation });
+    }
+
     if (!staffUserId) return json({ ok: false, error: 'staffUserId_required' }, 400);
 
     if (action === 'record_payment') {
       const amountCents = asCents(body.amountCents ?? body.creditCents);
       if (amountCents <= 0) return json({ ok: false, error: 'positive_amount_required' }, 400);
+
+      const linkedPayslipId = text(body.payslipId, 180) || null;
+      const linkedPayslip = linkedPayslipId
+        ? await db.payslip.findUnique({ where: { id: linkedPayslipId } })
+        : null;
+      if (linkedPayslipId && !linkedPayslip) {
+        return json({ ok: false, error: 'payslip_not_found' }, 404);
+      }
+      if (linkedPayslip && linkedPayslip.staffUserId !== staffUserId) {
+        return json({ ok: false, error: 'payslip_staff_mismatch' }, 409);
+      }
+      if (linkedPayslip && amountCents > Math.max(0, linkedPayslip.unpaidBalanceCents || 0)) {
+        return json({ ok: false, error: 'payment_exceeds_unpaid_salary_balance' }, 409);
+      }
 
       const batch = await db.payrollPaymentBatch.create({
         data: {
@@ -91,7 +119,7 @@ export async function POST(req: NextRequest) {
         data: {
           paymentBatchId: batch.id,
           staffUserId,
-          payslipId: text(body.payslipId, 180) || null,
+          payslipId: linkedPayslipId,
           arrearsLedgerEntryId: text(body.arrearsLedgerEntryId, 180) || null,
           salaryAccrualId: text(body.salaryAccrualId, 180) || null,
           allocationType: 'arrears_payment',
@@ -113,7 +141,7 @@ export async function POST(req: NextRequest) {
           staffUserId,
           payrollProfileId: text(body.payrollProfileId, 180) || null,
           payrollPeriodId: text(body.payrollPeriodId, 180) || null,
-          payslipId: text(body.payslipId, 180) || null,
+          payslipId: linkedPayslipId,
           salaryAccrualId: text(body.salaryAccrualId, 180) || null,
           entryType: 'payment',
           status: 'closed',
@@ -131,6 +159,32 @@ export async function POST(req: NextRequest) {
           meta: asObject(body.meta),
         },
       });
+
+      if (linkedPayslip) {
+        const nextUnpaid = Math.max(0, (linkedPayslip.unpaidBalanceCents || 0) - amountCents);
+        await db.payslip.update({
+          where: { id: linkedPayslip.id },
+          data: {
+            unpaidBalanceCents: nextUnpaid,
+            status: nextUnpaid === 0 ? 'paid' : 'partially_paid',
+            ...(nextUnpaid === 0 ? { paidAt: new Date() } : {}),
+          },
+        });
+
+        const automaticId = automaticSalaryArrearsId(linkedPayslip.id);
+        const automatic = await db.staffArrearsLedger.findUnique({ where: { id: automaticId } });
+        if (automatic) {
+          await db.staffArrearsLedger.update({
+            where: { id: automaticId },
+            data: {
+              status: nextUnpaid === 0 ? 'closed' : 'partial',
+              creditCents: Math.max(0, (automatic.debitCents || 0) - nextUnpaid),
+              balanceAfterCents: nextUnpaid,
+              effectiveAt: new Date(),
+            },
+          });
+        }
+      }
 
       await auditEnterpriseFinance('staff_arrears_payment_recorded', req, {
         model: 'StaffArrearsLedger',

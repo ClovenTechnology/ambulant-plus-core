@@ -4171,6 +4171,7 @@ model AdminUserProfile {
   opportunitiesPaused         Opportunity[]                @relation("OpportunityPausedBy")
   opportunitiesClosed         Opportunity[]                @relation("OpportunityClosedBy")
   opportunitiesArchived       Opportunity[]                @relation("OpportunityArchivedBy")
+  opportunityGalleryImagesCreated OpportunityGalleryImage[] @relation("OpportunityGalleryImageCreatedBy")
   applicationsAssigned        Application[]                @relation("ApplicationAssignedReviewer")
   applicationInterviewEvaluationCyclesOpened    ApplicationInterviewEvaluationCycle[] @relation("ApplicationInterviewEvaluationCycleOpenedBy")
   applicationInterviewEvaluationCyclesCompleted ApplicationInterviewEvaluationCycle[] @relation("ApplicationInterviewEvaluationCycleCompletedBy")
@@ -4187,6 +4188,17 @@ model AdminUserProfile {
   staffConversationMemberships                   StaffConversationMember[]               @relation("StaffConversationMemberProfile")
   staffMessagesSent                              StaffMessage[]                          @relation("StaffMessageSender")
   meetingChatMessagesSent                        MeetingChatMessage[]                    @relation("MeetingChatMessageSender")
+  staffSessions                                  AdminStaffSession[]                      @relation("AdminStaffSessionProfile")
+  staffPageActivities                            AdminStaffPageActivity[]                 @relation("AdminStaffPageActivityProfile")
+  notificationsReceived                         StaffNotification[]                      @relation("StaffNotificationRecipient")
+  notificationsCreated                          StaffNotification[]                      @relation("StaffNotificationActor")
+  employmentDocuments                           StaffEmploymentDocument[]                @relation("StaffEmploymentDocumentProfile")
+  employmentDocumentsUploaded                    StaffEmploymentDocument[]                @relation("StaffEmploymentDocumentUploadedBy")
+  employmentChanges                             StaffEmploymentChange[]                  @relation("StaffEmploymentChangeProfile")
+  employmentChangesCreated                       StaffEmploymentChange[]                  @relation("StaffEmploymentChangeCreatedBy")
+  leaveBalances                                  StaffLeaveBalance[]                      @relation("StaffLeaveBalanceProfile")
+  staffIdTemplatesCreated                        StaffIdTemplate[]                        @relation("StaffIdTemplateCreatedBy")
+  staffIdTemplatesUpdated                        StaffIdTemplate[]                        @relation("StaffIdTemplateUpdatedBy")
 
   @@index([departmentId])
   @@index([designationId])
@@ -4209,6 +4221,15 @@ model AdminStaffPresence {
 
   @@index([state, expiresAt])
   @@index([expiresAt])
+}
+
+enum DirectCallOutcome {
+  COMPLETED
+  MISSED
+  DECLINED
+  BUSY
+  CANCELLED
+  FAILED
 }
 
 model Meeting {
@@ -4239,6 +4260,9 @@ model Meeting {
   cancelledAt          DateTime?
   cancelledByProfileId String?
   cancellationReason   String?
+  ringExpiresAt        DateTime?
+  callOutcome          DirectCallOutcome?
+  callEndedReason      String?               @db.VarChar(240)
   createdAt            DateTime              @default(now())
   updatedAt            DateTime              @updatedAt
   createdByProfile     AdminUserProfile      @relation("MeetingCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
@@ -4250,8 +4274,10 @@ model Meeting {
   attendanceSessions   MeetingAttendanceSession[]
   applicationInterviewEvaluationCycle ApplicationInterviewEvaluationCycle?
   chatMessages                       MeetingChatMessage[]
+  staffNotifications                 StaffNotification[]
 
   @@index([state, startsAt])
+  @@index([kind, state, ringExpiresAt])
   @@index([createdByProfileId, createdAt])
   @@index([hostProfileId, startsAt])
   @@index([contextType, contextId])
@@ -4700,6 +4726,9 @@ model Opportunity {
   ctaLabel               String?                    @db.VarChar(80)
   seoTitle               String?                    @db.VarChar(240)
   seoDescription         String?                    @db.VarChar(500)
+  aeoSummary             String?                    @db.VarChar(1200)
+  aeoQuestions           Json?
+  discoveryMeta          Json?
   departmentLabel        String?                    @db.VarChar(160)
   locationMode           OpportunityLocationMode?
   locationLabel          String?                    @db.VarChar(240)
@@ -4730,12 +4759,31 @@ model Opportunity {
   pausedByProfile        AdminUserProfile?          @relation("OpportunityPausedBy", fields: [pausedByProfileId], references: [id], onDelete: SetNull)
   closedByProfile        AdminUserProfile?          @relation("OpportunityClosedBy", fields: [closedByProfileId], references: [id], onDelete: SetNull)
   archivedByProfile      AdminUserProfile?          @relation("OpportunityArchivedBy", fields: [archivedByProfileId], references: [id], onDelete: SetNull)
+  galleryImages          OpportunityGalleryImage[]
   applications           Application[]
 
   @@index([status, visibility, opensAt, closesAt])
   @@index([type, status, createdAt])
   @@index([applicationFormId])
   @@index([featured, sortOrder, publishedAt])
+  @@index([createdByProfileId, createdAt])
+}
+
+
+model OpportunityGalleryImage {
+  id                 String           @id @default(cuid())
+  opportunityId      String
+  mediaRef           String           @unique @db.VarChar(2048)
+  altText            String           @db.VarChar(240)
+  caption            String?          @db.VarChar(500)
+  sortOrder          Int              @default(0)
+  createdByProfileId String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  opportunity        Opportunity      @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  createdByProfile   AdminUserProfile @relation("OpportunityGalleryImageCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+
+  @@index([opportunityId, sortOrder, createdAt])
   @@index([createdByProfileId, createdAt])
 }
 
@@ -6377,6 +6425,7 @@ model ApplicationStaffConversion {
   initiatedByProfileId String
   activatedByProfileId String?
   notes                String?                           @db.VarChar(2000)
+  onboardingMeta       Json?
   createdAt            DateTime                          @default(now())
   updatedAt            DateTime                          @updatedAt
   activatedAt          DateTime?
@@ -6402,6 +6451,7 @@ model StaffConversation {
   createdByProfile   AdminUserProfile      @relation("StaffConversationCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
   members            StaffConversationMember[]
   messages           StaffMessage[]
+  notifications      StaffNotification[]
 
   @@index([kind, lastMessageAt, updatedAt])
   @@index([createdByProfileId, createdAt])
@@ -6414,6 +6464,7 @@ model StaffConversationMember {
   joinedAt       DateTime                    @default(now())
   leftAt         DateTime?
   lastReadAt     DateTime?
+  unreadCount    Int                         @default(0)
   conversation   StaffConversation           @relation(fields: [conversationId], references: [id], onDelete: Cascade)
   profile        AdminUserProfile            @relation("StaffConversationMemberProfile", fields: [profileId], references: [id], onDelete: Cascade)
 
@@ -6448,6 +6499,160 @@ model MeetingChatMessage {
 
   @@index([meetingId, createdAt])
   @@index([senderProfileId, createdAt])
+}
+
+model AdminStaffSession {
+  id                String           @id @default(cuid())
+  staffProfileId    String
+  userId            String
+  loginAt           DateTime         @default(now())
+  lastHeartbeatAt   DateTime         @default(now())
+  endedAt           DateTime?
+  activeSeconds     Int              @default(0)
+  lastPath          String?          @db.VarChar(500)
+  userAgent         String?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+  staffProfile      AdminUserProfile @relation("AdminStaffSessionProfile", fields: [staffProfileId], references: [id], onDelete: Cascade)
+  pageActivities    AdminStaffPageActivity[]
+
+  @@index([staffProfileId, loginAt])
+  @@index([userId, loginAt])
+  @@index([lastHeartbeatAt])
+}
+
+model AdminStaffPageActivity {
+  id              String            @id @default(cuid())
+  sessionId       String
+  staffProfileId  String
+  path            String            @db.VarChar(500)
+  firstSeenAt     DateTime          @default(now())
+  lastSeenAt      DateTime          @default(now())
+  visitCount      Int               @default(1)
+  activeSeconds   Int               @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  session         AdminStaffSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  staffProfile    AdminUserProfile  @relation("AdminStaffPageActivityProfile", fields: [staffProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, path], map: "admin_staff_page_activity_session_path_key")
+  @@index([staffProfileId, lastSeenAt])
+  @@index([staffProfileId, path])
+}
+
+model StaffNotification {
+  id                 String             @id @default(cuid())
+  recipientProfileId String
+  actorProfileId     String?
+  conversationId     String?
+  meetingId          String?
+  type               String             @db.VarChar(80)
+  title              String             @db.VarChar(240)
+  body               String?            @db.VarChar(1000)
+  payload            Json?
+  dedupeKey          String?            @unique @db.VarChar(240)
+  readAt             DateTime?
+  dismissedAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  recipientProfile   AdminUserProfile   @relation("StaffNotificationRecipient", fields: [recipientProfileId], references: [id], onDelete: Cascade)
+  actorProfile       AdminUserProfile?  @relation("StaffNotificationActor", fields: [actorProfileId], references: [id], onDelete: SetNull)
+  conversation       StaffConversation? @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  meeting            Meeting?           @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+
+  @@index([recipientProfileId, readAt, createdAt])
+  @@index([recipientProfileId, type, createdAt])
+  @@index([conversationId, createdAt])
+  @@index([meetingId, createdAt])
+}
+
+model StaffEmploymentDocument {
+  id                  String           @id @default(cuid())
+  staffProfileId      String
+  documentType        String           @db.VarChar(80)
+  title               String           @db.VarChar(240)
+  fileName            String           @db.VarChar(255)
+  contentType         String           @db.VarChar(160)
+  sizeBytes           Int
+  checksumSha256      String           @db.VarChar(64)
+  objectKey           String           @unique @db.VarChar(700)
+  effectiveAt         DateTime?
+  expiresAt           DateTime?
+  state               String           @default("active") @db.VarChar(80)
+  uploadedByProfileId String
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  staffProfile        AdminUserProfile @relation("StaffEmploymentDocumentProfile", fields: [staffProfileId], references: [id], onDelete: Cascade)
+  uploadedByProfile   AdminUserProfile @relation("StaffEmploymentDocumentUploadedBy", fields: [uploadedByProfileId], references: [id], onDelete: Restrict)
+
+  @@index([staffProfileId, documentType, createdAt])
+  @@index([state, createdAt])
+}
+
+model StaffEmploymentChange {
+  id                    String           @id @default(cuid())
+  staffProfileId        String
+  changeType            String           @db.VarChar(80)
+  effectiveAt           DateTime
+  fromDepartmentId      String?
+  toDepartmentId        String?
+  fromDesignationId     String?
+  toDesignationId       String?
+  fromManagerId         String?
+  toManagerId           String?
+  salaryBeforeCents     Int?
+  salaryAfterCents      Int?
+  currency              String           @default("ZAR") @db.VarChar(3)
+  benefits              Json?
+  privileges            Json?
+  notes                 String?          @db.VarChar(2000)
+  supportingDocumentId  String?
+  createdByProfileId    String
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+  staffProfile          AdminUserProfile @relation("StaffEmploymentChangeProfile", fields: [staffProfileId], references: [id], onDelete: Cascade)
+  createdByProfile      AdminUserProfile @relation("StaffEmploymentChangeCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+
+  @@index([staffProfileId, effectiveAt])
+  @@index([changeType, effectiveAt])
+}
+
+model StaffLeaveBalance {
+  id              String           @id @default(cuid())
+  staffProfileId  String
+  leaveType       String           @db.VarChar(80)
+  year            Int
+  entitlementDays Decimal          @default(0) @db.Decimal(8, 2)
+  usedDays        Decimal          @default(0) @db.Decimal(8, 2)
+  adjustmentDays  Decimal          @default(0) @db.Decimal(8, 2)
+  notes           String?          @db.VarChar(1000)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  staffProfile    AdminUserProfile @relation("StaffLeaveBalanceProfile", fields: [staffProfileId], references: [id], onDelete: Cascade)
+
+  @@unique([staffProfileId, leaveType, year], map: "staff_leave_balance_profile_type_year_key")
+  @@index([staffProfileId, year])
+}
+
+model StaffIdTemplate {
+  id                 String           @id @default(cuid())
+  name               String           @db.VarChar(160)
+  active             Boolean          @default(false)
+  organisationName   String           @default("Ambulant+") @db.VarChar(160)
+  subtitle           String?          @db.VarChar(240)
+  backgroundImageRef String?          @db.VarChar(2048)
+  logoImageRef       String?          @db.VarChar(2048)
+  accentHex          String           @default("#0f172a") @db.VarChar(16)
+  footerText         String?          @db.VarChar(240)
+  validityMonths     Int              @default(12)
+  createdByProfileId String
+  updatedByProfileId String
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+  createdByProfile   AdminUserProfile @relation("StaffIdTemplateCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  updatedByProfile   AdminUserProfile @relation("StaffIdTemplateUpdatedBy", fields: [updatedByProfileId], references: [id], onDelete: Restrict)
+
+  @@index([active, updatedAt])
 }
 
 enum RecruitmentTemplateStatus {

@@ -17,7 +17,7 @@ export const ENTERPRISE_MEDIA_IMAGE_TYPES = [
   'image/webp',
 ] as const;
 
-export type EnterpriseMediaKind = 'opportunity-image' | 'staff-avatar';
+export type EnterpriseMediaKind = 'opportunity-image' | 'staff-avatar' | 'staff-id-template';
 
 const MANAGED_REF_PREFIX = 'managed://ambulant-enterprise-media/';
 
@@ -41,29 +41,81 @@ function safeObjectSegment(value: string) {
   return value.replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 160);
 }
 
-function storageConfig() {
-  const bucket = clean(
-    process.env.ADMIN_MEDIA_S3_BUCKET ||
-      process.env.APPLICATION_DOCUMENT_S3_BUCKET ||
-      process.env.FORM_SUBMISSION_S3_BUCKET ||
-      process.env.S3_EVIDENCE_BUCKET ||
-      process.env.S3_BUCKET,
+function configuredValue(
+  candidates: Array<{ name: string; value: unknown }>,
+  max: number,
+) {
+  for (const candidate of candidates) {
+    const value = clean(candidate.value, max);
+    if (value) return { value, source: candidate.name };
+  }
+  return { value: '', source: null as string | null };
+}
+
+export function enterpriseMediaStorageStatus() {
+  const bucket = configuredValue(
+    [
+      { name: 'ADMIN_MEDIA_S3_BUCKET', value: process.env.ADMIN_MEDIA_S3_BUCKET },
+      { name: 'APPLICATION_DOCUMENT_S3_BUCKET', value: process.env.APPLICATION_DOCUMENT_S3_BUCKET },
+      { name: 'FORM_SUBMISSION_S3_BUCKET', value: process.env.FORM_SUBMISSION_S3_BUCKET },
+      { name: 'S3_EVIDENCE_BUCKET', value: process.env.S3_EVIDENCE_BUCKET },
+      { name: 'S3_BUCKET', value: process.env.S3_BUCKET },
+    ],
     255,
   );
-  const region = clean(
-    process.env.ADMIN_MEDIA_S3_REGION ||
-      process.env.APPLICATION_DOCUMENT_S3_REGION ||
-      process.env.FORM_SUBMISSION_S3_REGION ||
-      process.env.AWS_REGION ||
-      process.env.AWS_DEFAULT_REGION,
+  const region = configuredValue(
+    [
+      { name: 'ADMIN_MEDIA_S3_REGION', value: process.env.ADMIN_MEDIA_S3_REGION },
+      { name: 'APPLICATION_DOCUMENT_S3_REGION', value: process.env.APPLICATION_DOCUMENT_S3_REGION },
+      { name: 'FORM_SUBMISSION_S3_REGION', value: process.env.FORM_SUBMISSION_S3_REGION },
+      { name: 'AWS_REGION', value: process.env.AWS_REGION },
+      { name: 'AWS_DEFAULT_REGION', value: process.env.AWS_DEFAULT_REGION },
+    ],
     120,
   );
 
-  if (!bucket || !region) {
+  return {
+    configured: Boolean(bucket.value && region.value),
+    bucketSource: bucket.source,
+    regionSource: region.source,
+    required: {
+      preferredBucket: 'ADMIN_MEDIA_S3_BUCKET',
+      preferredRegion: 'ADMIN_MEDIA_S3_REGION',
+    },
+  };
+}
+
+function storageConfig() {
+  const bucket = configuredValue(
+    [
+      { name: 'ADMIN_MEDIA_S3_BUCKET', value: process.env.ADMIN_MEDIA_S3_BUCKET },
+      { name: 'APPLICATION_DOCUMENT_S3_BUCKET', value: process.env.APPLICATION_DOCUMENT_S3_BUCKET },
+      { name: 'FORM_SUBMISSION_S3_BUCKET', value: process.env.FORM_SUBMISSION_S3_BUCKET },
+      { name: 'S3_EVIDENCE_BUCKET', value: process.env.S3_EVIDENCE_BUCKET },
+      { name: 'S3_BUCKET', value: process.env.S3_BUCKET },
+    ],
+    255,
+  );
+  const region = configuredValue(
+    [
+      { name: 'ADMIN_MEDIA_S3_REGION', value: process.env.ADMIN_MEDIA_S3_REGION },
+      { name: 'APPLICATION_DOCUMENT_S3_REGION', value: process.env.APPLICATION_DOCUMENT_S3_REGION },
+      { name: 'FORM_SUBMISSION_S3_REGION', value: process.env.FORM_SUBMISSION_S3_REGION },
+      { name: 'AWS_REGION', value: process.env.AWS_REGION },
+      { name: 'AWS_DEFAULT_REGION', value: process.env.AWS_DEFAULT_REGION },
+    ],
+    120,
+  );
+
+  if (!bucket.value || !region.value) {
     throw new EnterpriseMediaStorageError('enterprise_media_storage_not_configured');
   }
 
-  return { bucket, client: new S3Client({ region }) };
+  return {
+    bucket: bucket.value,
+    region: region.value,
+    client: new S3Client({ region: region.value }),
+  };
 }
 
 export function isEnterpriseMediaImageType(value: unknown) {
@@ -134,6 +186,9 @@ export function managedEnterpriseMediaKind(value: unknown): EnterpriseMediaKind 
   }
   if (objectKey.startsWith('enterprise-media/staff-avatar/')) {
     return 'staff-avatar';
+  }
+  if (objectKey.startsWith('enterprise-media/staff-id-template/')) {
+    return 'staff-id-template';
   }
   return null;
 }
@@ -256,6 +311,39 @@ export async function verifyEnterpriseMediaUpload(input: {
   }
 }
 
+export function enterpriseMediaResponseBody(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+export async function getEnterpriseMediaObject(objectKey: string) {
+  const storage = storageConfig();
+  const response = await storage.client.send(
+    new GetObjectCommand({
+      Bucket: storage.bucket,
+      Key: clean(objectKey, 700),
+    }),
+  );
+
+  const body = response.Body as
+    | { transformToByteArray?: () => Promise<Uint8Array> }
+    | undefined;
+
+  if (!body?.transformToByteArray) {
+    throw new EnterpriseMediaStorageError('enterprise_media_object_unavailable', 503);
+  }
+
+  const bytes = await body.transformToByteArray();
+  return {
+    bytes,
+    contentType: clean(response.ContentType, 160) || 'application/octet-stream',
+    contentLength: Number(response.ContentLength ?? bytes.byteLength),
+    etag: clean(response.ETag, 240) || null,
+    lastModified: response.LastModified || null,
+  };
+}
+
 export async function presignEnterpriseMediaView(objectKey: string) {
   const storage = storageConfig();
   const viewUrl = await getSignedUrl(
@@ -289,7 +377,20 @@ export async function bestEffortDeleteManagedEnterpriseMedia(value: unknown) {
 
 export function enterpriseMediaErrorResponse(error: unknown) {
   if (error instanceof EnterpriseMediaStorageError) {
-    return { status: error.status, body: { ok: false, error: error.code } };
+    return {
+      status: error.status,
+      body: {
+        ok: false,
+        error: error.code,
+        ...(error.code === 'enterprise_media_storage_not_configured'
+          ? {
+              message:
+                'Image storage is not configured for this environment. Configure the Ambulant+ enterprise media bucket and region, then retry.',
+              configuration: enterpriseMediaStorageStatus(),
+            }
+          : {}),
+      },
+    };
   }
   return null;
 }

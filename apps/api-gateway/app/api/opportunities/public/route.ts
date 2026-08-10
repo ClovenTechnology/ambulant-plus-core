@@ -67,6 +67,17 @@ export async function GET(request: NextRequest) {
           },
         },
       },
+      galleryImages: {
+        orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
+        take: 2,
+        select: {
+          id: true,
+          mediaRef: true,
+          altText: true,
+          caption: true,
+          sortOrder: true,
+        },
+      },
     };
 
     const [total, rows] = await Promise.all([
@@ -96,6 +107,18 @@ export async function GET(request: NextRequest) {
           imageUrl: isManagedEnterpriseMediaRef(row.imageUrl)
             ? new URL(`/api/opportunities/public/${encodeURIComponent(row.slug)}/image`, request.url).toString()
             : item.imageUrl,
+          galleryImages: item.galleryImages.map((image: any) => {
+            const stored = row.galleryImages.find((entry) => entry.id === image.id);
+            return {
+              ...image,
+              imageUrl: isManagedEnterpriseMediaRef(stored?.mediaRef)
+                ? new URL(
+                    `/api/opportunities/public/${encodeURIComponent(row.slug)}/gallery/${encodeURIComponent(image.id)}`,
+                    request.url,
+                  ).toString()
+                : image.imageUrl,
+            };
+          }),
         };
       }),
     });

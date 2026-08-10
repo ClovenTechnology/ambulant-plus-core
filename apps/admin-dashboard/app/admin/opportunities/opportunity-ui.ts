@@ -40,6 +40,15 @@ export type AdminOpportunity = {
   description?: string | null;
   imageUrl?: string | null;
   imageAlt?: string | null;
+  galleryImages?: Array<{
+    id: string;
+    imageUrl: string | null;
+    altText: string;
+    caption?: string | null;
+    sortOrder: number;
+    createdAt?: string;
+    updatedAt?: string;
+  }>;
   tags?: string[];
   referenceCode?: string | null;
   audienceLabel?: string | null;
@@ -48,6 +57,9 @@ export type AdminOpportunity = {
   ctaLabel?: string | null;
   seoTitle?: string | null;
   seoDescription?: string | null;
+  aeoSummary?: string | null;
+  aeoQuestions?: Array<{ question: string; answer: string }> | null;
+  discoveryMeta?: Record<string, unknown> | null;
   departmentLabel?: string | null;
   locationMode?: OpportunityLocationMode | null;
   locationLabel?: string | null;
@@ -162,11 +174,18 @@ export function humanizeOpportunityError(error: unknown) {
     opportunity_image_type_invalid: 'Choose a JPEG, PNG or WebP image.',
     enterprise_media_image_type_invalid: 'Choose a JPEG, PNG or WebP image.',
     enterprise_media_image_size_invalid: 'Image files must be 8 MB or smaller.',
-    enterprise_media_storage_not_configured: 'Image uploads are temporarily unavailable. Please contact an administrator.',
+    enterprise_media_storage_not_configured: 'Image storage is not configured for this environment. A platform administrator must configure the managed media bucket and region before images can be uploaded.',
     secure_admin_credential_required: 'Please sign in with your password before changing this image.',
     opportunity_image_presign_failed: 'The image upload could not be prepared. Please try again.',
     opportunity_image_confirm_failed: 'The uploaded image could not be saved. Please try again.',
     opportunity_image_delete_failed: 'The image could not be removed. Please try again.',
+    opportunity_gallery_limit_reached: 'This opportunity already has the maximum of 8 additional images.',
+    opportunity_gallery_alt_required: 'Add meaningful alt text for every additional image before uploading.',
+    opportunity_gallery_presign_failed: 'The additional image upload could not be prepared. Please try again.',
+    opportunity_gallery_confirm_failed: 'The additional image could not be saved. Please try again.',
+    opportunity_gallery_update_failed: 'The additional image details could not be updated. Please try again.',
+    opportunity_gallery_delete_failed: 'The additional image could not be removed. Please try again.',
+    opportunity_discovery_generation_failed: 'SEO and answer-ready discovery content could not be generated. Please try again.',
     opportunity_delete_not_allowed: 'This opportunity has publication or application history and cannot be permanently deleted. Archive it instead.',
     super_admin_required: 'Only a Super Admin can permanently delete this record.',
   };

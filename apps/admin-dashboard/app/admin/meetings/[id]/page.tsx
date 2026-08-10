@@ -29,6 +29,31 @@ function formatMeetingDate(value: string, timezone: string) {
   }
 }
 
+function meetingStateLabel(value: unknown) {
+  const state = String(value || '').trim().toUpperCase();
+  const labels: Record<string, string> = {
+    DRAFT: 'Draft',
+    SCHEDULED: 'Scheduled',
+    RINGING: 'Calling',
+    LIVE: 'Live',
+    ENDED: 'Ended',
+    CANCELLED: 'Cancelled',
+    EXPIRED: 'Expired',
+  };
+  return labels[state] || state.replaceAll('_', ' ').toLowerCase();
+}
+
+function meetingKindLabel(value: unknown) {
+  const kind = String(value || '').trim().toUpperCase();
+  const labels: Record<string, string> = {
+    STANDARD: 'Meeting',
+    INTERVIEW: 'Interview',
+    TRAINING: 'Training session',
+    DIRECT_CALL: 'Staff call',
+  };
+  return labels[kind] || kind.replaceAll('_', ' ').toLowerCase();
+}
+
 export default function AdminMeetingDetailPage({
   params,
 }: {
@@ -210,7 +235,7 @@ export default function AdminMeetingDetailPage({
             {meeting?.title || 'Meeting'}
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            {meeting?.kind || ''} · {meeting?.state || ''}
+            {meeting ? `${meetingKindLabel(meeting.kind)} · ${meetingStateLabel(meeting.state)}` : ''}
           </p>
         </div>
 
@@ -231,14 +256,24 @@ export default function AdminMeetingDetailPage({
         </div>
       ) : null}
 
-      {meeting ? (
+      {meeting?.kind === 'DIRECT_CALL' ? (
+        <section className="rounded-3xl border bg-white p-6 shadow-sm">
+          <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">Staff call</div>
+          <h2 className="mt-2 text-xl font-semibold text-slate-950">Direct calls are managed in Communications</h2>
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-600">This call does not use a meeting lobby or external guest workflow. Open Communications to continue the conversation, view call history, or start a new audio/video call.</p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Link href="/admin/communications" className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Open Communications</Link>
+            <Link href="/admin/meetings" className="rounded-xl border px-4 py-2 text-sm font-medium">Back to Meetings</Link>
+          </div>
+        </section>
+      ) : meeting ? (
         <>
           <section className="grid gap-4 xl:grid-cols-3">
             <div className="rounded-3xl border bg-white p-5 shadow-sm xl:col-span-2">
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">
-                    {meeting.state}
+                    {meetingStateLabel(meeting.state)}
                   </div>
                   <div className="mt-2 text-lg font-semibold">{meeting.title}</div>
                   <div className="mt-2 text-sm text-slate-600">
@@ -320,8 +355,8 @@ export default function AdminMeetingDetailPage({
                       {participant.staffProfile?.email || participant.emailNormalized || participant.participantType}
                     </div>
                   </div>
-                  <div>{participant.role}</div>
-                  <div>{participant.state}</div>
+                  <div>{String(participant.role || '').replaceAll('_', ' ').toLowerCase()}</div>
+                  <div>{meetingStateLabel(participant.state)}</div>
                 </div>
               ))}
             </div>

@@ -21,6 +21,13 @@ export type PublicOpportunity = {
   description?: string | null;
   imageUrl?: string | null;
   imageAlt?: string | null;
+  galleryImages?: Array<{
+    id: string;
+    imageUrl: string | null;
+    altText: string;
+    caption?: string | null;
+    sortOrder: number;
+  }>;
   tags: string[];
   referenceCode?: string | null;
   audienceLabel?: string | null;
@@ -29,6 +36,8 @@ export type PublicOpportunity = {
   ctaLabel?: string | null;
   seoTitle?: string | null;
   seoDescription?: string | null;
+  aeoSummary?: string | null;
+  aeoQuestions?: Array<{ question: string; answer: string }> | null;
   departmentLabel?: string | null;
   locationMode?: 'REMOTE' | 'HYBRID' | 'ONSITE' | 'FLEXIBLE' | null;
   locationLabel?: string | null;
