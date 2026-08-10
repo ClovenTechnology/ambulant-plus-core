@@ -147,11 +147,21 @@ export async function listStaffConversations(actor: AdminStaffActor) {
     ok: true,
     actorProfileId: actor.profileId,
     incomingCalls,
-    conversations: conversations.map((conversation) => ({
-      ...conversation,
-      latestMessage: conversation.messages[0] || null,
-      messages: undefined,
-    })),
+    conversations: conversations.map((conversation) => {
+      const latestMessage = conversation.messages[0] || null;
+      const membership = conversation.members.find((member) => member.profileId === actor.profileId);
+      const unread = Boolean(
+        latestMessage &&
+        latestMessage.senderProfileId !== actor.profileId &&
+        (!membership?.lastReadAt || latestMessage.createdAt > membership.lastReadAt),
+      );
+      return {
+        ...conversation,
+        latestMessage,
+        unread,
+        messages: undefined,
+      };
+    }),
   };
 }
 

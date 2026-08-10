@@ -14,6 +14,7 @@ import {
   opportunityAdminInclude,
   opportunityDomainResponse,
   parseOpportunityWriteInput,
+  serializeAdminOpportunity,
   writeOpportunityAudit,
 } from '@/src/lib/admin-opportunities';
 
@@ -89,7 +90,7 @@ export async function GET(request: NextRequest) {
       page,
       pageSize,
       total,
-      items,
+      items: items.map((item) => serializeAdminOpportunity(item)),
     });
   } catch (error) {
     const auth = adminStaffAuthResponse(error);
@@ -144,7 +145,7 @@ export async function POST(request: NextRequest) {
       },
     });
 
-    return json({ ok: true, opportunity: created }, 201);
+    return json({ ok: true, opportunity: serializeAdminOpportunity(created) }, 201);
   } catch (error) {
     const auth = adminStaffAuthResponse(error);
     if (auth) return json(auth.body, auth.status);

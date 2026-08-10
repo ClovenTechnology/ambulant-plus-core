@@ -22,7 +22,7 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
   {
     key: 'staff-communications',
     title: 'Staff & Communications',
-    description: 'Internal staff identity, collaboration, meetings and communication governance.',
+    description: 'Internal staff profiles, collaboration, meetings and communications.',
     items: [
       { scope: 'staff.directory.read', label: 'Read staff directory', desc: 'Search staff and view authorised staff profile information.' },
       { scope: 'staff.manage', label: 'Manage staff', desc: 'Update staff organisational data and lifecycle state.', danger: true },
@@ -41,7 +41,7 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
   {
     key: 'applications-forms',
     title: 'Applications & Enterprise Forms',
-    description: 'Publish opportunities, review canonical applications and govern reusable enterprise forms and submission data.',
+    description: 'Publish opportunities, review applications and manage reusable enterprise forms and submission data.',
     items: [
       { scope: 'forms.read', label: 'Read enterprise forms', desc: 'View form definitions, versions and publication state.' },
       { scope: 'forms.design', label: 'Design enterprise forms', desc: 'Create forms and edit draft form versions.' },
@@ -51,18 +51,18 @@ export const SCOPE_GROUPS: ScopeGroup[] = [
       { scope: 'opportunities.read', label: 'Read opportunities', desc: 'View opportunity definitions and publication state.' },
       { scope: 'opportunities.manage', label: 'Manage opportunities', desc: 'Create and edit opportunity drafts and paused listings.' },
       { scope: 'opportunities.publish', label: 'Publish opportunities', desc: 'Publish, pause and close public opportunity listings.', danger: true },
-      { scope: 'applications.read', label: 'Read applications', desc: 'View canonical Application records and permitted recruitment metadata.' },
-      { scope: 'applications.review', label: 'Review applications', desc: 'Move applications through governed review and shortlist stages.' },
+      { scope: 'applications.read', label: 'Read applications', desc: 'View application records and permitted recruitment information.' },
+      { scope: 'applications.review', label: 'Review applications', desc: 'Move applications through review and shortlist stages.' },
       { scope: 'applications.assign', label: 'Assign application reviewers', desc: 'Assign active Staff profiles as application reviewers.' },
-      { scope: 'applications.decision', label: 'Make application decisions', desc: 'Record governed recruitment decisions including decline, successful and offer stages.', danger: true },
+      { scope: 'applications.decision', label: 'Make application decisions', desc: 'Record recruitment decisions including decline, successful and offer stages.', danger: true },
       { scope: 'applications.documents.read', label: 'Read applicant documents', desc: 'View applicant-requested document metadata and obtain short-lived authorised downloads.', danger: true },
-      { scope: 'applications.documents.request', label: 'Request applicant documents', desc: 'Create governed document requests and move eligible applications into the document-request stage.' },
-      { scope: 'applications.documents.review', label: 'Review applicant documents', desc: 'Accept, reject, re-request and complete governed applicant-document review cycles.', danger: true },
+      { scope: 'applications.documents.request', label: 'Request applicant documents', desc: 'Create document requests and move eligible applications into the document-request stage.' },
+      { scope: 'applications.documents.review', label: 'Review applicant documents', desc: 'Accept, reject, re-request and complete applicant-document review cycles.', danger: true },
       { scope: 'applications.interviews.read', label: 'Read application interviews', desc: 'View application-linked interview schedules, panel assignments and applicant response state.' },
-      { scope: 'applications.interviews.schedule', label: 'Schedule application interviews', desc: 'Create governed application interview invitations through the shared Meeting engine.' },
+      { scope: 'applications.interviews.schedule', label: 'Schedule application interviews', desc: 'Create application interview invitations and meeting sessions.' },
       { scope: 'applications.interviews.manage', label: 'Manage application interviews', desc: 'Reschedule, cancel and resend application interview invitations.', danger: true },
       { scope: 'applications.interviews.evaluate', label: 'Evaluate application interviews', desc: 'Complete assigned interview evaluation forms and scoring after an attended interview.', danger: true },
-      { scope: 'applications.onboarding.manage', label: 'Manage successful-applicant onboarding', desc: 'Start canonical Staff onboarding from successful or offered applications.', danger: true },
+      { scope: 'applications.onboarding.manage', label: 'Manage successful-applicant onboarding', desc: 'Start staff onboarding from successful or offered applications.', danger: true },
     ],
   },
   {

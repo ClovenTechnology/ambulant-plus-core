@@ -1,7 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Briefcase, CalendarDays, ExternalLink, MapPin, Sparkles } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CalendarDays, ExternalLink, MapPin } from 'lucide-react';
 import { absoluteUrl } from '@/lib/seo';
 import { fetchPublicOpportunity } from '@/lib/public-opportunities';
 import { applicationCta, opportunityDateLabel, PUBLIC_TYPE_LABELS, publicAvailabilityClass, publicAvailabilityLabel } from '../opportunity-ui';
@@ -34,6 +34,13 @@ export default async function OpportunityDetailPage({ params }: { params: { slug
   const cta = applicationCta(opportunity);
   const opens = opportunityDateLabel(opportunity.opensAt);
   const closes = opportunityDateLabel(opportunity.closesAt);
+  const applicationNote = cta.href && !cta.disabled
+    ? (closes ? `Applications are open until ${closes}.` : 'Applications are currently open.')
+    : opportunity.availability === 'UPCOMING'
+      ? (opens ? `Applications open ${opens}.` : 'Applications are not open yet.')
+      : opportunity.availability === 'CLOSED'
+        ? 'Applications are closed.'
+        : 'Applications are currently unavailable.';
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -46,11 +53,11 @@ export default async function OpportunityDetailPage({ params }: { params: { slug
       <section className="mx-auto grid max-w-7xl gap-8 px-4 py-10 md:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:py-16">
         <div className="space-y-8">
           <article className="overflow-hidden rounded-3xl border bg-white shadow-sm">
-            {opportunity.imageUrl ? <img src={opportunity.imageUrl} alt={opportunity.imageAlt || ''} className="max-h-[520px] w-full object-cover" /> : <div className="flex h-56 items-center justify-center bg-gradient-to-br from-cyan-50 to-slate-100"><Briefcase className="h-12 w-12 text-cyan-700/40" /></div>}
+            {opportunity.imageUrl ? <img src={opportunity.imageUrl} alt={opportunity.imageAlt || ''} className="max-h-[520px] w-full object-cover" /> : null}
             <div className="p-6 md:p-10">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${publicAvailabilityClass(opportunity.availability)}`}>{publicAvailabilityLabel(opportunity.availability)}</span>
-                {opportunity.featured ? <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"><Sparkles className="h-3.5 w-3.5" /> Featured</span> : null}
+                {opportunity.featured ? <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">Featured</span> : null}
               </div>
               <div className="mt-5 text-xs font-bold uppercase tracking-[0.22em] text-cyan-700">{PUBLIC_TYPE_LABELS[opportunity.type]}</div>
               <h1 className="mt-3 text-4xl font-semibold tracking-tight text-slate-950 md:text-5xl">{opportunity.title}</h1>
@@ -89,7 +96,7 @@ export default async function OpportunityDetailPage({ params }: { params: { slug
             ) : (
               <div className="mt-5 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-white/75">{cta.label}</div>
             )}
-            <p className="mt-4 text-xs leading-5 text-white/55">Application availability is enforced by the published opportunity window and, where applicable, the linked Enterprise Form submission window.</p>
+            <p className="mt-4 text-xs leading-5 text-white/60">{applicationNote}</p>
           </section>
         </aside>
       </section>

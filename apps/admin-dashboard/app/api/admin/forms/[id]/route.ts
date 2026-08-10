@@ -20,3 +20,9 @@ export async function PATCH(
     path: `/api/admin/forms/${encodeURIComponent(params.id)}`,
   });
 }
+
+export async function DELETE(request: NextRequest, context: { params: { id: string } }) {
+  return proxyAdminJsonBody(request, 'DELETE', {
+    path: `/api/admin/forms/${encodeURIComponent(context.params.id)}`,
+  });
+}

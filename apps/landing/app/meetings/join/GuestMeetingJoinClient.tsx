@@ -184,7 +184,7 @@ export default function GuestMeetingJoinClient() {
 
               {!token ? (
                 <p className="text-sm text-amber-700">
-                  No invitation credential was found in this page URL. Re-open the secure link from the invitation email.
+                  This invitation link is incomplete. Please reopen the secure link from your invitation email.
                 </p>
               ) : null}
             </form>
@@ -229,7 +229,7 @@ export default function GuestMeetingJoinClient() {
                 <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-5 text-sm text-emerald-900">
                   <div className="font-semibold">Admitted</div>
                   <p className="mt-2 leading-6">
-                    Your guest session is authorised for this meeting. The LiveKit media-room client is connected to this authority in the next Sprint C room-UX batch before production release.
+                    Your guest access has been confirmed. Join the meeting when you are ready.
                   </p>
                 </div>
               ) : null}

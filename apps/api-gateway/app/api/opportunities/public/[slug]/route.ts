@@ -6,6 +6,7 @@ import {
   validOpportunitySlug,
 } from '@/src/lib/opportunities-policy';
 import { serializePublicOpportunity } from '@/src/lib/admin-opportunities';
+import { isManagedEnterpriseMediaRef } from '@/src/lib/enterprise-media-storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -18,7 +19,7 @@ function json(body: unknown, status = 200) {
 }
 
 export async function GET(
-  _request: NextRequest,
+  request: NextRequest,
   context: { params: { slug: string } },
 ) {
   try {
@@ -58,9 +59,15 @@ export async function GET(
       return json({ ok: false, error: 'opportunity_not_found' }, 404);
     }
 
+    const opportunity = serializePublicOpportunity(row, new Date());
     return json({
       ok: true,
-      opportunity: serializePublicOpportunity(row, new Date()),
+      opportunity: {
+        ...opportunity,
+        imageUrl: isManagedEnterpriseMediaRef(row.imageUrl)
+          ? new URL(`/api/opportunities/public/${encodeURIComponent(row.slug)}/image`, request.url).toString()
+          : opportunity.imageUrl,
+      },
     });
   } catch (error) {
     console.error('[public opportunities] detail failed', error);

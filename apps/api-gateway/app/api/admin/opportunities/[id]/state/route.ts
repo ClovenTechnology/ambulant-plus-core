@@ -16,6 +16,7 @@ import {
   assertOpportunityStoredPublishable,
   opportunityAdminInclude,
   opportunityDomainResponse,
+  serializeAdminOpportunity,
   writeOpportunityAudit,
 } from '@/src/lib/admin-opportunities';
 
@@ -147,7 +148,7 @@ export async function POST(
       },
     });
 
-    return json({ ok: true, opportunity });
+    return json({ ok: true, opportunity: serializeAdminOpportunity(opportunity) });
   } catch (error) {
     const auth = adminStaffAuthResponse(error);
     if (auth) return json(auth.body, auth.status);

@@ -7,6 +7,7 @@ import {
   Phone,
   Plus,
   RefreshCw,
+  Search,
   Send,
   Users,
   Video,
@@ -34,12 +35,28 @@ type Conversation = {
     };
   }>;
   latestMessage?: any;
+  unread?: boolean;
 };
 
 function displayConversation(item: Conversation, actorProfileId: string | null) {
   if (item.kind === 'GROUP') return item.title || 'Group';
   const other = item.members.find((member) => member.profileId !== actorProfileId)?.profile;
   return other?.name || other?.email || 'Direct conversation';
+}
+
+function StaffAvatar({ profile, size = 'h-9 w-9' }: { profile: any; size?: string }) {
+  const label = profile?.name || profile?.email || 'Staff member';
+  if (profile?.photoUrl && profile?.id) {
+    return <img src={`/api/admin/staff/${encodeURIComponent(profile.id)}/avatar`} alt={`${label} profile`} className={`${size} shrink-0 rounded-full object-cover`} />;
+  }
+  const initials = String(label).split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'S';
+  return <span className={`${size} grid shrink-0 place-items-center rounded-full bg-slate-100 text-xs font-semibold text-slate-600`}>{initials}</span>;
+}
+
+function conversationProfile(item: Conversation, actorProfileId: string | null) {
+  return item.kind === 'DIRECT'
+    ? item.members.find((member) => member.profileId !== actorProfileId)?.profile || null
+    : null;
 }
 
 function displayTime(value: string | null | undefined) {
@@ -70,6 +87,7 @@ function AdminCommunicationsPageContent() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [newMode, setNewMode] = useState<'DIRECT' | 'GROUP'>('DIRECT');
+  const [conversationQuery, setConversationQuery] = useState('');
 
   async function loadList() {
     const response = await fetch('/api/admin/communications/conversations', { cache: 'no-store' });
@@ -99,6 +117,7 @@ function AdminCommunicationsPageContent() {
     const json = await response.json().catch(() => null);
     if (!response.ok || !json?.ok) throw new Error(json?.error || 'Unable to load conversation');
     setDetail(json);
+    setConversations((items) => items.map((item) => item.id === id ? { ...item, unread: false } : item));
   }
 
   async function refresh() {
@@ -245,6 +264,16 @@ function AdminCommunicationsPageContent() {
     [conversations, activeId, detail],
   );
 
+  const visibleConversations = useMemo(() => {
+    const query = conversationQuery.trim().toLowerCase();
+    if (!query) return conversations;
+    return conversations.filter((item) => {
+      const title = displayConversation(item, actorProfileId);
+      const latest = item.latestMessage?.body || '';
+      return `${title} ${latest}`.toLowerCase().includes(query);
+    });
+  }, [conversations, conversationQuery, actorProfileId]);
+
   return (
     <main className="space-y-5 p-4 lg:p-6">
       <header className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -252,7 +281,7 @@ function AdminCommunicationsPageContent() {
           <div className="text-xs font-semibold uppercase tracking-[0.18em] text-teal-700">Enterprise communications</div>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Staff messages & calls</h1>
           <p className="mt-2 max-w-3xl text-sm text-slate-500">
-            Persistent internal 1:1 and group conversations. Audio/video calls reuse the canonical Meeting and RTC authority.
+            Message colleagues individually or in groups, and start audio or video calls from the same workspace.
           </p>
         </div>
         <button type="button" onClick={refresh} disabled={busy} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm">
@@ -262,7 +291,7 @@ function AdminCommunicationsPageContent() {
 
       {error ? <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{error}</div> : null}
 
-      {incomingCalls.length ? <div className="space-y-2">{incomingCalls.map((call: any) => { const caller = call.participants?.find((participant: any) => participant.staffProfileId !== actorProfileId)?.staffProfile; return <div key={call.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-200 bg-cyan-50 p-4"><div><div className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Incoming {call.allowVideo ? 'video' : 'audio'} call</div><div className="mt-1 font-semibold">{caller?.name || caller?.email || call.title}</div></div><button type="button" onClick={() => router.push(`/admin/meetings/${encodeURIComponent(call.id)}`)} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Open call</button></div>; })}</div> : null}
+      {incomingCalls.length ? <div className="space-y-2">{incomingCalls.map((call: any) => { const caller = call.participants?.find((participant: any) => participant.staffProfileId !== actorProfileId)?.staffProfile; return <div key={call.id} className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-cyan-200 bg-cyan-50 p-4"><div className="flex items-center gap-3"><StaffAvatar profile={caller || { name: call.title }} /><div><div className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Incoming {call.allowVideo ? 'video' : 'audio'} call</div><div className="mt-1 font-semibold">{caller?.name || caller?.email || call.title}</div></div></div><button type="button" onClick={() => router.push(`/admin/meetings/${encodeURIComponent(call.id)}`)} className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Open call</button></div>; })}</div> : null}
 
       <section className="grid min-h-[680px] gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <aside className="rounded-3xl border bg-white p-4 shadow-sm">
@@ -271,18 +300,34 @@ function AdminCommunicationsPageContent() {
             <MessageSquare className="h-4 w-4 text-slate-400" />
           </div>
 
-          <div className="mt-4 space-y-2">
-            {conversations.length === 0 ? <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">No conversations yet.</div> : null}
-            {conversations.map((item) => (
-              <button key={item.id} type="button" onClick={() => setActiveId(item.id)} className={`w-full rounded-2xl border p-3 text-left ${activeId === item.id ? 'border-cyan-300 bg-cyan-50' : 'bg-white hover:bg-slate-50'}`}>
-                <div className="flex items-center justify-between gap-2">
-                  <div className="truncate text-sm font-semibold">{displayConversation(item, actorProfileId)}</div>
-                  <span className="text-[10px] uppercase text-slate-400">{item.kind}</span>
-                </div>
-                <div className="mt-1 truncate text-xs text-slate-500">{item.latestMessage?.body || 'No messages yet'}</div>
-                <div className="mt-1 text-[10px] text-slate-400">{displayTime(item.lastMessageAt || item.latestMessage?.createdAt)}</div>
-              </button>
-            ))}
+          <label className="relative mt-4 block">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <input value={conversationQuery} onChange={(event) => setConversationQuery(event.target.value)} placeholder="Search conversations" className="w-full rounded-xl border py-2 pl-9 pr-3 text-sm" />
+          </label>
+
+          <div className="mt-3 space-y-2">
+            {visibleConversations.length === 0 ? <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">{conversations.length ? 'No matching conversations.' : 'No conversations yet.'}</div> : null}
+            {visibleConversations.map((item) => {
+              const otherProfile = conversationProfile(item, actorProfileId);
+              return (
+                <button key={item.id} type="button" onClick={() => setActiveId(item.id)} className={`w-full rounded-2xl border p-3 text-left ${activeId === item.id ? 'border-cyan-300 bg-cyan-50' : 'bg-white hover:bg-slate-50'}`}>
+                  <div className="flex items-start gap-3">
+                    {item.kind === 'DIRECT' ? <StaffAvatar profile={otherProfile} /> : <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-100 text-slate-600"><Users className="h-4 w-4" /></span>}
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="truncate text-sm font-semibold">{displayConversation(item, actorProfileId)}</div>
+                        <div className="flex items-center gap-2">
+                          {item.unread ? <span className="rounded-full bg-cyan-700 px-2 py-0.5 text-[10px] font-semibold text-white">New</span> : null}
+                          <span className="text-[10px] uppercase text-slate-400">{item.kind === 'DIRECT' ? '1:1' : 'Group'}</span>
+                        </div>
+                      </div>
+                      <div className="mt-1 truncate text-xs text-slate-500">{item.latestMessage?.body || 'No messages yet'}</div>
+                      <div className="mt-1 text-[10px] text-slate-400">{displayTime(item.lastMessageAt || item.latestMessage?.createdAt)}</div>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
           </div>
 
           <div className="mt-5 border-t pt-4">
@@ -310,9 +355,12 @@ function AdminCommunicationsPageContent() {
           {activeConversation && detail?.conversation ? (
             <>
               <div className="flex flex-wrap items-center justify-between gap-3 border-b p-4">
-                <div>
-                  <div className="text-lg font-semibold">{displayConversation(detail.conversation, actorProfileId)}</div>
-                  <div className="mt-1 text-xs text-slate-500">{detail.conversation.members?.map((member: any) => member.profile.name || member.profile.email).join(', ')}</div>
+                <div className="flex items-center gap-3">
+                  {detail.conversation.kind === 'DIRECT' ? <StaffAvatar profile={conversationProfile(detail.conversation, actorProfileId)} size="h-10 w-10" /> : <span className="grid h-10 w-10 place-items-center rounded-full bg-slate-100 text-slate-600"><Users className="h-4 w-4" /></span>}
+                  <div>
+                    <div className="text-lg font-semibold">{displayConversation(detail.conversation, actorProfileId)}</div>
+                    <div className="mt-1 text-xs text-slate-500">{detail.conversation.members?.map((member: any) => member.profile.name || member.profile.email).join(', ')}</div>
+                  </div>
                 </div>
                 {detail.conversation.kind === 'DIRECT' ? (
                   <div className="flex gap-2">

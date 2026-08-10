@@ -562,3 +562,29 @@ export function validateEnterpriseFormDefinition(
 
   return issues;
 }
+
+export function canPermanentlyDeleteEnterpriseForm(input: {
+  submissionCount?: number | null;
+  opportunityCount?: number | null;
+  recruitmentTemplateCount?: number | null;
+  versions?: Array<{
+    state: EnterpriseFormVersionState;
+    publishedAt?: Date | string | null;
+    applicationCount?: number | null;
+    evaluationCycleCount?: number | null;
+    recruitmentEvaluationTemplateCount?: number | null;
+  }>;
+}) {
+  if (Number(input.submissionCount || 0) > 0) return false;
+  if (Number(input.opportunityCount || 0) > 0) return false;
+  if (Number(input.recruitmentTemplateCount || 0) > 0) return false;
+
+  return (input.versions || []).every((version) => (
+    version.state === 'DRAFT' &&
+    !version.publishedAt &&
+    Number(version.applicationCount || 0) === 0 &&
+    Number(version.evaluationCycleCount || 0) === 0 &&
+    Number(version.recruitmentEvaluationTemplateCount || 0) === 0
+  ));
+}
+

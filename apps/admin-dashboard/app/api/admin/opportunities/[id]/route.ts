@@ -14,3 +14,9 @@ export async function PATCH(request: NextRequest, context: { params: { id: strin
     path: `/api/admin/opportunities/${encodeURIComponent(context.params.id)}`,
   });
 }
+
+export async function DELETE(request: NextRequest, context: { params: { id: string } }) {
+  return proxyAdminJsonBody(request, 'DELETE', {
+    path: `/api/admin/opportunities/${encodeURIComponent(context.params.id)}`,
+  });
+}

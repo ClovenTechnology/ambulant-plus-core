@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { CalendarPlus, RefreshCw, Users } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { CalendarPlus, RefreshCw, Search, Users } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +28,8 @@ export default function AdminMeetingsPage() {
   const [items, setItems] = useState<MeetingRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [query, setQuery] = useState('');
+  const [view, setView] = useState<'UPCOMING' | 'LIVE' | 'PAST' | 'ALL'>('UPCOMING');
 
   async function load() {
     setBusy(true);
@@ -55,6 +57,26 @@ export default function AdminMeetingsPage() {
     load();
   }, []);
 
+  const filteredItems = useMemo(() => {
+    const now = Date.now();
+    const normalizedQuery = query.trim().toLowerCase();
+    return items.filter((item) => {
+      const startsAt = new Date(item.startsAt).getTime();
+      const endsAt = new Date(item.endsAt).getTime();
+      const terminal = ['ENDED', 'CANCELLED', 'EXPIRED'].includes(item.state);
+      const live = !terminal && startsAt <= now && endsAt >= now;
+      const past = terminal || endsAt < now;
+      const upcoming = !live && !past && startsAt > now;
+      const matchesView = view === 'ALL' || (view === 'LIVE' && live) || (view === 'PAST' && past) || (view === 'UPCOMING' && upcoming);
+      const matchesQuery = !normalizedQuery || `${item.title} ${item.kind} ${item.state}`.toLowerCase().includes(normalizedQuery);
+      return matchesView && matchesQuery;
+    });
+  }, [items, query, view]);
+
+  function humanize(value: string) {
+    return value.toLowerCase().replaceAll('_', ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+  }
+
   return (
     <main className="space-y-6 p-4 lg:p-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -66,8 +88,7 @@ export default function AdminMeetingsPage() {
             Meetings
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            Shared meeting authority for staff collaboration, direct calls,
-            interviews and verified external guests.
+            Schedule and manage staff meetings, interviews, direct calls and external guest sessions.
           </p>
         </div>
 
@@ -92,6 +113,20 @@ export default function AdminMeetingsPage() {
         </div>
       </header>
 
+      <section className="flex flex-col gap-3 rounded-3xl border bg-white p-4 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-wrap gap-2">
+          {(['UPCOMING', 'LIVE', 'PAST', 'ALL'] as const).map((item) => (
+            <button key={item} type="button" onClick={() => setView(item)} className={`rounded-xl px-3 py-2 text-sm font-semibold ${view === item ? 'bg-slate-950 text-white' : 'border bg-white text-slate-600'}`}>
+              {humanize(item)}
+            </button>
+          ))}
+        </div>
+        <label className="relative block min-w-[260px]">
+          <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search meetings" className="w-full rounded-xl border py-2 pl-9 pr-3 text-sm" />
+        </label>
+      </section>
+
       {error ? (
         <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">
           {error}
@@ -107,25 +142,25 @@ export default function AdminMeetingsPage() {
           <div />
         </div>
 
-        {items.length === 0 && !busy ? (
+        {filteredItems.length === 0 && !busy ? (
           <div className="p-8 text-sm text-slate-500">
             No meetings found.
           </div>
         ) : null}
 
-        {items.map((item) => (
+        {filteredItems.map((item) => (
           <div
             key={item.id}
             className="grid grid-cols-[1.5fr_0.7fr_1fr_0.7fr_auto] gap-3 border-b px-5 py-4 text-sm last:border-b-0"
           >
             <div>
               <div className="font-semibold text-slate-900">{item.title}</div>
-              <div className="mt-1 text-xs text-slate-500">{item.kind}</div>
+              <div className="mt-1 text-xs text-slate-500">{humanize(item.kind === 'DIRECT_CALL' ? 'CALL' : item.kind)}</div>
             </div>
 
             <div>
               <span className="rounded-full border px-2.5 py-1 text-xs font-semibold">
-                {item.state}
+                {humanize(item.state)}
               </span>
               {item.locked ? (
                 <div className="mt-2 text-xs text-amber-700">Locked</div>
@@ -154,10 +189,6 @@ export default function AdminMeetingsPage() {
         ))}
       </section>
 
-      <div className="rounded-2xl border border-cyan-100 bg-cyan-50 p-4 text-sm text-cyan-900">
-        This batch establishes scheduling, external invitation, lobby and RTC credential
-        authority. Enterprise LiveKit room rendering, persistent internal room chat and direct-call controls now use these canonical records.
-      </div>
     </main>
   );
 }

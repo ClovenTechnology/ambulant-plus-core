@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import type { AdminStaffActor } from '@/src/lib/admin-staff-auth';
+import { isManagedEnterpriseMediaRef, managedEnterpriseMediaKind } from '@/src/lib/enterprise-media-storage';
 import { effectivePresence } from '@/src/lib/admin-staff-policy';
 
 export function cleanText(value: unknown, max = 240) {
@@ -64,7 +65,10 @@ export function serializeStaffProfile(profile: any, now = new Date()) {
     email: profile.email,
     phone: profile.phone,
     staffIdentifier: profile.staffIdentifier,
-    photoUrl: profile.photoUrl,
+    photoUrl:
+      isManagedEnterpriseMediaRef(profile.photoUrl) && managedEnterpriseMediaKind(profile.photoUrl) === 'staff-avatar'
+        ? `/api/admin/staff/${encodeURIComponent(String(profile.id))}/avatar`
+        : profile.photoUrl,
     department: profile.department ? { id: profile.department.id, name: profile.department.name } : null,
     designation: profile.designation ? { id: profile.designation.id, name: profile.designation.name } : null,
     manager: profile.manager ? { id: profile.manager.id, name: profile.manager.name || profile.manager.email, email: profile.manager.email } : null,

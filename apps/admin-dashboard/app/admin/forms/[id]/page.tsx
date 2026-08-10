@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, Archive, CopyPlus, RefreshCw, RotateCcw } from 'lucide-react';
+import { ArrowLeft, Archive, CopyPlus, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +51,7 @@ export default function EnterpriseFormDetailPage({
   const [description, setDescription] = useState('');
   const [defaultLocale, setDefaultLocale] = useState('en');
   const [sourceVersionId, setSourceVersionId] = useState('');
+  const [canDelete, setCanDelete] = useState(false);
 
   async function load() {
     setBusy(true);
@@ -65,6 +66,7 @@ export default function EnterpriseFormDetailPage({
       }
 
       setForm(json.form);
+      setCanDelete(Boolean(json.permissions?.canDelete));
       setName(json.form.name || '');
       setSlug(json.form.slug || '');
       setDescription(json.form.description || '');
@@ -118,7 +120,7 @@ export default function EnterpriseFormDetailPage({
     if (
       nextArchived &&
       !window.confirm(
-        'Archive this enterprise form? Published versions remain immutable and existing submission records are preserved.',
+        'Archive this form? Existing versions and submission history will be preserved.',
       )
     ) {
       return;
@@ -139,6 +141,31 @@ export default function EnterpriseFormDetailPage({
       await load();
     } catch (err: any) {
       setError(err?.message || 'Unable to change enterprise form status');
+      setBusy(false);
+    }
+  }
+
+  async function deleteForm() {
+    if (!form || !canDelete) return;
+    const confirmation = window.prompt(`Permanently delete “${form.name}”? This is only available for unused forms. Type DELETE to continue.`);
+    if (confirmation !== 'DELETE') return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/admin/forms/${encodeURIComponent(params.id)}`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ confirm: 'DELETE' }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) {
+        throw new Error(json?.error === 'enterprise_form_delete_not_allowed'
+          ? 'This form has publication, submission or workflow history and cannot be permanently deleted. Archive it instead.'
+          : json?.error || 'Unable to delete form');
+      }
+      window.location.assign('/admin/forms');
+    } catch (err: any) {
+      setError(err?.message || 'Unable to delete form');
       setBusy(false);
     }
   }
@@ -185,7 +212,7 @@ export default function EnterpriseFormDetailPage({
             {form?.name || 'Enterprise form'}
           </h1>
           <p className="mt-2 text-sm text-slate-500">
-            Stable authority, version lifecycle and publication controls.
+            Form settings, versions and publication.
           </p>
         </div>
 
@@ -213,8 +240,8 @@ export default function EnterpriseFormDetailPage({
               <div>
                 <h2 className="text-lg font-semibold">Form identity</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  The stable key is intentionally immutable after creation. Name, public slug,
-                  description and default locale may be maintained here.
+                  The stable key cannot be changed after creation. Name, public slug,
+                  description and default locale can be maintained here.
                 </p>
               </div>
 
@@ -308,6 +335,14 @@ export default function EnterpriseFormDetailPage({
                   Restore active
                 </button>
               )}
+
+              {canDelete ? (
+                <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                  <div className="text-sm font-semibold text-rose-900">Super Admin</div>
+                  <p className="mt-1 text-xs leading-5 text-rose-700">This form has no submissions, published versions or workflow dependencies and can be permanently deleted.</p>
+                  <button type="button" onClick={deleteForm} disabled={busy} className="mt-3 inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 disabled:opacity-40"><Trash2 className="h-4 w-4" />Delete permanently</button>
+                </div>
+              ) : null}
             </div>
           </section>
 
@@ -316,7 +351,7 @@ export default function EnterpriseFormDetailPage({
               <div>
                 <h2 className="text-lg font-semibold">Versions</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Published and retired versions are immutable. Only one draft can exist at a time.
+                  Published and retired versions are locked. Create a new draft when you need to make changes.
                 </p>
               </div>
 

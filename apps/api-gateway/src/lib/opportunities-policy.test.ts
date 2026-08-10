@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   canEditOpportunity,
+  canPermanentlyDeleteOpportunity,
   canTransitionOpportunity,
   isPublicOpportunityDetailVisible,
   isPublicOpportunityListVisible,
@@ -208,4 +209,36 @@ test('opportunity images require HTTPS and accessible alt text', () => {
     }),
     false,
   );
+});
+
+
+test('managed opportunity images require the correct media kind and alt text', () => {
+  assert.equal(
+    validOpportunityImage({
+      imageUrl: 'managed://ambulant-enterprise-media/enterprise-media/opportunity-image/opportunity_1/asset_1',
+      imageAlt: 'Clinician in a consultation',
+    }),
+    true,
+  );
+  assert.equal(
+    validOpportunityImage({
+      imageUrl: 'managed://ambulant-enterprise-media/enterprise-media/staff-avatar/staff_1/asset_1',
+      imageAlt: 'Wrong media kind',
+    }),
+    false,
+  );
+  assert.equal(
+    validOpportunityImage({
+      imageUrl: 'managed://ambulant-enterprise-media/enterprise-media/opportunity-image/opportunity_1/asset_1',
+      imageAlt: '',
+    }),
+    false,
+  );
+});
+
+test('permanent opportunity deletion is limited to never-published empty drafts', () => {
+  assert.equal(canPermanentlyDeleteOpportunity({ status: 'DRAFT', applicationCount: 0 }), true);
+  assert.equal(canPermanentlyDeleteOpportunity({ status: 'DRAFT', publishedAt: new Date(), applicationCount: 0 }), false);
+  assert.equal(canPermanentlyDeleteOpportunity({ status: 'DRAFT', applicationCount: 1 }), false);
+  assert.equal(canPermanentlyDeleteOpportunity({ status: 'ARCHIVED', applicationCount: 0 }), false);
 });

@@ -78,7 +78,7 @@ export default function AdminApplicationsPage() {
           <div className="text-xs font-semibold uppercase tracking-[0.22em] text-teal-700">Applications & Opportunities</div>
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Applications</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            Review submitted applications, assign reviewers and progress the governed early recruitment pipeline. Documents, interviews and final decisions remain owned by their dedicated downstream workspaces.
+            Review submitted applications, assign reviewers and progress candidates through the recruitment process.
           </p>
         </div>
         <button type="button" onClick={load} disabled={busy} className="inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-2 text-sm">
@@ -136,7 +136,7 @@ export default function AdminApplicationsPage() {
         </div>
       </section>
 
-      <div className="text-xs text-slate-500"><UserRound className="mr-1 inline h-3.5 w-3.5" />Reviewer assignments are limited to active canonical Staff profiles.</div>
+      <div className="text-xs text-slate-500"><UserRound className="mr-1 inline h-3.5 w-3.5" />Reviewer assignments are limited to active staff members.</div>
     </main>
   );
 }

@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ExternalLink, Eye, PauseCircle, PlayCircle, Save, XCircle, Archive, Star } from 'lucide-react';
+import { ArrowLeft, Archive, ExternalLink, Eye, ImagePlus, PauseCircle, PlayCircle, Save, Trash2, XCircle } from 'lucide-react';
 import {
   OPPORTUNITY_APPLICATION_MODES,
   OPPORTUNITY_LOCATION_MODES,
@@ -20,6 +20,7 @@ import {
   type OpportunityType,
   type OpportunityVisibility,
 } from '../opportunity-ui';
+import { uploadManagedImage } from '@/lib/managed-image-upload';
 
 export const dynamic = 'force-dynamic';
 
@@ -50,8 +51,10 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
   const [visibility, setVisibility] = useState<OpportunityVisibility>('PUBLIC');
   const [summary, setSummary] = useState('');
   const [description, setDescription] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
   const [imageAlt, setImageAlt] = useState('');
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imageNonce, setImageNonce] = useState(0);
+  const [canDelete, setCanDelete] = useState(false);
   const [tags, setTags] = useState('');
   const [referenceCode, setReferenceCode] = useState('');
   const [audienceLabel, setAudienceLabel] = useState('');
@@ -81,8 +84,8 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
     setVisibility(row.visibility || 'PUBLIC');
     setSummary(row.summary || '');
     setDescription(row.description || '');
-    setImageUrl(row.imageUrl || '');
     setImageAlt(row.imageAlt || '');
+    setImageFile(null);
     setTags((row.tags || []).join(', '));
     setReferenceCode(row.referenceCode || '');
     setAudienceLabel(row.audienceLabel || '');
@@ -114,6 +117,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
         throw new Error(json?.error || 'opportunity_detail_failed');
       }
       hydrate(json.opportunity);
+      setCanDelete(Boolean(json.permissions?.canDelete));
     } catch (err: any) {
       setError(humanizeOpportunityError(err?.message));
     } finally {
@@ -139,16 +143,20 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
 
   const editable = opportunity?.status === 'DRAFT' || opportunity?.status === 'PAUSED';
   const publicPreviewUrl = opportunity ? `${PUBLIC_SITE}/opportunities/${encodeURIComponent(opportunity.slug)}` : '';
+  const hasImage = Boolean(opportunity?.imageUrl);
+  const imagePreviewUrl = opportunity?.imageUrl
+    ? `${opportunity.imageUrl}${opportunity.imageUrl.includes('?') ? '&' : '?'}v=${imageNonce}`
+    : '';
 
   const readiness = useMemo(() => {
     const items = [
       { label: 'Title and public slug', ok: Boolean(title.trim() && slug.trim()) },
-      { label: 'Image accessibility', ok: !imageUrl.trim() || Boolean(imageAlt.trim()) },
+      { label: 'Featured image', ok: !hasImage || Boolean(imageAlt.trim()) },
       { label: 'Application target', ok: applicationMode === 'NONE' || (applicationMode === 'ENTERPRISE_FORM' ? Boolean(applicationFormId.trim()) : /^https:\/\//i.test(externalApplicationUrl.trim())) },
       { label: 'Opening / closing window', ok: !opensAt || !closesAt || new Date(closesAt).getTime() > new Date(opensAt).getTime() },
     ];
     return items;
-  }, [title, slug, imageUrl, imageAlt, applicationMode, applicationFormId, externalApplicationUrl, opensAt, closesAt]);
+  }, [title, slug, hasImage, imageAlt, applicationMode, applicationFormId, externalApplicationUrl, opensAt, closesAt]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -168,8 +176,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
           visibility,
           summary: emptyToNull(summary),
           description: emptyToNull(description),
-          imageUrl: emptyToNull(imageUrl),
-          imageAlt: emptyToNull(imageAlt),
+          imageAlt: hasImage ? emptyToNull(imageAlt) : null,
           tags: parseTags(tags),
           referenceCode: emptyToNull(referenceCode),
           audienceLabel: emptyToNull(audienceLabel),
@@ -227,11 +234,63 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
         throw new Error(json?.error || 'opportunity_state_transition_failed');
       }
       hydrate(json.opportunity);
+      setCanDelete(false);
     } catch (err: any) {
       setError(humanizeOpportunityError(err?.message));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function uploadOpportunityImage() {
+    if (!imageFile || !editable) return;
+    if (!imageAlt.trim()) { setError('Add meaningful alt text before uploading the image.'); return; }
+    setBusy(true);
+    setError('');
+    try {
+      const json = await uploadManagedImage({
+        file: imageFile,
+        presignUrl: `/api/admin/opportunities/${encodeURIComponent(params.id)}/image/presign`,
+        confirmUrl: `/api/admin/opportunities/${encodeURIComponent(params.id)}/image/confirm`,
+        confirmBody: { imageAlt: imageAlt.trim() },
+      });
+      if (json?.opportunity) hydrate(json.opportunity);
+      else await load();
+      setImageNonce((value) => value + 1);
+    } catch (err: any) {
+      setError(humanizeOpportunityError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function removeOpportunityImage() {
+    if (!editable || !hasImage || !window.confirm('Remove this opportunity image?')) return;
+    setBusy(true); setError('');
+    try {
+      const response = await fetch(`/api/admin/opportunities/${encodeURIComponent(params.id)}/image`, {
+        method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({}),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'opportunity_image_delete_failed');
+      await load();
+      setImageNonce((value) => value + 1);
+    } catch (err: any) { setError(humanizeOpportunityError(err?.message)); setBusy(false); }
+  }
+
+  async function deleteDraft() {
+    if (!opportunity || !canDelete) return;
+    const confirmation = window.prompt(`Permanently delete “${opportunity.title}”? This cannot be undone. Type DELETE to continue.`);
+    if (confirmation !== 'DELETE') return;
+    setBusy(true); setError('');
+    try {
+      const response = await fetch(`/api/admin/opportunities/${encodeURIComponent(params.id)}`, {
+        method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ confirm: 'DELETE' }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'opportunity_delete_failed');
+      window.location.assign('/admin/opportunities');
+    } catch (err: any) { setError(humanizeOpportunityError(err?.message)); setBusy(false); }
   }
 
   if (!opportunity && busy) {
@@ -247,7 +306,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
           </Link>
           <div className="mt-4 flex flex-wrap items-center gap-2">
             <h1 className="text-3xl font-semibold tracking-tight text-slate-950">{opportunity?.title || 'Opportunity'}</h1>
-            {opportunity?.featured ? <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"><Star className="h-3.5 w-3.5" /> Featured</span> : null}
+            {opportunity?.featured ? <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">Featured</span> : null}
           </div>
           <p className="mt-2 text-sm text-slate-500">
             {opportunity ? `${STATUS_LABELS[opportunity.status]} · ${TYPE_LABELS[opportunity.type]} · ${opportunity.key}` : ''}
@@ -278,7 +337,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
       {!editable && opportunity ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
           {opportunity.status === 'PUBLISHED'
-            ? 'Published opportunities are immutable. Pause publication before editing.'
+            ? 'Pause this published opportunity before making changes.'
             : 'This opportunity is not editable in its current lifecycle state.'}
         </div>
       ) : null}
@@ -300,9 +359,19 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
             <div className="md:col-span-2"><h2 className="text-lg font-semibold">Public content</h2></div>
             <label className="space-y-1 text-sm md:col-span-2"><span className="font-medium">Summary</span><textarea disabled={!editable} value={summary} onChange={(e) => setSummary(e.target.value)} className="min-h-24 w-full rounded-xl border p-3 disabled:bg-slate-50" /></label>
             <label className="space-y-1 text-sm md:col-span-2"><span className="font-medium">Description</span><textarea disabled={!editable} value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-64 w-full rounded-xl border p-3 disabled:bg-slate-50" placeholder="Plain-text opportunity details, eligibility, expectations and next steps." /></label>
-            <label className="space-y-1 text-sm"><span className="font-medium">Image URL (HTTPS)</span><input disabled={!editable} value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50" placeholder="https://…" /></label>
-            <label className="space-y-1 text-sm"><span className="font-medium">Image alt text</span><input disabled={!editable} value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50" /></label>
-            {imageUrl ? <div className="md:col-span-2 overflow-hidden rounded-2xl border bg-slate-50"><img src={imageUrl} alt={imageAlt || 'Opportunity image preview'} className="max-h-64 w-full object-cover" /></div> : null}
+            <div className="space-y-3 md:col-span-2">
+              <div>
+                <div className="text-sm font-medium">Featured image</div>
+                <p className="mt-1 text-xs text-slate-500">Upload a JPEG, PNG or WebP image up to 8 MB. The image is stored securely by Ambulant+.</p>
+              </div>
+              {imagePreviewUrl ? <div className="overflow-hidden rounded-2xl border bg-slate-50"><img src={imagePreviewUrl} alt={imageAlt || 'Opportunity image preview'} className="max-h-72 w-full object-cover" /></div> : null}
+              <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
+                <label className="space-y-1 text-sm"><span className="font-medium">Choose image</span><input disabled={!editable || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] || null)} className="block w-full rounded-xl border px-3 py-2 text-sm disabled:bg-slate-50" /></label>
+                <button type="button" onClick={uploadOpportunityImage} disabled={!editable || busy || !imageFile || !imageAlt.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><ImagePlus className="h-4 w-4" />{hasImage ? 'Replace image' : 'Upload image'}</button>
+                {hasImage ? <button type="button" onClick={removeOpportunityImage} disabled={!editable || busy} className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-40"><Trash2 className="h-4 w-4" />Remove</button> : null}
+              </div>
+              <label className="block space-y-1 text-sm"><span className="font-medium">Image alt text</span><input disabled={!editable} value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50" placeholder="Describe the image for people using screen readers" /></label>
+            </div>
           </section>
 
           <section className="grid gap-4 rounded-3xl border bg-white p-5 shadow-sm md:grid-cols-2">
@@ -326,7 +395,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
           </section>
 
           <section className="grid gap-4 rounded-3xl border bg-white p-5 shadow-sm md:grid-cols-2">
-            <div className="md:col-span-2"><h2 className="text-lg font-semibold">Application route</h2><p className="mt-1 text-sm text-slate-500">Enterprise Forms reuse the canonical public form runtime. External URLs must use HTTPS.</p></div>
+            <div className="md:col-span-2"><h2 className="text-lg font-semibold">Application route</h2><p className="mt-1 text-sm text-slate-500">Choose how applicants should apply. External application links must use HTTPS.</p></div>
             <label className="space-y-1 text-sm"><span className="font-medium">Application mode</span><select disabled={!editable} value={applicationMode} onChange={(e) => setApplicationMode(e.target.value as OpportunityApplicationMode)} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50">{OPPORTUNITY_APPLICATION_MODES.map((value) => <option key={value} value={value}>{value.replace(/_/g, ' ')}</option>)}</select></label>
             {applicationMode === 'ENTERPRISE_FORM' ? (
               <label className="space-y-1 text-sm"><span className="font-medium">Enterprise Form</span>
@@ -352,7 +421,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
         <aside className="space-y-4">
           <section className="rounded-3xl border bg-white p-5 shadow-sm">
             <h2 className="font-semibold text-slate-950">Publication readiness</h2>
-            <p className="mt-1 text-xs leading-5 text-slate-500">Advisory only. The API performs the authoritative publication checks.</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">Complete these items before publishing.</p>
             <div className="mt-4 space-y-2">
               {readiness.map((item) => <div key={item.label} className="flex items-center justify-between gap-3 text-sm"><span className="text-slate-600">{item.label}</span><span className={item.ok ? 'text-emerald-700' : 'text-rose-700'}>{item.ok ? 'Ready' : 'Needs attention'}</span></div>)}
             </div>
@@ -369,7 +438,9 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
             </dl>
           </section>
 
-          {applicationMode === 'ENTERPRISE_FORM' ? <section className="rounded-3xl border bg-white p-5 text-sm shadow-sm"><h2 className="font-semibold">Form dependency</h2><p className="mt-2 text-slate-500">Publishing requires an ACTIVE Enterprise Form with a PUBLISHED PUBLIC version and an open submission window.</p><Link href="/admin/forms" className="mt-3 inline-flex text-teal-700 hover:underline">Open Enterprise Forms</Link></section> : null}
+          {applicationMode === 'ENTERPRISE_FORM' ? <section className="rounded-3xl border bg-white p-5 text-sm shadow-sm"><h2 className="font-semibold">Form dependency</h2><p className="mt-2 text-slate-500">Publishing requires an active form with a published public version that is accepting submissions.</p><Link href="/admin/forms" className="mt-3 inline-flex text-teal-700 hover:underline">Open Enterprise Forms</Link></section> : null}
+
+          {canDelete ? <section className="rounded-3xl border border-rose-200 bg-rose-50 p-5 text-sm"><h2 className="font-semibold text-rose-900">Super Admin</h2><p className="mt-2 text-rose-700">This never-published draft has no applications and can be permanently deleted.</p><button type="button" onClick={deleteDraft} disabled={busy} className="mt-4 inline-flex items-center gap-2 rounded-xl border border-rose-300 bg-white px-3 py-2 font-semibold text-rose-700 disabled:opacity-40"><Trash2 className="h-4 w-4" />Delete permanently</button></section> : null}
         </aside>
       </div>
     </main>

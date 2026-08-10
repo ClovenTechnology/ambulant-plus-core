@@ -5,12 +5,14 @@ import {
   requireAdminStaffActor,
 } from '@/src/lib/admin-staff-auth';
 import { requireOpportunityScope } from '@/src/lib/admin-opportunity-access';
-import { canEditOpportunity } from '@/src/lib/opportunities-policy';
+import { canEditOpportunity, canPermanentlyDeleteOpportunity } from '@/src/lib/opportunities-policy';
+import { bestEffortDeleteManagedEnterpriseMedia } from '@/src/lib/enterprise-media-storage';
 import {
   isOpportunityUniqueConstraintError,
   opportunityAdminInclude,
   opportunityDomainResponse,
   parseOpportunityWriteInput,
+  serializeAdminOpportunity,
   writeOpportunityAudit,
 } from '@/src/lib/admin-opportunities';
 
@@ -29,7 +31,7 @@ export async function GET(
   context: { params: { id: string } },
 ) {
   try {
-    requireOpportunityScope(
+    const actor = requireOpportunityScope(
       await requireAdminStaffActor(request),
       'opportunities.read',
     );
@@ -43,7 +45,20 @@ export async function GET(
       return json({ ok: false, error: 'opportunity_not_found' }, 404);
     }
 
-    return json({ ok: true, opportunity });
+    return json({
+      ok: true,
+      opportunity: serializeAdminOpportunity(opportunity),
+      permissions: {
+        canDelete: actor.isSuperAdmin && canPermanentlyDeleteOpportunity({
+          status: opportunity.status,
+          publishedAt: opportunity.publishedAt,
+          pausedAt: opportunity.pausedAt,
+          closedAt: opportunity.closedAt,
+          archivedAt: opportunity.archivedAt,
+          applicationCount: opportunity._count?.applications || 0,
+        }),
+      },
+    });
   } catch (error) {
     const auth = adminStaffAuthResponse(error);
     if (auth) return json(auth.body, auth.status);
@@ -110,7 +125,7 @@ export async function PATCH(
       },
     });
 
-    return json({ ok: true, opportunity: updated });
+    return json({ ok: true, opportunity: serializeAdminOpportunity(updated) });
   } catch (error) {
     const auth = adminStaffAuthResponse(error);
     if (auth) return json(auth.body, auth.status);
@@ -123,3 +138,64 @@ export async function PATCH(
     return json({ ok: false, error: 'opportunity_update_failed' }, 500);
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  context: { params: { id: string } },
+) {
+  try {
+    const actor = requireOpportunityScope(
+      await requireAdminStaffActor(request, { requirePassword: true }),
+      'opportunities.manage',
+    );
+    if (!actor.isSuperAdmin) {
+      return json({ ok: false, error: 'super_admin_required' }, 403);
+    }
+    const body = await request.json().catch(() => ({} as any));
+    if (String(body?.confirm || '') !== 'DELETE') {
+      return json({ ok: false, error: 'delete_confirmation_required' }, 400);
+    }
+
+    const current = await prisma.opportunity.findUnique({
+      where: { id: context.params.id },
+      include: { _count: { select: { applications: true } } },
+    });
+    if (!current) return json({ ok: false, error: 'opportunity_not_found' }, 404);
+    if (!canPermanentlyDeleteOpportunity({
+      status: current.status,
+      publishedAt: current.publishedAt,
+      pausedAt: current.pausedAt,
+      closedAt: current.closedAt,
+      archivedAt: current.archivedAt,
+      applicationCount: current._count.applications,
+    })) {
+      return json({ ok: false, error: 'opportunity_delete_not_allowed' }, 409);
+    }
+
+    await prisma.$transaction(async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actor.userId,
+          actorType: 'ADMIN',
+          actorRefId: actor.profileId,
+          app: 'admin-dashboard',
+          action: 'opportunity.deleted',
+          entityType: 'Opportunity',
+          entityId: current.id,
+          description: 'Never-published opportunity draft permanently deleted',
+          userAgent: request.headers.get('user-agent') || undefined,
+          meta: { title: current.title, key: current.key, slug: current.slug },
+        },
+      });
+      await tx.opportunity.delete({ where: { id: current.id } });
+    });
+    await bestEffortDeleteManagedEnterpriseMedia(current.imageUrl);
+    return json({ ok: true });
+  } catch (error) {
+    const auth = adminStaffAuthResponse(error);
+    if (auth) return json(auth.body, auth.status);
+    console.error('[admin opportunities] delete failed', error);
+    return json({ ok: false, error: 'opportunity_delete_failed' }, 500);
+  }
+}
+

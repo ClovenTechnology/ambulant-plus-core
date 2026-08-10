@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { Briefcase, Plus, RefreshCw, Search, Star } from 'lucide-react';
+import { Briefcase, Plus, RefreshCw, Search } from 'lucide-react';
 import {
   OPPORTUNITY_STATUSES,
   OPPORTUNITY_TYPES,
@@ -123,7 +123,7 @@ export default function AdminOpportunitiesPage() {
           <h1 className="mt-2 text-3xl font-semibold tracking-tight text-slate-950">Opportunities</h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
             Publish careers, internships, onboarding programmes, partnerships, franchises,
-            provider opportunities and research pilots from one governed workspace.
+            provider opportunities and research pilots from one workspace.
           </p>
         </div>
 
@@ -261,7 +261,7 @@ export default function AdminOpportunitiesPage() {
                 <div className="min-w-0">
                   <div className="flex flex-wrap items-center gap-2">
                     <h2 className="truncate font-semibold text-slate-950">{item.title}</h2>
-                    {item.featured ? <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700"><Star className="h-3 w-3" /> Featured</span> : null}
+                    {item.featured ? <span className="inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">Featured</span> : null}
                   </div>
                   <div className="mt-1 text-xs text-slate-500">
                     {TYPE_LABELS[item.type]} · /{item.slug}

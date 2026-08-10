@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, CalendarPlus, ShieldCheck } from 'lucide-react';
+import { ArrowLeft, CalendarPlus, Search, ShieldCheck, X } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +36,7 @@ function localDefaultStart() {
 export default function NewAdminMeetingPage() {
   const [staff, setStaff] = useState<StaffRow[]>([]);
   const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
+  const [staffQuery, setStaffQuery] = useState('');
   const [title, setTitle] = useState('Ambulant+ meeting');
   const [agenda, setAgenda] = useState('');
   const [startsAtLocal, setStartsAtLocal] = useState(localDefaultStart());
@@ -79,6 +80,15 @@ export default function NewAdminMeetingPage() {
   }, []);
 
   const selectedSet = useMemo(() => new Set(selectedStaffIds), [selectedStaffIds]);
+  const selectedStaff = useMemo(
+    () => staff.filter((item) => selectedSet.has(item.id)),
+    [staff, selectedSet],
+  );
+  const visibleStaff = useMemo(() => {
+    const query = staffQuery.trim().toLowerCase();
+    if (!query) return staff;
+    return staff.filter((item) => `${item.name || ''} ${item.email}`.toLowerCase().includes(query));
+  }, [staff, staffQuery]);
 
   function toggleStaff(id: string) {
     setSelectedStaffIds((current) =>
@@ -156,7 +166,7 @@ export default function NewAdminMeetingPage() {
             {created.meeting.title}
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-500">
-            Copy any generated guest PIN now. PIN plaintext is deliberately not stored and cannot be shown again.
+            Copy any generated guest PIN now. For security, it will not be shown again.
           </p>
         </header>
 
@@ -336,7 +346,7 @@ export default function NewAdminMeetingPage() {
           </label>
 
           <label className="grid gap-2">
-            <span className="text-sm font-medium">Invitation subject override</span>
+            <span className="text-sm font-medium">Invitation subject (optional)</span>
             <input
               value={subjectOverride}
               onChange={(event) => setSubjectOverride(event.target.value)}
@@ -346,7 +356,7 @@ export default function NewAdminMeetingPage() {
           </label>
 
           <label className="grid gap-2">
-            <span className="text-sm font-medium">Invitation message override</span>
+            <span className="text-sm font-medium">Invitation message (optional)</span>
             <textarea
               value={messageOverride}
               onChange={(event) => setMessageOverride(event.target.value)}
@@ -357,10 +367,40 @@ export default function NewAdminMeetingPage() {
         </section>
 
         <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm">
-          <h2 className="text-lg font-semibold">Internal attendees</h2>
+          <div>
+            <h2 className="text-lg font-semibold">Internal attendees</h2>
+            <p className="mt-1 text-sm text-slate-500">Search colleagues and add the people who should receive the meeting invitation.</p>
+          </div>
 
-          <div className="max-h-[520px] space-y-2 overflow-y-auto">
-            {staff.map((item) => (
+          <label className="relative block">
+            <Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+            <input
+              value={staffQuery}
+              onChange={(event) => setStaffQuery(event.target.value)}
+              placeholder="Search by name or email"
+              className="w-full rounded-xl border py-2 pl-9 pr-3 text-sm"
+            />
+          </label>
+
+          {selectedStaff.length ? (
+            <div className="flex flex-wrap gap-2">
+              {selectedStaff.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => toggleStaff(item.id)}
+                  className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700"
+                  title="Remove attendee"
+                >
+                  {item.name || item.email}
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ))}
+            </div>
+          ) : null}
+
+          <div className="max-h-[460px] space-y-2 overflow-y-auto">
+            {visibleStaff.map((item) => (
               <label
                 key={item.id}
                 className="flex cursor-pointer items-start gap-3 rounded-2xl border p-3"
@@ -380,8 +420,8 @@ export default function NewAdminMeetingPage() {
               </label>
             ))}
 
-            {staff.length === 0 ? (
-              <div className="text-sm text-slate-500">No active staff loaded.</div>
+            {visibleStaff.length === 0 ? (
+              <div className="rounded-xl bg-slate-50 p-3 text-sm text-slate-500">{staff.length ? 'No staff match your search.' : 'No active staff loaded.'}</div>
             ) : null}
           </div>
 

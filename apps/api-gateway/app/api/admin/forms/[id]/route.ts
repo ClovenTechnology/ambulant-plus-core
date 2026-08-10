@@ -9,6 +9,7 @@ import {
   requireEnterpriseFormScope,
 } from '@/src/lib/admin-form-access';
 import {
+  canPermanentlyDeleteEnterpriseForm,
   cleanFormText,
   normaliseFormSlug,
   validFormLocale,
@@ -34,12 +35,15 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    requireEnterpriseFormScope(await requireAdminStaffActor(request), 'forms.read');
+    const actor = requireEnterpriseFormScope(await requireAdminStaffActor(request), 'forms.read');
     const { id } = await context.params;
 
     const form = await prisma.enterpriseForm.findUnique({
       where: { id },
       include: {
+        _count: {
+          select: { submissions: true, opportunities: true, recruitmentTemplates: true },
+        },
         versions: {
           orderBy: { versionNumber: 'desc' },
           select: {
@@ -61,13 +65,32 @@ export async function GET(
             retiredAt: true,
             createdAt: true,
             updatedAt: true,
+            _count: {
+              select: {
+                applications: true,
+                applicationInterviewEvaluationCycles: true,
+                recruitmentEvaluationTemplates: true,
+              },
+            },
           },
         },
       },
     });
 
     if (!form) return json({ ok: false, error: 'enterprise_form_not_found' }, 404);
-    return json({ ok: true, form });
+    const canDelete = actor.isSuperAdmin && canPermanentlyDeleteEnterpriseForm({
+      submissionCount: form._count.submissions,
+      opportunityCount: form._count.opportunities,
+      recruitmentTemplateCount: form._count.recruitmentTemplates,
+      versions: form.versions.map((version) => ({
+        state: version.state,
+        publishedAt: version.publishedAt,
+        applicationCount: version._count.applications,
+        evaluationCycleCount: version._count.applicationInterviewEvaluationCycles,
+        recruitmentEvaluationTemplateCount: version._count.recruitmentEvaluationTemplates,
+      })),
+    });
+    return json({ ok: true, form, permissions: { canDelete } });
   } catch (error) {
     const auth = adminStaffAuthResponse(error);
     if (auth) return json(auth.body, auth.status);
@@ -170,3 +193,82 @@ export async function PATCH(
     return json({ ok: false, error: 'enterprise_form_update_failed' }, 500);
   }
 }
+
+export async function DELETE(
+  request: NextRequest,
+  context: { params: Promise<{ id: string }> },
+) {
+  try {
+    const actor = requireEnterpriseFormScope(
+      await requireAdminStaffActor(request, { requirePassword: true }),
+      'forms.design',
+    );
+    if (!actor.isSuperAdmin) return json({ ok: false, error: 'super_admin_required' }, 403);
+    const body = await request.json().catch(() => ({} as any));
+    if (String(body?.confirm || '') !== 'DELETE') {
+      return json({ ok: false, error: 'delete_confirmation_required' }, 400);
+    }
+    const { id } = await context.params;
+    const form = await prisma.enterpriseForm.findUnique({
+      where: { id },
+      include: {
+        _count: { select: { submissions: true, opportunities: true, recruitmentTemplates: true } },
+        versions: {
+          select: {
+            id: true,
+            state: true,
+            publishedAt: true,
+            _count: {
+              select: {
+                applications: true,
+                applicationInterviewEvaluationCycles: true,
+                recruitmentEvaluationTemplates: true,
+              },
+            },
+          },
+        },
+      },
+    });
+    if (!form) return json({ ok: false, error: 'enterprise_form_not_found' }, 404);
+
+    const allowed = canPermanentlyDeleteEnterpriseForm({
+      submissionCount: form._count.submissions,
+      opportunityCount: form._count.opportunities,
+      recruitmentTemplateCount: form._count.recruitmentTemplates,
+      versions: form.versions.map((version) => ({
+        state: version.state,
+        publishedAt: version.publishedAt,
+        applicationCount: version._count.applications,
+        evaluationCycleCount: version._count.applicationInterviewEvaluationCycles,
+        recruitmentEvaluationTemplateCount: version._count.recruitmentEvaluationTemplates,
+      })),
+    });
+    if (!allowed) return json({ ok: false, error: 'enterprise_form_delete_not_allowed' }, 409);
+
+    await prisma.$transaction(async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          actorUserId: actor.userId,
+          actorType: 'ADMIN',
+          actorRefId: actor.profileId,
+          app: 'admin-dashboard',
+          action: 'enterprise_form.deleted',
+          entityType: 'EnterpriseForm',
+          entityId: form.id,
+          description: 'Unused enterprise form permanently deleted',
+          userAgent: request.headers.get('user-agent') || undefined,
+          meta: { name: form.name, key: form.key, slug: form.slug },
+        },
+      });
+      await tx.enterpriseFormVersion.deleteMany({ where: { formId: form.id } });
+      await tx.enterpriseForm.delete({ where: { id: form.id } });
+    });
+    return json({ ok: true });
+  } catch (error) {
+    const auth = adminStaffAuthResponse(error);
+    if (auth) return json(auth.body, auth.status);
+    console.error('[admin forms] delete failed', error);
+    return json({ ok: false, error: 'enterprise_form_delete_failed' }, 500);
+  }
+}
+

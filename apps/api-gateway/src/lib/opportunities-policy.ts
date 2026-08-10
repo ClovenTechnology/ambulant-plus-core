@@ -211,6 +211,11 @@ export function validOpportunityImage(input: {
   const imageAlt = cleanOpportunityText(input.imageAlt, 240);
 
   if (!imageUrl) return imageAlt.length === 0;
+  if (imageUrl.startsWith('managed://ambulant-enterprise-media/')) {
+    return imageUrl.startsWith(
+      'managed://ambulant-enterprise-media/enterprise-media/opportunity-image/',
+    ) && imageAlt.length > 0;
+  }
   return validHttpsUrl(imageUrl) && imageAlt.length > 0;
 }
 
@@ -261,6 +266,25 @@ export function opportunityAvailability(input: {
   if (input.closesAt && input.closesAt.getTime() <= now) return 'CLOSED';
   if (input.opensAt && input.opensAt.getTime() > now) return 'UPCOMING';
   return 'OPEN';
+}
+
+
+export function canPermanentlyDeleteOpportunity(input: {
+  status: OpportunityStatus;
+  publishedAt?: Date | string | null;
+  pausedAt?: Date | string | null;
+  closedAt?: Date | string | null;
+  archivedAt?: Date | string | null;
+  applicationCount?: number | null;
+}) {
+  return (
+    input.status === 'DRAFT' &&
+    !input.publishedAt &&
+    !input.pausedAt &&
+    !input.closedAt &&
+    !input.archivedAt &&
+    Number(input.applicationCount || 0) === 0
+  );
 }
 
 export function isPublicOpportunityDetailVisible(input: {

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   canEditEnterpriseFormVersion,
+  canPermanentlyDeleteEnterpriseForm,
   canPublishEnterpriseFormVersion,
   canRetireEnterpriseFormVersion,
   normaliseFormKey,
@@ -157,5 +158,32 @@ test('submission window rejects an inverted interval', () => {
       acceptingUntil: new Date('2026-08-10T10:00:00Z'),
     }),
     true,
+  );
+});
+
+
+test('permanent form deletion is blocked by published history or downstream records', () => {
+  assert.equal(
+    canPermanentlyDeleteEnterpriseForm({
+      submissionCount: 0,
+      opportunityCount: 0,
+      recruitmentTemplateCount: 0,
+      versions: [{ state: 'DRAFT', applicationCount: 0, evaluationCycleCount: 0, recruitmentEvaluationTemplateCount: 0 }],
+    }),
+    true,
+  );
+  assert.equal(
+    canPermanentlyDeleteEnterpriseForm({ submissionCount: 1, versions: [] }),
+    false,
+  );
+  assert.equal(
+    canPermanentlyDeleteEnterpriseForm({
+      versions: [{ state: 'PUBLISHED', publishedAt: new Date(), applicationCount: 0, evaluationCycleCount: 0, recruitmentEvaluationTemplateCount: 0 }],
+    }),
+    false,
+  );
+  assert.equal(
+    canPermanentlyDeleteEnterpriseForm({ opportunityCount: 1, versions: [] }),
+    false,
   );
 });

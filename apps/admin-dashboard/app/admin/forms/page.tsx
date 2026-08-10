@@ -36,13 +36,14 @@ type ListPayload = {
   error?: string;
 };
 
-function versionLabel(form: FormRow) {
+function draftVersionLabel(form: FormRow) {
   const draft = form.versions.find((version) => version.state === 'DRAFT');
+  return draft ? `Draft v${draft.versionNumber}` : 'No working draft';
+}
+
+function publishedVersionLabel(form: FormRow) {
   const published = form.versions.find((version) => version.state === 'PUBLISHED');
-  if (draft) return `Draft v${draft.versionNumber}`;
-  if (published) return `Published v${published.versionNumber}`;
-  const latest = form.versions[0];
-  return latest ? `${latest.state} v${latest.versionNumber}` : 'No versions';
+  return published ? `Published v${published.versionNumber}` : 'Not published';
 }
 
 export default function AdminEnterpriseFormsPage() {
@@ -270,10 +271,11 @@ export default function AdminEnterpriseFormsPage() {
       </section>
 
       <section className="overflow-hidden rounded-3xl border bg-white shadow-sm">
-        <div className="grid grid-cols-[1.5fr_0.7fr_0.9fr_auto] gap-3 border-b bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
+        <div className="grid grid-cols-[1.45fr_0.65fr_0.8fr_0.8fr_auto] gap-3 border-b bg-slate-50 px-5 py-3 text-xs font-semibold uppercase tracking-wide text-slate-500">
           <div>Form</div>
           <div>Status</div>
-          <div>Version</div>
+          <div>Working version</div>
+          <div>Published version</div>
           <div />
         </div>
 
@@ -286,7 +288,7 @@ export default function AdminEnterpriseFormsPage() {
         {items.map((item) => (
           <div
             key={item.id}
-            className="grid grid-cols-[1.5fr_0.7fr_0.9fr_auto] gap-3 border-b px-5 py-4 text-sm last:border-b-0"
+            className="grid grid-cols-[1.45fr_0.65fr_0.8fr_0.8fr_auto] gap-3 border-b px-5 py-4 text-sm last:border-b-0"
           >
             <div className="min-w-0">
               <div className="flex items-center gap-2 font-semibold text-slate-900">
@@ -300,15 +302,18 @@ export default function AdminEnterpriseFormsPage() {
 
             <div>
               <span className="rounded-full border px-2.5 py-1 text-xs font-semibold">
-                {item.status}
+                {item.status === 'ACTIVE' ? 'Active' : 'Archived'}
               </span>
             </div>
 
             <div>
-              <div className="font-medium">{versionLabel(item)}</div>
-              <div className="mt-1 text-xs text-slate-500">
-                {new Date(item.updatedAt).toLocaleString()}
-              </div>
+              <div className="font-medium">{draftVersionLabel(item)}</div>
+              <div className="mt-1 text-xs text-slate-500">Updated {new Date(item.updatedAt).toLocaleDateString()}</div>
+            </div>
+
+            <div>
+              <div className="font-medium">{publishedVersionLabel(item)}</div>
+              <div className="mt-1 text-xs text-slate-500">{item.status === 'ARCHIVED' ? 'Archived form' : 'Live only when published'}</div>
             </div>
 
             <Link

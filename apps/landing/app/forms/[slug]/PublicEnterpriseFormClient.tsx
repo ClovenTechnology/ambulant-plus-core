@@ -831,7 +831,7 @@ export default function PublicEnterpriseFormClient({ slug, opportunitySlug }: { 
               <label>Website<input tabIndex={-1} autoComplete="off" value={honeypot} onChange={(event) => setHoneypot(event.target.value)} /></label>
             </div>
             <button type="button" disabled={busy} onClick={() => void startForm()} className="w-full rounded-xl bg-slate-950 px-5 py-3.5 text-sm font-semibold text-white disabled:opacity-50">{busy ? 'Starting securely…' : 'Start form'}</button>
-            <p className="text-xs leading-5 text-slate-500">A secure draft is created only when you choose Start. If save/resume is enabled, the continuation credential is kept on this device and never stored by the platform in plaintext.</p>
+            <p className="text-xs leading-5 text-slate-500">Your form begins when you choose Start. If save and resume is available, this device keeps the information needed to continue later.</p>
           </div>
         </section>
       </main>

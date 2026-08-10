@@ -59,7 +59,7 @@ export function MeetingRoomClient({
         method: 'POST',
       });
       const json = await response.json().catch(() => null);
-      if (!response.ok || !json?.ok) throw new Error(json?.error || 'Unable to obtain room credential');
+      if (!response.ok || !json?.ok) throw new Error(json?.error || 'Unable to connect to the meeting room');
       setToken(json.token);
       setServerUrl(json.wsUrl);
       await onMeetingChanged();
@@ -97,7 +97,7 @@ export function MeetingRoomClient({
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/10 p-4 text-white">
           <div>
             <div className="text-xs font-semibold uppercase tracking-[0.18em] text-cyan-300">Enterprise meeting room</div>
-            <div className="mt-1 text-sm text-white/70">LiveKit media credentials are minted server-side for your canonical Staff participant.</div>
+            <div className="mt-1 text-sm text-white/70">Your secure meeting connection is ready.</div>
           </div>
           {!token && !closed ? <button type="button" onClick={join} disabled={joining} className="inline-flex items-center gap-2 rounded-xl bg-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 disabled:opacity-50"><Video className="h-4 w-4" />{joining ? 'Joining…' : 'Join room'}</button> : null}
         </div>
@@ -125,7 +125,7 @@ export function MeetingRoomClient({
           </div>
         ) : (
           <div className="grid min-h-[420px] place-items-center p-8 text-center text-sm text-white/60">
-            {closed ? 'This meeting has ended. The room is closed.' : 'Join when you are ready. Audio/video permissions follow the canonical Meeting policy.'}
+            {closed ? 'This meeting has ended. The room is closed.' : 'Join when you are ready. Your available audio and video controls will appear in the room.'}
           </div>
         )}
       </div>

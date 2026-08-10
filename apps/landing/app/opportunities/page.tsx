@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { ArrowRight, Briefcase, MapPin, Search, Sparkles } from 'lucide-react';
+import { ArrowRight, Briefcase, MapPin, Search } from 'lucide-react';
 import { absoluteUrl } from '@/lib/seo';
 import { fetchPublicOpportunities, PUBLIC_OPPORTUNITY_TYPES } from '@/lib/public-opportunities';
 import { PUBLIC_TYPE_LABELS, publicAvailabilityClass, publicAvailabilityLabel } from './opportunity-ui';
@@ -58,7 +58,7 @@ export default async function OpportunitiesPage({
           <div className="max-w-4xl">
             <div className="text-xs font-bold uppercase tracking-[0.28em] text-cyan-700">Work, build and partner with us</div>
             <h1 className="mt-4 text-4xl font-semibold tracking-tight text-slate-950 md:text-6xl">Opportunities across the Ambulant+ ecosystem</h1>
-            <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600">Discover careers, internships, graduate programmes, partnerships, franchise opportunities, service-provider opportunities and research pilots published through our governed application platform.</p>
+            <p className="mt-6 max-w-3xl text-lg leading-8 text-slate-600">Discover careers, internships, graduate programmes, partnerships, franchise opportunities, service-provider opportunities and research pilots available through Ambulant+.</p>
           </div>
         </div>
       </section>
@@ -94,11 +94,11 @@ export default async function OpportunitiesPage({
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
           {result.items.map((item) => (
             <article key={item.slug} className="overflow-hidden rounded-3xl border bg-white shadow-sm">
-              {item.imageUrl ? <img src={item.imageUrl} alt={item.imageAlt || ''} className="h-56 w-full object-cover" /> : <div className="flex h-40 items-center justify-center bg-gradient-to-br from-cyan-50 to-slate-100"><Briefcase className="h-10 w-10 text-cyan-700/40" /></div>}
+              {item.imageUrl ? <img src={item.imageUrl} alt={item.imageAlt || ''} className="h-56 w-full object-cover" /> : null}
               <div className="p-6">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${publicAvailabilityClass(item.availability)}`}>{publicAvailabilityLabel(item.availability)}</span>
-                  {item.featured ? <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700"><Sparkles className="h-3.5 w-3.5" /> Featured</span> : null}
+                  {item.featured ? <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700">Featured</span> : null}
                 </div>
                 <div className="mt-4 text-xs font-semibold uppercase tracking-[0.18em] text-cyan-700">{PUBLIC_TYPE_LABELS[item.type]}</div>
                 <h2 className="mt-2 text-2xl font-semibold tracking-tight text-slate-950"><Link href={`/opportunities/${encodeURIComponent(item.slug)}`} className="hover:text-cyan-800">{item.title}</Link></h2>

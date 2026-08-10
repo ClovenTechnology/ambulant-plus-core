@@ -104,8 +104,8 @@ export function ApplicationStaffConversionPanel({
     <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2"><UserRoundPlus className="h-5 w-5" /><h2 className="text-lg font-semibold">Canonical Staff onboarding</h2></div>
-          <p className="mt-1 text-sm text-slate-500">Converts a successful applicant through the governed role-request path into the canonical <code>AdminUserProfile</code>. No duplicate employee record is created.</p>
+          <div className="flex items-center gap-2"><UserRoundPlus className="h-5 w-5" /><h2 className="text-lg font-semibold">Staff onboarding</h2></div>
+          <p className="mt-1 text-sm text-slate-500">Start staff onboarding for a successful applicant and send the required approval request.</p>
         </div>
         {canConvert && !conversion ? <button type="button" onClick={loadWorkspace} disabled={busy} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm"><RefreshCw className={`h-4 w-4 ${busy ? 'animate-spin' : ''}`} />Defaults</button> : null}
       </div>
@@ -116,12 +116,12 @@ export function ApplicationStaffConversionPanel({
         <div className={`rounded-2xl border p-4 ${conversion.status === 'ACTIVE' ? 'border-emerald-200 bg-emerald-50' : 'bg-slate-50'}`}>
           <div className="flex items-center gap-2 font-semibold">{conversion.status === 'ACTIVE' ? <CheckCircle2 className="h-4 w-4 text-emerald-700" /> : null}{conversion.status.replace(/_/g, ' ')}</div>
           <div className="mt-2 grid gap-2 text-sm md:grid-cols-2">
-            <div>Role request: <span className="font-medium">{conversion.roleRequest?.status || '—'}</span></div>
-            <div>Credential/profile: <span className="font-medium">{conversion.staffProfile?.email || 'Pending approval'}</span></div>
+            <div>Approval status: <span className="font-medium">{conversion.roleRequest?.status || '—'}</span></div>
+            <div>Staff profile: <span className="font-medium">{conversion.staffProfile?.email || 'Pending approval'}</span></div>
             <div>Department: <span className="font-medium">{conversion.roleRequest?.department?.name || '—'}</span></div>
             <div>Designation: <span className="font-medium">{conversion.roleRequest?.designation?.name || '—'}</span></div>
           </div>
-          {conversion.status === 'PENDING_APPROVAL' ? <p className="mt-3 text-xs text-slate-600">Final activation remains subject to the existing Role Request approval and Admin credential gate.</p> : null}
+          {conversion.status === 'PENDING_APPROVAL' ? <p className="mt-3 text-xs text-slate-600">Staff activation is awaiting the required approval and account setup.</p> : null}
           {conversion.staffProfile?.id ? <Link href={`/admin/staff/${encodeURIComponent(conversion.staffProfile.id)}`} className="mt-3 inline-flex rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white">Open Staff profile</Link> : null}
         </div>
       ) : canConvert ? (
@@ -133,7 +133,7 @@ export function ApplicationStaffConversionPanel({
           <label className="text-sm"><span className="mb-1 block font-medium">Designation</span><select value={designationId} onChange={(event) => setDesignationId(event.target.value)} className="w-full rounded-xl border px-3 py-2"><option value="">None</option>{designations.map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label className="text-sm"><span className="mb-1 block font-medium">Direct roles</span><select multiple value={roleIds} onChange={(event) => setRoleIds(Array.from(event.currentTarget.selectedOptions).map((option) => option.value))} className="min-h-24 w-full rounded-xl border px-3 py-2">{(workspace?.support?.roles || []).map((item: any) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
           <label className="text-sm md:col-span-2"><span className="mb-1 block font-medium">Internal onboarding notes</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} className="min-h-20 w-full rounded-xl border p-3" /></label>
-          <div className="md:col-span-2"><button type="button" onClick={startConversion} disabled={busy || !email.trim() || (!roleIds.length && !designationId)} className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Start governed Staff onboarding</button><p className="mt-2 text-xs text-slate-500">This creates a governed Role Request. The Staff profile is activated only after the existing approval/credential gate succeeds, at which point the Application advances to ONBOARDING.</p></div>
+          <div className="md:col-span-2"><button type="button" onClick={startConversion} disabled={busy || !email.trim() || (!roleIds.length && !designationId)} className="rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40">Start staff onboarding</button><p className="mt-2 text-xs text-slate-500">The staff profile will be activated after the required approval and account setup are completed.</p></div>
         </div>
       ) : (
         <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">Your role can view the successful application but does not include <code>applications.onboarding.manage</code>.</div>

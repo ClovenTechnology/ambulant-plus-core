@@ -18,7 +18,6 @@ export const dynamic = 'force-dynamic';
 
 const SELF_FIELDS = new Set([
   'phone',
-  'photoUrl',
   'timezone',
   'workingHours',
   'preferredContactMethod',
@@ -197,7 +196,6 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     if (Object.prototype.hasOwnProperty.call(body, 'name')) data.name = cleanText(body.name, 240);
     if (Object.prototype.hasOwnProperty.call(body, 'phone')) data.phone = cleanText(body.phone, 40);
     if (Object.prototype.hasOwnProperty.call(body, 'staffIdentifier')) data.staffIdentifier = cleanText(body.staffIdentifier, 120);
-    if (Object.prototype.hasOwnProperty.call(body, 'photoUrl')) data.photoUrl = cleanText(body.photoUrl, 1200);
     if (Object.prototype.hasOwnProperty.call(body, 'timezone')) data.timezone = cleanText(body.timezone, 120);
     if (Object.prototype.hasOwnProperty.call(body, 'preferredContactMethod')) {
       const value = contactMethod(body.preferredContactMethod);

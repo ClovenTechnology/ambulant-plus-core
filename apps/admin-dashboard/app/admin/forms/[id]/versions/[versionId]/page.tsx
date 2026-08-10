@@ -6,6 +6,7 @@ import {
   ArrowDown,
   ArrowLeft,
   ArrowUp,
+  Copy,
   Eye,
   Plus,
   RefreshCw,
@@ -43,6 +44,34 @@ const FIELD_TYPES = [
   'HIDDEN',
   'INFORMATION',
 ] as const;
+
+const FIELD_TYPE_LABELS: Record<string, string> = {
+  SHORT_TEXT: 'Short text',
+  LONG_TEXT: 'Long text',
+  EMAIL: 'Email',
+  PHONE: 'Phone',
+  NUMBER: 'Number',
+  CURRENCY: 'Currency',
+  DATE: 'Date',
+  DATETIME: 'Date & time',
+  TIME: 'Time',
+  BOOLEAN: 'Yes / No',
+  SINGLE_SELECT: 'Dropdown',
+  MULTI_SELECT: 'Multi-select',
+  RADIO: 'Radio buttons',
+  CHECKBOX: 'Checkbox',
+  CHECKBOX_GROUP: 'Checkbox group',
+  FILE_UPLOAD: 'File upload',
+  CONSENT: 'Consent',
+  URL: 'Website URL',
+  ADDRESS: 'Address',
+  COUNTRY: 'Country',
+  RATING: 'Rating',
+  MATRIX: 'Matrix',
+  REPEATER: 'Repeating group',
+  HIDDEN: 'Hidden field',
+  INFORMATION: 'Information block',
+};
 
 type OptionDefinition = {
   key: string;
@@ -323,6 +352,8 @@ export default function EnterpriseFormVersionBuilderPage({
 
   function mark(next: Definition) {
     setDefinition(next);
+    setRulesText(JSON.stringify(next.rules || [], null, 2));
+    setTranslationsText(JSON.stringify(next.translations || [], null, 2));
     setDirty(true);
   }
 
@@ -362,6 +393,35 @@ export default function EnterpriseFormVersionBuilderPage({
     if (target < 0 || target >= definition.pages.length) return;
     const pages = [...definition.pages];
     [pages[pageIndex], pages[target]] = [pages[target], pages[pageIndex]];
+    mark({ ...definition, pages: reorder(pages) });
+  }
+
+  function duplicatePage(pageIndex: number) {
+    const source = definition.pages[pageIndex];
+    if (!source) return;
+    const duplicate: PageDefinition = {
+      ...source,
+      key: safeKey('page'),
+      title: `${source.title} copy`,
+      order: pageIndex + 1,
+      sections: source.sections.map((section, sectionIndex) => ({
+        ...section,
+        key: safeKey('section'),
+        order: sectionIndex,
+        fields: section.fields.map((field, fieldIndex) => ({
+          ...field,
+          key: safeKey('field'),
+          order: fieldIndex,
+          options: (field.options || []).map((option, optionIndex) => ({
+            ...option,
+            key: safeKey('option'),
+            order: optionIndex,
+          })),
+        })),
+      })),
+    };
+    const pages = [...definition.pages];
+    pages.splice(pageIndex + 1, 0, duplicate);
     mark({ ...definition, pages: reorder(pages) });
   }
 
@@ -414,6 +474,34 @@ export default function EnterpriseFormVersionBuilderPage({
     if (!page || target < 0 || target >= page.sections.length) return;
     const sections = [...page.sections];
     [sections[sectionIndex], sections[target]] = [sections[target], sections[sectionIndex]];
+    const pages = definition.pages.map((item, index) =>
+      index === pageIndex ? { ...item, sections: reorder(sections) } : item,
+    );
+    mark({ ...definition, pages });
+  }
+
+  function duplicateSection(pageIndex: number, sectionIndex: number) {
+    const page = definition.pages[pageIndex];
+    const source = page?.sections[sectionIndex];
+    if (!page || !source) return;
+    const duplicate: SectionDefinition = {
+      ...source,
+      key: safeKey('section'),
+      title: `${source.title} copy`,
+      order: sectionIndex + 1,
+      fields: source.fields.map((field, fieldIndex) => ({
+        ...field,
+        key: safeKey('field'),
+        order: fieldIndex,
+        options: (field.options || []).map((option, optionIndex) => ({
+          ...option,
+          key: safeKey('option'),
+          order: optionIndex,
+        })),
+      })),
+    };
+    const sections = [...page.sections];
+    sections.splice(sectionIndex + 1, 0, duplicate);
     const pages = definition.pages.map((item, index) =>
       index === pageIndex ? { ...item, sections: reorder(sections) } : item,
     );
@@ -498,6 +586,35 @@ export default function EnterpriseFormVersionBuilderPage({
     if (!section || target < 0 || target >= section.fields.length) return;
     const fields = [...section.fields];
     [fields[fieldIndex], fields[target]] = [fields[target], fields[fieldIndex]];
+    const pages = definition.pages.map((page, pIndex) => {
+      if (pIndex !== pageIndex) return page;
+      return {
+        ...page,
+        sections: page.sections.map((item, sIndex) =>
+          sIndex === sectionIndex ? { ...item, fields: reorder(fields) } : item,
+        ),
+      };
+    });
+    mark({ ...definition, pages });
+  }
+
+  function duplicateField(pageIndex: number, sectionIndex: number, fieldIndex: number) {
+    const section = definition.pages[pageIndex]?.sections[sectionIndex];
+    const source = section?.fields[fieldIndex];
+    if (!section || !source) return;
+    const duplicate: FieldDefinition = {
+      ...source,
+      key: safeKey('field'),
+      label: `${source.label} copy`,
+      order: fieldIndex + 1,
+      options: (source.options || []).map((option, optionIndex) => ({
+        ...option,
+        key: safeKey('option'),
+        order: optionIndex,
+      })),
+    };
+    const fields = [...section.fields];
+    fields.splice(fieldIndex + 1, 0, duplicate);
     const pages = definition.pages.map((page, pIndex) => {
       if (pIndex !== pageIndex) return page;
       return {
@@ -609,6 +726,105 @@ export default function EnterpriseFormVersionBuilderPage({
     });
   }
 
+  function addSimpleRule(kind: 'VISIBILITY' | 'REQUIREMENT') {
+    const firstField = definition.pages.flatMap((page) => page.sections).flatMap((section) => section.fields)[0];
+    if (!firstField) {
+      setError('Add at least one field before creating form logic.');
+      return;
+    }
+    const rule = {
+      key: safeKey('rule'),
+      kind,
+      priority: definition.rules.length,
+      enabled: true,
+      condition: { field: firstField.key, exists: true },
+      effect: kind === 'VISIBILITY' ? { showFields: [firstField.key] } : { requireFields: [firstField.key] },
+    };
+    mark({ ...definition, rules: [...definition.rules, rule] });
+  }
+
+  function removeRule(ruleIndex: number) {
+    mark({ ...definition, rules: definition.rules.filter((_, index) => index !== ruleIndex) });
+  }
+
+  function updateSimpleRule(ruleIndex: number, patch: {
+    kind?: 'VISIBILITY' | 'REQUIREMENT';
+    conditionField?: string;
+    operator?: 'exists' | 'truthy' | 'equals' | 'notEquals';
+    conditionValue?: string;
+    action?: 'show' | 'hide' | 'require' | 'optional';
+    targetField?: string;
+    enabled?: boolean;
+  }) {
+    const rules = definition.rules.map((rule: any, index) => {
+      if (index !== ruleIndex) return rule;
+      const kind = patch.kind || rule.kind || 'VISIBILITY';
+      const conditionField = patch.conditionField || rule.condition?.field || '';
+      const operator = patch.operator || (
+        Object.prototype.hasOwnProperty.call(rule.condition || {}, 'equals') ? 'equals'
+          : Object.prototype.hasOwnProperty.call(rule.condition || {}, 'notEquals') ? 'notEquals'
+          : Object.prototype.hasOwnProperty.call(rule.condition || {}, 'truthy') ? 'truthy'
+          : 'exists'
+      );
+      const previousValue = rule.condition?.[operator];
+      const conditionValue = patch.conditionValue !== undefined ? patch.conditionValue : String(previousValue ?? '');
+      const condition: any = { field: conditionField };
+      if (operator === 'exists' || operator === 'truthy') condition[operator] = true;
+      else condition[operator] = conditionValue;
+
+      const existingAction = rule.effect?.showFields ? 'show'
+        : rule.effect?.hideFields ? 'hide'
+        : rule.effect?.requireFields ? 'require'
+        : rule.effect?.optionalFields ? 'optional'
+        : kind === 'REQUIREMENT' ? 'require' : 'show';
+      const kindChanged = patch.kind !== undefined && patch.kind !== rule.kind;
+      const action = patch.action
+        || (kindChanged ? (kind === 'REQUIREMENT' ? 'require' : 'show') : existingAction);
+      const previousTarget = rule.effect?.showFields?.[0] || rule.effect?.hideFields?.[0]
+        || rule.effect?.requireFields?.[0] || rule.effect?.optionalFields?.[0] || conditionField;
+      const targetField = patch.targetField || previousTarget;
+      const effect = action === 'show' ? { showFields: [targetField] }
+        : action === 'hide' ? { hideFields: [targetField] }
+        : action === 'require' ? { requireFields: [targetField] }
+        : { optionalFields: [targetField] };
+
+      return {
+        ...rule,
+        kind,
+        enabled: patch.enabled ?? rule.enabled ?? true,
+        condition,
+        effect,
+      };
+    });
+    mark({ ...definition, rules });
+  }
+
+  function addTranslation() {
+    const firstPage = definition.pages[0];
+    if (!firstPage) {
+      setError('Add a page before creating a translation.');
+      return;
+    }
+    mark({
+      ...definition,
+      translations: [
+        ...definition.translations,
+        { locale: locale === 'en' ? 'fr' : 'en', targetType: 'PAGE', targetKey: firstPage.key, values: { title: firstPage.title } },
+      ],
+    });
+  }
+
+  function updateTranslation(index: number, patch: Record<string, unknown>) {
+    const translations = definition.translations.map((translation: any, translationIndex) =>
+      translationIndex === index ? { ...translation, ...patch } : translation,
+    );
+    mark({ ...definition, translations });
+  }
+
+  function removeTranslation(index: number) {
+    mark({ ...definition, translations: definition.translations.filter((_, translationIndex) => translationIndex !== index) });
+  }
+
   function parseObject(text: string, label: string) {
     const parsed = JSON.parse(text || '{}');
     if (parsed == null || Array.isArray(parsed) || typeof parsed !== 'object') {
@@ -704,7 +920,7 @@ export default function EnterpriseFormVersionBuilderPage({
       setDefinition(next);
       setDirty(false);
       await load();
-      setNotice('Draft structure saved.');
+      setNotice('Changes saved.');
     } catch (err: any) {
       setError(err?.message || 'Unable to save form structure');
       setBusy(false);
@@ -717,7 +933,7 @@ export default function EnterpriseFormVersionBuilderPage({
       setError('Save both version settings and draft structure before publishing.');
       return;
     }
-    if (!window.confirm('Publish this immutable version and retire any previously published version?')) return;
+    if (!window.confirm('Publishing locks this version for live use. Future changes can be made in a new draft without changing existing submissions. Continue?')) return;
 
     setBusy(true);
     setError('');
@@ -776,6 +992,30 @@ export default function EnterpriseFormVersionBuilderPage({
     return { pages: definition.pages.length, sections, fields };
   }, [definition]);
 
+  const fieldOptions = useMemo(() =>
+    definition.pages.flatMap((page) =>
+      page.sections.flatMap((section) =>
+        section.fields.map((field) => ({ key: field.key, label: field.label || field.key })),
+      ),
+    ), [definition.pages]);
+
+  const translationTargets = useMemo(() => {
+    const targets: Array<{ type: string; key: string; label: string; properties: string[] }> = [];
+    for (const page of definition.pages) {
+      targets.push({ type: 'PAGE', key: page.key, label: `Page · ${page.title}`, properties: ['title', 'description'] });
+      for (const section of page.sections) {
+        targets.push({ type: 'SECTION', key: section.key, label: `Section · ${section.title}`, properties: ['title', 'description'] });
+        for (const field of section.fields) {
+          targets.push({ type: 'FIELD', key: field.key, label: `Field · ${field.label}`, properties: ['label', 'helpText', 'placeholder'] });
+          for (const option of field.options || []) {
+            targets.push({ type: 'OPTION', key: option.key, label: `Option · ${option.label}`, properties: ['label'] });
+          }
+        }
+      }
+    }
+    return targets;
+  }, [definition.pages]);
+
   return (
     <main className="space-y-6 p-4 lg:p-6">
       <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
@@ -830,8 +1070,7 @@ export default function EnterpriseFormVersionBuilderPage({
 
       {!editable && version ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          This version is {version.state}. Published and retired versions are immutable;
-          the builder is read-only.
+          This version is {version.state}. Published and retired versions are locked; create a new draft to make further changes.
         </div>
       ) : null}
 
@@ -995,6 +1234,7 @@ export default function EnterpriseFormVersionBuilderPage({
                     <div className="flex gap-1">
                       <button type="button" onClick={() => movePage(pageIndex, -1)} className="rounded-lg border bg-white p-2" aria-label="Move page up"><ArrowUp className="h-4 w-4" /></button>
                       <button type="button" onClick={() => movePage(pageIndex, 1)} className="rounded-lg border bg-white p-2" aria-label="Move page down"><ArrowDown className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => duplicatePage(pageIndex)} className="rounded-lg border bg-white p-2" aria-label="Duplicate page"><Copy className="h-4 w-4" /></button>
                       <button type="button" onClick={() => removePage(pageIndex)} className="rounded-lg border border-rose-200 bg-white p-2 text-rose-700" aria-label="Delete page"><Trash2 className="h-4 w-4" /></button>
                     </div>
                   ) : null}
@@ -1033,6 +1273,7 @@ export default function EnterpriseFormVersionBuilderPage({
                           <div className="flex gap-1">
                             <button type="button" onClick={() => moveSection(pageIndex, sectionIndex, -1)} className="rounded-lg border p-2"><ArrowUp className="h-4 w-4" /></button>
                             <button type="button" onClick={() => moveSection(pageIndex, sectionIndex, 1)} className="rounded-lg border p-2"><ArrowDown className="h-4 w-4" /></button>
+                            <button type="button" onClick={() => duplicateSection(pageIndex, sectionIndex)} className="rounded-lg border p-2" aria-label="Duplicate section"><Copy className="h-4 w-4" /></button>
                             <button type="button" onClick={() => removeSection(pageIndex, sectionIndex)} className="rounded-lg border border-rose-200 p-2 text-rose-700"><Trash2 className="h-4 w-4" /></button>
                           </div>
                         ) : null}
@@ -1063,7 +1304,7 @@ export default function EnterpriseFormVersionBuilderPage({
 
                               <div className="space-y-3">
                                 <select value={field.type} onChange={(e) => updateField(pageIndex, sectionIndex, fieldIndex, { type: e.target.value })} disabled={!editable} className="w-full rounded-xl border px-3 py-2 text-sm disabled:bg-slate-50">
-                                  {FIELD_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+                                  {FIELD_TYPES.map((type) => <option key={type} value={type}>{FIELD_TYPE_LABELS[type] || type}</option>)}
                                 </select>
                                 <label className="flex items-center gap-2 text-sm">
                                   <input type="checkbox" checked={Boolean(field.required)} onChange={(e) => updateField(pageIndex, sectionIndex, fieldIndex, { required: e.target.checked })} disabled={!editable} />
@@ -1079,6 +1320,7 @@ export default function EnterpriseFormVersionBuilderPage({
                                 <div className="flex gap-1">
                                   <button type="button" onClick={() => moveField(pageIndex, sectionIndex, fieldIndex, -1)} className="rounded-lg border p-2"><ArrowUp className="h-4 w-4" /></button>
                                   <button type="button" onClick={() => moveField(pageIndex, sectionIndex, fieldIndex, 1)} className="rounded-lg border p-2"><ArrowDown className="h-4 w-4" /></button>
+                                  <button type="button" onClick={() => duplicateField(pageIndex, sectionIndex, fieldIndex)} className="rounded-lg border p-2" aria-label="Duplicate field"><Copy className="h-4 w-4" /></button>
                                   <button type="button" onClick={() => editFieldAdvanced(pageIndex, sectionIndex, fieldIndex)} className="rounded-lg border px-2 py-1 text-[10px] font-semibold">Advanced</button>
                                   <button type="button" onClick={() => removeField(pageIndex, sectionIndex, fieldIndex)} className="rounded-lg border border-rose-200 p-2 text-rose-700"><Trash2 className="h-4 w-4" /></button>
                                 </div>
@@ -1132,46 +1374,165 @@ export default function EnterpriseFormVersionBuilderPage({
             ))}
           </section>
 
-          <section className="grid gap-4 xl:grid-cols-2">
-            <label className="space-y-2 rounded-3xl border bg-white p-5 shadow-sm">
-              <span className="font-semibold">Rules JSON</span>
-              <span className="block text-sm text-slate-500">
-                Visibility, requirement, navigation, calculation and scoring rules.
-              </span>
-              <textarea
-                value={rulesText}
-                onChange={(e) => { setRulesText(e.target.value); setDirty(true); }}
-                disabled={!editable}
-                spellCheck={false}
-                className="min-h-72 w-full rounded-xl border p-3 font-mono text-xs disabled:bg-slate-50"
-              />
-            </label>
+          <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Form logic</h2>
+                <p className="mt-1 text-sm text-slate-500">Show, hide, require or make fields optional based on earlier answers.</p>
+              </div>
+              {editable ? (
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={() => addSimpleRule('VISIBILITY')} className="rounded-xl border px-3 py-2 text-sm font-semibold">Add visibility rule</button>
+                  <button type="button" onClick={() => addSimpleRule('REQUIREMENT')} className="rounded-xl border px-3 py-2 text-sm font-semibold">Add requirement rule</button>
+                </div>
+              ) : null}
+            </div>
 
-            <label className="space-y-2 rounded-3xl border bg-white p-5 shadow-sm">
-              <span className="font-semibold">Translations JSON</span>
-              <span className="block text-sm text-slate-500">
-                Locale-specific values keyed to FORM, PAGE, SECTION, FIELD or OPTION targets.
-              </span>
-              <textarea
-                value={translationsText}
-                onChange={(e) => { setTranslationsText(e.target.value); setDirty(true); }}
-                disabled={!editable}
-                spellCheck={false}
-                className="min-h-72 w-full rounded-xl border p-3 font-mono text-xs disabled:bg-slate-50"
-              />
-            </label>
+            {definition.rules.length ? (
+              <div className="space-y-3">
+                {definition.rules.map((rule: any, ruleIndex) => {
+                  const supportedKind = rule.kind === 'VISIBILITY' || rule.kind === 'REQUIREMENT';
+                  const conditionKeys = Object.keys(rule.condition || {}).filter((key) => key !== 'field');
+                  const supportedCondition = Boolean(rule.condition?.field) && conditionKeys.length === 1 && ['exists', 'truthy', 'equals', 'notEquals'].includes(conditionKeys[0]);
+                  const action = rule.effect?.showFields ? 'show'
+                    : rule.effect?.hideFields ? 'hide'
+                    : rule.effect?.requireFields ? 'require'
+                    : rule.effect?.optionalFields ? 'optional'
+                    : '';
+                  const targetField = rule.effect?.showFields?.[0] || rule.effect?.hideFields?.[0] || rule.effect?.requireFields?.[0] || rule.effect?.optionalFields?.[0] || '';
+                  const isSimple = supportedKind && supportedCondition && Boolean(action) && Boolean(targetField);
+                  const operator = supportedCondition ? conditionKeys[0] : 'exists';
+                  const conditionValue = operator === 'equals' || operator === 'notEquals' ? String(rule.condition?.[operator] ?? '') : '';
+
+                  return (
+                    <div key={rule.key || ruleIndex} className="rounded-2xl border p-4">
+                      {isSimple ? (
+                        <div className="grid gap-3 xl:grid-cols-[150px_1fr_150px_1fr_150px_1fr_auto] xl:items-end">
+                          <label className="space-y-1 text-xs font-medium text-slate-600">
+                            Type
+                            <select value={rule.kind} onChange={(event) => updateSimpleRule(ruleIndex, { kind: event.target.value as 'VISIBILITY' | 'REQUIREMENT' })} disabled={!editable} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50">
+                              <option value="VISIBILITY">Visibility</option>
+                              <option value="REQUIREMENT">Requirement</option>
+                            </select>
+                          </label>
+                          <label className="space-y-1 text-xs font-medium text-slate-600">
+                            If field
+                            <select value={rule.condition.field} onChange={(event) => updateSimpleRule(ruleIndex, { conditionField: event.target.value })} disabled={!editable} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50">
+                              {fieldOptions.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
+                            </select>
+                          </label>
+                          <label className="space-y-1 text-xs font-medium text-slate-600">
+                            Condition
+                            <select value={operator} onChange={(event) => updateSimpleRule(ruleIndex, { operator: event.target.value as any })} disabled={!editable} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50">
+                              <option value="exists">Has an answer</option>
+                              <option value="truthy">Is yes / true</option>
+                              <option value="equals">Equals</option>
+                              <option value="notEquals">Does not equal</option>
+                            </select>
+                          </label>
+                          <label className="space-y-1 text-xs font-medium text-slate-600">
+                            Value
+                            <input value={conditionValue} onChange={(event) => updateSimpleRule(ruleIndex, { conditionValue: event.target.value })} disabled={!editable || !['equals', 'notEquals'].includes(operator)} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50" placeholder={['equals', 'notEquals'].includes(operator) ? 'Answer value' : 'Not required'} />
+                          </label>
+                          <label className="space-y-1 text-xs font-medium text-slate-600">
+                            Then
+                            <select value={action} onChange={(event) => updateSimpleRule(ruleIndex, { action: event.target.value as any })} disabled={!editable} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50">
+                              {rule.kind === 'REQUIREMENT' ? <><option value="require">Require</option><option value="optional">Make optional</option></> : <><option value="show">Show</option><option value="hide">Hide</option></>}
+                            </select>
+                          </label>
+                          <label className="space-y-1 text-xs font-medium text-slate-600">
+                            Target field
+                            <select value={targetField} onChange={(event) => updateSimpleRule(ruleIndex, { targetField: event.target.value })} disabled={!editable} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50">
+                              {fieldOptions.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
+                            </select>
+                          </label>
+                          {editable ? <button type="button" onClick={() => removeRule(ruleIndex)} className="rounded-lg border border-rose-200 p-2 text-rose-700" aria-label="Delete rule"><Trash2 className="h-4 w-4" /></button> : null}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="font-semibold text-slate-800">Advanced rule</div>
+                            <div className="mt-1 text-xs text-slate-500">This rule uses advanced logic. Edit it in Advanced logic & translation JSON below.</div>
+                          </div>
+                          {editable ? <button type="button" onClick={() => removeRule(ruleIndex)} className="rounded-lg border border-rose-200 p-2 text-rose-700" aria-label="Delete rule"><Trash2 className="h-4 w-4" /></button> : null}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No form logic configured.</div>}
           </section>
+
+          <section className="space-y-4 rounded-3xl border bg-white p-5 shadow-sm">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold">Translations</h2>
+                <p className="mt-1 text-sm text-slate-500">Provide translated labels, descriptions, help text and option names for additional languages.</p>
+              </div>
+              {editable ? <button type="button" onClick={addTranslation} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold"><Plus className="h-4 w-4" />Add translation</button> : null}
+            </div>
+
+            {definition.translations.length ? (
+              <div className="space-y-3">
+                {definition.translations.map((translation: any, translationIndex) => {
+                  const target = translationTargets.find((item) => item.type === translation.targetType && item.key === translation.targetKey);
+                  const supported = Boolean(target);
+                  const properties = target?.properties || Object.keys(translation.values || {});
+                  return (
+                    <div key={`${translation.locale}:${translation.targetType}:${translation.targetKey}:${translationIndex}`} className="rounded-2xl border p-4">
+                      {supported ? (
+                        <div className="space-y-3">
+                          <div className="grid gap-3 md:grid-cols-[160px_1fr_auto]">
+                            <label className="space-y-1 text-xs font-medium text-slate-600">Language / locale<input value={translation.locale || ''} onChange={(event) => updateTranslation(translationIndex, { locale: event.target.value })} disabled={!editable} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50" placeholder="en-ZA" /></label>
+                            <label className="space-y-1 text-xs font-medium text-slate-600">Translate<select value={`${translation.targetType}:${translation.targetKey}`} onChange={(event) => { const [targetType, ...rest] = event.target.value.split(':'); updateTranslation(translationIndex, { targetType, targetKey: rest.join(':'), values: {} }); }} disabled={!editable} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50">{translationTargets.map((item) => <option key={`${item.type}:${item.key}`} value={`${item.type}:${item.key}`}>{item.label}</option>)}</select></label>
+                            {editable ? <button type="button" onClick={() => removeTranslation(translationIndex)} className="self-end rounded-lg border border-rose-200 p-2 text-rose-700" aria-label="Delete translation"><Trash2 className="h-4 w-4" /></button> : null}
+                          </div>
+                          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                            {properties.map((property) => <label key={property} className="space-y-1 text-xs font-medium text-slate-600">{property.replaceAll(/([A-Z])/g, ' $1').replace(/^./, (letter: string) => letter.toUpperCase())}<input value={String(translation.values?.[property] || '')} onChange={(event) => updateTranslation(translationIndex, { values: { ...(translation.values || {}), [property]: event.target.value } })} disabled={!editable} className="w-full rounded-lg border px-2 py-2 text-sm disabled:bg-slate-50" /></label>)}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <div className="font-semibold text-slate-800">Advanced translation</div>
+                            <div className="mt-1 text-xs text-slate-500">This translation targets a form-level or advanced key. Edit it in Advanced logic & translation JSON below.</div>
+                          </div>
+                          {editable ? <button type="button" onClick={() => removeTranslation(translationIndex)} className="rounded-lg border border-rose-200 p-2 text-rose-700"><Trash2 className="h-4 w-4" /></button> : null}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : <div className="rounded-2xl bg-slate-50 p-4 text-sm text-slate-500">No translations configured.</div>}
+          </section>
+
+          <details className="rounded-3xl border bg-white p-5 shadow-sm">
+            <summary className="cursor-pointer font-semibold">Advanced logic & translation JSON</summary>
+            <p className="mt-2 text-sm text-slate-500">Use this area for complex navigation, calculation, scoring or translation definitions that are not represented by the visual editors.</p>
+            <div className="mt-4 grid gap-4 xl:grid-cols-2">
+              <label className="space-y-2">
+                <span className="text-sm font-semibold">Rules JSON</span>
+                <textarea value={rulesText} onChange={(event) => { setRulesText(event.target.value); setDirty(true); }} disabled={!editable} spellCheck={false} className="min-h-72 w-full rounded-xl border p-3 font-mono text-xs disabled:bg-slate-50" />
+              </label>
+              <label className="space-y-2">
+                <span className="text-sm font-semibold">Translations JSON</span>
+                <textarea value={translationsText} onChange={(event) => { setTranslationsText(event.target.value); setDirty(true); }} disabled={!editable} spellCheck={false} className="min-h-72 w-full rounded-xl border p-3 font-mono text-xs disabled:bg-slate-50" />
+              </label>
+            </div>
+          </details>
 
           <div className="flex flex-wrap gap-2">
             {editable ? (
               <>
                 <button type="button" onClick={saveStructure} disabled={busy} className="inline-flex items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">
                   <Save className="h-4 w-4" />
-                  Save draft structure
+                  Save changes
                 </button>
                 <button type="button" onClick={publish} disabled={busy || dirty || settingsDirty} className="inline-flex items-center gap-2 rounded-xl border border-emerald-200 px-4 py-2 text-sm font-semibold text-emerald-800 disabled:opacity-40">
                   <Send className="h-4 w-4" />
-                  Publish immutable version
+                  Publish version
                 </button>
               </>
             ) : null}
@@ -1233,9 +1594,7 @@ export default function EnterpriseFormVersionBuilderPage({
             </button>
 
             <div className="mt-4 rounded-xl bg-cyan-50 p-3 text-xs leading-5 text-cyan-900">
-              This is an administrative structural preview only. Public runtime validation,
-              branching, calculations, save/resume, uploads and consent evidence are activated
-              in the dedicated runtime sweep.
+              Preview mode — changes are not public until this version is published.
             </div>
           </aside>
         ) : null}

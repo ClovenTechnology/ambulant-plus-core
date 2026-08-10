@@ -279,7 +279,7 @@ export default function AdminMeetingDetailPage({
               ) : null}
 
               <div className="mt-5 rounded-2xl border border-cyan-100 bg-cyan-50 p-4 text-sm text-cyan-900">
-                This Meeting remains the canonical lobby, moderation and RTC authority. Media credentials are minted server-side and the room UI never chooses its own participant identity.
+                Manage participants, lobby access and the live meeting from this workspace.
               </div>
             </div>
 
@@ -334,8 +334,7 @@ export default function AdminMeetingDetailPage({
                   <div className="font-semibold">Application interview governance</div>
                   <p className="mt-2 leading-6">
                     Interview scheduling, applicant invitation, rescheduling and cancellation are
-                    governed from the canonical Application workspace. This shared Meeting room
-                    remains the lobby, moderation and RTC authority.
+                    managed from the Application workspace. This meeting room is used for the live interview session.
                   </p>
                   <Link
                     href={`/admin/applications/${encodeURIComponent(meeting.contextId)}`}
@@ -403,7 +402,7 @@ export default function AdminMeetingDetailPage({
                       <div className="mt-2 font-mono text-sm">PIN: {oneTime.pin}</div>
                     ) : null}
                     <div className="mt-2">
-                      The PIN is not stored in plaintext and will not be shown again.
+                      For security, the PIN will not be shown again.
                     </div>
                   </div>
                 ) : null}

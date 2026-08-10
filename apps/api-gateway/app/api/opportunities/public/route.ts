@@ -5,6 +5,7 @@ import {
   isOpportunityType,
 } from '@/src/lib/opportunities-policy';
 import { serializePublicOpportunity } from '@/src/lib/admin-opportunities';
+import { isManagedEnterpriseMediaRef } from '@/src/lib/enterprise-media-storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -88,7 +89,15 @@ export async function GET(request: NextRequest) {
       page,
       pageSize,
       total,
-      items: rows.map((row) => serializePublicOpportunity(row, now)),
+      items: rows.map((row) => {
+        const item = serializePublicOpportunity(row, now);
+        return {
+          ...item,
+          imageUrl: isManagedEnterpriseMediaRef(row.imageUrl)
+            ? new URL(`/api/opportunities/public/${encodeURIComponent(row.slug)}/image`, request.url).toString()
+            : item.imageUrl,
+        };
+      }),
     });
   } catch (error) {
     console.error('[public opportunities] list failed', error);

@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/lib/prisma';
 import type { AdminStaffActor } from '@/src/lib/admin-staff-auth';
+import { isManagedEnterpriseMediaRef } from '@/src/lib/enterprise-media-storage';
 import {
   cleanOpportunityText,
   isOpportunityApplicationMode,
@@ -87,6 +88,7 @@ export const opportunityAdminInclude = {
   pausedByProfile: { select: { id: true, name: true, email: true } },
   closedByProfile: { select: { id: true, name: true, email: true } },
   archivedByProfile: { select: { id: true, name: true, email: true } },
+  _count: { select: { applications: true } },
 };
 
 
@@ -194,11 +196,11 @@ export function parseOpportunityWriteInput(
     throw new OpportunityDomainError('invalid_opportunity_country_code', 400);
   }
 
-  const imageUrl =
-    cleanOpportunityText(
-      body?.imageUrl === undefined ? defaults.imageUrl : body.imageUrl,
-      2048,
-    ) || null;
+  if (body && Object.prototype.hasOwnProperty.call(body, 'imageUrl')) {
+    throw new OpportunityDomainError('opportunity_image_upload_required', 400);
+  }
+
+  const imageUrl = cleanOpportunityText(defaults.imageUrl, 2048) || null;
   const imageAlt =
     cleanOpportunityText(
       body?.imageAlt === undefined ? defaults.imageAlt : body.imageAlt,
@@ -281,6 +283,15 @@ export function parseOpportunityWriteInput(
     externalApplicationUrl,
     featured: Boolean(body?.featured ?? defaults.featured ?? false),
     sortOrder,
+  };
+}
+
+export function serializeAdminOpportunity(row: any) {
+  return {
+    ...row,
+    imageUrl: isManagedEnterpriseMediaRef(row?.imageUrl)
+      ? `/api/admin/opportunities/${encodeURIComponent(String(row.id))}/image`
+      : row?.imageUrl || null,
   };
 }
 
