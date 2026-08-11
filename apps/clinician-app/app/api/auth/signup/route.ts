@@ -259,24 +259,24 @@ function normalizePatientGender(value: any) {
   return raw || null;
 }
 
-function patientAddressFromClinicianProfile(profile: any, shipping: any) {
+function patientAddressFromClinicianProfile(profile: any) {
   const home = profile?.homeAddress || {};
   const billing = profile?.billingAddress || {};
   const practice = profile?.practiceAddress || {};
 
   const addressLine1 =
-    normalizeSpaces(home.line1 || billing.line1 || shipping?.addressLine1 || practice.line1 || profile?.address || '') ||
+    normalizeSpaces(home.line1 || billing.line1 || practice.line1 || profile?.address || '') ||
     'Address pending confirmation';
 
   const addressLine2 =
-    normalizeSpaces(home.line2 || billing.line2 || shipping?.addressLine2 || practice.line2 || '') || null;
+    normalizeSpaces(home.line2 || billing.line2 || practice.line2 || '') || null;
 
   const city =
-    normalizeSpaces(home.city || billing.city || shipping?.city || practice.city || '') ||
+    normalizeSpaces(home.city || billing.city || practice.city || '') ||
     'City pending confirmation';
 
   const postalCode =
-    normalizeSpaces(home.postalCode || billing.postalCode || shipping?.postalCode || practice.postalCode || '') || null;
+    normalizeSpaces(home.postalCode || billing.postalCode || practice.postalCode || '') || null;
 
   return { addressLine1, addressLine2, city, postalCode };
 }
@@ -292,7 +292,6 @@ async function ensurePatientAccountForClinician(
     gender?: string;
     idNumber?: string;
     profile?: any;
-    shipping?: any;
     submittedAt?: string;
   },
 ) {
@@ -351,7 +350,7 @@ async function ensurePatientAccountForClinician(
   }
 
   const mrn = await generateUniquePatientMrn(tx);
-  const address = patientAddressFromClinicianProfile(args.profile || {}, args.shipping || {});
+  const address = patientAddressFromClinicianProfile(args.profile || {});
   const dobDate = dateStringToUtcDate(args.dob);
 
   const patientProfile = await tx.patientProfile.create({
@@ -575,9 +574,6 @@ export async function POST(req: NextRequest) {
     const primaryQualification = primaryQualificationFrom(profile);
     const qualificationYear = Number(primaryQualification.yearOfCompletion);
     const onboarding = profile?.onboarding || {};
-    const training = onboarding?.training || {};
-    const shipping = onboarding?.shipping || {};
-    const shippingPhone = normalizePhone(shipping?.phone);
     const hasInsurance = profile?.hasInsurance;
     const platformCoverEnabled = profile?.platformCoverEnabled === true;
     const declarations = profile?.declarations || {};
@@ -654,11 +650,6 @@ export async function POST(req: NextRequest) {
 
     if (declarations?.termsAccepted !== true) return badRequest('Terms and privacy consent required', 'declarations.termsAccepted');
 
-    if (!isTodayOrFuture(training?.preferredDate)) return badRequest('Training preferred date must be today or a future date', 'training.preferredDate');
-    if (!normalizeSpaces(shipping?.recipientName)) return badRequest('Shipping recipient name required', 'shipping.recipientName');
-    if (!phoneLooksValid(shippingPhone)) return badRequest('Valid shipping phone with country code required', 'shipping.phone');
-    if (!normalizeSpaces(shipping?.addressLine1)) return badRequest('Shipping address line 1 required', 'shipping.addressLine1');
-    if (!normalizeSpaces(shipping?.city)) return badRequest('Shipping city required', 'shipping.city');
 
 
     if (!hpcsaFile) {
@@ -791,17 +782,16 @@ export async function POST(req: NextRequest) {
               : null,
 
             addressLine1:
-              normalizeSpaces(profile?.practiceAddress?.line1 || profile?.billingAddress?.line1 || shipping?.addressLine1 || profile?.address || '') ||
+              normalizeSpaces(profile?.practiceAddress?.line1 || profile?.billingAddress?.line1 || profile?.address || '') ||
               null,
-            addressLine2: normalizeSpaces(profile?.practiceAddress?.line2 || profile?.billingAddress?.line2 || shipping?.addressLine2 || '') || null,
-            city: normalizeSpaces(profile?.practiceAddress?.city || profile?.billingAddress?.city || shipping?.city || '') || null,
+            addressLine2: normalizeSpaces(profile?.practiceAddress?.line2 || profile?.billingAddress?.line2 || '') || null,
+            city: normalizeSpaces(profile?.practiceAddress?.city || profile?.billingAddress?.city || '') || null,
             postalCode:
-              normalizeSpaces(profile?.practiceAddress?.postalCode || profile?.billingAddress?.postalCode || shipping?.postalCode || '') || null,
+              normalizeSpaces(profile?.practiceAddress?.postalCode || profile?.billingAddress?.postalCode || '') || null,
             country:
               normalizeSpaces(
                 profile?.practiceAddress?.country ||
                   profile?.billingAddress?.country ||
-                  shipping?.country ||
                   (citizenship === 'south_african' ? 'South Africa' : citizenshipCountry),
               ) || null,
 
@@ -818,7 +808,6 @@ export async function POST(req: NextRequest) {
                   : 'in_person_only'
                 : null,
 
-            trainingScheduledAt: training?.preferredDate ? new Date(`${training.preferredDate}T09:00:00`) : null,
 
             // optional legacy fee fields
             feeCents: feeCents || 0,
@@ -897,7 +886,6 @@ export async function POST(req: NextRequest) {
           gender,
           idNumber: citizenship === 'south_african' ? idNumber : undefined,
           profile: mergedProfile,
-          shipping,
           submittedAt,
         });
 
@@ -914,36 +902,21 @@ export async function POST(req: NextRequest) {
       throw e;
     }
 
-    // Next steps
+    // Next steps: sign in, choose a real Admin-published training programme, then choose how to continue.
     const baseUrl = getBaseUrl(req);
-    const onboardingLink = `${baseUrl}/auth/login?reason=training_required&next=${encodeURIComponent('/')}`;
+    const onboardingPath = '/auth/login?reason=signup_success&next=%2Ftraining%2Fschedule';
+    const onboardingLink = `${baseUrl}${onboardingPath}`;
 
-    // Email + SMS: clearly explain the workflow (training -> payment -> ship -> certify)
     if (email) {
-      const subject = 'Ambulant+ Clinician Application Received — Next Steps';
+      const subject = 'Ambulant+ Clinician Application Received — Continue to Training';
       const html = `
         <p>Hi ${name || 'Clinician'},</p>
         <p>Your Ambulant+ clinician application has been received.</p>
-
-        <p><strong>Mandatory onboarding:</strong></p>
-        <ol>
-          <li><strong>Training scheduling + payment</strong> (required)</li>
-          <li><strong>Starter kit dispatch</strong> after payment confirmation</li>
-          <li><strong>Admin certification</strong> — only then your profile becomes visible to patients</li>
-        </ol>
-
-        <p><a href="${onboardingLink}">Sign in to continue onboarding</a></p>
-
-        <p style="margin-top:12px;"><strong>Starter kit contents</strong> (sent after payment):</p>
-        <ul>
-          <li>All four IoMTs</li>
-          <li>Clinician Handbook + consumables</li>
-          <li>Merchandise: branded formal shirts (black &amp; white), mug, thermo bottle</li>
-          <li>Smart ID with card holder + lanyard</li>
-        </ul>
-
-        <p>When the admin assigns courier + tracking, you will receive tracking details by email and SMS.</p>
-
+        <p><strong>Next:</strong> sign in and choose one of the training programmes published by Ambulant+ Admin.</p>
+        <p>Training is required, but there is <strong>no mandatory upfront onboarding payment</strong> for the direct training pathway.</p>
+        <p>The Contactless Medicine Kit (C-Med Kit) is optional. If you choose C-Med Flex or C-Med Full, the current Admin-published pricing, benefits and fulfilment terms will be shown before you continue.</p>
+        <p>Your profile can go live after the required credential verification, training completion and Ambulant+ approval.</p>
+        <p><a href="${onboardingLink}">Sign in &amp; continue to training</a></p>
         <p style="margin-top:12px;">If you didn't request this, you can ignore this email.</p>
         <p>— Ambulant+ Team</p>
       `;
@@ -952,8 +925,8 @@ export async function POST(req: NextRequest) {
 
     if (normalizedPhone) {
       const sms =
-        `Ambulant+ application received. Training is mandatory. Sign in to schedule & pay: ${onboardingLink} ` +
-        `After payment, starter kit ships & tracking will be sent.`;
+        `Ambulant+ application received. Sign in to choose your required training programme: ${onboardingLink} ` +
+        `No mandatory upfront onboarding payment is required; C-Med options are optional.`;
       sendSms(normalizedPhone, sms).catch(console.error);
     }
 
@@ -967,7 +940,7 @@ export async function POST(req: NextRequest) {
           specialty: clinician.specialty,
           patientAccount: clinician.patientAccount ?? null,
         },
-        redirectTo: '/auth/login?reason=signup_success',
+        redirectTo: '/auth/login?reason=signup_success&next=%2Ftraining%2Fschedule',
       },
       201,
     );

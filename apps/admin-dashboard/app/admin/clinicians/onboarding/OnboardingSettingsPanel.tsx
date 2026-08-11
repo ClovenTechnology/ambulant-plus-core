@@ -35,6 +35,28 @@ type Pathway = {
   featured: boolean;
   conditions: string[];
   privileges: Privileges;
+  standardPriceCents: number | null;
+  promotionalPriceCents: number | null;
+  promotionStartsAt: string | null;
+  promotionEndsAt: string | null;
+  amountDueTodayCents: number | null;
+  promotionLabel: string | null;
+};
+
+type SignupPresentation = {
+  heroHeading: string;
+  heroIntroduction: string;
+  noticeHeading: string;
+  noticeBody: string;
+  noticeSecondary: string;
+  noticeCtaLabel: string;
+  noticeCtaHref: string;
+  optionalKitTitle: string;
+  optionalKitDescription: string;
+  successHeading: string;
+  successBody: string;
+  successSecondary: string;
+  successCtaLabel: string;
 };
 
 type TrainingPolicy = {
@@ -49,6 +71,7 @@ type TrainingPolicy = {
   inPersonDescription: string;
   operationalNotice: string | null;
   supportMessage: string | null;
+  signupPresentation: SignupPresentation;
 };
 
 type Settings = {
@@ -79,39 +102,45 @@ const DEFAULT_PATHWAYS: Pathway[] = [
   {
     key: 'START_NOW_PAY_LATER',
     displayOrder: 1,
-    label: 'Start Now — Pay Later',
-    badge: 'Fastest start',
+    label: 'Continue to Training',
+    badge: 'Direct pathway',
     description:
-      'Begin after Admin approves the Pay Later request.',
-    ctaLabel:
-      'Request Pay Later approval',
+      'Continue with your required training without purchasing a C-Med Kit. Once your credentials are verified, training is completed and your profile is approved, you can start consulting and earning on Ambulant+.',
+    ctaLabel: 'Continue to Training',
     enabled: true,
     featured: true,
     conditions: [
-      'Training access begins after Admin approval.',
-      'A C-Med Kit dispatch requires a qualifying payment.',
+      'R0 upfront — no mandatory onboarding payment is required.',
+      'The C-Med Kit is optional and is not required to complete training.',
+      'Credential verification, training completion and profile approval remain required before practice activation.',
     ],
     privileges: {
       trainingAccess: true,
       practiceActivation: true,
       starterKitRelease: 'none',
       platformIndemnityEligible: false,
-      balanceRecoveryApplies: true,
+      balanceRecoveryApplies: false,
     },
+    standardPriceCents: 0,
+    promotionalPriceCents: null,
+    promotionStartsAt: null,
+    promotionEndsAt: null,
+    amountDueTodayCents: 0,
+    promotionLabel: null,
   },
   {
     key: 'QUALIFYING_DEPOSIT',
     displayOrder: 2,
-    label: 'Start with Initial Deposit',
-    badge: 'Balanced option',
+    label: 'C-Med Flex',
+    badge: 'Flexible payment',
     description:
-      'Pay the qualifying deposit and receive its assigned benefits.',
-    ctaLabel: 'Pay initial deposit',
+      'Get your discounted C-Med package with a qualifying initial payment and flexible settlement.',
+    ctaLabel: 'Choose C-Med Flex',
     enabled: true,
     featured: false,
     conditions: [
-      'The qualifying amount is set by Admin.',
-      'Only the selected deposit-kit items are released.',
+      'A qualifying initial payment is due when you choose this optional C-Med pathway.',
+      'Professional Indemnity / Medical Malpractice cover remains subject to eligibility and policy terms.',
     ],
     privileges: {
       trainingAccess: true,
@@ -120,20 +149,26 @@ const DEFAULT_PATHWAYS: Pathway[] = [
       platformIndemnityEligible: true,
       balanceRecoveryApplies: true,
     },
+    standardPriceCents: null,
+    promotionalPriceCents: null,
+    promotionStartsAt: null,
+    promotionEndsAt: null,
+    amountDueTodayCents: null,
+    promotionLabel: null,
   },
   {
     key: 'FULL_PAYMENT',
     displayOrder: 3,
-    label: 'Pay in Full',
-    badge: 'Complete package',
+    label: 'C-Med Full',
+    badge: 'Best value',
     description:
-      'Settle the full onboarding fee and receive the full configured package.',
-    ctaLabel: 'Pay full onboarding fee',
+      'Pay in full and receive the highest available C-Med package discount and priority fulfilment.',
+    ctaLabel: 'Choose C-Med Full',
     enabled: true,
     featured: false,
     conditions: [
-      'The complete configured C-Med Kit can be released.',
-      'No onboarding-fee balance remains.',
+      'The current Admin-configured C-Med Full price is payable.',
+      'Professional Indemnity / Medical Malpractice cover remains subject to eligibility and policy terms.',
     ],
     privileges: {
       trainingAccess: true,
@@ -142,14 +177,37 @@ const DEFAULT_PATHWAYS: Pathway[] = [
       platformIndemnityEligible: true,
       balanceRecoveryApplies: false,
     },
+    standardPriceCents: null,
+    promotionalPriceCents: null,
+    promotionStartsAt: null,
+    promotionEndsAt: null,
+    amountDueTodayCents: null,
+    promotionLabel: null,
   },
 ];
+
+const DEFAULT_SIGNUP_PRESENTATION: SignupPresentation = {
+  heroHeading: 'Join the Contactless Care Network',
+  heroIntroduction: 'Complete your application and required training. Once verified, trained and approved, your profile can go live and you can start consulting on Ambulant+. No upfront onboarding payment is required.',
+  noticeHeading: 'Start now - no mandatory upfront payment',
+  noticeBody: 'Training is required, but payment is not. Complete your Ambulant+ training and, once your credentials are verified and your profile is approved, you can start consulting and earning on Ambulant+ without purchasing a C-Med Kit.',
+  noticeSecondary: 'The Contactless Medicine Kit (C-Med Kit) is optional. If you choose one, clinicians receive discounted pricing with flexible payment options and tracked delivery.',
+  noticeCtaLabel: 'View C-Med Kit & payment options',
+  noticeCtaHref: '/clinicians/c-med-options',
+  optionalKitTitle: 'Optional C-Med Kit',
+  optionalKitDescription: "Add a discounted C-Med Kit if you want one, with flexible payment options and tracked delivery. Qualifying C-Med options also include access to Ambulant+'s platform-wide Professional Indemnity / Medical Malpractice cover, subject to eligibility and policy terms.",
+  successHeading: 'Application submitted successfully',
+  successBody: 'Your Ambulant+ clinician account has been created. Sign in to choose an available Ambulant+ training programme and complete your onboarding.',
+  successSecondary: 'No upfront onboarding payment is required to continue. You can choose a discounted C-Med Kit with flexible payment options during the next step.',
+  successCtaLabel: 'Sign in & continue to training',
+};
+
 
 const DEFAULT_POLICY: TrainingPolicy = {
   heading:
     'Mandatory clinician onboarding training',
   introduction:
-    'Choose an available programme, select a training mode, and complete the applicable onboarding pathway.',
+    'Choose an available programme, select an eligible training mode, then choose how you would like to continue. No upfront payment is required for the direct training pathway.',
   timezone: 'Africa/Johannesburg',
   defaultDurationDays: 1,
   defaultSessionDurationMinutes: 60,
@@ -164,6 +222,7 @@ const DEFAULT_POLICY: TrainingPolicy = {
   operationalNotice: null,
   supportMessage:
     'Contact Ambulant+ if you need accessibility support or a special arrangement.',
+  signupPresentation: { ...DEFAULT_SIGNUP_PRESENTATION },
 };
 
 function clonePathways(value = DEFAULT_PATHWAYS) {
@@ -203,6 +262,29 @@ function amountToCents(value: string) {
         Math.round(amount * 100),
       )
     : 0;
+}
+
+function optionalAmountToCents(value: string) {
+  const clean = value.trim();
+  return clean ? amountToCents(clean) : null;
+}
+
+function optionalCentsToAmount(value: number | null | undefined) {
+  return value == null ? '' : centsToAmount(value);
+}
+
+function localDateTimeValue(value: string | null | undefined) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
+}
+
+function localDateTimeToIso(value: string) {
+  if (!value.trim()) return null;
+  const date = new Date(value);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : null;
 }
 
 function errorText(value: unknown) {
@@ -247,6 +329,15 @@ function mergeSettings(raw: any): Settings {
           ...fallback.privileges,
           ...(found.privileges || {}),
         },
+        standardPriceCents:
+          found.standardPriceCents == null ? fallback.standardPriceCents : Number(found.standardPriceCents),
+        promotionalPriceCents:
+          found.promotionalPriceCents == null ? null : Number(found.promotionalPriceCents),
+        promotionStartsAt: found.promotionStartsAt || null,
+        promotionEndsAt: found.promotionEndsAt || null,
+        amountDueTodayCents:
+          found.amountDueTodayCents == null ? fallback.amountDueTodayCents : Number(found.amountDueTodayCents),
+        promotionLabel: String(found.promotionLabel || '').trim() || null,
       };
     }).sort(
       (left, right) =>
@@ -311,6 +402,10 @@ function mergeSettings(raw: any): Settings {
           .allowedModes.length
           ? raw.trainingPolicy.allowedModes
           : DEFAULT_POLICY.allowedModes,
+      signupPresentation: {
+        ...DEFAULT_SIGNUP_PRESENTATION,
+        ...(raw?.trainingPolicy?.signupPresentation || {}),
+      },
     },
     notes: raw?.notes || null,
   };
@@ -419,6 +514,25 @@ export default function OnboardingSettingsPanel() {
             trainingPolicy: {
               ...current.trainingPolicy,
               ...patch,
+            },
+          }
+        : current,
+    );
+  }
+
+  function patchSignupPresentation(
+    patch: Partial<SignupPresentation>,
+  ) {
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            trainingPolicy: {
+              ...current.trainingPolicy,
+              signupPresentation: {
+                ...current.trainingPolicy.signupPresentation,
+                ...patch,
+              },
             },
           }
         : current,
@@ -602,7 +716,7 @@ export default function OnboardingSettingsPanel() {
       setNotice({
         tone: 'ok',
         text:
-          'Training, payment and C-Med policy saved successfully.',
+          'Training and C-Med continuation policy saved successfully.',
       });
     } catch (error: any) {
       setNotice({
@@ -652,7 +766,7 @@ export default function OnboardingSettingsPanel() {
             Admin-configured control plane
           </div>
           <h2 className="mt-1 text-xl font-black">
-            Training, payments and C-Med policy
+            Training & C-Med commercial policy
           </h2>
           <p className="mt-1 max-w-3xl text-sm text-slate-300">
             These settings drive the clinician-facing onboarding experience and fulfilment rules.
@@ -686,16 +800,17 @@ export default function OnboardingSettingsPanel() {
           <section className="grid gap-4 xl:grid-cols-3">
             <div className="rounded-2xl border bg-slate-50 p-4">
               <h3 className="font-black text-slate-950">
-                Payment amounts
+                Compatibility amounts (derived)
               </h3>
 
               <div className="mt-4 space-y-3">
                 <label className="block text-xs font-bold text-slate-700">
-                  Full onboarding fee
+                  Derived full-package reference
                   <input
                     type="number"
                     min="0"
                     step="0.01"
+                    disabled
                     value={centsToAmount(
                       settings.trainingFeeCents,
                     )}
@@ -714,6 +829,7 @@ export default function OnboardingSettingsPanel() {
                 <label className="flex gap-2 rounded-xl border bg-white p-3 text-xs text-slate-700">
                   <input
                     type="checkbox"
+                    disabled
                     checked={
                       settings.allowPartialPayment
                     }
@@ -726,21 +842,19 @@ export default function OnboardingSettingsPanel() {
                   />
                   <span>
                     <strong className="block text-slate-950">
-                      Enable deposit pathway
+                      C-Med Flex enabled
                     </strong>
-                    Allow a qualifying partial payment.
+                    This compatibility flag follows the C-Med Flex pathway.
                   </span>
                 </label>
 
                 <label className="block text-xs font-bold text-slate-700">
-                  Minimum qualifying deposit
+                  Derived C-Med Flex amount due today
                   <input
                     type="number"
                     min="0"
                     step="0.01"
-                    disabled={
-                      !settings.allowPartialPayment
-                    }
+                    disabled
                     value={centsToAmount(
                       settings
                         .minimumInitialPaymentCents,
@@ -925,6 +1039,49 @@ export default function OnboardingSettingsPanel() {
                 placeholder="Optional clinician-facing operational notice"
                 className="mt-4 w-full rounded-xl border border-indigo-200 bg-white px-3 py-2 text-sm"
               />
+            </div>
+          </section>
+
+          <section className="rounded-2xl border border-emerald-100 bg-emerald-50/40 p-4">
+            <h3 className="text-lg font-black text-slate-950">Signup & public C-Med presentation</h3>
+            <p className="mt-1 text-xs text-slate-600">Commercial messaging is published from this control plane. Identity, security, HPCSA and legal acknowledgement mechanics remain fixed in source.</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              {[
+                ['heroHeading', 'Signup hero heading', 1],
+                ['noticeHeading', 'Green notice heading', 1],
+                ['noticeCtaLabel', 'Notice CTA label', 1],
+                ['noticeCtaHref', 'Notice CTA path', 1],
+                ['optionalKitTitle', 'Optional C-Med card title', 1],
+                ['successHeading', 'Success heading', 1],
+                ['successCtaLabel', 'Success CTA label', 1],
+              ].map(([key, label]) => (
+                <label key={String(key)} className="text-xs font-bold text-slate-700">
+                  {label}
+                  <input
+                    value={String(settings.trainingPolicy.signupPresentation[key as keyof SignupPresentation] || '')}
+                    onChange={(event) => patchSignupPresentation({ [key]: event.target.value } as Partial<SignupPresentation>)}
+                    className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
+                  />
+                </label>
+              ))}
+              {[
+                ['heroIntroduction', 'Signup introduction'],
+                ['noticeBody', 'Green notice main message'],
+                ['noticeSecondary', 'Green notice C-Med message'],
+                ['optionalKitDescription', 'Optional C-Med card description'],
+                ['successBody', 'Success main message'],
+                ['successSecondary', 'Success secondary message'],
+              ].map(([key, label]) => (
+                <label key={String(key)} className="text-xs font-bold text-slate-700 md:col-span-2">
+                  {label}
+                  <textarea
+                    value={String(settings.trainingPolicy.signupPresentation[key as keyof SignupPresentation] || '')}
+                    onChange={(event) => patchSignupPresentation({ [key]: event.target.value } as Partial<SignupPresentation>)}
+                    rows={3}
+                    className="mt-1 w-full rounded-xl border bg-white px-3 py-2 text-sm"
+                  />
+                </label>
+              ))}
             </div>
           </section>
 
@@ -1127,10 +1284,10 @@ export default function OnboardingSettingsPanel() {
 
           <section>
             <h3 className="text-lg font-black text-slate-950">
-              Payment options and attached privileges
+              Continuation options, pricing and attached privileges
             </h3>
             <p className="mt-1 text-xs text-slate-600">
-              Order, wording, availability and benefits are consumed by the clinician experience.
+              Order, wording, pricing, promotion dates, availability and benefits are consumed by the public C-Med page and clinician training flow.
             </p>
 
             <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -1257,6 +1414,42 @@ export default function OnboardingSettingsPanel() {
                       className="mt-2 w-full rounded-xl border px-3 py-2 text-sm"
                     />
 
+                    <div className="mt-3 rounded-xl border border-emerald-100 bg-emerald-50/60 p-3">
+                      <div className="text-xs font-black text-emerald-950">Commercial pricing</div>
+                      {pathway.key === 'START_NOW_PAY_LATER' ? (
+                        <div className="mt-2 rounded-lg bg-white px-3 py-2 text-sm font-black text-emerald-800">R0 upfront · direct training pathway</div>
+                      ) : (
+                        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Standard total price
+                            <input type="number" min="0" step="0.01" value={optionalCentsToAmount(pathway.standardPriceCents)} onChange={(event) => patchPathway(pathway.key, { standardPriceCents: optionalAmountToCents(event.target.value) })} className="mt-1 w-full rounded-lg border bg-white px-2 py-2" />
+                          </label>
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Promotional total price
+                            <input type="number" min="0" step="0.01" value={optionalCentsToAmount(pathway.promotionalPriceCents)} onChange={(event) => patchPathway(pathway.key, { promotionalPriceCents: optionalAmountToCents(event.target.value) })} className="mt-1 w-full rounded-lg border bg-white px-2 py-2" />
+                          </label>
+                          {pathway.key === 'QUALIFYING_DEPOSIT' ? (
+                            <label className="text-[11px] font-bold text-slate-700">
+                              Amount due today
+                              <input type="number" min="0" step="0.01" value={optionalCentsToAmount(pathway.amountDueTodayCents)} onChange={(event) => patchPathway(pathway.key, { amountDueTodayCents: optionalAmountToCents(event.target.value) })} className="mt-1 w-full rounded-lg border bg-white px-2 py-2" />
+                            </label>
+                          ) : null}
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Promotion label
+                            <input value={pathway.promotionLabel || ''} onChange={(event) => patchPathway(pathway.key, { promotionLabel: event.target.value || null })} placeholder="Limited offer" className="mt-1 w-full rounded-lg border bg-white px-2 py-2" />
+                          </label>
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Promotion starts
+                            <input type="datetime-local" value={localDateTimeValue(pathway.promotionStartsAt)} onChange={(event) => patchPathway(pathway.key, { promotionStartsAt: localDateTimeToIso(event.target.value) })} className="mt-1 w-full rounded-lg border bg-white px-2 py-2" />
+                          </label>
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Promotion expires
+                            <input type="datetime-local" value={localDateTimeValue(pathway.promotionEndsAt)} onChange={(event) => patchPathway(pathway.key, { promotionEndsAt: localDateTimeToIso(event.target.value) })} className="mt-1 w-full rounded-lg border bg-white px-2 py-2" />
+                          </label>
+                        </div>
+                      )}
+                    </div>
+
                     <input
                       value={pathway.ctaLabel}
                       onChange={(event) =>
@@ -1332,6 +1525,7 @@ export default function OnboardingSettingsPanel() {
                                 ],
                               )
                             }
+                            disabled={pathway.key === 'START_NOW_PAY_LATER'}
                             onChange={(event) =>
                               patchPathway(
                                 pathway.key,

@@ -40,6 +40,18 @@ type PathwayPrivileges = {
   balanceRecoveryApplies: boolean;
 };
 
+type PathwayPricing = {
+  standardPriceCents: number;
+  promotionalPriceCents: number | null;
+  promotionStartsAt: string | null;
+  promotionEndsAt: string | null;
+  promotionLabel: string | null;
+  promotionActive: boolean;
+  effectivePriceCents: number;
+  amountDueTodayCents: number;
+  savingsCents: number;
+};
+
 type CommercialPathway = {
   key: OnboardingPathwayKey;
   displayOrder: number;
@@ -51,6 +63,7 @@ type CommercialPathway = {
   featured: boolean;
   conditions: string[];
   privileges: PathwayPrivileges;
+  pricing: PathwayPricing;
 };
 
 type TrainingSession = {
@@ -249,11 +262,11 @@ function errorToMessage(
       clinician_not_found:
         'We could not find this clinician application. Please contact Ambulant+ support.',
       pay_later_pathway_disabled:
-        'The Pay Later pathway is currently disabled by Ambulant+ Admin.',
+        'The direct training pathway is currently unavailable. Please choose another published continuation option or contact Ambulant+ support.',
       pay_later_request_storage_unavailable:
-        'The Pay Later request service is temporarily unavailable.',
+        'The direct training pathway is temporarily unavailable. Please try again shortly.',
       pay_later_not_available_after_qualifying_payment:
-        'Pay Later is not available because a qualifying onboarding payment has already been recorded.',
+        'A qualifying C-Med payment has already been recorded for this onboarding account.',
       clinician_identity_mismatch:
         'Your signed-in clinician identity does not match this onboarding record.',
       training_slot_has_ended:
@@ -312,6 +325,24 @@ function normaliseCommercialPathways(value: unknown): CommercialPathway[] {
       if (!allowed.has(key)) return null;
       const privileges = candidate?.privileges || {};
       const release = String(privileges.starterKitRelease || '').trim().toLowerCase();
+      const rawPricing = candidate?.pricing || {};
+      const standardPriceCents = Math.max(
+        0,
+        Math.round(Number(rawPricing.standardPriceCents ?? candidate?.standardPriceCents ?? 0) || 0),
+      );
+      const promotionalPriceRaw = rawPricing.promotionalPriceCents ?? candidate?.promotionalPriceCents;
+      const promotionalPriceCents =
+        promotionalPriceRaw == null || promotionalPriceRaw === ''
+          ? null
+          : Math.max(0, Math.round(Number(promotionalPriceRaw) || 0));
+      const effectivePriceCents = Math.max(
+        0,
+        Math.round(Number(rawPricing.effectivePriceCents ?? standardPriceCents) || 0),
+      );
+      const amountDueTodayCents = Math.max(
+        0,
+        Math.round(Number(rawPricing.amountDueTodayCents ?? candidate?.amountDueTodayCents ?? effectivePriceCents) || 0),
+      );
 
       return {
         key,
@@ -334,6 +365,28 @@ function normaliseCommercialPathways(value: unknown): CommercialPathway[] {
             privileges.platformIndemnityEligible === true,
           balanceRecoveryApplies:
             privileges.balanceRecoveryApplies === true,
+        },
+        pricing: {
+          standardPriceCents,
+          promotionalPriceCents,
+          promotionStartsAt:
+            String(rawPricing.promotionStartsAt ?? candidate?.promotionStartsAt ?? '').trim() || null,
+          promotionEndsAt:
+            String(rawPricing.promotionEndsAt ?? candidate?.promotionEndsAt ?? '').trim() || null,
+          promotionLabel:
+            String(rawPricing.promotionLabel ?? candidate?.promotionLabel ?? '').trim() || null,
+          promotionActive: rawPricing.promotionActive === true,
+          effectivePriceCents,
+          amountDueTodayCents,
+          savingsCents: Math.max(
+            0,
+            Math.round(
+              Number(
+                rawPricing.savingsCents ??
+                  Math.max(0, standardPriceCents - effectivePriceCents),
+              ) || 0,
+            ),
+          ),
         },
       };
     })
@@ -520,35 +573,37 @@ function CommercialPathwaySelector({
   selectedPathway,
   onSelect,
   amountLabel,
+  currency,
 }: {
   pathways: CommercialPathway[];
   selectedPathway: OnboardingPathwayKey | null;
   onSelect: (key: OnboardingPathwayKey) => void;
   amountLabel: (key: OnboardingPathwayKey) => string;
+  currency: string;
 }) {
   if (!pathways.length) {
     return (
       <section className="rounded-3xl border border-amber-200 bg-amber-50 p-6">
-        <h2 className="font-black text-amber-950">Payment options are being prepared</h2>
+        <h2 className="font-black text-amber-950">Continuation options are being prepared</h2>
         <p className="mt-1 text-sm text-amber-900">
-          Ambulant+ Admin has not enabled an onboarding payment option yet.
+          Ambulant+ Admin has not enabled a clinician continuation option yet.
         </p>
       </section>
     );
   }
 
   return (
-    <section aria-labelledby="payment-options-heading">
+    <section aria-labelledby="continuation-options-heading">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-700">
-            Payment option
+            Your next step
           </div>
-          <h2 id="payment-options-heading" className="mt-1 text-xl font-black text-slate-950">
-            Choose how you want to begin
+          <h2 id="continuation-options-heading" className="mt-1 text-xl font-black text-slate-950">
+            Choose how you&apos;d like to continue
           </h2>
           <p className="mt-1 text-sm text-slate-600">
-            Amounts, benefits and release rules below are published by Ambulant+ Admin.
+            The direct training pathway requires no upfront payment. C-Med Flex and C-Med Full are optional upgrades published by Ambulant+ Admin.
           </p>
         </div>
         <span className="rounded-full border bg-white px-3 py-1 text-xs font-semibold text-slate-600">
@@ -559,6 +614,10 @@ function CommercialPathwaySelector({
       <div className="mt-5 grid gap-4 lg:grid-cols-3" role="radiogroup">
         {pathways.map((pathway) => {
           const selected = pathway.key === selectedPathway;
+          const direct = pathway.key === 'START_NOW_PAY_LATER';
+          const price = pathway.pricing;
+          const promotion = !direct && price.promotionActive && price.savingsCents > 0;
+
           return (
             <button
               key={pathway.key}
@@ -580,6 +639,11 @@ function CommercialPathwaySelector({
                     Option {pathway.displayOrder}
                   </div>
                   <h3 className="mt-1 text-base font-black text-slate-950">{pathway.label}</h3>
+                  {pathway.badge ? (
+                    <span className="mt-2 inline-flex rounded-full border border-indigo-100 bg-indigo-50 px-2.5 py-1 text-[10px] font-black text-indigo-700">
+                      {pathway.badge}
+                    </span>
+                  ) : null}
                 </div>
                 <span
                   className={`mt-0.5 flex h-5 w-5 items-center justify-center rounded-full border ${
@@ -590,24 +654,53 @@ function CommercialPathwaySelector({
                 </span>
               </div>
 
-              <div className="mt-4 text-2xl font-black tracking-tight text-slate-950">
-                {amountLabel(pathway.key)}
-              </div>
-              <p className="mt-2 min-h-16 text-sm leading-relaxed text-slate-600">
+              {direct ? (
+                <div className="mt-4">
+                  <div className="text-2xl font-black tracking-tight text-emerald-700">R0 upfront</div>
+                  <div className="mt-1 text-xs font-bold text-emerald-700">No mandatory onboarding payment</div>
+                </div>
+              ) : (
+                <div className="mt-4">
+                  {promotion ? (
+                    <div className="text-sm font-semibold text-slate-400 line-through">
+                      {money(price.standardPriceCents, currency)}
+                    </div>
+                  ) : null}
+                  <div className="text-2xl font-black tracking-tight text-slate-950">
+                    {money(price.effectivePriceCents, currency)}
+                  </div>
+                  {promotion ? (
+                    <div className="mt-1 text-xs font-black text-emerald-700">
+                      Save {money(price.savingsCents, currency)}
+                      {price.promotionEndsAt ? ` · Ends ${fmtDateOnly(price.promotionEndsAt)}` : ''}
+                    </div>
+                  ) : null}
+                  {price.promotionLabel && promotion ? (
+                    <div className="mt-1 text-[11px] font-semibold text-violet-700">{price.promotionLabel}</div>
+                  ) : null}
+                  <div className="mt-2 text-xs font-bold text-slate-600">
+                    {pathway.key === 'QUALIFYING_DEPOSIT'
+                      ? `${money(price.amountDueTodayCents, currency)} due today`
+                      : amountLabel(pathway.key)}
+                  </div>
+                </div>
+              )}
+
+              <p className="mt-3 min-h-16 text-sm leading-relaxed text-slate-600">
                 {pathway.description}
               </p>
 
               <div className="mt-4 space-y-2 rounded-2xl border border-slate-200/80 bg-white/80 p-3">
                 <Privilege granted={pathway.privileges.trainingAccess}>Training access</Privilege>
-                <Privilege granted={pathway.privileges.practiceActivation}>Practice activation</Privilege>
+                <Privilege granted={pathway.privileges.practiceActivation}>Practice activation after required verification, training and approval</Privilege>
                 <Privilege granted={pathway.privileges.platformIndemnityEligible}>
-                  Platform indemnity eligibility
+                  PI / Medical Malpractice cover eligibility
                 </Privilege>
                 <Privilege granted={pathway.privileges.starterKitRelease !== 'none'}>
                   {releaseLabel(pathway.privileges.starterKitRelease)}
                 </Privilege>
                 <Privilege granted={pathway.privileges.balanceRecoveryApplies}>
-                  Balance recovery applies
+                  Flexible balance settlement applies
                 </Privilege>
               </div>
 
@@ -806,7 +899,7 @@ function CMedPackageCard({
             <div>
               <div className="text-[10px] font-black uppercase tracking-[0.18em] text-indigo-200">
                 {preview
-                  ? 'Selected payment option preview'
+                  ? 'Selected continuation option preview'
                   : 'Admin-configured C-Med dispatch'}
               </div>
               <h2 id="cmed-package-heading" className="mt-0.5 text-lg font-black">C-Med package</h2>
@@ -821,7 +914,7 @@ function CMedPackageCard({
       <div className="p-5">
         {release === 'none' ? (
           <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm leading-relaxed text-amber-950">
-            This option does not include a C-Med Kit dispatch. Admin may grant training access independently under the selected pathway.
+            No C-Med Kit is required for this pathway. You can continue to your required training without purchasing a kit.
           </div>
         ) : items.length ? (
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -882,7 +975,6 @@ function TrainingSchedulePageContent() {
   const [popUploading, setPopUploading] = useState(false);
   const [popNotice, setPopNotice] = useState<string | null>(null);
   const [paymentNotice, setPaymentNotice] = useState<string | null>(null);
-  const [payLaterReason, setPayLaterReason] = useState('');
   const [selectedCommercialPathway, setSelectedCommercialPathway] =
     useState<OnboardingPathwayKey | null>(null);
   const [legalDocuments, setLegalDocuments] = useState<LegalDocument[]>([]);
@@ -972,7 +1064,7 @@ function TrainingSchedulePageContent() {
         setStep('done');
       } else if (trainingStatus === 'scheduled' && context.training?.paid) {
         setStep('done');
-      } else if (trainingStatus === 'scheduled' || currentPathway === 'START_NOW_PAY_LATER') {
+      } else if (trainingStatus === 'scheduled') {
         setStep('pay');
       } else {
         setStep('pick');
@@ -997,7 +1089,7 @@ function TrainingSchedulePageContent() {
   const currency = pricing?.currency || 'ZAR';
   const trainingPolicy: TrainingPolicy = pricing?.trainingPolicy || {
     heading: 'Clinician onboarding training',
-    introduction: 'Choose a published programme and complete an available onboarding option.',
+    introduction: 'Choose a published programme, select an available mode, then choose how you would like to continue. No upfront payment is required for the direct training pathway.',
     timezone: 'Africa/Johannesburg',
     defaultDurationDays: 1,
     defaultSessionDurationMinutes: 60,
@@ -1063,48 +1155,28 @@ function TrainingSchedulePageContent() {
     }
   }, [pathways, selectedCommercialPathway]);
 
-  const fullFee = Math.max(0, Math.round(Number(pricing?.trainingFeeCents || 0)));
   const amountPaid = Math.max(
     0,
     Math.round(Number(pricing?.amountPaidCents ?? ctx?.onboarding?.amountPaidCents ?? 0)),
   );
-  const outstanding = Math.max(
-    0,
-    Math.round(Number(pricing?.outstandingCents ?? ctx?.onboarding?.outstandingCents ?? fullFee - amountPaid)),
-  );
-  const initialDue = Math.max(
-    0,
-    Math.round(Number(pricing?.initialPaymentDueCents ?? pricing?.minimumInitialPaymentCents ?? fullFee)),
-  );
 
   function pathwayCharge(key: OnboardingPathwayKey) {
-    if (key === 'START_NOW_PAY_LATER') return 0;
-    if (key === 'FULL_PAYMENT') return outstanding;
-    return Math.max(0, initialDue - amountPaid);
+    const pathway = pathways.find((candidate) => candidate.key === key);
+    if (!pathway || key === 'START_NOW_PAY_LATER') return 0;
+    const requiredNow =
+      key === 'QUALIFYING_DEPOSIT'
+        ? pathway.pricing.amountDueTodayCents
+        : pathway.pricing.effectivePriceCents;
+    return Math.max(0, requiredNow - amountPaid);
   }
 
   function pathwayAmountLabel(key: OnboardingPathwayKey) {
-    if (key === 'START_NOW_PAY_LATER') return 'Pay later';
+    if (key === 'START_NOW_PAY_LATER') return 'R0 upfront';
     const charge = pathwayCharge(key);
-    return charge > 0 ? money(charge, currency) : 'Nothing due now';
+    return charge > 0 ? `${money(charge, currency)} due now` : 'Nothing due now';
   }
 
-  const selectedPathwayIsPayLater = selectedCommercialPathway === 'START_NOW_PAY_LATER';
-  const payLaterRequest = ctx?.payLaterRequest || null;
-  const payLaterStatus = String(payLaterRequest?.status || '').toLowerCase();
-  const payLaterPending = payLaterStatus === 'pending';
-  const payLaterRejected = payLaterStatus === 'rejected';
-  const payLaterApproved =
-    payLaterStatus === 'approved' ||
-    ctx?.entitlements?.approvedPayLater === true ||
-    ctx?.onboarding?.waiverActive === true ||
-    pricing?.waiverActive === true;
-  const payLaterCanSubmit =
-    !payLaterPending &&
-    !payLaterApproved &&
-    (!payLaterRequest ||
-      payLaterRequest.canResubmit === true ||
-      ['rejected', 'withdrawn', 'cancelled'].includes(payLaterStatus));
+  const selectedPathwayIsDirect = selectedCommercialPathway === 'START_NOW_PAY_LATER';
 
   const trainingStatus = String(ctx?.training?.status || '').toLowerCase();
   const alreadyScheduled = trainingStatus === 'scheduled';
@@ -1121,7 +1193,12 @@ function TrainingSchedulePageContent() {
       ),
     [ctx, slots],
   );
-  const requiredLegalDocuments = legalDocuments.filter(
+  const applicableLegalDocuments = legalDocuments.filter(
+    (document) =>
+      !selectedPathwayIsDirect ||
+      document.key !== 'CLINICIAN_ONBOARDING_PAYMENT_DISCLOSURE',
+  );
+  const requiredLegalDocuments = applicableLegalDocuments.filter(
     (document) => document.acknowledgementMode === 'REQUIRED',
   );
   const requiredLegalAccepted =
@@ -1231,7 +1308,7 @@ function TrainingSchedulePageContent() {
     if (!selectedSlot) throw new Error('Select a published training programme.');
     if (!eligibleModes.includes(mode)) throw new Error('Select an available training mode.');
     if (!selectedCommercialPathway || !selectedPathway) {
-      throw new Error('Select an Admin-configured payment option.');
+      throw new Error('Choose how you would like to continue.');
     }
   }
 
@@ -1245,50 +1322,40 @@ function TrainingSchedulePageContent() {
     }
   }
 
-  async function submitPayLaterRequest() {
+  async function confirmDirectTraining() {
     setErr(null);
     setPaymentNotice(null);
     try {
       validateSelection();
-      if (!selectedPathwayIsPayLater) throw new Error('Select the Pay Later option first.');
-      if (payLaterPending) {
-        setPaymentNotice('Your Pay Later request is already awaiting Admin review.');
-        return;
+      if (!selectedPathwayIsDirect) {
+        throw new Error('Select Continue to Training for the R0 upfront pathway.');
       }
-      if (payLaterApproved) {
-        setPaymentNotice('Your Pay Later option has already been approved.');
-        return;
-      }
-      if (!payLaterCanSubmit) throw new Error('A new Pay Later request cannot currently be submitted.');
-
       setBusy(true);
-      await acknowledgeRequiredLegal('PAY_LATER_REQUEST');
-      const response = await fetch('/api/training/pay-later/request', {
+      await acknowledgeRequiredLegal('DIRECT_TRAINING_CONFIRMATION');
+      const response = await fetch('/api/training/book', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({
           clinicianId,
-          pathwayKey: 'START_NOW_PAY_LATER',
-          requestReason: payLaterReason.trim() || undefined,
           slotId: selectedSlot?.id,
-          trainingMode: mode,
+          mode,
         }),
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok || !payload?.ok) {
-        throw new Error(apiError(payload, 'Unable to submit your Pay Later request.'));
+        throw new Error(apiError(payload, 'Unable to confirm your training programme.'));
       }
-      setPayLaterReason('');
-      setPaymentNotice(payload.message || 'Your Pay Later request was submitted for Admin review.');
       await load();
-      setStep('pay');
+      setStep('done');
+      setPaymentNotice('Training programme confirmed. No upfront onboarding payment was required.');
     } catch (error) {
-      setErr(errorToMessage(error, 'Unable to submit your Pay Later request.'));
+      setErr(errorToMessage(error, 'Unable to confirm your training programme.'));
     } finally {
       setBusy(false);
     }
   }
+
 
   async function startCardPayment(pathwayKey: OnboardingPathwayKey | null) {
     setErr(null);
@@ -1298,8 +1365,8 @@ function TrainingSchedulePageContent() {
       if (!pathwayKey || pathwayKey === 'START_NOW_PAY_LATER') {
         throw new Error('Choose Deposit or Full Payment for card checkout.');
       }
-      if (!pricing?.configured || fullFee <= 0) {
-        throw new Error('Payment settings are not configured yet. Please contact Ambulant+ support.');
+      if (!pricing?.configured || !selectedPathway || selectedPathway.pricing.standardPriceCents <= 0) {
+        throw new Error('This C-Med option is not priced yet. Please contact Ambulant+ support.');
       }
       if (pricing.cardPaymentEnabled === false) {
         throw new Error('Card payment is currently disabled by Ambulant+ Admin.');
@@ -1694,7 +1761,7 @@ function TrainingSchedulePageContent() {
 
             {!alreadyCompleted && ctx.training?.roomState === 'closed' ? (
               <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
-                This training room has closed. Choose another available date below; your payment or approved Pay Later entitlement remains in place.
+                This training room has closed. Choose another available date below; any existing qualifying payment or training entitlement remains in place.
               </div>
             ) : null}
 
@@ -1819,10 +1886,10 @@ function TrainingSchedulePageContent() {
                   </div>
                 ) : null}
 
-                <CommercialPathwaySelector pathways={pathways} selectedPathway={selectedCommercialPathway} onSelect={setSelectedCommercialPathway} amountLabel={pathwayAmountLabel} />
+                <CommercialPathwaySelector pathways={pathways} selectedPathway={selectedCommercialPathway} onSelect={setSelectedCommercialPathway} amountLabel={pathwayAmountLabel} currency={currency} />
 
                 <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-6">
-                  <p className="text-xs text-slate-500">Select one programme, an available mode, and one payment option.</p>
+                  <p className="text-xs text-slate-500">Select one programme, an available mode, and how you would like to continue.</p>
                   <button type="button" disabled={busy || !selectedSlot || !selectedPathway || !eligibleModes.includes(mode)} onClick={proceedToPay} className="rounded-xl bg-indigo-700 px-5 py-3 text-sm font-black text-white hover:bg-indigo-800 disabled:cursor-not-allowed disabled:opacity-50">
                     Review and confirm
                   </button>
@@ -1833,79 +1900,95 @@ function TrainingSchedulePageContent() {
                 <div className="space-y-6 rounded-[2rem] border bg-white p-6 shadow-sm sm:p-8">
                   <div>
                     <div className="text-xs font-black uppercase tracking-[0.18em] text-indigo-700">Confirmation</div>
-                    <h2 className="mt-1 text-2xl font-black text-slate-950">Complete your onboarding option</h2>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-600">Your programme and pathway remain subject to the Admin-published terms shown below.</p>
+                    <h2 className="mt-1 text-2xl font-black text-slate-950">Confirm your training and continuation choice</h2>
+                    <p className="mt-2 text-sm leading-relaxed text-slate-600">Your training programme and selected continuation option remain subject to the Admin-published terms shown below.</p>
                   </div>
 
-                  {selectedPathwayIsPayLater ? (
-                    <div className="space-y-4 rounded-3xl border border-violet-200 bg-violet-50 p-5">
-                      <div className="font-black text-violet-950">Request Pay Later approval</div>
-                      {payLaterRequest ? (
-                        <div className={`rounded-2xl border p-3 text-sm ${payLaterApproved ? 'border-emerald-200 bg-emerald-50 text-emerald-950' : payLaterRejected ? 'border-rose-200 bg-rose-50 text-rose-950' : 'border-amber-200 bg-amber-50 text-amber-950'}`}>
-                          <div className="font-black">{payLaterApproved ? 'Approved' : payLaterRejected ? 'Not approved' : 'Awaiting Admin review'}</div>
-                          {payLaterRequest.reviewNotes ? <div className="mt-1 text-xs">Admin note: {payLaterRequest.reviewNotes}</div> : null}
+                  {selectedPathwayIsDirect ? (
+                    <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
+                      <div className="flex items-start gap-3">
+                        <ShieldCheck className="mt-0.5 h-6 w-6 shrink-0 text-emerald-700" />
+                        <div>
+                          <div className="font-black text-emerald-950">Continue to Training — R0 upfront</div>
+                          <p className="mt-1 text-sm leading-relaxed text-emerald-900">
+                            No financial application or C-Med purchase is required. Confirm the published programme below and continue with your mandatory training.
+                          </p>
                         </div>
-                      ) : null}
-                      <label className="block text-xs font-semibold text-violet-950" htmlFor="payLaterReason">Supporting context <span className="font-normal text-violet-700">(optional)</span></label>
-                      <textarea id="payLaterReason" value={payLaterReason} onChange={(event) => setPayLaterReason(event.target.value)} maxLength={2000} rows={4} disabled={busy || payLaterPending || payLaterApproved} className="w-full rounded-2xl border border-violet-200 bg-white px-4 py-3 text-sm outline-none focus:border-violet-500 disabled:bg-slate-100" placeholder="Tell Admin anything relevant to this request." />
-                      <button type="button" disabled={busy || payLaterPending || payLaterApproved || !payLaterCanSubmit || !requiredLegalAccepted} onClick={submitPayLaterRequest} className="inline-flex items-center gap-2 rounded-xl bg-violet-700 px-4 py-3 text-sm font-black text-white hover:bg-violet-800 disabled:opacity-50">
-                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}{payLaterPending ? 'Awaiting Admin review' : payLaterApproved ? 'Pay Later approved' : payLaterRejected ? 'Resubmit request' : 'Submit for Admin review'}
+                      </div>
+                      <button
+                        type="button"
+                        disabled={busy || !requiredLegalAccepted}
+                        onClick={confirmDirectTraining}
+                        className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-700 px-4 py-3 text-sm font-black text-white hover:bg-emerald-800 disabled:opacity-50"
+                      >
+                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <BookOpenCheck className="h-4 w-4" />}
+                        Continue to Training
                       </button>
                     </div>
                   ) : (
-                    <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div><div className="text-xs font-black uppercase tracking-wide text-emerald-700">Amount due</div><div className="mt-1 text-3xl font-black text-emerald-950">{selectedCommercialPathway ? pathwayAmountLabel(selectedCommercialPathway) : '-'}</div></div>
-                        <CreditCard className="h-8 w-8 text-emerald-700" />
+                    <>
+                      <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-5">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <div className="text-xs font-black uppercase tracking-wide text-emerald-700">Amount due now</div>
+                            <div className="mt-1 text-3xl font-black text-emerald-950">
+                              {selectedCommercialPathway ? pathwayAmountLabel(selectedCommercialPathway) : '-'}
+                            </div>
+                            {selectedPathway?.pricing.promotionActive && selectedPathway.pricing.savingsCents > 0 ? (
+                              <div className="mt-2 text-xs font-black text-emerald-800">
+                                Current offer saves {money(selectedPathway.pricing.savingsCents, currency)}
+                                {selectedPathway.pricing.promotionEndsAt ? ` · Ends ${fmtDateOnly(selectedPathway.pricing.promotionEndsAt)}` : ''}
+                              </div>
+                            ) : null}
+                          </div>
+                          <CreditCard className="h-8 w-8 text-emerald-700" />
+                        </div>
+                        <button type="button" disabled={busy || !selectedCommercialPathway || pricing?.cardPaymentEnabled === false || pricing?.configured === false || !requiredLegalAccepted} onClick={() => startCardPayment(selectedCommercialPathway)} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-50">
+                          {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}{selectedPathway?.ctaLabel || 'Continue to secure checkout'}
+                        </button>
                       </div>
-                      <button type="button" disabled={busy || !selectedCommercialPathway || pricing?.cardPaymentEnabled === false || pricing?.configured === false || !requiredLegalAccepted} onClick={() => startCardPayment(selectedCommercialPathway)} className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-black text-white hover:bg-emerald-700 disabled:opacity-50">
-                        {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CreditCard className="h-4 w-4" />}{selectedPathway?.ctaLabel || 'Continue to secure checkout'}
-                      </button>
-                    </div>
+
+                      <div className="rounded-3xl border bg-slate-50 p-5">
+                        <div className="flex items-center gap-2 font-black text-slate-950"><Banknote className="h-5 w-5 text-indigo-700" />EFT or Admin authorization</div>
+                        <p className="mt-2 text-sm leading-relaxed text-slate-600">After Admin confirms an EFT/manual payment, use the one-time code issued from the Admin onboarding board.</p>
+                        {bankEntries.length ? (
+                          <dl className="mt-4 grid gap-3 rounded-2xl border bg-white p-4 text-sm sm:grid-cols-2">
+                            {bankEntries.map(([key, value]) => <div key={key}><dt className="text-[10px] font-black uppercase tracking-wide text-slate-500">{titleCaseKey(key)}</dt><dd className="mt-1 break-words font-semibold text-slate-900">{String(value)}</dd></div>)}
+                          </dl>
+                        ) : null}
+
+                        {pricing?.manualPaymentEnabled !== false ? (
+                          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                            <div className="text-sm font-black text-amber-950">Upload Proof of Payment</div>
+                            <p className="mt-1 text-xs text-amber-800">
+                              If you paid by EFT or bank deposit, upload your receipt here. Admin will verify and issue your authorization code.
+                            </p>
+                            <input
+                              type="file"
+                              accept=".pdf,.png,.jpg,.jpeg"
+                              onChange={(e) => setPopFile(e.target.files?.[0] || null)}
+                              className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-amber-700 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-amber-800"
+                            />
+                            <button
+                              type="button"
+                              disabled={popUploading || !popFile || !requiredLegalAccepted}
+                              onClick={uploadProofOfPayment}
+                              className="mt-3 inline-flex items-center gap-2 rounded-xl bg-amber-700 px-4 py-2 text-xs font-black text-white hover:bg-amber-800 disabled:opacity-50"
+                            >
+                              {popUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                              {popUploading ? 'Uploading…' : 'Submit PoP'}
+                            </button>
+                            {popNotice ? <div className="mt-2 text-xs text-amber-900">{popNotice}</div> : null}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                          <input id="authorisationCode" value={authorisationCode} onChange={(event) => setAuthorisationCode(event.target.value)} placeholder="AMB-ABC123-DEF456" className="min-w-0 flex-1 rounded-xl border bg-white px-4 py-3 text-sm outline-none focus:border-indigo-500" />
+                          <button type="button" disabled={busy || pricing?.manualPaymentEnabled === false || !requiredLegalAccepted} onClick={redeemAuthorisationCode} className="rounded-xl border bg-white px-4 py-3 text-sm font-black text-slate-800 hover:bg-slate-100 disabled:opacity-50">Verify code</button>
+                        </div>
+                      </div>
+                    </>
                   )}
-
-                  <div className="rounded-3xl border bg-slate-50 p-5">
-                    <div className="flex items-center gap-2 font-black text-slate-950"><Banknote className="h-5 w-5 text-indigo-700" />EFT or Admin authorization</div>
-                    <p className="mt-2 text-sm leading-relaxed text-slate-600">After Admin confirms an EFT/manual payment, use the one-time code issued from the Admin onboarding board.</p>
-                    {bankEntries.length ? (
-                      <dl className="mt-4 grid gap-3 rounded-2xl border bg-white p-4 text-sm sm:grid-cols-2">
-                        {bankEntries.map(([key, value]) => <div key={key}><dt className="text-[10px] font-black uppercase tracking-wide text-slate-500">{titleCaseKey(key)}</dt><dd className="mt-1 break-words font-semibold text-slate-900">{String(value)}</dd></div>)}
-                      </dl>
-                    ) : null}
-
-                    {!selectedPathwayIsPayLater && pricing?.manualPaymentEnabled !== false ? (
-                    <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
-                      <div className="text-sm font-black text-amber-950">Upload Proof of Payment</div>
-                      <p className="mt-1 text-xs text-amber-800">
-                        If you paid by EFT or bank deposit, upload your receipt here. Admin will verify and issue your authorization code.
-                      </p>
-                      <input
-                        type="file"
-                        accept=".pdf,.png,.jpg,.jpeg"
-                        onChange={(e) => setPopFile(e.target.files?.[0] || null)}
-                        className="mt-2 block w-full text-sm file:mr-3 file:rounded-lg file:border-0 file:bg-amber-700 file:px-3 file:py-1.5 file:text-xs file:font-semibold file:text-white hover:file:bg-amber-800"
-                      />
-                      <button
-                        type="button"
-                        disabled={popUploading || !popFile || !requiredLegalAccepted}
-                        onClick={uploadProofOfPayment}
-                        className="mt-3 inline-flex items-center gap-2 rounded-xl bg-amber-700 px-4 py-2 text-xs font-black text-white hover:bg-amber-800 disabled:opacity-50"
-                      >
-                        {popUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                        {popUploading ? 'Uploading…' : 'Submit PoP'}
-                      </button>
-                      {popNotice ? (
-                        <div className="mt-2 text-xs text-amber-900">{popNotice}</div>
-                      ) : null}
-                    </div>
-
-                    ) : null}
-
-                    <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-                      <input id="authorisationCode" value={authorisationCode} onChange={(event) => setAuthorisationCode(event.target.value)} placeholder="AMB-ABC123-DEF456" className="min-w-0 flex-1 rounded-xl border bg-white px-4 py-3 text-sm outline-none focus:border-indigo-500" />
-                      <button type="button" disabled={busy || pricing?.manualPaymentEnabled === false || !requiredLegalAccepted} onClick={redeemAuthorisationCode} className="rounded-xl border bg-white px-4 py-3 text-sm font-black text-slate-800 hover:bg-slate-100 disabled:opacity-50">Verify code</button>
-                    </div>
-                  </div>
 
                   <button type="button" disabled={busy} onClick={() => setStep('pick')} className="rounded-xl border px-4 py-2 text-sm font-semibold hover:bg-slate-50">Back to choices</button>
                 </div>
@@ -1914,7 +1997,7 @@ function TrainingSchedulePageContent() {
                   <div className="rounded-3xl border bg-white p-5 shadow-sm">
                     <div className="text-xs font-black uppercase tracking-[0.16em] text-indigo-700">Your selection</div>
                     <h3 className="mt-2 font-black text-slate-950">{selectedSlot?.title || 'No programme selected'}</h3>
-                    <div className="mt-3 space-y-2 text-sm text-slate-600"><div>{fmt(selectedSlot?.startAt)}</div><div>{modeLabel(mode)}</div><div>{selectedPathway?.label || 'No payment option selected'}</div></div>
+                    <div className="mt-3 space-y-2 text-sm text-slate-600"><div>{fmt(selectedSlot?.startAt)}</div><div>{modeLabel(mode)}</div><div>{selectedPathway?.label || 'No continuation option selected'}</div></div>
                   </div>
                   {trainingPolicy.supportMessage ? <div className="rounded-3xl border border-indigo-100 bg-indigo-50 p-5 text-sm leading-relaxed text-indigo-950">{trainingPolicy.supportMessage}</div> : null}
                 </aside>
@@ -1924,7 +2007,7 @@ function TrainingSchedulePageContent() {
         )}
 
         {ctx ? (
-          <LegalNoticePanel documents={legalDocuments} accepted={legalAccepted} onToggle={(versionId, checked) => setLegalAccepted((current) => ({ ...current, [versionId]: checked }))} status={legalStatus} />
+          <LegalNoticePanel documents={applicableLegalDocuments} accepted={legalAccepted} onToggle={(versionId, checked) => setLegalAccepted((current) => ({ ...current, [versionId]: checked }))} status={legalStatus} />
         ) : null}
 
         {ctx ? (

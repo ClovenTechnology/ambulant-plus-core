@@ -6,6 +6,7 @@ import {
 import {Prisma} from '@prisma/client';
 import {prisma} from '@/src/lib/prisma';
 import {
+  effectiveClinicianPathwayPricing,
   getClinicianOnboardingSettings,
   normaliseClinicianOnboardingCommercialPathways,
   normaliseClinicianOnboardingSettings,
@@ -166,420 +167,312 @@ export async function PATCH(
 ) {
   try {
     const admin = await requireAdmin(request);
+    if (!admin.ok) return admin.response;
 
-    if (!admin.ok) {
-      return admin.response;
-    }
+    const body = await request
+      .json()
+      .catch(() => ({} as Record<string, any>));
 
-    const body =
-      await request
-        .json()
-        .catch(() => ({} as Record<string, any>));
+    const existing = await getClinicianOnboardingSettings();
 
-    const existing =
-      await getClinicianOnboardingSettings();
-
-    const trainingFeeCents =
-      hasOwn(body, 'trainingFeeCents')
-        ? moneyCents(body.trainingFeeCents)
-        : existing.trainingFeeCents;
-
-    if (
-      trainingFeeCents == null ||
-      trainingFeeCents <= 0
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'full_onboarding_fee_must_be_greater_than_zero',
-        },
-        {status: 400},
-      );
-    }
-
-    const allowPartialPayment =
-      hasOwn(body, 'allowPartialPayment')
-        ? body.allowPartialPayment === true
-        : existing.allowPartialPayment;
-
-    const minimumInitialPaymentCents =
-      hasOwn(body, 'minimumInitialPaymentCents')
-        ? moneyCents(
-            body.minimumInitialPaymentCents,
-          ) ?? 0
-        : existing.minimumInitialPaymentCents;
-
-    if (
-      allowPartialPayment &&
-      minimumInitialPaymentCents <= 0
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'minimum_initial_payment_required',
-        },
-        {status: 400},
-      );
-    }
-
-    if (
-      minimumInitialPaymentCents >
-      trainingFeeCents
-    ) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'minimum_initial_payment_cannot_exceed_full_fee',
-        },
-        {status: 400},
-      );
-    }
-
-    const starterKitItems =
-      hasOwn(body, 'starterKitItems')
-        ? stringArray(body.starterKitItems)
-        : existing.starterKitItems;
-
-    if (!starterKitItems.length) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'at_least_one_c_med_kit_item_required',
-        },
-        {status: 400},
-      );
-    }
-
-    const kitByIdentity =
-      new Map(
-        starterKitItems.map((item) => [
-          item.toLowerCase(),
-          item,
-        ]),
-      );
-
-    const requestedDepositItems =
-      hasOwn(body, 'starterKitDepositItems')
-        ? stringArray(
-            body.starterKitDepositItems,
-          )
-        : existing.starterKitDepositItems;
-
-    const unknownDepositItem =
-      requestedDepositItems.find(
-        (item) =>
-          !kitByIdentity.has(
-            item.toLowerCase(),
-          ),
-      );
-
-    if (unknownDepositItem) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'deposit_kit_items_must_belong_to_full_kit',
-          item: unknownDepositItem,
-        },
-        {status: 400},
-      );
-    }
-
-    const starterKitDepositItems =
-      requestedDepositItems.map(
-        (item) =>
-          kitByIdentity.get(
-            item.toLowerCase(),
-          )!,
-      );
-
-    const commercialPathways =
+    const requestedPathways =
       normaliseClinicianOnboardingCommercialPathways(
         hasOwn(body, 'commercialPathways')
           ? body.commercialPathways
           : existing.commercialPathways,
       );
 
-    const enabled =
-      commercialPathways.filter(
-        (pathway) => pathway.enabled,
-      );
+    const commercialPathways = requestedPathways.map((pathway) =>
+      pathway.key === 'START_NOW_PAY_LATER'
+        ? {
+            ...pathway,
+            standardPriceCents: 0,
+            promotionalPriceCents: null,
+            promotionStartsAt: null,
+            promotionEndsAt: null,
+            amountDueTodayCents: 0,
+            promotionLabel: null,
+            privileges: {
+              ...pathway.privileges,
+              trainingAccess: true,
+              practiceActivation: true,
+              starterKitRelease: 'none' as const,
+              platformIndemnityEligible: false,
+              balanceRecoveryApplies: false,
+            },
+          }
+        : pathway,
+    );
 
-    const featured =
-      commercialPathways.filter(
-        (pathway) => pathway.featured,
-      );
+    const enabled = commercialPathways.filter((pathway) => pathway.enabled);
+    const featured = commercialPathways.filter((pathway) => pathway.featured);
 
     if (!enabled.length) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'at_least_one_payment_pathway_must_be_enabled',
-        },
-        {status: 400},
+        { ok: false, error: 'at_least_one_continuation_pathway_must_be_enabled' },
+        { status: 400 },
       );
     }
 
-    if (
-      featured.length !== 1 ||
-      !featured[0]?.enabled
-    ) {
+    if (featured.length !== 1 || !featured[0]?.enabled) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'exactly_one_enabled_pathway_must_be_featured',
-        },
-        {status: 400},
+        { ok: false, error: 'exactly_one_enabled_pathway_must_be_featured' },
+        { status: 400 },
       );
     }
 
-    const orders =
-      commercialPathways.map(
-        (pathway) => pathway.displayOrder,
-      );
-
-    if (
-      new Set(orders).size !==
-      orders.length
-    ) {
+    const orders = commercialPathways.map((pathway) => pathway.displayOrder);
+    if (new Set(orders).size !== orders.length) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'payment_pathway_display_orders_must_be_unique',
-        },
-        {status: 400},
+        { ok: false, error: 'continuation_pathway_display_orders_must_be_unique' },
+        { status: 400 },
       );
     }
 
-    const depositPathway =
-      commercialPathways.find(
-        (pathway) =>
-          pathway.key ===
-          'QUALIFYING_DEPOSIT',
-      );
+    const paidEnabled = enabled.filter(
+      (pathway) => pathway.key !== 'START_NOW_PAY_LATER',
+    );
 
-    if (
-      depositPathway?.enabled &&
-      !allowPartialPayment
-    ) {
+    for (const pathway of paidEnabled) {
+      const standard = moneyCents(pathway.standardPriceCents) ?? 0;
+      const promotional = pathway.promotionalPriceCents == null
+        ? null
+        : moneyCents(pathway.promotionalPriceCents);
+
+      if (standard <= 0) {
+        return NextResponse.json(
+          { ok: false, error: 'c_med_standard_price_required', pathwayKey: pathway.key },
+          { status: 400 },
+        );
+      }
+
+      if (promotional != null) {
+        if (promotional <= 0 || promotional >= standard) {
+          return NextResponse.json(
+            { ok: false, error: 'c_med_promotional_price_must_be_below_standard_price', pathwayKey: pathway.key },
+            { status: 400 },
+          );
+        }
+        if (!pathway.promotionEndsAt) {
+          return NextResponse.json(
+            { ok: false, error: 'c_med_promotion_expiry_required', pathwayKey: pathway.key },
+            { status: 400 },
+          );
+        }
+      }
+
+      const startMs = pathway.promotionStartsAt
+        ? Date.parse(pathway.promotionStartsAt)
+        : null;
+      const endMs = pathway.promotionEndsAt
+        ? Date.parse(pathway.promotionEndsAt)
+        : null;
+
+      if (startMs != null && !Number.isFinite(startMs)) {
+        return NextResponse.json(
+          { ok: false, error: 'c_med_promotion_start_invalid', pathwayKey: pathway.key },
+          { status: 400 },
+        );
+      }
+      if (endMs != null && !Number.isFinite(endMs)) {
+        return NextResponse.json(
+          { ok: false, error: 'c_med_promotion_expiry_invalid', pathwayKey: pathway.key },
+          { status: 400 },
+        );
+      }
+      if (startMs != null && endMs != null && startMs >= endMs) {
+        return NextResponse.json(
+          { ok: false, error: 'c_med_promotion_expiry_must_follow_start', pathwayKey: pathway.key },
+          { status: 400 },
+        );
+      }
+
+      if (pathway.key === 'QUALIFYING_DEPOSIT') {
+        const due = moneyCents(pathway.amountDueTodayCents) ?? 0;
+        const lowestConfiguredTotal = promotional != null
+          ? Math.min(standard, promotional)
+          : standard;
+        if (due <= 0 || due > lowestConfiguredTotal) {
+          return NextResponse.json(
+            { ok: false, error: 'c_med_flex_due_today_invalid', pathwayKey: pathway.key },
+            { status: 400 },
+          );
+        }
+      }
+    }
+
+    const starterKitItems = hasOwn(body, 'starterKitItems')
+      ? stringArray(body.starterKitItems)
+      : existing.starterKitItems;
+
+    const paidKitReleaseEnabled = paidEnabled.some(
+      (pathway) => pathway.privileges.starterKitRelease !== 'none',
+    );
+
+    if (paidKitReleaseEnabled && !starterKitItems.length) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'enable_partial_payment_or_disable_deposit_pathway',
-        },
-        {status: 400},
+        { ok: false, error: 'at_least_one_c_med_kit_item_required_for_c_med_pathways' },
+        { status: 400 },
       );
     }
 
+    const kitByIdentity = new Map(
+      starterKitItems.map((item) => [item.toLowerCase(), item]),
+    );
+
+    const requestedDepositItems = hasOwn(body, 'starterKitDepositItems')
+      ? stringArray(body.starterKitDepositItems)
+      : existing.starterKitDepositItems;
+
+    const unknownDepositItem = requestedDepositItems.find(
+      (item) => !kitByIdentity.has(item.toLowerCase()),
+    );
+
+    if (unknownDepositItem) {
+      return NextResponse.json(
+        { ok: false, error: 'flex_kit_items_must_belong_to_full_kit', item: unknownDepositItem },
+        { status: 400 },
+      );
+    }
+
+    const starterKitDepositItems = requestedDepositItems.map(
+      (item) => kitByIdentity.get(item.toLowerCase())!,
+    );
+
+    const flexPathway = commercialPathways.find(
+      (pathway) => pathway.key === 'QUALIFYING_DEPOSIT',
+    );
     if (
-      depositPathway?.enabled &&
-      depositPathway.privileges
-        .starterKitRelease === 'deposit' &&
+      flexPathway?.enabled &&
+      flexPathway.privileges.starterKitRelease === 'deposit' &&
       !starterKitDepositItems.length
     ) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'select_at_least_one_deposit_kit_item',
-        },
-        {status: 400},
+        { ok: false, error: 'select_at_least_one_c_med_flex_kit_item' },
+        { status: 400 },
       );
     }
 
-    const cardPaymentEnabled =
-      hasOwn(body, 'cardPaymentEnabled')
-        ? body.cardPaymentEnabled !== false
-        : existing.cardPaymentEnabled;
+    const cardPaymentEnabled = hasOwn(body, 'cardPaymentEnabled')
+      ? body.cardPaymentEnabled !== false
+      : existing.cardPaymentEnabled;
+    const manualPaymentEnabled = hasOwn(body, 'manualPaymentEnabled')
+      ? body.manualPaymentEnabled !== false
+      : existing.manualPaymentEnabled;
 
-    const manualPaymentEnabled =
-      hasOwn(body, 'manualPaymentEnabled')
-        ? body.manualPaymentEnabled !== false
-        : existing.manualPaymentEnabled;
-
-    const paidPathwayEnabled =
-      enabled.some(
-        (pathway) =>
-          pathway.key !==
-          'START_NOW_PAY_LATER',
-      );
-
-    if (
-      paidPathwayEnabled &&
-      !cardPaymentEnabled &&
-      !manualPaymentEnabled
-    ) {
+    if (paidEnabled.length && !cardPaymentEnabled && !manualPaymentEnabled) {
       return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'enable_card_or_eft_for_paid_pathways',
-        },
-        {status: 400},
+        { ok: false, error: 'enable_card_or_eft_for_c_med_pathways' },
+        { status: 400 },
       );
     }
 
-    const trainingPolicy =
-      normaliseClinicianTrainingPolicy(
-        hasOwn(body, 'trainingPolicy')
-          ? body.trainingPolicy
-          : existing.trainingPolicy,
-      );
+    const trainingPolicy = normaliseClinicianTrainingPolicy(
+      hasOwn(body, 'trainingPolicy')
+        ? body.trainingPolicy
+        : existing.trainingPolicy,
+    );
 
-    const actorId =
-      cleanStr(
-        (admin as any).uid ||
-        (admin as any).userId ||
-        'admin-api-key',
-        120,
-      );
+    const fullPathway = commercialPathways.find(
+      (pathway) => pathway.key === 'FULL_PAYMENT',
+    );
+    const flexPricing = flexPathway?.enabled
+      ? effectiveClinicianPathwayPricing(flexPathway)
+      : null;
+
+    // Legacy columns remain synchronized for older routes/history, but the
+    // commercial-pathway JSON is now the authoritative pricing contract.
+    const trainingFeeCents = fullPathway?.enabled
+      ? moneyCents(fullPathway.standardPriceCents) ?? 0
+      : flexPathway?.enabled
+        ? moneyCents(flexPathway.standardPriceCents) ?? 0
+        : 0;
+    const minimumInitialPaymentCents = flexPathway?.enabled
+      ? flexPricing?.amountDueTodayCents ?? 0
+      : trainingFeeCents;
+    const allowPartialPayment = Boolean(flexPathway?.enabled);
+
+    const actorId = cleanStr(
+      (admin as any).uid || (admin as any).userId || 'admin-api-key',
+      120,
+    );
 
     const data: any = {
       trainingFeeCents,
       minimumInitialPaymentCents,
       allowPartialPayment,
-      balanceRecoveryMode:
-        hasOwn(body, 'balanceRecoveryMode')
-          ? recoveryMode(
-              body.balanceRecoveryMode,
-            )
-          : existing.balanceRecoveryMode,
-      balanceRecoveryNotes:
-        hasOwn(body, 'balanceRecoveryNotes')
-          ? cleanStr(
-              body.balanceRecoveryNotes,
-              2000,
-            )
-          : existing.balanceRecoveryNotes,
-      currency:
-        hasOwn(body, 'currency')
-          ? currency(body.currency)
-          : existing.currency,
-      paymentProvider:
-        hasOwn(body, 'paymentProvider')
-          ? provider(body.paymentProvider)
-          : existing.paymentProvider,
+      balanceRecoveryMode: hasOwn(body, 'balanceRecoveryMode')
+        ? recoveryMode(body.balanceRecoveryMode)
+        : existing.balanceRecoveryMode,
+      balanceRecoveryNotes: hasOwn(body, 'balanceRecoveryNotes')
+        ? cleanStr(body.balanceRecoveryNotes, 2000)
+        : existing.balanceRecoveryNotes,
+      currency: hasOwn(body, 'currency')
+        ? currency(body.currency)
+        : existing.currency,
+      paymentProvider: hasOwn(body, 'paymentProvider')
+        ? provider(body.paymentProvider)
+        : existing.paymentProvider,
       cardPaymentEnabled,
       manualPaymentEnabled,
       starterKitItems,
       starterKitDepositItems,
-      bankInstructions:
-        hasOwn(body, 'bankInstructions')
-          ? jsonObjectOrNull(
-              body.bankInstructions,
-            )
-          : existing.bankInstructions ||
-            Prisma.JsonNull,
-      commercialPathways:
-        commercialPathways as unknown as
-          Prisma.InputJsonValue,
-      trainingPolicy:
-        trainingPolicy as unknown as
-          Prisma.InputJsonValue,
-      notes:
-        hasOwn(body, 'notes')
-          ? cleanStr(body.notes, 2000)
-          : existing.notes,
+      bankInstructions: hasOwn(body, 'bankInstructions')
+        ? jsonObjectOrNull(body.bankInstructions)
+        : existing.bankInstructions || Prisma.JsonNull,
+      commercialPathways: commercialPathways as unknown as Prisma.InputJsonValue,
+      trainingPolicy: trainingPolicy as unknown as Prisma.InputJsonValue,
+      notes: hasOwn(body, 'notes')
+        ? cleanStr(body.notes, 2000)
+        : existing.notes,
       updatedByUserId: actorId,
     };
 
-    const row =
-      await prisma
-        .clinicianOnboardingSetting
-        .upsert({
-          where: {id: 'default'},
-          update: data,
-          create: {
-            id: 'default',
-            ...data,
-          },
-        });
+    const row = await prisma.clinicianOnboardingSetting.upsert({
+      where: { id: 'default' },
+      update: data,
+      create: { id: 'default', ...data },
+    });
 
-    const settings =
-      normaliseClinicianOnboardingSettings(
-        row,
-      );
+    const settings = normaliseClinicianOnboardingSettings(row);
 
-    await prisma.auditLog
-      .create({
-        data: {
-          actorUserId: actorId,
-          actorType: 'ADMIN',
-          actorRefId: actorId,
-          app: 'admin-dashboard',
-          action:
-            'clinician_onboarding_policy.updated',
-          entityType:
-            'ClinicianOnboardingSetting',
-          entityId: 'default',
-          description:
-            'Clinician training, payment and C-Med policy updated',
-          ip:
-            request.headers
-              .get('x-forwarded-for')
-              ?.split(',')[0]
-              ?.trim() ||
-            request.headers
-              .get('x-real-ip') ||
-            null,
-          userAgent:
-            request.headers
-              .get('user-agent'),
-          meta: {
-            currency: settings.currency,
-            trainingFeeCents:
-              settings.trainingFeeCents,
-            minimumInitialPaymentCents:
-              settings.minimumInitialPaymentCents,
-            starterKitItemCount:
-              settings.starterKitItems.length,
-            depositKitItemCount:
-              settings
-                .starterKitDepositItems
-                .length,
-            allowedModes:
-              settings.trainingPolicy
-                .allowedModes,
-          },
+    await prisma.auditLog.create({
+      data: {
+        actorUserId: actorId,
+        actorType: 'ADMIN',
+        actorRefId: actorId,
+        app: 'admin-dashboard',
+        action: 'clinician_onboarding_policy.updated',
+        entityType: 'ClinicianOnboardingSetting',
+        entityId: 'default',
+        description: 'Clinician training and C-Med continuation policy updated',
+        ip: request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ||
+          request.headers.get('x-real-ip') || null,
+        userAgent: request.headers.get('user-agent'),
+        meta: {
+          currency: settings.currency,
+          enabledPathways: settings.commercialPathways
+            .filter((pathway) => pathway.enabled)
+            .map((pathway) => pathway.key),
+          starterKitItemCount: settings.starterKitItems.length,
+          flexKitItemCount: settings.starterKitDepositItems.length,
+          allowedModes: settings.trainingPolicy.allowedModes,
         },
-      })
-      .catch((error) => {
-        console.warn(
-          '[clinician-onboarding-settings] audit failed',
-          error,
-        );
-      });
+      },
+    }).catch((error) => {
+      console.warn('[clinician-onboarding-settings] audit failed', error);
+    });
 
     return NextResponse.json({
       ok: true,
       settings,
-      publicSettings:
-        publicClinicianOnboardingSettings(
-          settings,
-        ),
+      publicSettings: publicClinicianOnboardingSettings(settings),
     });
   } catch (error: any) {
-    console.error(
-      '[admin-clinician-onboarding-settings] error',
-      error,
-    );
-
+    console.error('[admin-clinician-onboarding-settings] error', error);
     return NextResponse.json(
-      {
-        ok: false,
-        error:
-          error?.message ||
-          'settings_update_failed',
-      },
-      {status: 500},
+      { ok: false, error: error?.message || 'settings_update_failed' },
+      { status: 500 },
     );
   }
 }

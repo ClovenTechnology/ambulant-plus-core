@@ -11,6 +11,7 @@ import {
 import { prisma } from '@/src/lib/prisma';
 import {
   calculateOnboardingPaymentState,
+  effectiveClinicianPathwayPricing,
   getClinicianOnboardingSettings,
   type ClinicianOnboardingPathwayKey,
 } from '@/src/clinicians/onboarding/settings';
@@ -354,17 +355,6 @@ export async function POST(
       );
     }
 
-    if (settings.trainingFeeCents <= 0) {
-      return NextResponse.json(
-        {
-          ok: false,
-          error:
-            'training_fee_not_configured',
-        },
-        { status: 409 },
-      );
-    }
-
     const configuredPathway =
       settings.commercialPathways.find(
         (pathway) =>
@@ -523,28 +513,70 @@ export async function POST(
         clinicianId,
       );
 
+    const effectivePricing =
+      effectiveClinicianPathwayPricing(
+        configuredPathway,
+      );
+
+    const pathwayTotalCents =
+      effectivePricing.effectivePriceCents;
+
+    const requiredNowCents =
+      pathwayKey === 'QUALIFYING_DEPOSIT'
+        ? effectivePricing.amountDueTodayCents
+        : pathwayTotalCents;
+
+    if (
+      pathwayTotalCents <= 0 ||
+      requiredNowCents <= 0
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            'c_med_pathway_price_not_configured',
+          pathwayKey,
+        },
+        { status: 409 },
+      );
+    }
+
     const paymentState =
       calculateOnboardingPaymentState({
         trainingFeeCents:
-          settings.trainingFeeCents,
+          pathwayTotalCents,
         minimumInitialPaymentCents:
-          settings.minimumInitialPaymentCents,
+          requiredNowCents,
         amountPaidCents:
           paidCents,
       });
 
-    const amountCents =
-      pathwayKey ===
-      'QUALIFYING_DEPOSIT'
-        ? Math.max(
-            0,
-            paymentState
-              .minimumInitialPaymentCents -
-            paymentState
-              .amountPaidCents,
-          )
-        : paymentState
-            .outstandingCents;
+    const amountCents = Math.max(
+      0,
+      requiredNowCents - paidCents,
+    );
+
+    const pricingSnapshot = {
+      pathwayKey,
+      standardPriceCents:
+        effectivePricing.standardPriceCents,
+      promotionalPriceCents:
+        effectivePricing.promotionalPriceCents,
+      currentPriceCents:
+        effectivePricing.effectivePriceCents,
+      promotionStartsAt:
+        effectivePricing.promotionStartsAt,
+      promotionEndsAt:
+        effectivePricing.promotionEndsAt,
+      promotionLabel:
+        effectivePricing.promotionLabel,
+      promotionActive:
+        effectivePricing.promotionActive,
+      amountDueTodayCents:
+        effectivePricing.amountDueTodayCents,
+      capturedAt:
+        new Date().toISOString(),
+    };
 
     if (amountCents <= 0) {
       return NextResponse.json(
@@ -554,6 +586,7 @@ export async function POST(
             'manual_payment_not_required',
           pathwayKey,
           paymentState,
+          pricing: pricingSnapshot,
         },
         { status: 409 },
       );
@@ -763,6 +796,7 @@ export async function POST(
       source:
         'clinician_payment_pop_upload',
       pathwayKey,
+      pricingSnapshot,
       slotId,
       trainingMode:
         selectedMode,
@@ -848,6 +882,7 @@ export async function POST(
         reviewStatus:
           'pending',
         pathwayKey,
+        pricing: pricingSnapshot,
         payment: {
           id: payment.id,
           status:

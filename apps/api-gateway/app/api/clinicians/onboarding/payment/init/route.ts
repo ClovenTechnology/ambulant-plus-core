@@ -5,6 +5,7 @@ import { prisma } from '@/src/lib/prisma';
 import { getProvider } from '@/src/payments';
 import {
   calculateOnboardingPaymentState,
+  effectiveClinicianPathwayPricing,
   getClinicianOnboardingSettings,
   type ClinicianOnboardingPathwayKey,
 } from '@/src/clinicians/onboarding/settings';
@@ -143,9 +144,6 @@ export async function POST(req: NextRequest) {
     if (!settings.cardPaymentEnabled) {
       return NextResponse.json({ ok: false, error: 'card_payment_disabled' }, { status: 409 });
     }
-    if (settings.trainingFeeCents <= 0) {
-      return NextResponse.json({ ok: false, error: 'training_fee_not_configured' }, { status: 409 });
-    }
     if (settings.paymentProvider !== 'paystack') {
       return NextResponse.json({ ok: false, error: 'unsupported_training_payment_provider' }, { status: 409 });
     }
@@ -186,21 +184,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (
-      pathwayKey ===
-      'START_NOW_PAY_LATER'
-    ) {
+    if (pathwayKey === 'START_NOW_PAY_LATER') {
       return NextResponse.json(
         {
-          ok: false,
-          error:
-            'pay_later_requires_admin_review',
+          ok: true,
           pathwayKey,
           paymentRequired: false,
-          message:
-            'Pay Later cannot be initialized as a card transaction and requires a separate Admin review request.',
+          amountDueCents: 0,
+          message: 'No payment is required for the direct training pathway.',
         },
-        { status: 409 },
+        { status: 200 },
       );
     }
 
@@ -244,44 +237,54 @@ export async function POST(req: NextRequest) {
         clinicianId,
       );
 
-    const paymentStateBefore =
-      calculateOnboardingPaymentState({
-        trainingFeeCents:
-          settings.trainingFeeCents,
-        minimumInitialPaymentCents:
-          settings.minimumInitialPaymentCents,
-        amountPaidCents,
-      });
+    const effectivePricing = effectiveClinicianPathwayPricing(configuredPathway);
+    const pathwayTotalCents = effectivePricing.effectivePriceCents;
+    const requiredNowCents = pathwayKey === 'QUALIFYING_DEPOSIT'
+      ? effectivePricing.amountDueTodayCents
+      : pathwayTotalCents;
 
-    const chargeAmountCents =
-      pathwayKey ===
-      'QUALIFYING_DEPOSIT'
-        ? Math.max(
-            0,
-            paymentStateBefore.minimumInitialPaymentCents -
-              paymentStateBefore.amountPaidCents,
-          )
-        : paymentStateBefore.outstandingCents;
+    if (pathwayTotalCents <= 0 || requiredNowCents <= 0) {
+      return NextResponse.json(
+        { ok: false, error: 'c_med_pathway_price_not_configured', pathwayKey },
+        { status: 409 },
+      );
+    }
+
+    const paymentStateBefore = calculateOnboardingPaymentState({
+      trainingFeeCents: pathwayTotalCents,
+      minimumInitialPaymentCents: requiredNowCents,
+      amountPaidCents,
+    });
+
+    const chargeAmountCents = Math.max(0, requiredNowCents - amountPaidCents);
+
+    const pricingSnapshot = {
+      pathwayKey,
+      standardPriceCents: effectivePricing.standardPriceCents,
+      promotionalPriceCents: effectivePricing.promotionalPriceCents,
+      currentPriceCents: effectivePricing.effectivePriceCents,
+      promotionStartsAt: effectivePricing.promotionStartsAt,
+      promotionEndsAt: effectivePricing.promotionEndsAt,
+      promotionLabel: effectivePricing.promotionLabel,
+      promotionActive: effectivePricing.promotionActive,
+      amountDueTodayCents: effectivePricing.amountDueTodayCents,
+      capturedAt: new Date().toISOString(),
+    };
 
     if (chargeAmountCents <= 0) {
-      const reason =
-        pathwayKey ===
-        'QUALIFYING_DEPOSIT'
-          ? 'initial_requirement_already_met'
-          : 'onboarding_fee_already_paid';
-
       return NextResponse.json(
         {
           ok: true,
           paymentRequired: false,
           pathwayKey,
-          reason,
+          reason: pathwayKey === 'QUALIFYING_DEPOSIT'
+            ? 'c_med_flex_initial_requirement_already_met'
+            : 'c_med_full_price_already_paid',
           paymentState: paymentStateBefore,
-          message:
-            pathwayKey ===
-            'QUALIFYING_DEPOSIT'
-              ? 'The configured initial-payment requirement has already been satisfied.'
-              : 'The onboarding fee has already been paid in full.',
+          pricing: pricingSnapshot,
+          message: pathwayKey === 'QUALIFYING_DEPOSIT'
+            ? 'The C-Med Flex amount due today has already been satisfied.'
+            : 'The current C-Med Full price has already been paid.',
         },
         { status: 200 },
       );
@@ -303,12 +306,13 @@ export async function POST(req: NextRequest) {
         meta: jsonSafe({
           source: 'clinician_training_payment_init',
           pathwayKey,
+          pricingSnapshot,
           slotId,
           callbackUrl,
           clinicianEmail: email,
           settings: {
-            trainingFeeCents: settings.trainingFeeCents,
-            minimumInitialPaymentCents: settings.minimumInitialPaymentCents,
+            trainingFeeCents: pathwayTotalCents,
+            minimumInitialPaymentCents: requiredNowCents,
             allowPartialPayment: settings.allowPartialPayment,
             amountPaidCents,
             chargeAmountCents,
@@ -329,6 +333,8 @@ export async function POST(req: NextRequest) {
       metadata: {
         purpose: 'clinician_training_onboarding',
         pathwayKey,
+        pathwayPriceCents: pathwayTotalCents,
+        amountDueNowCents: requiredNowCents,
         clinicianId,
         onboardingId: onboarding.id,
         slotId,
@@ -343,12 +349,13 @@ export async function POST(req: NextRequest) {
         meta: jsonSafe({
           source: 'clinician_training_payment_init',
           pathwayKey,
+          pricingSnapshot,
           slotId,
           callbackUrl,
           clinicianEmail: email,
           settings: {
-            trainingFeeCents: settings.trainingFeeCents,
-            minimumInitialPaymentCents: settings.minimumInitialPaymentCents,
+            trainingFeeCents: pathwayTotalCents,
+            minimumInitialPaymentCents: requiredNowCents,
             allowPartialPayment: settings.allowPartialPayment,
             amountPaidCents,
             chargeAmountCents,
@@ -367,6 +374,7 @@ export async function POST(req: NextRequest) {
         ok: true,
         paymentRequired: true,
         pathwayKey,
+        pricing: pricingSnapshot,
         paymentStateBefore,
         payment: {
           id: updated.id,

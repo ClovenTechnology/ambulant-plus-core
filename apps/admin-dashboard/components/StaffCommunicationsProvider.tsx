@@ -160,6 +160,7 @@ export function StaffCommunicationsProvider({
   const lastIncomingId = useRef('');
   const seenNotificationIds = useRef<Set<string> | null>(null);
   const reconnecting = useRef(false);
+  const lastReconnectAttemptAt = useRef<Record<string, number>>({});
   const ringTimer = useRef<number | null>(null);
   const authPage = pathname.startsWith('/auth/');
 
@@ -198,7 +199,11 @@ export function StaffCommunicationsProvider({
   }, [authPage]);
 
   const reconnectCall = useCallback(async (meetingId: string) => {
+    const now = Date.now();
     if (reconnecting.current) return;
+    if (now - Number(lastReconnectAttemptAt.current[meetingId] || 0) < 8000) return;
+
+    lastReconnectAttemptAt.current[meetingId] = now;
     reconnecting.current = true;
     try {
       const response = await fetch(
@@ -206,10 +211,20 @@ export function StaffCommunicationsProvider({
         { method: 'POST' },
       );
       const json = await response.json().catch(() => null);
-      if (response.ok && json?.ok && json?.rtc?.token && json?.rtc?.wsUrl) {
-        setCall(json.call || null);
-        setRtc(json.rtc);
+      if (!response.ok || !json?.ok || !json?.rtc?.token || !json?.rtc?.wsUrl) {
+        const facing = userFacingApiError({
+          response,
+          json,
+          fallback: 'The call is active, but its secure audio/video connection could not be restored.',
+        });
+        setNotice(errorText(facing));
+        return;
       }
+      setCall(json.call || null);
+      setRtc(json.rtc);
+      delete lastReconnectAttemptAt.current[meetingId];
+    } catch (error: any) {
+      setNotice(error?.message || 'The call is active, but its secure audio/video connection could not be restored.');
     } finally {
       reconnecting.current = false;
     }
@@ -650,6 +665,7 @@ export function StaffCommunicationsProvider({
               audio={true}
               video={call.mode === 'VIDEO'}
               onDisconnected={() => {
+                delete lastReconnectAttemptAt.current[call.id];
                 setRtc(null);
                 window.setTimeout(() => {
                   void refreshCommunications();

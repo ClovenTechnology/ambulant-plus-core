@@ -681,11 +681,33 @@ export async function startDirectStaffCall(input: {
 
   const existingCallerCall = await activeDirectCallForProfile(input.actor.profileId);
   if (existingCallerCall) {
+    const existingParticipant = directCallParticipant(
+      existingCallerCall,
+      input.actor.profileId,
+    );
+
+    const sameOutgoingConversation =
+      existingCallerCall.hostProfileId === input.actor.profileId &&
+      existingCallerCall.contextId === conversation.id &&
+      existingParticipant &&
+      ['ACCEPTED', 'JOINED'].includes(existingParticipant.state);
+
+    if (!sameOutgoingConversation || !existingParticipant) {
+      throw new CommunicationsError('direct_call_already_active', 409);
+    }
+
+    const rtc = await mintMeetingRtcAccess({
+      meeting: existingCallerCall,
+      participant: existingParticipant,
+      identity: `meeting:${existingCallerCall.id}:staff:${input.actor.profileId}`,
+      displayName: input.actor.name || input.actor.email,
+    });
+
     return {
       ok: true,
       reused: true,
       call: directCallSummary(existingCallerCall, input.actor.profileId),
-      rtc: null,
+      rtc: { ...rtc, expiresInSeconds: 900 },
     };
   }
 

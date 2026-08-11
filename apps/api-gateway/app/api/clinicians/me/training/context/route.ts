@@ -452,9 +452,16 @@ export async function GET(
         120,
       );
 
-    const payLaterPathwayActive =
-      entitlements.pathwayKey ===
-      'START_NOW_PAY_LATER';
+    const legacyPayLaterWaiverActive =
+      entitlements.approvedPayLater === true &&
+      [
+        'START_NOW_PAY_LATER',
+        'WAIVER_TRAIN_NOW_PAY_LATER',
+      ].includes(
+        String(paymentPlan || '')
+          .trim()
+          .toUpperCase(),
+      );
 
     const currency =
       publicSettings.currency;
@@ -548,7 +555,7 @@ export async function GET(
                     .depositQualified,
                 paymentPlan,
                 paymentStatus:
-                  payLaterPathwayActive
+                  legacyPayLaterWaiverActive
                     ? 'waiver'
                     : paymentState
                         .paymentStatus,
@@ -567,7 +574,7 @@ export async function GET(
                       .nextPaymentAt,
                   ),
                 waiverActive:
-                  payLaterPathwayActive,
+                  legacyPayLaterWaiverActive,
               }
             : null,
         payLaterRequest:
@@ -795,7 +802,7 @@ export async function GET(
             publicSettings
               .minimumInitialPaymentCents,
           paymentStatus:
-            payLaterPathwayActive
+            legacyPayLaterWaiverActive
               ? 'waiver'
               : paymentState
                   .paymentStatus,
@@ -806,7 +813,7 @@ export async function GET(
             paymentState.fullyPaid,
           paymentPlan,
           waiverActive:
-            payLaterPathwayActive,
+            legacyPayLaterWaiverActive,
           effectivePathwayKey:
             entitlements.pathwayKey,
           privileges:

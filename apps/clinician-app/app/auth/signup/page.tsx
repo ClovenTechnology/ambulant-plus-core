@@ -3,7 +3,6 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import {
   ShieldCheck,
   ClipboardCheck,
@@ -32,26 +31,47 @@ type InsuranceSettings = {
   platformCoversVirtual?: boolean;
 };
 
+type SignupPresentation = {
+  heroHeading: string;
+  heroIntroduction: string;
+  noticeHeading: string;
+  noticeBody: string;
+  noticeSecondary: string;
+  noticeCtaLabel: string;
+  noticeCtaHref: string;
+  optionalKitTitle: string;
+  optionalKitDescription: string;
+  successHeading: string;
+  successBody: string;
+  successSecondary: string;
+  successCtaLabel: string;
+};
+
+const DEFAULT_SIGNUP_PRESENTATION: SignupPresentation = {
+  heroHeading: 'Join the Contactless Care Network',
+  heroIntroduction:
+    'Complete your application and required training. Once verified, trained and approved, your profile can go live and you can start consulting on Ambulant+. No upfront onboarding payment is required.',
+  noticeHeading: 'Start now - no mandatory upfront payment',
+  noticeBody:
+    'Training is required, but payment is not. Complete your Ambulant+ training and, once your credentials are verified and your profile is approved, you can start consulting and earning on Ambulant+ without purchasing a C-Med Kit.',
+  noticeSecondary:
+    'The Contactless Medicine Kit (C-Med Kit) is optional. If you choose one, clinicians receive discounted pricing with flexible payment options and tracked delivery.',
+  noticeCtaLabel: 'View C-Med Kit & payment options',
+  noticeCtaHref: '/clinicians/c-med-options',
+  optionalKitTitle: 'Optional C-Med Kit',
+  optionalKitDescription:
+    "Add a discounted C-Med Kit if you want one, with flexible payment options and tracked delivery. Qualifying C-Med options also include access to Ambulant+'s platform-wide Professional Indemnity / Medical Malpractice cover, subject to eligibility and policy terms.",
+  successHeading: 'Application submitted successfully',
+  successBody:
+    'Your Ambulant+ clinician account has been created. Sign in to choose an available Ambulant+ training programme and complete your onboarding.',
+  successSecondary:
+    'No upfront onboarding payment is required to continue. You can choose a discounted C-Med Kit with flexible payment options during the next step.',
+  successCtaLabel: 'Sign in & continue to training',
+};
+
 type Qualification = { degree: string; institution: string; yearOfCompletion?: string };
 type OtherQualification = { award: string; institution: string; yearOfCompletion?: string };
 
-type TrainingPref = {
-  mode: 'virtual' | 'in_person';
-  city?: string;
-  preferredDate?: string; // YYYY-MM-DD
-  preferredSlot?: 'morning' | 'midday' | 'afternoon' | 'evening';
-};
-
-type ShippingInfo = {
-  recipientName: string;
-  phone: string;
-  addressLine1: string;
-  addressLine2?: string;
-  city: string;
-  province?: string;
-  postalCode?: string;
-  country?: string;
-};
 
 type SignupResponse = {
   ok?: boolean;
@@ -64,7 +84,7 @@ type SignupResponse = {
 };
 
 type ValidationFailure = {
-  step: 0 | 1 | 2 | 3;
+  step: 0 | 1 | 2;
   message: string;
 };
 
@@ -80,12 +100,6 @@ function safeInternalPath(p: any, fallback: string) {
 }
 
 const COMM_CHANNELS = ['Email', 'Phone', 'SMS', 'WhatsApp'] as const;
-const TRAINING_SLOTS: Array<{ label: string; value: TrainingPref['preferredSlot'] }> = [
-  { label: 'Morning', value: 'morning' },
-  { label: 'Midday', value: 'midday' },
-  { label: 'Afternoon', value: 'afternoon' },
-  { label: 'Evening', value: 'evening' },
-];
 
 const PHONE_COUNTRY_CODES = [
   { code: '+27', label: 'South Africa +27' },
@@ -333,8 +347,6 @@ function validateSaIdDetailed(id: string, dob: string, gender: string): string |
 
 
 export default function ClinicianSignupPage() {
-  const router = useRouter();
-
   // Basic identity
   const [firstName, setFirstName] = useState('');
   const [middleName, setMiddleName] = useState('');
@@ -399,32 +411,14 @@ export default function ClinicianSignupPage() {
   const [otherLanguages, setOtherLanguages] = useState<string[]>([]);
   const [hasTelemedicineExperience, setHasTelemedicineExperience] = useState<boolean | null>(null);
 
-  // Mandatory onboarding data
-  const [training, setTraining] = useState<TrainingPref>({
-    mode: 'virtual',
-    city: 'Johannesburg',
-    preferredDate: '',
-    preferredSlot: 'morning',
-  });
-
-  const [shipping, setShipping] = useState<ShippingInfo>({
-    recipientName: '',
-    phone: '',
-    addressLine1: '',
-    addressLine2: '',
-    city: '',
-    province: '',
-    postalCode: '',
-    country: 'South Africa',
-  });
-  const [shippingPhoneCountryCode, setShippingPhoneCountryCode] = useState('+27');
 
   // UX state
   const [consent, setConsent] = useState(false);
-  const [step, setStep] = useState<0 | 1 | 2 | 3>(0);
+  const [step, setStep] = useState<0 | 1 | 2>(0);
   const [msg, setMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [signupPresentation, setSignupPresentation] = useState<SignupPresentation>(DEFAULT_SIGNUP_PRESENTATION);
 
   // Fetch insurance settings (local first; fallback to gateway if you later proxy)
   useEffect(() => {
@@ -440,6 +434,24 @@ export default function ClinicianSignupPage() {
         // ignore
       }
       // Keep silent; default is no platform cover
+    })();
+  }, []);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const response = await fetch('/api/training/public-options', { cache: 'no-store' });
+        const payload = await response.json().catch(() => null);
+        const incoming = payload?.offer?.signupPresentation;
+        if (response.ok && payload?.ok && incoming && typeof incoming === 'object') {
+          setSignupPresentation({
+            ...DEFAULT_SIGNUP_PRESENTATION,
+            ...incoming,
+          });
+        }
+      } catch {
+        // The approved defaults remain visible if commercial presentation is temporarily unavailable.
+      }
     })();
   }, []);
 
@@ -480,10 +492,6 @@ export default function ClinicianSignupPage() {
   }, [passwordQuality.score, pw]);
 
   const normalizedPhone = useMemo(() => composePhone(phoneCountryCode, phone), [phoneCountryCode, phone]);
-  const normalizedShippingPhone = useMemo(
-    () => composePhone(shippingPhoneCountryCode, shipping.phone),
-    [shippingPhoneCountryCode, shipping.phone],
-  );
 
   const primaryQualification = useMemo(() => {
     return qualifications.find((q) => q.degree.trim() || q.institution.trim() || String(q.yearOfCompletion || '').trim()) || qualifications[0];
@@ -497,7 +505,7 @@ export default function ClinicianSignupPage() {
   const qualificationYear = String(primaryQualification?.yearOfCompletion || '').trim();
 
   const stepLabel = useMemo(() => {
-    return ['Account', 'Professional', 'Compliance', 'Training & Starter Kit'][step];
+    return ['Account', 'Professional', 'Compliance'][step];
   }, [step]);
 
   const canGoNext = useMemo(() => {
@@ -556,14 +564,7 @@ export default function ClinicianSignupPage() {
       return consent;
     }
 
-    return (
-      !!training.preferredDate &&
-      isTodayOrFuture(training.preferredDate) &&
-      !!shipping.recipientName.trim() &&
-      phoneLooksValid(normalizedShippingPhone) &&
-      !!shipping.addressLine1.trim() &&
-      !!shipping.city.trim()
-    );
+    return false;
   }, [
     step,
     firstName,
@@ -603,18 +604,11 @@ export default function ClinicianSignupPage() {
     insuranceRenewalDate,
     insuranceCoversVirtual,
     consent,
-    training.preferredDate,
-    shipping.recipientName,
-    shipping.phone,
-    shippingPhoneCountryCode,
-    normalizedShippingPhone,
-    shipping.addressLine1,
-    shipping.city,
   ]);
 
 
   const stepBlockerHint = useMemo(() => {
-    if (canGoNext || step === 3) return null;
+    if (canGoNext) return null;
 
     if (step === 0) {
       if (!normalizeSpaces(firstName)) return 'Enter the clinician first name.';
@@ -697,7 +691,7 @@ export default function ClinicianSignupPage() {
     consent,
   ]);
 
-  function fail(stepNo: 0 | 1 | 2 | 3, message: string): ValidationFailure {
+  function fail(stepNo: 0 | 1 | 2, message: string): ValidationFailure {
     return { step: stepNo, message };
   }
 
@@ -749,13 +743,6 @@ export default function ClinicianSignupPage() {
     }
     if (!consent) return fail(2, 'You must agree to the terms and privacy policy.');
 
-    if (!training.preferredDate || !isTodayOrFuture(training.preferredDate)) {
-      return fail(3, 'Please select today or a future date for training.');
-    }
-    if (!shipping.recipientName.trim()) return fail(3, 'Shipping recipient name is required.');
-    if (!phoneLooksValid(normalizedShippingPhone)) return fail(3, 'Enter a valid shipping phone number with country code.');
-    if (!shipping.addressLine1.trim()) return fail(3, 'Shipping address line 1 is required.');
-    if (!shipping.city.trim()) return fail(3, 'Shipping city is required.');
 
     return null;
   }
@@ -783,7 +770,7 @@ export default function ClinicianSignupPage() {
     }
 
     setMsg(null);
-    setStep((s) => (s < 3 ? ((s + 1) as any) : s));
+    setStep((s) => (s < 2 ? ((s + 1) as 0 | 1 | 2) : s));
   }
 
 
@@ -905,28 +892,6 @@ export default function ClinicianSignupPage() {
           patientVisibilityRequiresCertification: true,
         },
 
-        // Onboarding (mandatory)
-        onboarding: {
-          training: {
-            ...training,
-            city: normalizeSpaces(training.city || ''),
-          },
-          shipping: {
-            ...shipping,
-            recipientName: normalizeSpaces(shipping.recipientName),
-            phone: normalizedShippingPhone,
-            phoneCountryCode: shippingPhoneCountryCode,
-            addressLine1: normalizeSpaces(shipping.addressLine1),
-            addressLine2: normalizeSpaces(shipping.addressLine2 || ''),
-            city: normalizeSpaces(shipping.city),
-            province: normalizeSpaces(shipping.province || ''),
-            postalCode: normalizeSpaces(shipping.postalCode || ''),
-            country: normalizeSpaces(shipping.country || 'South Africa'),
-          },
-          // NOTE: actual payment + shipping tracking is handled later by admin tools.
-          payment: { status: 'pending' as const },
-          starterKit: { status: 'pending' as const },
-        },
       };
 
       // Prefer multipart (supports file upload)
@@ -961,32 +926,7 @@ export default function ClinicianSignupPage() {
       }
 
       setDone(true);
-
-      // ... Redirect priority:
-      // 1) server-supplied internal redirectTo
-      // 2) server-supplied internal trainingLink
-      // 3) default premium flow: training schedule (with clinicianId when available)
-      const redirectTo = safeInternalPath(data?.redirectTo, '');
-      if (redirectTo) {
-        router.replace(redirectTo);
-        router.refresh();
-        return;
-      }
-
-      const trainingLink = safeInternalPath((data as any)?.trainingLink, '');
-      if (trainingLink) {
-        router.push(trainingLink);
-        router.refresh();
-        return;
-      }
-
-      // PATCH: onboard -> training schedule (with clinicianId when possible)
-      {
-        const id = (data as any)?.clinician?.id || (data as any)?.clinicianId;
-        if (id) router.push(`/training/schedule?clinicianId=${encodeURIComponent(String(id))}`);
-        else router.push('/training/schedule');
-      }
-      router.refresh();
+      setMsg(null);
     } catch (er: any) {
       setMsg(`Error: ${er?.message || 'Network error'}`);
     } finally {
@@ -1005,26 +945,23 @@ export default function ClinicianSignupPage() {
             </div>
 
             <h1 className="mt-4 text-4xl font-black tracking-tight text-slate-950">
-              Join the Contactless
-              <span className="block bg-gradient-to-r from-indigo-700 to-emerald-700 bg-clip-text text-transparent">
-                Care Network
-              </span>
+              {signupPresentation.heroHeading}
             </h1>
 
             <p className="mt-3 max-w-xl text-sm leading-relaxed text-slate-600">
-              Training is mandatory. Once your training is scheduled and paid, your starter kit is dispatched, and you will be certified by an admin before your profile becomes visible to patients.
+              {signupPresentation.heroIntroduction}
             </p>
 
             <div className="mt-6 grid max-w-xl gap-3 sm:grid-cols-2">
               <InfoCard
                 icon={<ClipboardCheck className="h-4 w-4 text-indigo-700" />}
-                title="Mandatory training"
-                desc="Schedule + pay, then complete onboarding. Admin certifies you before patients can book you."
+                title="Required training"
+                desc="Choose a real Admin-published programme after signing in. No upfront onboarding payment is required for the direct pathway."
               />
               <InfoCard
                 icon={<Truck className="h-4 w-4 text-emerald-700" />}
-                title="Starter kit delivery"
-                desc="After payment, kit ships. Admin adds courier + tracking, and you get email/SMS notifications."
+                title={signupPresentation.optionalKitTitle}
+                desc={signupPresentation.optionalKitDescription}
               />
               <InfoCard
                 icon={<ShieldCheck className="h-4 w-4 text-slate-800" />}
@@ -1059,7 +996,6 @@ export default function ClinicianSignupPage() {
                       {step === 0 && 'Create your account credentials.'}
                       {step === 1 && 'Your professional profile details.'}
                       {step === 2 && 'Compliance and verification information.'}
-                      {step === 3 && 'Training preference + starter kit shipping details.'}
                     </div>
                   </div>
 
@@ -1081,30 +1017,45 @@ export default function ClinicianSignupPage() {
                 ) : null}
 
                 {done ? (
-                  <div className="mt-5 rounded-2xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                    <div className="flex items-center gap-2 font-extrabold">
-                      <CheckCircle2 className="h-4 w-4" />
-                      Application submitted
+                  <div className="mt-6 rounded-3xl border border-emerald-200 bg-emerald-50 p-6 text-emerald-950 shadow-sm">
+                    <div className="flex items-start gap-3">
+                      <div className="rounded-2xl bg-emerald-100 p-2">
+                        <CheckCircle2 className="h-6 w-6 text-emerald-700" />
+                      </div>
+                      <div>
+                        <div className="text-xl font-black">{signupPresentation.successHeading}</div>
+                        <p className="mt-2 text-sm leading-relaxed text-emerald-900">{signupPresentation.successBody}</p>
+                        <p className="mt-2 text-sm font-semibold leading-relaxed text-emerald-800">{signupPresentation.successSecondary}</p>
+                      </div>
                     </div>
-                    <div className="mt-1 text-[12px] text-emerald-900/80">
-                      Next: schedule your training slot and complete payment to unlock dispatch + certification.
-                    </div>
+                    <Link
+                      href="/auth/login?reason=signup_success&next=%2Ftraining%2Fschedule"
+                      className="mt-5 inline-flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-700 px-5 py-3 text-sm font-black text-white hover:bg-emerald-800"
+                    >
+                      {signupPresentation.successCtaLabel}
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
                   </div>
                 ) : null}
 
-                <form onSubmit={handleSubmit} className="mt-5 space-y-5">
-                <details className="mt-5 rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
-                  <summary className="cursor-pointer font-extrabold">Mandatory training and starter kit cost notice</summary>
-                  <div className="mt-2 space-y-2 text-[13px] leading-6">
-                    <p>Training is mandatory before your profile can become visible to real patients. Training slots are set by Ambulant+ admin. If no admin slot is available, you may submit a preferred date and time for review.</p>
-                    <p>Training payment and starter kit dispatch are part of onboarding. Your kit is dispatched after payment confirmation, and admin adds courier/tracking details.</p>
-                    <p>
-                      <Link href="/flexible-payment-and-pay-later" target="_blank" rel="noreferrer" className="font-extrabold text-indigo-700 hover:underline">
-                        Flexible instalments and pay later options available. T&amp;Cs apply.
-                      </Link>
-                    </p>
+                <form onSubmit={handleSubmit} className={cx('mt-5 space-y-5', done && 'hidden')}>
+                  <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-4 py-4 text-sm text-emerald-950">
+                    <div className="font-extrabold">{signupPresentation.noticeHeading}</div>
+                    <div className="mt-2 space-y-2 text-[13px] leading-6">
+                      <p>{signupPresentation.noticeBody}</p>
+                      <p><strong>{signupPresentation.noticeSecondary}</strong></p>
+                      <p>
+                        <Link
+                          href={safeInternalPath(signupPresentation.noticeCtaHref, '/clinicians/c-med-options')}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="font-extrabold text-emerald-800 hover:underline"
+                        >
+                          {signupPresentation.noticeCtaLabel}
+                        </Link>
+                      </p>
+                    </div>
                   </div>
-                </details>
 
 
                   {step === 0 ? (
@@ -1620,149 +1571,6 @@ export default function ClinicianSignupPage() {
                     </div>
                   ) : null}
 
-                  {step === 3 ? (
-                    <div className="space-y-5">
-                      <Section title="Training preference (mandatory)">
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <MiniField label="Mode">
-                            <select
-                              value={training.mode}
-                              onChange={(e) => setTraining((t) => ({ ...t, mode: e.target.value as any }))}
-                              className={selectCls}
-                            >
-                              <option value="virtual">Virtual</option>
-                              <option value="in_person">In-person</option>
-                            </select>
-                          </MiniField>
-
-                          <MiniField label="City (for in-person)">
-                            <input
-                              value={training.city || ''}
-                              onChange={(e) => setTraining((t) => ({ ...t, city: e.target.value }))}
-                              className={inputCls}
-                              placeholder="Johannesburg"
-                            />
-                          </MiniField>
-
-                          <MiniField label="Preferred date *">
-                            <input
-                              value={training.preferredDate || ''}
-                              onChange={(e) => setTraining((t) => ({ ...t, preferredDate: e.target.value }))}
-                              className={inputCls}
-                              type="date"
-                              required
-                            />
-                          </MiniField>
-
-                          <MiniField label="Preferred slot">
-                            <select
-                              value={training.preferredSlot || 'morning'}
-                              onChange={(e) => setTraining((t) => ({ ...t, preferredSlot: e.target.value as any }))}
-                              className={selectCls}
-                            >
-                              {TRAINING_SLOTS.map((s) => (
-                                <option key={s.value} value={s.value}>
-                                  {s.label}
-                                </option>
-                              ))}
-                            </select>
-                          </MiniField>
-                        </div>
-
-                        <div className="mt-3 rounded-2xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[12px] text-indigo-900">
-                          After you submit, you will be taken to <span className="font-extrabold">training scheduling + payment</span>.
-                          Once payment is confirmed, your starter kit is dispatched.
-                        </div>
-                      </Section>
-
-                      <Section title="Starter kit shipping details (used after payment)">
-                        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                          <MiniField label="Recipient name *">
-                            <input
-                              value={shipping.recipientName}
-                              onChange={(e) => setShipping((s) => ({ ...s, recipientName: e.target.value }))}
-                              className={inputCls}
-                              placeholder="Jane Doe"
-                              required
-                            />
-                          </MiniField>
-                          <MiniField label="Phone *">
-                            <div className="flex gap-2">
-                              <select
-                                value={shippingPhoneCountryCode}
-                                onChange={(e) => setShippingPhoneCountryCode(e.target.value)}
-                                className="w-32 rounded-2xl border border-slate-200 bg-white px-2 py-3 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-300"
-                                aria-label="Shipping phone country code"
-                              >
-                                {PHONE_COUNTRY_CODES.map((c) => (
-                                  <option key={c.code} value={c.code}>
-                                    {c.code}
-                                  </option>
-                                ))}
-                              </select>
-                              <input
-                                value={shipping.phone}
-                                onChange={(e) => setShipping((s) => ({ ...s, phone: e.target.value }))}
-                                className={inputCls}
-                                placeholder="82 123 4567"
-                                type="tel"
-                                inputMode="tel"
-                                required
-                              />
-                            </div>
-                          </MiniField>
-
-                          <MiniField label="Address line 1 *" className="sm:col-span-2">
-                            <input
-                              value={shipping.addressLine1}
-                              onChange={(e) => setShipping((s) => ({ ...s, addressLine1: e.target.value }))}
-                              className={inputCls}
-                              placeholder="Street / complex / number"
-                              required
-                            />
-                          </MiniField>
-
-                          <MiniField label="Address line 2" className="sm:col-span-2">
-                            <input
-                              value={shipping.addressLine2 || ''}
-                              onChange={(e) => setShipping((s) => ({ ...s, addressLine2: e.target.value }))}
-                              className={inputCls}
-                              placeholder="Suite / floor (optional)"
-                            />
-                          </MiniField>
-
-                          <MiniField label="City *">
-                            <input value={shipping.city} onChange={(e) => setShipping((s) => ({ ...s, city: e.target.value }))} className={inputCls} required />
-                          </MiniField>
-
-                          <MiniField label="Province">
-                            <input value={shipping.province || ''} onChange={(e) => setShipping((s) => ({ ...s, province: e.target.value }))} className={inputCls} />
-                          </MiniField>
-
-                          <MiniField label="Postal code">
-                            <input value={shipping.postalCode || ''} onChange={(e) => setShipping((s) => ({ ...s, postalCode: e.target.value }))} className={inputCls} />
-                          </MiniField>
-
-                          <MiniField label="Country">
-                            <input value={shipping.country || 'South Africa'} onChange={(e) => setShipping((s) => ({ ...s, country: e.target.value }))} className={inputCls} />
-                          </MiniField>
-                        </div>
-
-                        <div className="mt-3 rounded-2xl border border-slate-200 bg-white px-3 py-3 text-[12px] text-slate-700">
-                          <div className="font-extrabold">Starter kit contents (sent after payment)</div>
-                          <ul className="mt-2 list-disc pl-5 text-slate-600">
-                            <li>All four IoMTs</li>
-                            <li>Clinician Handbook + consumables</li>
-                            <li>Merch: branded formal shirts (black &amp; white), mug, thermo bottle</li>
-                            <li>Smart ID with card holder + lanyard</li>
-                          </ul>
-                          <div className="mt-2 text-slate-500">
-                            Tracking is added by admin (courier + tracking number + URL) and auto-sent to you by email + SMS.
-                          </div>
-                        </div>
-                      </Section>
-                    </div>
-                  ) : null}
 
                   {stepBlockerHint ? (
                     <div className="rounded-2xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-900">
@@ -1773,7 +1581,7 @@ export default function ClinicianSignupPage() {
                   <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
                     <button
                       type="button"
-                      onClick={() => setStep((s) => (s > 0 ? ((s - 1) as any) : s))}
+                      onClick={() => setStep((s) => (s > 0 ? ((s - 1) as 0 | 1 | 2) : s))}
                       className={cx(
                         'inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-extrabold text-slate-800',
                         step === 0 && 'opacity-50 pointer-events-none',
@@ -1784,7 +1592,7 @@ export default function ClinicianSignupPage() {
                     </button>
 
                     <div className="flex gap-2">
-                      {step < 3 ? (
+                      {step < 2 ? (
                         <button
                           type="button"
                           onClick={handleNextStep}
@@ -1881,10 +1689,9 @@ function Stepper({ step }: { step: number }) {
     { label: 'Account', icon: <User className="h-4 w-4" /> },
     { label: 'Professional', icon: <Stethoscope className="h-4 w-4" /> },
     { label: 'Compliance', icon: <ShieldCheck className="h-4 w-4" /> },
-    { label: 'Training', icon: <CalendarDays className="h-4 w-4" /> },
   ];
   return (
-    <div className="mt-5 grid grid-cols-4 gap-2">
+    <div className="mt-5 grid grid-cols-3 gap-2">
       {items.map((it, idx) => {
         const active = idx === step;
         const done = idx < step;

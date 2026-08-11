@@ -37,6 +37,28 @@ export type ClinicianOnboardingCommercialPathway = {
   featured: boolean;
   conditions: string[];
   privileges: ClinicianOnboardingPathwayPrivileges;
+  standardPriceCents: number | null;
+  promotionalPriceCents: number | null;
+  promotionStartsAt: string | null;
+  promotionEndsAt: string | null;
+  amountDueTodayCents: number | null;
+  promotionLabel: string | null;
+};
+
+export type ClinicianSignupPresentation = {
+  heroHeading: string;
+  heroIntroduction: string;
+  noticeHeading: string;
+  noticeBody: string;
+  noticeSecondary: string;
+  noticeCtaLabel: string;
+  noticeCtaHref: string;
+  optionalKitTitle: string;
+  optionalKitDescription: string;
+  successHeading: string;
+  successBody: string;
+  successSecondary: string;
+  successCtaLabel: string;
 };
 
 export type ClinicianTrainingPolicy = {
@@ -50,6 +72,29 @@ export type ClinicianTrainingPolicy = {
   inPersonDescription: string;
   operationalNotice: string | null;
   supportMessage: string | null;
+  signupPresentation: ClinicianSignupPresentation;
+};
+
+export const DEFAULT_SIGNUP_PRESENTATION: ClinicianSignupPresentation = {
+  heroHeading: 'Join the Contactless Care Network',
+  heroIntroduction:
+    'Complete your application and required training. Once verified, trained and approved, your profile can go live and you can start consulting on Ambulant+. No upfront onboarding payment is required.',
+  noticeHeading: 'Start now - no mandatory upfront payment',
+  noticeBody:
+    'Training is required, but payment is not. Complete your Ambulant+ training and, once your credentials are verified and your profile is approved, you can start consulting and earning on Ambulant+ without purchasing a C-Med Kit.',
+  noticeSecondary:
+    'The Contactless Medicine Kit (C-Med Kit) is optional. If you choose one, clinicians receive discounted pricing with flexible payment options and tracked delivery.',
+  noticeCtaLabel: 'View C-Med Kit & payment options',
+  noticeCtaHref: '/clinicians/c-med-options',
+  optionalKitTitle: 'Optional C-Med Kit',
+  optionalKitDescription:
+    "Add a discounted C-Med Kit if you want one, with flexible payment options and tracked delivery. Qualifying C-Med options also include access to Ambulant+'s platform-wide Professional Indemnity / Medical Malpractice cover, subject to eligibility and policy terms.",
+  successHeading: 'Application submitted successfully',
+  successBody:
+    'Your Ambulant+ clinician account has been created. Sign in to choose an available Ambulant+ training programme and complete your onboarding.',
+  successSecondary:
+    'No upfront onboarding payment is required to continue. You can choose a discounted C-Med Kit with flexible payment options during the next step.',
+  successCtaLabel: 'Sign in & continue to training',
 };
 
 export const DEFAULT_CLINICIAN_ONBOARDING_PATHWAYS:
@@ -57,42 +102,47 @@ export const DEFAULT_CLINICIAN_ONBOARDING_PATHWAYS:
     {
       key: 'START_NOW_PAY_LATER',
       displayOrder: 1,
-      label: 'Start Now — Pay Later',
-      badge: 'Fastest start',
+      label: 'Continue to Training',
+      badge: 'Direct pathway',
       description:
-        'Begin training after Ambulant+ Admin approves your Pay Later request, without an upfront onboarding payment.',
-      ctaLabel: 'Request Pay Later approval',
+        'Continue with your required training without purchasing a C-Med Kit. Once your credentials are verified, training is completed and your profile is approved, you can start consulting and earning on Ambulant+.',
+      ctaLabel: 'Continue to Training',
       enabled: true,
       featured: true,
       conditions: [
-        'Training access begins after Admin approval.',
-        'No C-Med Kit is dispatched/released until a qualifying payment is received.',
-        'Platform-wide Professional Indemnity eligibility begins only after a qualifying payment and applicable policy requirements.',
-        'The outstanding onboarding balance remains payable.',
+        'R0 upfront — no mandatory onboarding payment is required.',
+        'The C-Med Kit is optional and is not required to complete training.',
+        'Credential verification, training completion and profile approval remain required before practice activation.',
       ],
       privileges: {
         trainingAccess: true,
         practiceActivation: true,
         starterKitRelease: 'none',
         platformIndemnityEligible: false,
-        balanceRecoveryApplies: true,
+        balanceRecoveryApplies: false,
       },
+      standardPriceCents: 0,
+      promotionalPriceCents: null,
+      promotionStartsAt: null,
+      promotionEndsAt: null,
+      amountDueTodayCents: 0,
+      promotionLabel: null,
     },
     {
       key: 'QUALIFYING_DEPOSIT',
       displayOrder: 2,
-      label: 'Start with Initial Deposit',
-      badge: 'Balanced option',
+      label: 'C-Med Flex',
+      badge: 'Flexible payment',
       description:
-        'Pay the configured qualifying deposit and receive the benefits assigned to the deposit pathway.',
-      ctaLabel: 'Pay initial deposit',
+        'Get your discounted C-Med package with a qualifying initial payment and flexible settlement.',
+      ctaLabel: 'Choose C-Med Flex',
       enabled: true,
       featured: false,
       conditions: [
-        'The qualifying initial amount is configured by Ambulant+ Admin.',
-        'Only the C-Med items assigned to the deposit pathway are released.',
-        'Professional Indemnity eligibility remains subject to the published policy conditions.',
-        'The remaining onboarding balance remains payable.',
+        'A qualifying initial payment is due when you choose this optional C-Med pathway.',
+        'The configured C-Med Flex package benefits and fulfilment rules apply.',
+        'Professional Indemnity / Medical Malpractice cover remains subject to eligibility and policy terms.',
+        'Any remaining C-Med package balance is settled under the configured arrangement.',
       ],
       privileges: {
         trainingAccess: true,
@@ -101,22 +151,28 @@ export const DEFAULT_CLINICIAN_ONBOARDING_PATHWAYS:
         platformIndemnityEligible: true,
         balanceRecoveryApplies: true,
       },
+      standardPriceCents: null,
+      promotionalPriceCents: null,
+      promotionStartsAt: null,
+      promotionEndsAt: null,
+      amountDueTodayCents: null,
+      promotionLabel: null,
     },
     {
       key: 'FULL_PAYMENT',
       displayOrder: 3,
-      label: 'Pay in Full',
-      badge: 'Complete package',
+      label: 'C-Med Full',
+      badge: 'Best value',
       description:
-        'Settle the complete onboarding fee and receive the full configured onboarding package.',
-      ctaLabel: 'Pay full onboarding fee',
+        'Pay in full and receive the highest available C-Med package discount and priority fulfilment.',
+      ctaLabel: 'Choose C-Med Full',
       enabled: true,
       featured: false,
       conditions: [
-        'The full Admin-configured onboarding fee is payable.',
-        'The complete configured C-Med Kit can be released.',
-        'Professional Indemnity eligibility remains subject to the published policy conditions.',
-        'No onboarding-fee balance remains after confirmed full payment.',
+        'The current Admin-configured C-Med Full price is payable.',
+        'The complete configured C-Med Kit can be released after qualifying payment confirmation.',
+        'Professional Indemnity / Medical Malpractice cover remains subject to eligibility and policy terms.',
+        'No C-Med package balance remains after confirmed full payment.',
       ],
       privileges: {
         trainingAccess: true,
@@ -125,6 +181,12 @@ export const DEFAULT_CLINICIAN_ONBOARDING_PATHWAYS:
         platformIndemnityEligible: true,
         balanceRecoveryApplies: false,
       },
+      standardPriceCents: null,
+      promotionalPriceCents: null,
+      promotionStartsAt: null,
+      promotionEndsAt: null,
+      amountDueTodayCents: null,
+      promotionLabel: null,
     },
   ];
 
@@ -132,7 +194,7 @@ export const DEFAULT_TRAINING_POLICY:
   ClinicianTrainingPolicy = {
     heading: 'Mandatory clinician onboarding training',
     introduction:
-      'Choose an available programme, select an eligible training mode, and complete the applicable onboarding pathway.',
+      'Choose an available programme, select an eligible training mode, then choose how you would like to continue. No upfront payment is required for the direct training pathway.',
     timezone: 'Africa/Johannesburg',
     defaultDurationDays: 1,
     defaultSessionDurationMinutes: 60,
@@ -144,6 +206,9 @@ export const DEFAULT_TRAINING_POLICY:
     operationalNotice: null,
     supportMessage:
       'If you need accessibility support or a special arrangement, contact Ambulant+ after selecting a programme.',
+    signupPresentation: {
+      ...DEFAULT_SIGNUP_PRESENTATION,
+    },
   };
 
 export const DEFAULT_STARTER_KIT_ITEMS: string[] = [];
@@ -183,6 +248,26 @@ function cents(value: unknown): number {
   const number = Number(value);
   if (!Number.isFinite(number)) return 0;
   return Math.max(0, Math.round(number));
+}
+
+function optionalCents(value: unknown): number | null {
+  if (value === null || value === undefined || String(value).trim() === '') return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return Math.max(0, Math.round(number));
+}
+
+function normaliseDateTime(value: unknown): string | null {
+  const text = cleanStr(value, 100);
+  if (!text) return null;
+  const timestamp = Date.parse(text);
+  if (!Number.isFinite(timestamp)) return null;
+  return new Date(timestamp).toISOString();
+}
+
+function safeInternalHref(value: unknown, fallback: string) {
+  const href = cleanStr(value, 240) || fallback;
+  return href.startsWith('/') && !href.startsWith('//') ? href : fallback;
 }
 
 function positiveInteger(
@@ -380,6 +465,39 @@ export function normaliseClinicianOnboardingCommercialPathways(
       const raw = rawByKey.get(fallback.key);
       if (!raw) return fallback;
 
+      const legacyPresentation = (() => {
+        const label = String(raw.label || '').trim().toLowerCase();
+        const cta = String(raw.ctaLabel || '').trim().toLowerCase();
+        const description = String(raw.description || '').trim().toLowerCase();
+
+        if (fallback.key === 'START_NOW_PAY_LATER') {
+          return (
+            label === 'start now — pay later' ||
+            label === 'start now - pay later' ||
+            cta === 'request pay later approval' ||
+            description.includes('admin approves your pay later request')
+          );
+        }
+
+        if (fallback.key === 'QUALIFYING_DEPOSIT') {
+          return (
+            label === 'start with initial deposit' ||
+            cta === 'pay initial deposit' ||
+            description.includes('qualifying deposit')
+          );
+        }
+
+        return (
+          label === 'pay in full' ||
+          cta === 'pay full onboarding fee' ||
+          description.includes('complete onboarding fee')
+        );
+      })();
+
+      const presentation = legacyPresentation
+        ? {} as Record<string, any>
+        : raw;
+
       return {
         key: fallback.key,
         displayOrder: positiveInteger(
@@ -392,10 +510,10 @@ export function normaliseClinicianOnboardingCommercialPathways(
           fallback.label,
         badge:
           Object.prototype.hasOwnProperty.call(
-            raw,
+            presentation,
             'badge',
           )
-            ? cleanStr(raw.badge, 80)
+            ? cleanStr(presentation.badge, 80)
             : fallback.badge,
         description:
           cleanStr(raw.description, 600) ||
@@ -406,13 +524,25 @@ export function normaliseClinicianOnboardingCommercialPathways(
         enabled: raw.enabled !== false,
         featured: raw.featured === true,
         conditions: cleanTextArray(
-          raw.conditions,
+          presentation.conditions,
           fallback.conditions,
         ),
         privileges: normalisePrivileges(
           raw.privileges,
           fallback.privileges,
         ),
+        standardPriceCents:
+          optionalCents(raw.standardPriceCents),
+        promotionalPriceCents:
+          optionalCents(raw.promotionalPriceCents),
+        promotionStartsAt:
+          normaliseDateTime(raw.promotionStartsAt),
+        promotionEndsAt:
+          normaliseDateTime(raw.promotionEndsAt),
+        amountDueTodayCents:
+          optionalCents(raw.amountDueTodayCents),
+        promotionLabel:
+          cleanStr(raw.promotionLabel, 120),
       };
     })
     .sort(
@@ -426,6 +556,44 @@ export function normaliseClinicianOnboardingCommercialPathways(
             (item) => item.key === right.key,
           ),
     );
+}
+
+export function normaliseClinicianSignupPresentation(
+  value: unknown,
+): ClinicianSignupPresentation {
+  const raw =
+    value && typeof value === 'object' && !Array.isArray(value)
+      ? value as Record<string, any>
+      : {};
+
+  return {
+    heroHeading:
+      cleanStr(raw.heroHeading, 180) || DEFAULT_SIGNUP_PRESENTATION.heroHeading,
+    heroIntroduction:
+      cleanStr(raw.heroIntroduction, 1600) || DEFAULT_SIGNUP_PRESENTATION.heroIntroduction,
+    noticeHeading:
+      cleanStr(raw.noticeHeading, 180) || DEFAULT_SIGNUP_PRESENTATION.noticeHeading,
+    noticeBody:
+      cleanStr(raw.noticeBody, 1800) || DEFAULT_SIGNUP_PRESENTATION.noticeBody,
+    noticeSecondary:
+      cleanStr(raw.noticeSecondary, 1800) || DEFAULT_SIGNUP_PRESENTATION.noticeSecondary,
+    noticeCtaLabel:
+      cleanStr(raw.noticeCtaLabel, 140) || DEFAULT_SIGNUP_PRESENTATION.noticeCtaLabel,
+    noticeCtaHref:
+      safeInternalHref(raw.noticeCtaHref, DEFAULT_SIGNUP_PRESENTATION.noticeCtaHref),
+    optionalKitTitle:
+      cleanStr(raw.optionalKitTitle, 180) || DEFAULT_SIGNUP_PRESENTATION.optionalKitTitle,
+    optionalKitDescription:
+      cleanStr(raw.optionalKitDescription, 1800) || DEFAULT_SIGNUP_PRESENTATION.optionalKitDescription,
+    successHeading:
+      cleanStr(raw.successHeading, 180) || DEFAULT_SIGNUP_PRESENTATION.successHeading,
+    successBody:
+      cleanStr(raw.successBody, 1800) || DEFAULT_SIGNUP_PRESENTATION.successBody,
+    successSecondary:
+      cleanStr(raw.successSecondary, 1800) || DEFAULT_SIGNUP_PRESENTATION.successSecondary,
+    successCtaLabel:
+      cleanStr(raw.successCtaLabel, 140) || DEFAULT_SIGNUP_PRESENTATION.successCtaLabel,
+  };
 }
 
 export function normaliseClinicianTrainingPolicy(
@@ -492,6 +660,10 @@ export function normaliseClinicianTrainingPolicy(
       cleanStr(raw.operationalNotice, 2000),
     supportMessage:
       cleanStr(raw.supportMessage, 1000),
+    signupPresentation:
+      normaliseClinicianSignupPresentation(
+        raw.signupPresentation,
+      ),
   };
 }
 
@@ -556,16 +728,61 @@ export function normaliseClinicianOnboardingSettings(
       )
       .filter(Boolean) as string[];
 
+  const minimumInitialPaymentCents =
+    effectiveMinimumInitialPayment({
+      trainingFeeCents,
+      minimumInitialPaymentCents:
+        cents(row?.minimumInitialPaymentCents),
+      allowPartialPayment,
+    });
+
+  const commercialPathways =
+    normaliseClinicianOnboardingCommercialPathways(
+      row?.commercialPathways,
+    ).map((pathway) => {
+      if (pathway.key === 'START_NOW_PAY_LATER') {
+        return {
+          ...pathway,
+          standardPriceCents: 0,
+          promotionalPriceCents: null,
+          promotionStartsAt: null,
+          promotionEndsAt: null,
+          amountDueTodayCents: 0,
+          privileges: {
+            ...pathway.privileges,
+            trainingAccess: true,
+            practiceActivation: true,
+            starterKitRelease: 'none' as const,
+            platformIndemnityEligible: false,
+            balanceRecoveryApplies: false,
+          },
+        };
+      }
+
+      if (pathway.key === 'QUALIFYING_DEPOSIT') {
+        return {
+          ...pathway,
+          standardPriceCents:
+            pathway.standardPriceCents ?? trainingFeeCents,
+          amountDueTodayCents:
+            pathway.amountDueTodayCents ??
+            minimumInitialPaymentCents ??
+            trainingFeeCents,
+        };
+      }
+
+      return {
+        ...pathway,
+        standardPriceCents:
+          pathway.standardPriceCents ?? trainingFeeCents,
+        amountDueTodayCents: null,
+      };
+    });
+
   return {
     id: String(row?.id || 'default'),
     trainingFeeCents,
-    minimumInitialPaymentCents:
-      effectiveMinimumInitialPayment({
-        trainingFeeCents,
-        minimumInitialPaymentCents:
-          cents(row?.minimumInitialPaymentCents),
-        allowPartialPayment,
-      }),
+    minimumInitialPaymentCents,
     allowPartialPayment,
     balanceRecoveryMode:
       normaliseRecoveryMode(
@@ -585,10 +802,7 @@ export function normaliseClinicianOnboardingSettings(
     starterKitDepositItems,
     bankInstructions:
       normaliseJsonObject(row?.bankInstructions),
-    commercialPathways:
-      normaliseClinicianOnboardingCommercialPathways(
-        row?.commercialPathways,
-      ),
+    commercialPathways,
     trainingPolicy:
       normaliseClinicianTrainingPolicy(
         row?.trainingPolicy,
@@ -645,6 +859,90 @@ export async function getClinicianOnboardingSettings(
   );
 }
 
+export function effectiveClinicianPathwayPricing(
+  pathway: ClinicianOnboardingCommercialPathway,
+  now: Date = new Date(),
+) {
+  const standardPriceCents =
+    pathway.key === 'START_NOW_PAY_LATER'
+      ? 0
+      : cents(pathway.standardPriceCents);
+  const promotionalPriceCents =
+    pathway.promotionalPriceCents == null
+      ? null
+      : cents(pathway.promotionalPriceCents);
+  const startsAt = pathway.promotionStartsAt
+    ? Date.parse(pathway.promotionStartsAt)
+    : Number.NEGATIVE_INFINITY;
+  const endsAt = pathway.promotionEndsAt
+    ? Date.parse(pathway.promotionEndsAt)
+    : Number.POSITIVE_INFINITY;
+  const nowMs = now.getTime();
+  const promotionActive =
+    pathway.key !== 'START_NOW_PAY_LATER' &&
+    promotionalPriceCents != null &&
+    promotionalPriceCents > 0 &&
+    promotionalPriceCents < standardPriceCents &&
+    Number.isFinite(nowMs) &&
+    nowMs >= startsAt &&
+    nowMs <= endsAt;
+  const effectivePriceCents =
+    promotionActive && promotionalPriceCents != null
+      ? promotionalPriceCents
+      : standardPriceCents;
+  const amountDueTodayCents =
+    pathway.key === 'START_NOW_PAY_LATER'
+      ? 0
+      : pathway.key === 'FULL_PAYMENT'
+        ? effectivePriceCents
+        : Math.min(
+            effectivePriceCents,
+            pathway.amountDueTodayCents == null
+              ? effectivePriceCents
+              : cents(pathway.amountDueTodayCents),
+          );
+
+  return {
+    standardPriceCents,
+    promotionalPriceCents,
+    promotionStartsAt: pathway.promotionStartsAt,
+    promotionEndsAt: pathway.promotionEndsAt,
+    promotionLabel: pathway.promotionLabel,
+    promotionActive,
+    effectivePriceCents,
+    amountDueTodayCents,
+    savingsCents: Math.max(0, standardPriceCents - effectivePriceCents),
+  };
+}
+
+export function publicClinicianOnboardingCommercialOffer(
+  settings: ClinicianOnboardingSettings,
+  now: Date = new Date(),
+) {
+  return {
+    currency: settings.currency,
+    starterKitItems: [...settings.starterKitItems],
+    starterKitDepositItems: [...settings.starterKitDepositItems],
+    signupPresentation: {
+      ...settings.trainingPolicy.signupPresentation,
+    },
+    commercialPathways: settings.commercialPathways
+      .filter((pathway) => pathway.enabled)
+      .map((pathway) => ({
+        key: pathway.key,
+        displayOrder: pathway.displayOrder,
+        label: pathway.label,
+        badge: pathway.badge,
+        description: pathway.description,
+        ctaLabel: pathway.ctaLabel,
+        featured: pathway.featured,
+        conditions: [...pathway.conditions],
+        privileges: { ...pathway.privileges },
+        pricing: effectiveClinicianPathwayPricing(pathway, now),
+      })),
+  };
+}
+
 export function publicClinicianOnboardingSettings(
   settings: ClinicianOnboardingSettings,
 ) {
@@ -675,12 +973,17 @@ export function publicClinicianOnboardingSettings(
         ? settings.bankInstructions
         : null,
     commercialPathways:
-      settings.commercialPathways,
+      settings.commercialPathways.map((pathway) => ({
+        ...pathway,
+        pricing:
+          effectiveClinicianPathwayPricing(pathway),
+      })),
     trainingPolicy:
       settings.trainingPolicy,
     configured:
-      settings.trainingFeeCents > 0 &&
-      settings.starterKitItems.length > 0,
+      settings.commercialPathways.some(
+        (pathway) => pathway.enabled,
+      ),
   };
 }
 

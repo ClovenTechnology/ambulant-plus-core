@@ -194,9 +194,22 @@ export async function getStaffEmploymentWorkspace(input: {
   const canManage = canManageEmployment(input.actor);
   const canReadPay = canReadCompensation(input.actor, target.id);
 
-  const arrearsReconciliation = canReadPay
-    ? await reconcileOverdueSalaryArrears({ staffUserId: target.userId })
-    : null;
+  let arrearsReconciliation: any = null;
+  let arrearsReconciliationWarning: string | null = null;
+
+  if (canReadPay) {
+    try {
+      arrearsReconciliation = await reconcileOverdueSalaryArrears({
+        staffUserId: target.userId,
+      });
+    } catch (error) {
+      arrearsReconciliationWarning = 'salary_arrears_reconciliation_failed';
+      console.error(
+        '[staff employment] salary arrears reconciliation failed; loading persisted workspace',
+        { staffProfileId: target.id, staffUserId: target.userId, error },
+      );
+    }
+  }
 
   const [payrollProfile, bankAccounts, documents, changes, leave, payslips, arrears, activeTemplate] = await Promise.all([
     prisma.staffPayrollProfile.findFirst({
@@ -281,6 +294,7 @@ export async function getStaffEmploymentWorkspace(input: {
     payslips,
     arrears,
     arrearsReconciliation,
+    arrearsReconciliationWarning,
     staffId: {
       ready: Boolean(target.staffIdentifier),
       activeTemplate: activeTemplate ? { id: activeTemplate.id, name: activeTemplate.name, validityMonths: activeTemplate.validityMonths } : null,

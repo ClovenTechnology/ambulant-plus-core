@@ -211,6 +211,11 @@ export function StaffEmploymentWorkspace({ staffProfileId }: { staffProfileId: s
     <div className="space-y-6">
       <ErrorBanner error={error} onRetry={load} />
       {notice ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</div> : null}
+      {workspace?.arrearsReconciliationWarning ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Employment information loaded, but automatic salary-arrears reconciliation could not be refreshed. Persisted payroll and arrears records are shown below; retry before making an arrears-sensitive finance decision.
+        </div>
+      ) : null}
 
       <section className="rounded-3xl border bg-white p-5 shadow-sm">
         <div className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5" /><h2 className="text-lg font-semibold">Employment & compensation</h2></div>
