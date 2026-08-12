@@ -606,45 +606,35 @@ export async function mintMeetingRtcAccess(input: {
     throw new Error('meeting_locked');
   }
 
-  const key = envFirst(['LIVEKIT_API_KEY', 'LK_API_KEY']);
-  const secret = envFirst(['LIVEKIT_API_SECRET', 'LK_API_SECRET']);
-  const wsUrl = envFirst(['LIVEKIT_WS_URL', 'LIVEKIT_URL', 'LK_WS_URL', 'LK_URL']);
+  const { mintAdminLiveKitAccess } =
+    await import(
+      '@/src/lib/admin-livekit-access'
+    );
 
-  if (!key || !secret || !wsUrl) {
-    throw new Error('server_misconfig_missing_livekit_creds');
-  }
-
-  const { AccessToken } = await import('livekit-server-sdk');
-  const metadata = {
-    kind: 'ambulant_meeting',
-    meetingId: input.meeting.id,
-    participantId: input.participant.id,
-    participantType: input.participant.participantType,
-    participantRole: input.participant.role,
-  };
-
-  const at = new AccessToken(key, secret, {
-    identity: cleanMeetingText(input.identity, 240),
-    name: cleanMeetingText(input.displayName, 240),
-    ttl: '15m',
-    metadata: JSON.stringify(metadata),
-  });
-
-  at.addGrant({
-    room: input.meeting.roomId,
-    roomJoin: true,
-    roomAdmin: ['HOST', 'COHOST'].includes(String(input.participant.role)),
-    canPublish: true,
-    canSubscribe: true,
-    canPublishData: true,
-  });
-
-  return {
-    token: await at.toJwt(),
-    wsUrl,
+  return mintAdminLiveKitAccess({
     roomId: input.meeting.roomId,
-    metadata,
-  };
+    identity:
+      cleanMeetingText(
+        input.identity,
+        240,
+      ),
+    displayName:
+      cleanMeetingText(
+        input.displayName,
+        240,
+      ),
+    metadata: {
+      kind: 'ambulant_meeting',
+      meetingId: input.meeting.id,
+      participantId: input.participant.id,
+      participantType: input.participant.participantType,
+      participantRole: input.participant.role,
+    },
+    roomAdmin:
+      ['HOST', 'COHOST'].includes(
+        String(input.participant.role),
+      ),
+  });
 }
 
 export function publicMeetingSummary(meeting: any) {

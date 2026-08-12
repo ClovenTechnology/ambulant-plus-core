@@ -6,10 +6,10 @@ import {
 import { hasStaffCapability } from '@/src/lib/admin-staff-policy';
 import {
   cleanMeetingText,
-  mintMeetingRtcAccess,
   randomOpaqueToken,
   writeMeetingAudit,
 } from '@/src/lib/admin-meetings';
+import { mintDirectCallRtcAccess } from '@/src/lib/admin-direct-call-rtc';
 import { normaliseMeetingEmail } from '@/src/lib/admin-meetings-policy';
 import { canonicalDirectConversationKey, normalizeStaffMessageBody, validConversationShape, validDirectCallMode } from './enterprise-completion-policy';
 import {
@@ -696,7 +696,7 @@ export async function startDirectStaffCall(input: {
       throw new CommunicationsError('direct_call_already_active', 409);
     }
 
-    const rtc = await mintMeetingRtcAccess({
+    const rtc = await mintDirectCallRtcAccess({
       meeting: existingCallerCall,
       participant: existingParticipant,
       identity: `meeting:${existingCallerCall.id}:staff:${input.actor.profileId}`,
@@ -720,7 +720,10 @@ export async function startDirectStaffCall(input: {
 
   const mode = requestedMode === 'audio' ? 'AUDIO' : 'VIDEO';
   const now = new Date();
-  const durationMinutes = 60;
+  const compatibilityDurationMinutes = 60;
+  // DIRECT_CALL is stored in Meeting for schema compatibility only.
+  // Its startsAt/endsAt/durationMinutes MUST NOT gate RTC access or end the call.
+  // Actual call duration is determined by startedAt -> endedAt.
   const targetBusy = Boolean(await activeDirectCallForProfile(target.id));
 
   const meeting = await prisma.$transaction(async (tx) => {
@@ -732,8 +735,8 @@ export async function startDirectStaffCall(input: {
         title: `${mode === 'AUDIO' ? 'Audio' : 'Video'} call with ${target.name || target.email}`,
         timezone: 'Africa/Johannesburg',
         startsAt: now,
-        endsAt: new Date(now.getTime() + durationMinutes * 60_000),
-        durationMinutes,
+        endsAt: new Date(now.getTime() + compatibilityDurationMinutes * 60_000),
+        durationMinutes: compatibilityDurationMinutes,
         createdByProfileId: input.actor.profileId,
         hostProfileId: input.actor.profileId,
         contextType: 'STAFF_CONVERSATION',
@@ -840,7 +843,7 @@ export async function startDirectStaffCall(input: {
     throw new CommunicationsError('direct_call_participant_missing', 500);
   }
 
-  const rtc = await mintMeetingRtcAccess({
+  const rtc = await mintDirectCallRtcAccess({
     meeting: fullMeeting,
     participant: callerParticipant,
     identity: `meeting:${fullMeeting.id}:staff:${input.actor.profileId}`,
@@ -1075,7 +1078,7 @@ export async function respondToDirectStaffCall(input: {
   if (!acceptedParticipant) {
     throw new CommunicationsError('direct_call_participant_missing', 500);
   }
-  const rtc = await mintMeetingRtcAccess({
+  const rtc = await mintDirectCallRtcAccess({
     meeting: acceptedMeeting,
     participant: acceptedParticipant,
     identity: `meeting:${acceptedMeeting.id}:staff:${input.actor.profileId}`,
@@ -1203,7 +1206,7 @@ export async function reconnectDirectStaffCall(input: {
     throw new CommunicationsError('direct_call_access_denied', 403);
   }
 
-  const rtc = await mintMeetingRtcAccess({
+  const rtc = await mintDirectCallRtcAccess({
     meeting,
     participant,
     identity: `meeting:${meeting.id}:staff:${input.actor.profileId}`,
