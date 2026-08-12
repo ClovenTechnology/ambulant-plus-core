@@ -160,43 +160,96 @@ export function StaffCommunicationsProvider({
   const lastIncomingId = useRef('');
   const seenNotificationIds = useRef<Set<string> | null>(null);
   const reconnecting = useRef(false);
+  const refreshInFlight = useRef<Promise<void> | null>(null);
+  const callRef = useRef<StaffCall | null>(null);
   const lastReconnectAttemptAt = useRef<Record<string, number>>({});
   const ringTimer = useRef<number | null>(null);
   const authPage = pathname.startsWith('/auth/');
 
   const clearNotice = useCallback(() => setNotice(''), []);
 
+  const storeCall = useCallback((next: StaffCall | null) => {
+    callRef.current = next;
+    setCall(next);
+  }, []);
+
   const refreshCommunications = useCallback(async () => {
     if (authPage) return;
 
-    try {
-      const response = await fetch('/api/admin/communications/summary', {
-        cache: 'no-store',
-      });
-
-      if (response.status === 401 || response.status === 403) return;
-
-      const json = await response.json().catch(() => null);
-      if (!response.ok || !json?.ok) return;
-
-      const next = json as Summary;
-      setSummary(next);
-
-      const nextCurrentCall = next.currentCall;
-      if (nextCurrentCall) {
-        setCall((current) =>
-          current?.id === nextCurrentCall.id
-            ? { ...current, ...nextCurrentCall }
-            : nextCurrentCall,
-        );
-      } else {
-        setCall(null);
-        setRtc(null);
-      }
-    } catch {
-      // Background communications polling is deliberately silent.
+    if (refreshInFlight.current) {
+      await refreshInFlight.current;
+      return;
     }
-  }, [authPage]);
+
+    const request = (async () => {
+      try {
+        const response = await fetch('/api/admin/communications/summary', {
+          cache: 'no-store',
+        });
+
+        if (response.status === 401 || response.status === 403) return;
+
+        const json = await response.json().catch(() => null);
+        if (!response.ok || !json?.ok) return;
+
+        const next = json as Summary;
+        setSummary(next);
+
+        const nextCurrentCall = next.currentCall;
+        const current = callRef.current;
+
+        if (nextCurrentCall) {
+          const merged =
+            current?.id === nextCurrentCall.id
+              ? { ...current, ...nextCurrentCall }
+              : nextCurrentCall;
+
+          if (current?.id && current.id !== nextCurrentCall.id) {
+            setRtc(null);
+          }
+
+          storeCall(merged);
+          return;
+        }
+
+        if (!current) return;
+
+        const terminal = (next.callHistory || []).find(
+          (item) =>
+            item.id === current.id &&
+            ['ENDED', 'CANCELLED', 'EXPIRED'].includes(item.state),
+        );
+
+        if (terminal) {
+          storeCall({ ...current, ...terminal });
+          setRtc(null);
+          return;
+        }
+
+        /*
+         * A single summary snapshot without currentCall is not enough
+         * authority to tear down an already-ringing/live RTC session.
+         * Preserve it unless call history proves terminal state.
+         */
+        if (!['RINGING', 'LIVE'].includes(current.state)) {
+          storeCall(null);
+          setRtc(null);
+        }
+      } catch {
+        // Background communications polling is deliberately silent.
+      }
+    })();
+
+    refreshInFlight.current = request;
+
+    try {
+      await request;
+    } finally {
+      if (refreshInFlight.current === request) {
+        refreshInFlight.current = null;
+      }
+    }
+  }, [authPage, storeCall]);
 
   const reconnectCall = useCallback(async (meetingId: string) => {
     const now = Date.now();
@@ -220,7 +273,7 @@ export function StaffCommunicationsProvider({
         setNotice(errorText(facing));
         return;
       }
-      setCall(json.call || null);
+      storeCall(json.call || null);
       setRtc(json.rtc);
       delete lastReconnectAttemptAt.current[meetingId];
     } catch (error: any) {
@@ -228,7 +281,7 @@ export function StaffCommunicationsProvider({
     } finally {
       reconnecting.current = false;
     }
-  }, []);
+  }, [storeCall]);
 
   useEffect(() => {
     if (authPage) return;
@@ -382,14 +435,14 @@ export function StaffCommunicationsProvider({
         }
 
         if (json.busy || json.call?.outcome === 'BUSY') {
-          setCall(json.call || null);
+          storeCall(json.call || null);
           setRtc(null);
           setNotice(`${callName(json.call)} is already on another call.`);
           await refreshCommunications();
           return;
         }
 
-        setCall(json.call || null);
+        storeCall(json.call || null);
         setRtc(json.rtc || null);
         await refreshCommunications();
       } catch (error: any) {
@@ -399,7 +452,7 @@ export function StaffCommunicationsProvider({
         setCallBusy(false);
       }
     },
-    [callBusy, refreshCommunications],
+    [callBusy, refreshCommunications, storeCall],
   );
 
   const respond = useCallback(
@@ -425,7 +478,7 @@ export function StaffCommunicationsProvider({
           });
           throw new Error(errorText(facing));
         }
-        setCall(json.call || null);
+        storeCall(json.call || null);
         setRtc(action === 'ACCEPT' ? json.rtc || null : null);
         await refreshCommunications();
       } catch (error: any) {
@@ -435,7 +488,7 @@ export function StaffCommunicationsProvider({
         setCallBusy(false);
       }
     },
-    [callBusy, refreshCommunications],
+    [callBusy, refreshCommunications, storeCall],
   );
 
   const acceptCall = useCallback(
@@ -471,7 +524,7 @@ export function StaffCommunicationsProvider({
           throw new Error(errorText(facing));
         }
         setRtc(null);
-        setCall(null);
+        storeCall(null);
         await refreshCommunications();
       } catch (error: any) {
         setNotice(error?.message || 'The call could not be ended cleanly.');
@@ -480,7 +533,7 @@ export function StaffCommunicationsProvider({
         setCallBusy(false);
       }
     },
-    [call?.id, callBusy, refreshCommunications],
+    [call?.id, callBusy, refreshCommunications, storeCall],
   );
 
   const markNotificationsRead = useCallback(
@@ -550,8 +603,8 @@ export function StaffCommunicationsProvider({
     ],
   );
 
-  const connected =
-    Boolean(call && rtc && ['RINGING', 'LIVE'].includes(call.state));
+  const callActive =
+    Boolean(call && ['RINGING', 'LIVE'].includes(call.state));
 
   return (
     <StaffCommunicationsContext.Provider value={value}>
@@ -619,7 +672,7 @@ export function StaffCommunicationsProvider({
         </div>
       ) : null}
 
-      {call && rtc && connected ? (
+      {call && callActive ? (
         <div
           className={`fixed z-[130] overflow-hidden border border-slate-700 bg-slate-950 text-white shadow-2xl ${
             call.mode === 'VIDEO'
@@ -658,18 +711,22 @@ export function StaffCommunicationsProvider({
             className={call.mode === 'VIDEO' ? 'h-[360px]' : 'h-24'}
             data-lk-theme="default"
           >
-            <LiveKitRoom
-              token={rtc.token}
+            {rtc ? (
+              <LiveKitRoom
+                token={rtc.token}
               serverUrl={rtc.wsUrl}
               connect={true}
               audio={true}
               video={call.mode === 'VIDEO'}
               onDisconnected={() => {
+                /*
+                 * Keep the call shell and authoritative call state alive.
+                 * Clearing only RTC credentials activates the existing
+                 * reconnect effect without turning a media interruption
+                 * into a call teardown.
+                 */
                 delete lastReconnectAttemptAt.current[call.id];
                 setRtc(null);
-                window.setTimeout(() => {
-                  void refreshCommunications();
-                }, 750);
               }}
               style={{ height: '100%' }}
             >
@@ -685,13 +742,25 @@ export function StaffCommunicationsProvider({
                   </div>
                 </div>
               )}
-              <RoomAudioRenderer />
-            </LiveKitRoom>
+                <RoomAudioRenderer />
+              </LiveKitRoom>
+            ) : (
+              <div className="grid h-full place-items-center px-6 text-center">
+                <div>
+                  <div className="text-sm font-semibold">
+                    Reconnecting secure media...
+                  </div>
+                  <div className="mt-1 text-xs text-white/60">
+                    The call remains active while Ambulant+ restores audio/video.
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       ) : null}
 
-      {call && !connected && ['ENDED', 'CANCELLED', 'EXPIRED'].includes(call.state) ? (
+      {call && !callActive && ['ENDED', 'CANCELLED', 'EXPIRED'].includes(call.state) ? (
         <div className="fixed bottom-5 right-5 z-[125] rounded-2xl border bg-white p-4 shadow-xl">
           <div className="text-sm font-semibold text-slate-900">
             {humanCallOutcome(call.outcome)}

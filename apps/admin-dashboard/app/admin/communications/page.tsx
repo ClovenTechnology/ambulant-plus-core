@@ -159,7 +159,7 @@ function AdminCommunicationsPageContent() {
   useEffect(() => {
     if (!activeId) return;
     const timer = window.setInterval(() => {
-      void Promise.all([loadList(), loadDetail(activeId), refreshCommunications()]).catch(() => undefined);
+      void Promise.all([loadList(), loadDetail(activeId)]).catch(() => undefined);
     }, 2500);
     return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -261,7 +261,7 @@ function AdminCommunicationsPageContent() {
 
   async function startCallFor(conversationId: string, mode: 'AUDIO' | 'VIDEO') {
     await startPersistentCall(conversationId, mode);
-    await Promise.all([loadList(), refreshCommunications()]);
+    await loadList();
   }
 
   async function startCall(mode: 'AUDIO' | 'VIDEO') {
