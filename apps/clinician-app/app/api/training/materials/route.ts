@@ -1,139 +1,41 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
+// apps/clinician-app/app/api/training/materials/route.ts
+
+import {
+  NextRequest,
+  NextResponse,
+} from 'next/server';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-function trimSlash(s: string) {
-  return String(s || '').replace(/\/+$/, '');
+function trimSlash(
+  value: string,
+) {
+  return String(
+    value || '',
+  ).replace(/\/+$/, '');
 }
 
 function gatewayBase() {
   return trimSlash(
     process.env.APIGW_BASE_URL ||
-      process.env.APIGW_BASE ||
-      process.env.API_GATEWAY_URL ||
-      process.env.API_GATEWAY_BASE_URL ||
-      process.env.GATEWAY_URL ||
-      process.env.NEXT_PUBLIC_APIGW_BASE ||
-      process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
-      process.env.NEXT_PUBLIC_GATEWAY_BASE ||
-      process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
-      '',
+    process.env.APIGW_BASE ||
+    process.env.API_GATEWAY_URL ||
+    process.env.API_GATEWAY_BASE_URL ||
+    process.env.GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_APIGW_BASE ||
+    process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
+    process.env.NEXT_PUBLIC_GATEWAY_BASE ||
+    process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
+    '',
   );
 }
 
-function starterMaterials() {
-  const uploadedAt = new Date().toISOString();
-
-  return [
-    {
-      id: 'cm-starter-01',
-      trainingSlotId: null,
-      title: '1. Contactless Medicine: definition, scope, and practice framework',
-      kind: 'module',
-      url: null,
-      fileKey: null,
-      notes:
-        'Introduces Contactless Medicine as an Ambulant+ care model: remote-first, device-supported, clinically governed, and outcome-oriented care delivery.',
-      uploadedAt,
-    },
-    {
-      id: 'cm-starter-02',
-      trainingSlotId: null,
-      title: '2. Virtual consultation workflow and clinical equivalence principles',
-      kind: 'module',
-      url: null,
-      fileKey: null,
-      notes:
-        'How to structure history, observation, device-assisted assessment, safety-netting, escalation, and follow-up to achieve safe remote clinical outcomes.',
-      uploadedAt,
-    },
-    {
-      id: 'cm-starter-03',
-      trainingSlotId: null,
-      title: '3. IoMT starter kit: 6-in-1 Health Monitor, NexRing, digital stethoscope, and HD otoscope',
-      kind: 'module',
-      url: null,
-      fileKey: null,
-      notes:
-        'Practical orientation to device-supported observations, 6-in-1 health monitoring, remote examination workflow, limitations, artefacts, and clinical interpretation boundaries.',
-      uploadedAt,
-    },
-    {
-      id: 'cm-starter-04',
-      trainingSlotId: null,
-      title: '4. Remote patient monitoring and longitudinal outcome assessment',
-      kind: 'module',
-      url: null,
-      fileKey: null,
-      notes:
-        'Using trends, adherence, symptoms, escalation thresholds, and follow-up loops to interpret recovery and ongoing risk.',
-      uploadedAt,
-    },
-    {
-      id: 'cm-starter-05',
-      trainingSlotId: null,
-      title: '5. Documentation, claims-aware care coordination, and audit trail',
-      kind: 'module',
-      url: null,
-      fileKey: null,
-      notes:
-        'Clinical notes, structured summaries, device data, prescriptions, sick notes, care plans, claims context, and defensible documentation.',
-      uploadedAt,
-    },
-    {
-      id: 'cm-starter-06',
-      trainingSlotId: null,
-      title: '6. Patient rights, consent, privacy, and data protection',
-      kind: 'module',
-      url: null,
-      fileKey: null,
-      notes:
-        'Patient autonomy, confidentiality, consent for remote assessment, data minimisation, and safe handling of IoMT-derived information.',
-      uploadedAt,
-    },
-    {
-      id: 'cm-starter-07',
-      trainingSlotId: null,
-      title: '7. InsightCore AI assist and voice-to-text dictation safety',
-      kind: 'module',
-      url: null,
-      fileKey: null,
-      notes:
-        'Ethical use of AI assistance and dictation: clinician remains responsible for final decisions, verification, correction, and sign-off.',
-      uploadedAt,
-    },
-    {
-      id: 'cm-starter-08',
-      trainingSlotId: null,
-      title: '8. Escalation, red flags, emergency boundaries, and patient visibility readiness',
-      kind: 'module',
-      url: null,
-      fileKey: null,
-      notes:
-        'When remote care is appropriate, when it is not, when to escalate, and what must be completed before clinician profile activation.',
-      uploadedAt,
-    },
-  ];
-}
-
-function materialResponse(source: string, items: any[]) {
-  return NextResponse.json(
-    {
-      ok: true,
-      source,
-      items,
-      materials: items,
-    },
-    {
-      status: 200,
-      headers: { 'cache-control': 'no-store, max-age=0' },
-    },
-  );
-}
-
-function forwardHeaders(req: NextRequest) {
-  const h = new Headers();
+function forwardHeaders(
+  request: NextRequest,
+) {
+  const headers =
+    new Headers();
 
   [
     'cookie',
@@ -144,48 +46,154 @@ function forwardHeaders(req: NextRequest) {
     'x-org-id',
     'x-ambulant-identity',
     'user-agent',
-  ].forEach((k) => {
-    const v = req.headers.get(k);
-    if (v) h.set(k, v);
+  ].forEach((key) => {
+    const value =
+      request.headers.get(
+        key,
+      );
+
+    if (value) {
+      headers.set(
+        key,
+        value,
+      );
+    }
   });
 
-  h.set('accept', 'application/json');
-  return h;
+  headers.set(
+    'accept',
+    'application/json',
+  );
+
+  return headers;
 }
 
-export async function GET(req: NextRequest) {
-  const fallback = starterMaterials();
+function json(
+  body: unknown,
+  status = 200,
+) {
+  return NextResponse.json(
+    body,
+    {
+      status,
+      headers: {
+        'cache-control':
+          'no-store, max-age=0',
+      },
+    },
+  );
+}
 
+export async function GET(
+  request: NextRequest,
+) {
   try {
-    const gw = gatewayBase();
+    const gateway =
+      gatewayBase();
 
-    if (!gw) {
-      return materialResponse('starter_fallback_gateway_missing', fallback);
+    if (!gateway) {
+      return json(
+        {
+          ok: false,
+          error:
+            'training_materials_gateway_not_configured',
+        },
+        503,
+      );
     }
 
-    const upstream = await fetch(`${gw}/api/clinicians/me/training/materials`, {
-      method: 'GET',
-      headers: forwardHeaders(req),
-      cache: 'no-store',
+    const upstreamUrl =
+      new URL(
+        '/api/clinicians/me/training/materials',
+        gateway,
+      );
+
+    const clinicianId =
+      request.nextUrl
+        .searchParams
+        .get('clinicianId');
+
+    if (clinicianId) {
+      upstreamUrl
+        .searchParams
+        .set(
+          'clinicianId',
+          clinicianId,
+        );
+    }
+
+    const upstream =
+      await fetch(
+        upstreamUrl,
+        {
+          method: 'GET',
+          headers:
+            forwardHeaders(
+              request,
+            ),
+          cache: 'no-store',
+        },
+      );
+
+    const data =
+      await upstream
+        .json()
+        .catch(
+          () => null,
+        );
+
+    if (
+      !upstream.ok ||
+      !data?.ok
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            data?.error ||
+            'training_materials_fetch_failed',
+        },
+        upstream.status ||
+          502,
+      );
+    }
+
+    const items =
+      Array.isArray(
+        data?.items,
+      )
+        ? data.items
+        : Array.isArray(
+              data?.materials,
+            )
+          ? data.materials
+          : [];
+
+    return json({
+      ok: true,
+      source:
+        data?.source ||
+        'admin_configured',
+      trainingSlotId:
+        data?.trainingSlotId ||
+        null,
+      items,
+      materials: items,
     });
+  } catch (error: any) {
+    console.error(
+      '[clinician-app][training/materials][GET] upstream error',
+      error,
+    );
 
-    const data = await upstream.json().catch(() => null);
-
-    const upstreamItems = Array.isArray(data?.items)
-      ? data.items
-      : Array.isArray(data?.materials)
-        ? data.materials
-        : [];
-
-    if (upstream.ok && data?.ok && upstreamItems.length > 0) {
-      return materialResponse('gateway', upstreamItems);
-    }
-
-    return materialResponse('starter_fallback_empty_or_unavailable', fallback);
-  } catch (err: any) {
-    console.error('[clinician-app][training/materials][GET] upstream error', err);
-
-    return materialResponse('starter_fallback_error', fallback);
+    return json(
+      {
+        ok: false,
+        error:
+          error?.message ||
+          'training_materials_fetch_failed',
+      },
+      502,
+    );
   }
 }
-

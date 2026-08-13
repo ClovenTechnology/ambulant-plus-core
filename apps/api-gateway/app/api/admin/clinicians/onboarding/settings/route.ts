@@ -109,6 +109,20 @@ function jsonObjectOrNull(value: unknown) {
   return value as Prisma.InputJsonValue;
 }
 
+function jsonRecord(
+  value: unknown,
+): Record<string, any> {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value)
+  ) {
+    return {};
+  }
+
+  return value as Record<string, any>;
+}
+
 function hasOwn(
   body: Record<string, any>,
   key: string,
@@ -174,6 +188,21 @@ export async function PATCH(
       .catch(() => ({} as Record<string, any>));
 
     const existing = await getClinicianOnboardingSettings();
+
+    const rawExistingSettings =
+      await prisma.clinicianOnboardingSetting.findUnique({
+        where: {
+          id: 'default',
+        },
+        select: {
+          trainingPolicy: true,
+        },
+      });
+
+    const rawExistingTrainingPolicy =
+      jsonRecord(
+        rawExistingSettings?.trainingPolicy,
+      );
 
     const requestedPathways =
       normaliseClinicianOnboardingCommercialPathways(
@@ -373,6 +402,21 @@ export async function PATCH(
         : existing.trainingPolicy,
     );
 
+    /*
+     * Programme training materials are managed by the dedicated
+     * Admin training-materials control plane. Preserve that governed
+     * JSON subtree whenever commercial/training policy is edited so a
+     * routine settings save cannot erase published learner content.
+     */
+    const persistedTrainingPolicy = {
+      ...trainingPolicy,
+      programmeMaterials:
+        jsonRecord(
+          rawExistingTrainingPolicy
+            .programmeMaterials,
+        ),
+    };
+
     const fullPathway = commercialPathways.find(
       (pathway) => pathway.key === 'FULL_PAYMENT',
     );
@@ -421,7 +465,7 @@ export async function PATCH(
         ? jsonObjectOrNull(body.bankInstructions)
         : existing.bankInstructions || Prisma.JsonNull,
       commercialPathways: commercialPathways as unknown as Prisma.InputJsonValue,
-      trainingPolicy: trainingPolicy as unknown as Prisma.InputJsonValue,
+      trainingPolicy: persistedTrainingPolicy as unknown as Prisma.InputJsonValue,
       notes: hasOwn(body, 'notes')
         ? cleanStr(body.notes, 2000)
         : existing.notes,

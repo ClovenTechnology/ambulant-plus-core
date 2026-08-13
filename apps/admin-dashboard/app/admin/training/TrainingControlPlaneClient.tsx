@@ -16,6 +16,28 @@ type SessionMode =
   | TrainingMode
   | 'both';
 
+type TrainingMaterialKind =
+  | 'module'
+  | 'document'
+  | 'video'
+  | 'link'
+  | 'handbook'
+  | 'guide'
+  | 'other';
+
+type TrainingMaterial = {
+  id: string;
+  trainingSlotId?: string | null;
+  title: string;
+  kind: TrainingMaterialKind;
+  url?: string | null;
+  fileKey?: string | null;
+  notes?: string | null;
+  required: boolean;
+  active: boolean;
+  displayOrder: number;
+};
+
 type TrainingSession = {
   id: string;
   dayNumber: number;
@@ -367,6 +389,15 @@ export default function TrainingControlPlaneClient() {
   const [policyLoaded, setPolicyLoaded] =
     useState(false);
 
+  const [materials, setMaterials] =
+    useState<TrainingMaterial[]>([]);
+
+  const [materialsLoading, setMaterialsLoading] =
+    useState(false);
+
+  const [materialsSaving, setMaterialsSaving] =
+    useState(false);
+
   const [filter, setFilter] =
     useState<
       | 'all'
@@ -507,6 +538,62 @@ export default function TrainingControlPlaneClient() {
     void load();
   }, [load]);
 
+  const loadMaterials =
+    useCallback(async (trainingSlotId: string) => {
+      if (!trainingSlotId) {
+        setMaterials([]);
+        return;
+      }
+
+      setMaterialsLoading(true);
+
+      try {
+        const response =
+          await fetch(
+            `/api/admin/training/materials?trainingSlotId=${encodeURIComponent(trainingSlotId)}`,
+            {
+              cache: 'no-store',
+              headers: {
+                accept: 'application/json',
+              },
+            },
+          );
+
+        const body =
+          await readJson(response);
+
+        if (
+          !response.ok ||
+          body?.ok !== true
+        ) {
+          throw new Error(
+            body?.error ||
+            `HTTP ${response.status}`,
+          );
+        }
+
+        setMaterials(
+          Array.isArray(body.materials)
+            ? body.materials
+            : Array.isArray(body.items)
+              ? body.items
+              : [],
+        );
+      } catch (error: any) {
+        setMaterials([]);
+        setNotice({
+          tone: 'err',
+          text:
+            humanError(
+              error?.message ||
+              'Unable to load training materials.',
+            ),
+        });
+      } finally {
+        setMaterialsLoading(false);
+      }
+    }, []);
+
   const metrics =
     useMemo(() => {
       const published =
@@ -639,8 +726,176 @@ export default function TrainingControlPlaneClient() {
     }));
   }
 
+  function patchMaterial(
+    id: string,
+    patch: Partial<TrainingMaterial>,
+  ) {
+    setMaterials((current) =>
+      current.map((material) =>
+        material.id === id
+          ? {
+              ...material,
+              ...patch,
+            }
+          : material,
+      ),
+    );
+  }
+
+  function addMaterial() {
+    setMaterials((current) => [
+      ...current,
+      {
+        id:
+          `material-${Date.now()}-${current.length + 1}`,
+        trainingSlotId:
+          form.id || null,
+        title: '',
+        kind: 'module',
+        url: null,
+        fileKey: null,
+        notes: null,
+        required: false,
+        active: true,
+        displayOrder:
+          current.length + 1,
+      },
+    ]);
+  }
+
+  function removeMaterial(id: string) {
+    setMaterials((current) =>
+      current
+        .filter(
+          (material) =>
+            material.id !== id,
+        )
+        .map((material, index) => ({
+          ...material,
+          displayOrder:
+            index + 1,
+        })),
+    );
+  }
+
+  async function saveMaterials() {
+    if (!form.id) {
+      setNotice({
+        tone: 'err',
+        text:
+          'Create the draft programme before adding training materials.',
+      });
+      return;
+    }
+
+    const invalid =
+      materials.find(
+        (material) =>
+          !material.title.trim(),
+      );
+
+    if (invalid) {
+      setNotice({
+        tone: 'err',
+        text:
+          'Every training material requires a title.',
+      });
+      return;
+    }
+
+    setMaterialsSaving(true);
+    setNotice(null);
+
+    try {
+      const response =
+        await fetch(
+          '/api/admin/training/materials',
+          {
+            method: 'PATCH',
+            headers: {
+              accept: 'application/json',
+              'content-type':
+                'application/json',
+            },
+            body: JSON.stringify({
+              trainingSlotId: form.id,
+              materials:
+                materials.map(
+                  (material, index) => ({
+                    id:
+                      material.id,
+                    title:
+                      material.title.trim(),
+                    kind:
+                      material.kind,
+                    url:
+                      material.url?.trim() ||
+                      null,
+                    fileKey:
+                      material.fileKey?.trim() ||
+                      null,
+                    notes:
+                      material.notes?.trim() ||
+                      null,
+                    required:
+                      material.required === true,
+                    active:
+                      material.active !== false,
+                    displayOrder:
+                      Math.max(
+                        1,
+                        Number(
+                          material.displayOrder ||
+                          index + 1,
+                        ),
+                      ),
+                  }),
+                ),
+            }),
+          },
+        );
+
+      const body =
+        await readJson(response);
+
+      if (
+        !response.ok ||
+        body?.ok !== true
+      ) {
+        throw new Error(
+          body?.error ||
+          `HTTP ${response.status}`,
+        );
+      }
+
+      setMaterials(
+        Array.isArray(body.materials)
+          ? body.materials
+          : [],
+      );
+
+      setNotice({
+        tone: 'ok',
+        text:
+          'Training materials published successfully. Clinicians assigned to this programme will now see this Admin-configured list.',
+      });
+    } catch (error: any) {
+      setNotice({
+        tone: 'err',
+        text:
+          humanError(
+            error?.message ||
+            'Unable to save training materials.',
+          ),
+      });
+    } finally {
+      setMaterialsSaving(false);
+    }
+  }
+
   function startNew() {
     setForm(emptyProgramme(policy));
+    setMaterials([]);
     setNotice(null);
 
     window.scrollTo({
@@ -652,6 +907,7 @@ export default function TrainingControlPlaneClient() {
   function editSlot(slot: TrainingSlot) {
     setForm(slotToForm(slot));
     setNotice(null);
+    void loadMaterials(slot.id);
 
     window.scrollTo({
       top: 0,
@@ -1079,11 +1335,22 @@ export default function TrainingControlPlaneClient() {
             : 'Draft programme created. Review it, then publish when ready.',
       });
 
+      const savedSlot =
+        body?.slot || null;
+
       setForm(
-        body?.slot
-          ? slotToForm(body.slot)
+        savedSlot
+          ? slotToForm(savedSlot)
           : emptyProgramme(policy),
       );
+
+      if (savedSlot?.id) {
+        await loadMaterials(
+          String(savedSlot.id),
+        );
+      } else {
+        setMaterials([]);
+      }
 
       await load();
     } catch (error: any) {
@@ -1840,6 +2107,264 @@ export default function TrainingControlPlaneClient() {
                   ),
                 )}
               </div>
+            </section>
+
+            <section className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 className="font-black text-slate-950">
+                    Training materials
+                  </h3>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-600">
+                    Publish the exact modules, documents, videos and links clinicians assigned to this programme should see. No hardcoded fallback material is used.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  disabled={
+                    !form.id ||
+                    materialsLoading ||
+                    materialsSaving
+                  }
+                  onClick={addMaterial}
+                  className="rounded-lg border border-indigo-200 bg-white px-3 py-2 text-xs font-black text-indigo-800 disabled:opacity-40"
+                >
+                  + Add material
+                </button>
+              </div>
+
+              {!form.id ? (
+                <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  Create the draft programme first. You can then attach its Admin-configured training materials.
+                </div>
+              ) : materialsLoading ? (
+                <div className="mt-3 rounded-xl border bg-white p-3 text-xs text-slate-500">
+                  Loading training materials...
+                </div>
+              ) : materials.length === 0 ? (
+                <div className="mt-3 rounded-xl border border-dashed bg-white p-4 text-center">
+                  <div className="text-sm font-black text-slate-900">
+                    No materials published
+                  </div>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Add the first material. Clinicians will see a clean empty state until Admin publishes content.
+                  </p>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  {materials.map(
+                    (material, index) => (
+                      <div
+                        key={material.id}
+                        className="rounded-2xl border bg-white p-3"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="text-xs font-black text-slate-900">
+                            Material {index + 1}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              removeMaterial(
+                                material.id,
+                              )
+                            }
+                            className="text-[11px] font-bold text-rose-700"
+                          >
+                            Remove
+                          </button>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                          <label className="text-[11px] font-bold text-slate-700 sm:col-span-2">
+                            Title
+                            <input
+                              value={
+                                material.title
+                              }
+                              onChange={(event) =>
+                                patchMaterial(
+                                  material.id,
+                                  {
+                                    title:
+                                      event.target
+                                        .value,
+                                  },
+                                )
+                              }
+                              placeholder="e.g. Contactless Medicine clinical workflow"
+                              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                            />
+                          </label>
+
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Type
+                            <select
+                              value={
+                                material.kind
+                              }
+                              onChange={(event) =>
+                                patchMaterial(
+                                  material.id,
+                                  {
+                                    kind:
+                                      event.target
+                                        .value as
+                                        TrainingMaterialKind,
+                                  },
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border bg-white px-3 py-2 text-sm"
+                            >
+                              <option value="module">Module</option>
+                              <option value="document">Document / PDF</option>
+                              <option value="video">Video</option>
+                              <option value="link">Web link</option>
+                              <option value="handbook">Handbook</option>
+                              <option value="guide">Guide</option>
+                              <option value="other">Other</option>
+                            </select>
+                          </label>
+
+                          <label className="text-[11px] font-bold text-slate-700">
+                            Display order
+                            <input
+                              type="number"
+                              min="1"
+                              max="500"
+                              value={
+                                material.displayOrder
+                              }
+                              onChange={(event) =>
+                                patchMaterial(
+                                  material.id,
+                                  {
+                                    displayOrder:
+                                      Math.max(
+                                        1,
+                                        Number(
+                                          event.target
+                                            .value,
+                                        ) || 1,
+                                      ),
+                                  },
+                                )
+                              }
+                              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                            />
+                          </label>
+
+                          <label className="text-[11px] font-bold text-slate-700 sm:col-span-2">
+                            URL
+                            <input
+                              value={
+                                material.url || ''
+                              }
+                              onChange={(event) =>
+                                patchMaterial(
+                                  material.id,
+                                  {
+                                    url:
+                                      event.target
+                                        .value,
+                                  },
+                                )
+                              }
+                              placeholder="https://... (PDF, video, document or web resource)"
+                              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                            />
+                          </label>
+
+                          <label className="text-[11px] font-bold text-slate-700 sm:col-span-2">
+                            Notes / learner guidance
+                            <textarea
+                              value={
+                                material.notes || ''
+                              }
+                              onChange={(event) =>
+                                patchMaterial(
+                                  material.id,
+                                  {
+                                    notes:
+                                      event.target
+                                        .value,
+                                  },
+                                )
+                              }
+                              rows={3}
+                              placeholder="What the clinician should review, learn or complete."
+                              className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
+                            />
+                          </label>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-4">
+                          <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={
+                                material.required
+                              }
+                              onChange={(event) =>
+                                patchMaterial(
+                                  material.id,
+                                  {
+                                    required:
+                                      event.target
+                                        .checked,
+                                  },
+                                )
+                              }
+                            />
+                            Required
+                          </label>
+
+                          <label className="flex items-center gap-2 text-xs font-bold text-slate-700">
+                            <input
+                              type="checkbox"
+                              checked={
+                                material.active
+                              }
+                              onChange={(event) =>
+                                patchMaterial(
+                                  material.id,
+                                  {
+                                    active:
+                                      event.target
+                                        .checked,
+                                  },
+                                )
+                              }
+                            />
+                            Published / visible
+                          </label>
+                        </div>
+                      </div>
+                    ),
+                  )}
+                </div>
+              )}
+
+              {form.id ? (
+                <div className="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={
+                      materialsLoading ||
+                      materialsSaving
+                    }
+                    onClick={() =>
+                      void saveMaterials()
+                    }
+                    className="rounded-xl bg-indigo-700 px-4 py-2 text-xs font-black text-white hover:bg-indigo-800 disabled:opacity-50"
+                  >
+                    {materialsSaving
+                      ? 'Saving materials...'
+                      : 'Save & publish materials'}
+                  </button>
+                </div>
+              ) : null}
             </section>
 
             <section className="grid gap-3 sm:grid-cols-2">
