@@ -35,7 +35,7 @@ export async function mintDirectCallRtcAccess(input: {
 
   const callState = String(call.state || '');
 
-  if (!['RINGING', 'LIVE'].includes(callState)) {
+  if (callState !== 'LIVE') {
     throw new Error('direct_call_not_available');
   }
 
@@ -55,18 +55,7 @@ export async function mintDirectCallRtcAccess(input: {
   const hostProfileId =
     String(call.hostProfileId || '');
 
-  if (callState === 'RINGING') {
-    const callerMayJoin =
-      participantProfileId === hostProfileId &&
-      ['ACCEPTED', 'JOINED'].includes(participantState);
-
-    if (!callerMayJoin) {
-      throw new Error('direct_call_not_answered');
-    }
-  }
-
   if (
-    callState === 'LIVE' &&
     !['ACCEPTED', 'JOINED'].includes(participantState)
   ) {
     throw new Error('direct_call_access_denied');

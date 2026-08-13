@@ -73,7 +73,35 @@ export async function recordStaffActivity(input: {
           select: { id: true },
         }),
       ]);
-  const presenceState = liveMeeting ? 'IN_MEETING' : ringingCall ? 'BUSY' : 'AVAILABLE';
+  const activeDirectCall = await prisma.meeting.findFirst({
+    where: {
+      kind: 'DIRECT_CALL',
+      OR: [
+        { state: 'LIVE' },
+        {
+          state: 'RINGING',
+          OR: [
+            { ringExpiresAt: null },
+            { ringExpiresAt: { gt: new Date() } },
+          ],
+        },
+      ],
+      participants: {
+        some: {
+          staffProfileId: input.actor.profileId,
+          state: { in: ['INVITED', 'ACCEPTED', 'JOINED'] },
+        },
+      },
+    },
+    select: { id: true },
+  });
+
+  const presenceState =
+    activeDirectCall || ringingCall
+      ? 'BUSY'
+      : liveMeeting
+        ? 'IN_MEETING'
+        : 'AVAILABLE';
 
   await prisma.$transaction(async (tx) => {
     await tx.adminStaffSession.upsert({
