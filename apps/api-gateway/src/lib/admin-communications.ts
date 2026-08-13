@@ -213,12 +213,8 @@ async function expireDirectCallsForProfile(profileId: string) {
   }
 }
 
-async function activeDirectCallForProfile(
-  profileId: string,
-  excludeId?: string,
-  db: any = prisma,
-) {
-  return db.meeting.findFirst({
+async function activeDirectCallForProfile(profileId: string, excludeId?: string) {
+  return prisma.meeting.findFirst({
     where: {
       kind: 'DIRECT_CALL',
       id: excludeId ? { not: excludeId } : undefined,
@@ -233,24 +229,6 @@ async function activeDirectCallForProfile(
     orderBy: { createdAt: 'desc' },
     include: directCallInclude,
   });
-}
-
-async function lockDirectCallProfiles(
-  tx: any,
-  profileIds: string[],
-) {
-  const ordered = Array.from(
-    new Set(profileIds.filter(Boolean)),
-  ).sort();
-
-  for (const profileId of ordered) {
-    await tx.$queryRaw`
-      SELECT pg_advisory_xact_lock(
-        2030,
-        hashtext(${`ambulant-direct-call:${profileId}`})
-      )
-    `;
-  }
 }
 
 async function requireConversationMember(conversationId: string, actor: AdminStaffActor) {
@@ -332,19 +310,7 @@ export async function createStaffConversation(input: {
   requireCommunications(input.actor);
 
   const kind = cleanText(input.body?.kind, 40)?.toUpperCase() || 'DIRECT';
-  const requestedProfileIds = uniqueIds(input.body?.profileIds, 50);
-
-  if (
-    kind === 'DIRECT' &&
-    requestedProfileIds.includes(input.actor.profileId)
-  ) {
-    throw new CommunicationsError(
-      'direct_conversation_self_not_allowed',
-      400,
-    );
-  }
-
-  const profileIds = requestedProfileIds.filter(
+  const profileIds = uniqueIds(input.body?.profileIds, 50).filter(
     (id) => id !== input.actor.profileId,
   );
 
@@ -678,26 +644,16 @@ export async function startDirectStaffCall(input: {
   mode: unknown;
   userAgent?: string | null;
 }) {
-  const membership = await requireConversationMember(
-    input.conversationId,
-    input.actor,
-  );
+  const membership = await requireConversationMember(input.conversationId, input.actor);
   const conversation = membership.conversation;
-
   if (conversation.kind !== 'DIRECT') {
-    throw new CommunicationsError(
-      'direct_call_requires_direct_conversation',
-      409,
-    );
+    throw new CommunicationsError('direct_call_requires_direct_conversation', 409);
   }
 
   await expireDirectCallsForProfile(input.actor.profileId);
 
   const members = await prisma.staffConversationMember.findMany({
-    where: {
-      conversationId: conversation.id,
-      leftAt: null,
-    },
+    where: { conversationId: conversation.id, leftAt: null },
     include: {
       profile: {
         select: {
@@ -712,441 +668,209 @@ export async function startDirectStaffCall(input: {
   });
 
   if (members.length !== 2) {
-    throw new CommunicationsError(
-      'direct_conversation_member_shape_invalid',
-      409,
-    );
+    throw new CommunicationsError('direct_conversation_member_shape_invalid', 409);
   }
 
   const target = members.find(
     (member) => member.profileId !== input.actor.profileId,
   )?.profile;
 
-  if (!target || target.id === input.actor.profileId) {
-    throw new CommunicationsError('direct_call_self_not_allowed', 400);
+  if (!target || !['ACTIVE', 'LEAVE'].includes(target.lifecycleState)) {
+    throw new CommunicationsError('direct_call_target_unavailable', 409);
   }
 
-  if (!['ACTIVE', 'LEAVE'].includes(target.lifecycleState)) {
-    throw new CommunicationsError(
-      'direct_call_target_unavailable',
-      409,
+  const existingCallerCall = await activeDirectCallForProfile(input.actor.profileId);
+  if (existingCallerCall) {
+    const existingParticipant = directCallParticipant(
+      existingCallerCall,
+      input.actor.profileId,
     );
-  }
 
-  await expireDirectCallsForProfile(target.id);
+    const sameOutgoingConversation =
+      existingCallerCall.hostProfileId === input.actor.profileId &&
+      existingCallerCall.contextId === conversation.id &&
+      existingParticipant &&
+      ['ACCEPTED', 'JOINED'].includes(existingParticipant.state);
+
+    if (!sameOutgoingConversation || !existingParticipant) {
+      throw new CommunicationsError('direct_call_already_active', 409);
+    }
+
+    const rtc = await mintDirectCallRtcAccess({
+      meeting: existingCallerCall,
+      participant: existingParticipant,
+      identity: `meeting:${existingCallerCall.id}:staff:${input.actor.profileId}`,
+      displayName: input.actor.name || input.actor.email,
+    });
+
+    return {
+      ok: true,
+      reused: true,
+      call: directCallSummary(existingCallerCall, input.actor.profileId),
+      rtc: { ...rtc, expiresInSeconds: 900 },
+    };
+  }
 
   const requestedMode = validDirectCallMode(
     cleanText(input.mode, 20)?.toLowerCase(),
   );
-
   if (!requestedMode) {
-    throw new CommunicationsError(
-      'invalid_direct_call_mode',
-      400,
-    );
+    throw new CommunicationsError('invalid_direct_call_mode', 400);
   }
 
   const mode = requestedMode === 'audio' ? 'AUDIO' : 'VIDEO';
   const now = new Date();
   const compatibilityDurationMinutes = 60;
+  // DIRECT_CALL is stored in Meeting for schema compatibility only.
+  // Its startsAt/endsAt/durationMinutes MUST NOT gate RTC access or end the call.
+  // Actual call duration is determined by startedAt -> endedAt.
+  const targetBusy = Boolean(await activeDirectCallForProfile(target.id));
 
-  const arbitration = await prisma.$transaction(
-    async (tx: any) => {
-      await lockDirectCallProfiles(tx, [
-        input.actor.profileId,
-        target.id,
-      ]);
-
-      const actorActive =
-        await activeDirectCallForProfile(
-          input.actor.profileId,
-          undefined,
-          tx,
-        );
-
-      if (actorActive) {
-        const actorParticipant =
-          directCallParticipant(
-            actorActive,
-            input.actor.profileId,
-          );
-
-        const sameConversation =
-          actorActive.contextId ===
-            conversation.id &&
-          Boolean(actorParticipant);
-
-        const reciprocalIncoming =
-          sameConversation &&
-          actorActive.state === 'RINGING' &&
-          actorActive.hostProfileId ===
-            target.id &&
-          actorParticipant?.state ===
-            'INVITED';
-
-        if (reciprocalIncoming) {
-          return {
-            kind: 'COLLISION' as const,
-            callId: actorActive.id,
-          };
-        }
-
-        if (
-          sameConversation &&
-          ['RINGING', 'LIVE'].includes(
-            actorActive.state,
-          )
-        ) {
-          return {
-            kind: 'REUSE' as const,
-            callId: actorActive.id,
-          };
-        }
-
-        return {
-          kind: 'CALLER_BUSY' as const,
-          callId: actorActive.id,
-        };
-      }
-
-      const targetActive =
-        await activeDirectCallForProfile(
-          target.id,
-          undefined,
-          tx,
-        );
-
-      const targetBusy =
-        Boolean(targetActive);
-
-      const created =
-        await tx.meeting.create({
-          data: {
-            roomId: `meeting-${randomOpaqueToken(18)}`,
-            kind: 'DIRECT_CALL',
-            state: targetBusy
-              ? 'ENDED'
-              : 'RINGING',
-            title: `${
-              mode === 'AUDIO'
-                ? 'Audio'
-                : 'Video'
-            } call with ${
-              target.name ||
-              target.email
-            }`,
-            timezone:
-              'Africa/Johannesburg',
-            startsAt: now,
-            endsAt: new Date(
-              now.getTime() +
-                compatibilityDurationMinutes *
-                  60_000,
-            ),
-            durationMinutes:
-              compatibilityDurationMinutes,
-            createdByProfileId:
-              input.actor.profileId,
-            hostProfileId:
-              input.actor.profileId,
-            contextType:
-              'STAFF_CONVERSATION',
-            contextId:
-              conversation.id,
-            allowAudio: true,
-            allowVideo:
-              mode === 'VIDEO',
-            allowChat: true,
-            allowFiles: false,
-            allowScreenShare:
-              mode === 'VIDEO',
-            allowRecording: false,
-            lobbyRequired: false,
-            ringExpiresAt: targetBusy
-              ? null
-              : new Date(
-                  now.getTime() +
-                    CALL_RING_SECONDS *
-                      1000,
-                ),
-            ...(targetBusy
-              ? {
-                  endedAt: now,
-                  callOutcome:
-                    'BUSY' as const,
-                  callEndedReason:
-                    'Recipient is already on another call',
-                }
-              : {}),
-          },
-        });
-
-      await tx.meetingParticipant.createMany({
-        data: [
-          {
-            meetingId: created.id,
-            participantType:
-              'INTERNAL_STAFF',
-            staffProfileId:
-              input.actor.profileId,
-            emailNormalized:
-              normaliseMeetingEmail(
-                input.actor.email,
-              ),
-            displayName:
-              input.actor.name ||
-              input.actor.email,
-            role: 'HOST',
-            // JOINED here represents signalling ownership.
-            // RTC admission itself is LIVE-only.
-            state: targetBusy
-              ? 'LEFT'
-              : 'JOINED',
-            acceptedAt: now,
-            firstJoinedAt: targetBusy
-              ? null
-              : now,
-            lastLeftAt: targetBusy
-              ? now
-              : null,
-          },
-          {
-            meetingId: created.id,
-            participantType:
-              'INTERNAL_STAFF',
-            staffProfileId:
-              target.id,
-            emailNormalized:
-              normaliseMeetingEmail(
-                target.email,
-              ),
-            displayName:
-              target.name ||
-              target.email,
-            role: 'ATTENDEE',
-            state: targetBusy
-              ? 'LEFT'
-              : 'INVITED',
-            lastLeftAt: targetBusy
-              ? now
-              : null,
-          },
-        ],
-      });
-
-      if (targetBusy) {
-        await createStaffNotification(
-          tx as any,
-          {
-            recipientProfileId:
-              input.actor.profileId,
-            actorProfileId:
-              target.id,
-            conversationId:
-              conversation.id,
-            meetingId: created.id,
-            type: 'CALL_BUSY',
-            title:
-              'Call could not connect',
-            body: `${
-              target.name ||
-              target.email
-            } is busy on another call.`,
-            payload: { mode },
-            dedupeKey: `call-busy:${created.id}:${input.actor.profileId}`,
-          },
-        );
-
-        return {
-          kind: 'TARGET_BUSY' as const,
-          callId: created.id,
-        };
-      }
-
-      await createStaffNotification(
-        tx as any,
-        {
-          recipientProfileId:
-            target.id,
-          actorProfileId:
-            input.actor.profileId,
-          conversationId:
-            conversation.id,
-          meetingId: created.id,
-          type: 'INCOMING_CALL',
-          title: `Incoming ${
-            mode === 'VIDEO'
-              ? 'video'
-              : 'audio'
-          } call`,
-          body:
-            input.actor.name ||
-            input.actor.email,
-          payload: {
-            mode,
-            callerProfileId:
-              input.actor.profileId,
-          },
-          dedupeKey: `incoming-call:${created.id}:${target.id}`,
-        },
-      );
-
-      return {
-        kind: 'CREATED' as const,
-        callId: created.id,
-      };
-    },
-  );
-
-  const fullMeeting =
-    await prisma.meeting.findUnique({
-      where: {
-        id: arbitration.callId,
+  const meeting = await prisma.$transaction(async (tx) => {
+    const created = await tx.meeting.create({
+      data: {
+        roomId: `meeting-${randomOpaqueToken(18)}`,
+        kind: 'DIRECT_CALL',
+        state: targetBusy ? 'ENDED' : 'RINGING',
+        title: `${mode === 'AUDIO' ? 'Audio' : 'Video'} call with ${target.name || target.email}`,
+        timezone: 'Africa/Johannesburg',
+        startsAt: now,
+        endsAt: new Date(now.getTime() + compatibilityDurationMinutes * 60_000),
+        durationMinutes: compatibilityDurationMinutes,
+        createdByProfileId: input.actor.profileId,
+        hostProfileId: input.actor.profileId,
+        contextType: 'STAFF_CONVERSATION',
+        contextId: conversation.id,
+        allowAudio: true,
+        allowVideo: mode === 'VIDEO',
+        allowChat: true,
+        allowFiles: false,
+        allowScreenShare: mode === 'VIDEO',
+        allowRecording: false,
+        lobbyRequired: false,
+        ringExpiresAt: targetBusy
+          ? null
+          : new Date(now.getTime() + CALL_RING_SECONDS * 1000),
+        ...(targetBusy
+          ? {
+              endedAt: now,
+              callOutcome: 'BUSY' as const,
+              callEndedReason: 'Recipient is already on another call',
+            }
+          : {}),
       },
-      include: directCallInclude,
     });
 
+    await tx.meetingParticipant.createMany({
+      data: [
+        {
+          meetingId: created.id,
+          participantType: 'INTERNAL_STAFF',
+          staffProfileId: input.actor.profileId,
+          emailNormalized: normaliseMeetingEmail(input.actor.email),
+          displayName: input.actor.name || input.actor.email,
+          role: 'HOST',
+          state: targetBusy ? 'LEFT' : 'JOINED',
+          acceptedAt: now,
+          firstJoinedAt: targetBusy ? null : now,
+          lastLeftAt: targetBusy ? now : null,
+        },
+        {
+          meetingId: created.id,
+          participantType: 'INTERNAL_STAFF',
+          staffProfileId: target.id,
+          emailNormalized: normaliseMeetingEmail(target.email),
+          displayName: target.name || target.email,
+          role: 'ATTENDEE',
+          state: targetBusy ? 'LEFT' : 'INVITED',
+          lastLeftAt: targetBusy ? now : null,
+        },
+      ],
+    });
+
+    if (targetBusy) {
+      await createStaffNotification(tx as any, {
+        recipientProfileId: input.actor.profileId,
+        actorProfileId: target.id,
+        conversationId: conversation.id,
+        meetingId: created.id,
+        type: 'CALL_BUSY',
+        title: 'Call could not connect',
+        body: `${target.name || target.email} is already on another call.`,
+        payload: { mode },
+        dedupeKey: `call-busy:${created.id}:${input.actor.profileId}`,
+      });
+    } else {
+      await createStaffNotification(tx as any, {
+        recipientProfileId: target.id,
+        actorProfileId: input.actor.profileId,
+        conversationId: conversation.id,
+        meetingId: created.id,
+        type: 'INCOMING_CALL',
+        title: `Incoming ${mode === 'VIDEO' ? 'video' : 'audio'} call`,
+        body: input.actor.name || input.actor.email,
+        payload: { mode, callerProfileId: input.actor.profileId },
+        dedupeKey: `incoming-call:${created.id}:${target.id}`,
+      });
+    }
+
+    return created;
+  });
+
+  const fullMeeting = await prisma.meeting.findUnique({
+    where: { id: meeting.id },
+    include: directCallInclude,
+  });
   if (!fullMeeting) {
-    throw new CommunicationsError(
-      'direct_call_creation_failed',
-      500,
-    );
+    throw new CommunicationsError('direct_call_creation_failed', 500);
   }
 
-  if (arbitration.kind === 'COLLISION') {
-    return {
-      ok: true,
-      reused: true,
-      collision: true,
-      incoming: true,
-      busy: false,
-      callerBusy: false,
-      call: directCallSummary(
-        fullMeeting,
-        input.actor.profileId,
-      ),
-      rtc: null,
-    };
-  }
-
-  if (
-    arbitration.kind === 'CALLER_BUSY'
-  ) {
-    return {
-      ok: true,
-      reused: true,
-      collision: false,
-      incoming: false,
-      busy: true,
-      callerBusy: true,
-      call: directCallSummary(
-        fullMeeting,
-        input.actor.profileId,
-      ),
-      rtc: null,
-    };
-  }
-
-  if (
-    arbitration.kind === 'TARGET_BUSY'
-  ) {
+  if (targetBusy) {
     return {
       ok: true,
       reused: false,
-      collision: false,
-      incoming: false,
       busy: true,
-      callerBusy: false,
-      call: directCallSummary(
-        fullMeeting,
-        input.actor.profileId,
-      ),
+      call: directCallSummary(fullMeeting, input.actor.profileId),
       rtc: null,
     };
   }
 
-  if (arbitration.kind === 'REUSE') {
-    const participant =
-      directCallParticipant(
-        fullMeeting,
-        input.actor.profileId,
-      );
-
-    if (!participant) {
-      throw new CommunicationsError(
-        'direct_call_participant_missing',
-        500,
-      );
-    }
-
-    const rtc =
-      fullMeeting.state === 'LIVE'
-        ? await mintDirectCallRtcAccess({
-            meeting: fullMeeting,
-            participant,
-            identity: `meeting:${fullMeeting.id}:staff:${input.actor.profileId}`,
-            displayName:
-              input.actor.name ||
-              input.actor.email,
-          })
-        : null;
-
-    return {
-      ok: true,
-      reused: true,
-      collision: false,
-      incoming:
-        fullMeeting.hostProfileId !==
-        input.actor.profileId,
-      busy: false,
-      callerBusy: false,
-      call: directCallSummary(
-        fullMeeting,
-        input.actor.profileId,
-      ),
-      rtc: rtc
-        ? {
-            ...rtc,
-            expiresInSeconds: 900,
-          }
-        : null,
-    };
+  const callerParticipant = directCallParticipant(
+    fullMeeting,
+    input.actor.profileId,
+  );
+  if (!callerParticipant) {
+    throw new CommunicationsError('direct_call_participant_missing', 500);
   }
+
+  const rtc = await mintDirectCallRtcAccess({
+    meeting: fullMeeting,
+    participant: callerParticipant,
+    identity: `meeting:${fullMeeting.id}:staff:${input.actor.profileId}`,
+    displayName: input.actor.name || input.actor.email,
+  });
 
   await writeMeetingAudit({
     actorUserId: input.actor.userId,
-    actorRefId:
-      input.actor.profileId,
-    action:
-      'meeting.direct_call.created',
+    actorRefId: input.actor.profileId,
+    action: 'meeting.direct_call.created',
     meetingId: fullMeeting.id,
-    description:
-      `${mode} staff call started`,
+    description: `${mode} staff call started`,
     userAgent: input.userAgent,
     meta: {
-      conversationId:
-        conversation.id,
+      conversationId: conversation.id,
       targetProfileId: target.id,
       mode,
-      callerAutoJoined: false,
-      rtcAdmission: 'live_only',
+      callerAutoJoined: true,
     },
   });
 
   return {
     ok: true,
     reused: false,
-    collision: false,
-    incoming: false,
     busy: false,
-    callerBusy: false,
-    call: directCallSummary(
-      fullMeeting,
-      input.actor.profileId,
-    ),
-    // RINGING is signalling only.
-    // RTC begins after ACCEPT -> LIVE.
-    rtc: null,
+    call: directCallSummary(fullMeeting, input.actor.profileId),
+    rtc: { ...rtc, expiresInSeconds: 900 },
   };
 }
 
