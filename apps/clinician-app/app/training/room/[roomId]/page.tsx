@@ -21,15 +21,85 @@ import {
 import SFUClientProvider, { useSFUClient } from '@/app/sfu/[roomId]/SFUClientProvider';
 import VideoDock from '@/app/sfu/[roomId]/VideoDock';
 
+type TrainingParticipantRole =
+  | 'clinician'
+  | 'patient'
+  | 'trainer'
+  | 'observer'
+  | 'admin';
+
 type TrainingMaterial = {
   id: string;
   trainingSlotId?: string | null;
+  moduleId?: string | null;
+  moduleTitle?: string | null;
+  assignmentId?: string | null;
+  assignmentScope?: 'programme' | 'sessions' | null;
+  sessionIds?: string[];
+  resourceId?: string | null;
+  resourceVersionId?: string | null;
   title: string;
   kind?: string | null;
   url?: string | null;
   fileKey?: string | null;
+  fileName?: string | null;
+  version?: string | null;
   notes?: string | null;
+  required?: boolean;
   uploadedAt?: string | null;
+};
+
+type TrainingContentVersion = {
+  id: string;
+  version: string;
+  status: string;
+  url?: string | null;
+  fileKey?: string | null;
+  fileName?: string | null;
+};
+
+type TrainingContentResource = {
+  id: string;
+  title: string;
+  kind: string;
+  description?: string | null;
+  required: boolean;
+  currentVersion?: TrainingContentVersion | null;
+};
+
+type TrainingContentModule = {
+  id: string;
+  title: string;
+  summary?: string | null;
+  assignmentId: string;
+  assignmentScope: 'programme' | 'sessions';
+  sessionIds: string[];
+  resources: TrainingContentResource[];
+};
+
+type TrainingSessionRef = {
+  id: string;
+  dayNumber: number;
+  startAt?: string | null;
+  endAt?: string | null;
+  mode?: string | null;
+  trainerName?: string | null;
+};
+
+type TrainingMaterialResponse = {
+  ok: boolean;
+  role?: TrainingParticipantRole;
+  identity?: {
+    subjectId?: string | null;
+    uid?: string | null;
+    displayName?: string | null;
+  } | null;
+  trainingSlotId?: string | null;
+  sessions?: TrainingSessionRef[];
+  modules?: TrainingContentModule[];
+  legacyMaterials?: TrainingMaterial[];
+  items?: TrainingMaterial[];
+  materials?: TrainingMaterial[];
 };
 
 type TrainingContext = {
@@ -83,6 +153,26 @@ function fmtDateTime(iso?: string | null) {
   }).format(d);
 }
 
+function sessionContentLabel(
+  session: TrainingSessionRef,
+) {
+  const when =
+    session.startAt
+      ? fmtDateTime(
+          session.startAt,
+        )
+      : 'Time not set';
+
+  return (
+    `Day ${session.dayNumber} - ${when}` +
+    (
+      session.trainerName
+        ? ` - ${session.trainerName}`
+        : ''
+    )
+  );
+}
+
 function roomErrorMessage(
   value: unknown,
   training?: TrainingContext['training'],
@@ -121,12 +211,14 @@ function TrainingRoomInner({
   clinicianId,
   participantRole,
   participantUid,
+  joinToken,
 }: {
   roomId: string;
   trainingSlotId: string;
   clinicianId: string;
-  participantRole: 'clinician' | 'admin' | 'trainer';
+  participantRole: TrainingParticipantRole;
   participantUid: string;
+  joinToken: string;
 }) {
   const {
     room,
@@ -142,6 +234,10 @@ function TrainingRoomInner({
   const [ctx, setCtx] = useState<TrainingContext | null>(null);
   const [resolvedClinicianId, setResolvedClinicianId] = useState(clinicianId);
   const [materials, setMaterials] = useState<TrainingMaterial[]>([]);
+  const [contentModules, setContentModules] = useState<TrainingContentModule[]>([]);
+  const [contentSessions, setContentSessions] = useState<TrainingSessionRef[]>([]);
+  const [admissionVerified, setAdmissionVerified] = useState(participantRole === 'clinician');
+  const [resolvedParticipantName, setResolvedParticipantName] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [recordingConsentAccepted, setRecordingConsentAccepted] = useState(false);
@@ -167,103 +263,312 @@ function TrainingRoomInner({
           ? 'Connection issue'
           : 'Not connected';
 
-  const isStaffJoin = participantRole === 'admin' || participantRole === 'trainer';
+  const isStaffJoin =
+    participantRole === 'admin' ||
+    participantRole === 'trainer' ||
+    participantRole === 'observer';
+
+  const isObserver =
+    participantRole === 'observer';
+
   const participantLabel =
     participantRole === 'trainer'
       ? 'Training trainer'
       : participantRole === 'admin'
         ? 'Training administrator'
-        : 'Training participant';
+        : participantRole === 'observer'
+          ? 'Training observer'
+          : participantRole === 'patient'
+            ? 'Training patient'
+            : 'Training clinician';
 
   async function loadRoomData() {
     setErr(null);
 
     try {
-      const matRes = await fetch('/api/training/materials', {
-        cache: 'no-store',
-        credentials: 'include',
-      });
-
-      const m = (await matRes.json().catch(() => null)) as {
-        ok: boolean;
-        items?: TrainingMaterial[];
-        materials?: TrainingMaterial[];
-      } | null;
-
-      if (!matRes.ok || !m?.ok) {
-        throw new Error('Unable to load training materials right now.');
+      if (
+        participantRole !== 'clinician' &&
+        !joinToken
+      ) {
+        throw new Error(
+          'A signed training admission is required for this participant role.',
+        );
       }
 
-      const list = Array.isArray(m.items)
-        ? m.items
-        : Array.isArray(m.materials)
-          ? m.materials
-          : [];
+      const materialParams =
+        new URLSearchParams();
 
-      let nextCtx: TrainingContext | null = null;
+      if (trainingSlotId) {
+        materialParams.set(
+          'trainingSlotId',
+          trainingSlotId,
+        );
+      }
 
-      if (!isStaffJoin) {
-        const contextUrl = clinicianId
-          ? `/api/training/context?clinicianId=${encodeURIComponent(clinicianId)}`
-          : '/api/training/context';
-        const ctxRes = await fetch(contextUrl, {
-          cache: 'no-store',
-          credentials: 'include',
+      if (clinicianId) {
+        materialParams.set(
+          'clinicianId',
+          clinicianId,
+        );
+      }
+
+      if (roomId) {
+        materialParams.set(
+          'roomId',
+          roomId,
+        );
+      }
+
+      const materialUrl =
+        materialParams.toString()
+          ? `/api/training/materials?${materialParams.toString()}`
+          : '/api/training/materials';
+
+      const materialHeaders =
+        new Headers({
+          accept:
+            'application/json',
         });
 
-        const c = (await ctxRes.json().catch(() => null)) as TrainingContext | null;
+      if (joinToken) {
+        materialHeaders.set(
+          'x-join-token',
+          joinToken,
+        );
+      }
 
-        if (!ctxRes.ok || !c?.ok) {
-          throw new Error('Unable to load your training context right now.');
+      const matRes =
+        await fetch(
+          materialUrl,
+          {
+            cache:
+              'no-store',
+            credentials:
+              'include',
+            headers:
+              materialHeaders,
+          },
+        );
+
+      const m =
+        (await matRes
+          .json()
+          .catch(
+            () => null,
+          )) as
+          | TrainingMaterialResponse
+          | null;
+
+      if (
+        !matRes.ok ||
+        !m?.ok
+      ) {
+        throw new Error(
+          'Unable to load role-authorised training materials right now.',
+        );
+      }
+
+      const canonicalRole =
+        String(
+          m.role ||
+          participantRole,
+        ).toLowerCase();
+
+      if (
+        joinToken &&
+        canonicalRole !==
+          participantRole
+      ) {
+        throw new Error(
+          'The signed training admission role does not match this room entry.',
+        );
+      }
+
+      setAdmissionVerified(
+        participantRole ===
+          'clinician' ||
+        Boolean(
+          joinToken,
+        ),
+      );
+
+      setContentModules(
+        Array.isArray(
+          m.modules,
+        )
+          ? m.modules
+          : [],
+      );
+
+      setContentSessions(
+        Array.isArray(
+          m.sessions,
+        )
+          ? m.sessions
+          : [],
+      );
+
+      setMaterials(
+        Array.isArray(
+          m.legacyMaterials,
+        )
+          ? m.legacyMaterials
+          : (
+              Array.isArray(
+                m.items,
+              )
+                ? m.items.filter(
+                    (item) =>
+                      !item.moduleId,
+                  )
+                : []
+            ),
+      );
+
+      const canonicalName =
+        String(
+          m.identity
+            ?.displayName ||
+          participantLabel,
+        ).trim();
+
+      setResolvedParticipantName(
+        canonicalName,
+      );
+
+      let nextCtx:
+        | TrainingContext
+        | null =
+          null;
+
+      if (
+        participantRole ===
+        'clinician'
+      ) {
+        const contextUrl =
+          clinicianId
+            ? `/api/training/context?clinicianId=${encodeURIComponent(clinicianId)}`
+            : '/api/training/context';
+
+        const ctxRes =
+          await fetch(
+            contextUrl,
+            {
+              cache:
+                'no-store',
+              credentials:
+                'include',
+            },
+          );
+
+        const c =
+          (await ctxRes
+            .json()
+            .catch(
+              () => null,
+            )) as
+            | TrainingContext
+            | null;
+
+        if (
+          !ctxRes.ok ||
+          !c?.ok
+        ) {
+          throw new Error(
+            'Unable to load your training context right now.',
+          );
         }
 
-        nextCtx = c;
-        const identityId = String(c.clinician?.id || '').trim();
+        nextCtx =
+          c;
+
+        const identityId =
+          String(
+            c.clinician?.id ||
+            '',
+          ).trim();
 
         if (!identityId) {
-          throw new Error('clinician_not_found');
+          throw new Error(
+            'clinician_not_found',
+          );
         }
 
-        setResolvedClinicianId(identityId);
-      } else if (isStaffJoin) {
+        setResolvedClinicianId(
+          identityId,
+        );
+      } else {
         nextCtx = {
           ok: true,
           clinician: {
-            id: participantUid || participantRole,
-            name: participantLabel,
+            id:
+              String(
+                m.identity
+                  ?.subjectId ||
+                participantUid ||
+                participantRole,
+              ),
+            name:
+              canonicalName,
             email: null,
-            specialty: 'Contactless Medicine training',
-            status: 'trainer_join',
+            specialty:
+              'Contactless Medicine training',
+            status:
+              `${participantRole}_join`,
           },
           onboarding: {
-            stage: participantRole === 'trainer' ? 'trainer_join' : 'admin_join',
+            stage:
+              `${participantRole}_join`,
             notes: null,
           },
           training: {
-            status: 'training_scheduled',
+            status:
+              'training_scheduled',
             startAt: null,
             endAt: null,
-            mode: 'virtual',
+            mode:
+              'virtual',
             joinUrl: null,
-            certificateAvailable: false,
-            certificateUrl: null,
+            certificateAvailable:
+              false,
+            certificateUrl:
+              null,
           },
         };
+
+        setResolvedClinicianId(
+          '',
+        );
       }
 
-      setCtx(nextCtx);
-      setMaterials(
-        list.filter((x) => !x.trainingSlotId || !trainingSlotId || x.trainingSlotId === trainingSlotId),
+      setCtx(
+        nextCtx,
       );
-    } catch (e: any) {
-      setErr(e?.message || 'Unable to load the training room right now.');
+    } catch (
+      e: any
+    ) {
+      setAdmissionVerified(
+        participantRole ===
+          'clinician',
+      );
+
+      setErr(
+        e?.message ||
+        'Unable to load the training room right now.',
+      );
     }
   }
 
   useEffect(() => {
     loadRoomData();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clinicianId, trainingSlotId]);
+  }, [
+    clinicianId,
+    trainingSlotId,
+    participantRole,
+    joinToken,
+    roomId,
+  ]);
 
   useEffect(() => {
     const postAttendance = async (action: 'join' | 'heartbeat' | 'leave') => {
@@ -335,6 +640,13 @@ function TrainingRoomInner({
   }
 
   async function toggleMic() {
+    if (isObserver) {
+      setNotice(
+        'Observers join in view-only mode and cannot publish microphone audio.',
+      );
+      return;
+    }
+
     const next = !micOn;
     setMicOn(next);
     try {
@@ -346,6 +658,13 @@ function TrainingRoomInner({
   }
 
   async function toggleCam() {
+    if (isObserver) {
+      setNotice(
+        'Observers join in view-only mode and cannot publish camera video.',
+      );
+      return;
+    }
+
     const next = !camOn;
     setCamOn(next);
     try {
@@ -368,8 +687,18 @@ function TrainingRoomInner({
     [],
   );
 
-  const patientName = ctx?.clinician?.name || 'Training participant';
-  const joinPermitted = isStaffJoin || ctx?.training?.canJoin === true;
+  const participantName =
+    resolvedParticipantName ||
+    ctx?.clinician?.name ||
+    participantLabel;
+
+  const joinPermitted =
+    participantRole ===
+      'clinician'
+      ? ctx?.training
+          ?.canJoin === true
+      : admissionVerified &&
+        Boolean(joinToken);
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(79,70,229,0.10),_transparent_30%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_42%,_#ffffff_100%)]">
@@ -529,7 +858,10 @@ function TrainingRoomInner({
                   <button
                     type="button"
                     onClick={toggleMic}
-                    disabled={status !== 'connected'}
+                    disabled={
+                      status !== 'connected' ||
+                      isObserver
+                    }
                     className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     {micOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
@@ -539,7 +871,10 @@ function TrainingRoomInner({
                   <button
                     type="button"
                     onClick={toggleCam}
-                    disabled={status !== 'connected'}
+                    disabled={
+                      status !== 'connected' ||
+                      isObserver
+                    }
                     className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     {camOn ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
@@ -561,7 +896,7 @@ function TrainingRoomInner({
                 vitals={emptyVitals}
                 dense={false}
                 presentation={presentation}
-                patientName={patientName}
+                patientName={participantName}
                 micOn={micOn}
                 camOn={camOn}
                 showOverlay={showOverlay}
@@ -577,7 +912,14 @@ function TrainingRoomInner({
                 onToggleVitals={setShowVitals}
                 onToggleVitalsOverlay={setShowVitalsOverlay}
                 onToggleCaptions={setCaptionsOn}
-                onToggleRecording={setIsRecording}
+                onToggleRecording={
+                  isObserver
+                    ? () =>
+                        setNotice(
+                          'Observers cannot control training recording.',
+                        )
+                    : setIsRecording
+                }
                 onToggleXr={setXrEnabled}
                 onEnterPresentation={() => setPresentation(true)}
                 onExitPresentation={() => setPresentation(false)}
@@ -611,9 +953,29 @@ function TrainingRoomInner({
           <aside className="space-y-4">
             <Panel title="Training details">
               <div className="space-y-2 text-sm text-slate-700">
-                <InfoRow label="Clinician" value={ctx?.clinician?.name} />
-                <InfoRow label="Email" value={ctx?.clinician?.email} />
-                <InfoRow label="Specialty" value={ctx?.clinician?.specialty} />
+                <InfoRow
+                  label={
+                    participantRole ===
+                    'clinician'
+                      ? 'Clinician'
+                      : 'Participant'
+                  }
+                  value={
+                    participantName
+                  }
+                />
+                <InfoRow
+                  label="Role"
+                  value={
+                    participantRole
+                  }
+                />
+                {participantRole === 'clinician' ? (
+                  <>
+                    <InfoRow label="Email" value={ctx?.clinician?.email} />
+                    <InfoRow label="Specialty" value={ctx?.clinician?.specialty} />
+                  </>
+                ) : null}
                 <InfoRow label="Stage" value={ctx?.onboarding?.stage} />
                 <InfoRow label="Mode" value={ctx?.training?.mode} />
                 <InfoRow label="Slot" value={trainingSlotId || ctx?.training?.startAt || '—'} mono />
@@ -621,65 +983,222 @@ function TrainingRoomInner({
             </Panel>
 
             <Panel title="Training materials" icon={<FileText className="h-4 w-4" />}>
-              {materials.length === 0 ? (
+              {contentModules.length === 0 && materials.length === 0 ? (
                 <div className="text-sm text-slate-600">
-                  No materials uploaded yet. The trainer can still conduct the live session.
+                  No published materials are currently available for your training role.
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {materials.map((m) => (
-                    <div key={m.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-3">
-                      <div className="text-sm font-bold text-slate-900">{m.title}</div>
-                      {m.notes ? <div className="mt-1 text-xs text-slate-600">{m.notes}</div> : null}
+                <div className="space-y-4">
+                  {contentModules.map((module) => {
+                    const assignedSessions =
+                      module.sessionIds
+                        .map(
+                          (sessionId) =>
+                            contentSessions.find(
+                              (session) =>
+                                session.id ===
+                                sessionId,
+                            ),
+                        )
+                        .filter(
+                          (
+                            session,
+                          ): session is TrainingSessionRef =>
+                            Boolean(session),
+                        );
 
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {m.url ? (
-                          <a
-                            href={m.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
-                          >
-                            <ExternalLink className="h-3.5 w-3.5" />
-                            Open
-                          </a>
-                        ) : null}
+                    return (
+                      <div
+                        key={module.assignmentId}
+                        className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3"
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-black text-slate-950">
+                              {module.title}
+                            </div>
+                            {module.summary ? (
+                              <div className="mt-1 text-xs text-slate-600">
+                                {module.summary}
+                              </div>
+                            ) : null}
+                          </div>
 
-                        {m.fileKey ? (
-                          <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                            <Download className="h-3.5 w-3.5" />
-                            Stored file
+                          <span className="rounded-full border border-indigo-100 bg-white px-2 py-1 text-[10px] font-black uppercase text-indigo-700">
+                            {module.assignmentScope === 'programme'
+                              ? 'Programme-wide'
+                              : `${module.sessionIds.length} session(s)`}
                           </span>
+                        </div>
+
+                        {module.assignmentScope === 'sessions' ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {assignedSessions.map((session) => (
+                              <span
+                                key={session.id}
+                                title={`Session ID: ${session.id}`}
+                                className="rounded-full border bg-white px-2 py-1 text-[10px] font-bold text-slate-600"
+                              >
+                                {sessionContentLabel(session)}
+                              </span>
+                            ))}
+                          </div>
                         ) : null}
+
+                        <div className="mt-3 space-y-2">
+                          {module.resources.map((resource) => {
+                            const version =
+                              resource.currentVersion;
+
+                            return (
+                              <div
+                                key={resource.id}
+                                className="rounded-xl border border-slate-200 bg-white p-3"
+                              >
+                                <div className="flex flex-wrap items-start justify-between gap-2">
+                                  <div>
+                                    <div className="text-sm font-bold text-slate-900">
+                                      {resource.title}
+                                    </div>
+                                    {resource.description ? (
+                                      <div className="mt-1 text-xs text-slate-600">
+                                        {resource.description}
+                                      </div>
+                                    ) : null}
+                                  </div>
+
+                                  <div className="flex flex-wrap gap-1">
+                                    <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-black uppercase text-slate-500">
+                                      {resource.kind}
+                                    </span>
+                                    <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-black uppercase text-slate-500">
+                                      {resource.required ? 'Required' : 'Optional'}
+                                    </span>
+                                    {version?.version ? (
+                                      <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-black text-slate-500">
+                                        {version.version}
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                </div>
+
+                                <div className="mt-2 flex flex-wrap gap-2">
+                                  {version?.url ? (
+                                    <a
+                                      href={version.url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                                    >
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                      View resource
+                                    </a>
+                                  ) : null}
+
+                                  {version?.fileKey && !version?.url ? (
+                                    <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                                      <Download className="h-3.5 w-3.5" />
+                                      Secure file stored
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
+                    );
+                  })}
+
+                  {materials.length > 0 ? (
+                    <div className="space-y-2 border-t border-slate-200 pt-3">
+                      <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">
+                        Existing programme-only materials
+                      </div>
+
+                      {materials.map((m) => (
+                        <div
+                          key={m.id}
+                          className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                        >
+                          <div className="text-sm font-bold text-slate-900">
+                            {m.title}
+                          </div>
+
+                          {m.notes ? (
+                            <div className="mt-1 text-xs text-slate-600">
+                              {m.notes}
+                            </div>
+                          ) : null}
+
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {m.url ? (
+                              <a
+                                href={m.url}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                                Open
+                              </a>
+                            ) : null}
+
+                            {m.fileKey ? (
+                              <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                                <Download className="h-3.5 w-3.5" />
+                                Stored file
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                  ))}
+                  ) : null}
                 </div>
               )}
             </Panel>
 
-            <Panel title="Completion pathway" icon={<CheckCircle2 className="h-4 w-4" />}>
-              <ol className="space-y-2 text-sm text-slate-700">
-                <li>1. Join and remain present during trainer-led orientation.</li>
-                <li>2. Complete platform, device, documentation, and safety workflow training.</li>
-                <li>3. Admin confirms attendance and certifies completion.</li>
-                <li>4. Your clinician profile can then be activated for patient visibility.</li>
-              </ol>
+            {participantRole === 'clinician' ? (
+              <Panel title="Completion pathway" icon={<CheckCircle2 className="h-4 w-4" />}>
+                <ol className="space-y-2 text-sm text-slate-700">
+                  <li>1. Join and remain present during trainer-led orientation.</li>
+                  <li>2. Complete platform, device, documentation, and safety workflow training.</li>
+                  <li>3. Admin confirms attendance and certifies completion.</li>
+                  <li>4. Your clinician profile can then be activated for patient visibility.</li>
+                </ol>
 
-              {ctx?.training?.certificateAvailable && ctx?.training?.certificateUrl ? (
-                <a
-                  href={`${ctx.training.certificateUrl}?download=1`}
-                  className="mt-4 inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900 hover:bg-emerald-100"
-                >
-                  <Download className="h-4 w-4" />
-                  Download certificate
-                </a>
-              ) : (
-                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                  Certificate becomes available after admin certification.
+                {ctx?.training?.certificateAvailable && ctx?.training?.certificateUrl ? (
+                  <a
+                    href={`${ctx.training.certificateUrl}?download=1`}
+                    className="mt-4 inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900 hover:bg-emerald-100"
+                  >
+                    <Download className="h-4 w-4" />
+                    Download certificate
+                  </a>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                    Certificate becomes available after admin certification.
+                  </div>
+                )}
+              </Panel>
+            ) : (
+              <Panel title="Participation identity" icon={<Users className="h-4 w-4" />}>
+                <div className="space-y-2 text-sm text-slate-700">
+                  <InfoRow label="Participant" value={participantName} />
+                  <InfoRow label="Role" value={participantRole} />
+                  <InfoRow
+                    label="Media"
+                    value={isObserver ? 'View-only' : 'Role-authorised'}
+                  />
                 </div>
-              )}
-            </Panel>
+
+                <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-xs leading-relaxed text-indigo-950">
+                  Your signed training admission preserves this participant role through the room and RTC token. Materials are filtered server-side for the same role.
+                </div>
+              </Panel>
+            )}
+
           </aside>
         </section>
       </div>
@@ -762,9 +1281,14 @@ function TrainingRoomPageContent() {
   const trainingSlotId = search.get('trainingSlotId') || '';
   const clinicianIdFromQuery = search.get('clinicianId') || '';
   const uidFromQuery = search.get('uid') || search.get('identity') || '';
+  const joinToken = search.get('joinToken') || '';
   const roleFromQuery = String(search.get('role') || '').toLowerCase();
-  const participantRole =
-    roleFromQuery === 'admin' || roleFromQuery === 'trainer'
+
+  const participantRole: TrainingParticipantRole =
+    roleFromQuery === 'admin' ||
+    roleFromQuery === 'trainer' ||
+    roleFromQuery === 'observer' ||
+    roleFromQuery === 'patient'
       ? roleFromQuery
       : 'clinician';
 
@@ -776,10 +1300,16 @@ function TrainingRoomPageContent() {
       : `training-${participantRole}-${roomId || 'unknown'}`
   );
 
+  const providerRole =
+    participantRole === 'trainer' ||
+    participantRole === 'observer'
+      ? 'admin'
+      : participantRole;
+
   return (
     <SFUClientProvider
       roomId={roomId}
-      role={participantRole === 'trainer' ? 'admin' : participantRole}
+      role={providerRole}
       uid={uid}
       tokenEndpoint={typeof window !== 'undefined' ? `${window.location.origin}/api/rtc/token` : '/api/rtc/token'}
       autoConnect={false}
@@ -790,6 +1320,7 @@ function TrainingRoomPageContent() {
         clinicianId={clinicianId}
         participantRole={participantRole}
         participantUid={uid}
+        joinToken={joinToken}
       />
     </SFUClientProvider>
   );

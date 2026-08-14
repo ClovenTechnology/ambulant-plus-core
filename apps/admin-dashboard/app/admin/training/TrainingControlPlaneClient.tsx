@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from 'react';
+import TrainingContentManager from './TrainingContentManager';
 
 type TrainingMode =
   | 'virtual'
@@ -2109,12 +2110,27 @@ export default function TrainingControlPlaneClient() {
               </div>
             </section>
 
-            <section className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <h3 className="font-black text-slate-950">
-                    Training materials
-                  </h3>
+            <TrainingContentManager
+              trainingSlotId={form.id}
+              sessions={form.sessions}
+            />
+
+            <details className="rounded-2xl border border-amber-200 bg-amber-50/30">
+              <summary className="cursor-pointer list-none p-4">
+                <div className="text-sm font-black text-slate-900">
+                  Legacy programme-only materials
+                </div>
+                <p className="mt-1 text-xs text-slate-600">
+                  Existing P0 materials remain editable during migration. New content should normally be created once in the reusable library above and attached through module assignments.
+                </p>
+              </summary>
+
+              <section className="border-t border-amber-100 bg-white p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-black text-slate-950">
+                      Legacy training materials
+                    </h3>
                   <p className="mt-1 text-xs leading-relaxed text-slate-600">
                     Publish the exact modules, documents, videos and links clinicians assigned to this programme should see. No hardcoded fallback material is used.
                   </p>
@@ -2366,6 +2382,8 @@ export default function TrainingControlPlaneClient() {
                 </div>
               ) : null}
             </section>
+
+            </details>
 
             <section className="grid gap-3 sm:grid-cols-2">
               <label className="text-xs font-bold text-slate-700">

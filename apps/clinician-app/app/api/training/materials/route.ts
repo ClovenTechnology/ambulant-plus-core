@@ -45,6 +45,7 @@ function forwardHeaders(
     'x-user-id',
     'x-org-id',
     'x-ambulant-identity',
+    'x-join-token',
     'user-agent',
   ].forEach((key) => {
     const value =
@@ -104,23 +105,29 @@ export async function GET(
 
     const upstreamUrl =
       new URL(
-        '/api/clinicians/me/training/materials',
+        '/api/training/materials',
         gateway,
       );
 
-    const clinicianId =
-      request.nextUrl
-        .searchParams
-        .get('clinicianId');
+    [
+      'clinicianId',
+      'trainingSlotId',
+      'roomId',
+    ].forEach((key) => {
+      const value =
+        request.nextUrl
+          .searchParams
+          .get(key);
 
-    if (clinicianId) {
-      upstreamUrl
-        .searchParams
-        .set(
-          'clinicianId',
-          clinicianId,
-        );
-    }
+      if (value) {
+        upstreamUrl
+          .searchParams
+          .set(
+            key,
+            value,
+          );
+      }
+    });
 
     const upstream =
       await fetch(
@@ -174,9 +181,36 @@ export async function GET(
       source:
         data?.source ||
         'admin_configured',
+      role:
+        data?.role ||
+        'clinician',
+      identity:
+        data?.identity ||
+        null,
       trainingSlotId:
         data?.trainingSlotId ||
         null,
+      trainingSlot:
+        data?.trainingSlot ||
+        null,
+      sessions:
+        Array.isArray(
+          data?.sessions,
+        )
+          ? data.sessions
+          : [],
+      modules:
+        Array.isArray(
+          data?.modules,
+        )
+          ? data.modules
+          : [],
+      legacyMaterials:
+        Array.isArray(
+          data?.legacyMaterials,
+        )
+          ? data.legacyMaterials
+          : [],
       items,
       materials: items,
     });
