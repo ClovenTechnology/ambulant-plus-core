@@ -548,6 +548,14 @@ export async function presignTrainingResourceUpload(
       {
         expiresIn:
           UPLOAD_URL_TTL_SECONDS,
+        unhoistableHeaders:
+          new Set([
+            'x-amz-checksum-sha256',
+          ]),
+        signableHeaders:
+          new Set([
+            'content-type',
+          ]),
       },
     );
 
