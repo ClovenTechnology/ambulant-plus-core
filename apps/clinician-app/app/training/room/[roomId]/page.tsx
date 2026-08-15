@@ -42,6 +42,7 @@ type TrainingMaterial = {
   kind?: string | null;
   url?: string | null;
   fileKey?: string | null;
+  hasStoredFile?: boolean;
   fileName?: string | null;
   version?: string | null;
   notes?: string | null;
@@ -55,7 +56,10 @@ type TrainingContentVersion = {
   status: string;
   url?: string | null;
   fileKey?: string | null;
+  hasStoredFile?: boolean;
   fileName?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
 };
 
 type TrainingContentResource = {
@@ -240,6 +244,7 @@ function TrainingRoomInner({
   const [resolvedParticipantName, setResolvedParticipantName] = useState('');
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [accessingResourceKey, setAccessingResourceKey] = useState<string | null>(null);
   const [recordingConsentAccepted, setRecordingConsentAccepted] = useState(false);
   const [showRecordingConsent, setShowRecordingConsent] = useState(false);
 
@@ -600,6 +605,140 @@ function TrainingRoomInner({
       };
     }
   }, [status, roomId, trainingSlotId, resolvedClinicianId]);
+
+  async function openTrainingResourceFile(
+    resource: TrainingContentResource,
+    disposition:
+      | 'inline'
+      | 'attachment',
+  ) {
+    const version =
+      resource.currentVersion;
+
+    if (
+      !version?.id ||
+      !version
+        .hasStoredFile
+    ) {
+      setErr(
+        'This training resource does not have a stored file available.',
+      );
+      return;
+    }
+
+    const accessKey =
+      `${resource.id}:${version.id}:${disposition}`;
+
+    setAccessingResourceKey(
+      accessKey,
+    );
+    setErr(null);
+
+    const popup =
+      window.open(
+        '',
+        '_blank',
+      );
+
+    try {
+      const response =
+        await fetch(
+          '/api/training/materials',
+          {
+            method:
+              'POST',
+            cache:
+              'no-store',
+            credentials:
+              'include',
+            headers: {
+              accept:
+                'application/json',
+              'content-type':
+                'application/json',
+              ...(
+                joinToken
+                  ? {
+                      'x-join-token':
+                        joinToken,
+                    }
+                  : {}
+              ),
+            },
+            body:
+              JSON.stringify({
+                action:
+                  'access_file',
+                trainingSlotId,
+                roomId,
+                clinicianId:
+                  resolvedClinicianId ||
+                  clinicianId ||
+                  null,
+                resourceId:
+                  resource.id,
+                versionId:
+                  version.id,
+                disposition,
+              }),
+          },
+        );
+
+      const body =
+        await response
+          .json()
+          .catch(
+            () => null,
+          );
+
+      if (
+        !response.ok ||
+        !body?.ok ||
+        !body
+          ?.accessUrl
+      ) {
+        throw new Error(
+          body?.message ||
+          body?.error ||
+          'Unable to create a secure training-file link.',
+        );
+      }
+
+      if (popup) {
+        popup.opener =
+          null;
+        popup.location.href =
+          String(
+            body.accessUrl,
+          );
+      } else {
+        window.location.href =
+          String(
+            body.accessUrl,
+          );
+      }
+    } catch (
+      reason: any
+    ) {
+      if (
+        popup &&
+        !popup.closed
+      ) {
+        popup.close();
+      }
+
+      setErr(
+        String(
+          reason?.message ||
+          'Unable to open the secure training file.',
+        ),
+      );
+    } finally {
+      setAccessingResourceKey(
+        null,
+      );
+    }
+  }
 
   async function joinLiveRoom() {
     setErr(null);
@@ -1095,11 +1234,50 @@ function TrainingRoomInner({
                                     </a>
                                   ) : null}
 
-                                  {version?.fileKey && !version?.url ? (
-                                    <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                                      <Download className="h-3.5 w-3.5" />
-                                      Secure file stored
-                                    </span>
+                                  {version?.hasStoredFile ? (
+                                    <>
+                                      <button
+                                        type="button"
+                                        disabled={
+                                          accessingResourceKey ===
+                                          `${resource.id}:${version.id}:inline`
+                                        }
+                                        onClick={() =>
+                                          void openTrainingResourceFile(
+                                            resource,
+                                            'inline',
+                                          )
+                                        }
+                                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                      >
+                                        <ExternalLink className="h-3.5 w-3.5" />
+                                        {accessingResourceKey ===
+                                        `${resource.id}:${version.id}:inline`
+                                          ? 'Opening...'
+                                          : 'View file'}
+                                      </button>
+
+                                      <button
+                                        type="button"
+                                        disabled={
+                                          accessingResourceKey ===
+                                          `${resource.id}:${version.id}:attachment`
+                                        }
+                                        onClick={() =>
+                                          void openTrainingResourceFile(
+                                            resource,
+                                            'attachment',
+                                          )
+                                        }
+                                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                                      >
+                                        <Download className="h-3.5 w-3.5" />
+                                        {accessingResourceKey ===
+                                        `${resource.id}:${version.id}:attachment`
+                                          ? 'Preparing...'
+                                          : 'Download'}
+                                      </button>
+                                    </>
                                   ) : null}
                                 </div>
                               </div>

@@ -6,6 +6,11 @@ import {
   useMemo,
   useState,
 } from 'react';
+import {
+  TRAINING_RESOURCE_ACCEPT,
+  TrainingResourceUploadStage,
+  uploadTrainingResourceFile,
+} from '../../../lib/training-resource-upload';
 
 type Audience =
   | 'clinician'
@@ -216,6 +221,46 @@ function readJson(
     .catch(() => null);
 }
 
+
+function fileSizeLabel(
+  value: number | null,
+) {
+  const bytes =
+    Number(
+      value,
+    );
+
+  if (
+    !Number.isFinite(
+      bytes,
+    ) ||
+    bytes <= 0
+  ) {
+    return '';
+  }
+
+  if (
+    bytes >=
+    1024 * 1024
+  ) {
+    return `${(
+      bytes /
+      (
+        1024 *
+        1024
+      )
+    ).toFixed(1)} MB`;
+  }
+
+  return `${Math.max(
+    1,
+    Math.round(
+      bytes /
+      1024,
+    ),
+  )} KB`;
+}
+
 function localLabel(
   value: string,
 ) {
@@ -370,6 +415,37 @@ export default function TrainingContentManager({
     setSelectedModuleId,
   ] =
     useState('');
+
+
+  const [
+    uploadingVersionId,
+    setUploadingVersionId,
+  ] =
+    useState<
+      string | null
+    >(
+      null,
+    );
+
+  const [
+    uploadStage,
+    setUploadStage,
+  ] =
+    useState<
+      TrainingResourceUploadStage | null
+    >(
+      null,
+    );
+
+  const [
+    accessingVersionId,
+    setAccessingVersionId,
+  ] =
+    useState<
+      string | null
+    >(
+      null,
+    );
 
   const groupedSessions =
     useMemo(() => {
@@ -701,6 +777,8 @@ export default function TrainingContentManager({
 
             return {
               ...item,
+              status:
+                'draft',
               currentVersionId:
                 versionId,
               versions: [
@@ -749,6 +827,10 @@ export default function TrainingContentManager({
             };
           },
         ),
+    );
+
+    setNotice(
+      'New draft version created. Upload or link the new content, then republish the resource when ready.',
     );
   }
 
@@ -906,7 +988,11 @@ export default function TrainingContentManager({
     );
   }
 
-  async function saveLibrary() {
+  async function saveLibrary(
+    options?: {
+      quiet?: boolean;
+    },
+  ): Promise<boolean> {
     const invalidResource =
       resources.find(
         (resource) =>
@@ -919,7 +1005,7 @@ export default function TrainingContentManager({
       setError(
         'Every saved resource requires a title.',
       );
-      return;
+      return false;
     }
 
     const invalidModule =
@@ -934,7 +1020,7 @@ export default function TrainingContentManager({
       setError(
         'Every saved module requires a title.',
       );
-      return;
+      return false;
     }
 
     const emptyPublishedModule =
@@ -952,7 +1038,7 @@ export default function TrainingContentManager({
       setError(
         'A published module must contain at least one saved resource.',
       );
-      return;
+      return false;
     }
 
     const publishedWithoutVersion =
@@ -992,12 +1078,17 @@ export default function TrainingContentManager({
       setError(
         'Published resources require a current viewable URL or stored file. Keep incomplete resources in Draft.',
       );
-      return;
+      return false;
     }
 
     setSavingLibrary(true);
     setError(null);
-    setNotice(null);
+
+    if (
+      !options?.quiet
+    ) {
+      setNotice(null);
+    }
 
     try {
       const response =
@@ -1089,9 +1180,15 @@ export default function TrainingContentManager({
           : [],
       );
 
-      setNotice(
-        'Reusable training library saved.',
-      );
+      if (
+        !options?.quiet
+      ) {
+        setNotice(
+          'Reusable training library saved.',
+        );
+      }
+
+      return true;
     } catch (
       reason: any
     ) {
@@ -1101,8 +1198,195 @@ export default function TrainingContentManager({
           'Unable to save the reusable training library.',
         ),
       );
+
+      return false;
     } finally {
       setSavingLibrary(false);
+    }
+  }
+
+  async function uploadResourceVersion(
+    resource: Resource,
+    version: ResourceVersion,
+    file: File,
+  ) {
+    setError(null);
+    setNotice(null);
+
+    const saved =
+      await saveLibrary({
+        quiet: true,
+      });
+
+    if (!saved) {
+      return;
+    }
+
+    setUploadingVersionId(
+      version.id,
+    );
+
+    try {
+      const confirmed =
+        await uploadTrainingResourceFile({
+          file,
+          resourceId:
+            resource.id,
+          versionId:
+            version.id,
+          onStage:
+            setUploadStage,
+        });
+
+      if (
+        Array.isArray(
+          confirmed?.library
+            ?.resources,
+        )
+      ) {
+        setResources(
+          confirmed.library
+            .resources,
+        );
+      }
+
+      if (
+        Array.isArray(
+          confirmed?.library
+            ?.modules,
+        )
+      ) {
+        setModules(
+          confirmed.library
+            .modules,
+        );
+      }
+
+      setNotice(
+        `Secure file uploaded and verified: ${file.name}`,
+      );
+    } catch (
+      reason: any
+    ) {
+      setError(
+        String(
+          reason?.message ||
+          'Unable to upload the training file.',
+        ),
+      );
+    } finally {
+      setUploadingVersionId(
+        null,
+      );
+      setUploadStage(
+        null,
+      );
+    }
+  }
+
+  async function openStoredResource(
+    resource: Resource,
+    version: ResourceVersion,
+    disposition:
+      | 'inline'
+      | 'attachment',
+  ) {
+    if (
+      !version.fileKey
+    ) {
+      setError(
+        'This version does not have a stored file.',
+      );
+      return;
+    }
+
+    setAccessingVersionId(
+      version.id,
+    );
+    setError(null);
+
+    const popup =
+      window.open(
+        '',
+        '_blank',
+      );
+
+    try {
+      const response =
+        await fetch(
+          '/api/admin/training/materials',
+          {
+            method:
+              'POST',
+            headers: {
+              accept:
+                'application/json',
+              'content-type':
+                'application/json',
+            },
+            body:
+              JSON.stringify({
+                action:
+                  'access_file',
+                resourceId:
+                  resource.id,
+                versionId:
+                  version.id,
+                disposition,
+              }),
+          },
+        );
+
+      const body =
+        await readJson(
+          response,
+        );
+
+      if (
+        !response.ok ||
+        body?.ok !== true ||
+        !body?.accessUrl
+      ) {
+        throw new Error(
+          body?.message ||
+          body?.error ||
+          'Unable to create a secure file link.',
+        );
+      }
+
+      if (popup) {
+        popup.opener =
+          null;
+        popup.location.href =
+          String(
+            body.accessUrl,
+          );
+      } else {
+        window.location.href =
+          String(
+            body.accessUrl,
+          );
+      }
+    } catch (
+      reason: any
+    ) {
+      if (
+        popup &&
+        !popup.closed
+      ) {
+        popup.close();
+      }
+
+      setError(
+        String(
+          reason?.message ||
+          'Unable to open the stored training file.',
+        ),
+      );
+    } finally {
+      setAccessingVersionId(
+        null,
+      );
     }
   }
 
@@ -1459,7 +1743,7 @@ export default function TrainingContentManager({
 
         <div className="border-t p-4">
           <div className="mb-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-950">
-            P0.5A establishes the governed reusable library and URL-backed versions. Secure binary upload will be wired to the existing presigned-storage pattern in P0.5B after its server-side storage helper is isolated; we are not coupling tomorrow's training release to an unverified storage path.
+            P0.5A establishes the governed reusable library and Upload PDF, Word, PowerPoint, Excel and approved image files directly from your computer. Files are SHA-256 verified, stored through short-lived presigned object-storage URLs, and opened only through authenticated short-lived View/Download links.
           </div>
 
           <div className="flex flex-wrap justify-end gap-2">
@@ -1817,6 +2101,107 @@ export default function TrainingContentManager({
                                 className="mt-1 w-full rounded-lg border px-3 py-2 text-sm"
                               />
                             </label>
+
+
+                            <div className="sm:col-span-2 rounded-xl border border-indigo-100 bg-indigo-50/70 p-3">
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                  <div className="text-[11px] font-black uppercase tracking-wide text-indigo-950">
+                                    Native secure file
+                                  </div>
+                                  <div className="mt-1 text-[11px] leading-relaxed text-indigo-900">
+                                    PDF, Word, PowerPoint, Excel, JPEG, PNG or WebP. Maximum 25 MB. Upload automatically saves the current library first, hashes the file in your browser, verifies the stored object, and records the file against this exact resource version.
+                                  </div>
+                                </div>
+
+                                <label className="cursor-pointer rounded-lg bg-indigo-700 px-3 py-2 text-[11px] font-black text-white">
+                                  {uploadingVersionId === version.id
+                                    ? uploadStage === 'hashing'
+                                      ? 'Hashing...'
+                                      : uploadStage === 'preparing'
+                                        ? 'Preparing...'
+                                        : uploadStage === 'uploading'
+                                          ? 'Uploading...'
+                                          : uploadStage === 'confirming'
+                                            ? 'Verifying...'
+                                            : 'Working...'
+                                    : version.fileKey
+                                      ? 'Replace file'
+                                      : 'Upload file'}
+                                  <input
+                                    type="file"
+                                    accept={TRAINING_RESOURCE_ACCEPT}
+                                    disabled={
+                                      uploadingVersionId !== null ||
+                                      savingLibrary
+                                    }
+                                    onChange={(event) => {
+                                      const file =
+                                        event.target.files?.[0];
+
+                                      event.currentTarget.value =
+                                        '';
+
+                                      if (file) {
+                                        void uploadResourceVersion(
+                                          resource,
+                                          version,
+                                          file,
+                                        );
+                                      }
+                                    }}
+                                    className="sr-only"
+                                  />
+                                </label>
+                              </div>
+
+                              {version.fileKey ? (
+                                <div className="mt-3 rounded-lg border border-emerald-200 bg-white p-3">
+                                  <div className="text-xs font-black text-emerald-900">
+                                    {version.fileName || 'Stored training file'}
+                                  </div>
+                                  <div className="mt-1 text-[11px] text-slate-600">
+                                    {[version.mimeType, fileSizeLabel(version.sizeBytes), version.version]
+                                      .filter(Boolean)
+                                      .join(' - ')}
+                                  </div>
+                                  <div className="mt-2 flex flex-wrap gap-2">
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        accessingVersionId === version.id
+                                      }
+                                      onClick={() =>
+                                        void openStoredResource(
+                                          resource,
+                                          version,
+                                          'inline',
+                                        )
+                                      }
+                                      className="rounded-lg border bg-white px-3 py-2 text-[11px] font-black text-slate-700 disabled:opacity-50"
+                                    >
+                                      View
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        accessingVersionId === version.id
+                                      }
+                                      onClick={() =>
+                                        void openStoredResource(
+                                          resource,
+                                          version,
+                                          'attachment',
+                                        )
+                                      }
+                                      className="rounded-lg border bg-white px-3 py-2 text-[11px] font-black text-slate-700 disabled:opacity-50"
+                                    >
+                                      Download
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
 
                           {resource.versions.length >

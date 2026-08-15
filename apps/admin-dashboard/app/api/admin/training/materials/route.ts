@@ -109,3 +109,9 @@ export async function PATCH(
 ) {
   return forward(request);
 }
+
+export async function POST(
+  request: NextRequest,
+) {
+  return forward(request);
+}

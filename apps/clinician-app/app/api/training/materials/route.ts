@@ -231,3 +231,104 @@ export async function GET(
     );
   }
 }
+
+export async function POST(
+  request: NextRequest,
+) {
+  try {
+    const gateway =
+      gatewayBase();
+
+    if (!gateway) {
+      return json(
+        {
+          ok: false,
+          error:
+            'training_materials_gateway_not_configured',
+        },
+        503,
+      );
+    }
+
+    const upstreamUrl =
+      new URL(
+        '/api/training/materials',
+        gateway,
+      );
+
+    const body =
+      await request
+        .text();
+
+    const headers =
+      forwardHeaders(
+        request,
+      );
+
+    headers.set(
+      'content-type',
+      'application/json',
+    );
+
+    const upstream =
+      await fetch(
+        upstreamUrl,
+        {
+          method:
+            'POST',
+          headers,
+          body,
+          cache:
+            'no-store',
+        },
+      );
+
+    const data =
+      await upstream
+        .json()
+        .catch(
+          () => null,
+        );
+
+    if (
+      !upstream.ok ||
+      !data?.ok
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            data?.error ||
+            'training_resource_access_failed',
+          message:
+            data?.message ||
+            null,
+        },
+        upstream.status ||
+          502,
+      );
+    }
+
+    return json({
+      ...data,
+      ok: true,
+    });
+  } catch (
+    error: any
+  ) {
+    console.error(
+      '[clinician-app][training/materials][POST] upstream error',
+      error,
+    );
+
+    return json(
+      {
+        ok: false,
+        error:
+          error?.message ||
+          'training_resource_access_failed',
+      },
+      502,
+    );
+  }
+}

@@ -20,6 +20,16 @@ import {
   writeProgrammeTrainingMaterials,
   writeTrainingResourceLibrary,
 } from '@/src/clinicians/onboarding/training-materials';
+import {
+  bestEffortDeleteTrainingResourceObject,
+  presignTrainingResourceAccess,
+  presignTrainingResourceUpload,
+  trainingResourceObjectBelongsTo,
+  trainingResourceObjectKey,
+  trainingResourceStorageResponse,
+  validateTrainingResourceUploadInput,
+  verifyTrainingResourceUpload,
+} from '@/src/clinicians/onboarding/training-resource-storage';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -310,6 +320,671 @@ export async function GET(
           'training_materials_fetch_failed',
       },
       500,
+    );
+  }
+}
+
+
+export async function POST(
+  request: NextRequest,
+) {
+  try {
+    const admin =
+      await verifyAdminRequest(
+        request,
+      );
+
+    if (!admin.ok) {
+      return admin.response;
+    }
+
+    const body =
+      await request
+        .json()
+        .catch(
+          () =>
+            ({} as any),
+        );
+
+    const action =
+      String(
+        body?.action ||
+        '',
+      )
+        .trim()
+        .toLowerCase();
+
+    const actorId =
+      actorIdFromAdmin(
+        admin,
+      );
+
+    const resourceId =
+      cleanId(
+        body?.resourceId,
+      );
+
+    const versionId =
+      cleanId(
+        body?.versionId,
+      );
+
+    if (
+      !resourceId ||
+      !versionId
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            'training_resource_identity_required',
+        },
+        400,
+      );
+    }
+
+    if (
+      action ===
+      'presign_upload'
+    ) {
+      const settings =
+        await readSettings(
+          prisma,
+        );
+
+      if (!settings) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_policy_settings_missing',
+          },
+          409,
+        );
+      }
+
+      const library =
+        readTrainingResourceLibrary(
+          settings.trainingPolicy,
+        );
+
+      const resource =
+        library.resources.find(
+          (item) =>
+            item.id ===
+            resourceId,
+        );
+
+      if (!resource) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_resource_not_found',
+          },
+          404,
+        );
+      }
+
+      const version =
+        resource.versions.find(
+          (item) =>
+            item.id ===
+            versionId,
+        );
+
+      if (!version) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_resource_version_not_found',
+          },
+          404,
+        );
+      }
+
+      const upload =
+        validateTrainingResourceUploadInput({
+          fileName:
+            body?.fileName,
+          contentType:
+            body?.contentType,
+          sizeBytes:
+            body?.sizeBytes,
+          checksumSha256:
+            body?.checksumSha256,
+        });
+
+      const objectKey =
+        trainingResourceObjectKey({
+          resourceId,
+          versionId,
+        });
+
+      const signed =
+        await presignTrainingResourceUpload({
+          objectKey,
+          contentType:
+            upload.contentType,
+          checksumSha256:
+            upload.checksumSha256,
+        });
+
+      return json({
+        ok: true,
+        source:
+          'admin_training_resource_upload',
+        resourceId,
+        versionId,
+        objectKey,
+        fileName:
+          upload.fileName,
+        contentType:
+          upload.contentType,
+        sizeBytes:
+          upload.sizeBytes,
+        ...signed,
+      });
+    }
+
+    if (
+      action ===
+      'confirm_upload'
+    ) {
+      const objectKey =
+        String(
+          body?.objectKey ||
+          '',
+        )
+          .trim()
+          .slice(
+            0,
+            1000,
+          );
+
+      if (
+        !trainingResourceObjectBelongsTo({
+          objectKey,
+          resourceId,
+          versionId,
+        })
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_resource_object_invalid',
+          },
+          400,
+        );
+      }
+
+      const upload =
+        validateTrainingResourceUploadInput({
+          fileName:
+            body?.fileName,
+          contentType:
+            body?.contentType,
+          sizeBytes:
+            body?.sizeBytes,
+          checksumSha256:
+            body?.checksumSha256,
+        });
+
+      await verifyTrainingResourceUpload({
+        objectKey,
+        contentType:
+          upload.contentType,
+        sizeBytes:
+          upload.sizeBytes,
+        checksumSha256:
+          upload.checksumSha256,
+      });
+
+      let result:
+        | {
+            kind:
+              'OK';
+            library: ReturnType<
+              typeof readTrainingResourceLibrary
+            >;
+            previousFileKey:
+              string | null;
+          }
+        | {
+            kind:
+              'SETTINGS_MISSING' |
+              'RESOURCE_NOT_FOUND' |
+              'VERSION_NOT_FOUND';
+          };
+
+      try {
+        result =
+          await prisma.$transaction(
+            async (tx: any) => {
+              const settings =
+                await readSettings(
+                  tx,
+                );
+
+              if (!settings) {
+                return {
+                  kind:
+                    'SETTINGS_MISSING' as const,
+                };
+              }
+
+              const library =
+                readTrainingResourceLibrary(
+                  settings.trainingPolicy,
+                );
+
+              const resource =
+                library.resources.find(
+                  (item) =>
+                    item.id ===
+                    resourceId,
+                );
+
+              if (!resource) {
+                return {
+                  kind:
+                    'RESOURCE_NOT_FOUND' as const,
+                };
+              }
+
+              const version =
+                resource.versions.find(
+                  (item) =>
+                    item.id ===
+                    versionId,
+                );
+
+              if (!version) {
+                return {
+                  kind:
+                    'VERSION_NOT_FOUND' as const,
+                };
+              }
+
+              const previousFileKey =
+                version.fileKey ||
+                null;
+
+              const nextLibrary =
+                normaliseTrainingResourceLibrary({
+                  ...library,
+                  resources:
+                    library.resources.map(
+                      (item) =>
+                        item.id ===
+                        resourceId
+                          ? {
+                              ...item,
+                              versions:
+                                item.versions.map(
+                                  (
+                                    candidate,
+                                  ) =>
+                                    candidate.id ===
+                                    versionId
+                                      ? {
+                                          ...candidate,
+                                          url:
+                                            null,
+                                          fileKey:
+                                            objectKey,
+                                          fileName:
+                                            upload.fileName,
+                                          mimeType:
+                                            upload.contentType,
+                                          sizeBytes:
+                                            upload.sizeBytes,
+                                          checksumSha256:
+                                            upload.checksumSha256,
+                                          uploadedBy:
+                                            actorId ||
+                                            'admin',
+                                        }
+                                      : candidate,
+                                ),
+                            }
+                          : item,
+                    ),
+                });
+
+              const nextPolicy =
+                writeTrainingResourceLibrary(
+                  settings.trainingPolicy,
+                  nextLibrary,
+                );
+
+              await tx
+                .clinicianOnboardingSetting
+                .update({
+                  where: {
+                    id: 'default',
+                  },
+                  data: {
+                    trainingPolicy:
+                      nextPolicy as unknown as
+                        Prisma.InputJsonValue,
+                    updatedByUserId:
+                      actorId ||
+                      'admin',
+                  },
+                });
+
+              return {
+                kind:
+                  'OK' as const,
+                library:
+                  readTrainingResourceLibrary(
+                    nextPolicy,
+                  ),
+                previousFileKey,
+              };
+            },
+          );
+      } catch (
+        error
+      ) {
+        await bestEffortDeleteTrainingResourceObject(
+          objectKey,
+        );
+
+        throw error;
+      }
+
+      if (
+        result.kind !==
+        'OK'
+      ) {
+        await bestEffortDeleteTrainingResourceObject(
+          objectKey,
+        );
+
+        const status =
+          result.kind ===
+          'SETTINGS_MISSING'
+            ? 409
+            : 404;
+
+        const error =
+          result.kind ===
+          'SETTINGS_MISSING'
+            ? 'training_policy_settings_missing'
+            : result.kind ===
+                'RESOURCE_NOT_FOUND'
+              ? 'training_resource_not_found'
+              : 'training_resource_version_not_found';
+
+        return json(
+          {
+            ok: false,
+            error,
+          },
+          status,
+        );
+      }
+
+      if (
+        result.previousFileKey &&
+        result.previousFileKey !==
+          objectKey &&
+        trainingResourceObjectBelongsTo({
+          objectKey:
+            result.previousFileKey,
+          resourceId,
+          versionId,
+        })
+      ) {
+        await bestEffortDeleteTrainingResourceObject(
+          result.previousFileKey,
+        );
+      }
+
+      await writeAudit(
+        request,
+        {
+          actorId,
+          action:
+            'training_resource_file.uploaded',
+          entityType:
+            'TrainingResource',
+          entityId:
+            resourceId,
+          description:
+            'Admin uploaded and verified a native training resource file',
+          meta: {
+            versionId,
+            fileName:
+              upload.fileName,
+            contentType:
+              upload.contentType,
+            sizeBytes:
+              upload.sizeBytes,
+            checksumSha256:
+              upload.checksumSha256,
+          },
+        },
+      );
+
+      return json({
+        ok: true,
+        source:
+          'admin_training_resource_upload',
+        resourceId,
+        versionId,
+        library:
+          result.library,
+      });
+    }
+
+    if (
+      action ===
+      'access_file'
+    ) {
+      const settings =
+        await readSettings(
+          prisma,
+        );
+
+      if (!settings) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_policy_settings_missing',
+          },
+          409,
+        );
+      }
+
+      const library =
+        readTrainingResourceLibrary(
+          settings.trainingPolicy,
+        );
+
+      const resource =
+        library.resources.find(
+          (item) =>
+            item.id ===
+            resourceId,
+        );
+
+      if (!resource) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_resource_not_found',
+          },
+          404,
+        );
+      }
+
+      const version =
+        resource.versions.find(
+          (item) =>
+            item.id ===
+            versionId,
+        );
+
+      if (
+        !version ||
+        !version.fileKey
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_resource_file_not_found',
+          },
+          404,
+        );
+      }
+
+      if (
+        !trainingResourceObjectBelongsTo({
+          objectKey:
+            version.fileKey,
+          resourceId,
+          versionId,
+        })
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_resource_object_invalid',
+          },
+          409,
+        );
+      }
+
+      const upload =
+        validateTrainingResourceUploadInput({
+          fileName:
+            version.fileName,
+          contentType:
+            version.mimeType,
+          sizeBytes:
+            version.sizeBytes,
+          checksumSha256:
+            version.checksumSha256,
+        });
+
+      const disposition =
+        String(
+          body?.disposition ||
+          '',
+        )
+          .trim()
+          .toLowerCase() ===
+        'attachment'
+          ? 'attachment'
+          : 'inline';
+
+      const signed =
+        await presignTrainingResourceAccess({
+          objectKey:
+            version.fileKey,
+          fileName:
+            upload.fileName,
+          contentType:
+            upload.contentType,
+          disposition,
+        });
+
+      await writeAudit(
+        request,
+        {
+          actorId,
+          action:
+            disposition ===
+            'attachment'
+              ? 'training_resource_file.downloaded'
+              : 'training_resource_file.viewed',
+          entityType:
+            'TrainingResource',
+          entityId:
+            resourceId,
+          description:
+            disposition ===
+            'attachment'
+              ? 'Admin requested a secure training resource download'
+              : 'Admin requested a secure training resource view',
+          meta: {
+            versionId,
+            disposition,
+          },
+        },
+      );
+
+      return json({
+        ok: true,
+        source:
+          'admin_training_resource_access',
+        resourceId,
+        versionId,
+        fileName:
+          upload.fileName,
+        mimeType:
+          upload.contentType,
+        ...signed,
+      });
+    }
+
+    return json(
+      {
+        ok: false,
+        error:
+          'training_resource_action_invalid',
+      },
+      400,
+    );
+  } catch (
+    error: any
+  ) {
+    const storage =
+      trainingResourceStorageResponse(
+        error,
+      );
+
+    if (storage) {
+      return json(
+        storage.body,
+        storage.status,
+      );
+    }
+
+    console.error(
+      '[admin-training-materials][POST] error',
+      error,
+    );
+
+    const status =
+      Number(
+        error?.status,
+      );
+
+    return json(
+      {
+        ok: false,
+        error:
+          error?.code ||
+          error?.message ||
+          'training_resource_action_failed',
+      },
+      Number.isFinite(
+        status,
+      ) &&
+      status >= 400 &&
+      status <= 599
+        ? status
+        : 500,
     );
   }
 }
