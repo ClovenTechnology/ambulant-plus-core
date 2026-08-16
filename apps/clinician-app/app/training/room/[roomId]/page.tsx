@@ -243,6 +243,7 @@ function TrainingRoomInner({
   const [admissionVerified, setAdmissionVerified] = useState(participantRole === 'clinician');
   const [resolvedParticipantName, setResolvedParticipantName] = useState('');
   const [err, setErr] = useState<string | null>(null);
+  const [materialsNotice, setMaterialsNotice] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [accessingResourceKey, setAccessingResourceKey] = useState<string | null>(null);
   const [recordingConsentAccepted, setRecordingConsentAccepted] = useState(false);
@@ -287,19 +288,8 @@ function TrainingRoomInner({
             ? 'Training patient'
             : 'Training clinician';
 
-  async function loadRoomData() {
-    setErr(null);
-
+  async function refreshTrainingMaterials() {
     try {
-      if (
-        participantRole !== 'clinician' &&
-        !joinToken
-      ) {
-        throw new Error(
-          'A signed training admission is required for this participant role.',
-        );
-      }
-
       const materialParams =
         new URLSearchParams();
 
@@ -310,10 +300,14 @@ function TrainingRoomInner({
         );
       }
 
-      if (clinicianId) {
+      const materialClinicianId =
+        resolvedClinicianId ||
+        clinicianId;
+
+      if (materialClinicianId) {
         materialParams.set(
           'clinicianId',
-          clinicianId,
+          materialClinicianId,
         );
       }
 
@@ -355,7 +349,7 @@ function TrainingRoomInner({
           },
         );
 
-      const m =
+      const candidate =
         (await matRes
           .json()
           .catch(
@@ -366,16 +360,18 @@ function TrainingRoomInner({
 
       if (
         !matRes.ok ||
-        !m?.ok
+        !candidate?.ok
       ) {
-        throw new Error(
-          'Unable to load role-authorised training materials right now.',
+        setMaterialsNotice(
+          'Training materials are temporarily unavailable. You can still join and participate in the live session. Existing materials will remain visible while Ambulant+ retries automatically.',
         );
+
+        return null;
       }
 
       const canonicalRole =
         String(
-          m.role ||
+          candidate.role ||
           participantRole,
         ).toLowerCase();
 
@@ -384,8 +380,83 @@ function TrainingRoomInner({
         canonicalRole !==
           participantRole
       ) {
+        setMaterialsNotice(
+          'Training materials were not refreshed because the material audience does not match this signed room role. You can still join and participate in the live session.',
+        );
+
+        return null;
+      }
+
+      setContentModules(
+        Array.isArray(
+          candidate.modules,
+        )
+          ? candidate.modules
+          : [],
+      );
+
+      setContentSessions(
+        Array.isArray(
+          candidate.sessions,
+        )
+          ? candidate.sessions
+          : [],
+      );
+
+      setMaterials(
+        Array.isArray(
+          candidate.legacyMaterials,
+        )
+          ? candidate.legacyMaterials
+          : (
+              Array.isArray(
+                candidate.items,
+              )
+                ? candidate.items.filter(
+                    (item) =>
+                      !item.moduleId,
+                  )
+                : []
+            ),
+      );
+
+      const canonicalName =
+        String(
+          candidate.identity
+            ?.displayName ||
+          '',
+        ).trim();
+
+      if (canonicalName) {
+        setResolvedParticipantName(
+          canonicalName,
+        );
+      }
+
+      setMaterialsNotice(
+        null,
+      );
+
+      return candidate;
+    } catch {
+      setMaterialsNotice(
+        'Training materials are temporarily unavailable. You can still join and participate in the live session. Existing materials will remain visible while Ambulant+ retries automatically.',
+      );
+
+      return null;
+    }
+  }
+
+  async function loadRoomData() {
+    setErr(null);
+
+    try {
+      if (
+        participantRole !== 'clinician' &&
+        !joinToken
+      ) {
         throw new Error(
-          'The signed training admission role does not match this room entry.',
+          'A signed training admission is required for this participant role.',
         );
       }
 
@@ -397,42 +468,12 @@ function TrainingRoomInner({
         ),
       );
 
-      setContentModules(
-        Array.isArray(
-          m.modules,
-        )
-          ? m.modules
-          : [],
-      );
-
-      setContentSessions(
-        Array.isArray(
-          m.sessions,
-        )
-          ? m.sessions
-          : [],
-      );
-
-      setMaterials(
-        Array.isArray(
-          m.legacyMaterials,
-        )
-          ? m.legacyMaterials
-          : (
-              Array.isArray(
-                m.items,
-              )
-                ? m.items.filter(
-                    (item) =>
-                      !item.moduleId,
-                  )
-                : []
-            ),
-      );
+      const m =
+        await refreshTrainingMaterials();
 
       const canonicalName =
         String(
-          m.identity
+          m?.identity
             ?.displayName ||
           participantLabel,
         ).trim();
@@ -508,7 +549,7 @@ function TrainingRoomInner({
           clinician: {
             id:
               String(
-                m.identity
+                m?.identity
                   ?.subjectId ||
                 participantUid ||
                 participantRole,
@@ -570,6 +611,63 @@ function TrainingRoomInner({
   }, [
     clinicianId,
     trainingSlotId,
+    participantRole,
+    joinToken,
+    roomId,
+  ]);
+
+  useEffect(() => {
+    if (
+      status !==
+      'connected'
+    ) {
+      return;
+    }
+
+    const refresh =
+      () => {
+        void refreshTrainingMaterials();
+      };
+
+    const intervalId =
+      window.setInterval(
+        refresh,
+        15_000,
+      );
+
+    const handleVisibilityChange =
+      () => {
+        if (
+          document.visibilityState ===
+          'visible'
+        ) {
+          refresh();
+        }
+      };
+
+    document.addEventListener(
+      'visibilitychange',
+      handleVisibilityChange,
+    );
+
+    return () => {
+      window.clearInterval(
+        intervalId,
+      );
+
+      document.removeEventListener(
+        'visibilitychange',
+        handleVisibilityChange,
+      );
+    };
+
+    // The material query inputs are already represented below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    status,
+    trainingSlotId,
+    resolvedClinicianId,
+    clinicianId,
     participantRole,
     joinToken,
     roomId,
@@ -1122,12 +1220,19 @@ function TrainingRoomInner({
             </Panel>
 
             <Panel title="Training materials" icon={<FileText className="h-4 w-4" />}>
-              {contentModules.length === 0 && materials.length === 0 ? (
-                <div className="text-sm text-slate-600">
-                  No published materials are currently available for your training role.
-                </div>
-              ) : (
-                <div className="space-y-4">
+              <div className="space-y-3">
+                {materialsNotice ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    {materialsNotice}
+                  </div>
+                ) : null}
+
+                {contentModules.length === 0 && materials.length === 0 ? (
+                  <div className="text-sm text-slate-600">
+                    No published materials are currently available for your training role. You can still join and participate in the live session. Newly published materials will appear automatically while you remain connected.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
                   {contentModules.map((module) => {
                     const assignedSessions =
                       module.sessionIds
@@ -1335,6 +1440,7 @@ function TrainingRoomInner({
                   ) : null}
                 </div>
               )}
+              </div>
             </Panel>
 
             {participantRole === 'clinician' ? (

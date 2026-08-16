@@ -4,6 +4,9 @@ import {
   NextRequest,
   NextResponse,
 } from 'next/server';
+import {
+  createTrustedClinicianIdentityHeader,
+} from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -44,7 +47,6 @@ function forwardHeaders(
     'x-uid',
     'x-user-id',
     'x-org-id',
-    'x-ambulant-identity',
     'x-join-token',
     'user-agent',
   ].forEach((key) => {
@@ -60,6 +62,25 @@ function forwardHeaders(
       );
     }
   });
+
+  const joinToken =
+    request.headers.get(
+      'x-join-token',
+    );
+
+  if (!joinToken) {
+    try {
+      headers.set(
+        'x-ambulant-identity',
+        createTrustedClinicianIdentityHeader(
+          request,
+        ),
+      );
+    } catch {
+      // Leave identity unset so API Gateway can return
+      // its canonical authentication error.
+    }
+  }
 
   headers.set(
     'accept',
