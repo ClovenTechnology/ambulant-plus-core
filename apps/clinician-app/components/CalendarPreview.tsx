@@ -81,15 +81,21 @@ export default function CalendarPreview({
   clinicianId = 'me',
   initialView = 'week' as View,
   useBatchForWeek = false,
+  refreshKey = 0,
 }: {
   clinicianId?: string;
   initialView?: View;
   useBatchForWeek?: boolean;
+  refreshKey?: number;
 }) {
   const [view, setView] = useState<View>(initialView);
   const [cursor, setCursor] = useState<Date>(new Date());
   const [grid, setGrid] = useState<Array<{ date: string; slots: string[] }>>([]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setView(initialView);
+  }, [initialView]);
 
   const title = useMemo(() => {
     const opts: Intl.DateTimeFormatOptions = { month: 'long', year: 'numeric' };
@@ -143,7 +149,7 @@ export default function CalendarPreview({
     return () => {
       cancelled = true;
     };
-  }, [days, view, clinicianId, useBatchForWeek]);
+  }, [days, view, clinicianId, useBatchForWeek, refreshKey]);
 
   function shift(n: number) {
     if (view === 'week') setCursor(addDays(cursor, n * 7));

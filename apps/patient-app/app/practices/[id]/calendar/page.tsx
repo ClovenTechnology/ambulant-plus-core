@@ -78,11 +78,15 @@ type PracticePatientView = {
 
 type PracticeSlot = {
   start: string;
-  end?: string;
+  end: string;
   clinicianId: string;
   clinicianName?: string;
   priceCents?: number;
   currency?: string;
+  durationMin?: number;
+  bufferMin?: number;
+  status?: string;
+  consultType?: string;
 };
 
 /* ----------------- tiny uid + toasts ----------------- */
@@ -146,11 +150,7 @@ function useToasts() {
   return { push, Toasts };
 }
 
-function addMinutes(iso: string, mins: number) {
-  const d = new Date(iso);
-  d.setMinutes(d.getMinutes() + mins);
-  return d.toISOString();
-}
+
 
 function formatZar(cents?: number) {
   if (typeof cents !== 'number') return '—';
@@ -215,8 +215,7 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
 
   const [confirm, setConfirm] = useState<{ open: boolean; slot?: PracticeSlot }>({ open: false });
 
-  const tileMinutes = 30;
-  const defaultDurationMin = 45;
+
 
   useEffect(() => {
     try {
@@ -326,7 +325,6 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
         const params = new URLSearchParams({
           from: from.toISOString().slice(0, 10),
           days: '14',
-          slot: String(tileMinutes),
           country,
         });
 
@@ -347,7 +345,7 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
 
         const mapped: PracticeSlot[] = rawSlots.map((s: any) => ({
           start: String(s.start ?? s.startsAt ?? ''),
-          end: s.end ?? s.endsAt ?? undefined,
+          end: String(s.end ?? s.endsAt ?? ''),
           clinicianId: String(s.clinicianId ?? s.clinician_id ?? ''),
           clinicianName: s.clinicianName ?? s.clinician_name ?? undefined,
           priceCents:
@@ -357,9 +355,28 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
                 ? s.feeCents
                 : undefined,
           currency: s.currency ?? 'ZAR',
+          durationMin:
+            typeof s.durationMin === 'number'
+              ? s.durationMin
+              : undefined,
+          bufferMin:
+            typeof s.bufferMin === 'number'
+              ? s.bufferMin
+              : undefined,
+          status: s.status ?? undefined,
+          consultType: s.consultType ?? undefined,
         }));
 
-        if (!cancelled) setSlots(mapped.filter((s) => s.start && s.clinicianId));
+        if (!cancelled) {
+          setSlots(
+            mapped.filter(
+              (s) =>
+                s.start &&
+                s.end &&
+                s.clinicianId,
+            ),
+          );
+        }
       } catch (e: any) {
         if (!cancelled) {
           setSlotsError(e?.message || 'Failed to load availability');
@@ -375,7 +392,7 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
     return () => {
       cancelled = true;
     };
-  }, [practiceId, country, tileMinutes]);
+  }, [practiceId, country]);
 
   const clinicians = view?.clinicians ?? [];
 
@@ -448,21 +465,43 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
   const selectedSlot = confirm.slot;
   const selectedClinicianForSlot = selectedSlot && clinicianMap.get(selectedSlot.clinicianId);
 
-  const computedDurationMin = defaultDurationMin;
-  const endsAt = selectedSlot ? addMinutes(selectedSlot.start, computedDurationMin) : undefined;
+  const endsAt = selectedSlot?.end;
+  const computedDurationMin = selectedSlot
+    ? selectedSlot.durationMin ??
+      Math.max(
+        1,
+        Math.round(
+          (new Date(selectedSlot.end).getTime() -
+            new Date(selectedSlot.start).getTime()) /
+            60_000,
+        ),
+      )
+    : 0;
 
   async function confirmBooking() {
     if (!selectedSlot) return;
 
     try {
-      const priceCents = selectedSlot.priceCents ?? selectedClinicianForSlot?.priceCents ?? 60000;
-      const currency = selectedSlot.currency ?? selectedClinicianForSlot?.currency ?? 'ZAR';
+      const priceCents =
+        selectedSlot.priceCents ??
+        selectedClinicianForSlot?.priceCents;
+
+      if (!Number.isFinite(Number(priceCents))) {
+        throw new Error(
+          'This clinician fee could not be confirmed. Please choose another slot or try again.',
+        );
+      }
+
+      const currency =
+        selectedSlot.currency ??
+        selectedClinicianForSlot?.currency ??
+        'ZAR';
 
       const payload: any = {
         practiceId,
         clinicianId: selectedSlot.clinicianId,
         startsAt: selectedSlot.start,
-        endsAt: endsAt ?? addMinutes(selectedSlot.start, computedDurationMin),
+        endsAt: selectedSlot.end,
         reason: 'Practice consultation',
         kind: 'standard',
         visitMode: 'televisit',
@@ -474,8 +513,9 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
             : 'card',
         meta: {
           source: 'patient.practice-calendar',
-          tileMinutes,
+          canonicalPracticeSlot: true,
           durationMin: computedDurationMin,
+          bufferMin: selectedSlot.bufferMin,
           priceCents,
           currency,
         },
@@ -628,7 +668,7 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
           <div>
             <div className="font-medium text-sm">Available slots (next 14 days)</div>
             <p className="text-xs text-gray-600">
-              Each tile is a {tileMinutes}-minute slot. Once you pick a slot, we&apos;ll confirm the booking with that clinician.
+              Each tile uses that clinician&apos;s current server-confirmed consultation window. Once you pick a slot, we&apos;ll confirm the booking with that clinician.
             </p>
           </div>
           {loadingSlots && <div className="text-xs text-gray-500">Loading availability…</div>}
@@ -675,9 +715,8 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
               const c = clinicianMap.get(s.clinicianId);
               const labelName = s.clinicianName ?? c?.name ?? 'Clinician';
               const start = new Date(s.start);
-              const endIso = s.end ?? addMinutes(s.start, defaultDurationMin);
-              const end = new Date(endIso);
-              const price = s.priceCents ?? c?.priceCents ?? 60000;
+              const end = new Date(s.end);
+              const price = s.priceCents ?? c?.priceCents;
 
               return (
                 <li key={`${s.start}-${s.clinicianId}`}>
@@ -733,7 +772,7 @@ function PracticeCalendarPageContent({ params }: { params: { id: string } }) {
               </div>
               <div>
                 <span className="text-gray-500">Fee (approx.):</span>{' '}
-                <b>{formatZar(selectedSlot.priceCents ?? selectedClinicianForSlot?.priceCents ?? 60000)}</b>
+                <b>{formatZar(selectedSlot.priceCents ?? selectedClinicianForSlot?.priceCents)}</b>
               </div>
               <div className="text-[11px] text-gray-500 mt-2">
                 This booking will create a <b>new consultation</b> at this practice. Follow-up appointments should be booked from your Case / Encounter view.

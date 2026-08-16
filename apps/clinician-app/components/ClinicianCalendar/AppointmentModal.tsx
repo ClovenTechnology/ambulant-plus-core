@@ -225,33 +225,6 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
   const [suggestionOpen, setSuggestionOpen] = useState(false);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
 
-  // duration control (minutes) — compact control: 15 / 30 / 60
-  const STORAGE_KEY = `clinician:${clinicianId}:duration`;
-  const [selectedDuration, setSelectedDuration] = useState<number>(() => {
-    // initialize lazily from localStorage (guard for window)
-    try {
-      if (typeof window !== 'undefined') {
-        const v = localStorage.getItem(STORAGE_KEY);
-        const n = v ? parseInt(v, 10) : NaN;
-        if (!isNaN(n) && (n === 15 || n === 30 || n === 60)) return n;
-      }
-    } catch (e) {
-      // ignore
-    }
-    return 30;
-  });
-
-  // write preference to localStorage whenever it changes
-  useEffect(() => {
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(STORAGE_KEY, String(selectedDuration));
-      }
-    } catch (e) {
-      // ignore localStorage errors
-    }
-  }, [selectedDuration, STORAGE_KEY]);
-
   // drag overlay state
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
   const [dragPreviewLabel, setDragPreviewLabel] = useState<string>('');
@@ -274,9 +247,30 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
     (async () => {
       setLoading(true);
       try {
-        const cfgRes = await fetch(`/api/settings/schedule`, { cache: 'no-store' });
+        const [cfgRes, consultRes] = await Promise.all([
+          fetch(`/api/settings/schedule`, { cache: 'no-store' }),
+          fetch(`/api/settings/consult`, { cache: 'no-store' }),
+        ]);
         const cfgJson = cfgRes.ok ? await cfgRes.json() : null;
-        if (mounted) setScheduleConfig(cfgJson || { bufferMinutes: 0, minAdvanceMinutes: 0, maxAdvanceDays: 365, template: {}, exceptions: [] });
+        const consultJson = consultRes.ok ? await consultRes.json() : null;
+        const effectiveConsult = consultJson?.effective || consultJson || {};
+        if (mounted) {
+          setScheduleConfig({
+            ...(cfgJson || { template: {}, exceptions: [] }),
+            bufferMinutes:
+              effectiveConsult.bufferAfterMinutes ??
+              consultJson?.bufferMinutes ??
+              0,
+            minAdvanceMinutes:
+              effectiveConsult.minAdvanceMinutes ??
+              consultJson?.minAdvanceMinutes ??
+              0,
+            maxAdvanceDays:
+              effectiveConsult.maxAdvanceDays ??
+              consultJson?.maxAdvanceDays ??
+              365,
+          });
+        }
 
         const startStr = weekStart.format('YYYY-MM-DD');
         const slotsRes = await fetch(`/api/schedule/slots/batch?start=${encodeURIComponent(startStr)}&days=7&clinicianId=${encodeURIComponent(clinicianId)}`, { cache: 'no-store' });
@@ -315,6 +309,16 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
     };
   };
 
+  const resolveCanonicalSlot = (slotStartIso: string | null) => {
+    if (!slotStartIso) return null;
+    const day = dayjs(slotStartIso);
+    const dayKey = day.format('YYYY-MM-DD');
+    const slot = (slotsByDay[dayKey] || []).find(
+      (candidate) => slotToIso(day, candidate).startIso === slotStartIso,
+    );
+    return slot ? slotToIso(day, slot) : null;
+  };
+
   const isSlotDisabled = (slotIsoStart: string, slotIsoEnd: string) => {
     if (!scheduleConfig) return false;
     const slotStart = dayjs(slotIsoStart);
@@ -343,19 +347,25 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
     return false;
   };
 
-  // find duration in minutes for an appointment id (if present in bookedByDay), else fallback to selectedDuration
-  const getDurationForAppt = (apptId: string | null) => {
-    if (!apptId) return selectedDuration;
-    for (const day of Object.keys(bookedByDay || {})) {
-      const a = (bookedByDay[day] || []).find((x) => x.id === apptId);
-      if (a) {
-        const mins = dayjs(a.endsAt).diff(dayjs(a.startsAt), 'minute');
-        if (mins > 0) return mins;
-      }
-    }
-    return selectedDuration;
+  const eventDurationMinutes = () => {
+    if (!event.start || !event.end) return null;
+    const minutes = dayjs(event.end).diff(dayjs(event.start), 'minute');
+    return minutes > 0 ? minutes : null;
   };
 
+  // Existing appointments retain their actual persisted duration when moved.
+  const getDurationForAppt = (apptId: string | null) => {
+    if (apptId) {
+      for (const day of Object.keys(bookedByDay || {})) {
+        const appointment = (bookedByDay[day] || []).find((item) => item.id === apptId);
+        if (appointment) {
+          const minutes = dayjs(appointment.endsAt).diff(dayjs(appointment.startsAt), 'minute');
+          if (minutes > 0) return minutes;
+        }
+      }
+    }
+    return eventDurationMinutes();
+  };
   const refreshWeek = async () => {
     try {
       const startStr = weekStart.format('YYYY-MM-DD');
@@ -412,6 +422,7 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
     setSubmitting(true);
     try {
       const duration = getDurationForAppt(appointmentId);
+      if (!duration) return toast.error('Unable to determine the existing appointment duration.');
       const res = await fetch(`/api/_proxy/appointments/${encodeURIComponent(appointmentId)}/reschedule`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -447,11 +458,15 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
     const targetStartIso = overId;
     const targetDay = dayjs(targetStartIso).format('YYYY-MM-DD');
     const slot = (slotsByDay[targetDay] || []).find((s) => slotToIso(dayjs(targetDay), s).startIso === targetStartIso);
-    // compute duration: prefer original appointment duration if present, otherwise use selectedDuration
+    // Preserve the existing appointment duration; Calendar never invents a new one.
     const duration = getDurationForAppt(apptId);
-    const targetEndIso = slot ? slotToIso(dayjs(targetDay), slot).endIso : dayjs(targetStartIso).add(duration, 'minute').toISOString();
+    if (!duration) {
+      toast.error('Unable to determine the existing appointment duration.');
+      return;
+    }
+    const targetEndIso = dayjs(targetStartIso).add(duration, 'minute').toISOString();
 
-    if (isSlotDisabled(targetStartIso, targetEndIso)) {
+    if (!slot || isSlotDisabled(targetStartIso, targetEndIso)) {
       toast.error('Target slot is not allowed (buffer/exceptions/min-advance).');
       return;
     }
@@ -512,40 +527,55 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
   /* ---------- Create / Block actions ---------- */
   const handleCreate = async () => {
     if (!selectedSlotIso) return toast.error('Select a slot first');
-    const duration = selectedDuration;
-    if (isSlotDisabled(selectedSlotIso, dayjs(selectedSlotIso).add(duration, 'minute').toISOString())) {
+
+    const canonicalSlot = resolveCanonicalSlot(selectedSlotIso);
+    if (!canonicalSlot) {
+      return toast.error('That slot is no longer available. Refresh and choose another slot.');
+    }
+
+    if (isSlotDisabled(canonicalSlot.startIso, canonicalSlot.endIso)) {
       return toast.error('Selected slot is not available');
     }
+
     setSubmitting(true);
     try {
-      const startIso = selectedSlotIso;
-      const endIso = dayjs(startIso).add(duration, 'minute').toISOString();
       const res = await fetch(`/api/_proxy/appointments`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           clinicianId,
           patientId: event.extendedProps?.patientId || null,
-          startsAt: startIso,
-          endsAt: endIso,
+          startsAt: canonicalSlot.startIso,
+          endsAt: canonicalSlot.endIso,
         }),
       });
       if (!res.ok) throw res;
       const created = await res.json();
-      const dayKey = dayjs(startIso).format('YYYY-MM-DD');
-      setBookedByDay((prev) => ({ ...(prev || {}), [dayKey]: [...(prev[dayKey] || []), { id: created.id, patient: created.patient, startsAt: created.startsAt, endsAt: created.endsAt, status: created.status }] }));
+      const dayKey = dayjs(canonicalSlot.startIso).format('YYYY-MM-DD');
+      setBookedByDay((prev) => ({
+        ...(prev || {}),
+        [dayKey]: [
+          ...(prev[dayKey] || []),
+          {
+            id: created.id,
+            patient: created.patient,
+            startsAt: created.startsAt,
+            endsAt: created.endsAt,
+            status: created.status,
+          },
+        ],
+      }));
       onUpdate(created);
       toast.success('Appointment created');
       onClose();
     } catch (err) {
       console.error('create error', err);
-      toast.error('Failed to create appointment — slot may have been taken');
+      toast.error('Failed to create appointment - slot may have been taken');
       await refreshWeek();
     } finally {
       setSubmitting(false);
     }
   };
-
   const toggleBlockDay = async (dateStr: string, currentlyBlocked: boolean) => {
     try {
       if (currentlyBlocked) {
@@ -566,7 +596,9 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
       await refreshWeek();
       const cfgRes = await fetch(`/api/settings/schedule`, { cache: 'no-store' });
       const cfgJson = cfgRes.ok ? await cfgRes.json() : null;
-      setScheduleConfig(cfgJson || scheduleConfig);
+      setScheduleConfig((current: any) =>
+        cfgJson ? { ...(current || {}), ...cfgJson } : current,
+      );
       toast.success(currentlyBlocked ? `Unblocked ${dateStr}` : `Blocked ${dateStr}`);
     } catch (err) {
       console.error('toggle block error', err);
@@ -582,6 +614,14 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
     window.addEventListener('keydown', h);
     return () => window.removeEventListener('keydown', h);
   }, [onClose]);
+
+  const selectedCanonicalSlot = resolveCanonicalSlot(selectedSlotIso);
+  const selectedCanonicalDurationMin = selectedCanonicalSlot
+    ? dayjs(selectedCanonicalSlot.endIso).diff(
+        dayjs(selectedCanonicalSlot.startIso),
+        'minute',
+      )
+    : null;
 
   /* ---------- Render ---------- */
   return (
@@ -710,22 +750,16 @@ export function AppointmentModal({ event, clinicianId, onClose, onUpdate }: Appo
                 </div>
 
                 <div className="flex items-center gap-3">
-                  {/* Duration selector (compact) */}
-                  <div className="flex items-center gap-2">
-                    <div className="text-xs text-gray-600 mr-1">Duration</div>
-                    {[15, 30, 60].map((m) => (
-                      <button
-                        key={m}
-                        onClick={() => setSelectedDuration(m)}
-                        className={`px-2 py-1 text-xs rounded ${selectedDuration === m ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-                        aria-pressed={selectedDuration === m}
-                        title={`${m} minutes`}
-                      >
-                        {m}m
-                      </button>
-                    ))}
+                  <div className="max-w-sm">
+                    <div className="text-xs font-medium text-gray-700">
+                      Appointment duration
+                    </div>
+                    <div className="text-[11px] text-gray-500">
+                      {selectedCanonicalDurationMin
+                        ? `${selectedCanonicalDurationMin} min from the canonical consultation slot`
+                        : 'Choose a canonical slot. Change standard/follow-up duration in Consult settings.'}
+                    </div>
                   </div>
-
                   <div className="flex gap-2">
                     <button onClick={onClose} className="px-3 py-1 border rounded">
                       Cancel

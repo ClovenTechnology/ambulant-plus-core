@@ -1,5 +1,6 @@
 // file: apps/clinician-app/app/settings/schedule/page.tsx
 'use client';
+import Link from 'next/link';
 import { SettingsTabs } from '@/components/SettingsTabs';
 import { useEffect, useState } from 'react';
 import CalendarPreview from '../../../components/CalendarPreview';
@@ -24,14 +25,6 @@ type ScheduleConfig = {
   timezone: string;
   template: Record<DayKey, DayTemplate>;
   exceptions: Exception[];
-  slotMin?: string;
-  slotMax?: string;
-};
-type ConsultSettings = {
-  defaultMinutes: number;
-  bufferMinutes: number;
-  minAdvanceMinutes: number;
-  maxAdvanceDays: number;
 };
 
 const DEFAULT: ScheduleConfig = {
@@ -61,39 +54,40 @@ function showToast(msg: string, opts?: { type?: 'ok' | 'err'; duration?: number 
 
 export default function SchedulePage() {
   const [cfg, setCfg] = useState<ScheduleConfig>(DEFAULT);
-  const [consult, setConsult] = useState<ConsultSettings | null>(null);
   const [saved, setSaved] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
+
 
   // onboarding flag (first-run callout)
   const ONBOARD_KEY = 'clinician:seenScheduleOnboard';
   const [showOnboard, setShowOnboard] = useState(false);
 
-  // UI-only time window (kept in sync with cfg)
-  const [slotMin, setSlotMin] = useState<string>('08:00');
-  const [slotMax, setSlotMax] = useState<string>('23:00');
 
-  // preview mode: clinician vs patient view
-  const [patientView, setPatientView] = useState(false);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
       try {
-        const [r1, r2] = await Promise.all([
-          fetch('/api/settings/schedule', { cache: 'no-store' }),
-          fetch('/api/settings/consult', { cache: 'no-store' }),
-        ]);
-        const s = r1.ok ? await r1.json() : DEFAULT;
-        const c = r2.ok
-          ? await r2.json()
-          : { defaultMinutes: 25, bufferMinutes: 5, minAdvanceMinutes: 30, maxAdvanceDays: 30 };
-        const merged = { ...DEFAULT, ...s, template: { ...DEFAULT.template, ...(s?.template || {}) } } as ScheduleConfig;
+        const response = await fetch('/api/settings/schedule', {
+          cache: 'no-store',
+        });
+        const savedSchedule = response.ok
+          ? await response.json()
+          : DEFAULT;
+        const merged = {
+          ...DEFAULT,
+          ...savedSchedule,
+          template: {
+            ...DEFAULT.template,
+            ...(savedSchedule?.template || {}),
+          },
+          exceptions: Array.isArray(savedSchedule?.exceptions)
+            ? savedSchedule.exceptions
+            : [],
+        } as ScheduleConfig;
         setCfg(merged);
-        setSlotMin(s?.slotMin ?? merged.slotMin ?? '08:00');
-        setSlotMax(s?.slotMax ?? merged.slotMax ?? '23:00');
-        setConsult(c);
         const seen = typeof window !== 'undefined' && !!localStorage.getItem(ONBOARD_KEY);
         setShowOnboard(!seen);
       } finally {
@@ -138,68 +132,90 @@ export default function SchedulePage() {
     setCfg(next);
   }
 
-  // Save both schedule and consult settings (slotMin/slotMax included in schedule payload)
   async function save() {
-    // validation
     const timeRe = /^\d{2}:\d{2}$/;
-    if (!timeRe.test(slotMin) || !timeRe.test(slotMax)) {
-      showToast('Please enter valid times (HH:mm)', { type: 'err' });
+
+    for (const day of DAYS) {
+      const dayTemplate = cfg.template[day];
+
+      if (!dayTemplate.enabled) continue;
+
+      for (const range of dayTemplate.ranges) {
+        if (
+          !timeRe.test(range.start) ||
+          !timeRe.test(range.end)
+        ) {
+          showToast(
+            `Please enter valid ${DAY_LABEL[day]} times (HH:mm).`,
+            { type: 'err' },
+          );
+          return;
+        }
+      }
+    }
+
+    if (!cfg.timezone.trim()) {
+      showToast('Timezone is required.', { type: 'err' });
       return;
     }
 
     setSaving(true);
+
     try {
-      const schedulePayload = { ...cfg, slotMin: slotMin, slotMax: slotMax };
-      const r = await fetch('/api/settings/schedule', {
+      const response = await fetch('/api/settings/schedule', {
         method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(schedulePayload),
+        headers: {
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          country: cfg.country,
+          timezone: cfg.timezone,
+          template: cfg.template,
+          exceptions: cfg.exceptions,
+        }),
       });
 
-      let r2 = { ok: true } as Response;
-      if (consult) {
-        r2 = await fetch('/api/settings/consult', {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(consult),
-        });
+      if (!response.ok) {
+        const detail = await response
+          .text()
+          .catch(() => '');
+
+        console.error(
+          'schedule save error',
+          response.status,
+          detail,
+        );
+
+        showToast(
+          'Failed to save availability schedule.',
+          { type: 'err' },
+        );
+
+        return;
       }
 
-      if (r.ok && r2.ok) {
-        setSaved(true);
-        setCfg((prev) => ({ ...prev, slotMin, slotMax }));
-        showToast('Schedule & consult saved', { type: 'ok' });
-        // subtle saved animation
-        setTimeout(() => setSaved(false), 3000);
-      } else {
-        console.error('save error', await r.text().catch(() => ''), await r2.text().catch(() => ''));
-        showToast('Failed to save schedule', { type: 'err' });
-      }
-    } catch (e) {
-      console.error('save exception', e);
-      showToast('Save error: network or server problem', { type: 'err' });
+      setSaved(true);
+      setPreviewRevision((value) => value + 1);
+      showToast('Availability schedule saved.', {
+        type: 'ok',
+      });
+
+      setTimeout(
+        () => setSaved(false),
+        3000,
+      );
+    } catch (error) {
+      console.error(
+        'schedule save exception',
+        error,
+      );
+
+      showToast(
+        'Save error: network or server problem.',
+        { type: 'err' },
+      );
     } finally {
       setSaving(false);
-    }
-  }
-
-  // Called when a clinician clicks a slot in CalendarPreview
-  async function handleSlotClick(slotStartIso: string, slotEndIso?: string) {
-    const date = slotStartIso.slice(0, 10);
-    if (cfg.exceptions.some((ex) => ex.date === date)) {
-      showToast(`Day already blocked: ${date}`, { type: 'err' });
-      return;
-    }
-    setCfg((prev) => ({
-      ...prev,
-      exceptions: [...prev.exceptions, { date, reason: 'Blocked (clinician clicked slot)' }],
-    }));
-    showToast(`Blocking ${date} — saving…`, { type: 'ok' });
-    try {
-      await save();
-      showToast(`Blocked ${date}`, { type: 'ok' });
-    } catch {
-      // save already shows failure toast
     }
   }
 
@@ -223,8 +239,8 @@ export default function SchedulePage() {
           <div className="flex-1">
             <div className="font-semibold">Welcome — set your availability</div>
             <div className="text-sm text-gray-600">
-              Configure weekly templates, working windows, and exceptions. These settings control patient booking
-              availability.
+              Configure weekly availability, timezone, and exceptions here. Consultation durations, buffer, and booking
+              windows are managed separately in Consult Settings.
             </div>
           </div>
           <div className="flex flex-col gap-2">
@@ -250,31 +266,13 @@ export default function SchedulePage() {
             Copy Mon → Weekdays
           </button>
 
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-gray-600 mr-1">Preview</label>
-            <button
-              onClick={() => setPatientView(false)}
-              className={`px-2 py-1 rounded text-sm ${!patientView ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}
-              aria-pressed={!patientView}
-            >
-              Clinician
-            </button>
-            <button
-              onClick={() => setPatientView(true)}
-              className={`px-2 py-1 rounded text-sm ${patientView ? 'bg-indigo-600 text-white' : 'bg-gray-100'}`}
-              aria-pressed={patientView}
-            >
-              Patient view
-            </button>
-          </div>
-
           <button
             onClick={save}
             disabled={saving}
             className={`px-3 py-1 border rounded ${
               saving ? 'bg-gray-200 text-gray-600 cursor-wait' : 'bg-black text-white'
             } transition-transform ${saved ? 'transform scale-105 shadow-md' : ''}`}
-            title="Save schedule & consult settings"
+            title="Save availability schedule"
           >
             {saving ? 'Saving…' : 'Save'}
           </button>
@@ -334,86 +332,18 @@ export default function SchedulePage() {
         </div>
 
         <div className="border rounded p-4 bg-white">
-          <div className="flex items-center justify-between mb-3">
-            <div className="font-medium">Consult & Window</div>
-            <div className="text-xs text-gray-500" title="These settings affect what patients see when booking">
-              Help
-            </div>
-          </div>
-
-          <div className="mb-3">
-            <div className="text-sm text-gray-600 mb-2">Default visit duration</div>
-            <div className="flex gap-2">
-              {[15, 30, 60].map((m) => (
-                <button
-                  key={m}
-                  onClick={() =>
-                    setConsult((c) =>
-                      c
-                        ? { ...c, defaultMinutes: m }
-                        : { defaultMinutes: m, bufferMinutes: 5, minAdvanceMinutes: 30, maxAdvanceDays: 30 },
-                    )
-                  }
-                  className={`px-3 py-1 text-sm rounded ${
-                    consult?.defaultMinutes === m ? 'bg-indigo-600 text-white shadow' : 'bg-gray-100 text-gray-700'
-                  }`}
-                  aria-pressed={consult?.defaultMinutes === m}
-                >
-                  {m}m
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="mb-3">
-            <div className="text-sm text-gray-600 mb-2">Working window (slot grid)</div>
-            <div className="flex items-center gap-2 mb-2">
-              <select
-                aria-label="Window preset"
-                onChange={(e) => {
-                  const v = e.target.value;
-                  if (v === 'clinic') {
-                    setSlotMin('08:00');
-                    setSlotMax('17:00');
-                  } else if (v === 'full') {
-                    setSlotMin('00:00');
-                    setSlotMax('23:59');
-                  } else if (v === 'late') {
-                    setSlotMin('18:00');
-                    setSlotMax('03:00');
-                  }
-                }}
-                defaultValue="custom"
-                className="text-sm border rounded px-2 py-1"
-              >
-                <option value="custom">Custom</option>
-                <option value="clinic">Clinic (08:00–17:00)</option>
-                <option value="full">All day (00:00–23:59)</option>
-                <option value="late">Late (18:00–03:00)</option>
-              </select>
-            </div>
-            <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500">From</label>
-              <input
-                aria-label="From time"
-                type="time"
-                value={slotMin}
-                onChange={(e) => setSlotMin(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              />
-              <label className="text-xs text-gray-500">To</label>
-              <input
-                aria-label="To time"
-                type="time"
-                value={slotMax}
-                onChange={(e) => setSlotMax(e.target.value)}
-                className="border rounded px-2 py-1 text-sm"
-              />
-            </div>
-            <div className="text-xs text-gray-500 mt-2">
-              If <code>To</code> is earlier or equal to <code>From</code> this is interpreted as an overnight window
-              (e.g. 18:00 → 03:00).
-            </div>
+          <div className="mb-4">
+            <div className="font-medium">Schedule scope</div>
+            <p className="mt-2 text-sm text-gray-600">
+              This page controls recurring availability, timezone, and date exceptions only.
+              Consultation duration, follow-up duration, buffer, and booking-window rules are owned by Consult Settings.
+            </p>
+            <Link
+              href="/settings/consult"
+              className="mt-3 inline-flex rounded border px-3 py-1.5 text-sm font-medium text-indigo-700 hover:bg-indigo-50"
+            >
+              Open Consult Settings
+            </Link>
           </div>
 
           <div className="font-medium mb-2">Exceptions & Holidays</div>
@@ -464,12 +394,19 @@ export default function SchedulePage() {
         </div>
       </section>
 
-      {/* Calendar preview — pass window + default duration + preview mode */}
-      <CalendarPreview
-        clinicianId="me"
-        initialView={patientView ? 'month' : 'week'}
-        useBatchForWeek={!patientView}
-      />
+      <section className="space-y-2">
+        <div className="font-medium">Canonical availability preview</div>
+        <p className="text-xs text-gray-600">
+          This preview is generated by the server from your saved schedule and Consult Settings.
+          Unsaved edits appear after you save.
+        </p>
+        <CalendarPreview
+          clinicianId="me"
+          initialView="week"
+          useBatchForWeek
+          refreshKey={previewRevision}
+        />
+      </section>
     </main>
   );
 }

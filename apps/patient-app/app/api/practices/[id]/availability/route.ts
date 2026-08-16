@@ -74,6 +74,16 @@ function normalizeSlot(input: any) {
           ? input.feeCents
           : undefined,
     currency: input?.currency ?? undefined,
+    durationMin:
+      typeof input?.durationMin === 'number'
+        ? input.durationMin
+        : undefined,
+    bufferMin:
+      typeof input?.bufferMin === 'number'
+        ? input.bufferMin
+        : undefined,
+    status: input?.status ?? undefined,
+    consultType: input?.consultType ?? undefined,
   };
 }
 
@@ -102,7 +112,6 @@ export async function GET(
   const incoming = new URL(req.url);
   const candidates = [
     `/api/practices/${encodeURIComponent(practiceId)}/availability`,
-    `/api/practices/${encodeURIComponent(practiceId)}/slots`,
   ];
 
   let lastError = '';
@@ -138,7 +147,12 @@ export async function GET(
 
       const slots = rawSlots
         .map(normalizeSlot)
-        .filter((slot: any) => slot.start && slot.clinicianId);
+        .filter(
+          (slot: any) =>
+            slot.start &&
+            slot.end &&
+            slot.clinicianId,
+        );
 
       return NextResponse.json(
         { ok: true, slots, source: 'api_gateway' },

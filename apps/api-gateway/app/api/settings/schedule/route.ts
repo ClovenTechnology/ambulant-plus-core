@@ -1,4 +1,4 @@
-﻿// apps/api-gateway/app/api/settings/schedule/route.ts
+// apps/api-gateway/app/api/settings/schedule/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { getSchedule, setSchedule } from '@/src/store/schedule';
@@ -139,9 +139,45 @@ export async function PUT(req: NextRequest) {
   const ident = await resolveClinicianIdentity(req);
   if (ident.error) return ident.error;
 
-  const body = await req.json();
+  const body = await req.json().catch(() => ({} as any));
 
-  await setSchedule(ident.canonicalUserId, body);
+  const currentRow = await findScheduleRow(
+    ident.keys,
+    ident.canonicalUserId,
+  );
+
+  const current = currentRow
+    ? rowToSchedule(currentRow)
+    : await getSchedule(ident.canonicalUserId);
+
+  const hasCountry = cleanStr(body?.country) !== null;
+  const hasTimezone = cleanStr(body?.timezone) !== null;
+  const hasTemplate =
+    body?.template &&
+    typeof body.template === 'object' &&
+    !Array.isArray(body.template);
+  const hasExceptions = Array.isArray(body?.exceptions);
+
+  if (!hasCountry && !hasTimezone && !hasTemplate && !hasExceptions) {
+    return json(
+      {
+        ok: false,
+        error: 'unsupported_schedule_patch',
+        message:
+          'No canonical schedule fields were supplied. Update weekly availability from Schedule settings.',
+      },
+      400,
+    );
+  }
+
+  const next = {
+    country: hasCountry ? String(body.country).trim() : current.country,
+    timezone: hasTimezone ? String(body.timezone).trim() : current.timezone,
+    template: hasTemplate ? body.template : current.template,
+    exceptions: hasExceptions ? body.exceptions : current.exceptions,
+  };
+
+  await setSchedule(ident.canonicalUserId, next);
 
   // Keep any existing legacy/alias rows aligned so old identifiers do not drift.
   const existing = await (prisma as any).clinicianSchedule.findMany({
@@ -152,7 +188,7 @@ export async function PUT(req: NextRequest) {
   for (const row of existing) {
     const alias = cleanStr(row?.userId);
     if (alias && alias !== ident.canonicalUserId) {
-      await setSchedule(alias, body).catch(() => null);
+      await setSchedule(alias, next).catch(() => null);
     }
   }
 

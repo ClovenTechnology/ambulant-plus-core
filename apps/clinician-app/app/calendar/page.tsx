@@ -194,22 +194,8 @@ function CalendarPageContent() {
     };
   }, [requestedClinicianId]);
 
-  // preferences persisted in localStorage
-  const durationStorageKey = `clinician:${clinicianId}:duration`;
+  // Calendar view hours are presentation-only. Clinical availability belongs to Schedule settings.
   const timeWindowStorageKey = `clinician:${clinicianId}:timewindow`;
-
-  // clinician preferred duration (15/30/60)
-  const [preferredDuration, setPreferredDuration] = useState<number>(() => {
-    try {
-      const raw = typeof window !== 'undefined' ? localStorage.getItem(durationStorageKey) : null;
-      const v = raw ? Number(raw) : 30;
-      return [15,30,60].includes(v) ? v : 30;
-    } catch { return 30; }
-  });
-  useEffect(() => {
-    try { localStorage.setItem(durationStorageKey, String(preferredDuration)); } catch {}
-  }, [preferredDuration]);
-
   // slot window: min/max strings like "08:00" and "23:00" (min inclusive, max can be >24.00 if overnight)
   const [slotMin, setSlotMin] = useState<string>(() => {
     try {
@@ -359,11 +345,17 @@ function CalendarPageContent() {
       if (tag === 'input' || tag === 'textarea' || (e.target as HTMLElement)?.isContentEditable) return;
 
       if (e.key === 'n' || e.key === 'N') {
-        const api = calendarRef.current?.getApi?.();
-        if (!api) return;
         const start = new Date();
-        const end = new Date(start.getTime() + preferredDuration * 60000);
-        api.select(start, end);
+        setSelectedEvent({
+          id: 'tmp-' + Date.now(),
+          start,
+          end: start,
+          title: 'New Appointment',
+          extendedProps: {
+            availableSlots: slotsCache,
+          },
+        } as unknown as EventApi);
+        setModalOpen(true);
       } else if (e.key === 'ArrowLeft') {
         calendarRef.current?.getApi?.().prev();
       } else if (e.key === 'ArrowRight') {
@@ -372,8 +364,7 @@ function CalendarPageContent() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [preferredDuration]);
-
+  }, [slotsCache]);
   const handleEventClick = (clickInfo: EventClickArg) => {
     setSelectedEvent(clickInfo.event);
     setModalOpen(true);
@@ -396,7 +387,6 @@ function CalendarPageContent() {
       title: 'New Appointment',
       extendedProps: {
         availableSlots: cached,
-        defaultDuration: preferredDuration,
       },
     } as unknown as EventApi);
     setModalOpen(true);
@@ -742,22 +732,7 @@ function CalendarPageContent() {
   // compute final slot props for calendar
   const { slotMinTime, slotMaxTime } = toFullCalendarTimes(slotMin, slotMaxInput);
 
-  // save window server-side (PUT /api/settings/schedule with { clinicianId, window: { min, max } })
-  async function saveWindow() {
-    try {
-      const res = await fetch('/api/settings/schedule', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ clinicianId, window: { min: slotMin, max: slotMaxInput } }),
-      });
-      if (!res.ok) throw new Error(`Status ${res.status}`);
-      toast.success('Window saved');
-    } catch (e) {
-      console.error('saveWindow failed', e);
-      toast.error('Failed to save window');
-    }
-  }
-
+  // View hours are persisted only in localStorage above. They never mutate clinician availability.
   if (identityLoading) {
     return (
       <div className="p-6">
@@ -792,7 +767,12 @@ function CalendarPageContent() {
         <div className="flex items-start gap-4">
           <div>
             <div className="text-lg font-semibold">Clinician Calendar</div>
-            <div className="text-sm text-gray-600">Clinician: <strong>{clinicianId}</strong></div>
+            <div className="text-sm text-gray-600">
+              Clinician: <strong>{clinicianId}</strong>
+              <span className="ml-2 text-xs text-gray-500">
+                Availability comes from Schedule settings; consultation duration comes from Consult settings.
+              </span>
+            </div>
           </div>
           <div className="pt-1"><Legend /></div>
         </div>
@@ -805,23 +785,8 @@ function CalendarPageContent() {
             <button aria-label="Reload calendar" onClick={reload} className="px-3 py-1 border rounded">{loading ? 'Loading…' : 'Reload'}</button>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="text-xs text-gray-600 mr-1">Default duration</div>
-            {[15,30,60].map((m) => (
-              <button
-                key={m}
-                onClick={() => setPreferredDuration(m)}
-                className={`px-2 py-1 text-xs rounded ${preferredDuration === m ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-700'}`}
-                aria-pressed={preferredDuration === m}
-                title={`${m} minutes`}
-              >
-                {m}m
-              </button>
-            ))}
-          </div>
-
           <div className="flex items-center gap-2 border rounded px-2 py-1 text-sm">
-            <label className="text-xs text-gray-600 mr-1">Window</label>
+            <label className="text-xs text-gray-600 mr-1">View hours</label>
             <select
               aria-label="Presets"
               onChange={(e) => {
@@ -843,8 +808,7 @@ function CalendarPageContent() {
             <input aria-label="Start time" type="time" value={slotMin} onChange={(e) => setSlotMin(e.target.value)} className="text-xs" />
             <span className="text-xs">—</span>
             <input aria-label="End time" type="time" value={slotMaxInput} onChange={(e) => setSlotMaxInput(e.target.value)} className="text-xs" />
-
-            <button onClick={saveWindow} className="ml-2 px-2 py-1 rounded bg-indigo-600 text-white text-xs">Save window</button>
+            <span className="ml-1 text-[11px] text-gray-500">Display only</span>
           </div>
 
           <MiniMonth onJump={(d) => safeGotoDate(d)} slots={slotsCache} collapsed={miniCollapsed} setCollapsed={setMiniCollapsed} />

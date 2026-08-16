@@ -1,39 +1,38 @@
-// apps/clinician-app/app/api/_proxy/appointments/[id]/reschedule/route.ts
+// apps/patient-app/app/api/appointments/[id]/reschedule/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import {
-  authErrorResponse,
-  requireClinicianAuth,
-} from '@/src/lib/clinician-auth';
-import {
-  createTrustedClinicianIdentityHeader,
-} from '@/src/lib/clinician-session';
+  patientGatewayHeaders,
+  readPatientGatewayIdentity,
+} from '@/src/lib/gateway-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const GATEWAY =
-  process.env.API_GATEWAY_URL?.replace(/\/+$/, '') ||
-  process.env.NEXT_PUBLIC_API_GATEWAY_URL?.replace(/\/+$/, '') ||
-  process.env.APIGW_BASE?.replace(/\/+$/, '') ||
-  process.env.NEXT_PUBLIC_GATEWAY_ORIGIN?.replace(/\/+$/, '') ||
-  '';
+const CANONICAL_API_GATEWAY =
+  'https://api-gateway.ambulantplus.co.za';
+
+function trimSlash(value: string) {
+  return String(value || '').replace(/\/+$/, '');
+}
+
+function gatewayBase() {
+  return trimSlash(
+    process.env.APIGW_BASE ||
+      process.env.API_GATEWAY_BASE_URL ||
+      process.env.API_GATEWAY_URL ||
+      process.env.NEXT_PUBLIC_APIGW_BASE ||
+      process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
+      CANONICAL_API_GATEWAY,
+  );
+}
 
 function json(data: any, status = 200) {
   return NextResponse.json(data, {
     status,
-    headers: { 'cache-control': 'no-store' },
+    headers: {
+      'cache-control': 'no-store',
+    },
   });
-}
-
-function clinicianUid(auth: any) {
-  return String(
-    auth?.clinicianId ||
-      auth?.clinician?.id ||
-      auth?.clinician?.userId ||
-      auth?.session?.email ||
-      auth?.session?.sub ||
-      '',
-  ).trim();
 }
 
 async function proxyReschedule(
@@ -41,27 +40,15 @@ async function proxyReschedule(
   { params }: { params: { id: string } },
 ) {
   try {
-    if (!GATEWAY) {
+    const identity =
+      await readPatientGatewayIdentity(req);
+
+    if (!identity) {
       return json(
-        { ok: false, error: 'missing_gateway_origin' },
-        500,
-      );
-    }
-
-    const auth = await requireClinicianAuth(req, {
-      allowAdmin: false,
-      allowAdminStaff: false,
-    });
-
-    if (!auth.ok) {
-      return authErrorResponse(auth);
-    }
-
-    const uid = clinicianUid(auth);
-
-    if (!uid) {
-      return json(
-        { ok: false, error: 'missing_clinician_identity' },
+        {
+          ok: false,
+          error: 'patient_session_required',
+        },
         401,
       );
     }
@@ -93,19 +80,15 @@ async function proxyReschedule(
     }
 
     const response = await fetch(
-      `${GATEWAY}/api/appointments/${encodeURIComponent(id)}/reschedule`,
+      `${gatewayBase()}/api/appointments/${encodeURIComponent(id)}/reschedule`,
       {
         method: 'POST',
         cache: 'no-store',
-        headers: {
-          accept: 'application/json',
-          'content-type': 'application/json',
-          'x-ambulant-identity':
-            createTrustedClinicianIdentityHeader(req),
-          'x-uid': uid,
-          'x-clinician-id': auth.clinicianId,
-          'x-role': auth.role,
-        },
+        headers: patientGatewayHeaders({
+          req,
+          identity,
+          includeJson: true,
+        }),
         body: JSON.stringify({
           ...body,
           startsAt,
@@ -125,11 +108,6 @@ async function proxyReschedule(
       },
     });
   } catch (error: any) {
-    console.error(
-      '[clinician-app] appointment reschedule proxy failed',
-      error,
-    );
-
     return json(
       {
         ok: false,
@@ -140,7 +118,7 @@ async function proxyReschedule(
       error?.message ===
         'internal_identity_secret_unavailable'
         ? 503
-        : 500,
+        : 502,
     );
   }
 }

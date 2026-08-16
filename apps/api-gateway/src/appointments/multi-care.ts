@@ -726,6 +726,7 @@ export async function findMultiCareConflicts(args: {
   recipientPatientIds: string[];
   startsAt: Date;
   endsAt: Date;
+  excludeAppointmentId?: string | null;
 }) {
   const db = args.db || prisma;
   const recipientPatientIds = Array.from(
@@ -734,6 +735,9 @@ export async function findMultiCareConflicts(args: {
 
   const clinicianConflict = await db.appointment.findFirst({
     where: {
+      ...(args.excludeAppointmentId
+        ? { id: { not: args.excludeAppointmentId } }
+        : {}),
       clinicianId: args.clinicianId,
       startsAt: { lt: args.endsAt },
       endsAt: { gt: args.startsAt },
@@ -776,6 +780,9 @@ export async function findMultiCareConflicts(args: {
   const legacyPatientConflict = legacyOr.length
     ? await db.appointment.findFirst({
         where: {
+          ...(args.excludeAppointmentId
+            ? { id: { not: args.excludeAppointmentId } }
+            : {}),
           OR: legacyOr,
           startsAt: { lt: args.endsAt },
           endsAt: { gt: args.startsAt },
@@ -809,6 +816,9 @@ export async function findMultiCareConflicts(args: {
               notIn: ['DECLINED', 'REMOVED', 'CANCELLED'],
             },
             appointment: {
+              ...(args.excludeAppointmentId
+                ? { id: { not: args.excludeAppointmentId } }
+                : {}),
               startsAt: { lt: args.endsAt },
               endsAt: { gt: args.startsAt },
               status: { notIn: ACTIVE_APPOINTMENT_EXCLUSIONS },

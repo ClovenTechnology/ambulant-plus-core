@@ -202,11 +202,6 @@ function formatMoney(cents: number, currency: string) {
   }
 }
 
-function addMinutesIso(iso: string, mins: number) {
-  const d = new Date(iso);
-  d.setMinutes(d.getMinutes() + mins);
-  return d.toISOString();
-}
 
 function safeNum(v: any): number | undefined {
   const n = typeof v === 'number' ? v : Number(v);
@@ -343,23 +338,62 @@ function normalizeBookingProfile(p: any, fallback: BookingProfile): BookingProfi
   return { clinician, fees, refundPolicy, rules };
 }
 
-function normalizeSlot(raw: Slot, fee: FeeProfile, consultType: ConsultType): NormalizedSlot {
-  const allowed: SlotStatus[] = ['available', 'limited', 'blocked', 'booked', 'past'];
-  const rawStatus = String(raw?.status || '').toLowerCase() as SlotStatus;
-  const status = allowed.includes(rawStatus) ? rawStatus : 'available';
+function normalizeSlot(
+  raw: Slot,
+  consultType: ConsultType,
+): NormalizedSlot | null {
+  const start = String(raw?.start || '').trim();
+  const end = String(raw?.end || '').trim();
+  const startMs = new Date(start).getTime();
+  const endMs = new Date(end).getTime();
+  const durationMin = Number(raw?.durationMin);
+  const bufferMin = Number(raw?.bufferMin);
+  const feeCents = Number(raw?.feeCents);
+  const currency = String(raw?.currency || '').trim().toUpperCase();
 
-  const start = String(raw.start);
-  const durationMin = Number.isFinite(Number(raw.durationMin)) ? Number(raw.durationMin) : fee.durationMin;
-  const bufferMin = Number.isFinite(Number(raw.bufferMin)) ? Number(raw.bufferMin) : fee.bufferMin;
-  const end = raw.end ? String(raw.end) : addMinutesIso(start, durationMin);
+  if (
+    !start ||
+    !end ||
+    !Number.isFinite(startMs) ||
+    !Number.isFinite(endMs) ||
+    endMs <= startMs ||
+    !Number.isFinite(durationMin) ||
+    durationMin <= 0 ||
+    !Number.isFinite(bufferMin) ||
+    bufferMin < 0 ||
+    !Number.isFinite(feeCents) ||
+    feeCents < 0 ||
+    !/^[A-Z]{3}$/.test(currency)
+  ) {
+    return null;
+  }
 
-  const localStart = raw.localStart ? String(raw.localStart) : undefined;
-  const localEnd = raw.localEnd ? String(raw.localEnd) : undefined;
-  const localDate = raw.localDate ? String(raw.localDate) : undefined;
-  const localStartTime = raw.localStartTime ? String(raw.localStartTime) : undefined;
-  const localEndTime = raw.localEndTime ? String(raw.localEndTime) : undefined;
-  const localTimeLabel = raw.localTimeLabel ? String(raw.localTimeLabel) : undefined;
-  const timezone = raw.timezone ? String(raw.timezone) : undefined;
+  const allowed: SlotStatus[] = [
+    'available',
+    'limited',
+    'blocked',
+    'booked',
+    'past',
+  ];
+  const rawStatus =
+    String(raw?.status || '').toLowerCase() as SlotStatus;
+  const status =
+    allowed.includes(rawStatus) ? rawStatus : 'available';
+
+  const localStart =
+    raw.localStart ? String(raw.localStart) : undefined;
+  const localEnd =
+    raw.localEnd ? String(raw.localEnd) : undefined;
+  const localDate =
+    raw.localDate ? String(raw.localDate) : undefined;
+  const localStartTime =
+    raw.localStartTime ? String(raw.localStartTime) : undefined;
+  const localEndTime =
+    raw.localEndTime ? String(raw.localEndTime) : undefined;
+  const localTimeLabel =
+    raw.localTimeLabel ? String(raw.localTimeLabel) : undefined;
+  const timezone =
+    raw.timezone ? String(raw.timezone) : undefined;
 
   return {
     start,
@@ -373,9 +407,10 @@ function normalizeSlot(raw: Slot, fee: FeeProfile, consultType: ConsultType): No
     timezone,
     status,
     reason: raw.reason ? String(raw.reason) : undefined,
-    consultType: raw.consultType === 'followup' ? 'followup' : consultType,
-    feeCents: Number.isFinite(Number(raw.feeCents)) ? Number(raw.feeCents) : fee.priceCents,
-    currency: String(raw.currency || fee.currency || 'ZAR').toUpperCase(),
+    consultType:
+      raw.consultType === 'followup' ? 'followup' : consultType,
+    feeCents,
+    currency,
     durationMin,
     bufferMin,
   };
@@ -710,7 +745,6 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     return consultType === 'followup' ? src.fees.followUp : src.fees.standard;
   }, [normalizedForUi, consultType]);
 
-  const tileMinutes = useMemo(() => Math.max(10, (fee.durationMin ?? 0) + (fee.bufferMin ?? 0)), [fee]);
 
   useEffect(() => {
     let canceled = false;
@@ -783,7 +817,6 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         const q = new URLSearchParams({
           from: from.toISOString().slice(0, 10),
           days: '14',
-          slot: String(tileMinutes),
           type: consultType,
           includeUnavailable: showUnavailable ? '1' : '0',
         });
@@ -799,7 +832,12 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
         if (!r.ok) throw new Error(j?.error || `Failed to load availability (HTTP ${r.status})`);
 
         const out = Array.isArray(j?.slots) ? (j.slots as Slot[]) : [];
-        const normalized = out.map((slot) => normalizeSlot(slot, fee, consultType));
+        const normalized = out
+          .map((slot) => normalizeSlot(slot, consultType))
+          .filter(
+            (slot): slot is NormalizedSlot =>
+              slot !== null,
+          );
 
         if (!canceled) setSlots(normalized);
       } catch (e: any) {
@@ -817,7 +855,7 @@ export default function ClinicianCalendar({ params }: { params: { id: string } }
     return () => {
       canceled = true;
     };
-  }, [params.id, consultType, caseId, tileMinutes, apiEnabled, fee, profile, canBeBooked, showUnavailable]);
+  }, [params.id, consultType, caseId, apiEnabled, profile, canBeBooked, showUnavailable]);
 
   useEffect(() => {
     setSelectedSlot(null);

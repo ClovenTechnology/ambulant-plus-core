@@ -7,6 +7,7 @@ import {
   isMultiCareFoundationUnavailable,
   loadClinicianMultiCarePolicies,
 } from '@/src/clinicians/multi-care-policy';
+import { loadAvailabilityConfig } from '@/src/availability/resolver';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -46,24 +47,6 @@ function cleanStr(value: unknown, max = 240): string | undefined {
   return s.length > max ? s.slice(0, max) : s;
 }
 
-function normalizeCurrency(value: unknown) {
-  const c = String(value || 'ZAR').trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(c) ? c : 'ZAR';
-}
-
-function num(value: unknown, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function amountCents(...values: unknown[]) {
-  for (const value of values) {
-    const n = Number(value);
-    if (Number.isFinite(n) && n >= 0) return Math.round(n);
-  }
-
-  return 0;
-}
 
 function normalizeCountryCode(value: unknown) {
   const raw = String(value ?? '').trim().slice(0, 80);
@@ -119,47 +102,6 @@ function readProfileJson(clinician: any) {
   };
 }
 
-function buildFeeProfile(clinician: any, profile: any) {
-  const currency = normalizeCurrency(clinician?.currency || profile?.currency || 'ZAR');
-
-  const standardCents = amountCents(
-    clinician?.feeCents,
-    profile?.feeCents,
-    profile?.standardFeeCents,
-    profile?.standardConsultFeeCents,
-    profile?.consultationFeeCents,
-  );
-
-  const followUpCents = amountCents(
-    profile?.followUpFeeCents,
-    profile?.followupFeeCents,
-    standardCents > 0 ? Math.round(standardCents * 0.75) : 0,
-  );
-
-  return {
-    standard: {
-      priceCents: standardCents,
-      currency,
-      durationMin: Math.max(
-        1,
-        Math.round(num(profile?.durationMin ?? profile?.standardDurationMin, 30)),
-      ),
-      bufferMin: Math.max(0, Math.round(num(profile?.bufferMin, 0))),
-    },
-    followUp: {
-      priceCents: followUpCents,
-      currency,
-      durationMin: Math.max(
-        1,
-        Math.round(num(profile?.followUpDurationMin ?? profile?.followupDurationMin, 15)),
-      ),
-      bufferMin: Math.max(
-        0,
-        Math.round(num(profile?.followUpBufferMin ?? profile?.followupBufferMin, 0)),
-      ),
-    },
-  };
-}
 
 export async function OPTIONS() {
   return new NextResponse(null, {
@@ -252,7 +194,24 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
       .slice(0, 3);
 
     const { meta, profile } = readProfileJson(clinician);
-    const fees = buildFeeProfile(clinician, profile);
+    const availability = await loadAvailabilityConfig(
+      String(clinician.id),
+      'standard',
+    );
+    const fees = {
+      standard: {
+        priceCents: availability.standard.feeCents,
+        currency: availability.standard.currency,
+        durationMin: availability.standard.durationMin,
+        bufferMin: availability.standard.bufferMin,
+      },
+      followUp: {
+        priceCents: availability.followup.feeCents,
+        currency: availability.followup.currency,
+        durationMin: availability.followup.durationMin,
+        bufferMin: availability.followup.bufferMin,
+      },
+    };
 
     let multiCare: any = {
       available: false,
@@ -360,7 +319,7 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
       city,
       province,
       country: normalizeCountryCode(clinician.country ?? profile.country),
-      timezone: profile.timezone || 'Africa/Johannesburg',
+      timezone: availability.timezone,
       rating:
         typeof clinician.ratingAvg === 'number'
           ? clinician.ratingAvg
@@ -424,6 +383,9 @@ export async function GET(_req: NextRequest, ctx: { params: { id: string } }) {
       testimonials,
       meta: {
         source: 'api_gateway_booking_profile',
+        availabilitySource: 'canonical_availability_config',
+        availabilitySources: availability.sources,
+        scheduleMatchedUserId: availability.scheduleMatchedUserId,
         realPatientApprovedAt:
           meta.realPatientApprovedAt ?? meta.realPatientApproval?.approvedAt ?? null,
       },

@@ -1,7 +1,11 @@
 // apps/api-gateway/app/api/schedule/slots/route.ts
 import { NextRequest, NextResponse } from 'next/server';
-import { addDays, startOfDay } from '@/src/time';
-import { getEffectiveConsultConfig, generateSlotsForDate } from '@/src/consult/engine';
+import {
+  addAvailabilityDays,
+  AvailabilityError,
+  isValidAvailabilityDate,
+  listAvailabilitySlots,
+} from '@/src/availability/resolver';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,70 +15,149 @@ type BatchParams = {
   clinicianId?: string;
 };
 
-async function parseParams(req: NextRequest): Promise<BatchParams> {
+async function parseParams(
+  req: NextRequest,
+): Promise<BatchParams> {
   if (req.method === 'GET') {
-    const q = req.nextUrl.searchParams;
+    const query = req.nextUrl.searchParams;
 
     return {
-      start: q.get('start') ?? undefined,
-      days: q.get('days') ? Number(q.get('days')) : undefined,
-      clinicianId: q.get('clinicianId') ?? q.get('clinician_id') ?? undefined,
+      start: query.get('start') ?? undefined,
+      days: query.get('days')
+        ? Number(query.get('days'))
+        : undefined,
+      clinicianId:
+        query.get('clinicianId') ??
+        query.get('clinician_id') ??
+        undefined,
     };
   }
 
-  try {
-    const body = await req.json().catch(() => ({}));
+  const body = await req
+    .json()
+    .catch(() => ({} as any));
 
-    return {
-      start: body.start,
-      days: typeof body.days === 'number' ? body.days : undefined,
-      clinicianId: body.clinicianId || body.clinician_id,
-    };
-  } catch {
-    return {};
+  return {
+    start: body.start,
+    days:
+      typeof body.days === 'number'
+        ? body.days
+        : undefined,
+    clinicianId:
+      body.clinicianId ||
+      body.clinician_id,
+  };
+}
+
+function groupSlots(
+  from: string,
+  days: number,
+  slots: Array<{
+    localDate: string;
+    start: string;
+    end: string;
+    status?: string;
+  }>,
+) {
+  const output: Record<string, any[]> = {};
+
+  for (let index = 0; index < days; index += 1) {
+    output[addAvailabilityDays(from, index)] = [];
   }
+
+  for (const slot of slots) {
+    const key = slot.localDate;
+
+    if (!output[key]) {
+      output[key] = [];
+    }
+
+    output[key].push({
+      start: slot.start,
+      end: slot.end,
+      label: 'Available',
+      ...(slot.status
+        ? { status: slot.status }
+        : {}),
+    });
+  }
+
+  return output;
 }
 
 async function handleBatch(req: NextRequest) {
-  const { start, days = 42, clinicianId } = await parseParams(req);
+  const {
+    start,
+    days = 42,
+    clinicianId,
+  } = await parseParams(req);
 
-  if (!start || !clinicianId) {
+  const from = String(start || '').slice(0, 10);
+
+  if (
+    !from ||
+    !clinicianId ||
+    !isValidAvailabilityDate(from)
+  ) {
     return NextResponse.json(
-      { error: 'missing_start_or_clinicianId' },
+      {
+        error:
+          !start || !clinicianId
+            ? 'missing_start_or_clinicianId'
+            : 'invalid_start',
+      },
       { status: 400 },
     );
   }
 
-  const safeDays = Math.max(1, Math.min(62, Number(days || 42)));
+  const safeDays = Math.max(
+    1,
+    Math.min(
+      62,
+      Math.floor(Number(days || 42)),
+    ),
+  );
 
   try {
-    const startDay = startOfDay(new Date(start));
-    const cfg = await getEffectiveConsultConfig(clinicianId);
+    const result = await listAvailabilitySlots({
+      clinicianRef: clinicianId,
+      from,
+      days: safeDays,
+      consultType: 'standard',
+      includeUnavailable: false,
+      enforceBookability: false,
+      enforceAdvanceWindow: true,
+    });
 
-    const out: Record<string, any[]> = {};
+    return NextResponse.json({
+      slots: groupSlots(
+        from,
+        result.meta.days,
+        result.slots,
+      ),
+    });
+  } catch (error: any) {
+    console.error(
+      'schedule/slots error',
+      error,
+    );
 
-    for (let i = 0; i < safeDays; i += 1) {
-      const d = addDays(startDay, i);
-      const key = d.toISOString().slice(0, 10);
-
-      const slotObjs = generateSlotsForDate(d, cfg).map((s) => ({
-        start: s.start.toISOString(),
-        end: s.end.toISOString(),
-        label: s.label,
-        ...(s.status ? { status: s.status } : {}),
-      }));
-
-      out[key] = slotObjs;
+    if (error instanceof AvailabilityError) {
+      return NextResponse.json(
+        {
+          error: error.code,
+          details: error.details,
+        },
+        { status: error.status },
+      );
     }
-
-    return NextResponse.json({ slots: out });
-  } catch (err: any) {
-    console.error('schedule/slots error', err);
 
     return NextResponse.json(
       {
         error: 'server_error',
-        message: String(err?.message || err),
+        message: String(
+          error?.message || error,
+        ),
       },
       { status: 500 },
     );

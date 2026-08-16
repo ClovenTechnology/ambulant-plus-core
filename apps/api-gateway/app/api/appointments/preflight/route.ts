@@ -13,6 +13,10 @@ import {
   resolveAuthorizedCareRecipients,
   resolveMultiCareQuote,
 } from '@/src/appointments/multi-care';
+import {
+  AvailabilityError,
+  validateAvailabilityInterval,
+} from '@/src/availability/resolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,46 +56,6 @@ function minutesBetween(startsAt: Date, endsAt: Date) {
   );
 }
 
-function addUtcDaysYmd(ymd: string, days: number) {
-  const [year, month, day] = ymd.split('-').map(Number);
-  const value = new Date(
-    Date.UTC(year, (month || 1) - 1, day || 1),
-  );
-  value.setUTCDate(value.getUTCDate() + days);
-  return value.toISOString().slice(0, 10);
-}
-
-function sameInstant(value: unknown, expected: Date) {
-  const milliseconds = Date.parse(String(value || ''));
-  return (
-    Number.isFinite(milliseconds) &&
-    milliseconds === expected.getTime()
-  );
-}
-
-function bookableSlotStatus(value: unknown) {
-  const status = clean(value, 40).toLowerCase();
-  return status === 'available' || status === 'limited';
-}
-
-function pickConsultType(value: unknown) {
-  const kind = clean(value, 40).toLowerCase();
-  return kind === 'followup' || kind === 'follow-up'
-    ? 'followup'
-    : 'standard';
-}
-
-async function readJsonSafe(response: Response) {
-  const text = await response.text();
-  if (!text) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
-}
-
 async function revalidateSelectedAvailabilitySlot(args: {
   req: NextRequest;
   clinicianId: string;
@@ -100,78 +64,93 @@ async function revalidateSelectedAvailabilitySlot(args: {
   kind: string;
   caseId: string | null;
 }) {
-  const from = addUtcDaysYmd(
-    args.startsAt.toISOString().slice(0, 10),
-    -1,
-  );
-  const type = pickConsultType(args.kind);
-  const url = new URL(
-    `/api/clinicians/${encodeURIComponent(args.clinicianId)}/availability`,
-    args.req.url,
-  );
+  try {
+    const validation = await validateAvailabilityInterval({
+      clinicianRef: args.clinicianId,
+      startsAt: args.startsAt,
+      endsAt: args.endsAt,
+      consultType: args.kind,
+      caseId: args.caseId,
+      allowExtendedDuration: false,
+      enforceBookability: true,
+      enforceAdvanceWindow: true,
+      enforceConflicts: true,
+    });
 
-  url.searchParams.set('from', from);
-  url.searchParams.set('days', '3');
-  url.searchParams.set('includeUnavailable', '1');
-  url.searchParams.set('type', type);
-  if (args.caseId) url.searchParams.set('caseId', args.caseId);
+    return {
+      status: validation.status,
+      reason: validation.reason,
+      start: args.startsAt.toISOString(),
+      end: args.endsAt.toISOString(),
+      localStart: validation.localStart,
+      localEnd: validation.localEnd,
+      localDate: validation.localDate,
+      localStartTime: validation.localStartTime,
+      localEndTime: validation.localEndTime,
+      localTimeLabel: validation.localTimeLabel,
+      timezone: validation.timezone,
+      consultType: validation.consultType,
+      feeCents: validation.feeCents,
+      currency: validation.currency,
+      durationMin: validation.canonicalDurationMin,
+      bufferMin: validation.bufferMin,
+    };
+  } catch (error: any) {
+    if (error instanceof AvailabilityError) {
+      const mappedCode =
+        error.code === 'interval_not_bookable'
+          ? 'selected_slot_not_bookable'
+          : 'selected_slot_not_in_current_availability';
 
-  const headers = new Headers();
-  for (const key of [
-    'authorization',
-    'cookie',
-    'x-ambulant-identity',
-    'x-request-id',
-    'x-correlation-id',
-  ]) {
-    const value = args.req.headers.get(key);
-    if (value) headers.set(key, value);
+      throw new MultiCareBookingError(
+        mappedCode,
+        error.status,
+        {
+          canonicalAvailabilityError: error.code,
+          details: error.details,
+        },
+      );
+    }
+
+    throw error;
   }
-  headers.set('accept', 'application/json');
+}
 
-  const response = await fetch(url.toString(), {
-    method: 'GET',
-    headers,
-    cache: 'no-store',
-  });
-  const data: any = await readJsonSafe(response);
+async function validateExpandedAvailabilityInterval(args: {
+  clinicianId: string;
+  startsAt: Date;
+  endsAt: Date;
+  kind: string;
+  caseId: string | null;
+}) {
+  try {
+    return await validateAvailabilityInterval({
+      clinicianRef: args.clinicianId,
+      startsAt: args.startsAt,
+      endsAt: args.endsAt,
+      consultType: args.kind,
+      caseId: args.caseId,
+      allowExtendedDuration: true,
+      enforceBookability: false,
+      enforceAdvanceWindow: false,
+      enforceConflicts: false,
+    });
+  } catch (error: any) {
+    if (error instanceof AvailabilityError) {
+      throw new MultiCareBookingError(
+        'expanded_interval_outside_clinician_availability',
+        error.status,
+        {
+          canonicalAvailabilityError: error.code,
+          details: error.details,
+          startsAt: args.startsAt.toISOString(),
+          endsAt: args.endsAt.toISOString(),
+        },
+      );
+    }
 
-  if (!response.ok || !data || data.ok === false) {
-    throw new MultiCareBookingError(
-      data?.error || 'availability_revalidation_failed',
-      response.status || 502,
-      data,
-    );
+    throw error;
   }
-
-  const slots = Array.isArray(data.slots) ? data.slots : [];
-  const slot = slots.find(
-    (candidate: any) =>
-      sameInstant(candidate?.start, args.startsAt) &&
-      sameInstant(candidate?.end, args.endsAt),
-  );
-
-  if (!slot) {
-    throw new MultiCareBookingError(
-      'selected_slot_not_in_current_availability',
-      409,
-      {
-        startsAt: args.startsAt.toISOString(),
-        endsAt: args.endsAt.toISOString(),
-        consultType: type,
-      },
-    );
-  }
-
-  if (!bookableSlotStatus(slot.status)) {
-    throw new MultiCareBookingError(
-      'selected_slot_not_bookable',
-      409,
-      { slot },
-    );
-  }
-
-  return slot;
 }
 
 export async function OPTIONS() {
@@ -345,6 +324,14 @@ export async function POST(req: NextRequest) {
     const finalEndsAt = new Date(
       startsAt.getTime() + quote.durationMin * 60_000,
     );
+
+    await validateExpandedAvailabilityInterval({
+      clinicianId: clinician.id,
+      startsAt,
+      endsAt: finalEndsAt,
+      kind: feeKind,
+      caseId: requestedCaseId,
+    });
 
     const conflicts = await findMultiCareConflicts({
       clinicianId: clinician.id,

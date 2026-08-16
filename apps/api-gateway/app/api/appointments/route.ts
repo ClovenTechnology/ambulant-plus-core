@@ -15,6 +15,10 @@ import {
   resolveMultiCareQuote,
   verifyMultiCarePriceLock,
 } from '@/src/appointments/multi-care';
+import {
+  AvailabilityError,
+  validateAvailabilityInterval,
+} from '@/src/availability/resolver';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -133,39 +137,6 @@ function dateFrom(value: unknown) {
   return Number.isFinite(d.getTime()) ? d : null;
 }
 
-function addUtcDaysYmd(ymd: string, days: number) {
-  const [y, m, d] = ymd.split('-').map(Number);
-  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
-  dt.setUTCDate(dt.getUTCDate() + days);
-  return dt.toISOString().slice(0, 10);
-}
-
-function sameInstant(a: unknown, b: Date) {
-  const ms = Date.parse(String(a || ''));
-  return Number.isFinite(ms) && ms === b.getTime();
-}
-
-function bookableSlotStatus(status: unknown) {
-  const s = String(status || '').toLowerCase();
-  return s === 'available' || s === 'limited';
-}
-
-function pickConsultType(value: unknown) {
-  const s = String(value || '').trim().toLowerCase();
-  return s === 'followup' || s === 'follow-up' ? 'followup' : 'standard';
-}
-
-async function readJsonSafe(res: Response) {
-  const text = await res.text();
-  if (!text) return null;
-
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { raw: text };
-  }
-}
-
 async function revalidateSelectedAvailabilitySlot(args: {
   req: NextRequest;
   clinicianId: string;
@@ -176,100 +147,132 @@ async function revalidateSelectedAvailabilitySlot(args: {
   kind: string;
   caseId: string;
 }) {
-  const from = addUtcDaysYmd(args.startsAt.toISOString().slice(0, 10), -1);
-  const type = pickConsultType(args.kind);
-  const url = new URL(
-    `/api/clinicians/${encodeURIComponent(args.clinicianId)}/availability`,
-    args.req.url,
-  );
+  try {
+    const validation = await validateAvailabilityInterval({
+      clinicianRef: args.clinicianId,
+      startsAt: args.startsAt,
+      endsAt: args.endsAt,
+      consultType: args.kind,
+      caseId: args.caseId || null,
+      allowExtendedDuration: false,
+      enforceBookability: true,
+      enforceAdvanceWindow: true,
+      enforceConflicts: true,
+    });
 
-  url.searchParams.set('from', from);
-  url.searchParams.set('days', '3');
-  url.searchParams.set('includeUnavailable', '1');
-  url.searchParams.set('type', type);
-  if (args.caseId) url.searchParams.set('caseId', args.caseId);
-
-  const headers = new Headers();
-  for (const key of [
-    'authorization',
-    'cookie',
-    'x-ambulant-identity',
-    'x-request-id',
-    'x-correlation-id',
-  ]) {
-    const value = args.req.headers.get(key);
-    if (value) headers.set(key, value);
-  }
-  headers.set('accept', 'application/json');
-
-  const res = await fetch(url.toString(), {
-    method: 'GET',
-    cache: 'no-store',
-    headers,
-  });
-
-  const data: any = await readJsonSafe(res);
-
-  if (!res.ok || !data || data.ok === false) {
-    return {
-      ok: false,
-      status: res.status || 502,
-      error: data?.error || 'availability_revalidation_failed',
-      details: data,
+    const slot = {
+      start: args.startsAt.toISOString(),
+      end: args.endsAt.toISOString(),
+      localStart: validation.localStart,
+      localEnd: validation.localEnd,
+      localDate: validation.localDate,
+      localStartTime: validation.localStartTime,
+      localEndTime: validation.localEndTime,
+      localTimeLabel: validation.localTimeLabel,
+      timezone: validation.timezone,
+      status: validation.status,
+      reason: validation.reason,
+      consultType: validation.consultType,
+      feeCents: validation.feeCents,
+      currency: validation.currency,
+      durationMin: validation.canonicalDurationMin,
+      bufferMin: validation.bufferMin,
     };
-  }
 
-  const slots = Array.isArray(data.slots) ? data.slots : [];
-  const slot = slots.find(
-    (s: any) => sameInstant(s?.start, args.startsAt) && sameInstant(s?.end, args.endsAt),
-  );
+    const availabilityMeta = {
+      source: 'api_gateway_canonical_availability_v1',
+      clinicianId: validation.contract.clinicianId,
+      clinicianUserId:
+        validation.contract.clinicianUserId,
+      timezone: validation.contract.timezone,
+      schedule: {
+        matched: Boolean(
+          validation.contract.scheduleMatchedUserId,
+        ),
+        matchedUserId:
+          validation.contract.scheduleMatchedUserId,
+      },
+      sources: validation.contract.sources,
+    };
 
-  if (!slot) {
+    if (
+      validation.consultType === 'followup' &&
+      !args.caseId
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        error: 'followup_case_required',
+        details: {
+          slot,
+          availabilityMeta,
+        },
+      };
+    }
+
     return {
-      ok: false,
-      status: 409,
-      error: 'selected_slot_not_in_current_availability',
-      details: {
-        requested: {
+      ok: true,
+      status: 200,
+      slot,
+      availabilityMeta,
+    };
+  } catch (error: any) {
+    if (error instanceof AvailabilityError) {
+      const mappedCode =
+        error.code === 'interval_not_bookable'
+          ? 'selected_slot_not_bookable'
+          : 'selected_slot_not_in_current_availability';
+
+      return {
+        ok: false,
+        status: error.status,
+        error: mappedCode,
+        details: {
+          canonicalAvailabilityError: error.code,
+          availabilityDetails: error.details,
+        },
+      };
+    }
+
+    throw error;
+  }
+}
+
+async function validateExpandedAvailabilityInterval(args: {
+  clinicianId: string;
+  startsAt: Date;
+  endsAt: Date;
+  kind: string;
+  caseId: string | null;
+}) {
+  try {
+    return await validateAvailabilityInterval({
+      clinicianRef: args.clinicianId,
+      startsAt: args.startsAt,
+      endsAt: args.endsAt,
+      consultType: args.kind,
+      caseId: args.caseId,
+      allowExtendedDuration: true,
+      enforceBookability: false,
+      enforceAdvanceWindow: false,
+      enforceConflicts: false,
+    });
+  } catch (error: any) {
+    if (error instanceof AvailabilityError) {
+      throw new MultiCareBookingError(
+        'expanded_interval_outside_clinician_availability',
+        error.status,
+        {
+          canonicalAvailabilityError: error.code,
+          details: error.details,
           startsAt: args.startsAt.toISOString(),
           endsAt: args.endsAt.toISOString(),
-          consultType: type,
         },
-        availabilityMeta: data.meta || null,
-      },
-    };
-  }
+      );
+    }
 
-  if (!bookableSlotStatus(slot.status)) {
-    return {
-      ok: false,
-      status: 409,
-      error: 'selected_slot_not_bookable',
-      details: {
-        slot,
-        availabilityMeta: data.meta || null,
-      },
-    };
+    throw error;
   }
-
-  if (type === 'followup' && !args.caseId) {
-    return {
-      ok: false,
-      status: 400,
-      error: 'followup_case_required',
-      details: {
-        slot,
-        availabilityMeta: data.meta || null,
-      },
-    };
-  }
-
-  return {
-    ok: true,
-    status: 200,
-    slot,
-    availabilityMeta: data.meta || null,
-  };
 }
 
 function isSimulationAppointment(item: any) {
@@ -898,6 +901,14 @@ export async function POST(req: NextRequest) {
       startsAt.getTime() +
         quote.durationMin * 60_000,
     );
+
+    await validateExpandedAvailabilityInterval({
+      clinicianId: clinician.id,
+      startsAt,
+      endsAt: finalEndsAt,
+      kind: appointmentKind,
+      caseId: requestedCaseId || null,
+    });
 
     const suppliedPriceLock =
       typeof body.priceLock === 'string'
