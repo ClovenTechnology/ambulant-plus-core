@@ -327,11 +327,11 @@ function ScreenShareStage({ share }: { share: ScreenShareRef }) {
             <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/10 text-lg text-white shadow-lg backdrop-blur">
               ↗
             </div>
-            <div className="mt-4 text-base font-semibold tracking-[-0.02em] text-white">
-              Your screen is being shared
+            <div className="mt-4 text-base font-medium tracking-[-0.02em] text-white">
+              You're presenting your screen
             </div>
             <div className="mt-2 text-sm leading-6 text-white/60">
-              The local mirror preview is hidden to prevent the infinity effect. Other participants continue to receive the live shared screen.
+              Your shared content is live for everyone else in the room. Your local preview is hidden while you present.
             </div>
           </div>
         </div>

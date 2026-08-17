@@ -1,18 +1,21 @@
 'use client';
 
-import React, { Suspense, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { RoomEvent } from 'livekit-client';
 import {
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
   Download,
   ExternalLink,
   FileText,
   Loader2,
+  Maximize2,
   Mic,
   MicOff,
+  Minimize2,
   MonitorPlay,
   Users,
   Video,
@@ -277,6 +280,12 @@ function TrainingRoomInner({
     chat: false,
   });
   const [presentation, setPresentation] = useState(false);
+  const [chatExpanded, setChatExpanded] = useState(true);
+  const [identityExpanded, setIdentityExpanded] = useState(true);
+  const [materialsExpanded, setMaterialsExpanded] = useState(true);
+  const [roomFullscreen, setRoomFullscreen] = useState(false);
+  const [fullscreenAvailable, setFullscreenAvailable] = useState(false);
+  const liveRoomRef = useRef<HTMLDivElement | null>(null);
 
   const [showOverlay, setShowOverlay] = useState(true);
   const [showVitals, setShowVitals] = useState(false);
@@ -284,6 +293,23 @@ function TrainingRoomInner({
   const [captionsOn, setCaptionsOn] = useState(true);
   const [isRecording, setIsRecording] = useState(false);
   const [xrEnabled, setXrEnabled] = useState(false);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+
+    setFullscreenAvailable(Boolean(document.fullscreenEnabled));
+
+    const handleFullscreenChange = () => {
+      setRoomFullscreen(document.fullscreenElement === liveRoomRef.current);
+    };
+
+    handleFullscreenChange();
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+    };
+  }, []);
 
   const roomStatusLabel =
     status === 'connected'
@@ -1121,6 +1147,28 @@ function TrainingRoomInner({
     }
   }
 
+  async function toggleRoomFullscreen() {
+    const target = liveRoomRef.current;
+
+    if (
+      typeof document === 'undefined' ||
+      !document.fullscreenEnabled ||
+      !target
+    ) {
+      return;
+    }
+
+    try {
+      if (document.fullscreenElement === target) {
+        await document.exitFullscreen();
+      } else {
+        await target.requestFullscreen();
+      }
+    } catch {
+      setNotice('Full screen is unavailable on this device.');
+    }
+  }
+
   async function joinLiveRoom() {
     setErr(null);
     setNotice(null);
@@ -1233,11 +1281,11 @@ function TrainingRoomInner({
                 Ambulant+ mandatory training room
               </div>
 
-              <h1 className="mt-4 text-[clamp(1.8rem,2.7vw,2.55rem)] font-semibold tracking-[-0.035em] text-slate-950">
+              <h1 className="mt-5 max-w-4xl text-[clamp(2rem,3.1vw,2.9rem)] font-medium leading-[1.03] tracking-[-0.045em] text-slate-950">
                 Contactless Medicine training session
               </h1>
 
-              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 md:text-[15px]">
+              <p className="mt-3 max-w-2xl text-[13px] font-normal leading-6 tracking-[-0.005em] text-slate-500 md:text-sm">
                 Join the trainer-led virtual room, review materials, keep attendance active, and complete the certification pathway before workspace access is unlocked.
               </p>
 
@@ -1251,7 +1299,7 @@ function TrainingRoomInner({
             <div className="flex flex-wrap items-center gap-2">
               <span
                 className={cx(
-                  'inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm',
+                  'inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium tracking-[-0.01em] shadow-sm',
                   status === 'connected'
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
                     : status === 'connecting'
@@ -1281,7 +1329,7 @@ function TrainingRoomInner({
                   type="button"
                   onClick={handleConnect}
                   disabled={status === 'connecting' || !joinPermitted}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
+                  className="inline-flex h-9 items-center gap-2 rounded-full bg-slate-950 px-4 text-xs font-medium tracking-[-0.01em] text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {status === 'connecting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
                   Join room
@@ -1290,7 +1338,7 @@ function TrainingRoomInner({
                 <button
                   type="button"
                   onClick={handleDisconnect}
-                  className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200/90 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+                  className="inline-flex h-9 items-center gap-2 rounded-full border border-slate-200/90 bg-white px-4 text-xs font-medium tracking-[-0.01em] text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                 >
                   Leave room
                 </button>
@@ -1298,7 +1346,7 @@ function TrainingRoomInner({
 
               <Link
                 href="/training/schedule"
-                className="inline-flex min-h-10 items-center rounded-full border border-slate-200/90 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
+                className="inline-flex h-9 items-center rounded-full border border-slate-200/90 bg-white px-4 text-xs font-medium tracking-[-0.01em] text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
               >
                 Back to training
               </Link>
@@ -1333,11 +1381,11 @@ function TrainingRoomInner({
         {showRecordingConsent ? (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm">
             <div className="w-full max-w-xl rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl">
-              <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-extrabold text-amber-900">
+              <div className="inline-flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-900">
                 Recording notice
               </div>
 
-              <h2 className="mt-4 text-xl font-black text-slate-950">
+              <h2 className="mt-4 text-xl font-semibold tracking-[-0.02em] text-slate-950">
                 Training session recording notice
               </h2>
 
@@ -1348,7 +1396,7 @@ function TrainingRoomInner({
               <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <Link
                   href="/training/schedule"
-                  className="inline-flex justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex justify-center rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
                 >
                   Back to training
                 </Link>
@@ -1356,7 +1404,7 @@ function TrainingRoomInner({
                 <button
                   type="button"
                   onClick={acceptRecordingConsentAndJoin}
-                  className="inline-flex justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-700"
+                  className="inline-flex justify-center rounded-xl bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-700"
                 >
                   I understand and join
                 </button>
@@ -1366,10 +1414,17 @@ function TrainingRoomInner({
         ) : null}
 
         <section className="space-y-5">
-          <div className="rounded-[30px] border border-white/80 bg-white/94 p-3 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl md:p-4">
+          <div
+            ref={liveRoomRef}
+            className={cx(
+              'rounded-[30px] border border-white/80 bg-white/94 p-3 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl md:p-4',
+              roomFullscreen &&
+                'flex min-h-screen flex-col overflow-y-auto rounded-none border-0 bg-slate-100 p-4 shadow-none md:p-5',
+            )}
+          >
             <div className="mb-3 flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <div className="text-[15px] font-semibold tracking-[-0.01em] text-slate-950">
+                <div className="text-[13px] font-medium tracking-[-0.015em] text-slate-900">
                   Live training room
                 </div>
                 <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
@@ -1395,7 +1450,7 @@ function TrainingRoomInner({
                     (isObserver && !observerCapabilities.microphone)
                   }
                   className={cx(
-                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
+                    'inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium tracking-[-0.01em] shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
                     micOn
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
@@ -1413,7 +1468,7 @@ function TrainingRoomInner({
                     (isObserver && !observerCapabilities.camera)
                   }
                   className={cx(
-                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
+                    'inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium tracking-[-0.01em] shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
                     camOn
                       ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
@@ -1428,7 +1483,7 @@ function TrainingRoomInner({
                   onClick={toggleScreenShare}
                   disabled={status !== 'connected' || isObserver}
                   className={cx(
-                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
+                    'inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium tracking-[-0.01em] shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
                     screenSharing
                       ? 'border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
@@ -1442,7 +1497,7 @@ function TrainingRoomInner({
                   onClick={toggleHandRaise}
                   disabled={status !== 'connected'}
                   className={cx(
-                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
+                    'inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium tracking-[-0.01em] shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
                     handRaised
                       ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
@@ -1455,7 +1510,7 @@ function TrainingRoomInner({
                   type="button"
                   onClick={() => setPresentation((v) => !v)}
                   className={cx(
-                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition',
+                    'inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium tracking-[-0.01em] shadow-sm transition',
                     presentation
                       ? 'border-slate-900 bg-slate-950 text-white hover:bg-slate-800'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
@@ -1463,10 +1518,36 @@ function TrainingRoomInner({
                 >
                   {presentation ? 'Exit focus' : 'Focus mode'}
                 </button>
+
+                {fullscreenAvailable ? (
+                  <button
+                    type="button"
+                    onClick={() => void toggleRoomFullscreen()}
+                    className={cx(
+                      'inline-flex h-9 items-center gap-2 rounded-full border px-3.5 text-xs font-medium tracking-[-0.01em] shadow-sm transition',
+                      roomFullscreen
+                        ? 'border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                    )}
+                    aria-pressed={roomFullscreen}
+                  >
+                    {roomFullscreen ? (
+                      <Minimize2 className="h-4 w-4" />
+                    ) : (
+                      <Maximize2 className="h-4 w-4" />
+                    )}
+                    {roomFullscreen ? 'Exit full screen' : 'Full screen'}
+                  </button>
+                ) : null}
               </div>
             </div>
 
-            <div className="overflow-hidden rounded-[24px] border border-slate-900/10 bg-slate-950 shadow-inner">
+            <div
+              className={cx(
+                'overflow-hidden rounded-[24px] border border-slate-900/10 bg-slate-950 shadow-inner',
+                roomFullscreen && 'min-h-[65vh] flex-1',
+              )}
+            >
               <VideoDock
                 room={room}
                 vitals={emptyVitals}
@@ -1503,6 +1584,87 @@ function TrainingRoomInner({
             </div>
           </div>
 
+          <Panel
+            title="Room chat"
+            collapsible
+            expanded={chatExpanded}
+            onToggle={() => setChatExpanded((value) => !value)}
+            contentId="training-room-chat"
+          >
+            <div className="flex min-h-[210px] flex-col">
+              <div className="max-h-64 flex-1 space-y-2 overflow-y-auto rounded-2xl border border-slate-200/70 bg-slate-50/60 p-3">
+                {chatMessages.length === 0 ? (
+                  <div className="grid min-h-24 place-items-center text-center">
+                    <div>
+                      <div className="text-sm font-medium text-slate-700">No room messages yet</div>
+                      <div className="mt-1 text-xs text-slate-500">
+                        Messages shared here stay inside the live training room.
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  chatMessages.map((message) => (
+                    <div
+                      key={message.id}
+                      className="rounded-2xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-[0_8px_24px_-20px_rgba(15,23,42,0.45)]"
+                    >
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0 truncate text-xs font-semibold text-slate-900">
+                          {message.displayName}
+                          <span className="ml-2 font-medium capitalize text-slate-400">
+                            {String(message.participantRole).split('_').join(' ')}
+                          </span>
+                        </div>
+                        <div className="shrink-0 text-[10px] font-medium text-slate-400">
+                          {new Date(message.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                        </div>
+                      </div>
+                      <div className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-5 text-slate-700">
+                        {message.text}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {isObserver && !observerCapabilities.chat ? (
+                <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/80 p-3 text-xs leading-5 text-amber-900">
+                  Observer chat is read-only. Raise your hand and an admin or trainer can enable chat contribution for this session.
+                </div>
+              ) : (
+                <div className="mt-3 flex items-end gap-2">
+                  <textarea
+                    value={chatInput}
+                    onChange={(event) => setChatInput(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        void sendChatMessage();
+                      }
+                    }}
+                    disabled={status !== 'connected'}
+                    maxLength={1200}
+                    rows={1}
+                    placeholder="Message the training room"
+                    className="min-h-10 min-w-0 flex-1 resize-none rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm leading-5 text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100/60 disabled:bg-slate-100"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void sendChatMessage()}
+                    disabled={status !== 'connected' || !chatInput.trim()}
+                    className="inline-flex h-10 items-center justify-center rounded-xl bg-slate-950 px-4 text-xs font-medium tracking-[-0.01em] text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    Send
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-2 text-[10px] text-slate-400">
+                Enter to send · Shift + Enter for a new line
+              </div>
+            </div>
+          </Panel>
+
           <div className="grid gap-4 md:grid-cols-3">
             <StatusCard
               title="Attendance"
@@ -1526,115 +1688,52 @@ function TrainingRoomInner({
             />
           </div>
 
-          <div className="grid items-stretch gap-5 xl:grid-cols-[0.88fr_1.12fr]">
-            <Panel title="Session & identity" icon={<Users className="h-4 w-4" />}>
-              <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
-                <InfoRow
-                  label={participantRole === 'clinician' ? 'Clinician' : 'Participant'}
-                  value={participantName}
-                />
-                <InfoRow label="Role" value={participantRole} />
-                {participantRole === 'clinician' ? (
-                  <>
-                    <InfoRow label="Email" value={ctx?.clinician?.email} />
-                    <InfoRow label="Specialty" value={ctx?.clinician?.specialty} />
-                  </>
-                ) : null}
-                <InfoRow label="Stage" value={ctx?.onboarding?.stage} />
-                <InfoRow label="Mode" value={ctx?.training?.mode} />
-                <InfoRow label="Slot" value={trainingSlotId || ctx?.training?.startAt || '—'} mono />
-                <InfoRow
-                  label="Media"
-                  value={
-                    isObserver
-                      ? `Mic ${observerCapabilities.microphone ? 'allowed' : 'blocked'} · Camera ${observerCapabilities.camera ? 'allowed' : 'blocked'} · Chat ${observerCapabilities.chat ? 'write enabled' : 'read-only'}`
-                      : 'Role-authorised'
-                  }
-                />
-              </div>
+          <Panel
+            title="Session & identity"
+            icon={<Users className="h-4 w-4" />}
+            collapsible
+            expanded={identityExpanded}
+            onToggle={() => setIdentityExpanded((value) => !value)}
+            contentId="training-session-identity"
+          >
+            <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+              <InfoRow
+                label={participantRole === 'clinician' ? 'Clinician' : 'Participant'}
+                value={participantName}
+              />
+              <InfoRow label="Role" value={participantRole} />
+              {participantRole === 'clinician' ? (
+                <>
+                  <InfoRow label="Email" value={ctx?.clinician?.email} />
+                  <InfoRow label="Specialty" value={ctx?.clinician?.specialty} />
+                </>
+              ) : null}
+              <InfoRow label="Stage" value={ctx?.onboarding?.stage} />
+              <InfoRow label="Mode" value={ctx?.training?.mode} />
+              <InfoRow label="Slot" value={trainingSlotId || ctx?.training?.startAt || '—'} mono />
+              <InfoRow
+                label="Media"
+                value={
+                  isObserver
+                    ? `Mic ${observerCapabilities.microphone ? 'allowed' : 'blocked'} · Camera ${observerCapabilities.camera ? 'allowed' : 'blocked'} · Chat ${observerCapabilities.chat ? 'write enabled' : 'read-only'}`
+                    : 'Role-authorised'
+                }
+              />
+            </div>
 
-              <div className="mt-5 rounded-2xl border border-indigo-100/80 bg-indigo-50/65 p-3.5 text-xs leading-5 text-indigo-950">
-                Your signed training admission preserves this participant role through the room and RTC token. Materials and collaboration permissions remain role-authorised.
-              </div>
-            </Panel>
+            <div className="mt-5 rounded-2xl border border-indigo-100/80 bg-indigo-50/65 p-3.5 text-xs leading-5 text-indigo-950">
+              Your signed training admission preserves this participant role through the room and RTC token. Materials and collaboration permissions remain role-authorised.
+            </div>
+          </Panel>
 
-            <Panel title="Room chat">
-              <div className="flex h-full min-h-[280px] flex-col">
-                <div className="max-h-80 flex-1 space-y-2 overflow-y-auto rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3">
-                  {chatMessages.length === 0 ? (
-                    <div className="grid min-h-36 place-items-center text-center">
-                      <div>
-                        <div className="text-sm font-medium text-slate-700">No room messages yet</div>
-                        <div className="mt-1 text-xs text-slate-500">
-                          Messages shared here stay inside the live training room.
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    chatMessages.map((message) => (
-                      <div
-                        key={message.id}
-                        className="rounded-2xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-[0_8px_24px_-20px_rgba(15,23,42,0.45)]"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="min-w-0 truncate text-xs font-semibold text-slate-900">
-                            {message.displayName}
-                            <span className="ml-2 font-medium capitalize text-slate-400">
-                              {String(message.participantRole).split('_').join(' ')}
-                            </span>
-                          </div>
-                          <div className="shrink-0 text-[10px] font-medium text-slate-400">
-                            {new Date(message.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </div>
-                        </div>
-                        <div className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-5 text-slate-700">
-                          {message.text}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                {isObserver && !observerCapabilities.chat ? (
-                  <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/80 p-3 text-xs leading-5 text-amber-900">
-                    Observer chat is read-only. Raise your hand and an admin or trainer can enable chat contribution for this session.
-                  </div>
-                ) : (
-                  <div className="mt-3 flex items-end gap-2">
-                    <textarea
-                      value={chatInput}
-                      onChange={(event) => setChatInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' && !event.shiftKey) {
-                          event.preventDefault();
-                          void sendChatMessage();
-                        }
-                      }}
-                      disabled={status !== 'connected'}
-                      maxLength={1200}
-                      rows={1}
-                      placeholder="Message the training room"
-                      className="min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-sm leading-5 text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100/70 disabled:bg-slate-100"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void sendChatMessage()}
-                      disabled={status !== 'connected' || !chatInput.trim()}
-                      className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35"
-                    >
-                      Send
-                    </button>
-                  </div>
-                )}
-
-                <div className="mt-2 text-[10px] text-slate-400">
-                  Enter to send · Shift + Enter for a new line
-                </div>
-              </div>
-            </Panel>
-          </div>
-
-          <Panel title="Training materials" icon={<FileText className="h-4 w-4" />}>
+          <Panel
+            title="Training materials"
+            icon={<FileText className="h-4 w-4" />}
+            collapsible
+            expanded={materialsExpanded}
+            onToggle={() => setMaterialsExpanded((value) => !value)}
+            contentId="training-materials"
+          >
             <div className="space-y-3">
               {materialsNotice ? (
                 <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
@@ -1936,7 +2035,7 @@ function StatusCard({
           )}
         />
       </div>
-      <div className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-950">{value}</div>
+      <div className="mt-2 text-[17px] font-medium tracking-[-0.025em] text-slate-950">{value}</div>
       <div className="mt-1 text-xs leading-5 text-slate-500">{detail}</div>
     </div>
   );
@@ -1946,24 +2045,64 @@ function Panel({
   title,
   icon,
   children,
+  collapsible = false,
+  expanded = true,
+  onToggle,
+  contentId,
 }: {
   title: string;
   icon?: React.ReactNode;
   children: React.ReactNode;
+  collapsible?: boolean;
+  expanded?: boolean;
+  onToggle?: () => void;
+  contentId?: string;
 }) {
-  return (
-    <section className="h-full rounded-[26px] border border-white/80 bg-white/94 p-5 shadow-[0_22px_58px_-38px_rgba(15,23,42,0.45)] backdrop-blur md:p-6">
-      <div className="mb-4 flex items-center gap-2.5">
+  const heading = (
+    <>
+      <span className="flex min-w-0 items-center gap-2.5">
         {icon ? (
-          <span className="grid h-8 w-8 place-items-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl border border-slate-200/80 bg-slate-50/80 text-slate-600">
             {icon}
           </span>
         ) : null}
-        <div className="text-[15px] font-semibold tracking-[-0.015em] text-slate-950">
+        <span className="truncate text-[13px] font-medium tracking-[-0.012em] text-slate-900">
           {title}
+        </span>
+      </span>
+
+      {collapsible ? (
+        <ChevronDown
+          className={cx(
+            'h-4 w-4 shrink-0 text-slate-400 transition-transform duration-200',
+            expanded && 'rotate-180',
+          )}
+        />
+      ) : null}
+    </>
+  );
+
+  return (
+    <section className="h-full rounded-[24px] border border-white/80 bg-white/94 p-4 shadow-[0_18px_48px_-38px_rgba(15,23,42,0.4)] backdrop-blur md:p-5">
+      {collapsible ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-expanded={expanded}
+          aria-controls={contentId}
+          className="mb-3 flex w-full items-center justify-between gap-3 rounded-xl text-left outline-none transition focus-visible:ring-2 focus-visible:ring-indigo-300 focus-visible:ring-offset-2"
+        >
+          {heading}
+        </button>
+      ) : (
+        <div className="mb-3 flex items-center justify-between gap-3">
+          {heading}
         </div>
+      )}
+
+      <div id={contentId} hidden={collapsible && !expanded}>
+        {children}
       </div>
-      {children}
     </section>
   );
 }
