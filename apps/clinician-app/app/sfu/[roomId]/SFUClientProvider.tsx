@@ -20,7 +20,7 @@ import {
   type RemoteTrackPublication,
 } from 'livekit-client';
 
-type SFURole = 'clinician' | 'patient' | 'admin' | 'guest';
+type SFURole = 'clinician' | 'patient' | 'observer' | 'admin' | 'guest';
 
 type SFUStatus = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 

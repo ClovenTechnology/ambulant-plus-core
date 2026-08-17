@@ -220,9 +220,30 @@ async function mintTrainingRoomToken(
   const permissions = Array.isArray(admission.permissions)
     ? admission.permissions.map((permission) => String(permission))
     : [];
-  const canPublish = admission.role !== 'observer';
+
+  const observerMicrophone =
+    admission.role === 'observer' &&
+    permissions.includes('training:media:microphone');
+
+  const observerCamera =
+    admission.role === 'observer' &&
+    permissions.includes('training:media:camera');
+
+  const observerChatWrite =
+    admission.role === 'observer' &&
+    permissions.includes('training:chat:write');
+
+  const observerPublishSources = [
+    ...(observerCamera ? [1] : []),
+    ...(observerMicrophone ? [2] : []),
+  ];
+
+  const canPublish =
+    admission.role !== 'observer' ||
+    observerPublishSources.length > 0;
+
   const canPublishData =
-    canPublish &&
+    admission.role !== 'observer' &&
     (admission.role !== 'patient' || permissions.includes('training:iomt:publish'));
   const metadata = {
     kind: 'training_admission',
@@ -255,6 +276,13 @@ async function mintTrainingRoomToken(
       participantRole: admission.role,
       authRole: admission.role,
       trainingSlotId: admission.trainingSlotId,
+      ...(admission.role === 'observer'
+        ? {
+            trainingMediaMicrophone: observerMicrophone ? '1' : '0',
+            trainingMediaCamera: observerCamera ? '1' : '0',
+            trainingChatWrite: observerChatWrite ? '1' : '0',
+          }
+        : {}),
     },
   });
 
@@ -264,6 +292,9 @@ async function mintTrainingRoomToken(
     canPublish,
     canPublishData,
     canSubscribe: true,
+    ...(admission.role === 'observer'
+      ? { canPublishSources: observerPublishSources as any }
+      : {}),
   });
 
   return {

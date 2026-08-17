@@ -3,6 +3,7 @@
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
+import { RoomEvent } from 'livekit-client';
 import {
   CalendarDays,
   CheckCircle2,
@@ -27,6 +28,21 @@ type TrainingParticipantRole =
   | 'trainer'
   | 'observer'
   | 'admin';
+
+type TrainingChatMessage = {
+  id: string;
+  text: string;
+  sentAt: string;
+  participantIdentity: string;
+  displayName: string;
+  participantRole: TrainingParticipantRole | string;
+};
+
+type ObserverCapabilities = {
+  microphone: boolean;
+  camera: boolean;
+  chat: boolean;
+};
 
 type TrainingMaterial = {
   id: string;
@@ -251,6 +267,15 @@ function TrainingRoomInner({
 
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
+  const [screenSharing, setScreenSharing] = useState(false);
+  const [handRaised, setHandRaised] = useState(false);
+  const [chatInput, setChatInput] = useState('');
+  const [chatMessages, setChatMessages] = useState<TrainingChatMessage[]>([]);
+  const [observerCapabilities, setObserverCapabilities] = useState<ObserverCapabilities>({
+    microphone: false,
+    camera: false,
+    chat: false,
+  });
   const [presentation, setPresentation] = useState(false);
 
   const [showOverlay, setShowOverlay] = useState(true);
@@ -838,6 +863,264 @@ function TrainingRoomInner({
     }
   }
 
+  function appendChatMessage(message: TrainingChatMessage) {
+    setChatMessages((current) => {
+      if (current.some((item) => item.id === message.id)) return current;
+      return [...current, message].slice(-200);
+    });
+  }
+
+  async function postCollaboration(payload: Record<string, unknown>) {
+    if (!joinToken) {
+      throw new Error('A signed training admission is required for this collaboration action.');
+    }
+
+    const response = await fetch('/api/training/collaboration', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'include',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        'x-join-token': joinToken,
+      },
+      body: JSON.stringify({
+        roomId,
+        ...payload,
+      }),
+    });
+
+    const body = await response.json().catch(() => null);
+    if (!response.ok || !body?.ok) {
+      throw new Error(String(body?.message || body?.error || 'training_collaboration_failed'));
+    }
+    return body;
+  }
+
+  useEffect(() => {
+    if (!room) return;
+
+    const onData = (
+      payload: Uint8Array,
+      participant: any,
+      _kind: any,
+      topic?: string,
+    ) => {
+      let parsed: any = null;
+      try {
+        parsed = JSON.parse(new TextDecoder().decode(payload));
+      } catch {
+        return;
+      }
+
+      if (topic === 'chat') {
+        const text = String(parsed?.text || '').trim();
+        if (!text) return;
+
+        let remoteMetadata: any = {};
+        try {
+          remoteMetadata = participant?.metadata
+            ? JSON.parse(participant.metadata)
+            : {};
+        } catch {
+          remoteMetadata = {};
+        }
+
+        const senderIdentity = String(
+          participant?.identity ||
+          parsed?.participantIdentity ||
+          'participant',
+        );
+
+        appendChatMessage({
+          id: String(parsed?.id || `${senderIdentity}:${parsed?.sentAt || Date.now()}:${text}`),
+          text,
+          sentAt: String(parsed?.sentAt || new Date().toISOString()),
+          participantIdentity: senderIdentity,
+          displayName: String(
+            participant?.name ||
+            remoteMetadata?.displayName ||
+            parsed?.displayName ||
+            senderIdentity,
+          ),
+          participantRole: String(
+            remoteMetadata?.participantRole ||
+            parsed?.participantRole ||
+            'participant',
+          ),
+        });
+        return;
+      }
+
+      if (topic !== 'control') return;
+
+      const type = String(parsed?.type || '');
+      const targetIdentity = String(parsed?.targetIdentity || parsed?.participantIdentity || '');
+
+      if ((type === 'raise_hand' || type === 'hand') && targetIdentity === participantUid) {
+        setHandRaised(Boolean(parsed?.value));
+      }
+
+      if (type === 'training_capability' && targetIdentity === participantUid && isObserver) {
+        const capability = String(parsed?.capability || '');
+        const enabled = Boolean(parsed?.enabled);
+        setObserverCapabilities((current) => ({
+          ...current,
+          ...(capability === 'microphone' ? { microphone: enabled } : {}),
+          ...(capability === 'camera' ? { camera: enabled } : {}),
+          ...(capability === 'chat' ? { chat: enabled } : {}),
+        }));
+
+        if (capability === 'microphone' && !enabled) setMicOn(false);
+        if (capability === 'camera' && !enabled) setCamOn(false);
+
+        setNotice(
+          enabled
+            ? `Trainer enabled your ${capability} capability for this session.`
+            : `Trainer disabled your ${capability} capability for this session.`,
+        );
+      }
+    };
+
+    room.on(RoomEvent.DataReceived, onData);
+    return () => {
+      room.off(RoomEvent.DataReceived, onData);
+    };
+  }, [room, participantUid, isObserver]);
+
+  useEffect(() => {
+    if (!room || !isObserver || status !== 'connected') return;
+
+    const syncCapabilities = () => {
+      const attributes = ((room.localParticipant as any).attributes || {}) as Record<string, string>;
+      setObserverCapabilities({
+        microphone: attributes.trainingMediaMicrophone === '1',
+        camera: attributes.trainingMediaCamera === '1',
+        chat: attributes.trainingChatWrite === '1',
+      });
+    };
+
+    const onAttributesChanged = (
+      _changed: Record<string, string>,
+      participant: any,
+    ) => {
+      if (participant?.identity === room.localParticipant.identity) {
+        syncCapabilities();
+      }
+    };
+
+    syncCapabilities();
+    room.on(RoomEvent.ParticipantAttributesChanged, onAttributesChanged);
+
+    return () => {
+      room.off(RoomEvent.ParticipantAttributesChanged, onAttributesChanged);
+    };
+  }, [room, status, isObserver]);
+
+  useEffect(() => {
+    if (!room) {
+      setScreenSharing(false);
+      return;
+    }
+
+    const sync = () => {
+      const active = Array.from(room.localParticipant.videoTrackPublications.values()).some(
+        (publication: any) => publication.source === 'screen_share' && Boolean(publication.track),
+      );
+      setScreenSharing(active);
+    };
+
+    sync();
+    room.on(RoomEvent.LocalTrackPublished, sync);
+    room.on(RoomEvent.LocalTrackUnpublished, sync);
+    return () => {
+      room.off(RoomEvent.LocalTrackPublished, sync);
+      room.off(RoomEvent.LocalTrackUnpublished, sync);
+    };
+  }, [room]);
+
+  async function sendChatMessage() {
+    const text = chatInput.trim().slice(0, 1200);
+    if (!text || !room || status !== 'connected') return;
+
+    if (isObserver && !observerCapabilities.chat) {
+      setNotice('Observer chat is read-only until an admin or trainer enables chat contribution.');
+      return;
+    }
+
+    setErr(null);
+    try {
+      if (joinToken) {
+        const result = await postCollaboration({ action: 'chat.send', text });
+        if (result?.message) {
+          appendChatMessage(result.message as TrainingChatMessage);
+        }
+      } else {
+        const message: TrainingChatMessage = {
+          id: `chat-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+          text,
+          sentAt: new Date().toISOString(),
+          participantIdentity: participantUid,
+          displayName: participantName,
+          participantRole,
+        };
+        await room.localParticipant.publishData(
+          new TextEncoder().encode(JSON.stringify(message)),
+          { reliable: true, topic: 'chat' },
+        );
+        appendChatMessage(message);
+      }
+      setChatInput('');
+    } catch (reason: any) {
+      setErr(String(reason?.message || 'Unable to send room message.').split('_').join(' '));
+    }
+  }
+
+  async function toggleHandRaise() {
+    if (!room || status !== 'connected') return;
+    const next = !handRaised;
+    setErr(null);
+    try {
+      if (joinToken) {
+        await postCollaboration({ action: 'hand.set', raised: next });
+      } else {
+        await room.localParticipant.publishData(
+          new TextEncoder().encode(
+            JSON.stringify({
+              type: 'raise_hand',
+              value: next,
+              participantIdentity: participantUid,
+              displayName: participantName,
+              participantRole,
+              ts: Date.now(),
+            }),
+          ),
+          { reliable: true, topic: 'control' },
+        );
+      }
+      setHandRaised(next);
+    } catch (reason: any) {
+      setErr(String(reason?.message || 'Unable to update hand raise.').split('_').join(' '));
+    }
+  }
+
+  async function toggleScreenShare() {
+    if (!room || status !== 'connected') return;
+    if (isObserver) {
+      setNotice('Observers cannot share their screen.');
+      return;
+    }
+
+    const next = !screenSharing;
+    setErr(null);
+    try {
+      await room.localParticipant.setScreenShareEnabled(next);
+      setScreenSharing(next);
+    } catch {
+      setErr('Unable to change screen sharing state.');
+    }
+  }
+
   async function joinLiveRoom() {
     setErr(null);
     setNotice(null);
@@ -870,6 +1153,8 @@ function TrainingRoomInner({
       await disconnect();
       setMicOn(false);
       setCamOn(false);
+      setScreenSharing(false);
+      setHandRaised(false);
       setNotice('You left the training room.');
     } catch {
       setErr('Unable to leave cleanly. Please refresh the page if the room remains connected.');
@@ -877,9 +1162,9 @@ function TrainingRoomInner({
   }
 
   async function toggleMic() {
-    if (isObserver) {
+    if (isObserver && !observerCapabilities.microphone) {
       setNotice(
-        'Observers join in view-only mode and cannot publish microphone audio.',
+        'Observer microphone is disabled until an admin or trainer grants speaking permission.',
       );
       return;
     }
@@ -895,9 +1180,9 @@ function TrainingRoomInner({
   }
 
   async function toggleCam() {
-    if (isObserver) {
+    if (isObserver && !observerCapabilities.camera) {
       setNotice(
-        'Observers join in view-only mode and cannot publish camera video.',
+        'Observer camera is disabled until an admin or trainer grants camera permission.',
       );
       return;
     }
@@ -1097,7 +1382,7 @@ function TrainingRoomInner({
                     onClick={toggleMic}
                     disabled={
                       status !== 'connected' ||
-                      isObserver
+                      (isObserver && !observerCapabilities.microphone)
                     }
                     className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
@@ -1110,12 +1395,35 @@ function TrainingRoomInner({
                     onClick={toggleCam}
                     disabled={
                       status !== 'connected' ||
-                      isObserver
+                      (isObserver && !observerCapabilities.camera)
                     }
                     className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
                   >
                     {camOn ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
                     {camOn ? 'Camera on' : 'Camera off'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={toggleScreenShare}
+                    disabled={status !== 'connected' || isObserver}
+                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    {screenSharing ? 'Stop sharing' : 'Share screen'}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={toggleHandRaise}
+                    disabled={status !== 'connected'}
+                    className={cx(
+                      'inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold disabled:opacity-50',
+                      handRaised
+                        ? 'border-amber-300 bg-amber-50 text-amber-900'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
+                    )}
+                  >
+                    {handRaised ? '✋ Lower hand' : '✋ Raise hand'}
                   </button>
 
                   <button
@@ -1216,6 +1524,64 @@ function TrainingRoomInner({
                 <InfoRow label="Stage" value={ctx?.onboarding?.stage} />
                 <InfoRow label="Mode" value={ctx?.training?.mode} />
                 <InfoRow label="Slot" value={trainingSlotId || ctx?.training?.startAt || '—'} mono />
+              </div>
+            </Panel>
+
+            <Panel title="Room chat">
+              <div className="space-y-3">
+                <div className="max-h-72 space-y-2 overflow-y-auto rounded-2xl border border-slate-100 bg-slate-50 p-3">
+                  {chatMessages.length === 0 ? (
+                    <div className="text-sm text-slate-500">No room messages yet.</div>
+                  ) : (
+                    chatMessages.map((message) => (
+                      <div key={message.id} className="rounded-xl bg-white p-2 shadow-sm">
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="min-w-0 truncate text-xs font-black text-slate-900">
+                            {message.displayName}
+                            <span className="ml-2 font-semibold capitalize text-slate-400">
+                              {String(message.participantRole).split('_').join(' ')}
+                            </span>
+                          </div>
+                          <div className="shrink-0 text-[10px] text-slate-400">
+                            {new Date(message.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </div>
+                        </div>
+                        <div className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{message.text}</div>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                {isObserver && !observerCapabilities.chat ? (
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+                    Observer chat is read-only. Raise your hand and an admin or trainer can enable chat contribution for this session.
+                  </div>
+                ) : (
+                  <div className="flex gap-2">
+                    <input
+                      value={chatInput}
+                      onChange={(event) => setChatInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          void sendChatMessage();
+                        }
+                      }}
+                      disabled={status !== 'connected'}
+                      maxLength={1200}
+                      placeholder="Message the training room"
+                      className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 disabled:bg-slate-100"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void sendChatMessage()}
+                      disabled={status !== 'connected' || !chatInput.trim()}
+                      className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:opacity-40"
+                    >
+                      Send
+                    </button>
+                  </div>
+                )}
               </div>
             </Panel>
 
@@ -1473,7 +1839,11 @@ function TrainingRoomInner({
                   <InfoRow label="Role" value={participantRole} />
                   <InfoRow
                     label="Media"
-                    value={isObserver ? 'View-only' : 'Role-authorised'}
+                    value={
+                      isObserver
+                        ? `Observer · mic ${observerCapabilities.microphone ? 'allowed' : 'blocked'} · camera ${observerCapabilities.camera ? 'allowed' : 'blocked'} · chat ${observerCapabilities.chat ? 'write enabled' : 'read-only'}`
+                        : 'Role-authorised'
+                    }
                   />
                 </div>
 
@@ -1585,8 +1955,7 @@ function TrainingRoomPageContent() {
   );
 
   const providerRole =
-    participantRole === 'trainer' ||
-    participantRole === 'observer'
+    participantRole === 'trainer'
       ? 'admin'
       : participantRole;
 
