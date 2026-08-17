@@ -152,8 +152,12 @@ function RemoteTile({
 
   return (
     <div
-      className={`group relative min-h-0 overflow-hidden rounded-xl bg-slate-950 ring-2 ${
-        speaking ? 'ring-emerald-400' : handRaised ? 'ring-amber-400' : 'ring-white/10'
+      className={`group relative min-h-0 overflow-hidden rounded-2xl border bg-slate-950 shadow-[0_18px_50px_-32px_rgba(0,0,0,0.85)] transition ${
+        speaking
+          ? 'border-emerald-400/80 ring-2 ring-emerald-400/35'
+          : handRaised
+            ? 'border-amber-400/80 ring-2 ring-amber-400/30'
+            : 'border-white/10'
       }`}
     >
       <video
@@ -165,7 +169,7 @@ function RemoteTile({
 
       {!hasVideo ? (
         <div className="absolute inset-0 grid place-items-center">
-          <div className="grid h-16 w-16 place-items-center rounded-full bg-slate-800 text-xl font-black text-white">
+          <div className="grid h-16 w-16 place-items-center rounded-full border border-white/10 bg-slate-800/90 text-xl font-semibold tracking-[-0.03em] text-white shadow-lg">
             {initials(displayName(participant))}
           </div>
         </div>
@@ -174,15 +178,15 @@ function RemoteTile({
       <audio ref={audioRef} autoPlay />
 
       {handRaised ? (
-        <div className="absolute left-2 top-2 rounded-full bg-amber-400 px-2 py-1 text-[10px] font-black text-slate-950 shadow">
+        <div className="absolute left-3 top-3 rounded-full border border-amber-300/60 bg-amber-300/95 px-2.5 py-1 text-[10px] font-semibold text-slate-950 shadow-lg backdrop-blur">
           ✋ Hand raised
         </div>
       ) : null}
 
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/70 to-transparent p-3 text-white">
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/75 to-transparent p-3.5 text-white">
         <div className="flex items-end justify-between gap-2">
           <div className="min-w-0">
-            <div className="truncate text-xs font-black">{displayName(participant)}</div>
+            <div className="truncate text-xs font-semibold tracking-[-0.01em]">{displayName(participant)}</div>
             <div className="text-[10px] capitalize text-white/70">
               {roleName(participant)}{micMuted ? ' · muted' : ''}
             </div>
@@ -193,7 +197,7 @@ function RemoteTile({
               type="button"
               disabled={busy}
               onClick={onMute}
-              className="rounded-lg bg-white/15 px-2 py-1 text-[10px] font-black hover:bg-rose-500 disabled:opacity-40"
+              className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] font-semibold backdrop-blur transition hover:border-rose-400/60 hover:bg-rose-500/90 disabled:opacity-40"
             >
               Mute
             </button>
@@ -207,7 +211,7 @@ function RemoteTile({
                 type="button"
                 disabled={busy}
                 onClick={onLowerHand}
-                className="rounded-lg bg-amber-400 px-2 py-1 text-[10px] font-black text-slate-950 disabled:opacity-40"
+                className="rounded-full border border-amber-200/70 bg-amber-300 px-2.5 py-1 text-[10px] font-semibold text-slate-950 shadow-sm transition hover:bg-amber-200 disabled:opacity-40"
               >
                 Lower hand
               </button>
@@ -219,7 +223,7 @@ function RemoteTile({
                   type="button"
                   disabled={busy}
                   onClick={() => onCapability('microphone', !capabilities.microphone)}
-                  className="rounded-lg bg-white/15 px-2 py-1 text-[10px] font-black disabled:opacity-40"
+                  className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] font-semibold backdrop-blur transition hover:bg-white/20 disabled:opacity-40"
                 >
                   {capabilities.microphone ? 'Revoke mic' : 'Allow mic'}
                 </button>
@@ -227,7 +231,7 @@ function RemoteTile({
                   type="button"
                   disabled={busy}
                   onClick={() => onCapability('camera', !capabilities.camera)}
-                  className="rounded-lg bg-white/15 px-2 py-1 text-[10px] font-black disabled:opacity-40"
+                  className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] font-semibold backdrop-blur transition hover:bg-white/20 disabled:opacity-40"
                 >
                   {capabilities.camera ? 'Revoke camera' : 'Allow camera'}
                 </button>
@@ -235,7 +239,7 @@ function RemoteTile({
                   type="button"
                   disabled={busy}
                   onClick={() => onCapability('chat', !capabilities.chat)}
-                  className="rounded-lg bg-white/15 px-2 py-1 text-[10px] font-black disabled:opacity-40"
+                  className="rounded-full border border-white/10 bg-white/10 px-2.5 py-1 text-[10px] font-semibold backdrop-blur transition hover:bg-white/20 disabled:opacity-40"
                 >
                   {capabilities.chat ? 'Disable chat' : 'Enable chat'}
                 </button>
@@ -282,7 +286,7 @@ function LocalTile({ room }: { room: Room }) {
   }, [room]);
 
   return (
-    <div className="relative min-h-0 overflow-hidden rounded-xl bg-slate-950 ring-2 ring-indigo-400/60">
+    <div className="relative min-h-0 overflow-hidden rounded-2xl border border-indigo-300/40 bg-slate-950 shadow-[0_18px_50px_-32px_rgba(0,0,0,0.85)] ring-2 ring-indigo-400/25">
       <video
         ref={videoRef}
         autoPlay
@@ -291,11 +295,11 @@ function LocalTile({ room }: { room: Room }) {
         className={`h-full w-full object-cover ${hasVideo ? '' : 'invisible'}`}
       />
       {!hasVideo ? (
-        <div className="absolute inset-0 grid place-items-center text-sm font-bold text-white/60">
+        <div className="absolute inset-0 grid place-items-center text-sm font-medium text-white/55">
           Camera off
         </div>
       ) : null}
-      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-3 text-xs font-black text-white">
+      <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/90 to-transparent p-3.5 text-xs font-semibold text-white">
         You
       </div>
     </div>
@@ -304,19 +308,37 @@ function LocalTile({ room }: { room: Room }) {
 
 function ScreenShareStage({ share }: { share: ScreenShareRef }) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const isLocalShare = share.id === 'local-screen-share';
 
   useEffect(() => {
+    if (isLocalShare) return;
     const track = share.publication?.videoTrack || share.publication?.track;
     if (track && videoRef.current) track.attach(videoRef.current);
     return () => {
       if (track && videoRef.current) track.detach(videoRef.current);
     };
-  }, [share]);
+  }, [isLocalShare, share]);
 
   return (
-    <div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border border-white/10 bg-slate-950">
-      <video ref={videoRef} autoPlay playsInline muted={share.id === 'local-screen-share'} className="h-full w-full object-contain" />
-      <div className="absolute left-3 top-3 rounded-lg bg-black/75 px-3 py-1.5 text-xs font-black text-white">
+    <div className="relative min-h-0 flex-1 overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-inner">
+      {isLocalShare ? (
+        <div className="absolute inset-0 grid place-items-center bg-[radial-gradient(circle_at_center,_rgba(79,70,229,0.22),_transparent_45%),linear-gradient(135deg,_#0f172a,_#020617)] p-6 text-center">
+          <div className="max-w-md">
+            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-white/10 bg-white/10 text-lg text-white shadow-lg backdrop-blur">
+              ↗
+            </div>
+            <div className="mt-4 text-base font-semibold tracking-[-0.02em] text-white">
+              Your screen is being shared
+            </div>
+            <div className="mt-2 text-sm leading-6 text-white/60">
+              The local mirror preview is hidden to prevent the infinity effect. Other participants continue to receive the live shared screen.
+            </div>
+          </div>
+        </div>
+      ) : (
+        <video ref={videoRef} autoPlay playsInline className="h-full w-full object-contain" />
+      )}
+      <div className="absolute left-3 top-3 rounded-full border border-white/10 bg-black/60 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white shadow-lg backdrop-blur">
         {share.label} · sharing screen
       </div>
     </div>
@@ -628,9 +650,9 @@ export default function TrainingParticipantGrid({ room }: { room: Room | null })
   }
 
   return (
-    <div className="absolute inset-0 flex flex-col bg-black p-2">
-      <div className="mb-2 flex items-center justify-between gap-3 text-white">
-        <div className="text-xs font-bold">
+    <div className="absolute inset-0 flex flex-col bg-slate-950 p-2.5">
+      <div className="mb-2.5 flex items-center justify-between gap-3 px-1 text-white">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.06em] text-white/75">
           {total} participant{total === 1 ? '' : 's'} connected
           {ordered.length > visible.length ? ` · ${ordered.length - visible.length} in overflow` : ''}
         </div>
@@ -639,7 +661,7 @@ export default function TrainingParticipantGrid({ room }: { room: Room | null })
             type="button"
             disabled={Boolean(busyKey) || participants.length === 0}
             onClick={() => void mute()}
-            className="pointer-events-auto rounded-lg border border-white/20 bg-white/10 px-3 py-1.5 text-xs font-black hover:bg-rose-600 disabled:opacity-40"
+            className="pointer-events-auto rounded-full border border-white/10 bg-white/10 px-3 py-1.5 text-[11px] font-semibold text-white backdrop-blur transition hover:border-rose-400/50 hover:bg-rose-500/90 disabled:opacity-40"
           >
             Mute all
           </button>
@@ -647,18 +669,18 @@ export default function TrainingParticipantGrid({ room }: { room: Room | null })
       </div>
 
       {notice ? (
-        <div className="mb-2 rounded-lg bg-white/10 px-3 py-1.5 text-xs font-semibold text-white">
+        <div className="mb-2.5 rounded-2xl border border-white/10 bg-white/10 px-3 py-2 text-xs font-medium text-white/90 backdrop-blur">
           {notice}
         </div>
       ) : null}
 
       {screenShare ? (
-        <div className="mb-2 flex min-h-0 flex-[1.45]">
+        <div className="mb-2.5 flex min-h-0 flex-[1.45]">
           <ScreenShareStage share={screenShare} />
         </div>
       ) : null}
 
-      <div className={`grid min-h-0 ${screenShare ? 'h-[34%] min-h-[120px]' : 'flex-1'} auto-rows-fr gap-2 ${columns}`}>
+      <div className={`grid min-h-0 ${screenShare ? 'h-[34%] min-h-[120px]' : 'flex-1'} auto-rows-fr gap-2.5 ${columns}`}>
         <LocalTile room={room} />
         {visible.map((participant) => (
           <RemoteTile

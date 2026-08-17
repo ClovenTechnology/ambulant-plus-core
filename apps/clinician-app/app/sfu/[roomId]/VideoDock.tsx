@@ -289,7 +289,7 @@ export default function VideoDock({
         aria-live="polite"
         onDoubleClick={handleDoubleClick}
         onTouchStart={() => touchKick()}
-        className={`relative aspect-video w-full rounded-lg overflow-hidden bg-black ring-1 ring-gray-200 group ${
+        className={`group relative aspect-video w-full overflow-hidden rounded-2xl border border-white/10 bg-slate-950 shadow-inner ${
           presentation ? 'cursor-zoom-out' : 'cursor-default'
         }`}
       >
@@ -298,7 +298,7 @@ export default function VideoDock({
         <CaptionOverlay lines={captionLines} enabled={captionsOn} />
 
         {handRaised ? (
-          <div className="absolute left-3 top-3 z-20 flex items-center gap-2 rounded-full border border-amber-200 bg-amber-50/95 px-3 py-1.5 text-xs font-black text-amber-900 shadow-lg backdrop-blur">
+          <div className="absolute left-4 top-4 z-20 flex items-center gap-2 rounded-full border border-amber-200/80 bg-amber-50/95 px-3 py-1.5 text-[11px] font-semibold text-amber-900 shadow-lg backdrop-blur">
             <span className="h-2 w-2 rounded-full bg-amber-500 animate-pulse" />
             Patient hand raised
           </div>
@@ -306,7 +306,7 @@ export default function VideoDock({
 
         {/* Controls bar */}
         <div
-          className={`absolute bottom-4 left-1/2 -translate-x-1/2 flex gap-2 bg-white/85 backdrop-blur rounded-full px-2 py-2 shadow ${hoverOpacity} transition-opacity duration-200`}
+          className={`absolute bottom-4 left-1/2 z-30 flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-white/10 bg-slate-950/78 px-2.5 py-2 shadow-2xl backdrop-blur-xl ${hoverOpacity} transition-opacity duration-200`}
           data-no-drag="true"
           onMouseDown={(e) => e.stopPropagation()}
           onTouchStart={(e) => e.stopPropagation()}
@@ -330,7 +330,7 @@ export default function VideoDock({
           <button
             type="button"
             onClick={() => setTranscriptOpen(true)}
-            className="rounded-full border border-gray-200 bg-white px-3 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-full border border-white/10 bg-white/10 px-3 py-2 text-[11px] font-semibold text-white shadow-sm transition hover:bg-white/20 disabled:cursor-not-allowed disabled:opacity-40"
             disabled={captionLines.length === 0}
             title="Open full transcript"
           >
@@ -368,7 +368,7 @@ export default function VideoDock({
         {showVitalsOverlay && <VitalsStreamOverlay vitals={vitals} />}
 
         {/* Badges */}
-        <div className="absolute top-3 right-3 flex gap-1 drop-shadow-sm pointer-events-none">
+        <div className="pointer-events-none absolute right-4 top-4 flex flex-wrap justify-end gap-1.5 drop-shadow-sm">
           <Badge label="Vitals" active={showVitals} color="emerald" />
           <Badge label="Captions" active={captionsOn} color="indigo" />
           <Badge label="Overlay" active={showOverlay} color="sky" />
@@ -379,8 +379,8 @@ export default function VideoDock({
       </div>
       {transcriptOpen ? (
         <div className="fixed inset-0 z-[70] bg-gray-950/55 p-3 backdrop-blur-sm sm:p-6" role="dialog" aria-modal="true">
-          <div className="ml-auto flex h-full w-full max-w-xl flex-col rounded-3xl bg-white shadow-2xl">
-            <div className="flex items-center justify-between border-b border-gray-100 px-4 py-3">
+          <div className="ml-auto flex h-full w-full max-w-xl flex-col rounded-[28px] border border-white/80 bg-white shadow-2xl">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
               <div>
                 <div className="text-sm font-semibold text-gray-900">Consultation transcript</div>
                 <div className="text-xs text-gray-500">Live caption transcript. Review before filing into the clinical note.</div>
@@ -388,7 +388,7 @@ export default function VideoDock({
               <button
                 type="button"
                 onClick={() => setTranscriptOpen(false)}
-                className="rounded-full border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
               >
                 Close
               </button>
@@ -416,12 +416,12 @@ function VitalsStreamOverlay({ vitals }: { vitals: Vitals }) {
   ];
 
   return (
-    <div className="absolute right-3 top-1/2 -translate-y-1/2 z-20 pointer-events-none select-none" aria-hidden="true">
-      <div className="flex flex-col gap-1 text-white drop-shadow">
+    <div className="pointer-events-none absolute right-4 top-1/2 z-20 -translate-y-1/2 select-none" aria-hidden="true">
+      <div className="flex flex-col gap-1.5 rounded-2xl border border-white/10 bg-slate-950/48 p-2.5 text-white shadow-xl backdrop-blur-md">
         {rows.map((r) => (
-          <div key={r.key} className="flex items-center gap-2">
-            <span className="text-[11px] opacity-90">{r.label}</span>
-            <span className="text-sm font-semibold">{r.value}</span>
+          <div key={r.key} className="flex items-center justify-between gap-3">
+            <span className="text-[10px] font-medium uppercase tracking-[0.08em] text-white/55">{r.label}</span>
+            <span className="text-xs font-semibold tracking-[-0.01em]">{r.value}</span>
           </div>
         ))}
       </div>

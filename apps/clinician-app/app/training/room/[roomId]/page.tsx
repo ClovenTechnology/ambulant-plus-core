@@ -1223,21 +1223,21 @@ function TrainingRoomInner({
         Boolean(joinToken);
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(79,70,229,0.10),_transparent_30%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_42%,_#ffffff_100%)]">
-      <div className="mx-auto max-w-7xl p-4 md:p-6 space-y-5">
-        <header className="rounded-[28px] border border-slate-200 bg-white/90 p-5 shadow-sm backdrop-blur">
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,_rgba(99,102,241,0.10),_transparent_28%),radial-gradient(circle_at_top_right,_rgba(14,165,233,0.08),_transparent_24%),linear-gradient(180deg,_#f8fafc_0%,_#eef2ff_44%,_#ffffff_100%)] font-sans text-slate-900">
+      <div className="mx-auto max-w-[1480px] space-y-5 p-4 md:p-6 xl:p-8">
+        <header className="rounded-[30px] border border-white/80 bg-white/92 p-5 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl md:p-6">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-extrabold text-indigo-900">
+              <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200/80 bg-indigo-50/80 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-indigo-900 shadow-sm">
                 <MonitorPlay className="h-4 w-4" />
                 Ambulant+ mandatory training room
               </div>
 
-              <h1 className="mt-3 text-2xl font-black tracking-tight text-slate-950">
+              <h1 className="mt-4 text-[clamp(1.8rem,2.7vw,2.55rem)] font-semibold tracking-[-0.035em] text-slate-950">
                 Contactless Medicine training session
               </h1>
 
-              <p className="mt-1 max-w-2xl text-sm leading-relaxed text-slate-600">
+              <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 md:text-[15px]">
                 Join the trainer-led virtual room, review materials, keep attendance active, and complete the certification pathway before workspace access is unlocked.
               </p>
 
@@ -1251,7 +1251,7 @@ function TrainingRoomInner({
             <div className="flex flex-wrap items-center gap-2">
               <span
                 className={cx(
-                  'inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-bold',
+                  'inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm',
                   status === 'connected'
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
                     : status === 'connecting'
@@ -1281,7 +1281,7 @@ function TrainingRoomInner({
                   type="button"
                   onClick={handleConnect}
                   disabled={status === 'connecting' || !joinPermitted}
-                  className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-extrabold text-white hover:bg-indigo-700 disabled:opacity-60"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {status === 'connecting' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />}
                   Join room
@@ -1290,7 +1290,7 @@ function TrainingRoomInner({
                 <button
                   type="button"
                   onClick={handleDisconnect}
-                  className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-extrabold text-slate-700 hover:bg-slate-50"
+                  className="inline-flex min-h-10 items-center gap-2 rounded-full border border-slate-200/90 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
                 >
                   Leave room
                 </button>
@@ -1298,7 +1298,7 @@ function TrainingRoomInner({
 
               <Link
                 href="/training/schedule"
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-bold text-slate-700 hover:bg-slate-50"
+                className="inline-flex min-h-10 items-center rounded-full border border-slate-200/90 bg-white px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition hover:border-slate-300 hover:bg-slate-50"
               >
                 Back to training
               </Link>
@@ -1365,77 +1365,108 @@ function TrainingRoomInner({
           </div>
         ) : null}
 
-        <section className="grid gap-5 xl:grid-cols-[1.45fr_0.75fr]">
-          <div className="space-y-4">
-            <div className="rounded-[28px] border border-slate-200 bg-white/90 p-4 shadow-sm">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div>
-                  <div className="text-sm font-black text-slate-950">Live training room</div>
-                  <div className="text-xs text-slate-500">
-                    Room: <span className="font-mono">{roomId || '—'}</span>
-                  </div>
+        <section className="space-y-5">
+          <div className="rounded-[30px] border border-white/80 bg-white/94 p-3 shadow-[0_24px_70px_-42px_rgba(15,23,42,0.45)] backdrop-blur-xl md:p-4">
+            <div className="mb-3 flex flex-col gap-3 px-1 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold tracking-[-0.01em] text-slate-950">
+                  Live training room
                 </div>
-
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={toggleMic}
-                    disabled={
-                      status !== 'connected' ||
-                      (isObserver && !observerCapabilities.microphone)
-                    }
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    {micOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
-                    {micOn ? 'Mic on' : 'Mic off'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={toggleCam}
-                    disabled={
-                      status !== 'connected' ||
-                      (isObserver && !observerCapabilities.camera)
-                    }
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    {camOn ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
-                    {camOn ? 'Camera on' : 'Camera off'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={toggleScreenShare}
-                    disabled={status !== 'connected' || isObserver}
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                  >
-                    {screenSharing ? 'Stop sharing' : 'Share screen'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={toggleHandRaise}
-                    disabled={status !== 'connected'}
-                    className={cx(
-                      'inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold disabled:opacity-50',
-                      handRaised
-                        ? 'border-amber-300 bg-amber-50 text-amber-900'
-                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50',
-                    )}
-                  >
-                    {handRaised ? '✋ Lower hand' : '✋ Raise hand'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setPresentation((v) => !v)}
-                    className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
-                  >
-                    {presentation ? 'Exit focus' : 'Focus mode'}
-                  </button>
+                <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200/80 bg-slate-50 px-2.5 py-1">
+                    Room
+                    <span className="font-mono text-[11px] text-slate-700">{roomId || '—'}</span>
+                  </span>
+                  {status === 'connected' ? (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                      Live
+                    </span>
+                  ) : null}
                 </div>
               </div>
 
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={toggleMic}
+                  disabled={
+                    status !== 'connected' ||
+                    (isObserver && !observerCapabilities.microphone)
+                  }
+                  className={cx(
+                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
+                    micOn
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                  )}
+                >
+                  {micOn ? <Mic className="h-4 w-4" /> : <MicOff className="h-4 w-4" />}
+                  {micOn ? 'Mic on' : 'Mic off'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleCam}
+                  disabled={
+                    status !== 'connected' ||
+                    (isObserver && !observerCapabilities.camera)
+                  }
+                  className={cx(
+                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
+                    camOn
+                      ? 'border-emerald-200 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                  )}
+                >
+                  {camOn ? <Video className="h-4 w-4" /> : <VideoOff className="h-4 w-4" />}
+                  {camOn ? 'Camera on' : 'Camera off'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleScreenShare}
+                  disabled={status !== 'connected' || isObserver}
+                  className={cx(
+                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
+                    screenSharing
+                      ? 'border-indigo-200 bg-indigo-50 text-indigo-800 hover:bg-indigo-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                  )}
+                >
+                  {screenSharing ? 'Stop sharing' : 'Share screen'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={toggleHandRaise}
+                  disabled={status !== 'connected'}
+                  className={cx(
+                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition disabled:cursor-not-allowed disabled:opacity-40',
+                    handRaised
+                      ? 'border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                  )}
+                >
+                  {handRaised ? '✋ Lower hand' : '✋ Raise hand'}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setPresentation((v) => !v)}
+                  className={cx(
+                    'inline-flex min-h-10 items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold shadow-sm transition',
+                    presentation
+                      ? 'border-slate-900 bg-slate-950 text-white hover:bg-slate-800'
+                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50',
+                  )}
+                >
+                  {presentation ? 'Exit focus' : 'Focus mode'}
+                </button>
+              </div>
+            </div>
+
+            <div className="overflow-hidden rounded-[24px] border border-slate-900/10 bg-slate-950 shadow-inner">
               <VideoDock
                 room={room}
                 vitals={emptyVitals}
@@ -1470,51 +1501,39 @@ function TrainingRoomInner({
                 onExitPresentation={() => setPresentation(false)}
               />
             </div>
-
-            <div className="grid gap-4 md:grid-cols-3">
-              <StatusCard
-                title="Attendance"
-                value={status === 'connected' ? 'Active heartbeat' : 'Not recording'}
-                detail="Attendance is recorded while connected, with a heartbeat every 60 seconds."
-                done={status === 'connected'}
-              />
-
-              <StatusCard
-                title="Participants"
-                value={`${remoteParticipants.length} remote`}
-                detail="Trainer, admins, and other training participants appear here as they join."
-                done={remoteParticipants.length > 0}
-              />
-
-              <StatusCard
-                title="Certification gate"
-                value={safeText(ctx?.onboarding?.stage || ctx?.training?.status)}
-                detail="Admin certification is required before full workspace visibility."
-                done={ctx?.onboarding?.stage === 'training_completed' || ctx?.training?.status === 'completed'}
-              />
-            </div>
           </div>
 
-          <aside className="space-y-4">
-            <Panel title="Training details">
-              <div className="space-y-2 text-sm text-slate-700">
+          <div className="grid gap-4 md:grid-cols-3">
+            <StatusCard
+              title="Attendance"
+              value={status === 'connected' ? 'Active heartbeat' : 'Not recording'}
+              detail="Attendance is recorded while connected, with a heartbeat every 60 seconds."
+              done={status === 'connected'}
+            />
+
+            <StatusCard
+              title="Participants"
+              value={`${remoteParticipants.length} remote`}
+              detail="Trainer, admins, and other training participants appear here as they join."
+              done={remoteParticipants.length > 0}
+            />
+
+            <StatusCard
+              title="Certification gate"
+              value={safeText(ctx?.onboarding?.stage || ctx?.training?.status)}
+              detail="Admin certification is required before full workspace visibility."
+              done={ctx?.onboarding?.stage === 'training_completed' || ctx?.training?.status === 'completed'}
+            />
+          </div>
+
+          <div className="grid items-stretch gap-5 xl:grid-cols-[0.88fr_1.12fr]">
+            <Panel title="Session & identity" icon={<Users className="h-4 w-4" />}>
+              <div className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
                 <InfoRow
-                  label={
-                    participantRole ===
-                    'clinician'
-                      ? 'Clinician'
-                      : 'Participant'
-                  }
-                  value={
-                    participantName
-                  }
+                  label={participantRole === 'clinician' ? 'Clinician' : 'Participant'}
+                  value={participantName}
                 />
-                <InfoRow
-                  label="Role"
-                  value={
-                    participantRole
-                  }
-                />
+                <InfoRow label="Role" value={participantRole} />
                 {participantRole === 'clinician' ? (
                   <>
                     <InfoRow label="Email" value={ctx?.clinician?.email} />
@@ -1524,41 +1543,65 @@ function TrainingRoomInner({
                 <InfoRow label="Stage" value={ctx?.onboarding?.stage} />
                 <InfoRow label="Mode" value={ctx?.training?.mode} />
                 <InfoRow label="Slot" value={trainingSlotId || ctx?.training?.startAt || '—'} mono />
+                <InfoRow
+                  label="Media"
+                  value={
+                    isObserver
+                      ? `Mic ${observerCapabilities.microphone ? 'allowed' : 'blocked'} · Camera ${observerCapabilities.camera ? 'allowed' : 'blocked'} · Chat ${observerCapabilities.chat ? 'write enabled' : 'read-only'}`
+                      : 'Role-authorised'
+                  }
+                />
+              </div>
+
+              <div className="mt-5 rounded-2xl border border-indigo-100/80 bg-indigo-50/65 p-3.5 text-xs leading-5 text-indigo-950">
+                Your signed training admission preserves this participant role through the room and RTC token. Materials and collaboration permissions remain role-authorised.
               </div>
             </Panel>
 
             <Panel title="Room chat">
-              <div className="space-y-3">
-                <div className="max-h-72 space-y-2 overflow-y-auto rounded-2xl border border-slate-100 bg-slate-50 p-3">
+              <div className="flex h-full min-h-[280px] flex-col">
+                <div className="max-h-80 flex-1 space-y-2 overflow-y-auto rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3">
                   {chatMessages.length === 0 ? (
-                    <div className="text-sm text-slate-500">No room messages yet.</div>
+                    <div className="grid min-h-36 place-items-center text-center">
+                      <div>
+                        <div className="text-sm font-medium text-slate-700">No room messages yet</div>
+                        <div className="mt-1 text-xs text-slate-500">
+                          Messages shared here stay inside the live training room.
+                        </div>
+                      </div>
+                    </div>
                   ) : (
                     chatMessages.map((message) => (
-                      <div key={message.id} className="rounded-xl bg-white p-2 shadow-sm">
-                        <div className="flex items-center justify-between gap-2">
-                          <div className="min-w-0 truncate text-xs font-black text-slate-900">
+                      <div
+                        key={message.id}
+                        className="rounded-2xl border border-slate-200/70 bg-white px-3 py-2.5 shadow-[0_8px_24px_-20px_rgba(15,23,42,0.45)]"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0 truncate text-xs font-semibold text-slate-900">
                             {message.displayName}
-                            <span className="ml-2 font-semibold capitalize text-slate-400">
+                            <span className="ml-2 font-medium capitalize text-slate-400">
                               {String(message.participantRole).split('_').join(' ')}
                             </span>
                           </div>
-                          <div className="shrink-0 text-[10px] text-slate-400">
+                          <div className="shrink-0 text-[10px] font-medium text-slate-400">
                             {new Date(message.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                           </div>
                         </div>
-                        <div className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">{message.text}</div>
+                        <div className="mt-1.5 whitespace-pre-wrap break-words text-sm leading-5 text-slate-700">
+                          {message.text}
+                        </div>
                       </div>
                     ))
                   )}
                 </div>
 
                 {isObserver && !observerCapabilities.chat ? (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs leading-relaxed text-amber-900">
+                  <div className="mt-3 rounded-2xl border border-amber-200/80 bg-amber-50/80 p-3 text-xs leading-5 text-amber-900">
                     Observer chat is read-only. Raise your hand and an admin or trainer can enable chat contribution for this session.
                   </div>
                 ) : (
-                  <div className="flex gap-2">
-                    <input
+                  <div className="mt-3 flex items-end gap-2">
+                    <textarea
                       value={chatInput}
                       onChange={(event) => setChatInput(event.target.value)}
                       onKeyDown={(event) => {
@@ -1569,291 +1612,276 @@ function TrainingRoomInner({
                       }}
                       disabled={status !== 'connected'}
                       maxLength={1200}
+                      rows={1}
                       placeholder="Message the training room"
-                      className="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm outline-none focus:border-indigo-400 disabled:bg-slate-100"
+                      className="min-h-11 min-w-0 flex-1 resize-none rounded-2xl border border-slate-200 bg-white px-3.5 py-3 text-sm leading-5 text-slate-800 shadow-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100/70 disabled:bg-slate-100"
                     />
                     <button
                       type="button"
                       onClick={() => void sendChatMessage()}
                       disabled={status !== 'connected' || !chatInput.trim()}
-                      className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-black text-white disabled:opacity-40"
+                      className="inline-flex min-h-11 items-center justify-center rounded-2xl bg-slate-950 px-4 py-2.5 text-xs font-semibold text-white shadow-sm transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-35"
                     >
                       Send
                     </button>
                   </div>
                 )}
+
+                <div className="mt-2 text-[10px] text-slate-400">
+                  Enter to send · Shift + Enter for a new line
+                </div>
               </div>
             </Panel>
+          </div>
 
-            <Panel title="Training materials" icon={<FileText className="h-4 w-4" />}>
-              <div className="space-y-3">
-                {materialsNotice ? (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                    {materialsNotice}
-                  </div>
-                ) : null}
+          <Panel title="Training materials" icon={<FileText className="h-4 w-4" />}>
+            <div className="space-y-3">
+              {materialsNotice ? (
+                <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                  {materialsNotice}
+                </div>
+              ) : null}
 
-                {contentModules.length === 0 && materials.length === 0 ? (
-                  <div className="text-sm text-slate-600">
-                    No published materials are currently available for your training role. You can still join and participate in the live session. Newly published materials will appear automatically while you remain connected.
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                  {contentModules.map((module) => {
-                    const assignedSessions =
-                      module.sessionIds
-                        .map(
-                          (sessionId) =>
-                            contentSessions.find(
-                              (session) =>
-                                session.id ===
-                                sessionId,
-                            ),
-                        )
-                        .filter(
-                          (
-                            session,
-                          ): session is TrainingSessionRef =>
-                            Boolean(session),
-                        );
+              {contentModules.length === 0 && materials.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 p-5 text-sm leading-6 text-slate-600">
+                  No published materials are currently available for your training role. You can still join and participate in the live session. Newly published materials will appear automatically while you remain connected.
+                </div>
+              ) : (
+                <div className="space-y-4">
+                {contentModules.map((module) => {
+                  const assignedSessions =
+                    module.sessionIds
+                      .map(
+                        (sessionId) =>
+                          contentSessions.find(
+                            (session) =>
+                              session.id ===
+                              sessionId,
+                          ),
+                      )
+                      .filter(
+                        (
+                          session,
+                        ): session is TrainingSessionRef =>
+                          Boolean(session),
+                      );
 
-                    return (
-                      <div
-                        key={module.assignmentId}
-                        className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3"
-                      >
-                        <div className="flex flex-wrap items-start justify-between gap-2">
-                          <div>
-                            <div className="text-sm font-black text-slate-950">
-                              {module.title}
-                            </div>
-                            {module.summary ? (
-                              <div className="mt-1 text-xs text-slate-600">
-                                {module.summary}
-                              </div>
-                            ) : null}
+                  return (
+                    <div
+                      key={module.assignmentId}
+                      className="rounded-2xl border border-indigo-100 bg-indigo-50/40 p-3"
+                    >
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <div className="text-sm font-semibold text-slate-950">
+                            {module.title}
                           </div>
-
-                          <span className="rounded-full border border-indigo-100 bg-white px-2 py-1 text-[10px] font-black uppercase text-indigo-700">
-                            {module.assignmentScope === 'programme'
-                              ? 'Programme-wide'
-                              : `${module.sessionIds.length} session(s)`}
-                          </span>
+                          {module.summary ? (
+                            <div className="mt-1 text-xs text-slate-600">
+                              {module.summary}
+                            </div>
+                          ) : null}
                         </div>
 
-                        {module.assignmentScope === 'sessions' ? (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {assignedSessions.map((session) => (
-                              <span
-                                key={session.id}
-                                title={`Session ID: ${session.id}`}
-                                className="rounded-full border bg-white px-2 py-1 text-[10px] font-bold text-slate-600"
-                              >
-                                {sessionContentLabel(session)}
-                              </span>
-                            ))}
+                        <span className="rounded-full border border-indigo-100 bg-white px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-indigo-700">
+                          {module.assignmentScope === 'programme'
+                            ? 'Programme-wide'
+                            : `${module.sessionIds.length} session(s)`}
+                        </span>
+                      </div>
+
+                      {module.assignmentScope === 'sessions' ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {assignedSessions.map((session) => (
+                            <span
+                              key={session.id}
+                              title={`Session ID: ${session.id}`}
+                              className="rounded-full border bg-white px-2 py-1 text-[10px] font-medium text-slate-600"
+                            >
+                              {sessionContentLabel(session)}
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-3 space-y-2">
+                        {module.resources.map((resource) => {
+                          const version =
+                            resource.currentVersion;
+
+                          return (
+                            <div
+                              key={resource.id}
+                              className="rounded-xl border border-slate-200 bg-white p-3"
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-2">
+                                <div>
+                                  <div className="text-sm font-semibold text-slate-900">
+                                    {resource.title}
+                                  </div>
+                                  {resource.description ? (
+                                    <div className="mt-1 text-xs text-slate-600">
+                                      {resource.description}
+                                    </div>
+                                  ) : null}
+                                </div>
+
+                                <div className="flex flex-wrap gap-1">
+                                  <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    {resource.kind}
+                                  </span>
+                                  <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                    {resource.required ? 'Required' : 'Optional'}
+                                  </span>
+                                  {version?.version ? (
+                                    <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-semibold text-slate-500">
+                                      {version.version}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              <div className="mt-2 flex flex-wrap gap-2">
+                                {version?.url ? (
+                                  <a
+                                    href={version.url}
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="inline-flex min-h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                                  >
+                                    <ExternalLink className="h-3.5 w-3.5" />
+                                    View resource
+                                  </a>
+                                ) : null}
+
+                                {version?.hasStoredFile ? (
+                                  <>
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        accessingResourceKey ===
+                                        `${resource.id}:${version.id}:inline`
+                                      }
+                                      onClick={() =>
+                                        void openTrainingResourceFile(
+                                          resource,
+                                          'inline',
+                                        )
+                                      }
+                                      className="inline-flex min-h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+                                    >
+                                      <ExternalLink className="h-3.5 w-3.5" />
+                                      {accessingResourceKey ===
+                                      `${resource.id}:${version.id}:inline`
+                                        ? 'Opening...'
+                                        : 'View file'}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      disabled={
+                                        accessingResourceKey ===
+                                        `${resource.id}:${version.id}:attachment`
+                                      }
+                                      onClick={() =>
+                                        void openTrainingResourceFile(
+                                          resource,
+                                          'attachment',
+                                        )
+                                      }
+                                      className="inline-flex min-h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-50"
+                                    >
+                                      <Download className="h-3.5 w-3.5" />
+                                      {accessingResourceKey ===
+                                      `${resource.id}:${version.id}:attachment`
+                                        ? 'Preparing...'
+                                        : 'Download'}
+                                    </button>
+                                  </>
+                                ) : null}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {materials.length > 0 ? (
+                  <div className="space-y-2 border-t border-slate-200 pt-3">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+                      Existing programme-only materials
+                    </div>
+
+                    {materials.map((m) => (
+                      <div
+                        key={m.id}
+                        className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
+                      >
+                        <div className="text-sm font-semibold text-slate-900">
+                          {m.title}
+                        </div>
+
+                        {m.notes ? (
+                          <div className="mt-1 text-xs text-slate-600">
+                            {m.notes}
                           </div>
                         ) : null}
 
-                        <div className="mt-3 space-y-2">
-                          {module.resources.map((resource) => {
-                            const version =
-                              resource.currentVersion;
-
-                            return (
-                              <div
-                                key={resource.id}
-                                className="rounded-xl border border-slate-200 bg-white p-3"
-                              >
-                                <div className="flex flex-wrap items-start justify-between gap-2">
-                                  <div>
-                                    <div className="text-sm font-bold text-slate-900">
-                                      {resource.title}
-                                    </div>
-                                    {resource.description ? (
-                                      <div className="mt-1 text-xs text-slate-600">
-                                        {resource.description}
-                                      </div>
-                                    ) : null}
-                                  </div>
-
-                                  <div className="flex flex-wrap gap-1">
-                                    <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-black uppercase text-slate-500">
-                                      {resource.kind}
-                                    </span>
-                                    <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-black uppercase text-slate-500">
-                                      {resource.required ? 'Required' : 'Optional'}
-                                    </span>
-                                    {version?.version ? (
-                                      <span className="rounded-full border bg-slate-50 px-2 py-1 text-[10px] font-black text-slate-500">
-                                        {version.version}
-                                      </span>
-                                    ) : null}
-                                  </div>
-                                </div>
-
-                                <div className="mt-2 flex flex-wrap gap-2">
-                                  {version?.url ? (
-                                    <a
-                                      href={version.url}
-                                      target="_blank"
-                                      rel="noreferrer"
-                                      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
-                                    >
-                                      <ExternalLink className="h-3.5 w-3.5" />
-                                      View resource
-                                    </a>
-                                  ) : null}
-
-                                  {version?.hasStoredFile ? (
-                                    <>
-                                      <button
-                                        type="button"
-                                        disabled={
-                                          accessingResourceKey ===
-                                          `${resource.id}:${version.id}:inline`
-                                        }
-                                        onClick={() =>
-                                          void openTrainingResourceFile(
-                                            resource,
-                                            'inline',
-                                          )
-                                        }
-                                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                                      >
-                                        <ExternalLink className="h-3.5 w-3.5" />
-                                        {accessingResourceKey ===
-                                        `${resource.id}:${version.id}:inline`
-                                          ? 'Opening...'
-                                          : 'View file'}
-                                      </button>
-
-                                      <button
-                                        type="button"
-                                        disabled={
-                                          accessingResourceKey ===
-                                          `${resource.id}:${version.id}:attachment`
-                                        }
-                                        onClick={() =>
-                                          void openTrainingResourceFile(
-                                            resource,
-                                            'attachment',
-                                          )
-                                        }
-                                        className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
-                                      >
-                                        <Download className="h-3.5 w-3.5" />
-                                        {accessingResourceKey ===
-                                        `${resource.id}:${version.id}:attachment`
-                                          ? 'Preparing...'
-                                          : 'Download'}
-                                      </button>
-                                    </>
-                                  ) : null}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    );
-                  })}
-
-                  {materials.length > 0 ? (
-                    <div className="space-y-2 border-t border-slate-200 pt-3">
-                      <div className="text-[11px] font-black uppercase tracking-wide text-slate-500">
-                        Existing programme-only materials
-                      </div>
-
-                      {materials.map((m) => (
-                        <div
-                          key={m.id}
-                          className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
-                        >
-                          <div className="text-sm font-bold text-slate-900">
-                            {m.title}
-                          </div>
-
-                          {m.notes ? (
-                            <div className="mt-1 text-xs text-slate-600">
-                              {m.notes}
-                            </div>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {m.url ? (
+                            <a
+                              href={m.url}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex min-h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition hover:border-slate-300 hover:bg-slate-50"
+                            >
+                              <ExternalLink className="h-3.5 w-3.5" />
+                              Open
+                            </a>
                           ) : null}
 
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {m.url ? (
-                              <a
-                                href={m.url}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50"
-                              >
-                                <ExternalLink className="h-3.5 w-3.5" />
-                                Open
-                              </a>
-                            ) : null}
-
-                            {m.fileKey ? (
-                              <span className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
-                                <Download className="h-3.5 w-3.5" />
-                                Stored file
-                              </span>
-                            ) : null}
-                          </div>
+                          {m.fileKey ? (
+                            <span className="inline-flex min-h-9 items-center gap-2 rounded-full border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600">
+                              <Download className="h-3.5 w-3.5" />
+                              Stored file
+                            </span>
+                          ) : null}
                         </div>
-                      ))}
-                    </div>
-                  ) : null}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            )}
+            </div>
+          </Panel>
+
+          {participantRole === 'clinician' ? (
+            <Panel title="Completion pathway" icon={<CheckCircle2 className="h-4 w-4" />}>
+              <ol className="grid gap-3 text-sm leading-6 text-slate-700 md:grid-cols-2">
+                <li className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3">1. Join and remain present during trainer-led orientation.</li>
+                <li className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3">2. Complete platform, device, documentation, and safety workflow training.</li>
+                <li className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3">3. Admin confirms attendance and certifies completion.</li>
+                <li className="rounded-2xl border border-slate-200/70 bg-slate-50/70 p-3">4. Your clinician profile can then be activated for patient visibility.</li>
+              </ol>
+
+              {ctx?.training?.certificateAvailable && ctx?.training?.certificateUrl ? (
+                <a
+                  href={`${ctx.training.certificateUrl}?download=1`}
+                  className="mt-4 inline-flex min-h-10 items-center gap-2 rounded-full border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-900 transition hover:bg-emerald-100"
+                >
+                  <Download className="h-4 w-4" />
+                  Download certificate
+                </a>
+              ) : (
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs leading-5 text-amber-900">
+                  Certificate becomes available after admin certification.
                 </div>
               )}
-              </div>
             </Panel>
-
-            {participantRole === 'clinician' ? (
-              <Panel title="Completion pathway" icon={<CheckCircle2 className="h-4 w-4" />}>
-                <ol className="space-y-2 text-sm text-slate-700">
-                  <li>1. Join and remain present during trainer-led orientation.</li>
-                  <li>2. Complete platform, device, documentation, and safety workflow training.</li>
-                  <li>3. Admin confirms attendance and certifies completion.</li>
-                  <li>4. Your clinician profile can then be activated for patient visibility.</li>
-                </ol>
-
-                {ctx?.training?.certificateAvailable && ctx?.training?.certificateUrl ? (
-                  <a
-                    href={`${ctx.training.certificateUrl}?download=1`}
-                    className="mt-4 inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-bold text-emerald-900 hover:bg-emerald-100"
-                  >
-                    <Download className="h-4 w-4" />
-                    Download certificate
-                  </a>
-                ) : (
-                  <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                    Certificate becomes available after admin certification.
-                  </div>
-                )}
-              </Panel>
-            ) : (
-              <Panel title="Participation identity" icon={<Users className="h-4 w-4" />}>
-                <div className="space-y-2 text-sm text-slate-700">
-                  <InfoRow label="Participant" value={participantName} />
-                  <InfoRow label="Role" value={participantRole} />
-                  <InfoRow
-                    label="Media"
-                    value={
-                      isObserver
-                        ? `Observer · mic ${observerCapabilities.microphone ? 'allowed' : 'blocked'} · camera ${observerCapabilities.camera ? 'allowed' : 'blocked'} · chat ${observerCapabilities.chat ? 'write enabled' : 'read-only'}`
-                        : 'Role-authorised'
-                    }
-                  />
-                </div>
-
-                <div className="mt-3 rounded-xl border border-indigo-100 bg-indigo-50 p-3 text-xs leading-relaxed text-indigo-950">
-                  Your signed training admission preserves this participant role through the room and RTC token. Materials are filtered server-side for the same role.
-                </div>
-              </Panel>
-            )}
-
-          </aside>
+          ) : null}
         </section>
       </div>
     </main>
@@ -1870,11 +1898,18 @@ function InfoRow({
   mono?: boolean;
 }) {
   return (
-    <div className="flex items-start justify-between gap-3">
-      <span className="text-slate-500">{label}</span>
-      <span className={cx('text-right font-semibold text-slate-900', mono && 'font-mono text-xs')}>
+    <div className="min-w-0 rounded-2xl border border-slate-200/70 bg-slate-50/65 px-3.5 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+        {label}
+      </div>
+      <div
+        className={cx(
+          'mt-1 break-words text-sm font-medium leading-5 text-slate-900',
+          mono && 'font-mono text-[11px] text-slate-700',
+        )}
+      >
         {safeText(value)}
-      </span>
+      </div>
     </div>
   );
 }
@@ -1891,18 +1926,18 @@ function StatusCard({
   done?: boolean;
 }) {
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white/90 p-4 shadow-sm">
+    <div className="rounded-[24px] border border-white/80 bg-white/94 p-4 shadow-[0_18px_48px_-34px_rgba(15,23,42,0.45)] backdrop-blur">
       <div className="flex items-center justify-between gap-3">
-        <div className="text-sm font-black text-slate-950">{title}</div>
+        <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-500">{title}</div>
         <span
           className={cx(
-            'h-2.5 w-2.5 rounded-full',
+            'h-2 w-2 rounded-full shadow-sm',
             done ? 'bg-emerald-500' : 'bg-slate-300',
           )}
         />
       </div>
-      <div className="mt-2 text-lg font-black text-slate-900">{value}</div>
-      <div className="mt-1 text-xs leading-relaxed text-slate-500">{detail}</div>
+      <div className="mt-2 text-lg font-semibold tracking-[-0.02em] text-slate-950">{value}</div>
+      <div className="mt-1 text-xs leading-5 text-slate-500">{detail}</div>
     </div>
   );
 }
@@ -1917,10 +1952,16 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[24px] border border-slate-200 bg-white/90 p-5 shadow-sm">
-      <div className="mb-3 flex items-center gap-2 text-lg font-black text-slate-950">
-        {icon}
-        {title}
+    <section className="h-full rounded-[26px] border border-white/80 bg-white/94 p-5 shadow-[0_22px_58px_-38px_rgba(15,23,42,0.45)] backdrop-blur md:p-6">
+      <div className="mb-4 flex items-center gap-2.5">
+        {icon ? (
+          <span className="grid h-8 w-8 place-items-center rounded-xl border border-slate-200 bg-slate-50 text-slate-700">
+            {icon}
+          </span>
+        ) : null}
+        <div className="text-[15px] font-semibold tracking-[-0.015em] text-slate-950">
+          {title}
+        </div>
       </div>
       {children}
     </section>
@@ -1985,7 +2026,7 @@ export default function TrainingRoomPage() {
       fallback={
         <main className="min-h-screen bg-slate-50">
           <div className="mx-auto max-w-7xl p-6">
-            <div className="rounded-2xl border bg-white p-6 text-sm text-slate-600">
+            <div className="rounded-[28px] border border-slate-200 bg-white p-6 text-sm font-medium text-slate-600 shadow-sm">
               Loading training room…
             </div>
           </div>
