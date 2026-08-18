@@ -83,6 +83,7 @@ export async function POST(request: NextRequest) {
         trainingSlotId: admission.trainingSlotId,
         sessionKey: admission.sessionKey,
         role: admission.role,
+        uid: admission.uid,
         displayName: admission.displayName,
         notBeforeAt: admission.notBeforeAt.toISOString(),
         expiresAt: admission.expiresAt.toISOString(),

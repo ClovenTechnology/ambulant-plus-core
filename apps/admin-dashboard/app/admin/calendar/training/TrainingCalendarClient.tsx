@@ -3,6 +3,7 @@
 
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
 import TrainingParticipationPanel from './TrainingParticipationPanel';
+import TrainingContentManager from '../../training/TrainingContentManager';
 
 type Row = {
   clinicianId: string;
@@ -11,10 +12,15 @@ type Row = {
   phone?: string | null;
   specialty?: string | null;
   createdAt: string;
+  trainingCompleted?: boolean | null;
   onboarding: { id: string; stage: string; notes?: string | null };
 
   trainingSlot?: {
     id: string;
+    title?: string | null;
+    summary?: string | null;
+    timezone?: string | null;
+    trainerName?: string | null;
     startAt: string;
     endAt: string;
     mode: 'virtual' | 'in_person';
@@ -29,6 +35,9 @@ type EventItem = {
   onboardingId: string;
   trainingSlotId?: string | null;
   title: string;
+  summary?: string | null;
+  timezone?: string | null;
+  trainerName?: string | null;
   startAt: string;
   endAt: string;
   mode: 'virtual' | 'in_person';
@@ -126,14 +135,96 @@ function Field({ label, children, hint }: { label: string; children: React.React
   );
 }
 
+function isTrainingComplete(row: Row) {
+  return (
+    row.trainingCompleted === true ||
+    String(row.onboarding?.stage || '').toLowerCase() === 'training_completed'
+  );
+}
+
+function trainingSelectionMeta(row: Row) {
+  const stage = String(row.onboarding?.stage || '').toLowerCase();
+
+  if (isTrainingComplete(row)) {
+    return {
+      disabled: true,
+      badge: 'Training complete - invite only',
+      badgeClass: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    };
+  }
+
+  if (stage === 'rejected') {
+    return {
+      disabled: true,
+      badge: 'Rejected',
+      badgeClass: 'border-rose-200 bg-rose-50 text-rose-800',
+    };
+  }
+
+  if (stage === 'training_scheduled') {
+    return {
+      disabled: false,
+      badge: 'Training scheduled - can reassign',
+      badgeClass: 'border-amber-200 bg-amber-50 text-amber-800',
+    };
+  }
+
+  return {
+    disabled: false,
+    badge: 'Training required',
+    badgeClass: 'border-blue-200 bg-blue-50 text-blue-800',
+  };
+}
+
+function friendlyTrainingError(value: unknown) {
+  const raw = String(value || '').trim();
+  const code = (() => {
+    try {
+      const parsed = JSON.parse(raw);
+      return String(parsed?.error || raw).trim();
+    } catch {
+      return raw;
+    }
+  })();
+
+  if (code === 'completed_clinician_requires_training_invitation') {
+    return 'This clinician has already completed mandatory training. Use the session participant controls to send an optional additional-training invitation instead.';
+  }
+
+  if (code === 'cannot_schedule_training_for_rejected_onboarding') {
+    return 'A rejected onboarding record cannot be scheduled for mandatory training.';
+  }
+
+  return code.replace(/_/g, ' ') || 'Unable to complete the training action.';
+}
+
 async function post(url: string, body: any) {
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(await res.text().catch(() => `HTTP_${res.status}`));
-  return res.json().catch(() => ({}));
+
+  const text = await res.text().catch(() => '');
+  let payload: any = {};
+
+  if (text) {
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      payload = { ok: false, error: text };
+    }
+  }
+
+  if (!res.ok || payload?.ok === false) {
+    throw new Error(
+      friendlyTrainingError(
+        payload?.error || text || `HTTP_${res.status}`,
+      ),
+    );
+  }
+
+  return payload;
 }
 
 export default function TrainingCalendarClient({
@@ -156,6 +247,9 @@ export default function TrainingCalendarClient({
 
   // schedule modal
   const [schedOpen, setSchedOpen] = useState(false);
+  const [schedTitle, setSchedTitle] = useState('');
+  const [schedSummary, setSchedSummary] = useState('');
+  const [schedTrainerName, setSchedTrainerName] = useState('');
   const [schedClinicianId, setSchedClinicianId] = useState('');
   const [schedOnboardingId, setSchedOnboardingId] = useState('');
   const [schedMode, setSchedMode] = useState<'virtual' | 'in_person'>('virtual');
@@ -198,16 +292,21 @@ export default function TrainingCalendarClient({
 
       const t = r.trainingSlot;
       const key = `ts:${t.id}`;
+      const programmeTitle =
+        String(t.title || '').trim() ||
+        'Mandatory Clinician Training';
       const label = `${r.displayName}${r.specialty ? ` — ${r.specialty}` : ''}`;
 
       const existing = bySlot.get(key);
       if (existing) {
         existing.participantCount = (existing.participantCount || 1) + 1;
         existing.participantLabels = [...(existing.participantLabels || []), label];
-        existing.title =
-          existing.participantCount > 1
-            ? `Cohort training — ${existing.participantCount} clinicians`
-            : existing.title;
+        existing.title = programmeTitle;
+        if (!existing.summary && t.summary) existing.summary = t.summary;
+        if (!existing.trainerName && t.trainerName) {
+          existing.trainerName = t.trainerName;
+        }
+        if (!existing.timezone && t.timezone) existing.timezone = t.timezone;
         if (!existing.joinUrl && t.joinUrl) existing.joinUrl = t.joinUrl;
         continue;
       }
@@ -217,7 +316,10 @@ export default function TrainingCalendarClient({
         clinicianId: r.clinicianId,
         onboardingId: r.onboarding.id,
         trainingSlotId: t.id,
-        title: label,
+        title: programmeTitle,
+        summary: t.summary ?? null,
+        timezone: t.timezone ?? null,
+        trainerName: t.trainerName ?? null,
         startAt: t.startAt,
         endAt: t.endAt,
         mode: t.mode,
@@ -253,6 +355,46 @@ export default function TrainingCalendarClient({
 
   const agenda = eventsByDay.get(selectedDay) ?? [];
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const slotId =
+      String(
+        window.sessionStorage.getItem(
+          'ambulant-training-open-slot',
+        ) || '',
+      ).trim();
+
+    if (!slotId) return;
+
+    const event =
+      events.find(
+        (candidate) =>
+          String(candidate.trainingSlotId || '') === slotId,
+      );
+
+    if (!event) return;
+
+    window.sessionStorage.removeItem(
+      'ambulant-training-open-slot',
+    );
+
+    const start = safeDate(event.startAt);
+    if (start) {
+      setSelectedDay(ymd(start));
+      setCursor(
+        new Date(
+          start.getFullYear(),
+          start.getMonth(),
+          1,
+        ),
+      );
+    }
+
+    setActiveEv(event);
+    setEvOpen(true);
+  }, [events]);
+
   // month grid (6 weeks)
   const gridDays = useMemo(() => {
     const start = new Date(cursor);
@@ -274,17 +416,19 @@ export default function TrainingCalendarClient({
   }, [cursor]);
 
   const cliniciansOptions = useMemo(() => {
-    const opts = rows
-      .filter(
-        (r) =>
-          String(r.onboarding?.stage || '').toLowerCase() !==
-          'training_completed',
-      )
-      .map((r) => ({
+    const opts = rows.map((r) => {
+      const selection = trainingSelectionMeta(r);
+
+      return {
         clinicianId: r.clinicianId,
         onboardingId: r.onboarding.id,
         label: `${r.displayName}${r.specialty ? ` — ${r.specialty}` : ''}`,
-      }));
+        disabled: selection.disabled,
+        badge: selection.badge,
+        badgeClass: selection.badgeClass,
+      };
+    });
+
     opts.sort((a, b) => a.label.localeCompare(b.label));
     return opts;
   }, [rows]);
@@ -298,12 +442,17 @@ export default function TrainingCalendarClient({
       setSchedDurationMin(60);
       setSchedMode('virtual');
       setSchedJoinUrl('');
+      setSchedTitle('');
+      setSchedSummary('');
+      setSchedTrainerName('');
 
-      // If clinician not selected yet, pick first as default (safe)
-      if (!schedSelectedClinicianIds.length && cliniciansOptions[0]) {
-        setSchedSelectedClinicianIds([cliniciansOptions[0].clinicianId]);
-        setSchedClinicianId(cliniciansOptions[0].clinicianId);
-        setSchedOnboardingId(cliniciansOptions[0].onboardingId);
+      const firstEligible =
+        cliniciansOptions.find((option) => !option.disabled);
+
+      if (!schedSelectedClinicianIds.length && firstEligible) {
+        setSchedSelectedClinicianIds([firstEligible.clinicianId]);
+        setSchedClinicianId(firstEligible.clinicianId);
+        setSchedOnboardingId(firstEligible.onboardingId);
       }
 
       setSchedOpen(true);
@@ -314,9 +463,19 @@ export default function TrainingCalendarClient({
   const saveSchedule = useCallback(async () => {
     setNotice(null);
 
-    const selectedClinicians = cliniciansOptions.filter((x) =>
-      schedSelectedClinicianIds.includes(x.clinicianId),
+    const selectedClinicians = cliniciansOptions.filter(
+      (x) =>
+        !x.disabled &&
+        schedSelectedClinicianIds.includes(x.clinicianId),
     );
+
+    if (!schedTitle.trim()) {
+      setNotice({
+        tone: 'err',
+        text: 'Training title / topic is required.',
+      });
+      return;
+    }
 
     if (!selectedClinicians.length) {
       setNotice({ tone: 'err', text: 'Select at least one clinician.' });
@@ -342,20 +501,35 @@ export default function TrainingCalendarClient({
       endIso = endD.toISOString();
     }
 try {
-      await post('/api/admin/clinicians/onboarding/schedule-training', {
-        clinicians: selectedClinicians.map((x) => ({
-          clinicianId: x.clinicianId,
-          onboardingId: x.onboardingId,
-        })),
-        clinicianId: selectedClinicians[0]?.clinicianId,
-        onboardingId: selectedClinicians[0]?.onboardingId,
-        startAt: startIso,
-        endAt: endIso,
-        mode: schedMode,
-        joinUrl: null,
-      });
+      const created = await post(
+        '/api/admin/clinicians/onboarding/schedule-training',
+        {
+          clinicians: selectedClinicians.map((x) => ({
+            clinicianId: x.clinicianId,
+            onboardingId: x.onboardingId,
+          })),
+          clinicianId: selectedClinicians[0]?.clinicianId,
+          onboardingId: selectedClinicians[0]?.onboardingId,
+          title: schedTitle.trim(),
+          summary: schedSummary.trim() || null,
+          trainerName: schedTrainerName.trim() || null,
+          startAt: startIso,
+          endAt: endIso,
+          mode: schedMode,
+          joinUrl: null,
+        },
+      );
 
-      // reflect immediately in UI by reloading (simple + reliable)
+      const createdSlotId =
+        String(created?.trainingSlot?.id || '').trim();
+
+      if (createdSlotId) {
+        window.sessionStorage.setItem(
+          'ambulant-training-open-slot',
+          createdSlotId,
+        );
+      }
+
       window.location.reload();
     } catch (e: any) {
       setNotice({ tone: 'err', text: e?.message || 'Failed to schedule training.' });
@@ -368,6 +542,9 @@ try {
     schedJoinUrl,
     schedMode,
     schedStartLocal,
+    schedTitle,
+    schedSummary,
+    schedTrainerName,
   ]);
 
   const openEvent = useCallback((ev: EventItem) => {
@@ -589,6 +766,7 @@ try {
                     <input
                       type="checkbox"
                       checked={checked}
+                      disabled={o.disabled}
                       onChange={(e) => {
                         const next = e.target.checked
                           ? Array.from(new Set([...schedSelectedClinicianIds, o.clinicianId]))
@@ -602,15 +780,68 @@ try {
                       }}
                       className="mt-0.5"
                     />
-                    <span>{o.label}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{o.label}</span>
+                      <span
+                        className={[
+                          'mt-1 inline-flex rounded-full border px-2 py-0.5 text-[10px] font-semibold',
+                          o.badgeClass,
+                        ].join(' ')}
+                      >
+                        {o.badge}
+                      </span>
+                    </span>
                   </label>
                 );
               })}
             </div>
-            <div className="mt-1 text-[11px] text-gray-500">
-              Selected: {schedSelectedClinicianIds.length}. All selected clinicians will share one training room.
+            <div className="mt-1 space-y-1 text-[11px] text-gray-500">
+              <div>
+                Selected: {schedSelectedClinicianIds.length}. All selected mandatory trainees will share one training room.
+              </div>
+              <div>
+                Clinicians marked "Training complete - invite only" remain visible for clarity but cannot be added through mandatory scheduling. Invite them from an existing session's participant controls.
+              </div>
             </div>
           </div>
+
+          <div className="sm:col-span-2">
+            <Field label="Training title / topic">
+              <input
+                type="text"
+                value={schedTitle}
+                onChange={(e) => setSchedTitle(e.target.value)}
+                placeholder="e.g. Contactless Medicine - Platform Orientation"
+                maxLength={240}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+              />
+            </Field>
+          </div>
+
+          <div className="sm:col-span-2">
+            <Field
+              label="Summary / description"
+              hint="Optional - shown to invited participants and observers."
+            >
+              <textarea
+                value={schedSummary}
+                onChange={(e) => setSchedSummary(e.target.value)}
+                rows={3}
+                maxLength={2000}
+                className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+              />
+            </Field>
+          </div>
+
+          <Field label="Trainer / facilitator" hint="Optional">
+            <input
+              type="text"
+              value={schedTrainerName}
+              onChange={(e) => setSchedTrainerName(e.target.value)}
+              maxLength={240}
+              className="w-full rounded-lg border px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-black/10"
+            />
+          </Field>
 
           <Field label="Mode">
             <select
@@ -653,8 +884,13 @@ try {
           </Field>
 
           <div className="sm:col-span-2">
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-              Virtual training links are generated automatically when you save. No manual Join URL is required.
+            <div className="space-y-2">
+              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                Virtual training links are generated automatically when you save. No manual Join URL is required.
+              </div>
+              <div className="rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs text-indigo-800">
+                Next step: after you create the session, this exact session reopens automatically so you can assign reusable modules and training materials. Materials remain optional for room admission.
+              </div>
             </div>
           </div>
         </div>
@@ -694,6 +930,27 @@ try {
               </div>
             </div>
 
+            {(activeEv.summary || activeEv.trainerName) ? (
+              <div className="rounded-lg border bg-white p-3">
+                <div className="text-xs font-semibold text-gray-700">
+                  Session details
+                </div>
+                {activeEv.summary ? (
+                  <p className="mt-2 text-xs leading-5 text-gray-600">
+                    {activeEv.summary}
+                  </p>
+                ) : null}
+                {activeEv.trainerName ? (
+                  <div className="mt-2 text-xs text-gray-600">
+                    Trainer / facilitator:{' '}
+                    <span className="font-semibold text-gray-900">
+                      {activeEv.trainerName}
+                    </span>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             {activeEv.trainingSlotId ? (
               <div className="rounded-lg border bg-white p-3">
                 <div className="text-xs font-semibold text-gray-700">
@@ -728,14 +985,29 @@ try {
             ) : null}
 
             {activeEv.trainingSlotId ? (
+              <TrainingContentManager
+                trainingSlotId={activeEv.trainingSlotId}
+                sessions={[
+                  {
+                    id: 'session-1',
+                    dayNumber: 1,
+                    startLocal: toLocalInputValue(activeEv.startAt),
+                    endLocal: toLocalInputValue(activeEv.endAt),
+                    mode: activeEv.mode,
+                    trainerName: activeEv.trainerName || '',
+                  },
+                ]}
+              />
+            ) : null}
+
+            {activeEv.trainingSlotId ? (
               <TrainingParticipationPanel
                 trainingSlotId={activeEv.trainingSlotId}
                 commonRoomUrl={activeEv.joinUrl}
                 qualifiedClinicians={rows
                   .filter(
                     (row) =>
-                      String(row.onboarding?.stage || '').toLowerCase() ===
-                      'training_completed',
+                      isTrainingComplete(row),
                   )
                   .map((row) => ({
                     clinicianId: row.clinicianId,

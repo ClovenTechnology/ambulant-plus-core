@@ -713,6 +713,8 @@ export async function GET(
               ) ||
               new Date()
                 .toISOString(),
+            trainingCompleted:
+              clinician.trainingCompleted === true,
             onboarding: {
               id:
                 onboarding?.id
@@ -932,6 +934,27 @@ export async function GET(
                     id:
                       String(
                         training.id,
+                      ),
+                    title:
+                      cleanStr(
+                        training.title,
+                        240,
+                      ),
+                    summary:
+                      cleanStr(
+                        training.summary,
+                        2000,
+                      ),
+                    timezone:
+                      cleanStr(
+                        training.timezone,
+                        120,
+                      ) ||
+                      'Africa/Johannesburg',
+                    trainerName:
+                      cleanStr(
+                        training.trainerName,
+                        240,
                       ),
                     startAt:
                       asIso(

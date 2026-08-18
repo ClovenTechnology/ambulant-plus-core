@@ -250,6 +250,9 @@ export default function GuestTrainingJoinClient() {
         !response.ok ||
         !payload?.ok ||
         !payload?.admission?.token ||
+        !payload?.admission?.trainingSlotId ||
+        !payload?.admission?.role ||
+        !payload?.admission?.uid ||
         !payload?.roomUrl
       ) {
         throw new Error(
@@ -262,6 +265,27 @@ export default function GuestTrainingJoinClient() {
         new URL(
           String(payload.roomUrl),
         );
+
+      url.searchParams.set(
+        'trainingSlotId',
+        String(
+          payload.admission.trainingSlotId,
+        ),
+      );
+
+      url.searchParams.set(
+        'role',
+        String(
+          payload.admission.role,
+        ),
+      );
+
+      url.searchParams.set(
+        'uid',
+        String(
+          payload.admission.uid,
+        ),
+      );
 
       url.searchParams.set(
         'joinToken',

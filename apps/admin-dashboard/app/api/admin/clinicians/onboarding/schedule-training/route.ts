@@ -23,6 +23,8 @@ export async function POST(req: NextRequest) {
   const mode = body?.mode === 'in_person' ? 'in_person' : 'virtual';
   const joinUrl = body?.joinUrl ? String(body.joinUrl) : null;
   const trainerName = body?.trainerName ? String(body.trainerName) : null;
+  const title = body?.title ? String(body.title) : null;
+  const summary = body?.summary ? String(body.summary) : null;
 
   if ((!clinicians.length && (!clinicianId || !onboardingId)) || !startAt || !endAt) {
     return new Response('clinicians, startAt, endAt required', { status: 400 });
@@ -37,5 +39,7 @@ export async function POST(req: NextRequest) {
     mode,
     joinUrl,
     trainerName,
+    title,
+    summary,
   });
 }
