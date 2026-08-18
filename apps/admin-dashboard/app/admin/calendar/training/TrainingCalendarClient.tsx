@@ -2,6 +2,7 @@
 'use client';
 
 import React, { useMemo, useState, useCallback, useEffect } from 'react';
+import TrainingParticipationPanel from './TrainingParticipationPanel';
 
 type Row = {
   clinicianId: string;
@@ -92,7 +93,7 @@ function Modal({
   return (
     <div className="fixed inset-0 z-[80] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} aria-hidden="true" />
-      <div className="relative w-full max-w-xl rounded-2xl border bg-white shadow-xl">
+      <div className="relative flex max-h-[92vh] w-full max-w-4xl flex-col overflow-hidden rounded-2xl border bg-white shadow-xl">
         <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
           <div>
             <div className="text-sm font-semibold text-gray-900">{title}</div>
@@ -108,7 +109,7 @@ function Modal({
             Close
           </button>
         </div>
-        <div className="px-4 py-3">{children}</div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{children}</div>
         {footer ? <div className="border-t px-4 py-3">{footer}</div> : null}
       </div>
     </div>
@@ -273,11 +274,17 @@ export default function TrainingCalendarClient({
   }, [cursor]);
 
   const cliniciansOptions = useMemo(() => {
-    const opts = rows.map((r) => ({
-      clinicianId: r.clinicianId,
-      onboardingId: r.onboarding.id,
-      label: `${r.displayName}${r.specialty ? ` — ${r.specialty}` : ''}`,
-    }));
+    const opts = rows
+      .filter(
+        (r) =>
+          String(r.onboarding?.stage || '').toLowerCase() !==
+          'training_completed',
+      )
+      .map((r) => ({
+        clinicianId: r.clinicianId,
+        onboardingId: r.onboarding.id,
+        label: `${r.displayName}${r.specialty ? ` — ${r.specialty}` : ''}`,
+      }));
     opts.sort((a, b) => a.label.localeCompare(b.label));
     return opts;
   }, [rows]);
@@ -368,38 +375,6 @@ try {
     setActiveEv(ev);
     setEvOpen(true);
   }, []);
-
-  const markComplete = useCallback(async () => {
-    if (!activeEv?.trainingSlotId) return;
-    if (!confirm(`Mark completed: ${activeEv.title}?`)) return;
-
-    try {
-      await post('/api/admin/clinicians/onboarding/mark-training-complete', {
-        clinicianId: activeEv.clinicianId,
-        onboardingId: activeEv.onboardingId,
-        trainingSlotId: activeEv.trainingSlotId,
-      });
-      window.location.reload();
-    } catch (e: any) {
-      setNotice({ tone: 'err', text: e?.message || 'Failed to mark complete.' });
-    }
-  }, [activeEv]);
-
-  const cancelTraining = useCallback(async () => {
-    if (!activeEv?.trainingSlotId) return;
-    if (!confirm(`Cancel training slot: ${activeEv.title}?`)) return;
-
-    try {
-      await post('/api/admin/clinicians/onboarding/cancel-training', {
-        clinicianId: activeEv.clinicianId,
-        onboardingId: activeEv.onboardingId,
-        trainingSlotId: activeEv.trainingSlotId,
-      });
-      window.location.reload();
-    } catch (e: any) {
-      setNotice({ tone: 'err', text: e?.message || 'Failed to cancel training.' });
-    }
-  }, [activeEv]);
 
   const goPrevMonth = () => setCursor((d) => new Date(d.getFullYear(), d.getMonth() - 1, 1));
   const goNextMonth = () => setCursor((d) => new Date(d.getFullYear(), d.getMonth() + 1, 1));
@@ -691,93 +666,87 @@ try {
         open={evOpen}
         onClose={() => setEvOpen(false)}
         footer={
-          <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center justify-end">
             <button
               type="button"
-              onClick={cancelTraining}
-              className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+              onClick={() => setEvOpen(false)}
+              className="rounded-lg border bg-white px-3 py-1.5 text-xs hover:bg-gray-50"
             >
-              Cancel slot
+              Close
             </button>
-
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setEvOpen(false)}
-                className="rounded-lg border bg-white px-3 py-1.5 text-xs hover:bg-gray-50"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={markComplete}
-                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700"
-              >
-                Mark completed
-              </button>
-            </div>
           </div>
         }
       >
         {activeEv ? (
-          <div className="space-y-2 text-sm">
+          <div className="space-y-3 text-sm">
             <div className="rounded-lg border bg-slate-50 p-3">
               <div className="text-xs text-gray-600">Time</div>
               <div className="mt-1 font-semibold text-gray-900">
                 {new Date(activeEv.startAt).toLocaleString()} →{' '}
-                {new Date(activeEv.endAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                {new Date(activeEv.endAt).toLocaleTimeString([], {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
               </div>
               <div className="mt-1 text-xs text-gray-600">
-                {activeEv.mode === 'virtual' ? 'Virtual' : 'In person'} • {activeEv.status}
+                {activeEv.mode === 'virtual' ? 'Virtual' : 'In person'} •{' '}
+                {activeEv.status}
               </div>
             </div>
 
-            {activeEv.joinUrl ? (
-              <div className="rounded-lg border bg-white p-3">
-                <div className="text-xs text-gray-600">Clinician Join URL</div>
-                <div className="mt-1 break-all text-sm text-blue-700">{activeEv.joinUrl}</div>
-              </div>
-            ) : null}
-
             {activeEv.trainingSlotId ? (
               <div className="rounded-lg border bg-white p-3">
-                <div className="text-xs font-semibold text-gray-700">Admin room access</div>
+                <div className="text-xs font-semibold text-gray-700">
+                  Admin room access
+                </div>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <a
-                    href={adminTrainingRoomPath(activeEv.trainingSlotId, 'admin')}
+                    href={adminTrainingRoomPath(
+                      activeEv.trainingSlotId,
+                      'admin',
+                    )}
                     className="rounded-lg bg-black px-3 py-1.5 text-xs font-semibold text-white hover:bg-black/90"
                   >
                     Open as admin/trainer
                   </a>
                   <a
-                    href={adminTrainingRoomPath(activeEv.trainingSlotId, 'observer')}
+                    href={adminTrainingRoomPath(
+                      activeEv.trainingSlotId,
+                      'observer',
+                    )}
                     className="rounded-lg border px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-gray-50"
                   >
                     Open as observer
                   </a>
                 </div>
                 <div className="mt-2 text-[11px] text-gray-500">
-                  Observers may join for supervision/audit and are not counted as trainee completion.
+                  This observer control is for the authenticated Admin/staff
+                  member. External observers receive their own unique secure
+                  invitation below.
                 </div>
               </div>
             ) : null}
 
-            {activeEv.participantLabels?.length ? (
-              <div className="rounded-lg border bg-white p-3">
-                <div className="text-xs font-semibold text-gray-700">Participants</div>
-                <ul className="mt-1 list-disc space-y-0.5 pl-4 text-xs text-gray-600">
-                  {activeEv.participantLabels.map((x) => (
-                    <li key={x}>{x}</li>
-                  ))}
-                </ul>
-              </div>
+            {activeEv.trainingSlotId ? (
+              <TrainingParticipationPanel
+                trainingSlotId={activeEv.trainingSlotId}
+                commonRoomUrl={activeEv.joinUrl}
+                qualifiedClinicians={rows
+                  .filter(
+                    (row) =>
+                      String(row.onboarding?.stage || '').toLowerCase() ===
+                      'training_completed',
+                  )
+                  .map((row) => ({
+                    clinicianId: row.clinicianId,
+                    onboardingId: row.onboarding.id,
+                    label: `${row.displayName}${
+                      row.specialty ? ` — ${row.specialty}` : ''
+                    }`,
+                  }))}
+                onChanged={() => window.location.reload()}
+              />
             ) : null}
-
-            <div className="rounded-lg border bg-white p-3 text-xs text-gray-600">
-              Clinician ID: <span className="font-mono">{activeEv.clinicianId}</span>
-              <br />
-              Slot ID: <span className="font-mono">{activeEv.trainingSlotId}</span>
-            </div>
           </div>
         ) : null}
       </Modal>
