@@ -315,21 +315,11 @@ export async function bookClinicianTrainingSlot(input: {
         },
       });
 
-    if (
+    const trainingCompleted =
+      clinician.trainingCompleted === true ||
       String(existing?.status || '')
         .trim()
-        .toLowerCase() ===
-      'training_completed'
-    ) {
-      return {
-        status: 409,
-        body: {
-          ok: false,
-          error:
-            'completed_training_cannot_be_rescheduled',
-        },
-      };
-    }
+        .toLowerCase() === 'training_completed';
 
     const access =
       await resolveClinicianOnboardingEntitlements(
@@ -338,7 +328,7 @@ export async function bookClinicianTrainingSlot(input: {
         existing,
       );
 
-    if (!access.trainingAccess) {
+    if (!trainingCompleted && !access.trainingAccess) {
       return {
         status: 403,
         body: {
@@ -357,11 +347,51 @@ export async function bookClinicianTrainingSlot(input: {
       };
     }
 
-    const alreadyOnSlot =
-      String(existing?.trainingSlotId || '') ===
-      String(slot.id);
+    const nowDate = new Date();
+    const principalKey =
+      `clinician:${String(
+        input.clinicianId,
+      )}`;
 
-    if (!alreadyOnSlot) {
+    const existingAssignment =
+      await tx
+        .clinicianTrainingParticipantAssignment
+        .findUnique({
+          where: {
+            trainingSlotId_sessionKey_principalKey: {
+              trainingSlotId:
+                String(slot.id),
+              sessionKey: 'slot',
+              principalKey,
+            },
+          },
+        });
+
+    const existingAssignmentActive =
+      Boolean(existingAssignment) &&
+      !existingAssignment.revokedAt &&
+      (!existingAssignment.expiresAt ||
+        new Date(existingAssignment.expiresAt).getTime() > now) &&
+      ![
+        'revoked',
+        'expired',
+        'declined',
+      ].includes(
+        String(existingAssignment.status || '')
+          .trim()
+          .toLowerCase(),
+      );
+
+    const legacyAlreadyOnSlot =
+      !trainingCompleted &&
+      String(existing?.trainingSlotId || '') ===
+        String(slot.id);
+
+    const seatAlreadyHeld =
+      existingAssignmentActive ||
+      legacyAlreadyOnSlot;
+
+    if (!seatAlreadyHeld) {
       const reserved = await tx.$executeRaw`
         UPDATE "ClinicianTrainingSlot"
         SET
@@ -382,6 +412,140 @@ export async function bookClinicianTrainingSlot(input: {
           },
         };
       }
+    }
+
+    const displayName =
+      cleanText(
+        clinician.displayName ||
+          clinician.fullName ||
+          clinician.name ||
+          clinician.email,
+        240,
+      ) || 'Clinician';
+
+    if (trainingCompleted) {
+      const assignment =
+        await tx
+          .clinicianTrainingParticipantAssignment
+          .upsert({
+            where: {
+              trainingSlotId_sessionKey_principalKey: {
+                trainingSlotId:
+                  String(slot.id),
+                sessionKey: 'slot',
+                principalKey,
+              },
+            },
+            create: {
+              trainingSlotId:
+                String(slot.id),
+              sessionKey: 'slot',
+              principalType: 'clinician',
+              principalKey,
+              principalId:
+                String(input.clinicianId),
+              email:
+                cleanText(
+                  clinician.email,
+                  320,
+                ),
+              name: displayName,
+              role: 'clinician',
+              permissions: [
+                'training:join',
+                'training:attendance:self',
+              ],
+              status: 'assigned',
+              assignedAt: nowDate,
+              acceptedAt: null,
+              metadata: {
+                source:
+                  'clinician_booking',
+                qualificationTraining: false,
+                onboardingId:
+                  existing?.id
+                    ? String(existing.id)
+                    : null,
+              },
+            },
+            update: {
+              email:
+                cleanText(
+                  clinician.email,
+                  320,
+                ),
+              name: displayName,
+              permissions: [
+                'training:join',
+                'training:attendance:self',
+              ],
+              status: 'assigned',
+              assignedAt: nowDate,
+              acceptedAt: null,
+              revokedAt: null,
+              expiresAt: null,
+              metadata: {
+                source:
+                  'clinician_booking',
+                qualificationTraining: false,
+                onboardingId:
+                  existing?.id
+                    ? String(existing.id)
+                    : null,
+              },
+            },
+          });
+
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          training: {
+            ...publicTrainingSlot({
+              ...slot,
+              usedCount:
+                Number(slot.usedCount || 0) +
+                (seatAlreadyHeld ? 0 : 1),
+            }),
+            status: 'scheduled',
+            selectedMode: input.mode,
+            paid: true,
+            accessGranted: true,
+            waiverActive:
+              access.approvedPayLater,
+            entitlements: {
+              pathwayKey:
+                access.pathwayKey,
+              privileges:
+                access.privileges,
+              starterKitRelease:
+                access.starterKitRelease,
+              platformIndemnityEligible:
+                access.platformIndemnityEligible,
+              balanceRecoveryApplies:
+                access.balanceRecoveryApplies,
+            },
+          },
+          participation: {
+            assignmentId:
+              String(assignment.id),
+            trainingSlotId:
+              String(slot.id),
+            status: 'assigned',
+            qualificationTraining: false,
+          },
+          onboarding: existing
+            ? {
+                id: String(existing.id),
+                stage: existing.status,
+                trainingSlotId:
+                  existing.trainingSlotId,
+                trainingMode:
+                  existing.trainingMode,
+              }
+            : null,
+        },
+      };
     }
 
     const switchingFrom =
@@ -419,86 +583,77 @@ export async function bookClinicianTrainingSlot(input: {
         },
       });
 
-    const nowDate = new Date();
-    const principalKey =
-      `clinician:${String(
-        input.clinicianId,
-      )}`;
-    const displayName =
-      cleanText(
-        clinician.displayName ||
-          clinician.fullName ||
-          clinician.name ||
-          clinician.email,
-        240,
-      ) || 'Clinician';
-
-    await tx
-      .clinicianTrainingParticipantAssignment
-      .upsert({
-        where: {
-          trainingSlotId_sessionKey_principalKey: {
+    const assignment =
+      await tx
+        .clinicianTrainingParticipantAssignment
+        .upsert({
+          where: {
+            trainingSlotId_sessionKey_principalKey: {
+              trainingSlotId:
+                String(slot.id),
+              sessionKey: 'slot',
+              principalKey,
+            },
+          },
+          create: {
             trainingSlotId:
               String(slot.id),
             sessionKey: 'slot',
+            principalType: 'clinician',
             principalKey,
+            principalId:
+              String(input.clinicianId),
+            email:
+              cleanText(
+                clinician.email,
+                320,
+              ),
+            name: displayName,
+            role: 'clinician',
+            permissions: [
+              'training:join',
+              'training:attendance:self',
+            ],
+            status: 'assigned',
+            assignedAt: nowDate,
+            acceptedAt: null,
+            metadata: {
+              source:
+                switchingFrom
+                  ? 'clinician_reschedule'
+                  : 'clinician_booking',
+              qualificationTraining: true,
+              onboardingId:
+                String(onboarding.id),
+            },
           },
-        },
-        create: {
-          trainingSlotId:
-            String(slot.id),
-          sessionKey: 'slot',
-          principalType: 'clinician',
-          principalKey,
-          principalId:
-            String(input.clinicianId),
-          email:
-            cleanText(
-              clinician.email,
-              320,
-            ),
-          name: displayName,
-          role: 'clinician',
-          permissions: [
-            'training:join',
-            'training:attendance:self',
-          ],
-          status: 'assigned',
-          assignedAt: nowDate,
-          metadata: {
-            source:
-              switchingFrom
-                ? 'clinician_reschedule'
-                : 'clinician_booking',
-            onboardingId:
-              String(onboarding.id),
+          update: {
+            email:
+              cleanText(
+                clinician.email,
+                320,
+              ),
+            name: displayName,
+            permissions: [
+              'training:join',
+              'training:attendance:self',
+            ],
+            status: 'assigned',
+            assignedAt: nowDate,
+            acceptedAt: null,
+            revokedAt: null,
+            expiresAt: null,
+            metadata: {
+              source:
+                switchingFrom
+                  ? 'clinician_reschedule'
+                  : 'clinician_booking',
+              qualificationTraining: true,
+              onboardingId:
+                String(onboarding.id),
+            },
           },
-        },
-        update: {
-          email:
-            cleanText(
-              clinician.email,
-              320,
-            ),
-          name: displayName,
-          permissions: [
-            'training:join',
-            'training:attendance:self',
-          ],
-          status: 'assigned',
-          assignedAt: nowDate,
-          revokedAt: null,
-          expiresAt: null,
-          metadata: {
-            source:
-              switchingFrom
-                ? 'clinician_reschedule'
-                : 'clinician_booking',
-            onboardingId:
-              String(onboarding.id),
-          },
-        },
-      });
+        });
 
     if (switchingFrom) {
       const oldAssignments =
@@ -529,8 +684,8 @@ export async function bookClinicianTrainingSlot(input: {
 
       const oldAssignmentIds =
         oldAssignments.map(
-          (assignment: any) =>
-            String(assignment.id),
+          (oldAssignment: any) =>
+            String(oldAssignment.id),
         );
 
       if (oldAssignmentIds.length) {
@@ -561,6 +716,7 @@ export async function bookClinicianTrainingSlot(input: {
               revokedAt: nowDate,
             },
           });
+
       }
 
       await tx.$executeRaw`
@@ -590,7 +746,7 @@ export async function bookClinicianTrainingSlot(input: {
             ...slot,
             usedCount:
               Number(slot.usedCount || 0) +
-              (alreadyOnSlot ? 0 : 1),
+              (seatAlreadyHeld ? 0 : 1),
           }),
           status: 'scheduled',
           selectedMode: input.mode,
@@ -613,6 +769,14 @@ export async function bookClinicianTrainingSlot(input: {
             balanceRecoveryApplies:
               access.balanceRecoveryApplies,
           },
+        },
+        participation: {
+          assignmentId:
+            String(assignment.id),
+          trainingSlotId:
+            String(slot.id),
+          status: 'assigned',
+          qualificationTraining: true,
         },
         onboarding: {
           id: onboarding.id,

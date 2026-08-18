@@ -267,6 +267,175 @@ function publicEntitlements(
   };
 }
 
+function publicTrainingParticipation(
+  assignment: any,
+  onboarding: any,
+  trainingCompleted: boolean,
+) {
+  const slot = assignment?.trainingSlot || null;
+  const trainingSlotId =
+    cleanStr(
+      assignment?.trainingSlotId,
+      240,
+    );
+  const status =
+    String(assignment?.status || '')
+      .trim()
+      .toLowerCase();
+  const mandatoryQualification =
+    Boolean(
+      trainingSlotId &&
+      onboarding?.trainingSlotId &&
+      String(onboarding.trainingSlotId) ===
+        trainingSlotId,
+    );
+
+  const roomLifecycle =
+    slot?.startsAt && slot?.endsAt
+      ? trainingRoomLifecycle({
+          startsAt: new Date(slot.startsAt),
+          endsAt: new Date(slot.endsAt),
+        })
+      : null;
+
+  const activeForAdmission =
+    !assignment?.revokedAt &&
+    ![
+      'revoked',
+      'expired',
+      'declined',
+      'invited',
+    ].includes(status) &&
+    (!assignment?.expiresAt ||
+      new Date(
+        assignment.expiresAt,
+      ).getTime() > Date.now());
+
+  const latestAttendance =
+    Array.isArray(
+      assignment?.attendanceSessions,
+    )
+      ? assignment.attendanceSessions[0] ||
+        null
+      : null;
+
+  return {
+    assignmentId:
+      cleanStr(
+        assignment?.id,
+        240,
+      ),
+    trainingSlotId,
+    sessionKey:
+      cleanStr(
+        assignment?.sessionKey,
+        160,
+      ) || 'slot',
+    status:
+      status || 'assigned',
+    role:
+      cleanStr(
+        assignment?.role,
+        40,
+      ) || 'clinician',
+    permissions:
+      Array.isArray(
+        assignment?.permissions,
+      )
+        ? assignment.permissions
+        : [],
+    mandatoryQualification,
+    qualificationCompleted:
+      mandatoryQualification &&
+      trainingCompleted,
+    assignedAt:
+      asIso(
+        assignment?.assignedAt,
+      ),
+    invitedAt:
+      asIso(
+        assignment?.invitedAt,
+      ),
+    acceptedAt:
+      asIso(
+        assignment?.acceptedAt,
+      ),
+    revokedAt:
+      asIso(
+        assignment?.revokedAt,
+      ),
+    expiresAt:
+      asIso(
+        assignment?.expiresAt,
+      ),
+    attendance:
+      latestAttendance
+        ? {
+            state:
+              latestAttendance.leftAt
+                ? 'left'
+                : 'joined',
+            joinedAt:
+              asIso(
+                latestAttendance
+                  .joinedAt,
+              ),
+            lastHeartbeatAt:
+              asIso(
+                latestAttendance
+                  .lastHeartbeatAt,
+              ),
+            leftAt:
+              asIso(
+                latestAttendance
+                  .leftAt,
+              ),
+            durationSeconds:
+              Math.max(
+                0,
+                Number(
+                  latestAttendance
+                    .durationSeconds ||
+                    0,
+                ),
+              ),
+          }
+        : null,
+    trainingSlot:
+      slot
+        ? {
+            ...publicTrainingSlot(slot),
+            roomId:
+              trainingSlotId
+                ? `training-slot-${trainingSlotId}`
+                : null,
+            joinUrl:
+              cleanStr(
+                slot.meetingUrl,
+                1000,
+              ),
+            roomState:
+              roomLifecycle?.state ||
+              null,
+            canJoin:
+              activeForAdmission &&
+              (roomLifecycle?.canJoin ||
+                false),
+            joinOpensAt:
+              roomLifecycle
+                ?.joinOpensAt
+                .toISOString() ||
+              null,
+            joinClosesAt:
+              roomLifecycle
+                ?.joinClosesAt
+                .toISOString() ||
+              null,
+          }
+        : null,
+  };
+}
+
 export async function GET(
   request: NextRequest,
 ) {
@@ -503,6 +672,52 @@ export async function GET(
           })
         : null;
 
+    const principalKey =
+      `clinician:${String(
+        clinician.id,
+      )}`;
+
+    const participationRows =
+      await db
+        .clinicianTrainingParticipantAssignment
+        .findMany({
+          where: {
+            principalType: 'clinician',
+            OR: [
+              {
+                principalId:
+                  String(clinician.id),
+              },
+              {
+                principalKey,
+              },
+            ],
+          },
+          include: {
+            trainingSlot: true,
+            attendanceSessions: {
+              orderBy: {
+                joinedAt: 'desc',
+              },
+              take: 1,
+            },
+          },
+          orderBy: {
+            assignedAt: 'desc',
+          },
+          take: 100,
+        });
+
+    const participations =
+      participationRows.map(
+        (assignment: any) =>
+          publicTrainingParticipation(
+            assignment,
+            onboarding,
+            trainingCompleted,
+          ),
+      );
+
     return NextResponse.json(
       {
         ok: true,
@@ -581,6 +796,7 @@ export async function GET(
           publicClinicianPayLaterRequest(
             latestPayLaterRequest,
           ),
+        participations,
         training:
           trainingSlot
             ? {

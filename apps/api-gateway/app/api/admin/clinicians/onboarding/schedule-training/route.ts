@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/prisma';
 import { verifyAdminRequest } from '../../../utils/auth';
+import {
+  deliverClinicianTrainingNotification,
+} from '@/src/clinicians/onboarding/training-notifications';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -150,6 +153,18 @@ async function persistRawProfileJson(db: any, clinicianId: string, clinician: an
   return false;
 }
 
+function clinicianTrainingCompleted(
+  clinician: any,
+  onboarding: any,
+) {
+  return (
+    clinician?.trainingCompleted === true ||
+    String(onboarding?.status || '')
+      .trim()
+      .toLowerCase() === 'training_completed'
+  );
+}
+
 export async function POST(req: NextRequest) {
   try {
     const isAdmin = await verifyAdminRequest(req);
@@ -194,8 +209,12 @@ export async function POST(req: NextRequest) {
       }),
     ]);
 
-    const cliniciansById = new Map<string, any>(clinicians.map((c: any) => [String(c.id), c]));
-    const onboardingsById = new Map<string, any>(onboardings.map((o: any) => [String(o.id), o]));
+    const cliniciansById = new Map<string, any>(
+      clinicians.map((c: any) => [String(c.id), c]),
+    );
+    const onboardingsById = new Map<string, any>(
+      onboardings.map((o: any) => [String(o.id), o]),
+    );
 
     for (const p of participants) {
       const clinician = cliniciansById.get(p.clinicianId);
@@ -210,14 +229,41 @@ export async function POST(req: NextRequest) {
 
       if (!onboarding || String(onboarding.clinicianId) !== p.clinicianId) {
         return NextResponse.json(
-          { ok: false, error: 'onboarding_not_found', clinicianId: p.clinicianId, onboardingId: p.onboardingId },
+          {
+            ok: false,
+            error: 'onboarding_not_found',
+            clinicianId: p.clinicianId,
+            onboardingId: p.onboardingId,
+          },
           { status: 404 },
         );
       }
 
-      if (String(onboarding.status || '').toLowerCase() === 'rejected') {
+      const completed = clinicianTrainingCompleted(
+        clinician,
+        onboarding,
+      );
+
+      if (completed) {
         return NextResponse.json(
-          { ok: false, error: 'cannot_schedule_training_for_rejected_onboarding', clinicianId: p.clinicianId },
+          {
+            ok: false,
+            error: 'completed_clinician_requires_training_invitation',
+            clinicianId: p.clinicianId,
+          },
+          { status: 409 },
+        );
+      }
+
+      if (
+        String(onboarding.status || '').toLowerCase() === 'rejected'
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'cannot_schedule_training_for_rejected_onboarding',
+            clinicianId: p.clinicianId,
+          },
           { status: 409 },
         );
       }
@@ -227,7 +273,10 @@ export async function POST(req: NextRequest) {
           where: { id: onboarding.trainingSlotId },
         });
 
-        if (existing && String(existing.status || '').toLowerCase() === 'completed') {
+        if (
+          existing &&
+          String(existing.status || '').toLowerCase() === 'completed'
+        ) {
           return NextResponse.json(
             {
               ok: false,
@@ -243,10 +292,11 @@ export async function POST(req: NextRequest) {
 
     const outcome = await db.$transaction(async (tx: any) => {
       /*
-       * Cohort rule:
-       * - Create one shared slot for the selected participant set.
-       * - Reassignment releases each old seat and revokes old clinician admissions.
-       * - Patient invitations remain on their consented slot and are not silently moved.
+       * Mandatory Admin Calendar scheduling rule:
+       * - One shared lightweight slot is created for the selected onboarding cohort.
+       * - Every selected clinician receives an ASSIGNED participation with no acceptance step.
+       * - ClinicianOnboarding.trainingSlotId remains the primary mandatory qualification pointer.
+       * - Already-qualified clinicians must use the separate additional-training invitation path.
        */
       let slot = await tx.clinicianTrainingSlot.create({
         data: {
@@ -307,9 +357,15 @@ export async function POST(req: NextRequest) {
       for (const p of participants) {
         const clinician = cliniciansById.get(p.clinicianId);
         const onboarding = onboardingsById.get(p.onboardingId);
-        const previousSlotId = cleanStr(onboarding.trainingSlotId, 120);
+        const qualificationTraining = true;
+        const previousSlotId =
+          cleanStr(onboarding.trainingSlotId, 120);
 
-        if (previousSlotId && previousSlotId !== String(slot.id)) {
+        if (
+          qualificationTraining &&
+          previousSlotId &&
+          previousSlotId !== String(slot.id)
+        ) {
           const oldAssignments =
             await tx.clinicianTrainingParticipantAssignment.findMany({
               where: {
@@ -322,7 +378,9 @@ export async function POST(req: NextRequest) {
               },
               select: { id: true },
             });
-          const oldAssignmentIds = oldAssignments.map((assignment: any) => String(assignment.id));
+          const oldAssignmentIds = oldAssignments.map(
+            (assignment: any) => String(assignment.id),
+          );
 
           if (oldAssignmentIds.length) {
             await tx.clinicianTrainingAdmission.updateMany({
@@ -350,21 +408,27 @@ export async function POST(req: NextRequest) {
           `;
         }
 
-        const updatedOnboarding = await tx.clinicianOnboarding.update({
-          where: { id: onboarding.id },
-          data: {
-            status: 'training_scheduled',
-            trainingSlotId: slot.id,
-            trainingMode: mode,
-            trainingNotes: [
-              cleanStr(onboarding.trainingNotes, 2000),
-              `${previousSlotId ? 'Training reassigned' : 'Training scheduled'} ${changedAt.toISOString()}`,
-              participants.length > 1 ? `Cohort training slot: ${slot.id}` : null,
-            ]
-              .filter(Boolean)
-              .join('\n'),
-          },
-        });
+        let updatedOnboarding = onboarding;
+
+        if (qualificationTraining) {
+          updatedOnboarding = await tx.clinicianOnboarding.update({
+            where: { id: onboarding.id },
+            data: {
+              status: 'training_scheduled',
+              trainingSlotId: slot.id,
+              trainingMode: mode,
+              trainingNotes: [
+                cleanStr(onboarding.trainingNotes, 2000),
+                `${previousSlotId ? 'Training reassigned' : 'Training scheduled'} ${changedAt.toISOString()}`,
+                participants.length > 1
+                  ? `Cohort training slot: ${slot.id}`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join('\n'),
+            },
+          });
+        }
 
         const principalKey = `clinician:${p.clinicianId}`;
         const displayName =
@@ -376,52 +440,78 @@ export async function POST(req: NextRequest) {
             240,
           ) || 'Clinician';
 
-        await tx.clinicianTrainingParticipantAssignment.upsert({
-          where: {
-            trainingSlotId_sessionKey_principalKey: {
+        const assignmentStatus = 'assigned';
+        const assignmentSource = previousSlotId
+          ? 'admin_reassignment'
+          : 'admin_scheduling';
+
+        const assignment =
+          await tx.clinicianTrainingParticipantAssignment.upsert({
+            where: {
+              trainingSlotId_sessionKey_principalKey: {
+                trainingSlotId: String(slot.id),
+                sessionKey: 'slot',
+                principalKey,
+              },
+            },
+            create: {
               trainingSlotId: String(slot.id),
               sessionKey: 'slot',
+              principalType: 'clinician',
               principalKey,
+              principalId: p.clinicianId,
+              email: cleanStr(clinician.email, 320),
+              name: displayName,
+              role: 'clinician',
+              permissions: [
+                'training:join',
+                'training:attendance:self',
+              ],
+              status: assignmentStatus,
+              assignedByUserId: isAdmin.uid,
+              assignedAt: changedAt,
+              invitedAt: null,
+              acceptedAt: null,
+              metadata: {
+                source: assignmentSource,
+                qualificationTraining,
+                onboardingId: String(updatedOnboarding.id),
+              },
             },
-          },
-          create: {
-            trainingSlotId: String(slot.id),
-            sessionKey: 'slot',
-            principalType: 'clinician',
-            principalKey,
-            principalId: p.clinicianId,
-            email: cleanStr(clinician.email, 320),
-            name: displayName,
-            role: 'clinician',
-            permissions: ['training:join', 'training:attendance:self'],
-            status: 'assigned',
-            assignedAt: changedAt,
-            metadata: {
-              source: previousSlotId ? 'admin_reassignment' : 'admin_scheduling',
-              onboardingId: String(updatedOnboarding.id),
+            update: {
+              email: cleanStr(clinician.email, 320),
+              name: displayName,
+              permissions: [
+                'training:join',
+                'training:attendance:self',
+              ],
+              status: assignmentStatus,
+              assignedByUserId: isAdmin.uid,
+              assignedAt: changedAt,
+              invitedAt: null,
+              acceptedAt: null,
+              revokedAt: null,
+              expiresAt: null,
+              metadata: {
+                source: assignmentSource,
+                qualificationTraining,
+                onboardingId: String(updatedOnboarding.id),
+              },
             },
-          },
-          update: {
-            email: cleanStr(clinician.email, 320),
-            name: displayName,
-            permissions: ['training:join', 'training:attendance:self'],
-            status: 'assigned',
-            assignedAt: changedAt,
-            revokedAt: null,
-            expiresAt: null,
-            metadata: {
-              source: previousSlotId ? 'admin_reassignment' : 'admin_scheduling',
-              onboardingId: String(updatedOnboarding.id),
-            },
-          },
-        });
+          });
 
         updated.push({
           clinicianId: p.clinicianId,
           previousTrainingSlotId: previousSlotId,
+          qualificationTraining,
+          participation: {
+            assignmentId: String(assignment.id),
+            status: assignmentStatus,
+            trainingSlotId: String(slot.id),
+          },
           onboarding: {
             id: String(updatedOnboarding.id),
-            stage: 'training_scheduled',
+            stage: String(updatedOnboarding.status),
             notes: cleanStr(updatedOnboarding.trainingNotes, 2000),
           },
         });
@@ -432,10 +522,18 @@ export async function POST(req: NextRequest) {
 
     const { slot, autoJoinUrl, updated, changedAt } = outcome;
 
-    // Legacy profile JSON is a compatibility projection, not scheduling authority.
-    // Keep it best-effort and outside the relational transaction so fallback writes
-    // cannot poison an otherwise valid transaction after a schema-specific failure.
+    // Legacy profile JSON remains a compatibility projection only for the
+    // mandatory qualification event. Additional participation must not rewrite
+    // a qualified clinician's completion/certificate projection.
     for (const p of participants) {
+      const result = updated.find(
+        (item: any) => item.clinicianId === p.clinicianId,
+      );
+
+      if (!result?.qualificationTraining) {
+        continue;
+      }
+
       const clinician = cliniciansById.get(p.clinicianId);
       const rawBase =
         safeParseJson((clinician as any)?.meta?.rawProfile) ||
@@ -453,7 +551,49 @@ export async function POST(req: NextRequest) {
         bookedAt: changedAt.toISOString(),
       });
 
-      await persistRawProfileJson(db, p.clinicianId, clinician, merged);
+      await persistRawProfileJson(
+        db,
+        p.clinicianId,
+        clinician,
+        merged,
+      );
+    }
+
+    const notifications: any[] = [];
+
+    for (const p of participants) {
+      const clinician = cliniciansById.get(p.clinicianId);
+      const result = updated.find(
+        (item: any) => item.clinicianId === p.clinicianId,
+      );
+
+      const notification =
+        await deliverClinicianTrainingNotification({
+          action: result?.previousTrainingSlotId
+            ? 'rescheduled'
+            : 'scheduled',
+          recipientEmail: clinician?.email,
+          recipientUserId:
+            clinician?.userId || clinician?.email || null,
+          recipientName:
+            clinician?.displayName ||
+            clinician?.fullName ||
+            clinician?.name ||
+            clinician?.email ||
+            'Clinician',
+          trainingSlotId: String(slot.id),
+          title: slot.title,
+          startsAt: new Date(slot.startsAt),
+          endsAt: new Date(slot.endsAt),
+          timezone: slot.timezone,
+          mode,
+          joinUrl: autoJoinUrl,
+        });
+
+      notifications.push({
+        clinicianId: p.clinicianId,
+        ...notification,
+      });
     }
 
     return NextResponse.json(
@@ -463,6 +603,8 @@ export async function POST(req: NextRequest) {
         clinicianId: participants[0]?.clinicianId || null,
         participants: updated,
         onboarding: updated[0]?.onboarding || null,
+        notifications,
+        notificationDeliveryRequired: true,
         trainingSlot: {
           id: String(slot.id),
           startAt: slot.startsAt.toISOString(),
@@ -483,9 +625,18 @@ export async function POST(req: NextRequest) {
       },
     );
   } catch (err: any) {
-    console.error('[api-gateway][admin][clinicians][onboarding][schedule-training] error', err);
+    console.error(
+      '[api-gateway][admin][clinicians][onboarding][schedule-training] error',
+      err,
+    );
     return NextResponse.json(
-      { ok: false, error: String(err?.message || 'schedule_training_failed') },
+      {
+        ok: false,
+        error: String(
+          err?.message ||
+            'schedule_training_failed',
+        ),
+      },
       { status: 500 },
     );
   }

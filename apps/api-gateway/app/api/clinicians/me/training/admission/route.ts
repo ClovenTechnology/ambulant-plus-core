@@ -106,6 +106,39 @@ export async function POST(
     identity.clinician;
 
   try {
+    const body =
+      await request.json().catch(
+        () => ({} as any),
+      );
+
+    const requestedRoomId =
+      cleanText(
+        body?.roomId ||
+          body?.room ||
+          body?.roomName,
+        400,
+      );
+
+    const slotFromRoom =
+      requestedRoomId &&
+      requestedRoomId.startsWith(
+        'training-slot-',
+      )
+        ? cleanText(
+            requestedRoomId.slice(
+              'training-slot-'.length,
+            ),
+            240,
+          )
+        : null;
+
+    const requestedTrainingSlotId =
+      cleanText(
+        body?.trainingSlotId ||
+          body?.slotId,
+        240,
+      ) || slotFromRoom;
+
     const onboarding =
       await db.clinicianOnboarding
         .findFirst({
@@ -120,23 +153,315 @@ export async function POST(
           },
         });
 
-    const trainingSlotId =
+    const principalKey =
+      trainingPrincipalKey(
+        'clinician',
+        String(clinician.id),
+      );
+    const sessionKey = 'slot';
+    const now = new Date();
+
+    let trainingSlotId =
+      requestedTrainingSlotId ||
       cleanText(
         onboarding?.trainingSlotId,
         240,
       );
 
+    let assignment: any = null;
+
+    if (trainingSlotId) {
+      assignment =
+        await db
+          .clinicianTrainingParticipantAssignment
+          .findUnique({
+            where: {
+              trainingSlotId_sessionKey_principalKey: {
+                trainingSlotId,
+                sessionKey,
+                principalKey,
+              },
+            },
+          });
+    }
+
     if (
-      !onboarding ||
+      !assignment &&
+      !requestedTrainingSlotId &&
       !trainingSlotId
+    ) {
+      const activeAssignments =
+        await db
+          .clinicianTrainingParticipantAssignment
+          .findMany({
+            where: {
+              principalType: 'clinician',
+              principalId:
+                String(clinician.id),
+              revokedAt: null,
+              status: {
+                in: [
+                  'assigned',
+                  'accepted',
+                  'invited',
+                ],
+              },
+              OR: [
+                { expiresAt: null },
+                { expiresAt: { gt: now } },
+              ],
+            },
+            include: {
+              trainingSlot: true,
+            },
+            orderBy: {
+              assignedAt: 'desc',
+            },
+            take: 20,
+          });
+
+      const usableAssignments =
+        activeAssignments.filter(
+          (item: any) =>
+            item.trainingSlot &&
+            String(
+              item.trainingSlot.status ||
+                '',
+            ).toLowerCase() !==
+              'cancelled' &&
+            !item.trainingSlot.cancelledAt &&
+            new Date(
+              item.trainingSlot.endsAt,
+            ).getTime() >
+              now.getTime(),
+        );
+
+      if (usableAssignments.length === 1) {
+        assignment =
+          usableAssignments[0];
+        trainingSlotId =
+          String(
+            assignment.trainingSlotId,
+          );
+      }
+      else if (
+        usableAssignments.length > 1
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_slot_selection_required',
+          },
+          409,
+        );
+      }
+    }
+
+    const legacyQualificationSlot =
+      Boolean(
+        trainingSlotId &&
+        onboarding &&
+        String(
+          onboarding.trainingSlotId ||
+            '',
+        ) === String(trainingSlotId) &&
+        clinician.trainingCompleted !==
+          true &&
+        String(
+          onboarding.status || '',
+        )
+          .trim()
+          .toLowerCase() !==
+          'training_completed',
+      );
+
+    if (
+      !assignment &&
+      trainingSlotId &&
+      legacyQualificationSlot
+    ) {
+      const displayName =
+        clinicianName(clinician);
+      const email =
+        cleanText(
+          clinician.email,
+          320,
+        );
+      const specialty =
+        cleanText(
+          clinician.specialty ||
+            clinician.speciality,
+          240,
+        );
+
+      assignment =
+        await db
+          .clinicianTrainingParticipantAssignment
+          .upsert({
+            where: {
+              trainingSlotId_sessionKey_principalKey: {
+                trainingSlotId,
+                sessionKey,
+                principalKey,
+              },
+            },
+            create: {
+              trainingSlotId,
+              sessionKey,
+              principalType:
+                'clinician',
+              principalId:
+                String(clinician.id),
+              principalKey,
+              email,
+              name: displayName,
+              role: 'clinician',
+              permissions: [
+                'training:join',
+                'training:attendance:self',
+              ],
+              scopeSnapshot: {
+                clinicianId:
+                  String(
+                    clinician.id,
+                  ),
+                specialty,
+              },
+              status: 'assigned',
+              assignedAt:
+                onboarding.trainingBookedAt ||
+                onboarding.updatedAt ||
+                now,
+              metadata: {
+                source:
+                  'legacy_onboarding_booking',
+                qualificationTraining: true,
+                onboardingId:
+                  String(
+                    onboarding.id,
+                  ),
+              },
+            },
+            update: {
+              email,
+              name: displayName,
+              permissions: [
+                'training:join',
+                'training:attendance:self',
+              ],
+              scopeSnapshot: {
+                clinicianId:
+                  String(
+                    clinician.id,
+                  ),
+                specialty,
+              },
+              status: 'assigned',
+              revokedAt: null,
+              expiresAt: null,
+              metadata: {
+                source:
+                  'legacy_onboarding_booking',
+                qualificationTraining: true,
+                onboardingId:
+                  String(
+                    onboarding.id,
+                  ),
+              },
+            },
+          });
+    }
+
+    if (!trainingSlotId || !assignment) {
+      return json(
+        {
+          ok: false,
+          error:
+            requestedTrainingSlotId
+              ? 'training_assignment_required'
+              : 'training_booking_required',
+        },
+        409,
+      );
+    }
+
+    if (
+      assignment.principalType !==
+        'clinician' ||
+      String(
+        assignment.principalId || '',
+      ) !== String(clinician.id) ||
+      String(
+        assignment.principalKey || '',
+      ) !== principalKey
     ) {
       return json(
         {
           ok: false,
           error:
-            'training_booking_required',
+            'training_assignment_identity_mismatch',
+        },
+        403,
+      );
+    }
+
+    const assignmentStatus =
+      String(
+        assignment.status || '',
+      )
+        .trim()
+        .toLowerCase();
+
+    if (
+      assignment.revokedAt ||
+      (assignment.expiresAt &&
+        new Date(
+          assignment.expiresAt,
+        ).getTime() <= now.getTime()) ||
+      [
+        'revoked',
+        'expired',
+        'declined',
+      ].includes(assignmentStatus)
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            'training_assignment_inactive',
+        },
+        403,
+      );
+    }
+
+    if (assignmentStatus === 'invited') {
+      return json(
+        {
+          ok: false,
+          error:
+            'training_invitation_acceptance_required',
+          assignmentId:
+            String(assignment.id),
+          trainingSlotId,
         },
         409,
+      );
+    }
+
+    if (
+      ![
+        'assigned',
+        'accepted',
+      ].includes(assignmentStatus)
+    ) {
+      return json(
+        {
+          ok: false,
+          error:
+            'training_assignment_inactive',
+        },
+        403,
       );
     }
 
@@ -175,116 +500,19 @@ export async function POST(
       );
     }
 
-    const principalKey =
-      trainingPrincipalKey(
-        'clinician',
-        String(clinician.id),
-      );
-
-    const sessionKey = 'slot';
-
-    const compoundKey = {
-      trainingSlotId,
-      sessionKey,
-      principalKey,
-    };
-
-    const displayName =
-      clinicianName(clinician);
-
-    const email =
-      cleanText(
-        clinician.email,
-        320,
-      );
-
-    const specialty =
-      cleanText(
-        clinician.specialty ||
-        clinician.speciality,
-        240,
-      );
-
-    const assignment =
-      await db
-        .clinicianTrainingParticipantAssignment
-        .upsert({
-          where: {
-            trainingSlotId_sessionKey_principalKey:
-              compoundKey,
-          },
-          create: {
-            trainingSlotId,
-            sessionKey,
-            principalType:
-              'clinician',
-            principalId:
-              String(clinician.id),
-            principalKey,
-            email,
-            name: displayName,
-            role: 'clinician',
-            permissions: [
-              'training:join',
-              'training:attendance:self',
-            ],
-            scopeSnapshot: {
-              clinicianId:
-                String(
-                  clinician.id,
-                ),
-              specialty,
-            },
-            status: 'assigned',
-            assignedAt:
-              onboarding.trainingBookedAt ||
-              onboarding.updatedAt ||
-              new Date(),
-            metadata: {
-              source:
-                'clinician_booking',
-              onboardingId:
-                String(
-                  onboarding.id,
-                ),
-            },
-          },
-          update: {
-            email,
-            name: displayName,
-            permissions: [
-              'training:join',
-              'training:attendance:self',
-            ],
-            scopeSnapshot: {
-              clinicianId:
-                String(
-                  clinician.id,
-                ),
-              specialty,
-            },
-            metadata: {
-              source:
-                'clinician_booking',
-              onboardingId:
-                String(
-                  onboarding.id,
-                ),
-            },
-          },
-        });
+    const expectedRoomId =
+      `training-slot-${trainingSlotId}`;
 
     if (
-      assignment.status ===
-        'revoked' ||
-      assignment.status ===
-        'expired'
+      requestedRoomId &&
+      requestedRoomId !==
+        expectedRoomId
     ) {
       return json(
         {
           ok: false,
           error:
-            'training_assignment_inactive',
+            'training_room_mismatch',
         },
         403,
       );
@@ -320,6 +548,8 @@ export async function POST(
           admission.token,
         admissionId:
           admission.admissionId,
+        assignmentId:
+          admission.assignmentId,
         roomId:
           admission.roomId,
         trainingSlotId:

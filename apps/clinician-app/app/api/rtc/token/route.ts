@@ -410,6 +410,7 @@ async function mintAuthenticatedClinicianRtcToken(req: NextRequest, body: any) {
 async function issueSignedTrainingAdmission(
   req: NextRequest,
   base: string,
+  body: any,
 ) {
   const headers = new Headers(
     forwardHeaders(req) as HeadersInit,
@@ -430,7 +431,7 @@ async function issueSignedTrainingAdmission(
     {
       method: 'POST',
       headers,
-      body: '{}',
+      body: JSON.stringify({ roomId: getRtcRoomId(body) }),
       cache: 'no-store',
     },
   );
@@ -526,7 +527,7 @@ async function proxyToGateway(req: NextRequest, bodyText: string, body: any) {
     - Without a joinToken and outside training, real clinician-owned rooms can use direct authenticated minting.
   */
   if (!joinToken && isTrainingRoom(body)) {
-    const admission = await issueSignedTrainingAdmission(req, base);
+    const admission = await issueSignedTrainingAdmission(req, base, body);
 
     if (!admission.ok) {
       return admission.response;
