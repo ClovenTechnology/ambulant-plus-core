@@ -18,7 +18,13 @@ type Audience =
   | 'trainer'
   | 'observer'
   | 'admin'
-  | 'assessor';
+  | 'assessor'
+  | 'careport'
+  | 'medreach'
+  | 'staff'
+  | 'client'
+  | 'partner'
+  | 'public';
 
 type ResourceKind =
   | 'presentation'
@@ -145,6 +151,30 @@ const AUDIENCES: Array<{
   {
     value: 'assessor',
     label: 'Assessor',
+  },
+  {
+    value: 'careport',
+    label: 'CarePort partner',
+  },
+  {
+    value: 'medreach',
+    label: 'MedReach partner',
+  },
+  {
+    value: 'staff',
+    label: 'Internal staff',
+  },
+  {
+    value: 'client',
+    label: 'Client organisation',
+  },
+  {
+    value: 'partner',
+    label: 'Enterprise partner',
+  },
+  {
+    value: 'public',
+    label: 'Public',
   },
 ];
 
@@ -324,11 +354,13 @@ function sessionDisplay(
 export default function TrainingContentManager({
   trainingSlotId,
   sessions,
+  allowPermanentPurge = false,
 }: {
   trainingSlotId:
     | string
     | null;
   sessions: SessionInput[];
+  allowPermanentPurge?: boolean;
 }) {
   const [
     resources,
@@ -444,6 +476,14 @@ export default function TrainingContentManager({
     useState<
       string | null
     >(
+      null,
+    );
+
+  const [
+    purgingEntityId,
+    setPurgingEntityId,
+  ] =
+    useState<string | null>(
       null,
     );
 
@@ -1205,6 +1245,179 @@ export default function TrainingContentManager({
     }
   }
 
+
+  async function purgeLibraryEntity(
+    entityType: 'resource' | 'module',
+    entityId: string,
+    title: string,
+  ) {
+    if (!allowPermanentPurge) {
+      setError(
+        'Permanent purge requires SUPER_ADMIN authority.',
+      );
+      return;
+    }
+
+    setPurgingEntityId(
+      `${entityType}:${entityId}`,
+    );
+    setError(null);
+    setNotice(null);
+
+    try {
+      const previewResponse =
+        await fetch(
+          '/api/admin/training/materials',
+          {
+            method: 'PATCH',
+            headers: {
+              accept:
+                'application/json',
+              'content-type':
+                'application/json',
+            },
+            body:
+              JSON.stringify({
+                action:
+                  'preview_purge',
+                entityType,
+                entityId,
+              }),
+          },
+        );
+
+      const previewBody =
+        await readJson(
+          previewResponse,
+        );
+
+      if (
+        !previewResponse.ok ||
+        previewBody?.ok !== true
+      ) {
+        throw new Error(
+          previewBody?.error ||
+          `HTTP ${previewResponse.status}`,
+        );
+      }
+
+      const preview =
+        previewBody?.preview ||
+        {};
+
+      const blockers =
+        Array.isArray(
+          preview.blockers,
+        )
+          ? preview.blockers
+              .map(
+                (item: unknown) =>
+                  String(item || '')
+                    .trim(),
+              )
+              .filter(Boolean)
+          : [];
+
+      if (
+        preview.canPurge !== true
+      ) {
+        setError(
+          blockers.length
+            ? `Permanent purge blocked: ${blockers.join(' ')}`
+            : 'Permanent purge is blocked because this content has protected dependencies.',
+        );
+        return;
+      }
+
+      const programmeCount =
+        Number(
+          preview.programmeReferenceCount ||
+          0,
+        );
+
+      const moduleCount =
+        Number(
+          preview.moduleMembershipCount ||
+          0,
+        );
+
+      const typed =
+        window.prompt(
+          `Permanent purge cannot be undone.\n\n${title}\nAffected programme assignments: ${programmeCount}\nModule references: ${moduleCount}\n\nType PURGE to continue.`,
+        );
+
+      if (
+        String(typed || '')
+          .trim()
+          .toUpperCase() !==
+        'PURGE'
+      ) {
+        setNotice(
+          'Permanent purge cancelled.',
+        );
+        return;
+      }
+
+      const purgeResponse =
+        await fetch(
+          '/api/admin/training/materials',
+          {
+            method: 'PATCH',
+            headers: {
+              accept:
+                'application/json',
+              'content-type':
+                'application/json',
+            },
+            body:
+              JSON.stringify({
+                action:
+                  'purge_library_entity',
+                entityType,
+                entityId,
+                confirmation:
+                  `PURGE:${entityType}:${entityId}`,
+              }),
+          },
+        );
+
+      const purgeBody =
+        await readJson(
+          purgeResponse,
+        );
+
+      if (
+        !purgeResponse.ok ||
+        purgeBody?.ok !== true
+      ) {
+        throw new Error(
+          purgeBody?.error ||
+          `HTTP ${purgeResponse.status}`,
+        );
+      }
+
+      setNotice(
+        `${entityType === 'resource' ? 'Resource' : 'Module'} permanently purged.`,
+      );
+
+      await load();
+    } catch (
+      reason: any
+    ) {
+      setError(
+        String(
+          reason?.message ||
+          'Unable to permanently purge training content.',
+        ),
+      );
+    } finally {
+      setPurgingEntityId(
+        null,
+      );
+    }
+  }
+
+
   async function uploadResourceVersion(
     resource: Resource,
     version: ResourceVersion,
@@ -1824,6 +2037,30 @@ export default function TrainingContentManager({
                           >
                             Delete draft
                           </button>
+
+                          {allowPermanentPurge &&
+                          resource.status !== 'draft' ? (
+                            <button
+                              type="button"
+                              disabled={
+                                purgingEntityId !== null
+                              }
+                              onClick={() =>
+                                void purgeLibraryEntity(
+                                  'resource',
+                                  resource.id,
+                                  resource.title ||
+                                    'Untitled resource',
+                                )
+                              }
+                              className="text-[11px] font-black text-rose-900 disabled:opacity-50"
+                            >
+                              {purgingEntityId ===
+                              `resource:${resource.id}`
+                                ? 'Purging...'
+                                : 'Purge permanently'}
+                            </button>
+                          ) : null}
                         </div>
                       </div>
 
@@ -2289,6 +2526,30 @@ export default function TrainingContentManager({
                       >
                         Delete draft
                       </button>
+
+                      {allowPermanentPurge &&
+                      module.status !== 'draft' ? (
+                        <button
+                          type="button"
+                          disabled={
+                            purgingEntityId !== null
+                          }
+                          onClick={() =>
+                            void purgeLibraryEntity(
+                              'module',
+                              module.id,
+                              module.title ||
+                                'Untitled module',
+                            )
+                          }
+                          className="text-[11px] font-black text-rose-900 disabled:opacity-50"
+                        >
+                          {purgingEntityId ===
+                          `module:${module.id}`
+                            ? 'Purging...'
+                            : 'Purge permanently'}
+                        </button>
+                      ) : null}
                     </div>
 
                     <div className="mt-3 grid gap-2 sm:grid-cols-2">

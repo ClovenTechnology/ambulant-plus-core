@@ -279,7 +279,13 @@ export type TrainingContentAudience =
   | 'trainer'
   | 'observer'
   | 'admin'
-  | 'assessor';
+  | 'assessor'
+  | 'careport'
+  | 'medreach'
+  | 'staff'
+  | 'client'
+  | 'partner'
+  | 'public';
 
 export type TrainingResourceKind =
   | 'presentation'
@@ -390,6 +396,12 @@ const ALL_AUDIENCES: TrainingContentAudience[] = [
   'observer',
   'admin',
   'assessor',
+  'careport',
+  'medreach',
+  'staff',
+  'client',
+  'partner',
+  'public',
 ];
 
 function cleanIdValue(

@@ -185,6 +185,75 @@ function serializePayrollProfile(profile: any, includeCompensation: boolean) {
   };
 }
 
+
+type StaffWorkspaceWarning = {
+  dataset: string;
+  code:
+    | 'schema_not_ready'
+    | 'read_failed';
+};
+
+function staffWorkspaceWarningCode(
+  error: unknown,
+): StaffWorkspaceWarning['code'] {
+  const code =
+    String(
+      (error as any)?.code ||
+      '',
+    ).trim();
+
+  return (
+    code === 'P2021' ||
+    code === 'P2022'
+  )
+    ? 'schema_not_ready'
+    : 'read_failed';
+}
+
+async function safeWorkspaceRead<T>(input: {
+  dataset: string;
+  read: () => Promise<T>;
+  fallback: T;
+  warnings: StaffWorkspaceWarning[];
+  staffProfileId: string;
+  staffUserId: string;
+}) {
+  try {
+    return await input.read();
+  } catch (error) {
+    const warning = {
+      dataset:
+        input.dataset,
+      code:
+        staffWorkspaceWarningCode(
+          error,
+        ),
+    } satisfies StaffWorkspaceWarning;
+
+    input.warnings.push(
+      warning,
+    );
+
+    console.error(
+      '[staff employment] workspace dataset unavailable',
+      {
+        staffProfileId:
+          input.staffProfileId,
+        staffUserId:
+          input.staffUserId,
+        dataset:
+          input.dataset,
+        warningCode:
+          warning.code,
+        error,
+      },
+    );
+
+    return input.fallback;
+  }
+}
+
+
 export async function getStaffEmploymentWorkspace(input: {
   actor: AdminStaffActor;
   staffProfileId: string;
@@ -211,76 +280,145 @@ export async function getStaffEmploymentWorkspace(input: {
     }
   }
 
+  const workspaceWarnings: StaffWorkspaceWarning[] = [];
+
   const [payrollProfile, bankAccounts, documents, changes, leave, payslips, arrears, activeTemplate] = await Promise.all([
-    prisma.staffPayrollProfile.findFirst({
-      where: { staffUserId: target.userId },
-      orderBy: { updatedAt: 'desc' },
+    safeWorkspaceRead({
+      dataset: 'payroll_profile',
+      read: () =>
+        prisma.staffPayrollProfile.findFirst({
+          where: { staffUserId: target.userId },
+          orderBy: { updatedAt: 'desc' },
+        }),
+      fallback: null,
+      warnings: workspaceWarnings,
+      staffProfileId: target.id,
+      staffUserId: target.userId,
     }),
     canReadPay
-      ? prisma.staffBankAccount.findMany({
-          where: { staffUserId: target.userId, active: true },
-          orderBy: [{ isPrimary: 'desc' }, { updatedAt: 'desc' }],
+      ? safeWorkspaceRead({
+          dataset: 'bank_accounts',
+          read: () =>
+            prisma.staffBankAccount.findMany({
+              where: { staffUserId: target.userId, active: true },
+              orderBy: [{ isPrimary: 'desc' }, { updatedAt: 'desc' }],
+              select: {
+                id: true,
+                accountHolderName: true,
+                bankName: true,
+                bankCode: true,
+                branchCode: true,
+                accountNumberMasked: true,
+                accountType: true,
+                country: true,
+                currency: true,
+                paystackRecipientCode: true,
+                verificationStatus: true,
+                verificationProvider: true,
+                verifiedAt: true,
+                isPrimary: true,
+                active: true,
+                updatedAt: true,
+              },
+            }),
+          fallback: [],
+          warnings: workspaceWarnings,
+          staffProfileId: target.id,
+          staffUserId: target.userId,
+        })
+      : Promise.resolve([]),
+    safeWorkspaceRead({
+      dataset: 'employment_documents',
+      read: () =>
+        prisma.staffEmploymentDocument.findMany({
+          where: { staffProfileId: target.id, state: 'active' },
+          orderBy: { createdAt: 'desc' },
           select: {
             id: true,
-            accountHolderName: true,
-            bankName: true,
-            bankCode: true,
-            branchCode: true,
-            accountNumberMasked: true,
-            accountType: true,
-            country: true,
-            currency: true,
-            paystackRecipientCode: true,
-            verificationStatus: true,
-            verificationProvider: true,
-            verifiedAt: true,
-            isPrimary: true,
-            active: true,
-            updatedAt: true,
+            documentType: true,
+            title: true,
+            fileName: true,
+            contentType: true,
+            sizeBytes: true,
+            effectiveAt: true,
+            expiresAt: true,
+            state: true,
+            createdAt: true,
+            uploadedByProfile: { select: { id: true, name: true, email: true } },
           },
-        })
-      : Promise.resolve([]),
-    prisma.staffEmploymentDocument.findMany({
-      where: { staffProfileId: target.id, state: 'active' },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        documentType: true,
-        title: true,
-        fileName: true,
-        contentType: true,
-        sizeBytes: true,
-        effectiveAt: true,
-        expiresAt: true,
-        state: true,
-        createdAt: true,
-        uploadedByProfile: { select: { id: true, name: true, email: true } },
-      },
+        }),
+      fallback: [],
+      warnings: workspaceWarnings,
+      staffProfileId: target.id,
+      staffUserId: target.userId,
     }),
-    prisma.staffEmploymentChange.findMany({
-      where: { staffProfileId: target.id },
-      orderBy: [{ effectiveAt: 'desc' }, { createdAt: 'desc' }],
-      take: 100,
-    }),
-    prisma.staffLeaveBalance.findMany({
-      where: { staffProfileId: target.id },
-      orderBy: [{ year: 'desc' }, { leaveType: 'asc' }],
-    }),
-    canReadPay
-      ? prisma.payslip.findMany({
-          where: { staffUserId: target.userId },
-          orderBy: { createdAt: 'desc' },
-          take: 36,
-        })
-      : Promise.resolve([]),
-    canReadPay
-      ? prisma.staffArrearsLedger.findMany({
-          where: { staffUserId: target.userId, status: { in: ['open', 'partial', 'overdue'] } },
-          orderBy: [{ dueDate: 'asc' }, { effectiveAt: 'desc' }],
+    safeWorkspaceRead({
+      dataset: 'employment_changes',
+      read: () =>
+        prisma.staffEmploymentChange.findMany({
+          where: { staffProfileId: target.id },
+          orderBy: [{ effectiveAt: 'desc' }, { createdAt: 'desc' }],
           take: 100,
+        }),
+      fallback: [],
+      warnings: workspaceWarnings,
+      staffProfileId: target.id,
+      staffUserId: target.userId,
+    }),
+    safeWorkspaceRead({
+      dataset: 'leave_balances',
+      read: () =>
+        prisma.staffLeaveBalance.findMany({
+          where: { staffProfileId: target.id },
+          orderBy: [{ year: 'desc' }, { leaveType: 'asc' }],
+        }),
+      fallback: [],
+      warnings: workspaceWarnings,
+      staffProfileId: target.id,
+      staffUserId: target.userId,
+    }),
+    canReadPay
+      ? safeWorkspaceRead({
+          dataset: 'payslips',
+          read: () =>
+            prisma.payslip.findMany({
+              where: { staffUserId: target.userId },
+              orderBy: { createdAt: 'desc' },
+              take: 36,
+            }),
+          fallback: [],
+          warnings: workspaceWarnings,
+          staffProfileId: target.id,
+          staffUserId: target.userId,
         })
       : Promise.resolve([]),
-    prisma.staffIdTemplate.findFirst({ where: { active: true }, orderBy: { updatedAt: 'desc' } }),
+    canReadPay
+      ? safeWorkspaceRead({
+          dataset: 'salary_arrears',
+          read: () =>
+            prisma.staffArrearsLedger.findMany({
+              where: { staffUserId: target.userId, status: { in: ['open', 'partial', 'overdue'] } },
+              orderBy: [{ dueDate: 'asc' }, { effectiveAt: 'desc' }],
+              take: 100,
+            }),
+          fallback: [],
+          warnings: workspaceWarnings,
+          staffProfileId: target.id,
+          staffUserId: target.userId,
+        })
+      : Promise.resolve([]),
+    safeWorkspaceRead({
+      dataset: 'staff_id_template',
+      read: () =>
+        prisma.staffIdTemplate.findFirst({
+          where: { active: true },
+          orderBy: { updatedAt: 'desc' },
+        }),
+      fallback: null,
+      warnings: workspaceWarnings,
+      staffProfileId: target.id,
+      staffUserId: target.userId,
+    }),
   ]);
 
   return {
@@ -295,6 +433,7 @@ export async function getStaffEmploymentWorkspace(input: {
     arrears,
     arrearsReconciliation,
     arrearsReconciliationWarning,
+    workspaceWarnings,
     staffId: {
       ready: Boolean(target.staffIdentifier),
       activeTemplate: activeTemplate ? { id: activeTemplate.id, name: activeTemplate.name, validityMonths: activeTemplate.validityMonths } : null,

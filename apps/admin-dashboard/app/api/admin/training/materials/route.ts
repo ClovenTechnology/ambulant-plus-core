@@ -53,25 +53,68 @@ async function forward(
       ? undefined
       : await request.text();
 
+  const upstreamHeaders =
+    new Headers({
+      accept:
+        'application/json',
+      'cache-control':
+        'no-store',
+      'x-admin-origin':
+        request.nextUrl.origin,
+    });
+
+  if (body) {
+    upstreamHeaders.set(
+      'content-type',
+      'application/json',
+    );
+  }
+
+  const cookie =
+    request.headers.get(
+      'cookie',
+    ) || '';
+
+  const authorization =
+    request.headers.get(
+      'authorization',
+    ) || '';
+
+  const adminKey =
+    String(
+      process.env
+        .ADMIN_API_KEY ||
+      '',
+    ).trim();
+
+  if (cookie) {
+    upstreamHeaders.set(
+      'cookie',
+      cookie,
+    );
+  }
+
+  if (authorization) {
+    upstreamHeaders.set(
+      'authorization',
+      authorization,
+    );
+  }
+
+  if (adminKey) {
+    upstreamHeaders.set(
+      'x-admin-key',
+      adminKey,
+    );
+  }
+
   const upstream =
     await fetch(
       upstreamUrl,
       {
         method,
-        headers: {
-          accept:
-            'application/json',
-          ...(body
-            ? {
-                'content-type':
-                  'application/json',
-              }
-            : {}),
-          'x-admin-key':
-            process.env
-              .ADMIN_API_KEY ||
-            '',
-        },
+        headers:
+          upstreamHeaders,
         body,
         cache: 'no-store',
       },

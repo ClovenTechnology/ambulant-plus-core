@@ -7,6 +7,7 @@ import {
 import { Prisma } from '@prisma/client';
 import { prisma } from '@/src/lib/prisma';
 import { verifyAdminRequest } from '../../utils/auth';
+import { adminStaffAuthResponse, requireAdminStaffActor } from '@/src/lib/admin-staff-auth';
 import {
   flattenResolvedTrainingContent,
   normaliseTrainingResourceLibrary,
@@ -184,6 +185,277 @@ async function writeAudit(
       );
     });
 }
+
+
+type TrainingLibraryEntityType =
+  | 'resource'
+  | 'module';
+
+function purgeEntityType(
+  value: unknown,
+): TrainingLibraryEntityType | null {
+  const entityType =
+    String(value || '')
+      .trim()
+      .toLowerCase();
+
+  return (
+    entityType === 'resource' ||
+    entityType === 'module'
+  )
+    ? entityType
+    : null;
+}
+
+async function trainingLibraryPurgeImpact(
+  db: any,
+  trainingPolicy: unknown,
+  entityType: TrainingLibraryEntityType,
+  entityId: string,
+) {
+  const library =
+    readTrainingResourceLibrary(
+      trainingPolicy,
+    );
+
+  const resource =
+    entityType === 'resource'
+      ? library.resources.find(
+          (item) =>
+            item.id === entityId,
+        ) || null
+      : null;
+
+  const module =
+    entityType === 'module'
+      ? library.modules.find(
+          (item) =>
+            item.id === entityId,
+        ) || null
+      : null;
+
+  if (
+    entityType === 'resource' &&
+    !resource
+  ) {
+    return {
+      kind:
+        'NOT_FOUND' as const,
+    };
+  }
+
+  if (
+    entityType === 'module' &&
+    !module
+  ) {
+    return {
+      kind:
+        'NOT_FOUND' as const,
+    };
+  }
+
+  const moduleIds =
+    entityType === 'module'
+      ? [entityId]
+      : library.modules
+          .filter(
+            (item) =>
+              item.resourceIds.includes(
+                entityId,
+              ),
+          )
+          .map(
+            (item) =>
+              item.id,
+          );
+
+  const moduleIdSet =
+    new Set(
+      moduleIds,
+    );
+
+  const slots =
+    moduleIds.length
+      ? await db
+          .clinicianTrainingSlot
+          .findMany({
+            select: {
+              id: true,
+              title: true,
+              status: true,
+            },
+          })
+      : [];
+
+  const programmeReferences: Array<{
+    trainingSlotId: string;
+    title: string;
+    status: string;
+    assignmentId: string;
+    moduleId: string;
+    assignmentStatus: string;
+  }> =
+    slots.flatMap(
+      (slot: any) =>
+        readProgrammeModuleAssignments(
+          trainingPolicy,
+          slot.id,
+        )
+          .filter(
+            (assignment) =>
+              moduleIdSet.has(
+                assignment.moduleId,
+              ),
+          )
+          .map(
+            (assignment) => ({
+              trainingSlotId:
+                slot.id,
+              title:
+                slot.title,
+              status:
+                slot.status,
+              assignmentId:
+                assignment.id,
+              moduleId:
+                assignment.moduleId,
+              assignmentStatus:
+                assignment.status,
+            }),
+          ),
+    );
+
+  const referencedSlotIds =
+    Array.from(
+      new Set(
+        programmeReferences.map(
+          (reference) =>
+            reference.trainingSlotId,
+        ),
+      ),
+    );
+
+  const historyRows =
+    referencedSlotIds.length
+      ? await db
+          .clinicianTrainingSlot
+          .findMany({
+            where: {
+              id: {
+                in:
+                  referencedSlotIds,
+              },
+            },
+            select: {
+              id: true,
+              title: true,
+              status: true,
+              _count: {
+                select: {
+                  onboardings: true,
+                  participantAssignments:
+                    true,
+                  admissions: true,
+                  attendanceSessions:
+                    true,
+                },
+              },
+            },
+          })
+      : [];
+
+  const blockers =
+    historyRows
+      .filter(
+        (row: any) =>
+          Number(
+            row?._count
+              ?.onboardings ||
+            0,
+          ) > 0 ||
+          Number(
+            row?._count
+              ?.participantAssignments ||
+            0,
+          ) > 0 ||
+          Number(
+            row?._count
+              ?.admissions ||
+            0,
+          ) > 0 ||
+          Number(
+            row?._count
+              ?.attendanceSessions ||
+            0,
+          ) > 0,
+      )
+      .map(
+        (row: any) =>
+          `Protected training history exists for "${String(row.title || row.id)}" (onboarding ${Number(row?._count?.onboardings || 0)}, participants ${Number(row?._count?.participantAssignments || 0)}, admissions ${Number(row?._count?.admissions || 0)}, attendance ${Number(row?._count?.attendanceSessions || 0)}).`,
+      );
+
+  const objectKeys =
+    resource
+      ? Array.from(
+          new Set(
+            resource.versions
+              .map(
+                (version) =>
+                  String(
+                    version.fileKey ||
+                    '',
+                  ).trim(),
+              )
+              .filter(Boolean),
+          ),
+        )
+      : [];
+
+  return {
+    kind: 'OK' as const,
+    entityType,
+    entityId,
+    title:
+      resource?.title ||
+      module?.title ||
+      entityId,
+    status:
+      resource?.status ||
+      module?.status ||
+      'unknown',
+    moduleMemberships:
+      entityType ===
+      'resource'
+        ? library.modules
+            .filter(
+              (item) =>
+                item.resourceIds.includes(
+                  entityId,
+                ),
+            )
+            .map(
+              (item) => ({
+                id:
+                  item.id,
+                title:
+                  item.title,
+                status:
+                  item.status,
+              }),
+            )
+        : [],
+    moduleIds,
+    programmeReferences,
+    referencedSlotIds,
+    historyRows,
+    blockers,
+    objectKeys,
+    canPurge:
+      blockers.length === 0,
+    library,
+  };
+}
+
 
 export async function GET(
   request: NextRequest,
@@ -1022,6 +1294,421 @@ export async function PATCH(
 
     if (
       action ===
+        'preview_purge' ||
+      action ===
+        'purge_library_entity'
+    ) {
+      let humanAdmin: Awaited<
+        ReturnType<
+          typeof requireAdminStaffActor
+        >
+      >;
+
+      try {
+        humanAdmin =
+          await requireAdminStaffActor(
+            request,
+          );
+      } catch (error) {
+        const handled =
+          adminStaffAuthResponse(
+            error,
+          );
+
+        if (handled) {
+          return json(
+            handled.body,
+            handled.status,
+          );
+        }
+
+        throw error;
+      }
+
+      if (
+        !humanAdmin.isSuperAdmin
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'super_admin_required',
+          },
+          403,
+        );
+      }
+
+      const entityType =
+        purgeEntityType(
+          body?.entityType,
+        );
+
+      const entityId =
+        cleanId(
+          body?.entityId,
+        );
+
+      if (
+        !entityType ||
+        !entityId
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_library_entity_required',
+          },
+          400,
+        );
+      }
+
+      const settings =
+        await readSettings(
+          prisma,
+        );
+
+      if (!settings) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_policy_settings_missing',
+          },
+          409,
+        );
+      }
+
+      const preview =
+        await trainingLibraryPurgeImpact(
+          prisma,
+          settings.trainingPolicy,
+          entityType,
+          entityId,
+        );
+
+      if (
+        preview.kind ===
+        'NOT_FOUND'
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_library_entity_not_found',
+          },
+          404,
+        );
+      }
+
+      if (
+        action ===
+        'preview_purge'
+      ) {
+        await writeAudit(
+          request,
+          {
+            actorId:
+              humanAdmin.userId,
+            action:
+              'training_resource_library.purge_previewed',
+            entityType:
+              entityType ===
+              'resource'
+                ? 'TrainingResource'
+                : 'TrainingModule',
+            entityId,
+            description:
+              'SUPER_ADMIN previewed permanent training-content purge dependencies',
+            meta: {
+              canPurge:
+                preview.canPurge,
+              blockerCount:
+                preview.blockers.length,
+              programmeReferenceCount:
+                preview.programmeReferences.length,
+              moduleMembershipCount:
+                preview.moduleMemberships.length,
+            },
+          },
+        );
+
+        return json({
+          ok: true,
+          source:
+            'admin_training_resource_library_purge_preview',
+          preview: {
+            entityType,
+            entityId,
+            title:
+              preview.title,
+            status:
+              preview.status,
+            canPurge:
+              preview.canPurge,
+            blockers:
+              preview.blockers,
+            programmeReferenceCount:
+              preview.programmeReferences.length,
+            moduleMembershipCount:
+              preview.moduleMemberships.length,
+            programmeReferences:
+              preview.programmeReferences,
+            moduleMemberships:
+              preview.moduleMemberships,
+          },
+        });
+      }
+
+      const expectedConfirmation =
+        `PURGE:${entityType}:${entityId}`;
+
+      if (
+        String(
+          body?.confirmation ||
+          '',
+        ).trim() !==
+        expectedConfirmation
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_library_purge_confirmation_required',
+          },
+          400,
+        );
+      }
+
+      const result =
+        await prisma.$transaction(
+          async (tx: any) => {
+            const currentSettings =
+              await readSettings(
+                tx,
+              );
+
+            if (!currentSettings) {
+              return {
+                kind:
+                  'SETTINGS_MISSING' as const,
+              };
+            }
+
+            const impact =
+              await trainingLibraryPurgeImpact(
+                tx,
+                currentSettings.trainingPolicy,
+                entityType,
+                entityId,
+              );
+
+            if (
+              impact.kind ===
+              'NOT_FOUND'
+            ) {
+              return {
+                kind:
+                  'NOT_FOUND' as const,
+              };
+            }
+
+            if (
+              !impact.canPurge
+            ) {
+              return {
+                kind:
+                  'PROTECTED_HISTORY' as const,
+                blockers:
+                  impact.blockers,
+              };
+            }
+
+            let nextPolicy =
+              currentSettings.trainingPolicy;
+
+            if (
+              entityType ===
+              'resource'
+            ) {
+              nextPolicy =
+                writeTrainingResourceLibrary(
+                  nextPolicy,
+                  {
+                    resources:
+                      impact.library.resources.filter(
+                        (item) =>
+                          item.id !==
+                          entityId,
+                      ),
+                    modules:
+                      impact.library.modules,
+                  },
+                );
+            } else {
+              nextPolicy =
+                writeTrainingResourceLibrary(
+                  nextPolicy,
+                  {
+                    resources:
+                      impact.library.resources,
+                    modules:
+                      impact.library.modules.filter(
+                        (item) =>
+                          item.id !==
+                          entityId,
+                      ),
+                  },
+                );
+
+              for (
+                const trainingSlotId of
+                impact.referencedSlotIds
+              ) {
+                const assignments =
+                  readProgrammeModuleAssignments(
+                    nextPolicy,
+                    trainingSlotId,
+                  )
+                    .filter(
+                      (assignment) =>
+                        assignment.moduleId !==
+                        entityId,
+                    );
+
+                nextPolicy =
+                  writeProgrammeModuleAssignments(
+                    nextPolicy,
+                    trainingSlotId,
+                    assignments,
+                  );
+              }
+            }
+
+            await tx
+              .clinicianOnboardingSetting
+              .update({
+                where: {
+                  id: 'default',
+                },
+                data: {
+                  trainingPolicy:
+                    nextPolicy as unknown as
+                      Prisma.InputJsonValue,
+                  updatedByUserId:
+                    humanAdmin.userId,
+                },
+              });
+
+            return {
+              kind: 'OK' as const,
+              objectKeys:
+                impact.objectKeys,
+              programmeReferenceCount:
+                impact.programmeReferences.length,
+              moduleMembershipCount:
+                impact.moduleMemberships.length,
+              library:
+                readTrainingResourceLibrary(
+                  nextPolicy,
+                ),
+            };
+          },
+        );
+
+      if (
+        result.kind ===
+        'SETTINGS_MISSING'
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_policy_settings_missing',
+          },
+          409,
+        );
+      }
+
+      if (
+        result.kind ===
+        'NOT_FOUND'
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_library_entity_not_found',
+          },
+          404,
+        );
+      }
+
+      if (
+        result.kind ===
+        'PROTECTED_HISTORY'
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_library_purge_blocked_by_history',
+            blockers:
+              result.blockers,
+          },
+          409,
+        );
+      }
+
+      for (
+        const objectKey of
+        result.objectKeys
+      ) {
+        await bestEffortDeleteTrainingResourceObject(
+          objectKey,
+        );
+      }
+
+      await writeAudit(
+        request,
+        {
+          actorId:
+            humanAdmin.userId,
+          action:
+            'training_resource_library.purged',
+          entityType:
+            entityType ===
+            'resource'
+              ? 'TrainingResource'
+              : 'TrainingModule',
+          entityId,
+          description:
+            'SUPER_ADMIN permanently purged training content after dependency checks',
+          meta: {
+            programmeReferenceCount:
+              result.programmeReferenceCount,
+            moduleMembershipCount:
+              result.moduleMembershipCount,
+            removedObjectCount:
+              result.objectKeys.length,
+          },
+        },
+      );
+
+      return json({
+        ok: true,
+        source:
+          'admin_training_resource_library_purge',
+        purged: {
+          entityType,
+          entityId,
+        },
+        library:
+          result.library,
+      });
+    }
+
+    if (
+      action ===
       'save_library'
     ) {
       const library =
@@ -1043,6 +1730,146 @@ export async function PATCH(
                   'SETTINGS_MISSING' as const,
               };
             }
+
+            const currentLibrary =
+              readTrainingResourceLibrary(
+                settings.trainingPolicy,
+              );
+
+            const nextResourceIds =
+              new Set(
+                library.resources.map(
+                  (resource) =>
+                    resource.id,
+                ),
+              );
+
+            const nextModuleIds =
+              new Set(
+                library.modules.map(
+                  (module) =>
+                    module.id,
+                ),
+              );
+
+            const removedResources =
+              currentLibrary.resources.filter(
+                (resource) =>
+                  !nextResourceIds.has(
+                    resource.id,
+                  ),
+              );
+
+            const removedModules =
+              currentLibrary.modules.filter(
+                (module) =>
+                  !nextModuleIds.has(
+                    module.id,
+                  ),
+              );
+
+            const protectedResource =
+              removedResources.find(
+                (resource) =>
+                  resource.status !==
+                  'draft',
+              );
+
+            if (protectedResource) {
+              return {
+                kind:
+                  'PROTECTED_REMOVAL' as const,
+                entityType:
+                  'resource' as const,
+                entityId:
+                  protectedResource.id,
+              };
+            }
+
+            const protectedModule =
+              removedModules.find(
+                (module) =>
+                  module.status !==
+                  'draft',
+              );
+
+            if (protectedModule) {
+              return {
+                kind:
+                  'PROTECTED_REMOVAL' as const,
+                entityType:
+                  'module' as const,
+                entityId:
+                  protectedModule.id,
+              };
+            }
+
+            if (
+              removedModules.length
+            ) {
+              const removedModuleIds =
+                new Set(
+                  removedModules.map(
+                    (module) =>
+                      module.id,
+                  ),
+                );
+
+              const slots =
+                await tx
+                  .clinicianTrainingSlot
+                  .findMany({
+                    select: {
+                      id: true,
+                    },
+                  });
+
+              for (
+                const slot of
+                slots
+              ) {
+                const assigned =
+                  readProgrammeModuleAssignments(
+                    settings.trainingPolicy,
+                    slot.id,
+                  )
+                    .some(
+                      (assignment) =>
+                        removedModuleIds.has(
+                          assignment.moduleId,
+                        ),
+                    );
+
+                if (assigned) {
+                  return {
+                    kind:
+                      'ENTITY_IN_USE' as const,
+                    entityType:
+                      'module' as const,
+                    trainingSlotId:
+                      slot.id,
+                  };
+                }
+              }
+            }
+
+            const removedObjectKeys =
+              Array.from(
+                new Set(
+                  removedResources.flatMap(
+                    (resource) =>
+                      resource.versions
+                        .map(
+                          (version) =>
+                            String(
+                              version.fileKey ||
+                              '',
+                            ).trim(),
+                        )
+                        .filter(Boolean),
+                  ),
+                ),
+              );
 
             const nextPolicy =
               writeTrainingResourceLibrary(
@@ -1071,6 +1898,7 @@ export async function PATCH(
                 readTrainingResourceLibrary(
                   nextPolicy,
                 ),
+              removedObjectKeys,
             };
           },
         );
@@ -1086,6 +1914,51 @@ export async function PATCH(
               'training_policy_settings_missing',
           },
           409,
+        );
+      }
+
+      if (
+        result.kind ===
+        'PROTECTED_REMOVAL'
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'super_admin_purge_required',
+            entityType:
+              result.entityType,
+            entityId:
+              result.entityId,
+          },
+          409,
+        );
+      }
+
+      if (
+        result.kind ===
+        'ENTITY_IN_USE'
+      ) {
+        return json(
+          {
+            ok: false,
+            error:
+              'training_library_entity_in_use',
+            entityType:
+              result.entityType,
+            trainingSlotId:
+              result.trainingSlotId,
+          },
+          409,
+        );
+      }
+
+      for (
+        const objectKey of
+        result.removedObjectKeys
+      ) {
+        await bestEffortDeleteTrainingResourceObject(
+          objectKey,
         );
       }
 

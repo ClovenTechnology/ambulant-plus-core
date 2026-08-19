@@ -114,6 +114,8 @@ function storageConfig() {
   return {
     bucket: bucket.value,
     region: region.value,
+    bucketSource: bucket.source,
+    regionSource: region.source,
     client: new S3Client({ region: region.value }),
   };
 }
@@ -251,7 +253,11 @@ export async function presignEnterpriseMediaUpload(input: {
       ContentType: input.contentType,
       ChecksumSHA256: checksumBase64,
     }),
-    { expiresIn: UPLOAD_URL_TTL_SECONDS },
+    {
+      expiresIn: UPLOAD_URL_TTL_SECONDS,
+      unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+      signableHeaders: new Set(['content-type']),
+    },
   );
 
   return {
@@ -260,6 +266,10 @@ export async function presignEnterpriseMediaUpload(input: {
     headers: {
       'content-type': input.contentType,
       'x-amz-checksum-sha256': checksumBase64,
+    },
+    storage: {
+      bucketSource: storage.bucketSource,
+      regionSource: storage.regionSource,
     },
   };
 }

@@ -217,6 +217,22 @@ export function StaffEmploymentWorkspace({ staffProfileId }: { staffProfileId: s
         </div>
       ) : null}
 
+      {Array.isArray(workspace?.workspaceWarnings) && workspace.workspaceWarnings.length ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          <div className="font-semibold">
+            Employment information loaded with limited datasets.
+          </div>
+          <div className="mt-1">
+            {workspace.workspaceWarnings.some((warning: any) => warning?.code === 'schema_not_ready')
+              ? 'One or more Enterprise Operations tables or columns are not available in the deployed database. The available employment information is shown below; complete the required database migration before relying on missing sections.'
+              : 'One or more employment datasets could not be refreshed. The available information is shown below; retry before making a decision that depends on a missing section.'}
+          </div>
+          <div className="mt-2 text-xs font-medium">
+            Affected datasets: {workspace.workspaceWarnings.map((warning: any) => String(warning?.dataset || 'unknown').replaceAll('_', ' ')).join(', ')}
+          </div>
+        </div>
+      ) : null}
+
       <section className="rounded-3xl border bg-white p-5 shadow-sm">
         <div className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5" /><h2 className="text-lg font-semibold">Employment & compensation</h2></div>
         <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

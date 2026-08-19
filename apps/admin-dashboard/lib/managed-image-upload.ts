@@ -73,7 +73,19 @@ export async function uploadManagedImage(input: {
     body: input.file,
   });
   if (!uploadResponse.ok) {
-    throw new ManagedImageUploadError('The image could not be uploaded. Please try again.');
+    const storageSource = [
+      presignJson?.storage?.bucketSource,
+      presignJson?.storage?.regionSource,
+    ]
+      .filter(Boolean)
+      .join(' / ');
+    console.error('[managed image] object-storage PUT failed', {
+      status: uploadResponse.status,
+      storageSource: storageSource || 'unknown',
+    });
+    throw new ManagedImageUploadError(
+      `The image could not be uploaded (storage HTTP ${uploadResponse.status}). Please try again or contact platform administration.`,
+    );
   }
 
   const confirmResponse = await fetch(input.confirmUrl, {

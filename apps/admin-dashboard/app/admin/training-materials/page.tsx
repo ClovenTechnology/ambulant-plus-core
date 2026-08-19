@@ -1,27 +1,55 @@
-// apps/admin-dashboard/app/admin/training/page.tsx
+// apps/admin-dashboard/app/admin/training-materials/page.tsx
 import Link from 'next/link';
-import {getSessionFromGateway} from '@/src/lib/session';
-import TrainingControlPlaneClient from './TrainingControlPlaneClient';
-import OnboardingSettingsPanel from '../clinicians/onboarding/OnboardingSettingsPanel';
+import { getSessionFromGateway } from '@/src/lib/session';
+import TrainingContentManager from '../training/TrainingContentManager';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export default async function AdminTrainingPage() {
-  const session =
-    await getSessionFromGateway();
+
+function canonicalAuthority(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s&_.:-]+/g, '');
+}
+
+function isSuperAdminSession(session: Awaited<ReturnType<typeof getSessionFromGateway>>) {
+  const roles = Array.isArray(session?.user?.roles)
+    ? session.user.roles
+    : [];
+  const scopes = Array.isArray(session?.user?.scopes)
+    ? session.user.scopes
+    : [];
+
+  const values = new Set(
+    [...roles, ...scopes]
+      .map(canonicalAuthority)
+      .filter(Boolean),
+  );
+
+  return (
+    values.has('superadmin') ||
+    values.has('adminall') ||
+    values.has('*')
+  );
+}
+
+export default async function AdminTrainingMaterialsPage() {
+  const session = await getSessionFromGateway();
+  const allowPermanentPurge = isSuperAdminSession(session);
 
   if (!session?.authenticated) {
     return (
       <main className="mx-auto max-w-4xl p-6">
         <h1 className="text-2xl font-black text-slate-950">
-          Training control plane
+          Training materials
         </h1>
         <div className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900">
           An authenticated Admin session is required.
         </div>
         <Link
-          href="/auth/signin?next=/admin/training"
+          href="/auth/signin?next=/admin/training-materials"
           className="mt-4 inline-flex rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white"
         >
           Sign in
@@ -36,40 +64,30 @@ export default async function AdminTrainingPage() {
         <div className="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
           <div>
             <div className="text-xs font-black uppercase tracking-[0.2em] text-indigo-200">
-              Clinician onboarding operations
+              Global governed content library
             </div>
             <h1 className="mt-2 text-3xl font-black tracking-tight">
-              Training control plane
+              Training materials
             </h1>
             <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-300">
-              Create multi-day programmes, allocate one or more sessions per day, set capacity and booking windows, then publish eligible slots directly to clinicians.
+              Create reusable resources once, version and publish them centrally,
+              bundle them into modules, and attach those modules to training
+              programmes without duplicating source content.
             </p>
           </div>
 
           <nav className="flex flex-wrap gap-2">
             <Link
-              href="/admin/clinicians/onboarding"
+              href="/admin/training"
               className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/15"
             >
-              Onboarding board
+              Training control plane
             </Link>
             <Link
               href="/admin/calendar"
               className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/15"
             >
               Training calendar
-            </Link>
-            <Link
-              href="/admin/training-materials"
-              className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/15"
-            >
-              Training materials
-            </Link>
-            <Link
-              href="/admin/legal"
-              className="rounded-xl border border-white/20 bg-white/10 px-3 py-2 text-xs font-bold hover:bg-white/15"
-            >
-              Legal notices
             </Link>
           </nav>
         </div>
@@ -82,19 +100,11 @@ export default async function AdminTrainingPage() {
         </div>
       </header>
 
-      <TrainingControlPlaneClient />
-
-      <section>
-        <div className="mb-3">
-          <h2 className="text-xl font-black text-slate-950">
-            Commercial and training policy
-          </h2>
-          <p className="mt-1 text-sm text-slate-600">
-            Configure programme defaults, modes, payment pathways, privileges, notices and C-Med dispatch.
-          </p>
-        </div>
-        <OnboardingSettingsPanel />
-      </section>
+      <TrainingContentManager
+        trainingSlotId={null}
+        sessions={[]}
+        allowPermanentPurge={allowPermanentPurge}
+      />
     </main>
   );
 }
