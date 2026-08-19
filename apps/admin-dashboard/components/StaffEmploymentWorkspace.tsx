@@ -16,9 +16,16 @@ import {
 import { uploadStaffEmploymentDocument } from '@/lib/managed-document-upload';
 import { errorText, userFacingApiError, type UserFacingError } from '@/lib/admin-error';
 
+const UNCHANGED = '__UNCHANGED__';
+const CLEAR = '__CLEAR__';
+
 function money(cents: unknown, currency = 'ZAR') {
   const value = Number(cents || 0) / 100;
-  return new Intl.NumberFormat('en-ZA', { style: 'currency', currency, maximumFractionDigits: 2 }).format(value);
+  return new Intl.NumberFormat('en-ZA', {
+    style: 'currency',
+    currency,
+    maximumFractionDigits: 2,
+  }).format(value);
 }
 
 function duration(seconds: unknown) {
@@ -34,23 +41,60 @@ function formatDate(value: unknown, withTime = false) {
   if (!value) return '—';
   const parsed = new Date(String(value));
   if (!Number.isFinite(parsed.getTime())) return '—';
-  return parsed.toLocaleString('en-ZA', withTime
-    ? { dateStyle: 'medium', timeStyle: 'short' }
-    : { dateStyle: 'medium' });
+  return parsed.toLocaleString(
+    'en-ZA',
+    withTime
+      ? { dateStyle: 'medium', timeStyle: 'short' }
+      : { dateStyle: 'medium' },
+  );
 }
 
-function ErrorBanner({ error, onRetry }: { error: UserFacingError | null; onRetry?: () => void }) {
+function ErrorBanner({
+  error,
+  onRetry,
+}: {
+  error: UserFacingError | null;
+  onRetry?: () => void;
+}) {
   if (!error) return null;
+
   return (
     <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800">
       <div className="font-semibold">We could not complete that action.</div>
       <div className="mt-1">{errorText(error)}</div>
-      {error.retryable && onRetry ? <button type="button" onClick={onRetry} className="mt-3 rounded-lg border border-rose-300 bg-white px-3 py-1.5 font-medium">Try again</button> : null}
+      {error.retryable && onRetry ? (
+        <button
+          type="button"
+          onClick={onRetry}
+          className="mt-3 rounded-lg border border-rose-300 bg-white px-3 py-1.5 font-medium"
+        >
+          Try again
+        </button>
+      ) : null}
     </div>
   );
 }
 
-export function StaffEmploymentWorkspace({ staffProfileId }: { staffProfileId: string }) {
+function fallbackError(
+  error: any,
+  fallback: string,
+  code: string,
+): UserFacingError {
+  return error?.referenceId
+    ? error
+    : {
+        message: error?.message || fallback,
+        referenceId: `ADM-${Date.now().toString(36).toUpperCase()}`,
+        retryable: true,
+        code,
+      };
+}
+
+export function StaffEmploymentWorkspace({
+  staffProfileId,
+}: {
+  staffProfileId: string;
+}) {
   const [workspace, setWorkspace] = useState<any>(null);
   const [activity, setActivity] = useState<any>(null);
   const [activityDays, setActivityDays] = useState(30);
@@ -58,36 +102,87 @@ export function StaffEmploymentWorkspace({ staffProfileId }: { staffProfileId: s
   const [error, setError] = useState<UserFacingError | null>(null);
   const [notice, setNotice] = useState('');
   const [employment, setEmployment] = useState<any>({});
-  const [bank, setBank] = useState<any>({ country: 'ZA', currency: 'ZAR' });
-  const [leave, setLeave] = useState<any>({ leaveType: 'ANNUAL', year: new Date().getUTCFullYear(), entitlementDays: 20, usedDays: 0, adjustmentDays: 0 });
-  const [change, setChange] = useState<any>({ changeType: 'PROMOTION', effectiveAt: new Date().toISOString().slice(0, 10), salaryAfterZar: '', benefitsText: '', privilegesText: '' });
-  const [documentMeta, setDocumentMeta] = useState<any>({ documentType: 'APPOINTMENT_LETTER', title: '', effectiveAt: '' });
+  const [bank, setBank] = useState<any>({
+    country: 'ZA',
+    currency: 'ZAR',
+  });
+  const [leave, setLeave] = useState<any>({
+    leaveType: 'ANNUAL',
+    year: new Date().getUTCFullYear(),
+    entitlementDays: 20,
+    usedDays: 0,
+    adjustmentDays: 0,
+  });
+  const [change, setChange] = useState<any>({
+    changeType: 'PROMOTION',
+    effectiveAt: new Date().toISOString().slice(0, 10),
+    salaryAfterZar: '',
+    benefitsText: '',
+    privilegesText: '',
+    notes: '',
+    toDepartmentId: UNCHANGED,
+    toDesignationId: UNCHANGED,
+    toManagerId: UNCHANGED,
+  });
+  const [documentMeta, setDocumentMeta] = useState<any>({
+    documentType: 'APPOINTMENT_LETTER',
+    title: '',
+    effectiveAt: '',
+  });
 
   async function load() {
     setBusy(true);
     setError(null);
+
     try {
-      const response = await fetch(`/api/admin/staff/${encodeURIComponent(staffProfileId)}/employment`, { cache: 'no-store' });
+      const response = await fetch(
+        `/api/admin/staff/${encodeURIComponent(staffProfileId)}/employment`,
+        { cache: 'no-store' },
+      );
       const json = await response.json().catch(() => null);
-      if (!response.ok || !json?.ok) throw userFacingApiError({ response, json, fallback: 'Unable to load employment information.' });
+
+      if (!response.ok || !json?.ok) {
+        throw userFacingApiError({
+          response,
+          json,
+          fallback: 'Unable to load employment information.',
+        });
+      }
+
       setWorkspace(json);
+
       const profile = json.payrollProfile || {};
       setEmployment({
         employmentType: profile.employmentType || 'permanent',
         payrollStatus: profile.payrollStatus || 'active',
-        startDate: profile.startDate ? String(profile.startDate).slice(0, 10) : '',
-        endDate: profile.endDate ? String(profile.endDate).slice(0, 10) : '',
-        positionTitle: profile.profileMeta?.positionTitle || '',
+        startDate: profile.startDate
+          ? String(profile.startDate).slice(0, 10)
+          : '',
+        endDate: profile.endDate
+          ? String(profile.endDate).slice(0, 10)
+          : '',
         contractType: profile.profileMeta?.contractType || '',
         contractStatus: profile.profileMeta?.contractStatus || '',
-        baseSalaryZar: profile.baseSalaryCents != null ? String(Number(profile.baseSalaryCents) / 100) : '',
-        hourlyRateZar: profile.hourlyRateCents != null ? String(Number(profile.hourlyRateCents) / 100) : '',
+        baseSalaryZar:
+          profile.baseSalaryCents != null
+            ? String(Number(profile.baseSalaryCents) / 100)
+            : '',
+        hourlyRateZar:
+          profile.hourlyRateCents != null
+            ? String(Number(profile.hourlyRateCents) / 100)
+            : '',
         payFrequency: profile.payFrequency || 'monthly',
         taxNumber: profile.taxNumber || '',
         payrollNumber: profile.payrollNumber || '',
       });
     } catch (err: any) {
-      setError(err?.referenceId ? err : { message: err?.message || 'Unable to load employment information.', referenceId: `ADM-${Date.now().toString(36).toUpperCase()}`, retryable: true, code: 'load_failed' });
+      setError(
+        fallbackError(
+          err,
+          'Unable to load employment information.',
+          'load_failed',
+        ),
+      );
     } finally {
       setBusy(false);
     }
@@ -95,11 +190,25 @@ export function StaffEmploymentWorkspace({ staffProfileId }: { staffProfileId: s
 
   async function loadActivity(days = activityDays) {
     if (!staffProfileId) return;
+
     try {
-      const response = await fetch(`/api/admin/staff/${encodeURIComponent(staffProfileId)}/activity?days=${days}`, { cache: 'no-store' });
+      const response = await fetch(
+        `/api/admin/staff/${encodeURIComponent(staffProfileId)}/activity?days=${days}`,
+        { cache: 'no-store' },
+      );
       const json = await response.json().catch(() => null);
-      if (response.ok && json?.ok) setActivity(json);
-      else if (response.status !== 403) setError(userFacingApiError({ response, json, fallback: 'Unable to load Staff activity.' }));
+
+      if (response.ok && json?.ok) {
+        setActivity(json);
+      } else if (response.status !== 403) {
+        setError(
+          userFacingApiError({
+            response,
+            json,
+            fallback: 'Unable to load Staff activity.',
+          }),
+        );
+      }
     } catch {
       // Employment workspace remains usable if telemetry is temporarily unavailable.
     }
@@ -113,46 +222,177 @@ export function StaffEmploymentWorkspace({ staffProfileId }: { staffProfileId: s
 
   const permissions = workspace?.permissions || {};
   const payroll = workspace?.payrollProfile;
-  const primaryBank = workspace?.bankAccounts?.find((item: any) => item.isPrimary) || workspace?.bankAccounts?.[0] || null;
-  const openArrearsCents = useMemo(() => (workspace?.arrears || []).reduce((sum: number, row: any) => sum + Math.max(0, Number(row.debitCents || 0) - Number(row.creditCents || 0)), 0), [workspace?.arrears]);
+  const organisation = workspace?.organisation || {};
+  const departments = Array.isArray(organisation.departments)
+    ? organisation.departments
+    : [];
+  const managers = Array.isArray(organisation.managers)
+    ? organisation.managers
+    : [];
+
+  const primaryBank =
+    workspace?.bankAccounts?.find((item: any) => item.isPrimary) ||
+    workspace?.bankAccounts?.[0] ||
+    null;
+
+  const openArrearsCents = useMemo(
+    () =>
+      (workspace?.arrears || []).reduce(
+        (sum: number, row: any) =>
+          sum +
+          Math.max(
+            0,
+            Number(row.debitCents || 0) -
+              Number(row.creditCents || 0),
+          ),
+        0,
+      ),
+    [workspace?.arrears],
+  );
+
+  const selectedChangeDepartmentId =
+    change.toDepartmentId === UNCHANGED
+      ? workspace?.staff?.departmentId || ''
+      : change.toDepartmentId === CLEAR
+        ? ''
+        : change.toDepartmentId;
+
+  const changeDesignationOptions =
+    departments.find(
+      (department: any) =>
+        department.id === selectedChangeDepartmentId,
+    )?.designations || [];
+
+  const canEditEmploymentProfile =
+    Boolean(permissions.canManageEmployment) ||
+    Boolean(permissions.canManageCompensation) ||
+    Boolean(permissions.canManagePayroll);
 
   async function saveEmployment() {
-    setBusy(true); setError(null); setNotice('');
+    setBusy(true);
+    setError(null);
+    setNotice('');
+
     try {
-      const response = await fetch(`/api/admin/staff/${encodeURIComponent(staffProfileId)}/employment`, {
-        method: 'PATCH', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ...employment,
-          baseSalaryCents: Math.round(Number(employment.baseSalaryZar || 0) * 100),
-          hourlyRateCents: Math.round(Number(employment.hourlyRateZar || 0) * 100),
-        }),
-      });
+      const body: Record<string, unknown> = {};
+
+      if (permissions.canManageEmployment) {
+        body.employmentType = employment.employmentType || 'permanent';
+        body.startDate = employment.startDate || null;
+        body.endDate = employment.endDate || null;
+        body.contractType = employment.contractType || null;
+      }
+
+      if (permissions.canManageCompensation) {
+        if (String(employment.baseSalaryZar ?? '').trim() !== '') {
+          body.baseSalaryCents = Math.round(
+            Number(employment.baseSalaryZar) * 100,
+          );
+        }
+
+        if (String(employment.hourlyRateZar ?? '').trim() !== '') {
+          body.hourlyRateCents = Math.round(
+            Number(employment.hourlyRateZar) * 100,
+          );
+        }
+
+        body.payFrequency = employment.payFrequency || 'monthly';
+      }
+
+      if (permissions.canManagePayroll) {
+        body.payrollStatus = employment.payrollStatus || 'active';
+        body.taxNumber = employment.taxNumber || null;
+        body.payrollNumber = employment.payrollNumber || null;
+      }
+
+      if (Object.keys(body).length === 0) {
+        throw new Error('No authorised employment fields are available to update.');
+      }
+
+      const response = await fetch(
+        `/api/admin/staff/${encodeURIComponent(staffProfileId)}/employment`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      );
       const json = await response.json().catch(() => null);
-      if (!response.ok || !json?.ok) throw userFacingApiError({ response, json, fallback: 'Unable to save employment details.' });
-      setNotice('Employment and compensation details saved.');
+
+      if (!response.ok || !json?.ok) {
+        throw userFacingApiError({
+          response,
+          json,
+          fallback: 'Unable to save employment details.',
+        });
+      }
+
+      setNotice('Authorised employment, compensation and payroll fields saved.');
       await load();
-    } catch (err: any) { setError(err?.referenceId ? err : { message: err?.message || 'Unable to save employment details.', referenceId: `ADM-${Date.now().toString(36).toUpperCase()}`, retryable: true, code: 'save_failed' }); }
-    finally { setBusy(false); }
+    } catch (err: any) {
+      setError(
+        fallbackError(
+          err,
+          'Unable to save employment details.',
+          'save_failed',
+        ),
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveBank() {
-    setBusy(true); setError(null); setNotice('');
+    setBusy(true);
+    setError(null);
+    setNotice('');
+
     try {
-      const response = await fetch(`/api/admin/staff/${encodeURIComponent(staffProfileId)}/bank`, {
-        method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(bank),
-      });
+      const response = await fetch(
+        `/api/admin/staff/${encodeURIComponent(staffProfileId)}/bank`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(bank),
+        },
+      );
       const json = await response.json().catch(() => null);
-      if (!response.ok || !json?.ok) throw userFacingApiError({ response, json, fallback: 'Unable to save payout details.' });
-      setNotice(json.providerPending ? 'Bank details saved securely. Transfer-recipient verification is pending.' : 'Bank details saved and payout recipient is ready.');
+
+      if (!response.ok || !json?.ok) {
+        throw userFacingApiError({
+          response,
+          json,
+          fallback: 'Unable to save payout details.',
+        });
+      }
+
+      setNotice(
+        json.providerPending
+          ? 'Bank details saved securely. Transfer-recipient verification is pending.'
+          : 'Bank details saved and payout recipient is ready.',
+      );
       setBank({ country: 'ZA', currency: 'ZAR' });
       await load();
-    } catch (err: any) { setError(err?.referenceId ? err : { message: err?.message || 'Unable to save payout details.', referenceId: `ADM-${Date.now().toString(36).toUpperCase()}`, retryable: true, code: 'bank_failed' }); }
-    finally { setBusy(false); }
+    } catch (err: any) {
+      setError(
+        fallbackError(
+          err,
+          'Unable to save payout details.',
+          'bank_failed',
+        ),
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function uploadDocument(file: File | null) {
     if (!file) return;
-    setBusy(true); setError(null); setNotice('');
+
+    setBusy(true);
+    setError(null);
+    setNotice('');
+
     try {
       await uploadStaffEmploymentDocument({
         file,
@@ -162,134 +402,1300 @@ export function StaffEmploymentWorkspace({ staffProfileId }: { staffProfileId: s
         title: documentMeta.title || file.name,
         effectiveAt: documentMeta.effectiveAt || null,
       });
+
       setNotice('Employment document issued to this Staff profile.');
-      setDocumentMeta({ ...documentMeta, title: '' });
+      setDocumentMeta((current: any) => ({
+        ...current,
+        title: '',
+      }));
       await load();
     } catch (err: any) {
-      const synthetic = { error: err?.message };
-      setError(userFacingApiError({ json: synthetic, fallback: err?.message || 'Unable to upload employment document.' }));
-    } finally { setBusy(false); }
+      setError(
+        userFacingApiError({
+          json: { error: err?.message },
+          fallback:
+            err?.message ||
+            'Unable to upload employment document.',
+        }),
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveLeave() {
-    setBusy(true); setError(null); setNotice('');
+    setBusy(true);
+    setError(null);
+    setNotice('');
+
     try {
-      const response = await fetch(`/api/admin/staff/${encodeURIComponent(staffProfileId)}/leave`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(leave) });
+      const response = await fetch(
+        `/api/admin/staff/${encodeURIComponent(staffProfileId)}/leave`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(leave),
+        },
+      );
       const json = await response.json().catch(() => null);
-      if (!response.ok || !json?.ok) throw userFacingApiError({ response, json, fallback: 'Unable to update leave balance.' });
+
+      if (!response.ok || !json?.ok) {
+        throw userFacingApiError({
+          response,
+          json,
+          fallback: 'Unable to update leave balance.',
+        });
+      }
+
       setNotice('Leave entitlement and usage updated.');
       await load();
-    } catch (err: any) { setError(err?.referenceId ? err : userFacingApiError({ json: { error: err?.message }, fallback: 'Unable to update leave balance.' })); }
-    finally { setBusy(false); }
+    } catch (err: any) {
+      setError(
+        err?.referenceId
+          ? err
+          : userFacingApiError({
+              json: { error: err?.message },
+              fallback: 'Unable to update leave balance.',
+            }),
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function saveChange() {
-    setBusy(true); setError(null); setNotice('');
+    setBusy(true);
+    setError(null);
+    setNotice('');
+
     try {
-      const response = await fetch(`/api/admin/staff/${encodeURIComponent(staffProfileId)}/employment-changes`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          ...change,
-          salaryAfterCents: change.salaryAfterZar === '' ? undefined : Math.round(Number(change.salaryAfterZar || 0) * 100),
-          benefits: String(change.benefitsText || '').split(/\n|,/).map((x) => x.trim()).filter(Boolean),
-          privileges: String(change.privilegesText || '').split(/\n|,/).map((x) => x.trim()).filter(Boolean),
-        }),
-      });
+      const body: Record<string, unknown> = {
+        changeType: change.changeType,
+        effectiveAt: change.effectiveAt,
+        benefits: String(change.benefitsText || '')
+          .split(/\n|,/)
+          .map((value) => value.trim())
+          .filter(Boolean),
+        privileges: String(change.privilegesText || '')
+          .split(/\n|,/)
+          .map((value) => value.trim())
+          .filter(Boolean),
+        notes: change.notes || null,
+      };
+
+      if (
+        permissions.canManageCompensation &&
+        String(change.salaryAfterZar ?? '').trim() !== ''
+      ) {
+        body.salaryAfterCents = Math.round(
+          Number(change.salaryAfterZar) * 100,
+        );
+      }
+
+      if (change.toDepartmentId !== UNCHANGED) {
+        body.toDepartmentId =
+          change.toDepartmentId === CLEAR
+            ? null
+            : change.toDepartmentId;
+      }
+
+      if (change.toDesignationId !== UNCHANGED) {
+        body.toDesignationId =
+          change.toDesignationId === CLEAR
+            ? null
+            : change.toDesignationId;
+      }
+
+      if (change.toManagerId !== UNCHANGED) {
+        body.toManagerId =
+          change.toManagerId === CLEAR
+            ? null
+            : change.toManagerId;
+      }
+
+      const response = await fetch(
+        `/api/admin/staff/${encodeURIComponent(staffProfileId)}/employment-changes`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+      );
       const json = await response.json().catch(() => null);
-      if (!response.ok || !json?.ok) throw userFacingApiError({ response, json, fallback: 'Unable to record the employment change.' });
+
+      if (!response.ok || !json?.ok) {
+        throw userFacingApiError({
+          response,
+          json,
+          fallback: 'Unable to record the employment change.',
+        });
+      }
+
       setNotice('Employment history updated.');
+      setChange((current: any) => ({
+        ...current,
+        salaryAfterZar: '',
+        benefitsText: '',
+        privilegesText: '',
+        notes: '',
+        toDepartmentId: UNCHANGED,
+        toDesignationId: UNCHANGED,
+        toManagerId: UNCHANGED,
+      }));
       await load();
-    } catch (err: any) { setError(err?.referenceId ? err : userFacingApiError({ json: { error: err?.message }, fallback: 'Unable to record the employment change.' })); }
-    finally { setBusy(false); }
+    } catch (err: any) {
+      setError(
+        err?.referenceId
+          ? err
+          : userFacingApiError({
+              json: { error: err?.message },
+              fallback: 'Unable to record the employment change.',
+            }),
+      );
+    } finally {
+      setBusy(false);
+    }
   }
 
-  if (!workspace && busy) return <div className="rounded-3xl border bg-white p-6 text-sm text-slate-500"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading employment workspace…</div>;
-  if (!workspace && error) return <ErrorBanner error={error} onRetry={load} />;
+  if (!workspace && busy) {
+    return (
+      <div className="rounded-3xl border bg-white p-6 text-sm text-slate-500">
+        <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
+        Loading employment workspace…
+      </div>
+    );
+  }
+
+  if (!workspace && error) {
+    return <ErrorBanner error={error} onRetry={load} />;
+  }
+
   if (!workspace) return null;
 
   return (
     <div className="space-y-6">
       <ErrorBanner error={error} onRetry={load} />
-      {notice ? <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">{notice}</div> : null}
-      {workspace?.arrearsReconciliationWarning ? (
-        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Employment information loaded, but automatic salary-arrears reconciliation could not be refreshed. Persisted payroll and arrears records are shown below; retry before making an arrears-sensitive finance decision.
+
+      {notice ? (
+        <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
+          {notice}
         </div>
       ) : null}
 
-      {Array.isArray(workspace?.workspaceWarnings) && workspace.workspaceWarnings.length ? (
+      {workspace?.arrearsReconciliationWarning ? (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+          Employment information loaded, but automatic salary-arrears
+          reconciliation could not be refreshed. Persisted payroll and arrears
+          records are shown below; retry before making an arrears-sensitive
+          finance decision.
+        </div>
+      ) : null}
+
+      {Array.isArray(workspace?.workspaceWarnings) &&
+      workspace.workspaceWarnings.length ? (
         <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <div className="font-semibold">
             Employment information loaded with limited datasets.
           </div>
           <div className="mt-1">
-            {workspace.workspaceWarnings.some((warning: any) => warning?.code === 'schema_not_ready')
+            {workspace.workspaceWarnings.some(
+              (warning: any) => warning?.code === 'schema_not_ready',
+            )
               ? 'One or more Enterprise Operations tables or columns are not available in the deployed database. The available employment information is shown below; complete the required database migration before relying on missing sections.'
               : 'One or more employment datasets could not be refreshed. The available information is shown below; retry before making a decision that depends on a missing section.'}
           </div>
           <div className="mt-2 text-xs font-medium">
-            Affected datasets: {workspace.workspaceWarnings.map((warning: any) => String(warning?.dataset || 'unknown').replaceAll('_', ' ')).join(', ')}
+            Affected datasets:{' '}
+            {workspace.workspaceWarnings
+              .map((warning: any) =>
+                String(warning?.dataset || 'unknown').replaceAll('_', ' '),
+              )
+              .join(', ')}
           </div>
         </div>
       ) : null}
 
       <section className="rounded-3xl border bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2"><BriefcaseBusiness className="h-5 w-5" /><h2 className="text-lg font-semibold">Employment & compensation</h2></div>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div><div className="text-xs uppercase text-slate-400">Joined / employed since</div><div className="mt-1 font-medium">{formatDate(payroll?.startDate)}</div></div>
-          <div><div className="text-xs uppercase text-slate-400">Employment</div><div className="mt-1 font-medium">{payroll?.employmentType || 'Not configured'}</div></div>
-          <div><div className="text-xs uppercase text-slate-400">Position</div><div className="mt-1 font-medium">{payroll?.profileMeta?.positionTitle || workspace.staff?.designation?.name || '—'}</div></div>
-          {permissions.canReadCompensation ? <div><div className="text-xs uppercase text-slate-400">Base salary</div><div className="mt-1 font-medium">{payroll ? money(payroll.baseSalaryCents, payroll.currency) : 'Not configured'}</div></div> : null}
-          {permissions.canReadCompensation ? <div><div className="text-xs uppercase text-slate-400">Pay frequency</div><div className="mt-1 font-medium">{payroll?.payFrequency || '—'}</div></div> : null}
-          {permissions.canReadCompensation ? <div><div className="text-xs uppercase text-slate-400">Open salary arrears</div><div className={`mt-1 font-medium ${openArrearsCents ? 'text-rose-700' : 'text-emerald-700'}`}>{money(openArrearsCents, payroll?.currency || 'ZAR')}</div></div> : null}
-          <div><div className="text-xs uppercase text-slate-400">Contract</div><div className="mt-1 font-medium">{payroll?.profileMeta?.contractType || '—'}</div></div>
-          {permissions.canReadCompensation ? <div><div className="text-xs uppercase text-slate-400">Tax number</div><div className="mt-1 font-medium">{payroll?.taxNumber || '—'}</div></div> : null}
-          <div className="sm:col-span-2 lg:col-span-4"><div className="text-xs uppercase text-slate-400">Benefits / privileges</div><div className="mt-1 text-sm text-slate-700">{Array.isArray(payroll?.profileMeta?.benefits) ? payroll.profileMeta.benefits.join(' · ') : payroll?.profileMeta?.benefits ? String(payroll.profileMeta.benefits) : '—'}</div></div>
+        <div className="flex items-center gap-2">
+          <BriefcaseBusiness className="h-5 w-5" />
+          <h2 className="text-lg font-semibold">
+            Employment, compensation & payroll
+          </h2>
         </div>
-        {permissions.canManageEmployment ? (
+
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {permissions.canReadEmployment ? (
+            <>
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Joined / employed since
+                </div>
+                <div className="mt-1 font-medium">
+                  {formatDate(payroll?.startDate)}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Employment
+                </div>
+                <div className="mt-1 font-medium">
+                  {payroll?.employmentType || 'Not configured'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Designation
+                </div>
+                <div className="mt-1 font-medium">
+                  {workspace.staff?.designation?.name ||
+                    payroll?.profileMeta?.positionTitle ||
+                    '—'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Contract
+                </div>
+                <div className="mt-1 font-medium">
+                  {payroll?.profileMeta?.contractType || '—'}
+                </div>
+              </div>
+
+              <div className="sm:col-span-2 lg:col-span-4">
+                <div className="text-xs uppercase text-slate-400">
+                  Benefits / privileges
+                </div>
+                <div className="mt-1 text-sm text-slate-700">
+                  {Array.isArray(payroll?.profileMeta?.benefits)
+                    ? payroll.profileMeta.benefits.join(' · ')
+                    : payroll?.profileMeta?.benefits
+                      ? String(payroll.profileMeta.benefits)
+                      : '—'}
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {permissions.canReadCompensation ? (
+            <>
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Base salary
+                </div>
+                <div className="mt-1 font-medium">
+                  {payroll
+                    ? money(
+                        payroll.baseSalaryCents,
+                        payroll.currency || 'ZAR',
+                      )
+                    : 'Not configured'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Pay frequency
+                </div>
+                <div className="mt-1 font-medium">
+                  {payroll?.payFrequency || '—'}
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {permissions.canReadPayroll ? (
+            <>
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Payroll status
+                </div>
+                <div className="mt-1 font-medium">
+                  {payroll?.payrollStatus || '—'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Tax number
+                </div>
+                <div className="mt-1 font-medium">
+                  {payroll?.taxNumber || '—'}
+                </div>
+              </div>
+
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Open salary arrears
+                </div>
+                <div
+                  className={`mt-1 font-medium ${
+                    openArrearsCents
+                      ? 'text-rose-700'
+                      : 'text-emerald-700'
+                  }`}
+                >
+                  {money(
+                    openArrearsCents,
+                    payroll?.currency || 'ZAR',
+                  )}
+                </div>
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        {canEditEmploymentProfile ? (
           <details className="mt-5 rounded-2xl border p-4">
-            <summary className="cursor-pointer font-semibold">Edit employment and payroll profile</summary>
+            <summary className="cursor-pointer font-semibold">
+              Edit authorised employment fields
+            </summary>
+
+            <p className="mt-2 text-xs text-slate-500">
+              Designation and reporting line are managed from Identity &
+              organisation. Compensation and payroll fields appear only when
+              your role grants those authorities.
+            </p>
+
             <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
-              <input className="rounded-xl border px-3 py-2" placeholder="Position title" value={employment.positionTitle || ''} onChange={(e) => setEmployment({ ...employment, positionTitle: e.target.value })} />
-              <select className="rounded-xl border px-3 py-2" value={employment.employmentType || 'permanent'} onChange={(e) => setEmployment({ ...employment, employmentType: e.target.value })}><option value="permanent">Permanent</option><option value="fixed_term">Fixed term</option><option value="part_time">Part time</option><option value="casual">Casual</option><option value="contractor">Contractor</option></select>
-              <input type="date" className="rounded-xl border px-3 py-2" value={employment.startDate || ''} onChange={(e) => setEmployment({ ...employment, startDate: e.target.value })} />
-              <input className="rounded-xl border px-3 py-2" placeholder="Contract type" value={employment.contractType || ''} onChange={(e) => setEmployment({ ...employment, contractType: e.target.value })} />
-              <input className="rounded-xl border px-3 py-2" placeholder="Monthly/base salary (ZAR)" inputMode="decimal" value={employment.baseSalaryZar || ''} onChange={(e) => setEmployment({ ...employment, baseSalaryZar: e.target.value })} />
-              <input className="rounded-xl border px-3 py-2" placeholder="Hourly rate (ZAR, if applicable)" inputMode="decimal" value={employment.hourlyRateZar || ''} onChange={(e) => setEmployment({ ...employment, hourlyRateZar: e.target.value })} />
-              <select className="rounded-xl border px-3 py-2" value={employment.payFrequency || 'monthly'} onChange={(e) => setEmployment({ ...employment, payFrequency: e.target.value })}><option value="monthly">Monthly</option><option value="fortnightly">Fortnightly</option><option value="weekly">Weekly</option><option value="hourly">Hourly</option></select>
-              <input className="rounded-xl border px-3 py-2" placeholder="Tax number" value={employment.taxNumber || ''} onChange={(e) => setEmployment({ ...employment, taxNumber: e.target.value })} />
-              <input className="rounded-xl border px-3 py-2" placeholder="Payroll number" value={employment.payrollNumber || ''} onChange={(e) => setEmployment({ ...employment, payrollNumber: e.target.value })} />
+              {permissions.canManageEmployment ? (
+                <>
+                  <select
+                    className="rounded-xl border px-3 py-2"
+                    value={employment.employmentType || 'permanent'}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        employmentType: event.target.value,
+                      })
+                    }
+                  >
+                    <option value="permanent">Permanent</option>
+                    <option value="fixed_term">Fixed term</option>
+                    <option value="part_time">Part time</option>
+                    <option value="casual">Casual</option>
+                    <option value="contractor">Contractor</option>
+                  </select>
+
+                  <input
+                    type="date"
+                    className="rounded-xl border px-3 py-2"
+                    value={employment.startDate || ''}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        startDate: event.target.value,
+                      })
+                    }
+                  />
+
+                  <input
+                    type="date"
+                    className="rounded-xl border px-3 py-2"
+                    value={employment.endDate || ''}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        endDate: event.target.value,
+                      })
+                    }
+                  />
+
+                  <input
+                    className="rounded-xl border px-3 py-2"
+                    placeholder="Contract type"
+                    value={employment.contractType || ''}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        contractType: event.target.value,
+                      })
+                    }
+                  />
+                </>
+              ) : null}
+
+              {permissions.canManageCompensation ? (
+                <>
+                  <input
+                    className="rounded-xl border px-3 py-2"
+                    placeholder="Monthly/base salary (ZAR)"
+                    inputMode="decimal"
+                    value={employment.baseSalaryZar || ''}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        baseSalaryZar: event.target.value,
+                      })
+                    }
+                  />
+
+                  <input
+                    className="rounded-xl border px-3 py-2"
+                    placeholder="Hourly rate (ZAR, if applicable)"
+                    inputMode="decimal"
+                    value={employment.hourlyRateZar || ''}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        hourlyRateZar: event.target.value,
+                      })
+                    }
+                  />
+
+                  <select
+                    className="rounded-xl border px-3 py-2"
+                    value={employment.payFrequency || 'monthly'}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        payFrequency: event.target.value,
+                      })
+                    }
+                  >
+                    <option value="monthly">Monthly</option>
+                    <option value="fortnightly">Fortnightly</option>
+                    <option value="weekly">Weekly</option>
+                    <option value="hourly">Hourly</option>
+                  </select>
+                </>
+              ) : null}
+
+              {permissions.canManagePayroll ? (
+                <>
+                  <select
+                    className="rounded-xl border px-3 py-2"
+                    value={employment.payrollStatus || 'active'}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        payrollStatus: event.target.value,
+                      })
+                    }
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="paused">Paused</option>
+                    <option value="ended">Ended</option>
+                  </select>
+
+                  <input
+                    className="rounded-xl border px-3 py-2"
+                    placeholder="Tax number"
+                    value={employment.taxNumber || ''}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        taxNumber: event.target.value,
+                      })
+                    }
+                  />
+
+                  <input
+                    className="rounded-xl border px-3 py-2"
+                    placeholder="Payroll number"
+                    value={employment.payrollNumber || ''}
+                    onChange={(event) =>
+                      setEmployment({
+                        ...employment,
+                        payrollNumber: event.target.value,
+                      })
+                    }
+                  />
+                </>
+              ) : null}
             </div>
-            <button type="button" disabled={busy} onClick={saveEmployment} className="mt-4 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Save employment profile</button>
+
+            <button
+              type="button"
+              disabled={busy}
+              onClick={saveEmployment}
+              className="mt-4 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+            >
+              Save authorised fields
+            </button>
           </details>
         ) : null}
       </section>
 
-      {permissions.canReadCompensation ? <section className="rounded-3xl border bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2"><Landmark className="h-5 w-5" /><h2 className="text-lg font-semibold">Banking & payouts</h2></div>
-        <p className="mt-1 text-sm text-slate-500">Primary bank details are encrypted at rest. Only masked account numbers are returned to the UI.</p>
-        {primaryBank ? <div className="mt-4 grid gap-3 sm:grid-cols-3"><div><div className="text-xs uppercase text-slate-400">Account</div><div className="font-medium">{primaryBank.accountNumberMasked}</div></div><div><div className="text-xs uppercase text-slate-400">Bank</div><div className="font-medium">{primaryBank.bankName || primaryBank.bankCode}</div></div><div><div className="text-xs uppercase text-slate-400">Payout readiness</div><div className="font-medium">{String(primaryBank.verificationStatus || '').replaceAll('_', ' ')}</div></div></div> : <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-slate-500">No payout bank account has been added.</div>}
-        {permissions.canEditBank ? <details className="mt-4 rounded-2xl border p-4"><summary className="cursor-pointer font-semibold">{primaryBank ? 'Replace primary payout account' : 'Add payout account'}</summary><div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3"><input className="rounded-xl border px-3 py-2" placeholder="Account holder name" value={bank.accountHolderName || ''} onChange={(e) => setBank({ ...bank, accountHolderName: e.target.value })}/><input className="rounded-xl border px-3 py-2" placeholder="Bank name" value={bank.bankName || ''} onChange={(e) => setBank({ ...bank, bankName: e.target.value })}/><input className="rounded-xl border px-3 py-2" placeholder="Bank code" value={bank.bankCode || ''} onChange={(e) => setBank({ ...bank, bankCode: e.target.value })}/><input className="rounded-xl border px-3 py-2" placeholder="Branch code (optional)" value={bank.branchCode || ''} onChange={(e) => setBank({ ...bank, branchCode: e.target.value })}/><input className="rounded-xl border px-3 py-2" placeholder="Account number" value={bank.accountNumber || ''} onChange={(e) => setBank({ ...bank, accountNumber: e.target.value })}/><select className="rounded-xl border px-3 py-2" value={bank.accountType || ''} onChange={(e) => setBank({ ...bank, accountType: e.target.value })}><option value="">Account type</option><option value="cheque">Cheque / current</option><option value="savings">Savings</option><option value="transmission">Transmission</option></select></div><button type="button" disabled={busy} onClick={saveBank} className="mt-4 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Save payout details</button></details> : null}
-      </section> : null}
+      {permissions.canReadBank ? (
+        <section className="rounded-3xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Landmark className="h-5 w-5" />
+            <h2 className="text-lg font-semibold">Banking & payouts</h2>
+          </div>
+          <p className="mt-1 text-sm text-slate-500">
+            Primary bank details are encrypted at rest. Only masked account
+            numbers are returned to the UI.
+          </p>
 
-      <section className="rounded-3xl border bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2"><FileText className="h-5 w-5" /><h2 className="text-lg font-semibold">Employment documents & Staff ID</h2></div>
-        <div className="mt-4 space-y-2">{(workspace.documents || []).length ? workspace.documents.map((doc: any) => <div key={doc.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3"><div><div className="font-medium">{doc.title}</div><div className="text-xs text-slate-500">{String(doc.documentType).replaceAll('_', ' ')} · {formatDate(doc.createdAt)}</div></div><a href={`/api/admin/staff/${encodeURIComponent(staffProfileId)}/documents/${encodeURIComponent(doc.id)}/download`} className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm"><Download className="h-4 w-4"/>Download</a></div>) : <div className="rounded-xl border border-dashed p-4 text-sm text-slate-500">No appointment letters, contracts or employment documents issued yet.</div>}</div>
-        <div className="mt-4 flex flex-wrap gap-2">{workspace.staffId?.downloadUrl ? <a href={workspace.staffId.downloadUrl} className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium"><ShieldCheck className="h-4 w-4"/>Download Staff ID</a> : <span className="text-sm text-slate-500">Assign a Staff identifier before generating the Staff ID.</span>}</div>
-        {permissions.canUploadDocuments ? <details className="mt-4 rounded-2xl border p-4"><summary className="cursor-pointer font-semibold">Issue a document</summary><div className="mt-4 grid gap-3 md:grid-cols-3"><select className="rounded-xl border px-3 py-2" value={documentMeta.documentType} onChange={(e) => setDocumentMeta({ ...documentMeta, documentType: e.target.value })}><option value="APPOINTMENT_LETTER">Appointment letter</option><option value="EMPLOYMENT_CONTRACT">Employment contract</option><option value="PROMOTION_LETTER">Promotion / salary review letter</option><option value="TAX_DOCUMENT">Tax document</option><option value="OTHER">Other</option></select><input className="rounded-xl border px-3 py-2" placeholder="Document title" value={documentMeta.title} onChange={(e) => setDocumentMeta({ ...documentMeta, title: e.target.value })}/><input type="date" className="rounded-xl border px-3 py-2" value={documentMeta.effectiveAt} onChange={(e) => setDocumentMeta({ ...documentMeta, effectiveAt: e.target.value })}/></div><label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white"><Upload className="h-4 w-4"/>Upload PDF/image<input type="file" accept="application/pdf,image/jpeg,image/png" className="sr-only" onChange={(e) => { const file=e.currentTarget.files?.[0]||null; e.currentTarget.value=''; void uploadDocument(file); }}/></label></details> : null}
-      </section>
+          {primaryBank ? (
+            <div className="mt-4 grid gap-3 sm:grid-cols-3">
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Account
+                </div>
+                <div className="font-medium">
+                  {primaryBank.accountNumberMasked}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Bank
+                </div>
+                <div className="font-medium">
+                  {primaryBank.bankName || primaryBank.bankCode}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs uppercase text-slate-400">
+                  Payout readiness
+                </div>
+                <div className="font-medium">
+                  {String(
+                    primaryBank.verificationStatus || '',
+                  ).replaceAll('_', ' ')}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="mt-4 rounded-xl border border-dashed p-4 text-sm text-slate-500">
+              No payout bank account has been added.
+            </div>
+          )}
 
-      <section className="rounded-3xl border bg-white p-5 shadow-sm">
-        <div className="flex items-center gap-2"><Palmtree className="h-5 w-5" /><h2 className="text-lg font-semibold">Leave & career history</h2></div>
-        <div className="mt-4 grid gap-3 md:grid-cols-2">{(workspace.leaveBalances || []).map((row: any) => <div key={row.id} className="rounded-xl border p-3"><div className="font-medium">{String(row.leaveType).replaceAll('_',' ')} · {row.year}</div><div className="mt-1 text-sm text-slate-600">Entitlement {Number(row.entitlementDays)} days · Used {Number(row.usedDays)} · Adjustment {Number(row.adjustmentDays)}</div></div>)}</div>
-        {permissions.canManageLeave ? <details className="mt-4 rounded-2xl border p-4"><summary className="cursor-pointer font-semibold">Update leave balance</summary><div className="mt-4 grid gap-3 md:grid-cols-4"><input className="rounded-xl border px-3 py-2" placeholder="Leave type" value={leave.leaveType} onChange={(e)=>setLeave({...leave,leaveType:e.target.value})}/><input type="number" className="rounded-xl border px-3 py-2" value={leave.year} onChange={(e)=>setLeave({...leave,year:Number(e.target.value)})}/><input type="number" step="0.5" className="rounded-xl border px-3 py-2" placeholder="Entitlement days" value={leave.entitlementDays} onChange={(e)=>setLeave({...leave,entitlementDays:Number(e.target.value)})}/><input type="number" step="0.5" className="rounded-xl border px-3 py-2" placeholder="Used days" value={leave.usedDays} onChange={(e)=>setLeave({...leave,usedDays:Number(e.target.value)})}/></div><button type="button" onClick={saveLeave} className="mt-3 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Save leave balance</button></details> : null}
-        <div className="mt-5 space-y-2">{(workspace.employmentChanges || []).length ? workspace.employmentChanges.map((row:any)=><div key={row.id} className="rounded-xl border p-3"><div className="flex flex-wrap justify-between gap-2"><div className="font-medium">{String(row.changeType).replaceAll('_',' ')}</div><div className="text-sm text-slate-500">{formatDate(row.effectiveAt)}</div></div>{row.salaryAfterCents!=null?<div className="mt-1 text-sm">Salary after: {money(row.salaryAfterCents,row.currency)}</div>:null}{row.notes?<div className="mt-1 text-sm text-slate-600">{row.notes}</div>:null}</div>) : <div className="text-sm text-slate-500">No promotion or employment-change history yet.</div>}</div>
-        {permissions.canRecordEmploymentChange ? <details className="mt-4 rounded-2xl border p-4"><summary className="cursor-pointer font-semibold">Record promotion, salary review or employment change</summary><div className="mt-4 grid gap-3 md:grid-cols-2"><select className="rounded-xl border px-3 py-2" value={change.changeType} onChange={(e)=>setChange({...change,changeType:e.target.value})}><option value="PROMOTION">Promotion</option><option value="SALARY_REVIEW">Salary review</option><option value="TRANSFER">Department / role transfer</option><option value="BENEFITS_CHANGE">Benefits change</option><option value="CONTRACT_CHANGE">Contract change</option></select><input type="date" className="rounded-xl border px-3 py-2" value={change.effectiveAt} onChange={(e)=>setChange({...change,effectiveAt:e.target.value})}/><input className="rounded-xl border px-3 py-2" placeholder="New salary ZAR (optional)" value={change.salaryAfterZar} onChange={(e)=>setChange({...change,salaryAfterZar:e.target.value})}/><input className="rounded-xl border px-3 py-2" placeholder="Benefits (comma-separated)" value={change.benefitsText} onChange={(e)=>setChange({...change,benefitsText:e.target.value})}/><textarea className="rounded-xl border p-3 md:col-span-2" placeholder="Privileges / responsibilities (comma-separated or one per line)" value={change.privilegesText} onChange={(e)=>setChange({...change,privilegesText:e.target.value})}/><textarea className="rounded-xl border p-3 md:col-span-2" placeholder="Notes" value={change.notes||''} onChange={(e)=>setChange({...change,notes:e.target.value})}/></div><button type="button" onClick={saveChange} className="mt-3 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">Record employment change</button></details> : null}
-      </section>
+          {permissions.canEditBank ? (
+            <details className="mt-4 rounded-2xl border p-4">
+              <summary className="cursor-pointer font-semibold">
+                {primaryBank
+                  ? 'Replace primary payout account'
+                  : 'Add payout account'}
+              </summary>
 
-      {permissions.canReadCompensation ? <section className="rounded-3xl border bg-white p-5 shadow-sm"><div className="flex items-center gap-2"><BadgeDollarSign className="h-5 w-5"/><h2 className="text-lg font-semibold">Payslips & salary arrears</h2></div><div className="mt-4 grid gap-3 lg:grid-cols-2"><div><div className="mb-2 font-medium">Recent payslips</div>{(workspace.payslips||[]).length?(workspace.payslips||[]).slice(0,12).map((row:any)=><div key={row.id} className="mb-2 rounded-xl border p-3 text-sm"><div className="flex justify-between gap-3"><span>{row.payslipNumber||'Payslip'}</span><span className="font-medium">{money(row.netPayCents,row.currency)}</span></div><div className="mt-1 text-xs text-slate-500">{String(row.status).replaceAll('_',' ')} · {formatDate(row.issuedAt||row.createdAt)}</div></div>):<div className="text-sm text-slate-500">No payslips issued yet.</div>}</div><div><div className="mb-2 font-medium">Open arrears</div>{(workspace.arrears||[]).length?(workspace.arrears||[]).map((row:any)=><div key={row.id} className="mb-2 rounded-xl border border-rose-100 bg-rose-50/40 p-3 text-sm"><div className="flex justify-between gap-3"><span>{row.description||'Salary arrears'}</span><span className="font-medium text-rose-700">{money(Math.max(0,Number(row.debitCents||0)-Number(row.creditCents||0)),row.currency)}</span></div><div className="mt-1 text-xs text-slate-500">Due {formatDate(row.dueDate)} · {row.status}</div></div>):<div className="text-sm text-emerald-700">No open salary arrears.</div>}</div></div></section> : null}
+              <div className="mt-4 grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+                <input
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Account holder name"
+                  value={bank.accountHolderName || ''}
+                  onChange={(event) =>
+                    setBank({
+                      ...bank,
+                      accountHolderName: event.target.value,
+                    })
+                  }
+                />
+                <input
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Bank name"
+                  value={bank.bankName || ''}
+                  onChange={(event) =>
+                    setBank({
+                      ...bank,
+                      bankName: event.target.value,
+                    })
+                  }
+                />
+                <input
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Bank code"
+                  value={bank.bankCode || ''}
+                  onChange={(event) =>
+                    setBank({
+                      ...bank,
+                      bankCode: event.target.value,
+                    })
+                  }
+                />
+                <input
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Branch code (optional)"
+                  value={bank.branchCode || ''}
+                  onChange={(event) =>
+                    setBank({
+                      ...bank,
+                      branchCode: event.target.value,
+                    })
+                  }
+                />
+                <input
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Account number"
+                  value={bank.accountNumber || ''}
+                  onChange={(event) =>
+                    setBank({
+                      ...bank,
+                      accountNumber: event.target.value,
+                    })
+                  }
+                />
+                <select
+                  className="rounded-xl border px-3 py-2"
+                  value={bank.accountType || ''}
+                  onChange={(event) =>
+                    setBank({
+                      ...bank,
+                      accountType: event.target.value,
+                    })
+                  }
+                >
+                  <option value="">Account type</option>
+                  <option value="cheque">Cheque / current</option>
+                  <option value="savings">Savings</option>
+                  <option value="transmission">Transmission</option>
+                </select>
+              </div>
 
-      {activity ? <section className="rounded-3xl border bg-white p-5 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><History className="h-5 w-5"/><h2 className="text-lg font-semibold">Staff activity intelligence</h2></div><select className="rounded-xl border px-3 py-2 text-sm" value={activityDays} onChange={(e)=>{const days=Number(e.target.value);setActivityDays(days);void loadActivity(days);}}><option value={7}>7 days</option><option value={30}>30 days</option><option value={90}>90 days</option></select></div><p className="mt-1 text-sm text-slate-500">Active time counts focused, visible Admin activity rather than an unattended browser tab.</p><div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5"><div className="rounded-xl border p-3"><div className="text-xs uppercase text-slate-400">Logins today</div><div className="text-2xl font-semibold">{activity.metrics.loginsToday}</div></div><div className="rounded-xl border p-3"><div className="text-xs uppercase text-slate-400">Active today</div><div className="text-2xl font-semibold">{duration(activity.metrics.activeSecondsToday)}</div></div><div className="rounded-xl border p-3"><div className="text-xs uppercase text-slate-400">Logins in range</div><div className="text-2xl font-semibold">{activity.metrics.totalLogins}</div></div><div className="rounded-xl border p-3"><div className="text-xs uppercase text-slate-400">Active in range</div><div className="text-2xl font-semibold">{duration(activity.metrics.totalActiveSeconds)}</div></div><div className="rounded-xl border p-3"><div className="text-xs uppercase text-slate-400">Avg active / login</div><div className="text-2xl font-semibold">{duration(activity.metrics.averageActiveSecondsPerLogin)}</div></div></div><div className="mt-5 overflow-x-auto"><table className="w-full text-sm"><thead><tr className="border-b text-left text-xs uppercase text-slate-400"><th className="py-2">Top page</th><th>Visits</th><th>Active time</th><th>Average / visit</th></tr></thead><tbody>{(activity.metrics.topPages||[]).map((row:any)=><tr key={row.path} className="border-b last:border-0"><td className="py-2 font-medium">{row.path}</td><td>{row.visits}</td><td>{duration(row.activeSeconds)}</td><td>{duration(row.averageSecondsPerVisit)}</td></tr>)}</tbody></table></div><details className="mt-4 rounded-xl border p-3"><summary className="cursor-pointer font-medium">Login sessions</summary><div className="mt-3 space-y-2">{(activity.sessions||[]).slice(0,30).map((row:any)=><div key={row.id} className="grid gap-1 rounded-lg bg-slate-50 p-3 text-sm md:grid-cols-4"><span>{formatDate(row.loginAt,true)}</span><span>{duration(row.activeSeconds)} active</span><span>{duration(row.wallSeconds)} session</span><span>{row.lastPath||'—'}</span></div>)}</div></details></section> : null}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={saveBank}
+                className="mt-4 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Save payout details
+              </button>
+            </details>
+          ) : null}
+        </section>
+      ) : null}
+
+      {permissions.canReadDocuments ? (
+        <section className="rounded-3xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2">
+            <FileText className="h-5 w-5" />
+            <h2 className="text-lg font-semibold">
+              Employment documents & Staff ID
+            </h2>
+          </div>
+
+          <div className="mt-4 space-y-2">
+            {(workspace.documents || []).length ? (
+              workspace.documents.map((doc: any) => (
+                <div
+                  key={doc.id}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-xl border p-3"
+                >
+                  <div>
+                    <div className="font-medium">{doc.title}</div>
+                    <div className="text-xs text-slate-500">
+                      {String(doc.documentType).replaceAll('_', ' ')} ·{' '}
+                      {formatDate(doc.createdAt)}
+                    </div>
+                  </div>
+
+                  {permissions.canDownloadDocuments ? (
+                    <a
+                      href={`/api/admin/staff/${encodeURIComponent(staffProfileId)}/documents/${encodeURIComponent(doc.id)}/download`}
+                      className="inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-sm"
+                    >
+                      <Download className="h-4 w-4" />
+                      Download
+                    </a>
+                  ) : null}
+                </div>
+              ))
+            ) : (
+              <div className="rounded-xl border border-dashed p-4 text-sm text-slate-500">
+                No appointment letters, contracts or employment documents
+                issued yet.
+              </div>
+            )}
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {workspace.staffId?.downloadUrl ? (
+              <a
+                href={workspace.staffId.downloadUrl}
+                className="inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium"
+              >
+                <ShieldCheck className="h-4 w-4" />
+                Download Staff ID
+              </a>
+            ) : (
+              <span className="text-sm text-slate-500">
+                Assign a Staff identifier before generating the Staff ID.
+              </span>
+            )}
+          </div>
+
+          {permissions.canUploadDocuments ? (
+            <details className="mt-4 rounded-2xl border p-4">
+              <summary className="cursor-pointer font-semibold">
+                Issue a document
+              </summary>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <select
+                  className="rounded-xl border px-3 py-2"
+                  value={documentMeta.documentType}
+                  onChange={(event) =>
+                    setDocumentMeta({
+                      ...documentMeta,
+                      documentType: event.target.value,
+                    })
+                  }
+                >
+                  <option value="APPOINTMENT_LETTER">
+                    Appointment letter
+                  </option>
+                  <option value="EMPLOYMENT_CONTRACT">
+                    Employment contract
+                  </option>
+                  <option value="PROMOTION_LETTER">
+                    Promotion / salary review letter
+                  </option>
+                  <option value="TAX_DOCUMENT">Tax document</option>
+                  <option value="OTHER">Other</option>
+                </select>
+
+                <input
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Document title"
+                  value={documentMeta.title}
+                  onChange={(event) =>
+                    setDocumentMeta({
+                      ...documentMeta,
+                      title: event.target.value,
+                    })
+                  }
+                />
+
+                <input
+                  type="date"
+                  className="rounded-xl border px-3 py-2"
+                  value={documentMeta.effectiveAt}
+                  onChange={(event) =>
+                    setDocumentMeta({
+                      ...documentMeta,
+                      effectiveAt: event.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <label className="mt-4 inline-flex cursor-pointer items-center gap-2 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
+                <Upload className="h-4 w-4" />
+                Upload PDF/image
+                <input
+                  type="file"
+                  accept="application/pdf,image/jpeg,image/png"
+                  className="sr-only"
+                  onChange={(event) => {
+                    const file =
+                      event.currentTarget.files?.[0] || null;
+                    event.currentTarget.value = '';
+                    void uploadDocument(file);
+                  }}
+                />
+              </label>
+            </details>
+          ) : null}
+        </section>
+      ) : null}
+
+      {permissions.canReadLeave ||
+      permissions.canReadEmploymentChanges ? (
+        <section className="rounded-3xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2">
+            <Palmtree className="h-5 w-5" />
+            <h2 className="text-lg font-semibold">
+              Leave & career history
+            </h2>
+          </div>
+
+          {permissions.canReadLeave ? (
+            <>
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {(workspace.leaveBalances || []).map((row: any) => (
+                  <div key={row.id} className="rounded-xl border p-3">
+                    <div className="font-medium">
+                      {String(row.leaveType).replaceAll('_', ' ')} ·{' '}
+                      {row.year}
+                    </div>
+                    <div className="mt-1 text-sm text-slate-600">
+                      Entitlement {Number(row.entitlementDays)} days · Used{' '}
+                      {Number(row.usedDays)} · Adjustment{' '}
+                      {Number(row.adjustmentDays)}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {permissions.canManageLeave ? (
+                <details className="mt-4 rounded-2xl border p-4">
+                  <summary className="cursor-pointer font-semibold">
+                    Update leave balance
+                  </summary>
+                  <div className="mt-4 grid gap-3 md:grid-cols-4">
+                    <input
+                      className="rounded-xl border px-3 py-2"
+                      placeholder="Leave type"
+                      value={leave.leaveType}
+                      onChange={(event) =>
+                        setLeave({
+                          ...leave,
+                          leaveType: event.target.value,
+                        })
+                      }
+                    />
+                    <input
+                      type="number"
+                      className="rounded-xl border px-3 py-2"
+                      value={leave.year}
+                      onChange={(event) =>
+                        setLeave({
+                          ...leave,
+                          year: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <input
+                      type="number"
+                      step="0.5"
+                      className="rounded-xl border px-3 py-2"
+                      placeholder="Entitlement days"
+                      value={leave.entitlementDays}
+                      onChange={(event) =>
+                        setLeave({
+                          ...leave,
+                          entitlementDays: Number(event.target.value),
+                        })
+                      }
+                    />
+                    <input
+                      type="number"
+                      step="0.5"
+                      className="rounded-xl border px-3 py-2"
+                      placeholder="Used days"
+                      value={leave.usedDays}
+                      onChange={(event) =>
+                        setLeave({
+                          ...leave,
+                          usedDays: Number(event.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={saveLeave}
+                    className="mt-3 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                  >
+                    Save leave balance
+                  </button>
+                </details>
+              ) : null}
+            </>
+          ) : null}
+
+          {permissions.canReadEmploymentChanges ? (
+            <div className="mt-5 space-y-2">
+              {(workspace.employmentChanges || []).length ? (
+                workspace.employmentChanges.map((row: any) => (
+                  <div key={row.id} className="rounded-xl border p-3">
+                    <div className="flex flex-wrap justify-between gap-2">
+                      <div className="font-medium">
+                        {String(row.changeType).replaceAll('_', ' ')}
+                      </div>
+                      <div className="text-sm text-slate-500">
+                        {formatDate(row.effectiveAt)}
+                      </div>
+                    </div>
+
+                    {permissions.canReadCompensation &&
+                    row.salaryAfterCents != null ? (
+                      <div className="mt-1 text-sm">
+                        Salary after:{' '}
+                        {money(
+                          row.salaryAfterCents,
+                          row.currency || 'ZAR',
+                        )}
+                      </div>
+                    ) : null}
+
+                    {row.notes ? (
+                      <div className="mt-1 text-sm text-slate-600">
+                        {row.notes}
+                      </div>
+                    ) : null}
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-slate-500">
+                  No promotion or employment-change history yet.
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {permissions.canRecordEmploymentChange ? (
+            <details className="mt-4 rounded-2xl border p-4">
+              <summary className="cursor-pointer font-semibold">
+                Record current-primary employment change
+              </summary>
+
+              <p className="mt-2 text-xs text-slate-500">
+                This workflow updates the current primary assignment. Concurrent,
+                acting and future-effective position assignments will be handled
+                by the effective-dated position engine in the next HR phase.
+              </p>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <select
+                  className="rounded-xl border px-3 py-2"
+                  value={change.changeType}
+                  onChange={(event) =>
+                    setChange({
+                      ...change,
+                      changeType: event.target.value,
+                    })
+                  }
+                >
+                  <option value="PROMOTION">Promotion</option>
+                  <option value="SALARY_REVIEW">Salary review</option>
+                  <option value="TRANSFER">
+                    Department / designation transfer
+                  </option>
+                  <option value="BENEFITS_CHANGE">Benefits change</option>
+                  <option value="CONTRACT_CHANGE">Contract change</option>
+                </select>
+
+                <input
+                  type="date"
+                  max={new Date().toISOString().slice(0, 10)}
+                  className="rounded-xl border px-3 py-2"
+                  value={change.effectiveAt}
+                  onChange={(event) =>
+                    setChange({
+                      ...change,
+                      effectiveAt: event.target.value,
+                    })
+                  }
+                />
+
+                <select
+                  className="rounded-xl border px-3 py-2"
+                  value={change.toDepartmentId}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    setChange({
+                      ...change,
+                      toDepartmentId: value,
+                      toDesignationId:
+                        value === UNCHANGED
+                          ? UNCHANGED
+                          : CLEAR,
+                    });
+                  }}
+                >
+                  <option value={UNCHANGED}>No department change</option>
+                  <option value={CLEAR}>Clear department</option>
+                  {departments.map((department: any) => (
+                    <option key={department.id} value={department.id}>
+                      {department.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="rounded-xl border px-3 py-2"
+                  value={change.toDesignationId}
+                  onChange={(event) =>
+                    setChange({
+                      ...change,
+                      toDesignationId: event.target.value,
+                    })
+                  }
+                  disabled={
+                    change.toDepartmentId !== UNCHANGED &&
+                    change.toDepartmentId !== CLEAR &&
+                    !selectedChangeDepartmentId
+                  }
+                >
+                  <option value={UNCHANGED}>No designation change</option>
+                  <option value={CLEAR}>Clear designation</option>
+                  {changeDesignationOptions.map((designation: any) => (
+                    <option key={designation.id} value={designation.id}>
+                      {designation.name}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  className="rounded-xl border px-3 py-2"
+                  value={change.toManagerId}
+                  onChange={(event) =>
+                    setChange({
+                      ...change,
+                      toManagerId: event.target.value,
+                    })
+                  }
+                >
+                  <option value={UNCHANGED}>No manager change</option>
+                  <option value={CLEAR}>Clear manager</option>
+                  {managers.map((manager: any) => (
+                    <option key={manager.id} value={manager.id}>
+                      {manager.name || manager.email}
+                    </option>
+                  ))}
+                </select>
+
+                {permissions.canManageCompensation ? (
+                  <input
+                    className="rounded-xl border px-3 py-2"
+                    placeholder="New salary ZAR (optional)"
+                    value={change.salaryAfterZar}
+                    onChange={(event) =>
+                      setChange({
+                        ...change,
+                        salaryAfterZar: event.target.value,
+                      })
+                    }
+                  />
+                ) : null}
+
+                <input
+                  className="rounded-xl border px-3 py-2"
+                  placeholder="Benefits (comma-separated)"
+                  value={change.benefitsText}
+                  onChange={(event) =>
+                    setChange({
+                      ...change,
+                      benefitsText: event.target.value,
+                    })
+                  }
+                />
+
+                <textarea
+                  className="rounded-xl border p-3 md:col-span-2"
+                  placeholder="Privileges / responsibilities (comma-separated or one per line)"
+                  value={change.privilegesText}
+                  onChange={(event) =>
+                    setChange({
+                      ...change,
+                      privilegesText: event.target.value,
+                    })
+                  }
+                />
+
+                <textarea
+                  className="rounded-xl border p-3 md:col-span-2"
+                  placeholder="Notes"
+                  value={change.notes || ''}
+                  onChange={(event) =>
+                    setChange({
+                      ...change,
+                      notes: event.target.value,
+                    })
+                  }
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={saveChange}
+                disabled={busy}
+                className="mt-3 rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
+              >
+                Record employment change
+              </button>
+            </details>
+          ) : null}
+        </section>
+      ) : null}
+
+      {permissions.canReadPayroll ? (
+        <section className="rounded-3xl border bg-white p-5 shadow-sm">
+          <div className="flex items-center gap-2">
+            <BadgeDollarSign className="h-5 w-5" />
+            <h2 className="text-lg font-semibold">
+              Payslips & salary arrears
+            </h2>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-2">
+            <div>
+              <div className="mb-2 font-medium">Recent payslips</div>
+              {(workspace.payslips || []).length ? (
+                (workspace.payslips || []).slice(0, 12).map((row: any) => (
+                  <div
+                    key={row.id}
+                    className="mb-2 rounded-xl border p-3 text-sm"
+                  >
+                    <div className="flex justify-between gap-3">
+                      <span>{row.payslipNumber || 'Payslip'}</span>
+                      <span className="font-medium">
+                        {money(row.netPayCents, row.currency || 'ZAR')}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {String(row.status).replaceAll('_', ' ')} ·{' '}
+                      {formatDate(row.issuedAt || row.createdAt)}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-slate-500">
+                  No payslips issued yet.
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="mb-2 font-medium">Open arrears</div>
+              {(workspace.arrears || []).length ? (
+                (workspace.arrears || []).map((row: any) => (
+                  <div
+                    key={row.id}
+                    className="mb-2 rounded-xl border border-rose-100 bg-rose-50/40 p-3 text-sm"
+                  >
+                    <div className="flex justify-between gap-3">
+                      <span>{row.description || 'Salary arrears'}</span>
+                      <span className="font-medium text-rose-700">
+                        {money(
+                          Math.max(
+                            0,
+                            Number(row.debitCents || 0) -
+                              Number(row.creditCents || 0),
+                          ),
+                          row.currency || 'ZAR',
+                        )}
+                      </span>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      Due {formatDate(row.dueDate)} · {row.status}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-emerald-700">
+                  No open salary arrears.
+                </div>
+              )}
+            </div>
+          </div>
+        </section>
+      ) : null}
+
+      {activity ? (
+        <section className="rounded-3xl border bg-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <History className="h-5 w-5" />
+              <h2 className="text-lg font-semibold">
+                Staff activity intelligence
+              </h2>
+            </div>
+            <select
+              className="rounded-xl border px-3 py-2 text-sm"
+              value={activityDays}
+              onChange={(event) => {
+                const days = Number(event.target.value);
+                setActivityDays(days);
+                void loadActivity(days);
+              }}
+            >
+              <option value={7}>7 days</option>
+              <option value={30}>30 days</option>
+              <option value={90}>90 days</option>
+            </select>
+          </div>
+
+          <p className="mt-1 text-sm text-slate-500">
+            Active time counts focused, visible Admin activity rather than an
+            unattended browser tab.
+          </p>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="rounded-xl border p-3">
+              <div className="text-xs uppercase text-slate-400">
+                Logins today
+              </div>
+              <div className="text-2xl font-semibold">
+                {activity.metrics.loginsToday}
+              </div>
+            </div>
+            <div className="rounded-xl border p-3">
+              <div className="text-xs uppercase text-slate-400">
+                Active today
+              </div>
+              <div className="text-2xl font-semibold">
+                {duration(activity.metrics.activeSecondsToday)}
+              </div>
+            </div>
+            <div className="rounded-xl border p-3">
+              <div className="text-xs uppercase text-slate-400">
+                Logins in range
+              </div>
+              <div className="text-2xl font-semibold">
+                {activity.metrics.totalLogins}
+              </div>
+            </div>
+            <div className="rounded-xl border p-3">
+              <div className="text-xs uppercase text-slate-400">
+                Active in range
+              </div>
+              <div className="text-2xl font-semibold">
+                {duration(activity.metrics.totalActiveSeconds)}
+              </div>
+            </div>
+            <div className="rounded-xl border p-3">
+              <div className="text-xs uppercase text-slate-400">
+                Avg active / login
+              </div>
+              <div className="text-2xl font-semibold">
+                {duration(activity.metrics.averageActiveSecondsPerLogin)}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-5 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b text-left text-xs uppercase text-slate-400">
+                  <th className="py-2">Top page</th>
+                  <th>Visits</th>
+                  <th>Active time</th>
+                  <th>Average / visit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(activity.metrics.topPages || []).map((row: any) => (
+                  <tr
+                    key={row.path}
+                    className="border-b last:border-0"
+                  >
+                    <td className="py-2 font-medium">{row.path}</td>
+                    <td>{row.visits}</td>
+                    <td>{duration(row.activeSeconds)}</td>
+                    <td>{duration(row.averageSecondsPerVisit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <details className="mt-4 rounded-xl border p-3">
+            <summary className="cursor-pointer font-medium">
+              Login sessions
+            </summary>
+            <div className="mt-3 space-y-2">
+              {(activity.sessions || []).slice(0, 30).map((row: any) => (
+                <div
+                  key={row.id}
+                  className="grid gap-1 rounded-lg bg-slate-50 p-3 text-sm md:grid-cols-4"
+                >
+                  <span>{formatDate(row.loginAt, true)}</span>
+                  <span>{duration(row.activeSeconds)} active</span>
+                  <span>{duration(row.wallSeconds)} session</span>
+                  <span>{row.lastPath || '—'}</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        </section>
+      ) : null}
     </div>
   );
 }

@@ -30,7 +30,7 @@ export async function POST(request: NextRequest, context: { params: { id: string
       select: { id: true, photoUrl: true },
     });
     if (!target) return json({ ok: false, error: 'staff_not_found' }, 404);
-    if (target.id !== actor.profileId) requireStaffCapability(actor, 'staff.manage');
+    if (target.id !== actor.profileId) requireStaffCapability(actor, 'staff.hr.manage');
 
     const body = await request.json().catch(() => ({}));
     const objectKey = cleanText((body as any)?.objectKey, 512) || '';

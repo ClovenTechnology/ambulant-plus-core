@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, context: { params: { id: string
       select: { id: true },
     });
     if (!target) return json({ ok: false, error: 'staff_not_found' }, 404);
-    if (target.id !== actor.profileId) requireStaffCapability(actor, 'staff.manage');
+    if (target.id !== actor.profileId) requireStaffCapability(actor, 'staff.hr.manage');
 
     const body = await request.json().catch(() => ({}));
     const upload = validateEnterpriseMediaUploadInput({

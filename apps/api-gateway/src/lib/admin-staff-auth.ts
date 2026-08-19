@@ -33,7 +33,7 @@ export type AdminStaffActor = {
 
 export async function requireAdminStaffActor(
   request: NextRequest,
-  options: { requirePassword?: boolean } = {},
+  _options: { requirePassword?: boolean } = {},
 ): Promise<AdminStaffActor> {
   const token = request.cookies.get('adm.profile')?.value;
   const session = verifyLegacyAdminSessionToken(token);
@@ -42,7 +42,7 @@ export async function requireAdminStaffActor(
     throw new AdminStaffAuthError('admin_authentication_required', 401);
   }
 
-  if (options.requirePassword && session.authMethod !== 'password') {
+  if (session.authMethod !== 'password') {
     throw new AdminStaffAuthError('secure_admin_credential_required', 403);
   }
 

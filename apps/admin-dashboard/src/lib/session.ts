@@ -8,10 +8,12 @@ export type GatewaySession = {
   tenant?: unknown;
   user?: {
     id: string | null;
+    profileId: string | null;
     email: string | null;
     name: string | null;
     departmentId: string | null;
     designationId: string | null;
+    directReportIds?: string[];
     roles: string[];
     scopes: string[];
   };

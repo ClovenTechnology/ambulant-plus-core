@@ -22,7 +22,7 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   try {
     const actor = await requireAdminStaffActor(req, { requirePassword: true });
-    requireStaffCapability(actor, 'staff.manage');
+    requireStaffCapability(actor, 'staff.hr.manage');
     const body = await req.json().catch(() => ({}));
     const name = String(body?.name || '').trim().slice(0, 180);
     if (!name) return NextResponse.json({ ok: false, error: 'department_name_required' }, { status: 400 });

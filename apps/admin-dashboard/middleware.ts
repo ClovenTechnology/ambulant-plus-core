@@ -11,6 +11,8 @@ const RULES: Array<{
     prefix:
       '/settings/people/role-requests',
     required: [
+      'staff.roles.manage',
+      'staff.hr.manage',
       'manageRoles',
       'hr',
     ],
@@ -19,6 +21,7 @@ const RULES: Array<{
     prefix:
       '/settings/roles',
     required: [
+      'staff.roles.manage',
       'manageRoles',
     ],
   },
@@ -26,6 +29,8 @@ const RULES: Array<{
     prefix:
       '/settings/people',
     required: [
+      'staff.hr.read',
+      'staff.hr.manage',
       'hr',
     ],
   },
@@ -102,6 +107,9 @@ const RULES: Array<{
       '/admin/staff',
     required: [
       'staff.directory.read',
+      'staff.hr.read',
+      'staff.hr.manage',
+      'staff.roles.manage',
       'staff.manage',
       'hr',
       'manageRoles',
@@ -192,6 +200,8 @@ type MeResponse = {
     id: string | null;
     email: string | null;
     name?: string | null;
+    profileId?: string | null;
+    directReportIds?: string[];
     roles?: string[];
     scopes?: string[];
   };
@@ -222,6 +232,55 @@ function isPublicPath(
     pathname.startsWith('/auth/signout') ||
     pathname.startsWith('/signout') ||
     pathname.startsWith('/forbidden')
+  );
+}
+
+function staffProfilePathTarget(
+  pathname: string,
+) {
+  const match =
+    /^\/admin\/staff\/([^/]+)\/?$/.exec(
+      pathname,
+    );
+
+  if (!match?.[1]) {
+    return null;
+  }
+
+  try {
+    return decodeURIComponent(
+      match[1],
+    );
+  }
+  catch {
+    return null;
+  }
+}
+
+function isSelfOrDirectReportStaffProfile(
+  pathname: string,
+  user: MeResponse['user'],
+) {
+  const target =
+    staffProfilePathTarget(
+      pathname,
+    );
+
+  if (!target || !user?.profileId) {
+    return false;
+  }
+
+  if (target === user.profileId) {
+    return true;
+  }
+
+  return (
+    Array.isArray(
+      user.directReportIds,
+    ) &&
+    user.directReportIds.includes(
+      target,
+    )
   );
 }
 
@@ -380,6 +439,15 @@ export async function middleware(
     );
   }
 
+  if (
+    isSelfOrDirectReportStaffProfile(
+      pathname,
+      session.user,
+    )
+  ) {
+    return NextResponse.next();
+  }
+
   if (!rule) {
     return NextResponse.next();
   }
@@ -391,9 +459,21 @@ export async function middleware(
       ? session.user.scopes
       : [];
 
+  const roles =
+    Array.isArray(
+      session.user.roles,
+    )
+      ? session.user.roles
+      : [];
+
+  const authorities = [
+    ...roles,
+    ...scopes,
+  ];
+
   if (
     hasRequiredAuthority(
-      scopes,
+      authorities,
       rule.required,
     )
   ) {

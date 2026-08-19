@@ -64,18 +64,194 @@ function jsonObject(value: unknown) {
     : {};
 }
 
+function canReadHr(actor: AdminStaffActor) {
+  return (
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.hr.read') ||
+    hasStaffCapability(actor, 'staff.hr.manage')
+  );
+}
+
 function canManageEmployment(actor: AdminStaffActor) {
-  return actor.isSuperAdmin || hasStaffCapability(actor, 'staff.manage');
+  return actor.isSuperAdmin || hasStaffCapability(actor, 'staff.hr.manage');
+}
+
+function canReadEmploymentCore(
+  actor: AdminStaffActor,
+  target: { id: string; managerId: string | null },
+) {
+  return (
+    actor.profileId === target.id ||
+    target.managerId === actor.profileId ||
+    canReadHr(actor) ||
+    canManageEmployment(actor)
+  );
 }
 
 function canReadCompensation(actor: AdminStaffActor, staffProfileId: string) {
   return (
     actor.profileId === staffProfileId ||
-    canManageEmployment(actor) ||
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.compensation.read') ||
+    hasStaffCapability(actor, 'staff.compensation.manage') ||
+    actor.scopes.includes('finance.read')
+  );
+}
+
+function canManageCompensation(actor: AdminStaffActor) {
+  return (
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.compensation.manage')
+  );
+}
+
+function canReadPayroll(actor: AdminStaffActor, staffProfileId: string) {
+  return (
+    actor.profileId === staffProfileId ||
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.payroll.read') ||
+    hasStaffCapability(actor, 'staff.payroll.manage') ||
     actor.scopes.includes('finance.read') ||
     actor.scopes.includes('finance.payouts.run') ||
     actor.scopes.includes('finance.payouts.approve')
   );
+}
+
+function canManagePayroll(actor: AdminStaffActor) {
+  return (
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.payroll.manage')
+  );
+}
+
+function canReadBank(actor: AdminStaffActor, staffProfileId: string) {
+  return (
+    actor.profileId === staffProfileId ||
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.bank.read') ||
+    hasStaffCapability(actor, 'staff.bank.manage') ||
+    hasStaffCapability(actor, 'staff.payroll.read') ||
+    hasStaffCapability(actor, 'staff.payroll.manage') ||
+    actor.scopes.includes('finance.payouts.run') ||
+    actor.scopes.includes('finance.payouts.approve')
+  );
+}
+
+function canManageBank(actor: AdminStaffActor, staffProfileId: string) {
+  return (
+    actor.profileId === staffProfileId ||
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.bank.manage') ||
+    actor.scopes.includes('finance.payouts.run') ||
+    actor.scopes.includes('finance.payouts.approve')
+  );
+}
+
+function canReadDocuments(actor: AdminStaffActor, staffProfileId: string) {
+  return (
+    actor.profileId === staffProfileId ||
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.documents.read') ||
+    hasStaffCapability(actor, 'staff.documents.manage') ||
+    canReadHr(actor)
+  );
+}
+
+function canUploadDocuments(
+  actor: AdminStaffActor,
+  staffProfileId: string,
+) {
+  return (
+    actor.profileId === staffProfileId ||
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.documents.manage')
+  );
+}
+
+function canManageDocuments(actor: AdminStaffActor) {
+  return (
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.documents.manage')
+  );
+}
+
+function canReadLeave(
+  actor: AdminStaffActor,
+  target: { id: string; managerId: string | null },
+) {
+  return (
+    actor.profileId === target.id ||
+    target.managerId === actor.profileId ||
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.leave.read') ||
+    hasStaffCapability(actor, 'staff.leave.manage') ||
+    canReadHr(actor)
+  );
+}
+
+function canManageLeave(actor: AdminStaffActor) {
+  return (
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.leave.manage')
+  );
+}
+
+function canReadEmploymentChanges(
+  actor: AdminStaffActor,
+  target: { id: string; managerId: string | null },
+) {
+  return (
+    actor.profileId === target.id ||
+    target.managerId === actor.profileId ||
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.employment-change.read') ||
+    hasStaffCapability(actor, 'staff.employment-change.manage') ||
+    canReadHr(actor)
+  );
+}
+
+function canManageEmploymentChanges(actor: AdminStaffActor) {
+  return (
+    actor.isSuperAdmin ||
+    hasStaffCapability(actor, 'staff.employment-change.manage')
+  );
+}
+
+function canAccessEmploymentWorkspace(
+  actor: AdminStaffActor,
+  target: { id: string; managerId: string | null },
+) {
+  return (
+    actor.profileId === target.id ||
+    target.managerId === actor.profileId ||
+    canReadHr(actor) ||
+    canReadCompensation(actor, target.id) ||
+    canReadPayroll(actor, target.id) ||
+    canReadBank(actor, target.id) ||
+    canReadDocuments(actor, target.id) ||
+    canReadLeave(actor, target) ||
+    canReadEmploymentChanges(actor, target)
+  );
+}
+
+async function wouldCreateManagerCycle(targetId: string, managerId: string) {
+  let cursor: string | null = managerId;
+  const seen = new Set<string>();
+
+  for (let depth = 0; cursor && depth < 50; depth += 1) {
+    if (cursor === targetId || seen.has(cursor)) return true;
+    seen.add(cursor);
+
+    const row: { managerId: string | null } | null =
+      await prisma.adminUserProfile.findUnique({
+        where: { id: cursor },
+        select: { managerId: true },
+      });
+
+    cursor = row?.managerId || null;
+  }
+
+  return false;
 }
 
 async function requireStaffTarget(actor: AdminStaffActor, staffProfileId: string) {
@@ -99,7 +275,7 @@ async function requireStaffTarget(actor: AdminStaffActor, staffProfileId: string
     },
   });
   if (!profile) throw new StaffEmploymentError('staff_not_found', 404);
-  if (actor.profileId !== profile.id && !canManageEmployment(actor) && !actor.scopes.includes('finance.read')) {
+  if (!canAccessEmploymentWorkspace(actor, profile)) {
     throw new StaffEmploymentError('staff_employment_access_denied', 403);
   }
   return profile;
@@ -153,36 +329,81 @@ export async function readPrimaryStaffBankAccountNumber(staffUserId: string) {
   return { account, accountNumber: decryptStaffBankAccountNumber(account.accountNumberEncrypted) };
 }
 
-function serializePayrollProfile(profile: any, includeCompensation: boolean) {
-  if (!profile) return null;
+function serializePayrollProfile(
+  profile: any,
+  access: {
+    employment: boolean;
+    compensation: boolean;
+    payroll: boolean;
+  },
+) {
+  if (
+    !profile ||
+    (!access.employment &&
+      !access.compensation &&
+      !access.payroll)
+  ) {
+    return null;
+  }
+
   return {
     id: profile.id,
     staffUserId: profile.staffUserId,
-    employmentType: profile.employmentType,
-    payrollStatus: profile.payrollStatus,
-    country: profile.country,
-    currency: profile.currency,
-    ...(includeCompensation
+    ...(access.employment
       ? {
+          employmentType: profile.employmentType,
+          startDate: profile.startDate,
+          endDate: profile.endDate,
+          profileMeta: (() => {
+            const meta = jsonObject(profile.profileMeta);
+            return {
+              contractType: meta.contractType ?? null,
+              contractStatus: meta.contractStatus ?? null,
+              probationEndsAt: meta.probationEndsAt ?? null,
+              benefits: meta.benefits ?? null,
+              positionTitle: meta.positionTitle ?? null,
+            };
+          })(),
+        }
+      : {}),
+    ...(access.compensation
+      ? {
+          currency: profile.currency,
           baseSalaryCents: profile.baseSalaryCents,
           hourlyRateCents: profile.hourlyRateCents,
           defaultHoursPerPeriod: profile.defaultHoursPerPeriod,
           payFrequency: profile.payFrequency,
           commissionEligible: profile.commissionEligible,
           commissionMode: profile.commissionMode,
+        }
+      : {}),
+    ...(access.payroll
+      ? {
+          payrollStatus: profile.payrollStatus,
+          country: profile.country,
+          currency: profile.currency,
           taxNumber: profile.taxNumber,
           payrollNumber: profile.payrollNumber,
           employerReference: profile.employerReference,
+          payrollMeta: profile.payrollMeta,
+          approvalStatus: profile.approvalStatus,
+          approvedAt: profile.approvedAt,
         }
       : {}),
-    startDate: profile.startDate,
-    endDate: profile.endDate,
-    profileMeta: profile.profileMeta,
-    payrollMeta: includeCompensation ? profile.payrollMeta : null,
-    approvalStatus: profile.approvalStatus,
-    approvedAt: profile.approvedAt,
     updatedAt: profile.updatedAt,
   };
+}
+
+function serializeEmploymentChange(change: any, includeCompensation: boolean) {
+  if (includeCompensation) return change;
+
+  const {
+    salaryBeforeCents: _salaryBeforeCents,
+    salaryAfterCents: _salaryAfterCents,
+    ...safe
+  } = change;
+
+  return safe;
 }
 
 
@@ -260,13 +481,27 @@ export async function getStaffEmploymentWorkspace(input: {
 }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
   const self = input.actor.profileId === target.id;
+  const managerAccess = target.managerId === input.actor.profileId;
   const canManage = canManageEmployment(input.actor);
-  const canReadPay = canReadCompensation(input.actor, target.id);
+  const canReadEmploymentData = canReadEmploymentCore(input.actor, target);
+  const canReadComp = canReadCompensation(input.actor, target.id);
+  const canManageComp = canManageCompensation(input.actor);
+  const canReadPayrollData = canReadPayroll(input.actor, target.id);
+  const canManagePayrollData = canManagePayroll(input.actor);
+  const canReadBankData = canReadBank(input.actor, target.id);
+  const canManageBankData = canManageBank(input.actor, target.id);
+  const canReadDocumentData = canReadDocuments(input.actor, target.id);
+  const canUploadDocumentData = canUploadDocuments(input.actor, target.id);
+  const canManageDocumentData = canManageDocuments(input.actor);
+  const canReadLeaveData = canReadLeave(input.actor, target);
+  const canManageLeaveData = canManageLeave(input.actor);
+  const canReadChangeData = canReadEmploymentChanges(input.actor, target);
+  const canManageChangeData = canManageEmploymentChanges(input.actor);
 
   let arrearsReconciliation: any = null;
   let arrearsReconciliationWarning: string | null = null;
 
-  if (canReadPay) {
+  if (canReadPayrollData) {
     try {
       arrearsReconciliation = await reconcileOverdueSalaryArrears({
         staffUserId: target.userId,
@@ -282,20 +517,32 @@ export async function getStaffEmploymentWorkspace(input: {
 
   const workspaceWarnings: StaffWorkspaceWarning[] = [];
 
-  const [payrollProfile, bankAccounts, documents, changes, leave, payslips, arrears, activeTemplate] = await Promise.all([
-    safeWorkspaceRead({
-      dataset: 'payroll_profile',
-      read: () =>
-        prisma.staffPayrollProfile.findFirst({
-          where: { staffUserId: target.userId },
-          orderBy: { updatedAt: 'desc' },
-        }),
-      fallback: null,
-      warnings: workspaceWarnings,
-      staffProfileId: target.id,
-      staffUserId: target.userId,
-    }),
-    canReadPay
+  const [
+    payrollProfile,
+    bankAccounts,
+    documents,
+    changes,
+    leave,
+    payslips,
+    arrears,
+    activeTemplate,
+    organisation,
+  ] = await Promise.all([
+    canReadEmploymentData || canReadComp || canReadPayrollData
+      ? safeWorkspaceRead({
+          dataset: 'payroll_profile',
+          read: () =>
+            prisma.staffPayrollProfile.findFirst({
+              where: { staffUserId: target.userId },
+              orderBy: { updatedAt: 'desc' },
+            }),
+          fallback: null,
+          warnings: workspaceWarnings,
+          staffProfileId: target.id,
+          staffUserId: target.userId,
+        })
+      : Promise.resolve(null),
+    canReadBankData
       ? safeWorkspaceRead({
           dataset: 'bank_accounts',
           read: () =>
@@ -312,7 +559,6 @@ export async function getStaffEmploymentWorkspace(input: {
                 accountType: true,
                 country: true,
                 currency: true,
-                paystackRecipientCode: true,
                 verificationStatus: true,
                 verificationProvider: true,
                 verifiedAt: true,
@@ -327,57 +573,63 @@ export async function getStaffEmploymentWorkspace(input: {
           staffUserId: target.userId,
         })
       : Promise.resolve([]),
-    safeWorkspaceRead({
-      dataset: 'employment_documents',
-      read: () =>
-        prisma.staffEmploymentDocument.findMany({
-          where: { staffProfileId: target.id, state: 'active' },
-          orderBy: { createdAt: 'desc' },
-          select: {
-            id: true,
-            documentType: true,
-            title: true,
-            fileName: true,
-            contentType: true,
-            sizeBytes: true,
-            effectiveAt: true,
-            expiresAt: true,
-            state: true,
-            createdAt: true,
-            uploadedByProfile: { select: { id: true, name: true, email: true } },
-          },
-        }),
-      fallback: [],
-      warnings: workspaceWarnings,
-      staffProfileId: target.id,
-      staffUserId: target.userId,
-    }),
-    safeWorkspaceRead({
-      dataset: 'employment_changes',
-      read: () =>
-        prisma.staffEmploymentChange.findMany({
-          where: { staffProfileId: target.id },
-          orderBy: [{ effectiveAt: 'desc' }, { createdAt: 'desc' }],
-          take: 100,
-        }),
-      fallback: [],
-      warnings: workspaceWarnings,
-      staffProfileId: target.id,
-      staffUserId: target.userId,
-    }),
-    safeWorkspaceRead({
-      dataset: 'leave_balances',
-      read: () =>
-        prisma.staffLeaveBalance.findMany({
-          where: { staffProfileId: target.id },
-          orderBy: [{ year: 'desc' }, { leaveType: 'asc' }],
-        }),
-      fallback: [],
-      warnings: workspaceWarnings,
-      staffProfileId: target.id,
-      staffUserId: target.userId,
-    }),
-    canReadPay
+    canReadDocumentData
+      ? safeWorkspaceRead({
+          dataset: 'employment_documents',
+          read: () =>
+            prisma.staffEmploymentDocument.findMany({
+              where: { staffProfileId: target.id, state: 'active' },
+              orderBy: { createdAt: 'desc' },
+              select: {
+                id: true,
+                documentType: true,
+                title: true,
+                fileName: true,
+                contentType: true,
+                sizeBytes: true,
+                effectiveAt: true,
+                expiresAt: true,
+                state: true,
+                createdAt: true,
+                uploadedByProfile: { select: { id: true, name: true, email: true } },
+              },
+            }),
+          fallback: [],
+          warnings: workspaceWarnings,
+          staffProfileId: target.id,
+          staffUserId: target.userId,
+        })
+      : Promise.resolve([]),
+    canReadChangeData
+      ? safeWorkspaceRead({
+          dataset: 'employment_changes',
+          read: () =>
+            prisma.staffEmploymentChange.findMany({
+              where: { staffProfileId: target.id },
+              orderBy: [{ effectiveAt: 'desc' }, { createdAt: 'desc' }],
+              take: 100,
+            }),
+          fallback: [],
+          warnings: workspaceWarnings,
+          staffProfileId: target.id,
+          staffUserId: target.userId,
+        })
+      : Promise.resolve([]),
+    canReadLeaveData
+      ? safeWorkspaceRead({
+          dataset: 'leave_balances',
+          read: () =>
+            prisma.staffLeaveBalance.findMany({
+              where: { staffProfileId: target.id },
+              orderBy: [{ year: 'desc' }, { leaveType: 'asc' }],
+            }),
+          fallback: [],
+          warnings: workspaceWarnings,
+          staffProfileId: target.id,
+          staffUserId: target.userId,
+        })
+      : Promise.resolve([]),
+    canReadPayrollData
       ? safeWorkspaceRead({
           dataset: 'payslips',
           read: () =>
@@ -392,7 +644,7 @@ export async function getStaffEmploymentWorkspace(input: {
           staffUserId: target.userId,
         })
       : Promise.resolve([]),
-    canReadPay
+    canReadPayrollData
       ? safeWorkspaceRead({
           dataset: 'salary_arrears',
           read: () =>
@@ -407,51 +659,112 @@ export async function getStaffEmploymentWorkspace(input: {
           staffUserId: target.userId,
         })
       : Promise.resolve([]),
-    safeWorkspaceRead({
-      dataset: 'staff_id_template',
-      read: () =>
-        prisma.staffIdTemplate.findFirst({
-          where: { active: true },
-          orderBy: { updatedAt: 'desc' },
-        }),
-      fallback: null,
-      warnings: workspaceWarnings,
-      staffProfileId: target.id,
-      staffUserId: target.userId,
-    }),
+    canReadDocumentData || self
+      ? safeWorkspaceRead({
+          dataset: 'staff_id_template',
+          read: () =>
+            prisma.staffIdTemplate.findFirst({
+              where: { active: true },
+              orderBy: { updatedAt: 'desc' },
+            }),
+          fallback: null,
+          warnings: workspaceWarnings,
+          staffProfileId: target.id,
+          staffUserId: target.userId,
+        })
+      : Promise.resolve(null),
+    canManageChangeData
+      ? Promise.all([
+          prisma.department.findMany({
+            where: { active: true },
+            orderBy: { name: 'asc' },
+            select: {
+              id: true,
+              name: true,
+              active: true,
+              designations: {
+                orderBy: { name: 'asc' },
+                select: { id: true, name: true, departmentId: true },
+              },
+            },
+          }),
+          prisma.adminUserProfile.findMany({
+            where: {
+              id: { not: target.id },
+              lifecycleState: { in: ['ACTIVE', 'LEAVE'] },
+            },
+            orderBy: [{ name: 'asc' }, { email: 'asc' }],
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              departmentId: true,
+              designationId: true,
+              lifecycleState: true,
+            },
+          }),
+        ]).then(([departments, managers]) => ({ departments, managers }))
+      : Promise.resolve(null),
   ]);
 
   return {
     ok: true,
     staff: target,
-    payrollProfile: serializePayrollProfile(payrollProfile, canReadPay),
+    payrollProfile: serializePayrollProfile(payrollProfile, {
+      employment: canReadEmploymentData,
+      compensation: canReadComp,
+      payroll: canReadPayrollData,
+    }),
     bankAccounts,
     documents,
-    employmentChanges: changes,
+    employmentChanges: changes.map((change) =>
+      serializeEmploymentChange(change, canReadComp),
+    ),
     leaveBalances: leave,
     payslips,
     arrears,
     arrearsReconciliation,
     arrearsReconciliationWarning,
     workspaceWarnings,
+    organisation,
     staffId: {
       ready: Boolean(target.staffIdentifier),
-      activeTemplate: activeTemplate ? { id: activeTemplate.id, name: activeTemplate.name, validityMonths: activeTemplate.validityMonths } : null,
-      downloadUrl: target.staffIdentifier ? `/api/admin/staff/${encodeURIComponent(target.id)}/id-card` : null,
+      activeTemplate: activeTemplate
+        ? {
+            id: activeTemplate.id,
+            name: activeTemplate.name,
+            validityMonths: activeTemplate.validityMonths,
+          }
+        : null,
+      downloadUrl:
+        target.staffIdentifier && (self || canReadDocumentData)
+          ? `/api/admin/staff/${encodeURIComponent(target.id)}/id-card`
+          : null,
     },
     permissions: {
       self,
+      managerAccess,
+      canReadEmployment: canReadEmploymentData,
       canManageEmployment: canManage,
-      canReadCompensation: canReadPay,
-      canEditBank: self || canManage || input.actor.scopes.includes('finance.payouts.run'),
-      canUploadDocuments: canManage,
-      canDownloadDocuments: self || canManage,
-      canManageLeave: canManage,
-      canRecordEmploymentChange: canManage,
+      canReadCompensation: canReadComp,
+      canManageCompensation: canManageComp,
+      canReadPayroll: canReadPayrollData,
+      canManagePayroll: canManagePayrollData,
+      canReadBank: canReadBankData,
+      canEditBank: canManageBankData,
+      canReadDocuments: canReadDocumentData,
+      canUploadDocuments: canUploadDocumentData,
+      canManageDocuments: canManageDocumentData,
+      canDownloadDocuments: canReadDocumentData,
+      canReadLeave: canReadLeaveData,
+      canManageLeave: canManageLeaveData,
+      canReadEmploymentChanges: canReadChangeData,
+      canRecordEmploymentChange: canManageChangeData,
       canManageStaffIdTemplate: canManage,
     },
   };
 }
+
 
 export async function updateStaffEmployment(input: {
   request: NextRequest;
@@ -460,51 +773,166 @@ export async function updateStaffEmployment(input: {
   body: any;
 }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
-  if (!canManageEmployment(input.actor)) throw new StaffEmploymentError('staff_employment_manage_required', 403);
+  const body = input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+    ? input.body as Record<string, unknown>
+    : {};
+
+  const employmentFields = new Set([
+    'employmentType',
+    'startDate',
+    'endDate',
+    'contractType',
+    'contractStatus',
+    'probationEndsAt',
+    'benefits',
+  ]);
+  const compensationFields = new Set([
+    'baseSalaryCents',
+    'hourlyRateCents',
+    'payFrequency',
+    'commissionEligible',
+    'commissionMode',
+    'currency',
+  ]);
+  const payrollFields = new Set([
+    'payrollStatus',
+    'country',
+    'taxNumber',
+    'payrollNumber',
+    'employerReference',
+    'approvalStatus',
+  ]);
+
+  const keys = Object.keys(body).filter((key) => body[key] !== undefined);
+  if (keys.includes('positionTitle')) {
+    throw new StaffEmploymentError('position_title_managed_by_designation', 400);
+  }
+
+  const supported = new Set([
+    ...employmentFields,
+    ...compensationFields,
+    ...payrollFields,
+  ]);
+  const unsupported = keys.filter((key) => !supported.has(key));
+  if (unsupported.length) {
+    throw new StaffEmploymentError('unsupported_staff_employment_fields', 400, {
+      fields: unsupported,
+    });
+  }
+
+  const wantsEmployment = keys.some((key) => employmentFields.has(key));
+  const wantsCompensation = keys.some((key) => compensationFields.has(key));
+  const wantsPayroll = keys.some((key) => payrollFields.has(key));
+
+  if (!wantsEmployment && !wantsCompensation && !wantsPayroll) {
+    throw new StaffEmploymentError('staff_employment_changes_required', 400);
+  }
+  if (wantsEmployment && !canManageEmployment(input.actor)) {
+    throw new StaffEmploymentError('staff_employment_manage_required', 403);
+  }
+  if (wantsCompensation && !canManageCompensation(input.actor)) {
+    throw new StaffEmploymentError('staff_compensation_manage_required', 403);
+  }
+  if (wantsPayroll && !canManagePayroll(input.actor)) {
+    throw new StaffEmploymentError('staff_payroll_manage_required', 403);
+  }
 
   const current = await prisma.staffPayrollProfile.findFirst({
     where: { staffUserId: target.userId },
     orderBy: { updatedAt: 'desc' },
   });
-  const startDate = input.body?.startDate === undefined ? current?.startDate || null : dateOrNull(input.body.startDate);
-  const endDate = input.body?.endDate === undefined ? current?.endDate || null : dateOrNull(input.body.endDate);
-  const profileMeta = {
-    ...jsonObject(current?.profileMeta),
-    ...(input.body?.positionTitle !== undefined ? { positionTitle: clean(input.body.positionTitle, 240) } : {}),
-    ...(input.body?.contractType !== undefined ? { contractType: clean(input.body.contractType, 120) } : {}),
-    ...(input.body?.contractStatus !== undefined ? { contractStatus: clean(input.body.contractStatus, 120) } : {}),
-    ...(input.body?.probationEndsAt !== undefined ? { probationEndsAt: clean(input.body.probationEndsAt, 80) } : {}),
-    ...(input.body?.benefits !== undefined ? { benefits: input.body.benefits } : {}),
-  };
 
   const data: any = {
     staffDisplayName: target.name || target.email,
     staffEmail: target.email,
     departmentId: target.departmentId,
     designationId: target.designationId,
-    employmentType: clean(input.body?.employmentType ?? current?.employmentType ?? 'permanent', 80) || 'permanent',
-    payrollStatus: clean(input.body?.payrollStatus ?? current?.payrollStatus ?? 'active', 80) || 'active',
-    country: (clean(input.body?.country ?? current?.country ?? 'ZA', 2) || 'ZA').toUpperCase(),
-    currency: (clean(input.body?.currency ?? current?.currency ?? 'ZAR', 3) || 'ZAR').toUpperCase(),
-    baseSalaryCents: input.body?.baseSalaryCents === undefined ? current?.baseSalaryCents || 0 : cents(input.body.baseSalaryCents),
-    hourlyRateCents: input.body?.hourlyRateCents === undefined ? current?.hourlyRateCents || 0 : cents(input.body.hourlyRateCents),
-    payFrequency: clean(input.body?.payFrequency ?? current?.payFrequency ?? 'monthly', 80) || 'monthly',
-    commissionEligible: input.body?.commissionEligible === undefined ? Boolean(current?.commissionEligible) : Boolean(input.body.commissionEligible),
-    commissionMode: clean(input.body?.commissionMode ?? current?.commissionMode ?? 'none', 80) || 'none',
-    taxNumber: input.body?.taxNumber === undefined ? current?.taxNumber || null : clean(input.body.taxNumber, 180),
-    payrollNumber: input.body?.payrollNumber === undefined ? current?.payrollNumber || null : clean(input.body.payrollNumber, 180),
-    employerReference: input.body?.employerReference === undefined ? current?.employerReference || null : clean(input.body.employerReference, 180),
-    startDate,
-    endDate,
-    profileMeta,
-    approvalStatus: clean(input.body?.approvalStatus ?? current?.approvalStatus ?? 'approved', 80) || 'approved',
-    approvedByUserId: input.actor.userId,
-    approvedAt: new Date(),
   };
 
+  if (wantsCompensation || wantsPayroll) {
+    data.approvedByUserId = input.actor.userId;
+    data.approvedAt = new Date();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'employmentType')) {
+    data.employmentType = clean(body.employmentType, 80) || 'permanent';
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'startDate')) {
+    data.startDate = dateOrNull(body.startDate);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'endDate')) {
+    data.endDate = dateOrNull(body.endDate);
+  }
+
+  const profileMetaChanges: Record<string, unknown> = {};
+  if (Object.prototype.hasOwnProperty.call(body, 'contractType')) {
+    profileMetaChanges.contractType = clean(body.contractType, 120);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'contractStatus')) {
+    profileMetaChanges.contractStatus = clean(body.contractStatus, 120);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'probationEndsAt')) {
+    profileMetaChanges.probationEndsAt = clean(body.probationEndsAt, 80);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'benefits')) {
+    profileMetaChanges.benefits = body.benefits;
+  }
+  if (Object.keys(profileMetaChanges).length) {
+    data.profileMeta = {
+      ...jsonObject(current?.profileMeta),
+      ...profileMetaChanges,
+    };
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'baseSalaryCents')) {
+    data.baseSalaryCents = cents(body.baseSalaryCents);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'hourlyRateCents')) {
+    data.hourlyRateCents = cents(body.hourlyRateCents);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'payFrequency')) {
+    data.payFrequency = clean(body.payFrequency, 80) || 'monthly';
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'commissionEligible')) {
+    data.commissionEligible = Boolean(body.commissionEligible);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'commissionMode')) {
+    data.commissionMode = clean(body.commissionMode, 80) || 'none';
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'currency')) {
+    data.currency = (clean(body.currency, 3) || 'ZAR').toUpperCase();
+  }
+
+  if (Object.prototype.hasOwnProperty.call(body, 'payrollStatus')) {
+    data.payrollStatus = clean(body.payrollStatus, 80) || 'active';
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'country')) {
+    data.country = (clean(body.country, 2) || 'ZA').toUpperCase();
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'taxNumber')) {
+    data.taxNumber = clean(body.taxNumber, 180);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'payrollNumber')) {
+    data.payrollNumber = clean(body.payrollNumber, 180);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'employerReference')) {
+    data.employerReference = clean(body.employerReference, 180);
+  }
+  if (Object.prototype.hasOwnProperty.call(body, 'approvalStatus')) {
+    data.approvalStatus = clean(body.approvalStatus, 80) || 'approved';
+  }
+
   const item = current
-    ? await prisma.staffPayrollProfile.update({ where: { id: current.id }, data })
-    : await prisma.staffPayrollProfile.create({ data: { staffUserId: target.userId, ...data } });
+    ? await prisma.staffPayrollProfile.update({
+        where: { id: current.id },
+        data,
+      })
+    : await prisma.staffPayrollProfile.create({
+        data: {
+          staffUserId: target.userId,
+          ...data,
+        },
+      });
 
   await prisma.auditLog.create({
     data: {
@@ -515,15 +943,27 @@ export async function updateStaffEmployment(input: {
       action: 'staff.employment.updated',
       entityType: 'StaffPayrollProfile',
       entityId: item.id,
-      description: `Employment and compensation updated for ${target.email}`,
-      meta: { staffProfileId: target.id, staffUserId: target.userId },
+      description: `Employment/payroll fields updated for ${target.email}`,
+      meta: {
+        staffProfileId: target.id,
+        staffUserId: target.userId,
+        changedFields: keys,
+      },
       ip: input.request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null,
       userAgent: input.request.headers.get('user-agent') || null,
     },
   }).catch(() => null);
 
-  return { ok: true, item: serializePayrollProfile(item, true) };
+  return {
+    ok: true,
+    item: serializePayrollProfile(item, {
+      employment: canReadEmploymentCore(input.actor, target),
+      compensation: canReadCompensation(input.actor, target.id),
+      payroll: canReadPayroll(input.actor, target.id),
+    }),
+  };
 }
+
 
 export async function updateStaffBankAccount(input: {
   request: NextRequest;
@@ -532,9 +972,9 @@ export async function updateStaffBankAccount(input: {
   body: any;
 }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
-  const self = input.actor.profileId === target.id;
-  const canEdit = self || canManageEmployment(input.actor) || input.actor.scopes.includes('finance.payouts.run');
-  if (!canEdit) throw new StaffEmploymentError('staff_bank_manage_required', 403);
+  if (!canManageBank(input.actor, target.id)) {
+    throw new StaffEmploymentError('staff_bank_manage_required', 403);
+  }
 
   const accountHolderName = clean(input.body?.accountHolderName, 180);
   const accountNumber = String(input.body?.accountNumber || '').replace(/\s+/g, '').trim();
@@ -667,8 +1107,10 @@ export async function presignStaffEmploymentDocument(input: {
   staffProfileId: string;
   body: any;
 }) {
-  await requireStaffTarget(input.actor, input.staffProfileId);
-  if (!canManageEmployment(input.actor)) throw new StaffEmploymentError('staff_document_manage_required', 403);
+  const target = await requireStaffTarget(input.actor, input.staffProfileId);
+  if (!canUploadDocuments(input.actor, target.id)) {
+    throw new StaffEmploymentError('staff_document_manage_required', 403);
+  }
 
   const contentType = String(input.body?.contentType || '').trim().toLowerCase();
   const sizeBytes = Math.floor(Number(input.body?.sizeBytes) || 0);
@@ -677,7 +1119,7 @@ export async function presignStaffEmploymentDocument(input: {
   if (sizeBytes <= 0 || sizeBytes > MAX_EMPLOYMENT_DOCUMENT_BYTES) throw new StaffEmploymentError('staff_document_size_invalid', 400);
   if (!/^[a-f0-9]{64}$/.test(checksumSha256)) throw new StaffEmploymentError('staff_document_checksum_invalid', 400);
 
-  const objectKey = employmentDocumentObjectKey(input.staffProfileId);
+  const objectKey = employmentDocumentObjectKey(target.id);
   const presign = await presignApplicationDocumentUpload({ objectKey, contentType, checksumSha256Hex: checksumSha256 });
   return { ok: true, objectKey, ...presign };
 }
@@ -689,7 +1131,9 @@ export async function confirmStaffEmploymentDocument(input: {
   body: any;
 }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
-  if (!canManageEmployment(input.actor)) throw new StaffEmploymentError('staff_document_manage_required', 403);
+  if (!canUploadDocuments(input.actor, target.id)) {
+    throw new StaffEmploymentError('staff_document_manage_required', 403);
+  }
 
   const objectKey = String(input.body?.objectKey || '').trim();
   const contentType = String(input.body?.contentType || '').trim().toLowerCase();
@@ -758,7 +1202,7 @@ export async function staffEmploymentDocumentDownload(input: {
   documentId: string;
 }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
-  if (input.actor.profileId !== target.id && !canManageEmployment(input.actor)) {
+  if (!canReadDocuments(input.actor, target.id)) {
     throw new StaffEmploymentError('staff_document_access_denied', 403);
   }
   const item = await prisma.staffEmploymentDocument.findFirst({
@@ -775,7 +1219,9 @@ export async function archiveStaffEmploymentDocument(input: {
   documentId: string;
 }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
-  if (!canManageEmployment(input.actor)) throw new StaffEmploymentError('staff_document_manage_required', 403);
+  if (!canManageDocuments(input.actor)) {
+    throw new StaffEmploymentError('staff_document_manage_required', 403);
+  }
   const item = await prisma.staffEmploymentDocument.findFirst({ where: { id: input.documentId, staffProfileId: target.id } });
   if (!item) throw new StaffEmploymentError('staff_document_not_found', 404);
   const updated = await prisma.staffEmploymentDocument.update({ where: { id: item.id }, data: { state: 'archived' } });
@@ -804,12 +1250,133 @@ export async function recordStaffEmploymentChange(input: {
   body: any;
 }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
-  if (!canManageEmployment(input.actor)) throw new StaffEmploymentError('staff_employment_manage_required', 403);
-  const effectiveAt = dateOrNull(input.body?.effectiveAt) || new Date();
-  const changeType = clean(input.body?.changeType || 'PROMOTION', 80) || 'PROMOTION';
-  const salaryAfterCents = input.body?.salaryAfterCents === undefined ? null : cents(input.body.salaryAfterCents);
+  if (!canManageEmploymentChanges(input.actor)) {
+    throw new StaffEmploymentError('staff_employment_change_manage_required', 403);
+  }
 
-  const payroll = await prisma.staffPayrollProfile.findFirst({ where: { staffUserId: target.userId }, orderBy: { updatedAt: 'desc' } });
+  const body =
+    input.body && typeof input.body === 'object' && !Array.isArray(input.body)
+      ? input.body as Record<string, unknown>
+      : {};
+
+  const effectiveAt = dateOrNull(body.effectiveAt) || new Date();
+  const changeType = clean(body.changeType || 'PROMOTION', 80) || 'PROMOTION';
+  const salaryRequested = Object.prototype.hasOwnProperty.call(body, 'salaryAfterCents');
+  const salaryAfterCents = salaryRequested ? cents(body.salaryAfterCents) : null;
+
+  if (salaryRequested && !canManageCompensation(input.actor)) {
+    throw new StaffEmploymentError('staff_compensation_manage_required', 403);
+  }
+
+  const departmentProvided = Object.prototype.hasOwnProperty.call(body, 'toDepartmentId');
+  const designationProvided = Object.prototype.hasOwnProperty.call(body, 'toDesignationId');
+  const managerProvided = Object.prototype.hasOwnProperty.call(body, 'toManagerId');
+
+  if (
+    effectiveAt.getTime() > Date.now() &&
+    (
+      salaryRequested ||
+      departmentProvided ||
+      designationProvided ||
+      managerProvided
+    )
+  ) {
+    throw new StaffEmploymentError(
+      'future_dated_employment_change_requires_assignment_engine',
+      409,
+    );
+  }
+
+  let toDepartmentId =
+    departmentProvided
+      ? clean(body.toDepartmentId, 160)
+      : target.departmentId;
+
+  let toDesignationId =
+    designationProvided
+      ? clean(body.toDesignationId, 160)
+      : target.designationId;
+
+  const toManagerId =
+    managerProvided
+      ? clean(body.toManagerId, 160)
+      : target.managerId;
+
+  if (toDepartmentId) {
+    const department = await prisma.department.findUnique({
+      where: { id: toDepartmentId },
+      select: { id: true, active: true },
+    });
+
+    if (!department || !department.active) {
+      throw new StaffEmploymentError('department_not_available', 400);
+    }
+  }
+
+  if (
+    departmentProvided &&
+    toDepartmentId !== target.departmentId &&
+    !designationProvided &&
+    target.designationId
+  ) {
+    throw new StaffEmploymentError(
+      'designation_required_for_department_change',
+      400,
+    );
+  }
+
+  if (toDesignationId) {
+    const designation = await prisma.designation.findUnique({
+      where: { id: toDesignationId },
+      select: { id: true, departmentId: true },
+    });
+
+    if (!designation) {
+      throw new StaffEmploymentError('designation_not_found', 400);
+    }
+
+    if (toDepartmentId && designation.departmentId !== toDepartmentId) {
+      throw new StaffEmploymentError('designation_department_mismatch', 400);
+    }
+
+    if (!toDepartmentId) {
+      toDepartmentId = designation.departmentId;
+    }
+  }
+
+  if (toManagerId) {
+    if (toManagerId === target.id) {
+      throw new StaffEmploymentError('self_manager_forbidden', 400);
+    }
+
+    const manager = await prisma.adminUserProfile.findUnique({
+      where: { id: toManagerId },
+      select: { id: true, lifecycleState: true },
+    });
+
+    if (
+      !manager ||
+      manager.lifecycleState === 'ARCHIVED' ||
+      manager.lifecycleState === 'SUSPENDED'
+    ) {
+      throw new StaffEmploymentError('manager_not_available', 400);
+    }
+
+    if (await wouldCreateManagerCycle(target.id, toManagerId)) {
+      throw new StaffEmploymentError('manager_cycle_forbidden', 400);
+    }
+  }
+
+  const payroll = await prisma.staffPayrollProfile.findFirst({
+    where: { staffUserId: target.userId },
+    orderBy: { updatedAt: 'desc' },
+  });
+
+  const salaryBeforeCents =
+    canReadCompensation(input.actor, target.id)
+      ? payroll?.baseSalaryCents ?? null
+      : null;
+
   const item = await prisma.$transaction(async (tx) => {
     const change = await tx.staffEmploymentChange.create({
       data: {
@@ -817,30 +1384,75 @@ export async function recordStaffEmploymentChange(input: {
         changeType,
         effectiveAt,
         fromDepartmentId: target.departmentId,
-        toDepartmentId: clean(input.body?.toDepartmentId, 160) || target.departmentId,
+        toDepartmentId,
         fromDesignationId: target.designationId,
-        toDesignationId: clean(input.body?.toDesignationId, 160) || target.designationId,
+        toDesignationId,
         fromManagerId: target.managerId,
-        toManagerId: clean(input.body?.toManagerId, 160) || target.managerId,
-        salaryBeforeCents: payroll?.baseSalaryCents ?? null,
+        toManagerId,
+        salaryBeforeCents,
         salaryAfterCents,
-        currency: (clean(input.body?.currency || payroll?.currency || 'ZAR', 3) || 'ZAR').toUpperCase(),
-        benefits: input.body?.benefits ?? undefined,
-        privileges: input.body?.privileges ?? undefined,
-        notes: clean(input.body?.notes, 2000),
-        supportingDocumentId: clean(input.body?.supportingDocumentId, 160),
+        currency:
+          (clean(body.currency || payroll?.currency || 'ZAR', 3) || 'ZAR')
+            .toUpperCase(),
+        benefits: body.benefits ?? undefined,
+        privileges: body.privileges ?? undefined,
+        notes: clean(body.notes, 2000),
+        supportingDocumentId: clean(body.supportingDocumentId, 160),
         createdByProfileId: input.actor.profileId,
       },
     });
 
     const profileData: any = {};
-    if (input.body?.toDepartmentId !== undefined) profileData.departmentId = clean(input.body.toDepartmentId, 160);
-    if (input.body?.toDesignationId !== undefined) profileData.designationId = clean(input.body.toDesignationId, 160);
-    if (input.body?.toManagerId !== undefined) profileData.managerId = clean(input.body.toManagerId, 160);
-    if (Object.keys(profileData).length) await tx.adminUserProfile.update({ where: { id: target.id }, data: profileData });
-    if (payroll && salaryAfterCents !== null) {
-      await tx.staffPayrollProfile.update({ where: { id: payroll.id }, data: { baseSalaryCents: salaryAfterCents, approvedByUserId: input.actor.userId, approvedAt: new Date() } });
+    if (departmentProvided) profileData.departmentId = toDepartmentId;
+    if (designationProvided) profileData.designationId = toDesignationId;
+    if (managerProvided) profileData.managerId = toManagerId;
+
+    if (
+      designationProvided &&
+      !departmentProvided &&
+      toDesignationId
+    ) {
+      profileData.departmentId = toDepartmentId;
     }
+
+    if (Object.keys(profileData).length) {
+      await tx.adminUserProfile.update({
+        where: { id: target.id },
+        data: profileData,
+      });
+    }
+
+    if (salaryRequested && salaryAfterCents !== null) {
+      if (payroll) {
+        await tx.staffPayrollProfile.update({
+          where: { id: payroll.id },
+          data: {
+            baseSalaryCents: salaryAfterCents,
+            approvedByUserId: input.actor.userId,
+            approvedAt: new Date(),
+          },
+        });
+      } else {
+        await tx.staffPayrollProfile.create({
+          data: {
+            staffUserId: target.userId,
+            staffDisplayName: target.name || target.email,
+            staffEmail: target.email,
+            departmentId: toDepartmentId,
+            designationId: toDesignationId,
+            baseSalaryCents: salaryAfterCents,
+            currency:
+              (clean(body.currency || 'ZAR', 3) || 'ZAR')
+                .toUpperCase(),
+            payrollStatus: 'active',
+            approvalStatus: 'approved',
+            approvedByUserId: input.actor.userId,
+            approvedAt: new Date(),
+          },
+        });
+      }
+    }
+
     return change;
   });
 
@@ -854,12 +1466,25 @@ export async function recordStaffEmploymentChange(input: {
       entityType: 'StaffEmploymentChange',
       entityId: item.id,
       description: `${changeType} recorded for ${target.email}`,
-      meta: { staffProfileId: target.id },
+      meta: {
+        staffProfileId: target.id,
+        changedDepartment: departmentProvided,
+        changedDesignation: designationProvided,
+        changedManager: managerProvided,
+        changedCompensation: salaryRequested,
+      },
       ip: input.request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null,
       userAgent: input.request.headers.get('user-agent') || null,
     },
   }).catch(() => null);
-  return { ok: true, item };
+
+  return {
+    ok: true,
+    item: serializeEmploymentChange(
+      item,
+      canReadCompensation(input.actor, target.id),
+    ),
+  };
 }
 
 export async function updateStaffLeaveBalance(input: {
@@ -868,7 +1493,9 @@ export async function updateStaffLeaveBalance(input: {
   body: any;
 }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
-  if (!canManageEmployment(input.actor)) throw new StaffEmploymentError('staff_leave_manage_required', 403);
+  if (!canManageLeave(input.actor)) {
+    throw new StaffEmploymentError('staff_leave_manage_required', 403);
+  }
   const year = Math.floor(Number(input.body?.year) || new Date().getUTCFullYear());
   const leaveType = clean(input.body?.leaveType || 'ANNUAL', 80) || 'ANNUAL';
   if (year < 2000 || year > 2200) throw new StaffEmploymentError('staff_leave_year_invalid', 400);
@@ -961,6 +1588,12 @@ function escapeXml(value: unknown) {
 
 export async function generateStaffIdSvg(input: { actor: AdminStaffActor; staffProfileId: string }) {
   const target = await requireStaffTarget(input.actor, input.staffProfileId);
+  if (
+    input.actor.profileId !== target.id &&
+    !canReadDocuments(input.actor, target.id)
+  ) {
+    throw new StaffEmploymentError('staff_id_access_denied', 403);
+  }
   if (!target.staffIdentifier) throw new StaffEmploymentError('staff_identifier_required', 409);
   const template = await prisma.staffIdTemplate.findFirst({ where: { active: true }, orderBy: { updatedAt: 'desc' } });
   const accent = template?.accentHex || '#0f172a';

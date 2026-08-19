@@ -93,33 +93,23 @@ export async function POST(
           ? body.password
           : '';
 
-      const [
-        admin,
-        credential,
-      ] =
-        await Promise.all([
-          prisma.adminUserProfile.findFirst({
-            where: {
-              OR: [
-                {
-                  email,
-                },
-                {
-                  userId: email,
-                },
-              ],
-            },
-            include: {
-              department: true,
-              designation: true,
-            },
-          }),
-          prisma.adminAuthCredential.findUnique({
-            where: {
-              email,
-            },
-          }),
-        ]);
+      const admin =
+        await prisma.adminUserProfile.findFirst({
+          where: {
+            OR: [
+              {
+                email,
+              },
+              {
+                userId: email,
+              },
+            ],
+          },
+          include: {
+            department: true,
+            designation: true,
+          },
+        });
 
       if (!admin) {
         const application =
@@ -171,44 +161,44 @@ export async function POST(
         );
       }
 
-      if (credential) {
-        if (
-          !password ||
-          !verifyAdminPassword(
-            password,
-            credential.passwordHash,
-          )
-        ) {
-          return adminError(
-            'invalid_credentials',
-            401,
-          );
-        }
+      const credentialEmail =
+        String(admin.email || '')
+          .trim()
+          .toLowerCase();
 
-        if (
-          credential.mustResetPassword
-        ) {
-          return adminError(
-            'password_reset_required',
-            403,
-          );
-        }
-      }
-      else {
-        /*
-         * Transitional compatibility for approved
-         * Admin profiles created before credentials
-         * were introduced.
-         *
-         * New applicants cannot reach this path:
-         * approval must create a live profile, and
-         * Sweep 1 already creates their credential.
-         */
-        console.warn(
-          '[admin login] approved legacy profile has no credential',
-          {
-            profileId: admin.id,
+      const credential =
+        await prisma.adminAuthCredential.findUnique({
+          where: {
+            email: credentialEmail,
           },
+        });
+
+      if (!credential) {
+        return adminError(
+          'admin_credential_setup_required',
+          403,
+        );
+      }
+
+      if (
+        !password ||
+        !verifyAdminPassword(
+          password,
+          credential.passwordHash,
+        )
+      ) {
+        return adminError(
+          'invalid_credentials',
+          401,
+        );
+      }
+
+      if (
+        credential.mustResetPassword
+      ) {
+        return adminError(
+          'password_reset_required',
+          403,
         );
       }
 
@@ -221,7 +211,7 @@ export async function POST(
             email: admin.email,
             name: admin.name,
             role: 'admin_staff',
-            authMethod: credential ? 'password' : 'legacy',
+            authMethod: 'password',
             sessionId: staffSessionId,
           },
           ADMIN_SESSION_SECONDS,
@@ -243,12 +233,10 @@ export async function POST(
       const loginAt = new Date();
 
       await prisma.$transaction(async (tx) => {
-        if (credential) {
-          await tx.adminAuthCredential.update({
-            where: { email },
-            data: { lastLoginAt: loginAt },
-          });
-        }
+        await tx.adminAuthCredential.update({
+          where: { email: credentialEmail },
+          data: { lastLoginAt: loginAt },
+        });
 
         await tx.adminStaffSession.create({
           data: {

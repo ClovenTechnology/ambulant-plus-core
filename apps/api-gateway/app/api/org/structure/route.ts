@@ -212,7 +212,7 @@ async function writeOrgStructure(req: NextRequest, mode: 'create' | 'patch') {
       entity === 'role_assignment' ||
       action === 'assign_role_to_designation' ||
       action === 'remove_role_from_designation';
-    requireStaffCapability(actor, roleMutation ? 'staff.roles.manage' : 'staff.manage');
+    requireStaffCapability(actor, roleMutation ? 'staff.roles.manage' : 'staff.hr.manage');
   } catch (error) {
     const auth = adminStaffAuthResponse(error);
     if (auth) return NextResponse.json(auth.body, { status: auth.status });

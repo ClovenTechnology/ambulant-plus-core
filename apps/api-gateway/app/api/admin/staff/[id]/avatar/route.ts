@@ -72,7 +72,7 @@ export async function DELETE(request: NextRequest, context: { params: { id: stri
       select: { id: true, photoUrl: true },
     });
     if (!target) return json({ ok: false, error: 'staff_not_found' }, 404);
-    if (target.id !== actor.profileId) requireStaffCapability(actor, 'staff.manage');
+    if (target.id !== actor.profileId) requireStaffCapability(actor, 'staff.hr.manage');
 
     await prisma.$transaction(async (tx) => {
       await tx.adminUserProfile.update({ where: { id: target.id }, data: { photoUrl: null } });

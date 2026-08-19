@@ -71,7 +71,7 @@ export async function GET() {
         token,
       );
 
-    if (!session) {
+    if (!session || session.authMethod !== 'password') {
       return unauthenticated();
     }
 
@@ -95,6 +95,11 @@ export async function GET() {
           designationId: true,
           lifecycleState: true,
           lastActivityAt: true,
+          directReports: {
+            select: {
+              id: true,
+            },
+          },
           designation: {
             select: {
               roles: {
@@ -238,6 +243,11 @@ export async function GET() {
             profile.lifecycleState,
           lastActivityAt:
             profile.lastActivityAt,
+          directReportIds:
+            profile.directReports.map(
+              (entry) =>
+                entry.id,
+            ),
           roles: roleNames,
           scopes,
         },

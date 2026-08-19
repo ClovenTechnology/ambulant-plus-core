@@ -2,6 +2,21 @@ export type StaffCapability =
   | 'staff.directory.read'
   | 'staff.manage'
   | 'staff.roles.manage'
+  | 'staff.hr.read'
+  | 'staff.hr.manage'
+  | 'staff.compensation.read'
+  | 'staff.compensation.manage'
+  | 'staff.payroll.read'
+  | 'staff.payroll.manage'
+  | 'staff.bank.read'
+  | 'staff.bank.manage'
+  | 'staff.documents.read'
+  | 'staff.documents.manage'
+  | 'staff.leave.read'
+  | 'staff.leave.manage'
+  | 'staff.employment-change.read'
+  | 'staff.employment-change.manage'
+  | 'staff.credentials.manage'
   | 'communications.use'
   | 'recruitment.templates.read'
   | 'recruitment.templates.manage'
@@ -33,10 +48,54 @@ function canonical(value: unknown) {
     .replace(/[\s&_.:-]+/g, '');
 }
 
+const CAPABILITY_IMPLICATIONS: Partial<Record<StaffCapability, StaffCapability[]>> = {
+  'staff.directory.read': [
+    'staff.hr.read',
+    'staff.hr.manage',
+    'staff.roles.manage',
+  ],
+  'staff.hr.read': [
+    'staff.hr.manage',
+  ],
+  'staff.compensation.read': [
+    'staff.compensation.manage',
+  ],
+  'staff.payroll.read': [
+    'staff.payroll.manage',
+  ],
+  'staff.bank.read': [
+    'staff.bank.manage',
+  ],
+  'staff.documents.read': [
+    'staff.documents.manage',
+  ],
+  'staff.leave.read': [
+    'staff.leave.manage',
+  ],
+  'staff.employment-change.read': [
+    'staff.employment-change.manage',
+  ],
+};
+
 const LEGACY_CAPABILITY_ALIASES: Record<StaffCapability, string[]> = {
   'staff.directory.read': ['hr', 'manageroles'],
-  'staff.manage': ['hr', 'manageroles'],
+  'staff.manage': ['hr'],
   'staff.roles.manage': ['manageroles'],
+  'staff.hr.read': ['hr', 'staffmanage'],
+  'staff.hr.manage': ['hr', 'staffmanage'],
+  'staff.compensation.read': [],
+  'staff.compensation.manage': [],
+  'staff.payroll.read': [],
+  'staff.payroll.manage': [],
+  'staff.bank.read': [],
+  'staff.bank.manage': [],
+  'staff.documents.read': [],
+  'staff.documents.manage': ['hr', 'staffmanage'],
+  'staff.leave.read': [],
+  'staff.leave.manage': ['hr', 'staffmanage'],
+  'staff.employment-change.read': [],
+  'staff.employment-change.manage': ['hr', 'staffmanage'],
+  'staff.credentials.manage': [],
   'communications.use': [],
   'recruitment.templates.read': ['hr', 'manageroles', 'opportunitiesread', 'opportunitiesmanage'],
   'recruitment.templates.manage': ['hr', 'manageroles', 'opportunitiesmanage'],
@@ -74,6 +133,13 @@ export function hasStaffCapability(
   }
 
   if (values.has(canonical(capability))) return true;
+
+  if (
+    (CAPABILITY_IMPLICATIONS[capability] || [])
+      .some((impliedBy) => values.has(canonical(impliedBy)))
+  ) {
+    return true;
+  }
 
   return LEGACY_CAPABILITY_ALIASES[capability]
     .some((alias) => values.has(alias));

@@ -13,7 +13,7 @@ export const dynamic = 'force-dynamic';
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const actor = await requireAdminStaffActor(req, { requirePassword: true });
-    requireStaffCapability(actor, 'staff.manage');
+    requireStaffCapability(actor, 'staff.hr.manage');
     const body = await req.json().catch(() => ({}));
     const data: { name?: string; active?: boolean } = {};
     if (body?.name !== undefined) {
@@ -36,7 +36,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
 export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const actor = await requireAdminStaffActor(req, { requirePassword: true });
-    requireStaffCapability(actor, 'staff.manage');
+    requireStaffCapability(actor, 'staff.hr.manage');
     await prisma.department.delete({ where: { id: params.id } });
     return NextResponse.json({ ok: true });
   } catch (error) {

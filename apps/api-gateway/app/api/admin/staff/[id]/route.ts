@@ -107,8 +107,10 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         },
         permissions: {
           self: false,
-          canManage: hasStaffCapability(actor, 'staff.manage'),
+          canReadDirectory: true,
+          canManage: hasStaffCapability(actor, 'staff.hr.manage'),
           canManageRoles: hasStaffCapability(actor, 'staff.roles.manage'),
+          canManageCredentials: false,
         },
       }, { headers: { 'cache-control': 'no-store' } });
     }
@@ -116,11 +118,17 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
     const self = profile.id === actor.profileId;
     const managerAccess = profile.manager?.id === actor.profileId;
     if (!self && !managerAccess) requireStaffCapability(actor, 'staff.directory.read');
-    const canManage = hasStaffCapability(actor, 'staff.manage');
-    const canReadAudit = canManage || hasStaffCapability(actor, 'meetings.audit.read') || actor.scopes.includes('compliance.audit.read');
+    const canReadDirectory = hasStaffCapability(actor, 'staff.directory.read');
+    const canManage = hasStaffCapability(actor, 'staff.hr.manage');
+    const canManageRoles = hasStaffCapability(actor, 'staff.roles.manage');
+    const canManageCredentials = hasStaffCapability(actor, 'staff.credentials.manage');
+    const canReadAudit =
+      canManage ||
+      hasStaffCapability(actor, 'meetings.audit.read') ||
+      actor.scopes.includes('compliance.audit.read');
 
-    const [credential, audit] = await Promise.all([
-      canManage || self
+    const [credential, audit, administration] = await Promise.all([
+      canManageCredentials || self
         ? prisma.adminAuthCredential.findUnique({
             where: { email: profile.email },
             select: { mustResetPassword: true, lastLoginAt: true, createdAt: true, updatedAt: true },
@@ -141,6 +149,70 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
             },
           })
         : Promise.resolve([]),
+      canManage || canManageRoles || canManageCredentials
+        ? (async () => {
+            const departments = canManage
+              ? await prisma.department.findMany({
+                  where: { active: true },
+                  orderBy: { name: 'asc' },
+                  select: {
+                    id: true,
+                    name: true,
+                    active: true,
+                    designations: {
+                      orderBy: { name: 'asc' },
+                      select: { id: true, name: true, departmentId: true },
+                    },
+                  },
+                })
+              : [];
+
+            const managers = canManage
+              ? await prisma.adminUserProfile.findMany({
+                  where: {
+                    id: { not: profile.id },
+                    lifecycleState: { in: ['ACTIVE', 'LEAVE'] },
+                  },
+                  orderBy: [{ name: 'asc' }, { email: 'asc' }],
+                  select: {
+                    id: true,
+                    name: true,
+                    email: true,
+                    departmentId: true,
+                    designationId: true,
+                    lifecycleState: true,
+                  },
+                })
+              : [];
+
+            const roles = canManageRoles
+              ? await prisma.role.findMany({
+                  orderBy: { name: 'asc' },
+                  select: {
+                    id: true,
+                    name: true,
+                    scopes: {
+                      orderBy: { scope: 'asc' },
+                      select: { scope: true },
+                    },
+                  },
+                })
+              : [];
+
+            return {
+              departments,
+              managers,
+              roles: roles.map((role) => ({
+                id: role.id,
+                name: role.name,
+                scopes: role.scopes.map((scope) => scope.scope),
+              })),
+              directRoleIds: canManageRoles
+                ? profile.roles.map((entry) => entry.role.id)
+                : [],
+            };
+          })()
+        : Promise.resolve(null),
     ]);
 
     return NextResponse.json({
@@ -151,12 +223,15 @@ export async function GET(request: NextRequest, { params }: { params: { id: stri
         mustResetPassword: credential.mustResetPassword,
         lastLoginAt: credential.lastLoginAt,
       } : { credentialPresent: false, mustResetPassword: null, lastLoginAt: null },
+      administration,
       audit,
       permissions: {
         self,
         managerAccess,
+        canReadDirectory,
         canManage,
-        canManageRoles: hasStaffCapability(actor, 'staff.roles.manage'),
+        canManageRoles,
+        canManageCredentials,
         canUseCommunications: hasStaffCapability(actor, 'communications.use'),
         canCreateMeetings: hasStaffCapability(actor, 'meetings.create'),
       },
@@ -179,13 +254,13 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const self = target.id === actor.profileId;
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const keys = bodyKeys(body);
-    const canManageProfile = hasStaffCapability(actor, 'staff.manage');
+    const canManageProfile = hasStaffCapability(actor, 'staff.hr.manage');
     const allowed = self && !canManageProfile ? SELF_FIELDS : MANAGED_FIELDS;
     const forbidden = keys.filter((key) => !allowed.has(key) && key !== 'roleIds');
     if (forbidden.length) {
       return NextResponse.json({ ok: false, error: 'unsupported_staff_fields', fields: forbidden }, { status: 400 });
     }
-    if (!self) requireStaffCapability(actor, 'staff.manage');
+    if (!self) requireStaffCapability(actor, 'staff.hr.manage');
 
     const wantsRoles = Object.prototype.hasOwnProperty.call(body, 'roleIds');
     if (wantsRoles) {
@@ -209,21 +284,126 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       data.workingHours = value;
     }
 
-    const departmentId = Object.prototype.hasOwnProperty.call(body, 'departmentId') ? cleanText(body.departmentId, 120) : undefined;
-    const designationId = Object.prototype.hasOwnProperty.call(body, 'designationId') ? cleanText(body.designationId, 120) : undefined;
-    if (departmentId !== undefined) data.departmentId = departmentId;
-    if (designationId !== undefined) data.designationId = designationId;
+    const departmentProvided =
+      Object.prototype.hasOwnProperty.call(body, 'departmentId');
+    const designationProvided =
+      Object.prototype.hasOwnProperty.call(body, 'designationId');
 
-    if (designationId) {
-      const designation = await prisma.designation.findUnique({ where: { id: designationId }, select: { departmentId: true } });
-      if (!designation) return NextResponse.json({ ok: false, error: 'designation_not_found' }, { status: 400 });
-      const intendedDepartment = departmentId === undefined
-        ? (await prisma.adminUserProfile.findUnique({ where: { id }, select: { departmentId: true } }))?.departmentId
-        : departmentId;
-      if (intendedDepartment && designation.departmentId !== intendedDepartment) {
-        return NextResponse.json({ ok: false, error: 'designation_department_mismatch' }, { status: 400 });
+    const departmentId =
+      departmentProvided
+        ? cleanText(body.departmentId, 120)
+        : undefined;
+    const designationId =
+      designationProvided
+        ? cleanText(body.designationId, 120)
+        : undefined;
+
+    const currentOrganisation =
+      (departmentProvided || designationProvided)
+        ? await prisma.adminUserProfile.findUnique({
+            where: { id },
+            select: {
+              departmentId: true,
+              designationId: true,
+              designation: {
+                select: {
+                  departmentId: true,
+                },
+              },
+            },
+          })
+        : null;
+
+    if (departmentProvided && departmentId) {
+      const department =
+        await prisma.department.findUnique({
+          where: { id: departmentId },
+          select: { id: true, active: true },
+        });
+
+      if (!department?.active) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'department_not_available',
+          },
+          { status: 400 },
+        );
       }
-      if (!intendedDepartment) data.departmentId = designation.departmentId;
+    }
+
+    if (
+      departmentProvided &&
+      departmentId !== currentOrganisation?.departmentId &&
+      !designationProvided &&
+      currentOrganisation?.designationId &&
+      currentOrganisation.designation?.departmentId !== departmentId
+    ) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'designation_required_for_department_change',
+        },
+        { status: 400 },
+      );
+    }
+
+    let resolvedDepartmentId =
+      departmentProvided
+        ? departmentId
+        : currentOrganisation?.departmentId;
+
+    if (designationProvided && designationId) {
+      const designation =
+        await prisma.designation.findUnique({
+          where: { id: designationId },
+          select: {
+            id: true,
+            departmentId: true,
+          },
+        });
+
+      if (!designation) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'designation_not_found',
+          },
+          { status: 400 },
+        );
+      }
+
+      if (
+        resolvedDepartmentId &&
+        designation.departmentId !== resolvedDepartmentId
+      ) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: 'designation_department_mismatch',
+          },
+          { status: 400 },
+        );
+      }
+
+      resolvedDepartmentId =
+        resolvedDepartmentId ||
+        designation.departmentId;
+    }
+
+    if (departmentProvided) {
+      data.departmentId =
+        resolvedDepartmentId || null;
+    }
+
+    if (designationProvided) {
+      data.designationId =
+        designationId || null;
+
+      if (!departmentProvided && designationId) {
+        data.departmentId =
+          resolvedDepartmentId || null;
+      }
     }
 
     if (Object.prototype.hasOwnProperty.call(body, 'managerId')) {
@@ -231,8 +411,15 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
       if (managerId === id) return NextResponse.json({ ok: false, error: 'self_manager_forbidden' }, { status: 400 });
       if (managerId) {
         const manager = await prisma.adminUserProfile.findUnique({ where: { id: managerId }, select: { id: true, lifecycleState: true } });
-        if (!manager || manager.lifecycleState === 'ARCHIVED') {
-          return NextResponse.json({ ok: false, error: 'manager_not_available' }, { status: 400 });
+        if (
+          !manager ||
+          manager.lifecycleState === 'ARCHIVED' ||
+          manager.lifecycleState === 'SUSPENDED'
+        ) {
+          return NextResponse.json(
+            { ok: false, error: 'manager_not_available' },
+            { status: 400 },
+          );
         }
         if (await wouldCreateManagerCycle(id, managerId)) {
           return NextResponse.json({ ok: false, error: 'manager_cycle_forbidden' }, { status: 400 });

@@ -19,7 +19,7 @@ const STATES = new Set<StaffLifecycleState>(['ACTIVE', 'LEAVE', 'SUSPENDED', 'AR
 export async function POST(request: NextRequest, { params }: { params: { id: string } }) {
   try {
     const actor = await requireAdminStaffActor(request, { requirePassword: true });
-    requireStaffCapability(actor, 'staff.manage');
+    requireStaffCapability(actor, 'staff.hr.manage');
 
     const id = String(params.id || '').trim();
     if (id === actor.profileId) {
