@@ -179,7 +179,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { id: st
     const self = target.id === actor.profileId;
     const body = await request.json().catch(() => ({})) as Record<string, unknown>;
     const keys = bodyKeys(body);
-    const allowed = self ? SELF_FIELDS : MANAGED_FIELDS;
+    const canManageProfile = hasStaffCapability(actor, 'staff.manage');
+    const allowed = self && !canManageProfile ? SELF_FIELDS : MANAGED_FIELDS;
     const forbidden = keys.filter((key) => !allowed.has(key) && key !== 'roleIds');
     if (forbidden.length) {
       return NextResponse.json({ ok: false, error: 'unsupported_staff_fields', fields: forbidden }, { status: 400 });

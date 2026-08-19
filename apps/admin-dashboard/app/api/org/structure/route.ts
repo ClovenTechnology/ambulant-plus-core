@@ -1,6 +1,4 @@
-// apps/admin-dashboard/app/api/org/structure/route.ts
 import { NextResponse } from 'next/server';
-import { orgdb } from '@/lib/orgdb';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,7 +12,9 @@ const APIGW =
   process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
   process.env.NEXT_PUBLIC_API_GATEWAY_BASE_URL ||
   process.env.NEXT_PUBLIC_GATEWAY_ORIGIN ||
-  ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production') ? 'https://api-gateway.ambulantplus.co.za' : 'http://localhost:3010');
+  ((process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production')
+    ? 'https://api-gateway.ambulantplus.co.za'
+    : 'http://localhost:3010');
 
 function gatewayBase() {
   return String(APIGW || '').replace(/\/+$/, '');
@@ -22,26 +22,32 @@ function gatewayBase() {
 
 function normaliseGatewayStructure(value: any) {
   const departments = Array.isArray(value?.departments) ? value.departments : [];
+  const roles = Array.isArray(value?.roles) ? value.roles : [];
 
   return {
     name: value?.name || value?.orgName || 'Ambulant+',
     orgName: value?.orgName || value?.name || 'Ambulant+',
-    departments: departments.map((d: any) => ({
-      id: String(d?.id || ''),
-      name: String(d?.name || 'Department'),
-      active: d?.active !== false,
-      designations: Array.isArray(d?.designations)
-        ? d.designations.map((z: any) => ({
-            id: String(z?.id || ''),
-            departmentId: String(z?.departmentId || d?.id || ''),
-            name: String(z?.name || 'Designation'),
-            roleNames: Array.isArray(z?.roleNames)
-              ? z.roleNames.map(String)
-              : Array.isArray(z?.roles)
-                ? z.roles.map((r: any) => String(r?.name || r)).filter(Boolean)
+    departments: departments.map((department: any) => ({
+      id: String(department?.id || ''),
+      name: String(department?.name || 'Department'),
+      active: department?.active !== false,
+      designations: Array.isArray(department?.designations)
+        ? department.designations.map((designation: any) => ({
+            id: String(designation?.id || ''),
+            departmentId: String(designation?.departmentId || department?.id || ''),
+            name: String(designation?.name || 'Designation'),
+            roleNames: Array.isArray(designation?.roleNames)
+              ? designation.roleNames.map(String)
+              : Array.isArray(designation?.roles)
+                ? designation.roles.map((role: any) => String(role?.name || role)).filter(Boolean)
                 : [],
           }))
         : [],
+    })),
+    roles: roles.map((role: any) => ({
+      id: String(role?.id || ''),
+      name: String(role?.name || 'Role'),
+      scopes: Array.isArray(role?.scopes) ? role.scopes.map(String) : [],
     })),
   };
 }
@@ -55,13 +61,7 @@ export async function GET() {
     });
 
     const text = await upstream.text();
-    let data: any = null;
-
-    try {
-      data = text ? JSON.parse(text) : null;
-    } catch {
-      data = null;
-    }
+    const data = text ? JSON.parse(text) : null;
 
     if (!upstream.ok || !data || data?.ok === false) {
       throw new Error(data?.error || upstream.statusText || 'gateway_org_structure_unavailable');
@@ -70,18 +70,11 @@ export async function GET() {
     return NextResponse.json(normaliseGatewayStructure(data), {
       headers: { 'cache-control': 'no-store' },
     });
-  } catch (err: any) {
-    console.warn('[admin-dashboard] gateway org structure unavailable; using local fallback', err);
-
+  } catch (error: any) {
+    console.error('[admin-dashboard] canonical org structure unavailable', error);
     return NextResponse.json(
-      {
-        ...orgdb.structure(),
-        warning: 'gateway_org_structure_unavailable_using_local_fallback',
-      },
-      {
-        status: 200,
-        headers: { 'cache-control': 'no-store' },
-      },
+      { ok: false, error: 'canonical_org_structure_unavailable' },
+      { status: 502, headers: { 'cache-control': 'no-store' } },
     );
   }
 }

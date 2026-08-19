@@ -7,7 +7,7 @@ import { OrgApi } from '@/src/lib/gateway';
 
 type Department = { id: string; name: string; active: boolean };
 type Designation = { id: string; departmentId: string; name: string; roleNames: RoleName[] };
-type OrgStructure = { departments: Array<Department & { designations: Designation[] }> };
+type OrgStructure = { departments: Array<Department & { designations: Designation[] }>; roles?: Array<{ id: string; name: RoleName; scopes?: string[] }> };
 
 export default function DepartmentsSettingsPage() {
   const [structure, setStructure] = useState<OrgStructure | null>(null);
@@ -22,26 +22,17 @@ export default function DepartmentsSettingsPage() {
   const allRoleNames = useMemo<RoleName[]>(() => {
     const set = new Set<RoleName>();
 
-    (structure?.departments ?? []).forEach((d) =>
-      (d.designations ?? []).forEach((z) =>
-        (z.roleNames ?? []).forEach((r) => set.add(r))
+    (structure?.roles ?? []).forEach((role) => {
+      if (role?.name) set.add(role.name);
+    });
+
+    (structure?.departments ?? []).forEach((department) =>
+      (department.designations ?? []).forEach((designation) =>
+        (designation.roleNames ?? []).forEach((roleName) => set.add(roleName))
       )
     );
 
-    // Add expected defaults so UX isn't empty on day 1
-    [
-      'SuperAdmin',
-      'Admin',
-      'Medical',
-      'TechIT',
-      'Finance',
-      'HR',
-      'Compliance',
-      'ReportsResearch',
-      'RnD',
-    ].forEach((r) => set.add(r as RoleName));
-
-    return Array.from(set);
+    return Array.from(set).sort((a, b) => String(a).localeCompare(String(b)));
   }, [structure]);
 
   const refresh = async () => {

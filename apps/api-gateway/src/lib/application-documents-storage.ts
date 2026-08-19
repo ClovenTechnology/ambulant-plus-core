@@ -91,7 +91,11 @@ export async function presignApplicationDocumentUpload(input: {
       ContentType: input.contentType,
       ChecksumSHA256: checksumBase64,
     }),
-    { expiresIn: UPLOAD_URL_TTL_SECONDS },
+    {
+      expiresIn: UPLOAD_URL_TTL_SECONDS,
+      unhoistableHeaders: new Set(['x-amz-checksum-sha256']),
+      signableHeaders: new Set(['content-type']),
+    },
   );
 
   return {

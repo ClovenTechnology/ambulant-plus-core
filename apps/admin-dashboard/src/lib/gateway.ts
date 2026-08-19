@@ -70,27 +70,27 @@ export type RoleName = string;
 
 export const OrgApi = {
   async structure() {
-    return gwFetch('/api/org/structure', { method: 'GET' });
+    return localFetch('/api/org/structure', { method: 'GET' });
   },
 
   async createDepartment(input: { name: string; active?: boolean }) {
-    return gwFetch('/api/org/departments', { method: 'POST', json: input });
+    return localFetch('/api/org/departments', { method: 'POST', json: input });
   },
 
   async updateDepartment(id: string, input: { name?: string; active?: boolean }) {
-    return gwFetch(`/api/org/departments/${id}`, { method: 'PATCH', json: input });
+    return localFetch(`/api/org/departments/${id}`, { method: 'PATCH', json: input });
   },
 
   async deleteDepartment(id: string) {
-    return gwFetch(`/api/org/departments/${id}`, { method: 'DELETE' });
+    return localFetch(`/api/org/departments/${id}`, { method: 'DELETE' });
   },
 
   async listDesignations() {
-    return gwFetch('/api/org/designations', { method: 'GET' });
+    return localFetch('/api/org/designations', { method: 'GET' });
   },
 
   async createDesignation(input: { departmentId: string; name: string }) {
-    return gwFetch('/api/org/designations', { method: 'POST', json: input });
+    return localFetch('/api/org/designations', { method: 'POST', json: input });
   },
 
   async setDesignationRoles(
@@ -98,14 +98,14 @@ export const OrgApi = {
     roleIds?: string[] | null,
     roleNames?: RoleName[] | null,
   ) {
-    return gwFetch(`/api/org/designations/${designationId}/roles`, {
+    return localFetch(`/api/org/designations/${designationId}/roles`, {
       method: 'PUT',
       json: { roleIds: roleIds ?? undefined, roleNames: roleNames ?? undefined },
     });
   },
 
   async deleteDesignation(id: string) {
-    return gwFetch(`/api/org/designations/${id}`, { method: 'DELETE' });
+    return localFetch(`/api/org/designations/${id}`, { method: 'DELETE' });
   },
 };
 

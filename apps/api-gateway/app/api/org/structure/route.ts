@@ -1,6 +1,11 @@
 // apps/api-gateway/app/api/org/structure/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
+import {
+  adminStaffAuthResponse,
+  requireAdminStaffActor,
+  requireStaffCapability,
+} from '@/src/lib/admin-staff-auth';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -184,7 +189,7 @@ async function assignRoleToDesignation(body: Record<string, any>, remove = false
   });
 }
 
-async function writeOrgStructure(req: Request, mode: 'create' | 'patch') {
+async function writeOrgStructure(req: NextRequest, mode: 'create' | 'patch') {
   let body: Record<string, any>;
 
   try {
@@ -195,6 +200,24 @@ async function writeOrgStructure(req: Request, mode: 'create' | 'patch') {
 
   const entity = orgHierarchyEntity(body);
   const action = orgHierarchyText(body.action || mode, 80).toLowerCase();
+
+  try {
+    const actor = await requireAdminStaffActor(req, { requirePassword: true });
+    const roleMutation =
+      entity === 'role' ||
+      entity === 'org_role' ||
+      entity === 'role_node' ||
+      entity === 'designation_role' ||
+      entity === 'department_designation_role' ||
+      entity === 'role_assignment' ||
+      action === 'assign_role_to_designation' ||
+      action === 'remove_role_from_designation';
+    requireStaffCapability(actor, roleMutation ? 'staff.roles.manage' : 'staff.manage');
+  } catch (error) {
+    const auth = adminStaffAuthResponse(error);
+    if (auth) return NextResponse.json(auth.body, { status: auth.status });
+    throw error;
+  }
   const id = orgHierarchyText(body.id || body.nodeId, 160);
   const name = orgHierarchyText(body.name || body.label || body.title, 180);
   const active = orgHierarchyBool(body.active, true);
@@ -355,10 +378,10 @@ async function writeOrgStructure(req: Request, mode: 'create' | 'patch') {
   }
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   return writeOrgStructure(req, 'create');
 }
 
-export async function PATCH(req: Request) {
+export async function PATCH(req: NextRequest) {
   return writeOrgStructure(req, 'patch');
 }

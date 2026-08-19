@@ -1,17 +1,12 @@
-// apps/admin-dashboard/app/api/org/departments/route.ts
-import { NextResponse } from 'next/server';
-import { orgdb } from '@/lib/orgdb';
+import { NextRequest } from 'next/server';
+import { proxyAdminJsonBody, proxyAdminJsonGET } from '@/app/api/_proxy';
 
-export async function GET() {
-  return NextResponse.json({ items: orgdb.listDepartments() });
+export const dynamic = 'force-dynamic';
+
+export async function GET(request: NextRequest) {
+  return proxyAdminJsonGET(request, { path: '/api/org/departments', forwardQuery: false });
 }
 
-export async function POST(req: Request) {
-  try {
-    const body = await req.json().catch(() => ({}));
-    const dep = orgdb.createDepartment({ name: body.name, active: body.active });
-    return NextResponse.json(dep, { status: 201 });
-  } catch (e: any) {
-    return NextResponse.json({ error: e?.message || 'create failed' }, { status: 400 });
-  }
+export async function POST(request: NextRequest) {
+  return proxyAdminJsonBody(request, 'POST', { path: '/api/org/departments' });
 }

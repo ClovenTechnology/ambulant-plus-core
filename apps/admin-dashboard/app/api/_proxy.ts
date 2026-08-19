@@ -113,7 +113,7 @@ function jsonOrEmpty(body: any) {
   }
 }
 
-export async function proxyAdminJsonBody(req: NextRequest, method: 'POST' | 'PATCH' | 'DELETE', opts: ProxyOpts) {
+export async function proxyAdminJsonBody(req: NextRequest, method: 'POST' | 'PUT' | 'PATCH' | 'DELETE', opts: ProxyOpts) {
   try {
     const base = apigwBase();
     if (!base) return NextResponse.json({ ok: false, error: 'Missing API gateway base (apigwBase())' }, { status: 500 });
