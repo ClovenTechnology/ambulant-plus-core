@@ -1,3 +1,5 @@
+BEGIN;
+
 -- Ambulant+ Enterprise Finance / Operations physical-schema reconciliation
 -- Generated from a read-only Prisma migrate diff:
 --   live Production database -> current prisma/schema.prisma
@@ -1946,3 +1948,5 @@ CREATE INDEX "OpsVendorPayout_scheduledAt_idx" ON "OpsVendorPayout"("scheduledAt
 
 -- CreateIndex
 CREATE INDEX "OpsVendorPayout_paidAt_idx" ON "OpsVendorPayout"("paidAt");
+
+COMMIT;
