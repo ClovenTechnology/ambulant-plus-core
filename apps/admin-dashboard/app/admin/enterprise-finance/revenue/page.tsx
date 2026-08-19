@@ -68,15 +68,8 @@ const manualInflowCategories = [
   { value: "other", label: "Other" },
 ];
 
-const apiBase = (
-  process.env.NEXT_PUBLIC_API_GATEWAY_URL ||
-  process.env.NEXT_PUBLIC_API_BASE_URL ||
-  process.env.NEXT_PUBLIC_API_URL ||
-  ""
-).replace(/\/$/, "");
-
 function apiPath(path: string) {
-  return `${apiBase}${path}`;
+  return path.startsWith('/') ? path : `/${path}`;
 }
 
 function isRecord(value: unknown): value is JsonRecord {

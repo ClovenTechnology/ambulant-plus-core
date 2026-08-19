@@ -2,7 +2,8 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { BadgeCheck, RefreshCw, Search, UsersRound } from 'lucide-react';
+import { BadgeCheck, LockKeyhole, RefreshCw, Search, UsersRound } from 'lucide-react';
+import { errorText, userFacingApiError } from '@/lib/admin-error';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,6 +66,7 @@ export default function AdminStaffDirectoryPage() {
   const [data, setData] = useState<Payload | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [accessDenied, setAccessDenied] = useState(false);
   const [q, setQ] = useState('');
   const [state, setState] = useState('');
   const [department, setDepartment] = useState('');
@@ -87,10 +89,25 @@ export default function AdminStaffDirectoryPage() {
       if (presence) sp.set('presence', presence);
       const response = await fetch(`/api/admin/staff?${sp.toString()}`, { cache: 'no-store' });
       const json = await response.json().catch(() => null);
-      if (!response.ok || !json?.ok) throw new Error(json?.error || 'Unable to load staff directory');
+      if (!response.ok || !json?.ok) {
+        const userError = userFacingApiError({
+          response,
+          json,
+          fallback: 'Unable to load the Staff Directory.',
+        });
+        if (response.status === 403 && userError.code === 'staff_capability_required') {
+          setData(null);
+          setAccessDenied(true);
+          setError(errorText(userError));
+          return;
+        }
+        throw new Error(errorText(userError));
+      }
+      setAccessDenied(false);
       setData(json);
     } catch (err: any) {
-      setError(err?.message || 'Unable to load staff directory');
+      setAccessDenied(false);
+      setError(err?.message || 'Unable to load the Staff Directory.');
     } finally {
       setBusy(false);
     }
@@ -101,6 +118,34 @@ export default function AdminStaffDirectoryPage() {
   const counts = data?.counts || {};
   const options = data?.filters;
   const hasFilters = useMemo(() => Boolean(q || state || department || designation || role || presence), [q, state, department, designation, role, presence]);
+
+  if (accessDenied) {
+    return (
+      <main className="p-4 lg:p-6">
+        <section className="mx-auto max-w-2xl rounded-3xl border bg-white p-6 shadow-sm">
+          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-slate-100 text-slate-700">
+            <LockKeyhole className="h-5 w-5" />
+          </div>
+          <h1 className="mt-4 text-2xl font-semibold text-slate-950">
+            Staff Directory access is restricted
+          </h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Your Staff account does not have permission to browse or administer other Staff profiles.
+            You can continue to manage your own profile from My Profile.
+          </p>
+          {error ? (
+            <p className="mt-3 text-xs text-slate-500">{error}</p>
+          ) : null}
+          <Link
+            href="/settings/profile"
+            className="mt-5 inline-flex rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white"
+          >
+            Open My Profile
+          </Link>
+        </section>
+      </main>
+    );
+  }
 
   return (
     <main className="space-y-6 p-4 lg:p-6">

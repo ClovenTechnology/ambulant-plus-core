@@ -8,10 +8,14 @@ import {
   enterpriseMediaErrorResponse,
   enterpriseMediaObjectBelongsTo,
   managedEnterpriseMediaRef,
-  verifyEnterpriseMediaUpload,
   validateEnterpriseMediaUploadInput,
+  verifyEnterpriseMediaUpload,
 } from '@/src/lib/enterprise-media-storage';
-import { serializeAdminOpportunity, opportunityAdminInclude, writeOpportunityAudit } from '@/src/lib/admin-opportunities';
+import {
+  opportunityAdminInclude,
+  serializeAdminOpportunity,
+  writeOpportunityAudit,
+} from '@/src/lib/admin-opportunities';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -21,6 +25,8 @@ function json(body: unknown, status = 200) {
 }
 
 export async function POST(request: NextRequest, context: { params: { id: string } }) {
+  let cleanupRef: string | null = null;
+
   try {
     const actor = requireOpportunityScope(
       await requireAdminStaffActor(request, { requirePassword: true }),
@@ -51,15 +57,20 @@ export async function POST(request: NextRequest, context: { params: { id: string
     await verifyEnterpriseMediaUpload({ objectKey, ...upload });
 
     const managedRef = managedEnterpriseMediaRef(objectKey);
-    const updated = await prisma.opportunity.update({
+    cleanupRef = managedRef;
+
+    await prisma.opportunity.update({
       where: { id: opportunity.id },
       data: {
         imageUrl: managedRef,
         imageAlt,
         lastUpdatedByProfileId: actor.profileId,
       },
-      include: opportunityAdminInclude,
     });
+
+    // The uploaded object is now referenced by Opportunity and must no longer
+    // be treated as an orphan if a later audit/read operation fails.
+    cleanupRef = null;
 
     await writeOpportunityAudit({
       actor,
@@ -70,12 +81,24 @@ export async function POST(request: NextRequest, context: { params: { id: string
       meta: { imageAlt },
     });
 
+    const updated = await prisma.opportunity.findUnique({
+      where: { id: opportunity.id },
+      include: opportunityAdminInclude,
+    });
+
     if (opportunity.imageUrl && opportunity.imageUrl !== managedRef) {
       await bestEffortDeleteManagedEnterpriseMedia(opportunity.imageUrl);
     }
 
-    return json({ ok: true, opportunity: serializeAdminOpportunity(updated) });
+    return json({
+      ok: true,
+      opportunity: updated ? serializeAdminOpportunity(updated) : null,
+    });
   } catch (error) {
+    if (cleanupRef) {
+      await bestEffortDeleteManagedEnterpriseMedia(cleanupRef);
+    }
+
     const auth = adminStaffAuthResponse(error);
     if (auth) return json(auth.body, auth.status);
     const media = enterpriseMediaErrorResponse(error);

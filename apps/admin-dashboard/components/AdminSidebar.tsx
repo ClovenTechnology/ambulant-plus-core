@@ -166,10 +166,10 @@ export default function AdminSidebar() {
   const TOP: Item[] = useMemo(
     () => [
       { href: '/', label: 'Dashboard', icon: LayoutDashboard },
-      { href: '/patients', label: 'Patients', icon: Users, requires: ['medical', 'reports', 'hr'] },
-      { href: '/clinicians', label: 'Clinicians', icon: Stethoscope, requires: ['medical', 'hr'] },
-      { href: '/cases', label: 'Cases', icon: ClipboardList, requires: 'medical' },
-      { href: '/orders', label: 'Orders', icon: Package, requires: 'medical' },
+      { href: '/patients', label: 'Patients', icon: Users, requires: ['medical', 'clinical:read', 'clinical:write', 'patients:read', 'patients:support', 'reports:read', 'hr:read', 'hr:manage'] },
+      { href: '/clinicians', label: 'Clinicians', icon: Stethoscope, requires: ['medical', 'clinical:read', 'clinical:write', 'clinicians:read', 'clinicians:manage', 'clinicians:support', 'hr:read', 'hr:manage'] },
+      { href: '/cases', label: 'Cases', icon: ClipboardList, requires: ['medical', 'clinical:read', 'clinical:write'] },
+      { href: '/orders', label: 'Orders', icon: Package, requires: ['medical', 'clinical:read', 'clinical:write'] },
     ],
     []
   );
@@ -184,9 +184,15 @@ export default function AdminSidebar() {
 
       // NEW: Forex (FX)
       { href: '/finance/fx', label: 'Forex', icon: ArrowLeftRight, requires: 'finance' },
+      {
+        href: '/admin/enterprise-finance',
+        label: 'Enterprise Finance',
+        icon: BarChart3,
+        requires: ['finance', 'finance:manage', 'finance.manage'],
+      },
 
       { href: '/promotions', label: 'Promotions', icon: Sparkles /* public within admin */ },
-      { href: '/consult', label: 'Consult', icon: HeartPulse, requires: 'medical' },
+      { href: '/consult', label: 'Consult', icon: HeartPulse, requires: ['medical', 'clinical:read', 'clinical:write'] },
     ],
     []
   );
@@ -247,15 +253,15 @@ export default function AdminSidebar() {
         label: 'Admin',
         icon: Store,
         defaultOpen: true,
-        requires: ['hr', 'manageRoles', 'compliance', 'medical', 'forms.read', 'forms.design', 'forms.publish', 'opportunities.read', 'opportunities.manage', 'opportunities.publish', 'applications.read', 'applications.review', 'applications.assign', 'applications.decision', 'applications.documents.read', 'applications.documents.request', 'applications.documents.review', 'applications.interviews.read', 'applications.interviews.schedule', 'applications.interviews.manage', 'applications.interviews.evaluate', 'applications.onboarding.manage', 'communications.use', 'recruitment.templates.read', 'recruitment.templates.manage', 'recruitment.settings.manage'],
+        requires: ['hr', 'hr:read', 'hr:manage', 'staff.hr.read', 'staff.hr.manage', 'manageRoles', 'compliance', 'compliance:read', 'compliance:manage', 'medical', 'clinical:read', 'clinical:write', 'forms.read', 'forms.design', 'forms.publish', 'opportunities.read', 'opportunities.manage', 'opportunities.publish', 'applications.read', 'applications.review', 'applications.assign', 'applications.decision', 'applications.documents.read', 'applications.documents.request', 'applications.documents.review', 'applications.interviews.read', 'applications.interviews.schedule', 'applications.interviews.manage', 'applications.interviews.evaluate', 'applications.onboarding.manage', 'communications.use', 'recruitment.templates.read', 'recruitment.templates.manage', 'recruitment.settings.manage'],
         items: [
           { href: '/admin/training', label: 'Training control', icon: CalendarDays, requires: ['medical', 'hr', 'manageRoles'] },
           { href: '/admin/calendar', label: 'Training calendar', icon: CalendarDays, requires: ['medical', 'hr', 'manageRoles'] },
           { href: '/admin/clinicians/onboarding', label: 'Clinician onboarding', icon: Stethoscope, requires: ['medical', 'hr', 'manageRoles', 'finance'] },
-          { href: '/admin/legal', label: 'Legal Department', icon: Shield, requires: ['manageRoles', 'compliance'] },
-          { href: '/admin/staff', label: 'Staff Directory', icon: Users, requires: ['staff.directory.read', 'staff.manage', 'hr', 'manageRoles'] },
+          { href: '/admin/legal', label: 'Legal Department', icon: Shield, requires: ['manageRoles', 'compliance', 'compliance:read', 'compliance:manage', 'compliance.read', 'compliance.manage'] },
+          { href: '/admin/staff', label: 'Staff Directory', icon: Users, requires: ['staff.directory.read', 'staff.manage', 'staff.hr.read', 'staff.hr.manage', 'hr', 'hr:read', 'hr:manage', 'manageRoles'] },
           { href: '/admin/communications', label: 'Communications', icon: Users, requires: ['communications.use'] },
-          { href: '/admin/recruitment', label: 'Recruitment', icon: Briefcase, requires: ['recruitment.templates.read', 'recruitment.templates.manage', 'recruitment.settings.manage', 'applications.onboarding.manage', 'hr', 'manageRoles'] },
+          { href: '/admin/recruitment', label: 'Recruitment', icon: Briefcase, requires: ['recruitment.templates.read', 'recruitment.templates.manage', 'recruitment.settings.manage', 'applications.onboarding.manage', 'staff.hr.read', 'staff.hr.manage', 'hr', 'hr:read', 'hr:manage', 'manageRoles'] },
           { href: '/admin/meetings', label: 'Meetings', icon: CalendarDays, requires: ['meetings.create', 'meetings.moderate', 'meetings.audit.read', 'applications.interviews.read', 'applications.interviews.schedule', 'applications.interviews.manage', 'applications.interviews.evaluate', 'applications.onboarding.manage'] },
           { href: '/admin/forms', label: 'Enterprise Forms', icon: ClipboardList, requires: ['forms.read', 'forms.design', 'forms.publish'] },
           { href: '/admin/opportunities', label: 'Opportunities', icon: Briefcase, requires: ['opportunities.read', 'opportunities.manage', 'opportunities.publish'] },
@@ -270,19 +276,19 @@ export default function AdminSidebar() {
         label: 'Settings',
         icon: Settings,
         defaultOpen: true,
-        requires: ['manageRoles', 'finance', 'tech', 'medical'],
+        requires: ['manageRoles', 'finance', 'finance:read', 'finance:manage', 'tech', 'tech:read', 'tech:manage', 'medical', 'clinical:read', 'clinical:write', 'hr:read', 'hr:manage', 'staff.hr.read', 'staff.hr.manage'],
         items: [
           { href: '/settings/general', label: 'General', icon: Settings, requires: ['manageRoles'] },
           { href: '/settings/roles', label: 'Roles', icon: UserRoundCog, requires: ['manageRoles'] },
           { href: '/settings/plans', label: 'Plans', icon: Settings, requires: ['manageRoles', 'finance'] },
-          { href: '/settings/consult', label: 'Consult', icon: HeartPulse, requires: ['medical', 'manageRoles'] },
+          { href: '/settings/consult', label: 'Consult', icon: HeartPulse, requires: ['medical', 'clinical:read', 'clinical:write', 'manageRoles'] },
           { href: '/settings/insurance', label: 'Insurance', icon: Shield, requires: ['finance'] },
           { href: '/settings/payouts', label: 'Payouts', icon: Package, requires: ['finance'] },
           { href: '/settings/insightcore', label: 'InsightCore', icon: BarChart3, requires: ['tech'] },
           { href: '/settings/shop', label: 'Shop', icon: Store, requires: ['manageRoles'] },
           // People (Departments / Role Requests)
-          { href: '/settings/people/departments', label: 'Departments', icon: Settings, requires: ['hr', 'manageRoles'] },
-          { href: '/settings/people/role-requests', label: 'Role Requests', icon: UserRoundCog, requires: ['hr', 'manageRoles'] },
+          { href: '/settings/people/departments', label: 'Departments', icon: Settings, requires: ['staff.hr.read', 'staff.hr.manage', 'hr', 'hr:read', 'hr:manage', 'manageRoles'] },
+          { href: '/settings/people/role-requests', label: 'Role Requests', icon: UserRoundCog, requires: ['staff.roles.manage', 'staff.hr.manage', 'hr', 'hr:manage', 'manageRoles'] },
           { href: '/settings/profile', label: 'My Profile', icon: UserRoundCog }, // always visible to the user
         ],
       },

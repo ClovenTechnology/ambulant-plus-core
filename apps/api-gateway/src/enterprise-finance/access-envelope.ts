@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
+import {
+  AdminStaffAuthError,
+  requireAdminStaffActor,
+  type AdminStaffActor,
+} from '@/src/lib/admin-staff-auth';
 
 export const ENTERPRISE_FINANCE_ACCESS_MARKER =
   'A5_K_D_C_ENTERPRISE_FINANCE_ACCESS_ENVELOPE';
@@ -9,6 +14,8 @@ export type EnterpriseFinanceActor = {
   email: string | null;
   role: string | null;
   roles: string[];
+  scopes: string[];
+  identitySource: 'staff_session' | 'legacy_headers';
 };
 
 export type ShareholderAccessEnvelope = {
@@ -144,20 +151,69 @@ export function actorFromRequest(req: NextRequest): EnterpriseFinanceActor {
     ]),
   );
 
-  return { userId, email, role: primaryRole, roles };
+  return {
+    userId,
+    email,
+    role: primaryRole,
+    roles,
+    scopes: [],
+    identitySource: 'legacy_headers',
+  };
+}
+
+function actorFromAdminStaff(actor: AdminStaffActor): EnterpriseFinanceActor {
+  return {
+    userId: actor.userId,
+    email: actor.email,
+    role: actor.roles[0] || 'admin_staff',
+    roles: actor.roles,
+    scopes: actor.scopes,
+    identitySource: 'staff_session',
+  };
+}
+
+async function optionalAdminStaffActor(req: NextRequest) {
+  try {
+    return await requireAdminStaffActor(req, { requirePassword: true });
+  } catch (error) {
+    if (error instanceof AdminStaffAuthError) {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function canonicalAuthority(value: unknown) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s&_.:-]+/g, '');
+}
+
+function hasFinanceManageAuthority(actor: AdminStaffActor) {
+  if (actor.isSuperAdmin) return true;
+
+  const authorities = new Set(
+    [...actor.roles, ...actor.scopes]
+      .map(canonicalAuthority)
+      .filter(Boolean),
+  );
+
+  return (
+    authorities.has('finance') ||
+    authorities.has('financeadmin') ||
+    authorities.has('financemanager') ||
+    authorities.has('accountant') ||
+    authorities.has('financemanage')
+  );
 }
 
 export function isFinanceRole(roles: string[]) {
   const allowed = new Set([
-    'admin',
-    'super_admin',
-    'owner',
-    'founder',
     'accountant',
     'finance',
     'finance_admin',
     'finance_manager',
-    'operations_admin',
   ]);
 
   return roles.some((role) => allowed.has(role));
@@ -180,7 +236,10 @@ async function safeFindFirst(delegate: any, args: any) {
 export async function resolveEnterpriseFinanceAccess(
   req: NextRequest,
 ): Promise<EnterpriseFinanceAccessEnvelope> {
-  const actor = actorFromRequest(req);
+  const staffActor = await optionalAdminStaffActor(req);
+  const actor = staffActor
+    ? actorFromAdminStaff(staffActor)
+    : actorFromRequest(req);
   const db: any = prisma;
   const roleSet = Array.from(new Set(actor.roles));
 
@@ -232,8 +291,19 @@ export async function resolveEnterpriseFinanceAccess(
     canDownloadDocuments: Boolean(grant?.canDownloadDocuments ?? shareholder?.portalEnabled ?? false),
   };
 
-  const financeAdmin = isFinanceRole(roleSet);
-  const operations = isOperationalRole(roleSet);
+  /*
+   * Finance and operational authority must come from the signed, password-backed
+   * Staff session. Legacy identity headers remain lookup-only compatibility for
+   * shareholder access and can never confer Enterprise Finance controls.
+   */
+  const financeAdmin = Boolean(
+    staffActor &&
+      hasFinanceManageAuthority(staffActor),
+  );
+  const operations = Boolean(
+    staffActor &&
+      isOperationalRole(roleSet),
+  );
   const activePortals: string[] = [];
 
   if (operations || financeAdmin) activePortals.push('operations');
@@ -307,7 +377,10 @@ export async function requireShareholderReadAccess(
 
 export async function auditEnterpriseFinance(eventType: string, req: NextRequest, meta: any) {
   const db: any = prisma;
-  const actor = actorFromRequest(req);
+  const staffActor = await optionalAdminStaffActor(req);
+  const actor = staffActor
+    ? actorFromAdminStaff(staffActor)
+    : actorFromRequest(req);
 
   try {
     await db.payrollAuditEvent?.create?.({

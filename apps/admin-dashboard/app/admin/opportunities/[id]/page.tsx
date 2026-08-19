@@ -63,6 +63,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
   const [imageAlt, setImageAlt] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageNonce, setImageNonce] = useState(0);
+  const [featuredPickerKey, setFeaturedPickerKey] = useState(0);
   const [galleryDrafts, setGalleryDrafts] = useState<GalleryDraft[]>([]);
   const [canDelete, setCanDelete] = useState(false);
   const [tags, setTags] = useState('');
@@ -296,6 +297,8 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
       });
       if (json?.opportunity) hydrate(json.opportunity);
       else await load();
+      setImageFile(null);
+      setFeaturedPickerKey((value) => value + 1);
       setImageNonce((value) => value + 1);
     } catch (err: any) {
       setError(humanizeOpportunityError(err?.message));
@@ -513,12 +516,83 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
                 <p className="mt-1 text-xs text-slate-500">This is the lead image used on opportunity cards, social previews and the top of the public page. JPEG, PNG or WebP; maximum 8 MB.</p>
               </div>
               {imagePreviewUrl ? <div className="overflow-hidden rounded-2xl border bg-slate-50"><img src={imagePreviewUrl} alt={imageAlt || 'Opportunity image preview'} className="max-h-72 w-full object-cover" /></div> : null}
-              <div className="grid gap-3 md:grid-cols-[1fr_auto_auto] md:items-end">
-                <label className="space-y-1 text-sm"><span className="font-medium">Choose featured image</span><input disabled={!editable || busy} type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setImageFile(event.target.files?.[0] || null)} className="block w-full rounded-xl border px-3 py-2 text-sm disabled:bg-slate-50" /></label>
-                <button type="button" onClick={uploadOpportunityImage} disabled={!editable || busy || !imageFile || !imageAlt.trim()} className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"><ImagePlus className="h-4 w-4" />{hasImage ? 'Replace image' : 'Upload image'}</button>
-                {hasImage ? <button type="button" onClick={removeOpportunityImage} disabled={!editable || busy} className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-40"><Trash2 className="h-4 w-4" />Remove</button> : null}
-              </div>
-              <label className="block space-y-1 text-sm"><span className="font-medium">Featured image alt text</span><input disabled={!editable} value={imageAlt} onChange={(e) => setImageAlt(e.target.value)} className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50" placeholder="Describe the image for people using screen readers" /></label>
+              <label className="block space-y-1 text-sm">
+                <span className="font-medium">{hasImage ? 'Choose a replacement featured image' : 'Choose featured image'}</span>
+                <input
+                  key={featuredPickerKey}
+                  disabled={!editable || busy}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  onChange={(event) => {
+                    const file = event.target.files?.[0] || null;
+                    setImageFile(file);
+                    if (file && hasImage) setImageAlt('');
+                  }}
+                  className="block w-full rounded-xl border px-3 py-2 text-sm disabled:bg-slate-50"
+                />
+              </label>
+
+              {imageFile ? (
+                <div className="space-y-3 rounded-2xl border bg-slate-50 p-4">
+                  <div className="text-xs font-medium text-slate-600">{imageFile.name}</div>
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium">Alt text <span className="text-rose-600">*</span></span>
+                    <input
+                      disabled={!editable || busy}
+                      value={imageAlt}
+                      onChange={(event) => setImageAlt(event.target.value)}
+                      className="w-full rounded-xl border bg-white px-3 py-2 disabled:bg-slate-100"
+                      placeholder="Required accessible description"
+                    />
+                  </label>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={uploadOpportunityImage}
+                      disabled={!editable || busy || !imageAlt.trim()}
+                      className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-40"
+                    >
+                      <ImagePlus className="h-4 w-4" />
+                      {hasImage ? 'Upload replacement' : 'Upload featured image'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setImageFile(null);
+                        setFeaturedPickerKey((value) => value + 1);
+                        setImageAlt(opportunity?.imageAlt || '');
+                      }}
+                      disabled={busy}
+                      className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-40"
+                    >
+                      Cancel selection
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <label className="block space-y-1 text-sm">
+                  <span className="font-medium">Featured image alt text</span>
+                  <input
+                    disabled={!editable || !hasImage}
+                    value={imageAlt}
+                    onChange={(event) => setImageAlt(event.target.value)}
+                    className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50"
+                    placeholder={hasImage ? 'Describe the current image for people using screen readers' : 'Choose an image first'}
+                  />
+                </label>
+              )}
+
+              {hasImage ? (
+                <button
+                  type="button"
+                  onClick={removeOpportunityImage}
+                  disabled={!editable || busy}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-rose-200 px-4 py-2 text-sm font-semibold text-rose-700 disabled:opacity-40"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Remove featured image
+                </button>
+              ) : null}
             </div>
 
             <div className="space-y-4 border-t pt-5 md:col-span-2">

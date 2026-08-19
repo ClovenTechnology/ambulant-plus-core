@@ -13,6 +13,7 @@ const RULES: Array<{
     required: [
       'staff.roles.manage',
       'staff.hr.manage',
+      'hr:manage',
       'manageRoles',
       'hr',
     ],
@@ -31,6 +32,8 @@ const RULES: Array<{
     required: [
       'staff.hr.read',
       'staff.hr.manage',
+      'hr:read',
+      'hr:manage',
       'hr',
     ],
   },
@@ -49,6 +52,10 @@ const RULES: Array<{
       'recruitment.templates.manage',
       'recruitment.settings.manage',
       'applications.onboarding.manage',
+      'staff.hr.read',
+      'staff.hr.manage',
+      'hr:read',
+      'hr:manage',
       'hr',
       'manageRoles',
     ],
@@ -104,6 +111,27 @@ const RULES: Array<{
   },
   {
     prefix:
+      '/admin/enterprise-finance',
+    required: [
+      'finance:manage',
+      'finance.manage',
+      'finance',
+    ],
+  },
+  {
+    prefix:
+      '/admin/legal',
+    required: [
+      'compliance:read',
+      'compliance:manage',
+      'compliance.read',
+      'compliance.manage',
+      'compliance',
+      'manageRoles',
+    ],
+  },
+  {
+    prefix:
       '/admin/staff',
     required: [
       'staff.directory.read',
@@ -111,6 +139,8 @@ const RULES: Array<{
       'staff.hr.manage',
       'staff.roles.manage',
       'staff.manage',
+      'hr:read',
+      'hr:manage',
       'hr',
       'manageRoles',
     ],
@@ -132,6 +162,15 @@ const RULES: Array<{
     prefix:
       '/clinicians',
     required: [
+      'clinical:read',
+      'clinical:write',
+      'clinicians:read',
+      'clinicians:manage',
+      'clinicians:support',
+      'staff.hr.read',
+      'staff.hr.manage',
+      'hr:read',
+      'hr:manage',
       'manageRoles',
       'hr',
       'finance',
@@ -145,20 +184,17 @@ const RULES: Array<{
     prefix:
       '/finance',
     required: [
+      'finance:read',
+      'finance:manage',
       'finance',
-    ],
-  },
-  {
-    prefix:
-      '/tech',
-    required: [
-      'tech',
     ],
   },
   {
     prefix:
       '/compliance',
     required: [
+      'compliance:read',
+      'compliance:manage',
       'compliance',
     ],
   },
@@ -166,6 +202,7 @@ const RULES: Array<{
     prefix:
       '/reports',
     required: [
+      'reports:read',
       'reports',
     ],
   },
@@ -173,6 +210,8 @@ const RULES: Array<{
     prefix:
       '/rnd',
     required: [
+      'research:read',
+      'research:manage',
       'rnd',
     ],
   },
