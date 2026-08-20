@@ -3,7 +3,6 @@ import { prisma } from '@/lib/prisma';
 import { adminStaffAuthResponse, requireAdminStaffActor } from '@/src/lib/admin-staff-auth';
 import { requireOpportunityScope } from '@/src/lib/admin-opportunity-access';
 import { canEditOpportunity } from '@/src/lib/opportunities-policy';
-import { canAddOpportunityGalleryImage } from '@/src/lib/opportunity-gallery';
 import {
   enterpriseMediaErrorResponse,
   enterpriseMediaObjectKey,
@@ -29,11 +28,12 @@ export async function POST(request: NextRequest, context: { params: { id: string
     if (!canEditOpportunity(opportunity.status)) {
       return json({ ok: false, error: 'opportunity_pause_before_edit' }, 409);
     }
-    const galleryCount = await prisma.opportunityGalleryImage.count({
-      where: { opportunityId: opportunity.id, role: 'GALLERY' },
+
+    const contentCount = await prisma.opportunityGalleryImage.count({
+      where: { opportunityId: opportunity.id, role: 'CONTENT' },
     });
-    if (!canAddOpportunityGalleryImage(galleryCount)) {
-      return json({ ok: false, error: 'opportunity_gallery_limit_reached' }, 409);
+    if (contentCount >= 40) {
+      return json({ ok: false, error: 'opportunity_content_media_limit_reached' }, 409);
     }
 
     const body = await request.json().catch(() => ({}));
@@ -54,7 +54,7 @@ export async function POST(request: NextRequest, context: { params: { id: string
     if (auth) return json(auth.body, auth.status);
     const media = enterpriseMediaErrorResponse(error);
     if (media) return json(media.body, media.status);
-    console.error('[admin opportunities] gallery image presign failed', error);
-    return json({ ok: false, error: 'opportunity_gallery_presign_failed' }, 500);
+    console.error('[admin opportunities] content media presign failed', error);
+    return json({ ok: false, error: 'opportunity_content_media_presign_failed' }, 500);
   }
 }

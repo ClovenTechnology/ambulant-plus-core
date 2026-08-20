@@ -4172,6 +4172,7 @@ model AdminUserProfile {
   opportunitiesClosed         Opportunity[]                @relation("OpportunityClosedBy")
   opportunitiesArchived       Opportunity[]                @relation("OpportunityArchivedBy")
   opportunityGalleryImagesCreated OpportunityGalleryImage[] @relation("OpportunityGalleryImageCreatedBy")
+  opportunityRevisionsCreated     OpportunityRevision[]     @relation("OpportunityRevisionCreatedBy")
   applicationsAssigned        Application[]                @relation("ApplicationAssignedReviewer")
   applicationInterviewEvaluationCyclesOpened    ApplicationInterviewEvaluationCycle[] @relation("ApplicationInterviewEvaluationCycleOpenedBy")
   applicationInterviewEvaluationCyclesCompleted ApplicationInterviewEvaluationCycle[] @relation("ApplicationInterviewEvaluationCycleCompletedBy")
@@ -4716,6 +4717,12 @@ model Opportunity {
   title                  String                     @db.VarChar(240)
   summary                String?                    @db.VarChar(1200)
   description            String?
+  contentDocument        Json?
+  contentSchemaVersion   Int                        @default(1)
+  contentRevision        Int                        @default(0)
+  publishedContentDocument Json?
+  publishedContentRevision Int?
+  showFaq                Boolean                    @default(true)
   imageUrl               String?                    @db.VarChar(2048)
   imageAlt               String?                    @db.VarChar(240)
   tags                   String[]                   @default([])
@@ -4760,6 +4767,7 @@ model Opportunity {
   closedByProfile        AdminUserProfile?          @relation("OpportunityClosedBy", fields: [closedByProfileId], references: [id], onDelete: SetNull)
   archivedByProfile      AdminUserProfile?          @relation("OpportunityArchivedBy", fields: [archivedByProfileId], references: [id], onDelete: SetNull)
   galleryImages          OpportunityGalleryImage[]
+  revisions              OpportunityRevision[]
   applications           Application[]
 
   @@index([status, visibility, opensAt, closesAt])
@@ -4771,19 +4779,37 @@ model Opportunity {
 
 
 model OpportunityGalleryImage {
-  id                 String           @id @default(cuid())
+  id                 String               @id @default(cuid())
   opportunityId      String
-  mediaRef           String           @unique @db.VarChar(2048)
-  altText            String           @db.VarChar(240)
-  caption            String?          @db.VarChar(500)
-  sortOrder          Int              @default(0)
+  role               OpportunityMediaRole @default(GALLERY)
+  mediaRef           String               @unique @db.VarChar(2048)
+  altText            String               @db.VarChar(240)
+  caption            String?              @db.VarChar(500)
+  sortOrder          Int                  @default(0)
   createdByProfileId String
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  opportunity        Opportunity      @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
-  createdByProfile   AdminUserProfile @relation("OpportunityGalleryImageCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  opportunity        Opportunity          @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  createdByProfile   AdminUserProfile     @relation("OpportunityGalleryImageCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
 
-  @@index([opportunityId, sortOrder, createdAt])
+  @@index([opportunityId, role, sortOrder, createdAt])
+  @@index([createdByProfileId, createdAt])
+}
+
+model OpportunityRevision {
+  id                 String                   @id @default(cuid())
+  opportunityId      String
+  revisionNumber     Int
+  kind               OpportunityRevisionKind @default(AUTOSAVE)
+  contentDocument    Json?
+  showFaq            Boolean                  @default(true)
+  createdByProfileId String
+  createdAt          DateTime                 @default(now())
+  opportunity        Opportunity              @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  createdByProfile   AdminUserProfile         @relation("OpportunityRevisionCreatedBy", fields: [createdByProfileId], references: [id], onDelete: Restrict)
+
+  @@unique([opportunityId, revisionNumber])
+  @@index([opportunityId, createdAt])
   @@index([createdByProfileId, createdAt])
 }
 
@@ -6731,6 +6757,19 @@ enum OpportunityLocationMode {
   HYBRID
   ONSITE
   FLEXIBLE
+}
+
+enum OpportunityMediaRole {
+  FEATURED
+  GALLERY
+  CONTENT
+}
+
+enum OpportunityRevisionKind {
+  AUTOSAVE
+  MANUAL
+  PUBLISHED
+  RESTORED
 }
 
 enum MeetingKind {

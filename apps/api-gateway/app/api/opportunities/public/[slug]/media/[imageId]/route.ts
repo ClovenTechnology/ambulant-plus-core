@@ -32,17 +32,17 @@ export async function GET(
     }
 
     const image = await prisma.opportunityGalleryImage.findFirst({
-      where: { id: context.params.imageId, role: 'GALLERY', opportunity: { slug } },
+      where: { id: context.params.imageId, role: 'CONTENT', opportunity: { slug } },
       include: { opportunity: { select: { status: true, visibility: true } } },
     });
 
     if (!image || !isPublicOpportunityDetailVisible(image.opportunity)) {
-      return json({ ok: false, error: 'opportunity_gallery_image_not_found' }, 404);
+      return json({ ok: false, error: 'opportunity_content_media_not_found' }, 404);
     }
 
     if (isManagedEnterpriseMediaRef(image.mediaRef)) {
       const objectKey = objectKeyFromManagedEnterpriseMediaRef(image.mediaRef);
-      if (!objectKey) return json({ ok: false, error: 'opportunity_gallery_image_not_found' }, 404);
+      if (!objectKey) return json({ ok: false, error: 'opportunity_content_media_not_found' }, 404);
       const object = await getEnterpriseMediaObject(objectKey);
       return new Response(enterpriseMediaResponseBody(object.bytes), {
         status: 200,
@@ -56,11 +56,11 @@ export async function GET(
     }
 
     if (validHttpsUrl(image.mediaRef)) return NextResponse.redirect(image.mediaRef, 302);
-    return json({ ok: false, error: 'opportunity_gallery_image_not_found' }, 404);
+    return json({ ok: false, error: 'opportunity_content_media_not_found' }, 404);
   } catch (error) {
     const media = enterpriseMediaErrorResponse(error);
     if (media) return json(media.body, media.status);
-    console.error('[public opportunities] gallery image failed', error);
-    return json({ ok: false, error: 'opportunity_gallery_image_failed' }, 500);
+    console.error('[public opportunities] content media failed', error);
+    return json({ ok: false, error: 'opportunity_content_media_failed' }, 500);
   }
 }

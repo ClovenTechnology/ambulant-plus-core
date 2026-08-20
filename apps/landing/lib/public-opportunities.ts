@@ -12,6 +12,33 @@ export const PUBLIC_OPPORTUNITY_TYPES = [
 export type PublicOpportunityType = (typeof PUBLIC_OPPORTUNITY_TYPES)[number];
 export type PublicOpportunityAvailability = 'UPCOMING' | 'OPEN' | 'CLOSED' | 'UNAVAILABLE';
 
+
+export type PublicOpportunityContentBlock =
+  | { id: string; type: 'paragraph'; text: string }
+  | { id: string; type: 'heading'; level: 2 | 3 | 4; text: string }
+  | { id: string; type: 'bulletList' | 'numberedList'; items: string[] }
+  | { id: string; type: 'image'; mediaId: string; caption?: string; size?: 'compact' | 'normal' | 'wide'; align?: 'left' | 'center' | 'right'; focalX?: number; focalY?: number; link?: string }
+  | { id: string; type: 'quote'; text: string; attribution?: string }
+  | { id: string; type: 'callout'; title?: string; text?: string; tone?: string }
+  | { id: string; type: 'divider' }
+  | { id: string; type: 'cta'; label: string; href: string; style?: 'primary' | 'secondary' | 'text' }
+  | { id: string; type: 'faq'; items: Array<{ question: string; answer: string }> }
+  | { id: string; type: 'steps' | 'features'; items: Array<{ title: string; body: string }> }
+  | { id: string; type: 'table'; columns: string[]; rows: string[][] };
+
+export type PublicOpportunityContentDocument = {
+  version: 1;
+  blocks: PublicOpportunityContentBlock[];
+};
+
+export type PublicOpportunityMedia = {
+  id: string;
+  imageUrl: string | null;
+  altText: string;
+  caption?: string | null;
+  sortOrder?: number;
+};
+
 export type PublicOpportunity = {
   slug: string;
   type: PublicOpportunityType;
@@ -21,13 +48,13 @@ export type PublicOpportunity = {
   description?: string | null;
   imageUrl?: string | null;
   imageAlt?: string | null;
-  galleryImages?: Array<{
-    id: string;
-    imageUrl: string | null;
-    altText: string;
-    caption?: string | null;
-    sortOrder: number;
-  }>;
+  featuredImage?: PublicOpportunityMedia | null;
+  galleryImages?: PublicOpportunityMedia[];
+  contentImages?: PublicOpportunityMedia[];
+  contentDocument?: PublicOpportunityContentDocument | null;
+  contentSchemaVersion?: number;
+  contentRevision?: number;
+  showFaq?: boolean;
   tags: string[];
   referenceCode?: string | null;
   audienceLabel?: string | null;

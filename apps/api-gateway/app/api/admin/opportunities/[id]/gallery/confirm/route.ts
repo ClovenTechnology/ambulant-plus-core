@@ -34,13 +34,16 @@ export async function POST(request: NextRequest, context: { params: { id: string
     );
     const opportunity = await prisma.opportunity.findUnique({
       where: { id: context.params.id },
-      select: { id: true, status: true, _count: { select: { galleryImages: true } } },
+      select: { id: true, status: true },
     });
     if (!opportunity) return json({ ok: false, error: 'opportunity_not_found' }, 404);
     if (!canEditOpportunity(opportunity.status)) {
       return json({ ok: false, error: 'opportunity_pause_before_edit' }, 409);
     }
-    if (!canAddOpportunityGalleryImage(opportunity._count.galleryImages)) {
+    const galleryCount = await prisma.opportunityGalleryImage.count({
+      where: { opportunityId: opportunity.id, role: 'GALLERY' },
+    });
+    if (!canAddOpportunityGalleryImage(galleryCount)) {
       return json({ ok: false, error: 'opportunity_gallery_limit_reached' }, 409);
     }
 
@@ -68,7 +71,7 @@ export async function POST(request: NextRequest, context: { params: { id: string
         mediaRef,
         altText,
         caption,
-        sortOrder: opportunity._count.galleryImages,
+        sortOrder: galleryCount,
         createdByProfileId: actor.profileId,
       },
     });

@@ -158,7 +158,10 @@ export async function DELETE(
 
     const current = await prisma.opportunity.findUnique({
       where: { id: context.params.id },
-      include: { _count: { select: { applications: true } } },
+      include: {
+        _count: { select: { applications: true } },
+        galleryImages: { select: { mediaRef: true } },
+      },
     });
     if (!current) return json({ ok: false, error: 'opportunity_not_found' }, 404);
     if (!canPermanentlyDeleteOpportunity({
@@ -190,6 +193,9 @@ export async function DELETE(
       await tx.opportunity.delete({ where: { id: current.id } });
     });
     await bestEffortDeleteManagedEnterpriseMedia(current.imageUrl);
+    for (const media of current.galleryImages) {
+      await bestEffortDeleteManagedEnterpriseMedia(media.mediaRef);
+    }
     return json({ ok: true });
   } catch (error) {
     const auth = adminStaffAuthResponse(error);

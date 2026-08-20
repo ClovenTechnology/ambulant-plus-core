@@ -93,6 +93,7 @@ export const opportunityAdminInclude = {
     orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
     select: {
       id: true,
+      role: true,
       mediaRef: true,
       altText: true,
       caption: true,
@@ -374,24 +375,55 @@ export function parseOpportunityWriteInput(
 }
 
 export function serializeAdminOpportunity(row: any) {
+  const mediaRows = Array.isArray(row?.galleryImages) ? row.galleryImages : [];
+  const featured = mediaRows.find((image: any) => image?.role === 'FEATURED') || null;
+  const gallery = mediaRows.filter((image: any) => image?.role === 'GALLERY');
+  const content = mediaRows.filter((image: any) => image?.role === 'CONTENT');
+
+  const mapMedia = (image: any, surface: 'gallery' | 'media') => ({
+    id: String(image.id),
+    role: image.role,
+    imageUrl: isManagedEnterpriseMediaRef(image.mediaRef)
+      ? `/api/admin/opportunities/${encodeURIComponent(String(row.id))}/${surface}/${encodeURIComponent(String(image.id))}`
+      : image.mediaRef || null,
+    altText: image.altText || '',
+    caption: image.caption || null,
+    sortOrder: Number(image.sortOrder || 0),
+    createdAt: image.createdAt,
+    updatedAt: image.updatedAt,
+  });
+
+  const legacyImageUrl = isManagedEnterpriseMediaRef(row?.imageUrl)
+    ? `/api/admin/opportunities/${encodeURIComponent(String(row.id))}/image`
+    : row?.imageUrl || null;
+
   return {
     ...row,
-    imageUrl: isManagedEnterpriseMediaRef(row?.imageUrl)
+    imageUrl: featured
       ? `/api/admin/opportunities/${encodeURIComponent(String(row.id))}/image`
-      : row?.imageUrl || null,
-    galleryImages: Array.isArray(row?.galleryImages)
-      ? row.galleryImages.map((image: any) => ({
-          id: String(image.id),
-          imageUrl: isManagedEnterpriseMediaRef(image.mediaRef)
-            ? `/api/admin/opportunities/${encodeURIComponent(String(row.id))}/gallery/${encodeURIComponent(String(image.id))}`
-            : image.mediaRef || null,
-          altText: image.altText || '',
-          caption: image.caption || null,
-          sortOrder: Number(image.sortOrder || 0),
-          createdAt: image.createdAt,
-          updatedAt: image.updatedAt,
-        }))
-      : [],
+      : legacyImageUrl,
+    imageAlt: featured?.altText || row?.imageAlt || null,
+    featuredImage: featured
+      ? {
+          id: String(featured.id),
+          role: featured.role,
+          imageUrl: `/api/admin/opportunities/${encodeURIComponent(String(row.id))}/image`,
+          altText: featured.altText || '',
+          caption: featured.caption || null,
+          createdAt: featured.createdAt,
+          updatedAt: featured.updatedAt,
+        }
+      : null,
+    galleryImages: gallery.map((image: any) => mapMedia(image, 'gallery')),
+    contentImages: content.map((image: any) => mapMedia(image, 'media')),
+    contentDocument: row?.contentDocument || null,
+    contentSchemaVersion: Number(row?.contentSchemaVersion || 1),
+    contentRevision: Number(row?.contentRevision || 0),
+    publishedContentRevision:
+      row?.publishedContentRevision === null || row?.publishedContentRevision === undefined
+        ? null
+        : Number(row.publishedContentRevision),
+    showFaq: row?.showFaq !== false,
   };
 }
 
@@ -548,6 +580,18 @@ export function serializePublicOpportunity(row: any, now = new Date()) {
     application = { mode: 'NONE', available: false, href: null };
   }
 
+  const mediaRows = Array.isArray(row.galleryImages) ? row.galleryImages : [];
+  const featured = mediaRows.find((image: any) => image?.role === 'FEATURED') || null;
+  const gallery = mediaRows.filter((image: any) => image?.role === 'GALLERY');
+  const content = mediaRows.filter((image: any) => image?.role === 'CONTENT');
+
+  const publicDocument =
+    row.publishedContentRevision !== null &&
+    row.publishedContentRevision !== undefined &&
+    row.publishedContentDocument
+      ? row.publishedContentDocument
+      : row.contentDocument || null;
+
   return {
     slug: row.slug,
     type: row.type,
@@ -555,17 +599,37 @@ export function serializePublicOpportunity(row: any, now = new Date()) {
     title: row.title,
     summary: row.summary,
     description: row.description,
-    imageUrl: row.imageUrl,
-    imageAlt: row.imageAlt,
-    galleryImages: Array.isArray(row.galleryImages)
-      ? row.galleryImages.map((image: any) => ({
-          id: String(image.id),
-          imageUrl: image.mediaRef || null,
-          altText: image.altText || '',
-          caption: image.caption || null,
-          sortOrder: Number(image.sortOrder || 0),
-        }))
-      : [],
+    contentDocument: publicDocument,
+    contentSchemaVersion: Number(row.contentSchemaVersion || 1),
+    contentRevision:
+      row.publishedContentRevision === null || row.publishedContentRevision === undefined
+        ? Number(row.contentRevision || 0)
+        : Number(row.publishedContentRevision),
+    showFaq: row.showFaq !== false,
+    imageUrl: featured?.mediaRef || row.imageUrl,
+    imageAlt: featured?.altText || row.imageAlt,
+    featuredImage: featured
+      ? {
+          id: String(featured.id),
+          imageUrl: featured.mediaRef || null,
+          altText: featured.altText || '',
+          caption: featured.caption || null,
+        }
+      : null,
+    galleryImages: gallery.map((image: any) => ({
+      id: String(image.id),
+      imageUrl: image.mediaRef || null,
+      altText: image.altText || '',
+      caption: image.caption || null,
+      sortOrder: Number(image.sortOrder || 0),
+    })),
+    contentImages: content.map((image: any) => ({
+      id: String(image.id),
+      imageUrl: image.mediaRef || null,
+      altText: image.altText || '',
+      caption: image.caption || null,
+      sortOrder: Number(image.sortOrder || 0),
+    })),
     tags: Array.isArray(row.tags) ? row.tags : [],
     referenceCode: row.referenceCode,
     audienceLabel: row.audienceLabel,

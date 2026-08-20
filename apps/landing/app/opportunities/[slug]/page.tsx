@@ -4,6 +4,7 @@ import { notFound } from 'next/navigation';
 import { ArrowLeft, ArrowRight, CalendarDays, ExternalLink, MapPin } from 'lucide-react';
 import { absoluteUrl } from '@/lib/seo';
 import { fetchPublicOpportunity } from '@/lib/public-opportunities';
+import OpportunityRichContent from './OpportunityRichContent';
 import { applicationCta, opportunityDateLabel, PUBLIC_TYPE_LABELS, publicAvailabilityClass, publicAvailabilityLabel } from '../opportunity-ui';
 
 export const dynamic = 'force-dynamic';
@@ -119,6 +120,7 @@ function jobPostingStructuredData(opportunity: any) {
 }
 
 function faqStructuredData(opportunity: any) {
+  if (opportunity.showFaq === false) return null;
   const questions = Array.isArray(opportunity.aeoQuestions)
     ? opportunity.aeoQuestions
         .filter((item: any) => String(item?.question || '').trim() && String(item?.answer || '').trim())
@@ -182,7 +184,7 @@ export default async function OpportunityDetailPage({ params }: { params: { slug
       <section className="mx-auto grid max-w-7xl gap-8 px-4 py-10 md:px-6 lg:grid-cols-[minmax(0,1fr)_360px] lg:py-16">
         <div className="space-y-8">
           <article className="overflow-hidden rounded-3xl border bg-white shadow-sm">
-            {opportunity.imageUrl ? <img src={opportunity.imageUrl} alt={opportunity.imageAlt || ''} className="max-h-[520px] w-full object-cover" /> : null}
+            {opportunity.imageUrl ? <figure className="bg-slate-100"><img src={opportunity.imageUrl} alt={opportunity.imageAlt || ''} className="max-h-[520px] w-full object-cover" />{opportunity.featuredImage?.caption ? <figcaption className="border-t bg-white px-6 py-2 text-xs leading-5 text-slate-500 md:px-10">{opportunity.featuredImage.caption}</figcaption> : null}</figure> : null}
             <div className="p-6 md:p-10">
               <div className="flex flex-wrap items-center gap-2">
                 <span className={`rounded-full border px-2.5 py-1 text-xs font-medium ${publicAvailabilityClass(opportunity.availability)}`}>{publicAvailabilityLabel(opportunity.availability)}</span>
@@ -201,7 +203,11 @@ export default async function OpportunityDetailPage({ params }: { params: { slug
 
               {opportunity.tags.length ? <div className="mt-6 flex flex-wrap gap-2">{opportunity.tags.map((tag) => <span key={tag} className="rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">{tag}</span>)}</div> : null}
 
-              {opportunity.description ? <div className="mt-8 whitespace-pre-wrap border-t pt-8 text-[15px] leading-8 text-slate-700">{opportunity.description}</div> : null}
+              {opportunity.contentDocument?.blocks?.length ? (
+                <OpportunityRichContent document={opportunity.contentDocument} contentImages={opportunity.contentImages || []} />
+              ) : opportunity.description ? (
+                <div className="mx-auto mt-10 max-w-[820px] whitespace-pre-wrap border-t pt-10 text-[16px] leading-8 text-slate-700">{opportunity.description}</div>
+              ) : null}
 
               {Array.isArray(opportunity.galleryImages) && opportunity.galleryImages.length ? (
                 <section className="mt-8 border-t pt-8">
@@ -220,7 +226,7 @@ export default async function OpportunityDetailPage({ params }: { params: { slug
                 </section>
               ) : null}
 
-              {Array.isArray(opportunity.aeoQuestions) && opportunity.aeoQuestions.length ? (
+              {opportunity.showFaq !== false && Array.isArray(opportunity.aeoQuestions) && opportunity.aeoQuestions.length ? (
                 <section className="mt-8 border-t pt-8">
                   <h2 className="text-2xl font-semibold tracking-tight text-slate-950">Common questions</h2>
                   <div className="mt-4 divide-y rounded-2xl border">

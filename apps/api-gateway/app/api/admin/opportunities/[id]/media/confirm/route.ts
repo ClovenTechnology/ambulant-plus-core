@@ -26,7 +26,6 @@ function json(body: unknown, status = 200) {
 
 export async function POST(request: NextRequest, context: { params: { id: string } }) {
   let cleanupRef: string | null = null;
-
   try {
     const actor = requireOpportunityScope(
       await requireAdminStaffActor(request, { requirePassword: true }),
@@ -34,20 +33,27 @@ export async function POST(request: NextRequest, context: { params: { id: string
     );
     const opportunity = await prisma.opportunity.findUnique({
       where: { id: context.params.id },
-      select: { id: true, status: true, imageUrl: true },
+      select: { id: true, status: true },
     });
     if (!opportunity) return json({ ok: false, error: 'opportunity_not_found' }, 404);
     if (!canEditOpportunity(opportunity.status)) {
       return json({ ok: false, error: 'opportunity_pause_before_edit' }, 409);
     }
 
+    const contentCount = await prisma.opportunityGalleryImage.count({
+      where: { opportunityId: opportunity.id, role: 'CONTENT' },
+    });
+    if (contentCount >= 40) {
+      return json({ ok: false, error: 'opportunity_content_media_limit_reached' }, 409);
+    }
+
     const body = await request.json().catch(() => ({}));
     const objectKey = cleanOpportunityText((body as any)?.objectKey, 512);
-    const imageAlt = cleanOpportunityText((body as any)?.imageAlt, 240);
+    const altText = cleanOpportunityText((body as any)?.altText, 240);
     const caption = cleanOpportunityText((body as any)?.caption, 500) || null;
-    if (!imageAlt) return json({ ok: false, error: 'opportunity_image_alt_required' }, 400);
+    if (!altText) return json({ ok: false, error: 'opportunity_content_media_alt_required' }, 400);
     if (!enterpriseMediaObjectBelongsTo({ objectKey, kind: 'opportunity-image', ownerId: opportunity.id })) {
-      return json({ ok: false, error: 'opportunity_image_object_invalid' }, 400);
+      return json({ ok: false, error: 'opportunity_content_media_object_invalid' }, 400);
     }
 
     const upload = validateEnterpriseMediaUploadInput({
@@ -57,64 +63,42 @@ export async function POST(request: NextRequest, context: { params: { id: string
     });
     await verifyEnterpriseMediaUpload({ objectKey, ...upload });
 
-    const managedRef = managedEnterpriseMediaRef(objectKey);
-    cleanupRef = managedRef;
-    const previousFeatured = await prisma.opportunityGalleryImage.findFirst({
-      where: { opportunityId: opportunity.id, role: 'FEATURED' },
-      select: { id: true, mediaRef: true, altText: true },
+    cleanupRef = managedEnterpriseMediaRef(objectKey);
+    const media = await prisma.opportunityGalleryImage.create({
+      data: {
+        opportunityId: opportunity.id,
+        role: 'CONTENT',
+        mediaRef: cleanupRef,
+        altText,
+        caption,
+        sortOrder: contentCount,
+        createdByProfileId: actor.profileId,
+      },
     });
-
-    await prisma.$transaction(async (tx) => {
-      if (previousFeatured) {
-        await tx.opportunityGalleryImage.delete({ where: { id: previousFeatured.id } });
-      }
-      await tx.opportunityGalleryImage.create({
-        data: {
-          opportunityId: opportunity.id,
-          role: 'FEATURED',
-          mediaRef: managedRef,
-          altText: imageAlt,
-          caption,
-          sortOrder: 0,
-          createdByProfileId: actor.profileId,
-        },
-      });
-      await tx.opportunity.update({
-        where: { id: opportunity.id },
-        data: {
-          // Legacy imageUrl/imageAlt are deliberately retired as active media authority.
-          imageUrl: null,
-          imageAlt: null,
-          lastUpdatedByProfileId: actor.profileId,
-        },
-      });
-    });
-
     cleanupRef = null;
 
     await writeOpportunityAudit({
       actor,
-      action: 'opportunity.image.updated',
+      action: 'opportunity.content_media.added',
       entityId: opportunity.id,
-      description: 'Opportunity featured image updated through unified media authority',
+      description: 'Opportunity Publishing Studio inline image added',
       userAgent: request.headers.get('user-agent'),
-      meta: { imageAlt, caption: caption || undefined },
+      meta: { mediaId: media.id, altText, caption: caption || undefined },
     });
-
-    if (previousFeatured?.mediaRef && previousFeatured.mediaRef !== managedRef) {
-      await bestEffortDeleteManagedEnterpriseMedia(previousFeatured.mediaRef);
-    }
-    if (opportunity.imageUrl && opportunity.imageUrl !== managedRef) {
-      await bestEffortDeleteManagedEnterpriseMedia(opportunity.imageUrl);
-    }
 
     const updated = await prisma.opportunity.findUnique({
       where: { id: opportunity.id },
       include: opportunityAdminInclude,
     });
-
     return json({
       ok: true,
+      media: {
+        id: media.id,
+        role: media.role,
+        imageUrl: `/api/admin/opportunities/${encodeURIComponent(opportunity.id)}/media/${encodeURIComponent(media.id)}`,
+        altText: media.altText,
+        caption: media.caption,
+      },
       opportunity: updated ? serializeAdminOpportunity(updated) : null,
     });
   } catch (error) {
@@ -123,7 +107,7 @@ export async function POST(request: NextRequest, context: { params: { id: string
     if (auth) return json(auth.body, auth.status);
     const media = enterpriseMediaErrorResponse(error);
     if (media) return json(media.body, media.status);
-    console.error('[admin opportunities] image confirmation failed', error);
-    return json({ ok: false, error: 'opportunity_image_confirm_failed' }, 500);
+    console.error('[admin opportunities] content media confirm failed', error);
+    return json({ ok: false, error: 'opportunity_content_media_confirm_failed' }, 500);
   }
 }

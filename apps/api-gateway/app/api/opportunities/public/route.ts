@@ -68,10 +68,12 @@ export async function GET(request: NextRequest) {
         },
       },
       galleryImages: {
+        where: { role: { in: ['FEATURED' as const, 'GALLERY' as const] } },
         orderBy: [{ sortOrder: 'asc' as const }, { createdAt: 'asc' as const }],
-        take: 2,
+        take: 9,
         select: {
           id: true,
+          role: true,
           mediaRef: true,
           altText: true,
           caption: true,
@@ -102,12 +104,25 @@ export async function GET(request: NextRequest) {
       total,
       items: rows.map((row) => {
         const item = serializePublicOpportunity(row, now);
+        const featuredStored = row.galleryImages.find((entry) => entry.role === 'FEATURED');
         return {
           ...item,
-          imageUrl: isManagedEnterpriseMediaRef(row.imageUrl)
+          imageUrl: featuredStored
             ? new URL(`/api/opportunities/public/${encodeURIComponent(row.slug)}/image`, request.url).toString()
-            : item.imageUrl,
-          galleryImages: item.galleryImages.map((image: any) => {
+            : isManagedEnterpriseMediaRef(row.imageUrl)
+              ? new URL(`/api/opportunities/public/${encodeURIComponent(row.slug)}/image`, request.url).toString()
+              : item.imageUrl,
+          imageAlt: featuredStored?.altText || item.imageAlt,
+          featuredImage: item.featuredImage
+            ? {
+                ...item.featuredImage,
+                imageUrl: new URL(
+                  `/api/opportunities/public/${encodeURIComponent(row.slug)}/image`,
+                  request.url,
+                ).toString(),
+              }
+            : null,
+          galleryImages: item.galleryImages.slice(0, 2).map((image: any) => {
             const stored = row.galleryImages.find((entry) => entry.id === image.id);
             return {
               ...image,
@@ -119,6 +134,7 @@ export async function GET(request: NextRequest) {
                 : image.imageUrl,
             };
           }),
+          contentImages: [],
         };
       }),
     });

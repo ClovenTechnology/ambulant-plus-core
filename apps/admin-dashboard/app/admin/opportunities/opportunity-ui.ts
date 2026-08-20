@@ -27,6 +27,35 @@ export type OpportunityVisibility = (typeof OPPORTUNITY_VISIBILITIES)[number];
 export type OpportunityApplicationMode = (typeof OPPORTUNITY_APPLICATION_MODES)[number];
 export type OpportunityLocationMode = (typeof OPPORTUNITY_LOCATION_MODES)[number];
 
+
+export type OpportunityContentBlock =
+  | { id: string; type: 'paragraph'; text: string }
+  | { id: string; type: 'heading'; level: 2 | 3 | 4; text: string }
+  | { id: string; type: 'bulletList' | 'numberedList'; items: string[] }
+  | { id: string; type: 'image'; mediaId: string; caption?: string; size?: 'compact' | 'normal' | 'wide'; align?: 'left' | 'center' | 'right'; focalX?: number; focalY?: number; link?: string }
+  | { id: string; type: 'quote'; text: string; attribution?: string }
+  | { id: string; type: 'callout'; title?: string; text?: string; tone?: 'default' | 'navy' | 'teal' | 'cyan' | 'gold' | 'warning' | 'success' }
+  | { id: string; type: 'divider' }
+  | { id: string; type: 'cta'; label: string; href: string; style?: 'primary' | 'secondary' | 'text' }
+  | { id: string; type: 'faq'; items: Array<{ question: string; answer: string }> }
+  | { id: string; type: 'steps' | 'features'; items: Array<{ title: string; body: string }> }
+  | { id: string; type: 'table'; columns: string[]; rows: string[][] };
+
+export type OpportunityContentDocument = {
+  version: 1;
+  blocks: OpportunityContentBlock[];
+};
+
+export type OpportunityMedia = {
+  id: string;
+  imageUrl: string | null;
+  altText: string;
+  caption?: string | null;
+  sortOrder?: number;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
 export type AdminOpportunity = {
   id: string;
   key: string;
@@ -40,15 +69,14 @@ export type AdminOpportunity = {
   description?: string | null;
   imageUrl?: string | null;
   imageAlt?: string | null;
-  galleryImages?: Array<{
-    id: string;
-    imageUrl: string | null;
-    altText: string;
-    caption?: string | null;
-    sortOrder: number;
-    createdAt?: string;
-    updatedAt?: string;
-  }>;
+  featuredImage?: OpportunityMedia | null;
+  galleryImages?: OpportunityMedia[];
+  contentImages?: OpportunityMedia[];
+  contentDocument?: OpportunityContentDocument | null;
+  contentSchemaVersion?: number;
+  contentRevision?: number;
+  publishedContentRevision?: number | null;
+  showFaq?: boolean;
   tags?: string[];
   referenceCode?: string | null;
   audienceLabel?: string | null;
@@ -179,12 +207,26 @@ export function humanizeOpportunityError(error: unknown) {
     opportunity_image_presign_failed: 'The image upload could not be prepared. Please try again.',
     opportunity_image_confirm_failed: 'The uploaded image could not be saved. Please try again.',
     opportunity_image_delete_failed: 'The image could not be removed. Please try again.',
+    opportunity_image_update_failed: 'The featured image details could not be updated. Please try again.',
     opportunity_gallery_limit_reached: 'This opportunity already has the maximum of 8 additional images.',
     opportunity_gallery_alt_required: 'Add meaningful alt text for every additional image before uploading.',
     opportunity_gallery_presign_failed: 'The additional image upload could not be prepared. Please try again.',
     opportunity_gallery_confirm_failed: 'The additional image could not be saved. Please try again.',
     opportunity_gallery_update_failed: 'The additional image details could not be updated. Please try again.',
     opportunity_gallery_delete_failed: 'The additional image could not be removed. Please try again.',
+    invalid_opportunity_content_document: 'Publishing Studio content is not valid. Review the highlighted blocks and retry.',
+    invalid_opportunity_content_revision: 'The Publishing Studio revision is invalid. Refresh before retrying.',
+    opportunity_content_block_limit_reached: 'Publishing Studio supports up to 120 content blocks.',
+    opportunity_content_changed_concurrently: 'This publication changed in another session. Refresh before continuing.',
+    opportunity_content_save_failed: 'Publishing Studio could not save this revision. Please retry.',
+    opportunity_revisions_failed: 'Revision history could not be loaded.',
+    opportunity_content_media_limit_reached: 'This publication already has the maximum number of inline images.',
+    opportunity_content_media_alt_required: 'Add meaningful alt text before uploading an inline image.',
+    opportunity_content_media_presign_failed: 'The inline image upload could not be prepared.',
+    opportunity_content_media_confirm_failed: 'The inline image could not be saved.',
+    opportunity_content_media_update_failed: 'The inline image details could not be updated.',
+    opportunity_content_media_delete_failed: 'The inline image could not be removed.',
+    opportunity_content_media_in_use: 'Remove this image block from the publication before deleting its media asset.',
     opportunity_discovery_generation_failed: 'SEO and answer-ready discovery content could not be generated. Please try again.',
     opportunity_delete_not_allowed: 'This opportunity has publication or application history and cannot be permanently deleted. Archive it instead.',
     super_admin_required: 'Only a Super Admin can permanently delete this record.',

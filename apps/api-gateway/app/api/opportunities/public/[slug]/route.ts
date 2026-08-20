@@ -50,6 +50,7 @@ export async function GET(
           orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }],
           select: {
             id: true,
+            role: true,
             mediaRef: true,
             altText: true,
             caption: true,
@@ -70,13 +71,26 @@ export async function GET(
     }
 
     const opportunity = serializePublicOpportunity(row, new Date());
+    const featuredStored = row.galleryImages.find((entry) => entry.role === 'FEATURED');
     return json({
       ok: true,
       opportunity: {
         ...opportunity,
-        imageUrl: isManagedEnterpriseMediaRef(row.imageUrl)
+        imageUrl: featuredStored
           ? new URL(`/api/opportunities/public/${encodeURIComponent(row.slug)}/image`, request.url).toString()
-          : opportunity.imageUrl,
+          : isManagedEnterpriseMediaRef(row.imageUrl)
+            ? new URL(`/api/opportunities/public/${encodeURIComponent(row.slug)}/image`, request.url).toString()
+            : opportunity.imageUrl,
+        imageAlt: featuredStored?.altText || opportunity.imageAlt,
+        featuredImage: opportunity.featuredImage
+          ? {
+              ...opportunity.featuredImage,
+              imageUrl: new URL(
+                `/api/opportunities/public/${encodeURIComponent(row.slug)}/image`,
+                request.url,
+              ).toString(),
+            }
+          : null,
         galleryImages: opportunity.galleryImages.map((image: any) => {
           const stored = row.galleryImages.find((entry) => entry.id === image.id);
           return {
@@ -84,6 +98,18 @@ export async function GET(
             imageUrl: isManagedEnterpriseMediaRef(stored?.mediaRef)
               ? new URL(
                   `/api/opportunities/public/${encodeURIComponent(row.slug)}/gallery/${encodeURIComponent(image.id)}`,
+                  request.url,
+                ).toString()
+              : image.imageUrl,
+          };
+        }),
+        contentImages: opportunity.contentImages.map((image: any) => {
+          const stored = row.galleryImages.find((entry) => entry.id === image.id);
+          return {
+            ...image,
+            imageUrl: isManagedEnterpriseMediaRef(stored?.mediaRef)
+              ? new URL(
+                  `/api/opportunities/public/${encodeURIComponent(row.slug)}/media/${encodeURIComponent(image.id)}`,
                   request.url,
                 ).toString()
               : image.imageUrl,

@@ -1,3 +1,4 @@
+import { Prisma } from '@prisma/client';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
@@ -81,6 +82,7 @@ export async function POST(
         now,
       });
 
+      const publishedRevision = current.contentRevision + 1;
       data = {
         ...data,
         status: 'PUBLISHED',
@@ -89,6 +91,10 @@ export async function POST(
         pausedAt: null,
         pausedByProfileId: null,
         statusReason: null,
+        contentRevision: publishedRevision,
+        publishedContentDocument:
+          current.contentDocument === null ? Prisma.JsonNull : current.contentDocument,
+        publishedContentRevision: publishedRevision,
       };
       auditAction = current.status === 'PAUSED' ? 'opportunity.resumed' : 'opportunity.published';
     } else if (action === 'PAUSE') {
@@ -120,9 +126,29 @@ export async function POST(
       auditAction = 'opportunity.archived';
     }
 
-    const changed = await prisma.opportunity.updateMany({
-      where: { id: current.id, status: current.status },
-      data,
+    const changed = await prisma.$transaction(async (tx) => {
+      const result = await tx.opportunity.updateMany({
+        where: { id: current.id, status: current.status, contentRevision: current.contentRevision },
+        data,
+      });
+      if (result.count !== 1) return result;
+
+      if (action === 'PUBLISH') {
+        const publishedRevision = current.contentRevision + 1;
+        await tx.opportunityRevision.create({
+          data: {
+            opportunityId: current.id,
+            revisionNumber: publishedRevision,
+            kind: 'PUBLISHED',
+            contentDocument:
+              current.contentDocument === null ? Prisma.JsonNull : current.contentDocument,
+            showFaq: current.showFaq,
+            createdByProfileId: actor.profileId,
+          },
+        });
+      }
+
+      return result;
     });
 
     if (changed.count !== 1) {

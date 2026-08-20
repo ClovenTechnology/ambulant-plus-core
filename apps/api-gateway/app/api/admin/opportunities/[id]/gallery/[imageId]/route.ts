@@ -27,7 +27,7 @@ function json(body: unknown, status = 200) {
 
 async function findImage(opportunityId: string, imageId: string) {
   return prisma.opportunityGalleryImage.findFirst({
-    where: { id: imageId, opportunityId },
+    where: { id: imageId, opportunityId, role: 'GALLERY' },
     include: { opportunity: { select: { id: true, status: true } } },
   });
 }

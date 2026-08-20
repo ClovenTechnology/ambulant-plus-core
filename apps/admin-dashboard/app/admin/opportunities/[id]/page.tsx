@@ -15,12 +15,14 @@ import {
   parseTags,
   toDatetimeLocal,
   type AdminOpportunity,
+  type OpportunityContentDocument,
   type OpportunityApplicationMode,
   type OpportunityLocationMode,
   type OpportunityType,
   type OpportunityVisibility,
 } from '../opportunity-ui';
 import { uploadManagedImage } from '@/lib/managed-image-upload';
+import PublishingStudio from './PublishingStudio';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,6 +63,7 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
   const [summary, setSummary] = useState('');
   const [description, setDescription] = useState('');
   const [imageAlt, setImageAlt] = useState('');
+  const [imageCaption, setImageCaption] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
   const [imageNonce, setImageNonce] = useState(0);
   const [featuredPickerKey, setFeaturedPickerKey] = useState(0);
@@ -97,7 +100,8 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
     setVisibility(row.visibility || 'PUBLIC');
     setSummary(row.summary || '');
     setDescription(row.description || '');
-    setImageAlt(row.imageAlt || '');
+    setImageAlt(row.featuredImage?.altText || row.imageAlt || '');
+    setImageCaption(row.featuredImage?.caption || '');
     setImageFile(null);
     setGalleryDrafts([]);
     setTags((row.tags || []).join(', '));
@@ -167,14 +171,17 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
   const gallerySlotsRemaining = Math.max(0, MAX_GALLERY_IMAGES - galleryImages.length);
 
   const readiness = useMemo(() => {
+    const contentBlocks = opportunity?.contentDocument?.blocks || [];
+    const hasStructuredContent = Array.isArray(contentBlocks) && contentBlocks.length > 0;
     const items = [
       { label: 'Title and public slug', ok: Boolean(title.trim() && slug.trim()) },
-      { label: 'Featured image', ok: !hasImage || Boolean(imageAlt.trim()) },
+      { label: 'Publication content', ok: hasStructuredContent || Boolean(description.trim()) },
+      { label: 'Featured image', ok: Boolean(hasImage && imageAlt.trim()) },
       { label: 'Application target', ok: applicationMode === 'NONE' || (applicationMode === 'ENTERPRISE_FORM' ? Boolean(applicationFormId.trim()) : /^https:\/\//i.test(externalApplicationUrl.trim())) },
       { label: 'Opening / closing window', ok: !opensAt || !closesAt || new Date(closesAt).getTime() > new Date(opensAt).getTime() },
     ];
     return items;
-  }, [title, slug, hasImage, imageAlt, applicationMode, applicationFormId, externalApplicationUrl, opensAt, closesAt]);
+  }, [title, slug, hasImage, imageAlt, applicationMode, applicationFormId, externalApplicationUrl, opensAt, closesAt, opportunity?.contentDocument, description]);
 
   async function save(event: FormEvent) {
     event.preventDefault();
@@ -194,7 +201,6 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
           visibility,
           summary: emptyToNull(summary),
           description: emptyToNull(description),
-          imageAlt: hasImage ? emptyToNull(imageAlt) : null,
           tags: parseTags(tags),
           referenceCode: emptyToNull(referenceCode),
           audienceLabel: emptyToNull(audienceLabel),
@@ -293,13 +299,41 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
         file: imageFile,
         presignUrl: `/api/admin/opportunities/${encodeURIComponent(params.id)}/image/presign`,
         confirmUrl: `/api/admin/opportunities/${encodeURIComponent(params.id)}/image/confirm`,
-        confirmBody: { imageAlt: imageAlt.trim() },
+        confirmBody: { imageAlt: imageAlt.trim(), caption: emptyToNull(imageCaption) },
       });
       if (json?.opportunity) hydrate(json.opportunity);
       else await load();
       setImageFile(null);
       setFeaturedPickerKey((value) => value + 1);
       setImageNonce((value) => value + 1);
+    } catch (err: any) {
+      setError(humanizeOpportunityError(err?.message));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function handleStudioSaved(row: AdminOpportunity) {
+    setOpportunity((current) => current ? { ...current, ...row } : row);
+  }
+
+  async function saveFeaturedMetadata() {
+    if (!editable || !hasImage || !imageAlt.trim()) return;
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch(`/api/admin/opportunities/${encodeURIComponent(params.id)}/image`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ altText: imageAlt.trim(), caption: emptyToNull(imageCaption) }),
+      });
+      const json = await response.json().catch(() => null);
+      if (!response.ok || !json?.ok || !json?.opportunity) {
+        throw new Error(json?.error || 'opportunity_image_update_failed');
+      }
+      setOpportunity((current) => current ? { ...current, ...json.opportunity } : json.opportunity);
+      setImageAlt(json.opportunity.featuredImage?.altText || '');
+      setImageCaption(json.opportunity.featuredImage?.caption || '');
     } catch (err: any) {
       setError(humanizeOpportunityError(err?.message));
     } finally {
@@ -508,12 +542,25 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
           <section className="grid gap-4 rounded-3xl border bg-white p-5 shadow-sm md:grid-cols-2">
             <div className="md:col-span-2"><h2 className="text-lg font-semibold">Public content</h2></div>
             <label className="space-y-1 text-sm md:col-span-2"><span className="font-medium">Summary</span><textarea disabled={!editable} value={summary} onChange={(e) => setSummary(e.target.value)} className="min-h-24 w-full rounded-xl border p-3 disabled:bg-slate-50" /></label>
-            <label className="space-y-1 text-sm md:col-span-2"><span className="font-medium">Description</span><textarea disabled={!editable} value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-64 w-full rounded-xl border p-3 disabled:bg-slate-50" placeholder="Plain-text opportunity details, eligibility, expectations and next steps." /></label>
+            <div className="md:col-span-2">
+              <PublishingStudio
+                opportunityId={params.id}
+                editable={Boolean(editable)}
+                document={opportunity?.contentDocument as OpportunityContentDocument | null | undefined}
+                revision={opportunity?.contentRevision || 0}
+                showFaq={opportunity?.showFaq !== false}
+                legacyDescription={description}
+                contentImages={opportunity?.contentImages || []}
+                onSaved={handleStudioSaved}
+                onError={setError}
+              />
+              <p className="mt-2 text-xs leading-5 text-slate-500">Legacy plain-text description remains preserved for backward compatibility. New public publishing uses the governed structured document when present.</p>
+            </div>
 
             <div className="space-y-3 md:col-span-2">
               <div>
                 <div className="text-sm font-medium">Featured image</div>
-                <p className="mt-1 text-xs text-slate-500">This is the lead image used on opportunity cards, social previews and the top of the public page. JPEG, PNG or WebP; maximum 8 MB.</p>
+                <p className="mt-1 text-xs text-slate-500">Uses the same governed Opportunity media authority as Additional Images, limited to one Featured asset. It drives cards, Open Graph/social previews and the public hero. JPEG, PNG or WebP; maximum 8 MB.</p>
               </div>
               {imagePreviewUrl ? <div className="overflow-hidden rounded-2xl border bg-slate-50"><img src={imagePreviewUrl} alt={imageAlt || 'Opportunity image preview'} className="max-h-72 w-full object-cover" /></div> : null}
               <label className="block space-y-1 text-sm">
@@ -545,6 +592,10 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
                       placeholder="Required accessible description"
                     />
                   </label>
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium">Caption</span>
+                    <input disabled={!editable || busy} value={imageCaption} onChange={(event) => setImageCaption(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2 disabled:bg-slate-100" placeholder="Optional public caption" />
+                  </label>
                   <div className="flex flex-wrap gap-2">
                     <button
                       type="button"
@@ -560,7 +611,8 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
                       onClick={() => {
                         setImageFile(null);
                         setFeaturedPickerKey((value) => value + 1);
-                        setImageAlt(opportunity?.imageAlt || '');
+                        setImageAlt(opportunity?.featuredImage?.altText || opportunity?.imageAlt || '');
+                        setImageCaption(opportunity?.featuredImage?.caption || '');
                       }}
                       disabled={busy}
                       className="rounded-xl border px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-40"
@@ -569,18 +621,19 @@ export default function AdminOpportunityDetailPage({ params }: { params: { id: s
                     </button>
                   </div>
                 </div>
-              ) : (
-                <label className="block space-y-1 text-sm">
-                  <span className="font-medium">Featured image alt text</span>
-                  <input
-                    disabled={!editable || !hasImage}
-                    value={imageAlt}
-                    onChange={(event) => setImageAlt(event.target.value)}
-                    className="w-full rounded-xl border px-3 py-2 disabled:bg-slate-50"
-                    placeholder={hasImage ? 'Describe the current image for people using screen readers' : 'Choose an image first'}
-                  />
-                </label>
-              )}
+              ) : hasImage ? (
+                <div className="grid gap-3 rounded-2xl border bg-slate-50 p-4 md:grid-cols-2">
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium">Alt text <span className="text-rose-600">*</span></span>
+                    <input disabled={!editable || busy} value={imageAlt} onChange={(event) => setImageAlt(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2 disabled:bg-slate-100" placeholder="Required accessible description" />
+                  </label>
+                  <label className="block space-y-1 text-sm">
+                    <span className="font-medium">Caption</span>
+                    <input disabled={!editable || busy} value={imageCaption} onChange={(event) => setImageCaption(event.target.value)} className="w-full rounded-xl border bg-white px-3 py-2 disabled:bg-slate-100" placeholder="Optional public caption" />
+                  </label>
+                  {editable ? <button type="button" onClick={() => void saveFeaturedMetadata()} disabled={busy || !imageAlt.trim()} className="justify-self-start rounded-xl border bg-white px-4 py-2 text-sm font-semibold disabled:opacity-40">Save image details</button> : null}
+                </div>
+              ) : null}
 
               {hasImage ? (
                 <button

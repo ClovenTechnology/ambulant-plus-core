@@ -9,6 +9,12 @@ export async function GET(request: NextRequest, context: { params: { id: string 
   });
 }
 
+export async function PATCH(request: NextRequest, context: { params: { id: string } }) {
+  return proxyAdminJsonBody(request, 'PATCH', {
+    path: `/api/admin/opportunities/${encodeURIComponent(context.params.id)}/image`,
+  });
+}
+
 export async function DELETE(request: NextRequest, context: { params: { id: string } }) {
   return proxyAdminJsonBody(request, 'DELETE', {
     path: `/api/admin/opportunities/${encodeURIComponent(context.params.id)}/image`,
