@@ -28,17 +28,24 @@ export type OpportunityApplicationMode = (typeof OPPORTUNITY_APPLICATION_MODES)[
 export type OpportunityLocationMode = (typeof OPPORTUNITY_LOCATION_MODES)[number];
 
 
+export type OpportunityFontStyle = 'modern' | 'editorial' | 'humanist';
+export type OpportunityTextSize = 'small' | 'body' | 'lead';
+
 export type OpportunityContentBlock =
-  | { id: string; type: 'paragraph'; text: string }
-  | { id: string; type: 'heading'; level: 2 | 3 | 4; text: string }
-  | { id: string; type: 'bulletList' | 'numberedList'; items: string[] }
+  | { id: string; type: 'paragraph'; text: string; textSize?: OpportunityTextSize; fontStyle?: OpportunityFontStyle }
+  | { id: string; type: 'heading'; level: 2 | 3 | 4; text: string; fontStyle?: OpportunityFontStyle }
+  | { id: string; type: 'bulletList' | 'numberedList'; items: string[]; textSize?: OpportunityTextSize; fontStyle?: OpportunityFontStyle }
   | { id: string; type: 'image'; mediaId: string; caption?: string; size?: 'compact' | 'normal' | 'wide'; align?: 'left' | 'center' | 'right'; focalX?: number; focalY?: number; link?: string }
-  | { id: string; type: 'quote'; text: string; attribution?: string }
-  | { id: string; type: 'callout'; title?: string; text?: string; tone?: 'default' | 'navy' | 'teal' | 'cyan' | 'gold' | 'warning' | 'success' }
+  | { id: string; type: 'imageSlider'; items: Array<{ mediaId: string; caption?: string }>; autoplay?: boolean; intervalSeconds?: 3 | 5 | 7 | 10; aspect?: 'landscape' | 'square' | 'portrait'; showDots?: boolean; showArrows?: boolean }
+  | { id: string; type: 'video'; url: string; title: string; caption?: string; aspect?: '16:9' | '4:3' | '1:1' }
+  | { id: string; type: 'quote'; text: string; attribution?: string; fontStyle?: OpportunityFontStyle }
+  | { id: string; type: 'callout'; title?: string; text?: string; tone?: 'default' | 'navy' | 'teal' | 'cyan' | 'gold' | 'warning' | 'success'; textSize?: OpportunityTextSize; fontStyle?: OpportunityFontStyle }
   | { id: string; type: 'divider' }
   | { id: string; type: 'cta'; label: string; href: string; style?: 'primary' | 'secondary' | 'text' }
   | { id: string; type: 'faq'; items: Array<{ question: string; answer: string }> }
-  | { id: string; type: 'steps' | 'features'; items: Array<{ title: string; body: string }> }
+  | { id: string; type: 'accordion'; items: Array<{ title: string; body: string }>; style?: 'bordered' | 'minimal' }
+  | { id: string; type: 'steps'; items: Array<{ title: string; body: string }> }
+  | { id: string; type: 'features'; items: Array<{ title: string; body: string }>; columns?: 2 | 3 | 4; style?: 'cards' | 'minimal' }
   | { id: string; type: 'table'; columns: string[]; rows: string[][] };
 
 export type OpportunityContentDocument = {
