@@ -5,13 +5,27 @@ import { apigwBase } from '@/app/api/_apigw';
 export const dynamic = 'force-dynamic';
 
 const ANALYTICS_CALLER_SCOPES = [
+  'admin:all',
+  '*',
+  'analytics:read',
   'analytics.read',
+  'reports:read',
   'reports.read',
+  'insightcore:read',
+  'insightcore:manage',
+  'finance:read',
+  'finance:manage',
   'reports',
   'finance',
+  'tech:read',
+  'tech:manage',
   'tech',
+  'compliance:read',
+  'compliance:manage',
   'compliance',
   'manageRoles',
+  'research:read',
+  'research:manage',
   'rnd',
 ] as const;
 

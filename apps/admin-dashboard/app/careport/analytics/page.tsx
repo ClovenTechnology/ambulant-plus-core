@@ -240,91 +240,6 @@ function VBarChart({ items }: { items: BarItem[] }) {
   );
 }
 
-/* ---------- Demo fallback ---------- */
-
-const DEMO_DATA: CarePortAnalyticsPayload = {
-  timeRangeLabel: 'Last 30 days',
-  totalPrescriptions: 1524,
-  fulfillmentRatePct: 78,
-  reprintRatePct: 15,
-  avgDeliveryMinutes: 42,
-  breakdown: {
-    fulfilled: 780,
-    reprint: 150,
-    abandoned: 70,
-  },
-  topPharmacies: [
-    { label: 'MedExpress', value: 210 },
-    { label: 'HealRx', value: 180 },
-    { label: 'PharmaPlus', value: 150 },
-    { label: 'CityMeds', value: 130 },
-    { label: 'QuickMeds', value: 110 },
-    { label: 'SateMeds', value: 90 },
-    { label: 'CarePharmacy', value: 80 },
-    { label: 'UnitedMeds', value: 70 },
-    { label: 'WellCare', value: 60 },
-  ],
-  avgDeliveryTrend: [
-    { label: 'Mar', value: 44 },
-    { label: 'Apr', value: 40 },
-    { label: 'May', value: 39 },
-    { label: 'Jun', value: 42 },
-  ],
-  riderEarningsByRegion: [
-    { label: 'Gauteng', value: 3220 },
-    { label: 'Western Cape', value: 2100 },
-    { label: 'Eastern Cape', value: 1650 },
-    { label: 'KZN', value: 1300 },
-  ],
-  tripLogs: [
-    {
-      tripId: 'TR-00432',
-      prescriptionId: 'RX-00137',
-      rider: 'Isaac N.',
-      pharmacy: 'MedExpress',
-      deliveryFeeZAR: 55,
-      status: 'Delivered',
-      payoutZAR: 52,
-    },
-    {
-      tripId: 'TR-00431',
-      prescriptionId: 'RX-00187',
-      rider: 'Thandi S.',
-      pharmacy: 'HealRx',
-      deliveryFeeZAR: 55,
-      status: 'Delivered',
-      payoutZAR: 52,
-    },
-    {
-      tripId: 'TR-00429',
-      prescriptionId: 'RX-00209',
-      rider: 'Jacob M.',
-      pharmacy: 'PharmaPlus',
-      deliveryFeeZAR: 55,
-      status: 'Delivered',
-      payoutZAR: 52,
-    },
-    {
-      tripId: 'TR-00418',
-      prescriptionId: 'RX-00418',
-      rider: 'Jacob M.',
-      pharmacy: 'HealRx',
-      deliveryFeeZAR: 55,
-      status: 'Delivered',
-      payoutZAR: 52,
-    },
-    {
-      tripId: 'TR-00417',
-      prescriptionId: 'RX-00417',
-      rider: 'Ethan K.',
-      pharmacy: 'PharmaPlus',
-      deliveryFeeZAR: 55,
-      status: 'Delivered',
-      payoutZAR: 52,
-    },
-  ],
-};
-
 /* ---------- Page ---------- */
 
 type RangeKey = '7d' | '30d' | '90d';
@@ -357,13 +272,12 @@ export default function CarePortAnalyticsPage() {
         if (!mounted) return;
         setData(j);
       } catch (e: any) {
-        // graceful fallback to demo snapshot
-        if (!mounted) return;
+                if (!mounted) return;
         setErr(
           e?.message ||
-            'Using demo CarePort analytics snapshot.',
+            'Live CarePort analytics are unavailable.',
         );
-        setData(DEMO_DATA);
+        setData(null);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -374,7 +288,36 @@ export default function CarePortAnalyticsPage() {
     };
   }, [range]);
 
-  const d = data ?? DEMO_DATA;
+  if (!data) {
+    return (
+      <main className="p-6 max-w-6xl mx-auto space-y-6">
+        <header>
+          <h1 className="text-2xl font-semibold">CarePort Analytics</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Live prescription, pharmacy and rider analytics.
+          </p>
+        </header>
+
+        {err ? (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+            <h2 className="text-sm font-semibold text-amber-950">
+              Live analytics unavailable
+            </h2>
+            <p className="mt-2 text-sm text-amber-900">{err}</p>
+            <p className="mt-2 text-xs text-amber-800">
+              Production does not substitute demo or synthetic operational records.
+            </p>
+          </section>
+        ) : (
+          <section className="rounded-2xl border bg-white p-5 text-sm text-gray-500">
+            {loading ? 'Loading live analytics…' : 'No authoritative analytics payload has been returned.'}
+          </section>
+        )}
+      </main>
+    );
+  }
+
+  const d = data;
   const totalBreakdown =
     d.breakdown.fulfilled +
       d.breakdown.reprint +

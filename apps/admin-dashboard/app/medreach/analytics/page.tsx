@@ -219,87 +219,6 @@ function VBarChart({ items }: { items: BarItem[] }) {
   );
 }
 
-/* ---------- Demo fallback ---------- */
-
-const DEMO_DATA: MedreachAnalyticsPayload = {
-  timeRangeLabel: 'Last 30 days',
-  totalDraws: 864,
-  completionRatePct: 82,
-  rescheduleRatePct: 9,
-  avgTatHours: 36,
-  breakdown: {
-    completed: 710,
-    rescheduled: 80,
-    cancelled: 74,
-  },
-  topLabs: [
-    { label: 'Ambulant Labs — Cape Town', value: 210 },
-    { label: 'Ambulant Labs — Johannesburg', value: 190 },
-    { label: 'Lancet Partner Site', value: 160 },
-    { label: 'PathCare Sandton', value: 130 },
-    { label: 'NHLS Partner Hub', value: 100 },
-  ],
-  avgTatTrend: [
-    { label: 'Mar', value: 40 },
-    { label: 'Apr', value: 34 },
-    { label: 'May', value: 32 },
-    { label: 'Jun', value: 36 },
-  ],
-  phlebEarningsByRegion: [
-    { label: 'Gauteng', value: 35200 },
-    { label: 'Western Cape', value: 26500 },
-    { label: 'KZN', value: 18750 },
-    { label: 'Eastern Cape', value: 13200 },
-  ],
-  drawLogs: [
-    {
-      drawId: 'DR-00432',
-      orderId: 'LAB-00137',
-      phleb: 'Isaac N.',
-      lab: 'Ambulant Labs — Cape Town',
-      feeZAR: 180,
-      status: 'Completed',
-      payoutZAR: 126,
-    },
-    {
-      drawId: 'DR-00431',
-      orderId: 'LAB-00187',
-      phleb: 'Thandi S.',
-      lab: 'Ambulant Labs — Cape Town',
-      feeZAR: 180,
-      status: 'Completed',
-      payoutZAR: 126,
-    },
-    {
-      drawId: 'DR-00429',
-      orderId: 'LAB-00209',
-      phleb: 'Jacob M.',
-      lab: 'PathCare Sandton',
-      feeZAR: 190,
-      status: 'Completed',
-      payoutZAR: 133,
-    },
-    {
-      drawId: 'DR-00418',
-      orderId: 'LAB-00418',
-      phleb: 'Jacob M.',
-      lab: 'Ambulant Labs — Johannesburg',
-      feeZAR: 175,
-      status: 'Rescheduled',
-      payoutZAR: 80,
-    },
-    {
-      drawId: 'DR-00417',
-      orderId: 'LAB-00417',
-      phleb: 'Ethan K.',
-      lab: 'NHLS Partner Hub',
-      feeZAR: 160,
-      status: 'Completed',
-      payoutZAR: 112,
-    },
-  ],
-};
-
 /* ---------- Page ---------- */
 
 type RangeKey = '7d' | '30d' | '90d';
@@ -330,9 +249,9 @@ export default function MedreachAnalyticsPage() {
       } catch (e: any) {
         if (!mounted) return;
         setErr(
-          e?.message || 'Using demo MedReach analytics snapshot.',
+          e?.message || 'Live MedReach analytics are unavailable.',
         );
-        setData(DEMO_DATA);
+        setData(null);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -343,7 +262,36 @@ export default function MedreachAnalyticsPage() {
     };
   }, [range]);
 
-  const d = data ?? DEMO_DATA;
+  if (!data) {
+    return (
+      <main className="p-6 max-w-6xl mx-auto space-y-6">
+        <header>
+          <h1 className="text-2xl font-semibold">MedReach — Analytics</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Live laboratory, phlebotomy and diagnostic analytics.
+          </p>
+        </header>
+
+        {err ? (
+          <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+            <h2 className="text-sm font-semibold text-amber-950">
+              Live analytics unavailable
+            </h2>
+            <p className="mt-2 text-sm text-amber-900">{err}</p>
+            <p className="mt-2 text-xs text-amber-800">
+              Production does not substitute demo or synthetic operational records.
+            </p>
+          </section>
+        ) : (
+          <section className="rounded-2xl border bg-white p-5 text-sm text-gray-500">
+            {loading ? 'Loading live analytics…' : 'No authoritative analytics payload has been returned.'}
+          </section>
+        )}
+      </main>
+    );
+  }
+
+  const d = data;
   const totalBreakdown =
     d.breakdown.completed +
       d.breakdown.rescheduled +

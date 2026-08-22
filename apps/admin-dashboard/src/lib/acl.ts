@@ -22,6 +22,13 @@ function dedup<T extends string>(arr: T[] | undefined | null): T[] {
   return Array.from(new Set((arr ?? []).filter(Boolean))) as T[];
 }
 
+function canonicalAuthority(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s&_.:-]+/g, '');
+}
+
 /** Prefer roles from the session (Gateway already merged designation + direct). */
 export function resolveEffectiveRoles(u: SessionUser | null | undefined): RoleName[] {
   return dedup(u?.roles ?? []);
@@ -34,7 +41,24 @@ export function resolveEffectiveScopes(u: SessionUser | null | undefined): Scope
 
 /** Tiny gate util used by middleware/pages */
 export function hasAnyScope(scopes: Scope[] | null | undefined, required: Scope | Scope[]): boolean {
-  const set = new Set(dedup(scopes ?? []));
+  const values = dedup(scopes ?? []);
+  const set = new Set(values);
+  const canonical = new Set(values.map(canonicalAuthority));
+
+  if (
+    set.has('*') ||
+    canonical.has('adminall') ||
+    canonical.has('superadmin')
+  ) {
+    return true;
+  }
+
   const req = Array.isArray(required) ? required : [required];
-  return req.some((s) => set.has(s));
+
+  return req.some((scope) => {
+    if (set.has(scope)) return true;
+
+    const normalized = canonicalAuthority(scope);
+    return Boolean(normalized) && canonical.has(normalized);
+  });
 }

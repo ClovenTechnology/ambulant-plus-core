@@ -243,9 +243,8 @@ export default async function AdminHome() {
           ))}
           {visible.length === 0 && (
             <div className="text-sm text-gray-600 rounded-2xl border bg-white p-6">
-              No widgets available for your access level yet. Ask an
-              administrator to review your scopes or tenant
-              configuration.
+              No dashboard widgets are enabled for the current effective
+              scopes. This is an access-policy state, not a data fallback.
             </div>
           )}
         </div>

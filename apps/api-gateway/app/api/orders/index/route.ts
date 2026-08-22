@@ -9,6 +9,9 @@ import {
   orgIdFromHeaders,
   requireRole,
 } from '@/src/lib/careport';
+import {
+  requireAdminStaffActor,
+} from '@/src/lib/admin-staff-auth';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -524,12 +527,37 @@ export async function GET(
       who,
     );
 
-    requireRole(
-      who,
-      [
-        'admin',
-      ],
-    );
+    if (String(who.role) === 'admin_staff') {
+      const actor = await requireAdminStaffActor(req);
+
+      const allowedScopes = new Set(actor.scopes || []);
+      const hasOperationalOrderAccess =
+        actor.isSuperAdmin ||
+        allowedScopes.has('admin:all') ||
+        allowedScopes.has('*') ||
+        allowedScopes.has('clinical:read') ||
+        allowedScopes.has('clinical:write') ||
+        allowedScopes.has('careport:read') ||
+        allowedScopes.has('careport:manage') ||
+        allowedScopes.has('medreach:read') ||
+        allowedScopes.has('medreach:manage') ||
+        allowedScopes.has('finance:read') ||
+        allowedScopes.has('finance:manage');
+
+      if (!hasOperationalOrderAccess) {
+        const error = new Error('forbidden');
+        (error as any).status = 403;
+        throw error;
+      }
+    }
+    else {
+      requireRole(
+        who,
+        [
+          'admin',
+        ],
+      );
+    }
 
     const orgId =
       orgIdFromHeaders(

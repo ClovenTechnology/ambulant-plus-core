@@ -4,7 +4,6 @@
 import { useEffect, useState } from 'react';
 import { Cpu } from 'lucide-react';
 
-const APIGW = process.env.NEXT_PUBLIC_APIGW_BASE || 'http://localhost:3010';
 
 export default function DevicesOnlineTile() {
   const [count, setCount] = useState<number | null>(null);
@@ -14,19 +13,17 @@ export default function DevicesOnlineTile() {
     let alive = true;
     (async () => {
       try {
-        // Expected Gateway endpoint (optional stub):
-        // GET /api/devices/online?window=300 → { count: number }
-        const r = await fetch(`${APIGW}/api/devices/online?window=300`, {
+        const r = await fetch('/api/dashboard/devices-online?window=300', {
           credentials: 'include',
           cache: 'no-store',
         });
 
-        if (r.status === 404) {
-          if (alive) setCount(0); // graceful default
-          return;
+        const j = await r.json().catch(() => ({}));
+
+        if (!r.ok || j?.ok === false) {
+          throw new Error(j?.error || `HTTP ${r.status}`);
         }
 
-        const j = await r.json().catch(() => ({}));
         if (alive) setCount(Number.isFinite(j?.count) ? j.count : 0);
       } catch (e: any) {
         if (alive) setErr(e?.message || 'failed');

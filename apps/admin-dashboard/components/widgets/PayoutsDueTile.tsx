@@ -4,9 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Wallet } from 'lucide-react';
 
-const APIGW = process.env.NEXT_PUBLIC_APIGW_BASE || 'http://localhost:3010';
 
-type Payout = { id: string; amountCents: number; currency: string; status: string };
 
 export default function PayoutsDueTile() {
   const [count, setCount] = useState<number | null>(null);
@@ -17,26 +15,20 @@ export default function PayoutsDueTile() {
     let alive = true;
     (async () => {
       try {
-        // Expected Gateway endpoint (wire to Prisma Payout model):
-        // GET /api/finance/payouts?status=pending → { items: Payout[] }
-        const r = await fetch(`${APIGW}/api/finance/payouts?status=pending`, {
+        const r = await fetch('/api/dashboard/payouts-due', {
           credentials: 'include',
           cache: 'no-store',
         });
 
-        if (r.status === 404) {
-          // Graceful fallback values until endpoint exists
-          if (alive) { setCount(0); setTotal(0); }
-          return;
+        const j = await r.json().catch(() => ({}));
+
+        if (!r.ok || j?.ok === false) {
+          throw new Error(j?.error || `HTTP ${r.status}`);
         }
 
-        const j = await r.json().catch(() => ({}));
-        const items: Payout[] = Array.isArray(j?.items) ? j.items : [];
-        const sum = items.reduce((acc, p) => acc + (p.amountCents || 0), 0);
-
         if (alive) {
-          setCount(items.length ?? 0);
-          setTotal(sum);
+          setCount(Number.isFinite(j?.count) ? j.count : 0);
+          setTotal(Number.isFinite(j?.totalCents) ? j.totalCents : 0);
         }
       } catch (e: any) {
         if (alive) setErr(e?.message || 'failed');

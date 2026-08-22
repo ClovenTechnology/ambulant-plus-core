@@ -66,49 +66,11 @@ export default function MedReachDashboard() {
       setJobs(Array.isArray(json?.jobs) ? json.jobs : []);
     } catch (e: any) {
       console.error('medreach jobs load error', e);
-      // Demo fallback using MedReachJob-like rows
-      setJobs([
-        {
-          id: 'MRJ-00432',
-          externalId: 'LAB-00137',
-          labName: 'Ambulant Labs — Cape Town',
-          phlebName: 'Isaac N.',
-          patientName: 'N. Dlamini',
-          patientAddress: 'Khayelitsha, Cape Town',
-          windowLabel: '10–11am',
-          status: 'Completed',
-          eta: 'Today • 10:30',
-          etaAt: new Date(Date.now() - 1000 * 60 * 90).toISOString(),
-          createdAt: new Date(Date.now() - 1000 * 60 * 120).toISOString(),
-        },
-        {
-          id: 'MRJ-00433',
-          externalId: 'LAB-00187',
-          labName: 'Ambulant Labs — Cape Town',
-          phlebName: 'Thandi S.',
-          patientName: 'T. Khumalo',
-          patientAddress: 'Soweto, Johannesburg',
-          windowLabel: '14–15h',
-          status: 'EnRoute',
-          eta: 'Today • 14:30',
-          etaAt: new Date(Date.now() + 1000 * 60 * 60).toISOString(),
-          createdAt: new Date(Date.now() - 1000 * 60 * 45).toISOString(),
-        },
-        {
-          id: 'MRJ-00434',
-          externalId: 'LAB-00209',
-          labName: 'PathCare Sandton',
-          phlebName: 'Jacob M.',
-          patientName: 'L. Mthethwa',
-          patientAddress: 'Sandton, Johannesburg',
-          windowLabel: '18–19h',
-          status: 'Assigned',
-          eta: 'Today • 18:15',
-          etaAt: new Date(Date.now() + 1000 * 60 * 60 * 4).toISOString(),
-          createdAt: new Date(Date.now() - 1000 * 60 * 5).toISOString(),
-        },
-      ]);
-      setErr(e?.message || 'Fell back to demo MedReach jobs data');
+      setJobs([]);
+      setErr(
+        e?.message ||
+          'Live MedReach jobs are unavailable. No demo records are shown in production.',
+      );
     } finally {
       setLoading(false);
     }

@@ -39,6 +39,116 @@ const RULES: Array<{
   },
   {
     prefix:
+      '/insightcore',
+    required: [
+      'insightcore:read',
+      'insightcore:manage',
+      'ai:read',
+      'ai:governance',
+      'tech:read',
+      'tech:manage',
+      'tech',
+    ],
+  },
+  {
+    prefix:
+      '/cases',
+    required: [
+      'clinical:read',
+      'clinical:write',
+      'patients:read',
+      'medical',
+    ],
+  },
+  {
+    prefix:
+      '/orders',
+    required: [
+      'clinical:read',
+      'clinical:write',
+      'careport:read',
+      'careport:manage',
+      'medreach:read',
+      'medreach:manage',
+      'finance:read',
+      'finance:manage',
+      'medical',
+    ],
+  },
+  {
+    prefix:
+      '/analytics',
+    required: [
+      'reports:read',
+      'finance:read',
+      'finance:manage',
+      'insightcore:read',
+      'reports',
+      'finance',
+    ],
+  },
+  {
+    prefix:
+      '/consult',
+    required: [
+      'clinical:read',
+      'clinical:write',
+      'medical',
+    ],
+  },
+  {
+    prefix:
+      '/settings/insurance',
+    required: [
+      'finance:read',
+      'finance:manage',
+      'finance',
+    ],
+  },
+  {
+    prefix:
+      '/settings/payouts',
+    required: [
+      'finance:read',
+      'finance:manage',
+      'finance',
+    ],
+  },
+  {
+    prefix:
+      '/settings/insightcore',
+    required: [
+      'insightcore:read',
+      'insightcore:manage',
+      'ai:read',
+      'ai:governance',
+      'tech:read',
+      'tech:manage',
+      'tech',
+    ],
+  },
+  {
+    prefix:
+      '/settings/plans',
+    required: [
+      'finance:read',
+      'finance:manage',
+      'finance',
+      'manageRoles',
+    ],
+  },
+  {
+    prefix:
+      '/settings/consult',
+    required: [
+      'clinical:read',
+      'clinical:write',
+      'medical',
+      'manageRoles',
+    ],
+  },
+  {
+    prefix:
       '/admin/communications',
     required: [
       'communications.use',

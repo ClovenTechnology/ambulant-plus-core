@@ -158,299 +158,6 @@ type MedicalAnalyticsPayload = {
   paediatrics: PaediatricSlice;
 };
 
-/* ---------- Mock payload for local dev / fallback ---------- */
-
-const MOCK_MEDICAL: MedicalAnalyticsPayload = {
-  kpis: {
-    totalCases: 12430,
-    newCases: 820,
-    testPositivityPct: 14.2,
-    suspectedOutbreaks: 3,
-    paedsSharePct: 18,
-    highRiskPatientsPct7d: 7,
-    avgTimeToFirstConsultHours: 5.3,
-  },
-  topSyndromes: [
-    { key: 'respiratory', label: 'Respiratory', cases: 5100, sharePct: 41 },
-    { key: 'gi', label: 'GI / diarrhoeal', cases: 2900, sharePct: 23 },
-    { key: 'feverRash', label: 'Fever / rash', cases: 1800, sharePct: 15 },
-    { key: 'neuro', label: 'Neuro', cases: 900, sharePct: 7 },
-    { key: 'other', label: 'Other', cases: 1730, sharePct: 14 },
-  ],
-  timeSeries: Array.from({ length: 14 }).map((_, i) => {
-    const base = 400 + i * 15;
-    return {
-      bucket: new Date(Date.now() - (13 - i) * 24 * 60 * 60 * 1000)
-        .toISOString()
-        .slice(0, 10),
-      totalCases: base,
-      respiratory: Math.round(base * 0.42),
-      gi: Math.round(base * 0.22),
-      feverRash: Math.round(base * 0.16),
-      neuro: Math.round(base * 0.08),
-      other: Math.round(base * 0.12),
-    };
-  }),
-  topIcd10: [
-    {
-      code: 'J06.9',
-      description: 'Acute upper respiratory infection, unspecified',
-      cases: 2150,
-      patients: 1920,
-      sharePct: 17,
-      ageBandBreakdown: [
-        { band: '0–17', cases: 650 },
-        { band: '18–39', cases: 780 },
-        { band: '40–64', cases: 540 },
-        { band: '65+', cases: 180 },
-      ],
-    },
-    {
-      code: 'K52.9',
-      description: 'Noninfective gastroenteritis and colitis, unspecified',
-      cases: 1280,
-      patients: 1140,
-      sharePct: 10,
-      ageBandBreakdown: [
-        { band: '0–17', cases: 380 },
-        { band: '18–39', cases: 460 },
-        { band: '40–64', cases: 320 },
-        { band: '65+', cases: 120 },
-      ],
-    },
-    {
-      code: 'U07.1',
-      description: 'COVID-19, virus identified',
-      cases: 860,
-      patients: 820,
-      sharePct: 7,
-      ageBandBreakdown: [
-        { band: '0–17', cases: 90 },
-        { band: '18–39', cases: 360 },
-        { band: '40–64', cases: 290 },
-        { band: '65+', cases: 120 },
-      ],
-    },
-  ],
-  geoIncidence: [
-    {
-      geoLevel: 'province',
-      name: 'Gauteng',
-      code: 'ZA-GP',
-      totalCases: 5200,
-      incidencePer100k: 92,
-      growthRatePct: 18,
-      suspectedCluster: true,
-      dominantSyndrome: 'respiratory',
-    },
-    {
-      geoLevel: 'province',
-      name: 'Western Cape',
-      code: 'ZA-WC',
-      totalCases: 3100,
-      incidencePer100k: 79,
-      growthRatePct: 6,
-      suspectedCluster: false,
-      dominantSyndrome: 'gi',
-    },
-    {
-      geoLevel: 'province',
-      name: 'KZN',
-      code: 'ZA-KZN',
-      totalCases: 2100,
-      incidencePer100k: 64,
-      growthRatePct: 12,
-      suspectedCluster: false,
-      dominantSyndrome: 'respiratory',
-    },
-    {
-      geoLevel: 'province',
-      name: 'Eastern Cape',
-      code: 'ZA-EC',
-      totalCases: 1030,
-      incidencePer100k: 51,
-      growthRatePct: 4,
-      suspectedCluster: false,
-      dominantSyndrome: 'other',
-    },
-  ],
-  movement: [
-    {
-      fromName: 'Soweto',
-      fromCode: 'SOW',
-      toName: 'Johannesburg CBD',
-      toCode: 'JHB-CBD',
-      patients: 74,
-      suspectedCases: 34,
-    },
-    {
-      fromName: 'Khayelitsha',
-      fromCode: 'KHA',
-      toName: 'Cape Town CBD',
-      toCode: 'CPT-CBD',
-      patients: 51,
-      suspectedCases: 21,
-    },
-  ],
-  demography: [
-    {
-      ageBand: '0–17',
-      gender: 'Female',
-      patients: 820,
-      cases: 1040,
-      incidencePer100k: 88,
-      sharePct: 9,
-      topIcd10: [
-        { code: 'J06.9', description: 'Acute URI', cases: 210 },
-        { code: 'K52.9', description: 'GI / diarrhoeal', cases: 130 },
-      ],
-    },
-    {
-      ageBand: '0–17',
-      gender: 'Male',
-      patients: 910,
-      cases: 1120,
-      incidencePer100k: 94,
-      sharePct: 9,
-      topIcd10: [
-        { code: 'J06.9', description: 'Acute URI', cases: 240 },
-        { code: 'J45.9', description: 'Asthma, unspecified', cases: 110 },
-      ],
-    },
-    {
-      ageBand: '65+',
-      gender: 'Female',
-      patients: 460,
-      cases: 530,
-      incidencePer100k: 132,
-      sharePct: 6,
-      topIcd10: [
-        { code: 'I10', description: 'Hypertension', cases: 160 },
-        { code: 'J18.9', description: 'Pneumonia, unspecified', cases: 90 },
-      ],
-    },
-  ],
-  meds: {
-    overall: [
-      {
-        atcCode: 'J01CA04',
-        name: 'Amoxicillin 500mg',
-        prescriptions: 1640,
-        patients: 1420,
-        sharePct: 11,
-        demographicSkew: 'Paeds + young adults',
-      },
-      {
-        atcCode: 'N02BE01',
-        name: 'Paracetamol 500mg',
-        prescriptions: 2900,
-        patients: 2100,
-        sharePct: 19,
-        demographicSkew: 'All ages',
-      },
-    ],
-    paeds: [
-      {
-        atcCode: 'J01CR02',
-        name: 'Amoxicillin/clavulanic acid syrup',
-        prescriptions: 420,
-        patients: 360,
-        sharePct: 22,
-        demographicSkew: '0–11 yrs',
-      },
-    ],
-    adults: [
-      {
-        atcCode: 'J01CA04',
-        name: 'Amoxicillin 500mg',
-        prescriptions: 960,
-        patients: 860,
-        sharePct: 14,
-      },
-    ],
-    seniors: [
-      {
-        atcCode: 'C09AA05',
-        name: 'Ramipril',
-        prescriptions: 320,
-        patients: 290,
-        sharePct: 9,
-      },
-    ],
-  },
-  labs: [
-    {
-      loincCode: '94309-2',
-      name: 'SARS-CoV-2 RNA panel',
-      orders: 620,
-      positives: 82,
-      positivityPct: 13.2,
-      topIcd10: [
-        { code: 'U07.1', description: 'COVID-19, virus identified', cases: 78 },
-      ],
-    },
-    {
-      loincCode: '1988-5',
-      name: 'C-reactive protein (CRP)',
-      orders: 910,
-      positives: 340,
-      positivityPct: 37.4,
-      topIcd10: [
-        { code: 'J18.9', description: 'Pneumonia, unspecified', cases: 96 },
-      ],
-    },
-  ],
-  outbreakSignals: [
-    {
-      id: 'sig-1',
-      syndrome: 'respiratory',
-      label: 'Respiratory spike • Soweto',
-      geoLevel: 'city',
-      locationName: 'Soweto',
-      signalScore: 0.86,
-      baselineMultiplier: 2.4,
-      rEstimate: 1.4,
-      status: 'investigate',
-      window: {
-        from: new Date(Date.now() - 6 * 24 * 60 * 60 * 1000).toISOString(),
-        to: new Date().toISOString(),
-      },
-    },
-    {
-      id: 'sig-2',
-      syndrome: 'gi',
-      label: 'GI cluster • Khayelitsha',
-      geoLevel: 'city',
-      locationName: 'Khayelitsha',
-      signalScore: 0.71,
-      baselineMultiplier: 1.9,
-      rEstimate: 1.2,
-      status: 'watch',
-      window: {
-        from: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-        to: new Date().toISOString(),
-      },
-    },
-  ],
-  paediatrics: {
-    totalCases: 2200,
-    sharePct: 18,
-    hospitalisationRatePer1000: 14.2,
-    topDiagnoses: [
-      { code: 'J06.9', description: 'Acute URI', cases: 430 },
-      { code: 'A09', description: 'Infectious gastroenteritis', cases: 320 },
-      { code: 'J45.9', description: 'Asthma, unspecified', cases: 190 },
-    ],
-    topAgeBands: [
-      { band: '0–4', cases: 980 },
-      { band: '5–11', cases: 780 },
-      { band: '12–17', cases: 440 },
-    ],
-  },
-};
-
-/* ---------- Small UI bits ---------- */
-
 function MetricCard({
   label,
   value,
@@ -608,7 +315,6 @@ export default function MedicalAnalyticsPage() {
   const [data, setData] = useState<MedicalAnalyticsPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [usingMock, setUsingMock] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
 
   useEffect(() => {
@@ -634,18 +340,16 @@ export default function MedicalAnalyticsPage() {
         const json = (await res.json()) as MedicalAnalyticsPayload;
         if (cancelled) return;
         setData(json);
-        setUsingMock(false);
         setLastUpdated(new Date());
       } catch (e: any) {
         console.error('medical analytics error', e);
         if (!cancelled) {
           setErr(
             e?.message ||
-              'Using mock medical analytics snapshot until /api/analytics/medical is reachable.',
+              'Live medical analytics are unavailable.',
           );
-          setData(MOCK_MEDICAL);
-          setUsingMock(true);
-          setLastUpdated(new Date());
+          setData(null);
+            setLastUpdated(new Date());
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -657,22 +361,67 @@ export default function MedicalAnalyticsPage() {
     };
   }, [range, geoLevel, province, ageBand, gender, syndrome, searchCode]);
 
-  const d = data ?? MOCK_MEDICAL;
-
   const maxGeoIncidence = useMemo(
-    () => Math.max(...d.geoIncidence.map((g) => g.incidencePer100k), 1),
-    [d.geoIncidence],
+    () =>
+      Math.max(
+        ...(data?.geoIncidence ?? []).map(
+          (g) => g.incidencePer100k,
+        ),
+        1,
+      ),
+    [data?.geoIncidence],
   );
 
   const filteredIcd = useMemo(() => {
-    if (!searchCode.trim()) return d.topIcd10;
+    const rows = data?.topIcd10 ?? [];
+
+    if (!searchCode.trim()) return rows;
+
     const q = searchCode.trim().toLowerCase();
-    return d.topIcd10.filter(
+
+    return rows.filter(
       (r) =>
         r.code.toLowerCase().includes(q) ||
         r.description.toLowerCase().includes(q),
     );
-  }, [d.topIcd10, searchCode]);
+  }, [data?.topIcd10, searchCode]);
+
+  if (!data && !loading) {
+    return (
+      <main className="mx-auto max-w-7xl space-y-6 p-6">
+        <header>
+          <h1 className="text-2xl font-semibold">
+            Analytics — Medical &amp; Syndromic
+          </h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Near real-time symptoms, diagnoses, laboratories and InsightCore signals.
+          </p>
+        </header>
+
+        <section className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
+          <h2 className="text-sm font-semibold text-amber-950">
+            Live medical analytics unavailable
+          </h2>
+          <p className="mt-2 text-sm text-amber-900">
+            {err || 'The live analytics service did not return an authoritative dataset.'}
+          </p>
+          <p className="mt-2 text-xs text-amber-800">
+            Production does not substitute mock patient or clinical analytics.
+          </p>
+        </section>
+      </main>
+    );
+  }
+
+  if (!data) {
+    return (
+      <main className="mx-auto max-w-7xl p-6 text-sm text-gray-500">
+        Loading live medical analytics…
+      </main>
+    );
+  }
+
+  const d = data;
 
   function resetFilters() {
     setRange('7d');
@@ -730,9 +479,7 @@ export default function MedicalAnalyticsPage() {
             <Badge>Outbreak signals are indicative, not diagnostic</Badge>
             <Badge>
               Mode:{' '}
-              <span className={usingMock ? 'text-amber-700' : 'text-emerald-700'}>
-                {usingMock ? 'Mock snapshot' : 'Live API'}
-              </span>
+              <span className="text-emerald-700">Live API</span>
             </Badge>
           </div>
         </div>
