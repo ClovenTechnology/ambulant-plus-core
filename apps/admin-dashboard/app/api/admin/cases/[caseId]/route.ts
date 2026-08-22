@@ -5,25 +5,29 @@ import { requireAdminApiSession } from '@/app/api/_adminApiSession';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-async function forward(req: NextRequest, method: 'GET' | 'PUT') {
+async function forward(
+  req: NextRequest,
+  method: 'GET' | 'PATCH',
+  caseId: string,
+) {
   const auth = await requireAdminApiSession(
     req,
     method === 'GET'
-      ? ['admin:read', 'admin:write', 'compliance:read', 'compliance:manage']
-      : ['admin:write', 'compliance:manage'],
+      ? ['clinical:read', 'clinical:write', 'patients:read', 'patients:manage', 'admin:read']
+      : ['clinical:write', 'patients:manage', 'admin:write'],
   );
   if (!auth.ok) return auth.response;
 
   const headers = new Headers(auth.gatewayHeaders);
-  if (method === 'PUT') headers.set('content-type', 'application/json');
+  if (method === 'PATCH') headers.set('content-type', 'application/json');
 
   try {
     const upstream = await fetch(
-      new URL('/api/settings/insurance', apigwBase()),
+      new URL(`/api/cases/${encodeURIComponent(caseId)}`, apigwBase()),
       {
         method,
         headers,
-        body: method === 'PUT' ? await req.text() : undefined,
+        body: method === 'PATCH' ? await req.text() : undefined,
         cache: 'no-store',
       },
     );
@@ -37,16 +41,22 @@ async function forward(req: NextRequest, method: 'GET' | 'PUT') {
     });
   } catch {
     return NextResponse.json(
-      { ok: false, error: 'professional_indemnity_upstream_unavailable' },
+      { ok: false, error: 'case_upstream_unavailable' },
       { status: 503, headers: { 'cache-control': 'no-store' } },
     );
   }
 }
 
-export async function GET(req: NextRequest) {
-  return forward(req, 'GET');
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { caseId: string } },
+) {
+  return forward(req, 'GET', params.caseId);
 }
 
-export async function PUT(req: NextRequest) {
-  return forward(req, 'PUT');
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { caseId: string } },
+) {
+  return forward(req, 'PATCH', params.caseId);
 }

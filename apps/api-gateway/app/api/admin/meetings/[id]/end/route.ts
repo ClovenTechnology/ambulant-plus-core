@@ -65,6 +65,10 @@ export async function POST(
         data: { revokedAt: now },
       });
 
+      const joinedStaffProfileIds = access.meeting.participants
+        .filter((participant) => participant.state === 'JOINED' && participant.staffProfileId)
+        .map((participant) => String(participant.staffProfileId));
+
       await tx.meetingParticipant.updateMany({
         where: {
           meetingId: access.meeting.id,
@@ -75,6 +79,32 @@ export async function POST(
           lastLeftAt: now,
         },
       });
+
+      await tx.meetingAttendanceSession.updateMany({
+        where: {
+          meetingId: access.meeting.id,
+          leftAt: null,
+        },
+        data: {
+          leftAt: now,
+          disconnectReason: 'meeting_ended',
+        },
+      });
+
+      if (joinedStaffProfileIds.length) {
+        await tx.adminStaffPresence.updateMany({
+          where: {
+            staffProfileId: { in: joinedStaffProfileIds },
+            state: 'IN_MEETING',
+          },
+          data: {
+            state: 'OFFLINE',
+            lastHeartbeatAt: now,
+            expiresAt: now,
+            updatedByUserId: actor.userId,
+          },
+        });
+      }
 
       return true;
     });

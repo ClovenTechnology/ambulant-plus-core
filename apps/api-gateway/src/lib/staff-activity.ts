@@ -60,7 +60,13 @@ export async function recordStaffActivity(input: {
         prisma.meeting.findFirst({
           where: {
             state: 'LIVE',
-            participants: { some: { staffProfileId: input.actor.profileId, state: 'JOINED' } },
+            endsAt: { gt: new Date(now.getTime() - 15 * 60_000) },
+            participants: {
+              some: {
+                staffProfileId: input.actor.profileId,
+                state: 'JOINED',
+              },
+            },
           },
           select: { id: true },
         }),

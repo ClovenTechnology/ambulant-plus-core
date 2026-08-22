@@ -9,6 +9,7 @@ import {
   mintMeetingRtcAccess,
   writeMeetingAudit,
 } from '@/src/lib/admin-meetings';
+import { staffPresenceTtlMs } from '@/src/lib/admin-staff-policy';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -73,14 +74,14 @@ export async function POST(
         update: {
           state: 'IN_MEETING',
           lastHeartbeatAt: now,
-          expiresAt: new Date(Math.max(access.meeting.endsAt.getTime() + 30 * 60_000, now.getTime() + 90_000)),
+          expiresAt: new Date(now.getTime() + staffPresenceTtlMs()),
           updatedByUserId: actor.userId,
         },
         create: {
           staffProfileId: actor.profileId,
           state: 'IN_MEETING',
           lastHeartbeatAt: now,
-          expiresAt: new Date(Math.max(access.meeting.endsAt.getTime() + 30 * 60_000, now.getTime() + 90_000)),
+          expiresAt: new Date(now.getTime() + staffPresenceTtlMs()),
           updatedByUserId: actor.userId,
         },
       });

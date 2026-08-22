@@ -38,7 +38,9 @@ export async function GET(request: NextRequest) {
     const pageSize = posInt(url.searchParams.get('pageSize'), 50, 100);
     const now = new Date();
 
-    const [profiles, pendingRequests] = await Promise.all([
+    const meetingGraceBoundary = new Date(now.getTime() - 15 * 60_000);
+
+    const [profiles, pendingRequests, activeMeetingParticipants] = await Promise.all([
       prisma.adminUserProfile.findMany({
         include: staffProfileInclude,
         take: 5000,
@@ -59,9 +61,44 @@ export async function GET(request: NextRequest) {
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         take: 5000,
       }),
+      prisma.meetingParticipant.findMany({
+        where: {
+          state: 'JOINED',
+          staffProfileId: { not: null },
+          meeting: {
+            state: 'LIVE',
+            endsAt: { gt: meetingGraceBoundary },
+          },
+        },
+        select: { staffProfileId: true },
+        take: 5000,
+      }),
     ]);
 
-    const activeRows = profiles.map((profile) => serializeStaffProfile(profile, now));
+    const activeMeetingStaffIds = new Set(
+      activeMeetingParticipants
+        .map((row) => row.staffProfileId)
+        .filter((value): value is string => Boolean(value)),
+    );
+
+    const activeRows = profiles.map((profile) => {
+      const row = serializeStaffProfile(profile, now);
+      if (row.presence !== 'IN_MEETING' || activeMeetingStaffIds.has(profile.id)) {
+        return row;
+      }
+
+      const recentlyActive =
+        profile.lastActivityAt &&
+        now.getTime() - profile.lastActivityAt.getTime() <= 90_000;
+
+      return {
+        ...row,
+        presence: recentlyActive ? ('AVAILABLE' as const) : ('OFFLINE' as const),
+        presenceExpiresAt: recentlyActive
+          ? new Date(now.getTime() + 90_000)
+          : null,
+      };
+    });
     const pendingRows = pendingRequests.map((requestRow) => {
       const roles = requestRow.roles.map((entry) => ({
         id: entry.role.id,

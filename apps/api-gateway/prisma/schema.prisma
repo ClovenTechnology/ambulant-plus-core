@@ -184,6 +184,40 @@ model UserDevice {
   @@index([sponsoredAssignmentId])
 }
 
+model ClinicalCase {
+  id              String   @id
+  patientId       String
+  leadClinicianId String?
+  title           String   @default("Clinical case")
+  summary         String?
+  notes           String?
+  status          String   @default("open") @db.VarChar(80)
+  priority        String   @default("routine") @db.VarChar(80)
+  orgId           String   @default("org-default")
+  openedAt        DateTime @default(now())
+  closedAt        DateTime?
+  lastEncounterAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  encounters      Encounter[]
+
+  @@index([patientId, status, updatedAt])
+  @@index([leadClinicianId, status, updatedAt])
+  @@index([orgId, status, updatedAt])
+  @@index([lastEncounterAt])
+}
+
+model PlatformSetting {
+  key             String   @id @db.VarChar(160)
+  category        String?  @db.VarChar(80)
+  value           Json
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([category, updatedAt])
+}
+
 model Encounter {
   id          String  @id
   caseId      String
@@ -208,6 +242,7 @@ model Encounter {
 
   orgId String @default("org-default")
 
+  clinicalCase            ClinicalCase                       @relation(fields: [caseId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   appointments             Appointment[]
   erxOrders                ErxOrder[]
   labOrders                LabOrder[]
@@ -226,6 +261,7 @@ model Encounter {
   surgicalCases  SurgicalCase[]
   surgicalEvents SurgicalProcedureEvent[]
 
+  @@index([caseId, updatedAt])
   @@index([orgId])
   @@index([sessionId])
   @@index([status])

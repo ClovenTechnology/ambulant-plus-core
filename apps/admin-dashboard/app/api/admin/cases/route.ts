@@ -9,14 +9,15 @@ async function forward(req: NextRequest, method: 'GET' | 'POST') {
   const auth = await requireAdminApiSession(
     req,
     method === 'GET'
-      ? ['admin:read', 'admin:write', 'finance:read', 'finance:manage']
-      : ['admin:write', 'finance:manage'],
+      ? ['clinical:read', 'clinical:write', 'patients:read', 'patients:manage', 'admin:read']
+      : ['clinical:write', 'patients:manage', 'admin:write'],
   );
   if (!auth.ok) return auth.response;
 
-  const url = new URL('/api/settings/plans', apigwBase());
-  if (method === 'GET') url.searchParams.set('includeDisabled', '1');
-
+  const url = new URL('/api/cases', apigwBase());
+  if (method === 'GET') {
+    req.nextUrl.searchParams.forEach((value, key) => url.searchParams.append(key, value));
+  }
   const headers = new Headers(auth.gatewayHeaders);
   if (method === 'POST') headers.set('content-type', 'application/json');
 
@@ -37,7 +38,7 @@ async function forward(req: NextRequest, method: 'GET' | 'POST') {
     });
   } catch {
     return NextResponse.json(
-      { ok: false, error: 'plan_settings_upstream_unavailable' },
+      { ok: false, error: 'case_upstream_unavailable' },
       { status: 503, headers: { 'cache-control': 'no-store' } },
     );
   }
