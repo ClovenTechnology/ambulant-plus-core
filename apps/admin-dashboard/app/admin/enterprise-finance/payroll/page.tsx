@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -176,7 +176,7 @@ function formatDate(value: unknown) {
 }
 
 function recordId(record: JsonRecord, fallback: string) {
-  return textAt(record, ["id", "staffId", "userId", "employeeId", "profileId"], fallback);
+  return textAt(record, ["id", "staffUserId", "userId", "staffProfileId", "staffId", "employeeId", "profileId"], fallback);
 }
 
 function csvEscape(value: string) {
@@ -372,8 +372,15 @@ export default function EnterpriseFinancePayrollPage() {
 
       const haystack = [
         textAt(profile, ["staffName", "employeeName", "name", "userName"], ""),
-        textAt(profile, ["email", "staffEmail", "employeeEmail"], ""),
-        textAt(profile, ["role", "jobTitle", "designation"], ""),
+        textAt(profile, ["staffEmail", "email", "employeeEmail"], ""),
+        textAt(profile, ["staffIdentifier", "staffId"], ""),
+        textAt(profile, ["staffProfileId", "profileId"], ""),
+        textAt(profile, ["staffUserId", "userId"], ""),
+        textAt(profile, ["payrollNumber", "employerReference"], ""),
+        textAt(profile, ["departmentName", "department"], ""),
+        textAt(profile, ["designationName", "designation"], ""),
+        textAt(profile, ["role", "staffRole", "jobTitle"], ""),
+        textAt(profile, ["bankName", "bankAccountMasked"], ""),
         status,
         payCycle,
         bankStatus,
@@ -389,8 +396,8 @@ export default function EnterpriseFinancePayrollPage() {
     const totals = new Map<string, number>();
 
     state.arrears.forEach((entry) => {
-      const staffKey = textAt(entry, ["staffId", "userId", "employeeId", "profileId", "staffName", "employeeName", "name"], "unknown");
-      totals.set(staffKey, (totals.get(staffKey) || 0) + amountAt(entry, ["outstandingAmount", "balance", "amount", "amountCents"]));
+      const staffKey = textAt(entry, ["staffUserId", "userId", "employeeId", "staffProfileId", "profileId", "staffName", "employeeName", "name"], "unknown");
+      totals.set(staffKey, (totals.get(staffKey) || 0) + amountAt(entry, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]));
     });
 
     return totals;
@@ -414,9 +421,9 @@ export default function EnterpriseFinancePayrollPage() {
 
     const unpaidSalaryBalance =
       amountAt(state.overview, ["salaryArrears", "staffArrears", "arrearsPayable", "salaryArrearsCents"]) ||
-      sumAmounts(unpaidArrears, ["outstandingAmount", "balance", "amount", "amountCents"]);
+      sumAmounts(unpaidArrears, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]);
 
-    const selectedPaymentPlan = sumAmounts(selectedArrears, ["outstandingAmount", "balance", "amount", "amountCents"]);
+    const selectedPaymentPlan = sumAmounts(selectedArrears, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]);
 
     const disputedCount = state.arrears.filter((entry) => {
       const status = textAt(entry, ["disputeStatus", "status", "arrearsStatus"], "").toLowerCase();
@@ -456,7 +463,7 @@ export default function EnterpriseFinancePayrollPage() {
     const rows = selectedArrears.map((entry) => [
       textAt(entry, ["staffName", "employeeName", "name", "userName"], "Staff member"),
       textAt(entry, ["period", "payPeriod", "month"], "—"),
-      String(amountAt(entry, ["outstandingAmount", "balance", "amount", "amountCents"])),
+      String(amountAt(entry, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"])),
       textAt(entry, ["status", "paymentStatus", "arrearsStatus"], "pending"),
       textAt(entry, ["reference", "id", "payrollRunId"], ""),
     ]);
@@ -501,8 +508,8 @@ export default function EnterpriseFinancePayrollPage() {
 
               <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
                 Accountant-facing payroll page for staff payroll profiles, salary liability,
-                unpaid arrears, bulk payment planning and dispute visibility. Staff self-service
-                remains a later separate surface for payslips, bank details and disputes.
+                unpaid arrears, payment planning and dispute visibility. Staff identity is enriched
+                from the canonical Staff directory while self-service remains permission-gated.
               </p>
             </div>
 
@@ -573,7 +580,7 @@ export default function EnterpriseFinancePayrollPage() {
                 <input
                   value={filters.search}
                   onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-                  placeholder="Name, email, role or status"
+                  placeholder="Name, email, Staff ID, payroll no., role or status"
                   className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
                 />
               </label>
@@ -660,9 +667,9 @@ export default function EnterpriseFinancePayrollPage() {
                 </p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Staff self-service later</div>
+                <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Staff self-service</div>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Staff payslips, arrears view, bank details and dispute submission should be added as a separate staff-facing workflow.
+                  Payslips, bank details and current arrears are already surfaced through the governed Staff employment workspace; dispute submission remains separately controlled.
                 </p>
               </div>
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -709,8 +716,8 @@ export default function EnterpriseFinancePayrollPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100 bg-white">
                       {filteredProfiles.map((profile, index) => {
-                        const staffKey = textAt(profile, ["staffId", "userId", "employeeId", "profileId", "staffName", "employeeName", "name"], String(index));
-                        const salary = amountAt(profile, ["monthlySalary", "salary", "grossSalary", "baseSalary", "amount", "amountCents"]);
+                        const staffKey = textAt(profile, ["staffUserId", "userId", "staffProfileId", "profileId", "staffName", "employeeName", "name"], String(index));
+                        const salary = amountAt(profile, ["baseSalaryCents", "monthlySalary", "salary", "grossSalary", "baseSalary", "amount", "amountCents"]);
                         const bankStatus = textAt(profile, ["bankStatus", "bankVerificationStatus", "payoutStatus"], "pending");
                         const payrollStatus = textAt(profile, ["status", "employmentStatus", "payrollStatus"], "active");
                         const arrearsExposure = arrearsByStaff.get(staffKey) || 0;
@@ -722,11 +729,18 @@ export default function EnterpriseFinancePayrollPage() {
                                 {textAt(profile, ["staffName", "employeeName", "name", "userName"], "Staff member")}
                               </div>
                               <div className="text-xs text-slate-500">
-                                {textAt(profile, ["email", "staffEmail", "employeeEmail"], "—")}
+                                {textAt(profile, ["staffEmail", "email", "employeeEmail"], "—")}
+                              </div>
+                              <div className="mt-1 text-[11px] text-slate-400">
+                                Staff {textAt(profile, ["staffIdentifier"], "—")}
+                                {" · "}
+                                Profile {textAt(profile, ["staffProfileId"], "—")}
+                                {" · "}
+                                Payroll {textAt(profile, ["payrollNumber"], "—")}
                               </div>
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                              {textAt(profile, ["role", "jobTitle", "designation"], "—")}
+                              {textAt(profile, ["role", "staffRole", "designationName", "jobTitle", "designation"], "—")}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                               {textAt(profile, ["payCycle", "payFrequency", "frequency"], "monthly")}
@@ -736,6 +750,9 @@ export default function EnterpriseFinancePayrollPage() {
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                               <StatusPill tone={bankStatus.toLowerCase().includes("verified") ? "good" : "warn"}>{bankStatus}</StatusPill>
+                              <div className="mt-1 text-[11px] text-slate-400">
+                                {textAt(profile, ["bankName", "bankAccountMasked"], "")}
+                              </div>
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                               {payrollStatus}
@@ -759,7 +776,7 @@ export default function EnterpriseFinancePayrollPage() {
             <div>
               <h2 className="text-lg font-bold text-slate-950">Bulk arrears payment planning</h2>
               <p className="mt-1 text-sm leading-6 text-slate-500">
-                Select unpaid salary arrears rows for accountant review before any real transfer workflow is introduced.
+                Select unpaid salary arrears rows for accountant review. Recording and reconciliation are performed from the governed arrears ledger.
               </p>
             </div>
             <button
@@ -818,7 +835,7 @@ export default function EnterpriseFinancePayrollPage() {
                             {textAt(entry, ["period", "payPeriod", "month"], "—")}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
-                            {formatMoney(amountAt(entry, ["outstandingAmount", "balance", "amount", "amountCents"]))}
+                            {formatMoney(amountAt(entry, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]))}
                           </td>
                           <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                             {textAt(entry, ["status", "paymentStatus", "arrearsStatus"], "pending")}

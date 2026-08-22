@@ -178,10 +178,30 @@ export async function staffActivityAnalytics(input: {
   staffProfileId: string;
   days?: unknown;
 }) {
+  const profile = await prisma.adminUserProfile.findUnique({
+    where: { id: input.staffProfileId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      managerId: true,
+      lastActivityAt: true,
+    },
+  });
+
+  if (!profile) throw new StaffActivityError('staff_not_found', 404);
+
   const self = input.actor.profileId === input.staffProfileId;
-  const canManage = hasStaffCapability(input.actor, 'staff.manage');
-  const canReadAudit = input.actor.isSuperAdmin || canManage || input.actor.scopes.includes('compliance.audit.read');
-  if (!self && !canReadAudit) {
+  const managerAccess = profile.managerId === input.actor.profileId;
+  const canReadHr =
+    hasStaffCapability(input.actor, 'staff.hr.read') ||
+    hasStaffCapability(input.actor, 'staff.hr.manage');
+  const canReadAudit =
+    input.actor.isSuperAdmin ||
+    input.actor.scopes.includes('compliance.audit.read') ||
+    hasStaffCapability(input.actor, 'meetings.audit.read');
+
+  if (!self && !managerAccess && !canReadHr && !canReadAudit) {
     throw new StaffActivityError('staff_activity_access_denied', 403);
   }
 
@@ -190,11 +210,7 @@ export async function staffActivityAnalytics(input: {
   // Query one full extra day so the Johannesburg day boundary is never clipped by UTC.
   const since = new Date(now.getTime() - days * 86_400_000);
 
-  const [profile, sessions, pages] = await Promise.all([
-    prisma.adminUserProfile.findUnique({
-      where: { id: input.staffProfileId },
-      select: { id: true, name: true, email: true, lastActivityAt: true },
-    }),
+  const [sessions, pages] = await Promise.all([
     prisma.adminStaffSession.findMany({
       where: { staffProfileId: input.staffProfileId, loginAt: { gte: since } },
       orderBy: { loginAt: 'desc' },
@@ -219,8 +235,6 @@ export async function staffActivityAnalytics(input: {
       },
     }),
   ]);
-
-  if (!profile) throw new StaffActivityError('staff_not_found', 404);
 
   const dailyMap = new Map<string, { date: string; logins: number; activeSeconds: number }>();
   for (let offset = days - 1; offset >= 0; offset -= 1) {
@@ -281,7 +295,18 @@ export async function staffActivityAnalytics(input: {
   return {
     ok: true,
     range: { days, since, through: now, timezone: ACTIVITY_TIMEZONE },
-    profile,
+    profile: {
+      id: profile.id,
+      name: profile.name,
+      email: profile.email,
+      lastActivityAt: profile.lastActivityAt,
+    },
+    access: {
+      self,
+      managerAccess,
+      hrAccess: canReadHr,
+      auditAccess: canReadAudit,
+    },
     metrics: {
       loginsToday: today.logins,
       activeSecondsToday: today.activeSeconds,

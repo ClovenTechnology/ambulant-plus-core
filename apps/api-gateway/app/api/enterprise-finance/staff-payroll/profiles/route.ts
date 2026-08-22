@@ -29,19 +29,158 @@ export async function GET(req: NextRequest) {
     const payrollStatus = text(searchParams.get('payrollStatus'), 80);
     const employmentType = text(searchParams.get('employmentType'), 80);
     const approvalStatus = text(searchParams.get('approvalStatus'), 80);
+    const q = text(searchParams.get('q'), 180)?.toLowerCase() || '';
 
     if (staffUserId) where.staffUserId = staffUserId;
     if (payrollStatus) where.payrollStatus = payrollStatus;
     if (employmentType) where.employmentType = employmentType;
     if (approvalStatus) where.approvalStatus = approvalStatus;
 
-    const items = await db.staffPayrollProfile.findMany({
+    // This is intentionally capped at 500: the Admin surface needs canonical Staff
+    // identity enrichment before filtering, but must not turn into an unbounded export.
+    const baseItems = await db.staffPayrollProfile.findMany({
       where,
       orderBy: [{ updatedAt: 'desc' }],
-      take: limit,
+      take: 500,
     });
 
-    return json({ ok: true, envelope: access.envelope, items });
+    const staffUserIds = Array.from(
+      new Set(
+        baseItems
+          .map((item: any) => String(item.staffUserId || '').trim())
+          .filter(Boolean),
+      ),
+    );
+
+    const [staffRows, bankRows] = staffUserIds.length
+      ? await Promise.all([
+          db.adminUserProfile.findMany({
+            where: { userId: { in: staffUserIds } },
+            select: {
+              id: true,
+              userId: true,
+              name: true,
+              email: true,
+              staffIdentifier: true,
+              lifecycleState: true,
+              department: { select: { id: true, name: true } },
+              designation: {
+                select: {
+                  id: true,
+                  name: true,
+                  roles: {
+                    select: {
+                      role: { select: { id: true, name: true } },
+                    },
+                  },
+                },
+              },
+              roles: {
+                select: {
+                  role: { select: { id: true, name: true } },
+                },
+              },
+            },
+          }),
+          db.staffBankAccount.findMany({
+            where: {
+              staffUserId: { in: staffUserIds },
+              active: true,
+            },
+            orderBy: [{ isPrimary: 'desc' }, { updatedAt: 'desc' }],
+            select: {
+              id: true,
+              staffUserId: true,
+              bankName: true,
+              accountNumberMasked: true,
+              verificationStatus: true,
+              verificationProvider: true,
+              verifiedAt: true,
+              isPrimary: true,
+            },
+          }),
+        ])
+      : [[], []];
+
+    const staffByUserId = new Map<string, any>(
+      staffRows.map((row: any) => [String(row.userId), row] as [string, any]),
+    );
+
+    const bankByUserId = new Map<string, any>();
+    for (const row of bankRows) {
+      const key = String(row.staffUserId || '');
+      if (!bankByUserId.has(key)) {
+        bankByUserId.set(key, row);
+      }
+    }
+
+    const enriched = baseItems.map((item: any) => {
+      const staff = staffByUserId.get(String(item.staffUserId || ''));
+      const bank = bankByUserId.get(String(item.staffUserId || ''));
+      const designationRoles =
+        staff?.designation?.roles?.map((entry: any) => entry.role?.name).filter(Boolean) || [];
+      const directRoles =
+        staff?.roles?.map((entry: any) => entry.role?.name).filter(Boolean) || [];
+      const roles = Array.from(new Set([...designationRoles, ...directRoles]));
+
+      return {
+        ...item,
+        payrollProfileId: item.id,
+        staffProfileId: staff?.id || null,
+        staffIdentifier: staff?.staffIdentifier || null,
+        staffName: staff?.name || item.staffDisplayName || item.staffEmail || item.staffUserId,
+        staffEmail: staff?.email || item.staffEmail || null,
+        staffLifecycleState: staff?.lifecycleState || null,
+        departmentName: staff?.department?.name || null,
+        designationName: staff?.designation?.name || null,
+        roles,
+        role: roles.join(', ') || item.staffRole || staff?.designation?.name || null,
+        bankAccountId: bank?.id || null,
+        bankName: bank?.bankName || null,
+        bankAccountMasked: bank?.accountNumberMasked || null,
+        bankStatus: bank?.verificationStatus || 'not_configured',
+        bankVerificationProvider: bank?.verificationProvider || null,
+        bankVerifiedAt: bank?.verifiedAt || null,
+      };
+    });
+
+    const filtered = q
+      ? enriched.filter((item: any) =>
+          [
+            item.staffName,
+            item.staffEmail,
+            item.staffIdentifier,
+            item.staffProfileId,
+            item.staffUserId,
+            item.payrollNumber,
+            item.employerReference,
+            item.departmentName,
+            item.designationName,
+            item.role,
+            item.bankName,
+            item.bankAccountMasked,
+            item.payrollStatus,
+            item.employmentType,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(q),
+        )
+      : enriched;
+
+    return json({
+      ok: true,
+      envelope: access.envelope,
+      items: filtered.slice(0, limit),
+      meta: {
+        count: Math.min(filtered.length, limit),
+        matched: filtered.length,
+        scanned: baseItems.length,
+        limit,
+        canonicalStaffEnrichment: true,
+      },
+    });
   } catch (error: any) {
     return routeError(error, 'enterprise_finance_payroll_profiles_list_failed');
   }

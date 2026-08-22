@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
@@ -16,6 +16,7 @@ type LoadErrors = Partial<Record<keyof LoadState, string>>;
 
 type ArrearsFilters = {
   search: string;
+  staffUserId: string;
   status: string;
   disputeStatus: string;
   period: string;
@@ -32,11 +33,26 @@ const emptyState: LoadState = {
 
 const initialFilters: ArrearsFilters = {
   search: "",
+  staffUserId: "all",
   status: "all",
   disputeStatus: "all",
   period: "all",
   startDate: "",
   endDate: "",
+};
+
+type PaymentForm = {
+  amount: string;
+  paymentMethod: string;
+  paymentReference: string;
+  description: string;
+};
+
+const initialPaymentForm: PaymentForm = {
+  amount: "",
+  paymentMethod: "bank_transfer",
+  paymentReference: "",
+  description: "Arrears payment recorded",
 };
 
 function apiPath(path: string) {
@@ -302,6 +318,9 @@ export default function EnterpriseFinanceArrearsPage() {
   const [filters, setFilters] = useState<ArrearsFilters>(initialFilters);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activePaymentRecord, setActivePaymentRecord] = useState<JsonRecord | null>(null);
+  const [paymentForm, setPaymentForm] = useState<PaymentForm>(initialPaymentForm);
+  const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentMessage, setPaymentMessage] = useState<string | null>(null);
   const [planMessage, setPlanMessage] = useState<string | null>(null);
 
   const loadArrearsData = useCallback(async () => {
@@ -367,6 +386,21 @@ export default function EnterpriseFinanceArrearsPage() {
     };
   }, [state.arrears]);
 
+  const staffOptions = useMemo(
+    () =>
+      state.payrollProfiles
+        .map((profile) => ({
+          staffUserId: textAt(profile, ["staffUserId", "userId"], ""),
+          label: textAt(profile, ["staffName", "staffDisplayName", "name"], "Staff member"),
+          email: textAt(profile, ["staffEmail", "email"], ""),
+          staffIdentifier: textAt(profile, ["staffIdentifier"], ""),
+          payrollNumber: textAt(profile, ["payrollNumber"], ""),
+        }))
+        .filter((option) => option.staffUserId)
+        .sort((a, b) => a.label.localeCompare(b.label)),
+    [state.payrollProfiles],
+  );
+
   const filteredArrears = useMemo(() => {
     const search = filters.search.trim().toLowerCase();
 
@@ -375,6 +409,12 @@ export default function EnterpriseFinanceArrearsPage() {
       const disputeStatus = textAt(entry, ["disputeStatus", "dispute", "queryStatus"], "none").toLowerCase();
       const period = textAt(entry, ["period", "payPeriod", "month"], "unspecified").toLowerCase();
       const date = toDateValue(entry);
+
+      const entryStaffUserId = textAt(entry, ["staffUserId", "userId"], "");
+
+      if (filters.staffUserId !== "all" && entryStaffUserId !== filters.staffUserId) {
+        return false;
+      }
 
       if (filters.status !== "all" && status !== filters.status.toLowerCase()) {
         return false;
@@ -402,8 +442,13 @@ export default function EnterpriseFinanceArrearsPage() {
 
       const haystack = [
         textAt(entry, ["staffName", "employeeName", "name", "userName"], ""),
-        textAt(entry, ["email", "staffEmail", "employeeEmail"], ""),
-        textAt(entry, ["reference", "id", "payrollRunId"], ""),
+        textAt(entry, ["staffEmail", "email", "employeeEmail"], ""),
+        textAt(entry, ["staffIdentifier"], ""),
+        textAt(entry, ["staffProfileId"], ""),
+        textAt(entry, ["staffUserId", "userId"], ""),
+        textAt(entry, ["payrollNumber", "employerReference"], ""),
+        textAt(entry, ["reference", "id", "payrollRunId", "sourceId"], ""),
+        textAt(entry, ["paymentReference"], ""),
         textAt(entry, ["notes", "description", "memo"], ""),
         status,
         disputeStatus,
@@ -435,17 +480,17 @@ export default function EnterpriseFinanceArrearsPage() {
 
     const unpaidBalance =
       amountAt(state.overview, ["salaryArrears", "staffArrears", "arrearsPayable", "salaryArrearsCents"]) ||
-      sumAmounts(unpaidRecords, ["outstandingAmount", "balance", "amount", "amountCents"]);
+      sumAmounts(unpaidRecords, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]);
 
-    const filteredBalance = sumAmounts(filteredArrears, ["outstandingAmount", "balance", "amount", "amountCents"]);
-    const selectedBalance = sumAmounts(selectedArrears, ["outstandingAmount", "balance", "amount", "amountCents"]);
+    const filteredBalance = sumAmounts(filteredArrears, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]);
+    const selectedBalance = sumAmounts(selectedArrears, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]);
 
     const disputedBalance = sumAmounts(
       state.arrears.filter((entry) => {
         const dispute = textAt(entry, ["disputeStatus", "dispute", "queryStatus", "status"], "").toLowerCase();
         return dispute.includes("dispute") || dispute.includes("query");
       }),
-      ["outstandingAmount", "balance", "amount", "amountCents"],
+      ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"],
     );
 
     return {
@@ -481,7 +526,7 @@ export default function EnterpriseFinanceArrearsPage() {
     const rows = records.map((entry) => [
       textAt(entry, ["staffName", "employeeName", "name", "userName"], "Staff member"),
       textAt(entry, ["period", "payPeriod", "month"], "—"),
-      String(amountAt(entry, ["outstandingAmount", "balance", "amount", "amountCents"])),
+      String(amountAt(entry, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"])),
       textAt(entry, ["status", "paymentStatus", "arrearsStatus"], "pending"),
       textAt(entry, ["disputeStatus", "dispute", "queryStatus"], "—"),
       formatDate(valueAt(entry, ["dueDate", "scheduledPaymentDate", "payableAt"])),
@@ -504,6 +549,118 @@ export default function EnterpriseFinanceArrearsPage() {
       .writeText(csv)
       .then(() => setPlanMessage(`Copied ${rows.length} ${label} arrears row(s) for accountant payment review.`))
       .catch(() => setPlanMessage(`${label} payment plan could not be copied to clipboard.`));
+  }
+
+  useEffect(() => {
+    if (!activePaymentRecord) {
+      setPaymentForm(initialPaymentForm);
+      setPaymentMessage(null);
+      return;
+    }
+
+    setPaymentForm({
+      amount: String(
+        amountAt(activePaymentRecord, [
+          "outstandingAmount",
+          "outstandingAmountCents",
+          "balanceAfterCents",
+          "balance",
+          "amount",
+          "amountCents",
+        ]) || "",
+      ),
+      paymentMethod: "bank_transfer",
+      paymentReference: "",
+      description: "Arrears payment recorded",
+    });
+    setPaymentMessage(null);
+  }, [activePaymentRecord]);
+
+  async function recordPayment(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!activePaymentRecord) return;
+
+    const amount = Number(paymentForm.amount);
+    const outstanding = amountAt(activePaymentRecord, [
+      "outstandingAmount",
+      "outstandingAmountCents",
+      "balanceAfterCents",
+      "balance",
+      "amount",
+      "amountCents",
+    ]);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setPaymentMessage("Enter a positive payment amount.");
+      return;
+    }
+
+    if (outstanding > 0 && amount > outstanding + 0.001) {
+      setPaymentMessage("Payment cannot exceed the current outstanding balance.");
+      return;
+    }
+
+    if (!paymentForm.paymentReference.trim()) {
+      setPaymentMessage("A payment reference is required for reconciliation.");
+      return;
+    }
+
+    const staffUserId = textAt(activePaymentRecord, ["staffUserId", "userId"], "");
+    if (!staffUserId) {
+      setPaymentMessage("The selected arrears row does not resolve to a canonical Staff user.");
+      return;
+    }
+
+    setPaymentBusy(true);
+    setPaymentMessage(null);
+
+    try {
+      const response = await fetch(
+        apiPath("/api/enterprise-finance/staff-payroll/arrears"),
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            action: "record_payment",
+            staffUserId,
+            amountCents: Math.round(amount * 100),
+            currency: textAt(activePaymentRecord, ["currency"], "ZAR"),
+            paymentMethod: paymentForm.paymentMethod,
+            paymentReference: paymentForm.paymentReference.trim(),
+            description: paymentForm.description.trim() || "Arrears payment recorded",
+            arrearsLedgerEntryId: textAt(activePaymentRecord, ["id"], "") || null,
+            payslipId: textAt(activePaymentRecord, ["payslipId"], "") || null,
+            payrollProfileId: textAt(activePaymentRecord, ["payrollProfileId"], "") || null,
+            payrollPeriodId: textAt(activePaymentRecord, ["payrollPeriodId"], "") || null,
+            salaryAccrualId: textAt(activePaymentRecord, ["salaryAccrualId"], "") || null,
+            balanceAfterCents: Math.max(0, Math.round((outstanding - amount) * 100)),
+          }),
+        },
+      );
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error || `${response.status} ${response.statusText}`);
+      }
+
+      setPlanMessage("Arrears payment recorded and reconciled.");
+      setActivePaymentRecord(null);
+      setSelectedIds(new Set());
+      await loadArrearsData();
+    } catch (error) {
+      setPaymentMessage(
+        `Payment could not be recorded: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+      );
+    } finally {
+      setPaymentBusy(false);
+    }
   }
 
   const accessLabel = state.accessEnvelope
@@ -601,9 +758,27 @@ export default function EnterpriseFinanceArrearsPage() {
                 <input
                   value={filters.search}
                   onChange={(event) => setFilters((current) => ({ ...current, search: event.target.value }))}
-                  placeholder="Staff, reference, note, status"
+                  placeholder="Name, email, Staff ID, payroll no., reference"
                   className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
                 />
+              </label>
+
+              <label className="grid gap-2">
+                <FieldLabel>Staff</FieldLabel>
+                <select
+                  value={filters.staffUserId}
+                  onChange={(event) => setFilters((current) => ({ ...current, staffUserId: event.target.value }))}
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                >
+                  <option value="all">All Staff</option>
+                  {staffOptions.map((option) => (
+                    <option key={option.staffUserId} value={option.staffUserId}>
+                      {option.label}
+                      {option.staffIdentifier ? ` · ${option.staffIdentifier}` : ""}
+                      {option.payrollNumber ? ` · payroll ${option.payrollNumber}` : ""}
+                    </option>
+                  ))}
+                </select>
               </label>
 
               <label className="grid gap-2">
@@ -709,7 +884,7 @@ export default function EnterpriseFinanceArrearsPage() {
               <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
                 <div className="text-xs font-bold uppercase tracking-wide text-slate-500">Control note</div>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
-                  Arrears settlement remains accountant/admin controlled. Staff-facing dispute submission and Paystack transfer release should be added later.
+                  Arrears settlement remains accountant/admin controlled. Completed external payments can be recorded and reconciled here; Staff-facing dispute submission and automated transfer release remain separately governed.
                 </p>
               </div>
             </div>
@@ -780,6 +955,20 @@ export default function EnterpriseFinanceArrearsPage() {
                         const selected = selectedIds.has(id);
                         const status = textAt(entry, ["status", "paymentStatus", "arrearsStatus"], "pending");
                         const dispute = textAt(entry, ["disputeStatus", "dispute", "queryStatus"], "—");
+                        const outstanding = amountAt(entry, [
+                          "outstandingAmount",
+                          "outstandingAmountCents",
+                          "balanceAfterCents",
+                          "balance",
+                          "amount",
+                          "amountCents",
+                        ]);
+                        const canRecordPayment =
+                          outstanding > 0 &&
+                          !["paid", "settled", "closed", "voided", "cancelled"].some((value) =>
+                            status.toLowerCase().includes(value),
+                          ) &&
+                          textAt(entry, ["entryType"], "").toLowerCase() !== "payment";
 
                         return (
                           <tr key={`${id}-${index}`}>
@@ -797,14 +986,19 @@ export default function EnterpriseFinanceArrearsPage() {
                                 {textAt(entry, ["staffName", "employeeName", "name", "userName"], "Staff member")}
                               </div>
                               <div className="text-xs text-slate-500">
-                                {textAt(entry, ["email", "staffEmail", "employeeEmail"], "—")}
+                                {textAt(entry, ["staffEmail", "email", "employeeEmail"], "—")}
+                              </div>
+                              <div className="mt-1 text-[11px] text-slate-400">
+                                {textAt(entry, ["staffIdentifier", "staffProfileId"], "—")}
+                                {" · "}
+                                Payroll {textAt(entry, ["payrollNumber"], "—")}
                               </div>
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                               {textAt(entry, ["period", "payPeriod", "month"], "—")}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">
-                              {formatMoney(amountAt(entry, ["outstandingAmount", "balance", "amount", "amountCents"]))}
+                              {formatMoney(amountAt(entry, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]))}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-slate-700">
                               {formatMoney(amountAt(entry, ["paidAmount", "settledAmount", "paidAmountCents"]))}
@@ -824,13 +1018,17 @@ export default function EnterpriseFinanceArrearsPage() {
                               {textAt(entry, ["reference", "id", "payrollRunId"], "—")}
                             </td>
                             <td className="whitespace-nowrap px-4 py-3 text-slate-700">
-                              <button
-                                type="button"
-                                onClick={() => setActivePaymentRecord(entry)}
-                                className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
-                              >
-                                Plan payment
-                              </button>
+                              {canRecordPayment ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setActivePaymentRecord(entry)}
+                                  className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
+                                >
+                                  Record payment
+                                </button>
+                              ) : (
+                                <span className="text-xs text-slate-400">—</span>
+                              )}
                             </td>
                           </tr>
                         );
@@ -849,7 +1047,7 @@ export default function EnterpriseFinanceArrearsPage() {
               <div>
                 <h2 className="text-lg font-bold text-slate-950">Individual arrears payment plan</h2>
                 <p className="mt-1 text-sm leading-6 text-slate-500">
-                  Accountant review card for one salary arrears item before real transfer or settlement workflow is added.
+                  Review one salary arrears item, then record a completed payment against the governed payroll and arrears authority.
                 </p>
               </div>
               <button
@@ -869,7 +1067,7 @@ export default function EnterpriseFinanceArrearsPage() {
               />
               <MetricCard
                 label="Outstanding"
-                value={formatMoney(amountAt(activePaymentRecord, ["outstandingAmount", "balance", "amount", "amountCents"]))}
+                value={formatMoney(amountAt(activePaymentRecord, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "balance", "amount", "amountCents"]))}
                 helper="Amount currently planned for review."
                 tone="warn"
               />
@@ -884,6 +1082,84 @@ export default function EnterpriseFinanceArrearsPage() {
                 helper="Backend-provided status."
               />
             </div>
+
+            <form
+              onSubmit={recordPayment}
+              className="mt-5 grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:grid-cols-4"
+            >
+              <label className="grid gap-2">
+                <FieldLabel>Amount (ZAR)</FieldLabel>
+                <input
+                  inputMode="decimal"
+                  value={paymentForm.amount}
+                  onChange={(event) =>
+                    setPaymentForm((current) => ({ ...current, amount: event.target.value }))
+                  }
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <FieldLabel>Payment method</FieldLabel>
+                <select
+                  value={paymentForm.paymentMethod}
+                  onChange={(event) =>
+                    setPaymentForm((current) => ({ ...current, paymentMethod: event.target.value }))
+                  }
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                >
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="paystack">Paystack</option>
+                  <option value="cash">Cash</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+
+              <label className="grid gap-2">
+                <FieldLabel>Payment reference</FieldLabel>
+                <input
+                  value={paymentForm.paymentReference}
+                  onChange={(event) =>
+                    setPaymentForm((current) => ({
+                      ...current,
+                      paymentReference: event.target.value,
+                    }))
+                  }
+                  placeholder="Bank / transfer reference"
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                />
+              </label>
+
+              <label className="grid gap-2">
+                <FieldLabel>Description</FieldLabel>
+                <input
+                  value={paymentForm.description}
+                  onChange={(event) =>
+                    setPaymentForm((current) => ({ ...current, description: event.target.value }))
+                  }
+                  className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm"
+                />
+              </label>
+
+              <div className="lg:col-span-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="text-xs leading-5 text-slate-500">
+                  This records a payment that has already completed. It does not initiate a bank or Paystack transfer.
+                </div>
+                <button
+                  type="submit"
+                  disabled={paymentBusy}
+                  className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-bold text-white transition hover:bg-slate-800 disabled:opacity-60"
+                >
+                  {paymentBusy ? "Recording…" : "Record completed payment"}
+                </button>
+              </div>
+
+              {paymentMessage ? (
+                <div className="lg:col-span-4 rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+                  {paymentMessage}
+                </div>
+              ) : null}
+            </form>
           </section>
         ) : null}
 

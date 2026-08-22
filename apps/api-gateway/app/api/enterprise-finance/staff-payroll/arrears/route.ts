@@ -34,18 +34,251 @@ export async function GET(req: NextRequest) {
     const staffUserId = text(searchParams.get('staffUserId'), 180);
     const status = text(searchParams.get('status'), 80);
     const entryType = text(searchParams.get('entryType'), 80);
+    const q = text(searchParams.get('q'), 180)?.toLowerCase() || '';
 
     if (staffUserId) where.staffUserId = staffUserId;
     if (status) where.status = status;
     if (entryType) where.entryType = entryType;
 
-    const items = await db.staffArrearsLedger.findMany({
+    // Identity, payroll-period and payment-reference enrichment happens after the
+    // ledger read because these finance models intentionally do not create a
+    // parallel Staff identity relation.
+    const baseItems = await db.staffArrearsLedger.findMany({
       where,
       orderBy: [{ effectiveAt: 'desc' }, { createdAt: 'desc' }],
-      take: limit,
+      take: 500,
     });
 
-    return json({ ok: true, envelope: access.envelope, items, reconciliation });
+    const staffUserIds = Array.from(
+      new Set(
+        baseItems
+          .map((item: any) => String(item.staffUserId || '').trim())
+          .filter(Boolean),
+      ),
+    );
+    const payrollPeriodIds = Array.from(
+      new Set(
+        baseItems
+          .map((item: any) => String(item.payrollPeriodId || '').trim())
+          .filter(Boolean),
+      ),
+    );
+    const payrollProfileIds = Array.from(
+      new Set(
+        baseItems
+          .map((item: any) => String(item.payrollProfileId || '').trim())
+          .filter(Boolean),
+      ),
+    );
+    const paymentAllocationIds = Array.from(
+      new Set(
+        baseItems
+          .filter((item: any) => item.sourceType === 'payroll_payment_allocation')
+          .map((item: any) => String(item.sourceId || '').trim())
+          .filter(Boolean),
+      ),
+    );
+    const arrearsIds = baseItems.map((item: any) => String(item.id));
+
+    const [
+      staffRows,
+      periodRows,
+      payrollRows,
+      allocationRows,
+      disputeRows,
+    ] = await Promise.all([
+      staffUserIds.length
+        ? db.adminUserProfile.findMany({
+            where: { userId: { in: staffUserIds } },
+            select: {
+              id: true,
+              userId: true,
+              name: true,
+              email: true,
+              staffIdentifier: true,
+              department: { select: { id: true, name: true } },
+              designation: { select: { id: true, name: true } },
+            },
+          })
+        : [],
+      payrollPeriodIds.length
+        ? db.payrollPeriod.findMany({
+            where: { id: { in: payrollPeriodIds } },
+            select: {
+              id: true,
+              label: true,
+              startsAt: true,
+              endsAt: true,
+              payDate: true,
+              status: true,
+              currency: true,
+            },
+          })
+        : [],
+      payrollProfileIds.length || staffUserIds.length
+        ? db.staffPayrollProfile.findMany({
+            where: {
+              OR: [
+                ...(payrollProfileIds.length ? [{ id: { in: payrollProfileIds } }] : []),
+                ...(staffUserIds.length ? [{ staffUserId: { in: staffUserIds } }] : []),
+              ],
+            },
+            orderBy: { updatedAt: 'desc' },
+            select: {
+              id: true,
+              staffUserId: true,
+              payrollNumber: true,
+              employerReference: true,
+              payFrequency: true,
+            },
+          })
+        : [],
+      paymentAllocationIds.length
+        ? db.payrollPaymentAllocation.findMany({
+            where: { id: { in: paymentAllocationIds } },
+            select: {
+              id: true,
+              amountCents: true,
+              paymentMethod: true,
+              paymentReference: true,
+              paidAt: true,
+              status: true,
+              paymentBatchId: true,
+            },
+          })
+        : [],
+      arrearsIds.length
+        ? db.staffPayrollDispute.findMany({
+            where: { arrearsLedgerEntryId: { in: arrearsIds } },
+            orderBy: { raisedAt: 'desc' },
+            select: {
+              id: true,
+              arrearsLedgerEntryId: true,
+              disputeType: true,
+              status: true,
+              subject: true,
+              raisedAt: true,
+              resolvedAt: true,
+            },
+          })
+        : [],
+    ]);
+
+    const staffByUserId = new Map<string, any>(
+      staffRows.map((row: any) => [String(row.userId), row] as [string, any]),
+    );
+    const periodById = new Map<string, any>(
+      periodRows.map((row: any) => [String(row.id), row] as [string, any]),
+    );
+    const payrollById = new Map<string, any>(
+      payrollRows.map((row: any) => [String(row.id), row] as [string, any]),
+    );
+    const payrollByStaff = new Map<string, any>();
+    for (const row of payrollRows) {
+      const key = String(row.staffUserId || '');
+      if (!payrollByStaff.has(key)) payrollByStaff.set(key, row);
+    }
+    const allocationById = new Map<string, any>(
+      allocationRows.map((row: any) => [String(row.id), row] as [string, any]),
+    );
+    const disputeByArrearsId = new Map<string, any>();
+    for (const row of disputeRows) {
+      const key = String(row.arrearsLedgerEntryId || '');
+      if (!disputeByArrearsId.has(key)) disputeByArrearsId.set(key, row);
+    }
+
+    const enriched = baseItems.map((item: any) => {
+      const staff = staffByUserId.get(String(item.staffUserId || ''));
+      const period = periodById.get(String(item.payrollPeriodId || ''));
+      const payroll =
+        payrollById.get(String(item.payrollProfileId || '')) ||
+        payrollByStaff.get(String(item.staffUserId || ''));
+      const allocation =
+        item.sourceType === 'payroll_payment_allocation'
+          ? allocationById.get(String(item.sourceId || ''))
+          : null;
+      const dispute = disputeByArrearsId.get(String(item.id));
+      const outstandingAmountCents =
+        item.entryType === 'payment'
+          ? 0
+          : Math.max(
+              0,
+              Number.isFinite(Number(item.balanceAfterCents))
+                ? Number(item.balanceAfterCents)
+                : Number(item.debitCents || 0) - Number(item.creditCents || 0),
+            );
+
+      return {
+        ...item,
+        staffProfileId: staff?.id || null,
+        staffIdentifier: staff?.staffIdentifier || null,
+        staffName: staff?.name || staff?.email || item.staffUserId,
+        staffEmail: staff?.email || null,
+        departmentName: staff?.department?.name || null,
+        designationName: staff?.designation?.name || null,
+        payrollNumber: payroll?.payrollNumber || null,
+        employerReference: payroll?.employerReference || null,
+        payFrequency: payroll?.payFrequency || null,
+        period: period?.label || null,
+        periodStartsAt: period?.startsAt || null,
+        periodEndsAt: period?.endsAt || null,
+        scheduledPaymentDate: period?.payDate || item.dueDate || null,
+        outstandingAmountCents,
+        paidAmountCents:
+          item.entryType === 'payment'
+            ? Number(item.creditCents || allocation?.amountCents || 0)
+            : Math.max(0, Number(item.creditCents || 0)),
+        paymentReference: allocation?.paymentReference || null,
+        paymentMethod: allocation?.paymentMethod || null,
+        paidAt: allocation?.paidAt || null,
+        paymentBatchId: allocation?.paymentBatchId || item.batchId || null,
+        disputeStatus: dispute?.status || 'none',
+        disputeType: dispute?.disputeType || null,
+        disputeSubject: dispute?.subject || null,
+        disputeRaisedAt: dispute?.raisedAt || null,
+      };
+    });
+
+    const filtered = q
+      ? enriched.filter((item: any) =>
+          [
+            item.staffName,
+            item.staffEmail,
+            item.staffIdentifier,
+            item.staffProfileId,
+            item.staffUserId,
+            item.payrollNumber,
+            item.employerReference,
+            item.period,
+            item.reference,
+            item.id,
+            item.sourceId,
+            item.description,
+            item.status,
+            item.entryType,
+            item.disputeStatus,
+            item.paymentReference,
+          ]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(q),
+        )
+      : enriched;
+
+    return json({
+      ok: true,
+      envelope: access.envelope,
+      items: filtered.slice(0, limit),
+      reconciliation,
+      meta: {
+        count: Math.min(filtered.length, limit),
+        matched: filtered.length,
+        scanned: baseItems.length,
+        limit,
+        canonicalStaffEnrichment: true,
+      },
+    });
   } catch (error: any) {
     return routeError(error, 'enterprise_finance_arrears_list_failed');
   }

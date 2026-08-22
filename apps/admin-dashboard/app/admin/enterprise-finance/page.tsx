@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import Link from "next/link";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
@@ -42,7 +42,7 @@ const emptyState: LoadState = {
 };
 
 const initialManualInflowForm: ManualInflowForm = {
-  category: "manual_revenue",
+  category: "operating_revenue",
   amount: "",
   counterparty: "",
   reference: "",
@@ -163,8 +163,35 @@ function numberAt(record: JsonRecord | null | undefined, keys: string[]) {
   return 0;
 }
 
+function amountAt(record: JsonRecord | null | undefined, keys: string[]) {
+  if (!record) {
+    return 0;
+  }
+
+  for (const key of keys) {
+    const value = valueAt(record, [key]);
+
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return key.toLowerCase().includes("cents") ? value / 100 : value;
+    }
+
+    if (typeof value === "string") {
+      const parsed = Number(value.replace(/,/g, ""));
+      if (Number.isFinite(parsed)) {
+        return key.toLowerCase().includes("cents") ? parsed / 100 : parsed;
+      }
+    }
+  }
+
+  return 0;
+}
+
 function sumBy(records: JsonRecord[], keys: string[]) {
   return records.reduce((total, record) => total + numberAt(record, keys), 0);
+}
+
+function sumAmounts(records: JsonRecord[], keys: string[]) {
+  return records.reduce((total, record) => total + amountAt(record, keys), 0);
 }
 
 function formatMoney(value: number, currency = "ZAR") {
@@ -296,7 +323,7 @@ function SectionShell({
             href={href}
             className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
           >
-            Future page
+            Open page
           </Link>
         ) : null}
       </div>
@@ -422,37 +449,37 @@ export default function EnterpriseFinanceCommandCentrePage() {
     const overview = state.overview;
 
     const grossRevenue =
-      numberAt(overview, ["grossRevenue", "grossRevenueAmount", "totalGrossRevenue", "grossRevenueCents"]) ||
-      sumBy(state.revenueEntries, ["grossAmount", "grossRevenue", "amount", "amountCents"]);
+      amountAt(overview, ["grossRevenue", "grossRevenueAmount", "totalGrossRevenue", "grossRevenueCents"]) ||
+      sumAmounts(state.revenueEntries, ["grossAmount", "grossRevenue", "amount", "grossAmountCents", "amountCents"]);
 
     const netPlatformRevenue =
-      numberAt(overview, ["netPlatformRevenue", "netRevenue", "platformRevenue", "netPlatformRevenueCents"]) ||
-      sumBy(state.revenueEntries, ["netPlatformRevenue", "netAmount", "platformFee", "platformFeeCents"]);
+      amountAt(overview, ["netPlatformRevenue", "netRevenue", "platformRevenue", "netPlatformRevenueCents"]) ||
+      sumAmounts(state.revenueEntries, ["netPlatformRevenue", "netAmount", "platformFee", "netPlatformRevenueCents", "platformFeeCents"]);
 
     const manualInflows =
-      numberAt(overview, ["manualInflows", "manualRevenue", "manualInflowAmount", "manualInflowsCents"]) ||
-      sumBy(state.manualInflows, ["amount", "amountCents", "value"]);
+      amountAt(overview, ["manualInflows", "manualRevenue", "manualInflowAmount", "manualInflowCents", "manualInflowsCents"]) ||
+      sumAmounts(state.manualInflows, ["amount", "grossAmountCents", "amountReceivedCents", "amountCents", "value"]);
 
     const investmentInflows =
-      numberAt(overview, ["investmentInflows", "investmentContributions", "capitalContributions", "investmentInflowsCents"]) ||
+      amountAt(overview, ["investmentInflows", "investmentContributions", "capitalContributions", "investmentInflowCents", "investmentInflowsCents"]) ||
       state.manualInflows
-        .filter((item) => textAt(item, ["category", "type"], "").toLowerCase().includes("invest"))
-        .reduce((total, item) => total + numberAt(item, ["amount", "amountCents", "value"]), 0);
+        .filter((item) => textAt(item, ["inflowCategory", "category", "type"], "").toLowerCase().includes("invest"))
+        .reduce((total, item) => total + amountAt(item, ["amount", "grossAmountCents", "amountReceivedCents", "amountCents", "value"]), 0);
 
     const contractorPayable =
-      numberAt(overview, ["contractorPayable", "contractorPayables", "partnerPayable", "contractorPayableCents"]);
+      amountAt(overview, ["contractorPayable", "contractorPayables", "partnerPayable", "contractorPayableCents"]);
 
     const payrollLiability =
-      numberAt(overview, ["payrollLiability", "staffPayrollLiability", "payrollPayable", "payrollLiabilityCents"]) ||
-      sumBy(state.payrollProfiles, ["monthlySalary", "salary", "grossSalary", "amount", "amountCents"]);
+      amountAt(overview, ["payrollLiability", "staffPayrollLiability", "payrollPayable", "payrollLiabilityCents"]) ||
+      sumAmounts(state.payrollProfiles, ["monthlySalary", "salary", "grossSalary", "baseSalaryCents", "amount", "amountCents"]);
 
     const salaryArrears =
-      numberAt(overview, ["salaryArrears", "staffArrears", "arrearsPayable", "salaryArrearsCents"]) ||
-      sumBy(state.arrears, ["amount", "amountCents", "balance", "outstandingAmount"]);
+      amountAt(overview, ["salaryArrears", "staffArrears", "arrearsPayable", "salaryArrearsCents"]) ||
+      sumAmounts(state.arrears, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "amount", "amountCents", "balance"]);
 
     const commissionPayable =
-      numberAt(overview, ["commissionPayable", "commissionOutstanding", "commissionPayableCents"]) ||
-      sumBy(state.commission, ["amount", "amountCents", "commissionAmount", "balance"]);
+      amountAt(overview, ["commissionPayable", "commissionOutstanding", "commissionPayableCents"]) ||
+      sumAmounts(state.commission, ["amount", "amountCents", "approvedAmountCents", "commissionAmount", "balance"]);
 
     return {
       grossRevenue,
@@ -493,9 +520,9 @@ export default function EnterpriseFinanceCommandCentrePage() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          category: form.category,
-          amount,
-          counterparty: form.counterparty.trim(),
+          inflowCategory: form.category,
+          amountCents: Math.round(amount * 100),
+          counterpartyName: form.counterparty.trim(),
           reference: form.reference.trim(),
           description: form.description.trim(),
         }),
@@ -517,24 +544,24 @@ export default function EnterpriseFinanceCommandCentrePage() {
   }
 
   const recentRevenueRows = state.revenueEntries.slice(0, 8).map((entry) => [
-    formatDate(valueAt(entry, ["createdAt", "date", "paidAt", "transactionDate"])),
-    textAt(entry, ["source", "type", "category"], "Revenue"),
-    textAt(entry, ["counterparty", "patientName", "partnerName", "payerName"], "—"),
-    formatMoney(numberAt(entry, ["grossAmount", "grossRevenue", "amount", "amountCents"])),
-    formatMoney(numberAt(entry, ["netPlatformRevenue", "netAmount", "platformFee", "platformFeeCents"])),
+    formatDate(valueAt(entry, ["occurredAt", "createdAt", "date", "paidAt", "transactionDate"])),
+    textAt(entry, ["source", "sourceType", "inflowCategory", "type", "category"], "Revenue"),
+    textAt(entry, ["counterpartyName", "counterparty", "patientName", "partnerName", "payerName"], "—"),
+    formatMoney(amountAt(entry, ["grossAmount", "grossRevenue", "amount", "grossAmountCents", "amountCents"])),
+    formatMoney(amountAt(entry, ["netPlatformRevenue", "netAmount", "platformFee", "netPlatformRevenueCents", "platformFeeCents"])),
   ]);
 
   const arrearsRows = state.arrears.slice(0, 8).map((entry) => [
     textAt(entry, ["staffName", "employeeName", "name", "userName"], "Staff member"),
     textAt(entry, ["period", "payPeriod", "month"], "—"),
-    formatMoney(numberAt(entry, ["amount", "amountCents", "balance", "outstandingAmount"])),
+    formatMoney(amountAt(entry, ["outstandingAmount", "outstandingAmountCents", "balanceAfterCents", "amount", "amountCents", "balance"])),
     textAt(entry, ["status"], "Pending"),
   ]);
 
   const commissionRows = state.commission.slice(0, 8).map((entry) => [
     textAt(entry, ["recipientName", "staffName", "employeeName", "name"], "Recipient"),
     textAt(entry, ["source", "eventType", "category"], "Commission"),
-    formatMoney(numberAt(entry, ["amount", "amountCents", "commissionAmount", "balance"])),
+    formatMoney(amountAt(entry, ["amount", "amountCents", "approvedAmountCents", "commissionAmount", "balance"])),
     textAt(entry, ["status"], "Pending"),
   ]);
 
@@ -574,18 +601,21 @@ export default function EnterpriseFinanceCommandCentrePage() {
               </p>
             </div>
 
-            <div className="grid gap-2 text-sm text-slate-600 sm:grid-cols-2 lg:w-96">
+            <div className="grid gap-2 text-sm text-slate-600 sm:grid-cols-2 lg:w-[30rem]">
               <Link className="rounded-xl border border-slate-200 px-3 py-2 font-semibold hover:bg-slate-50" href="/admin/enterprise-finance/revenue">
-                Revenue placeholder
+                Revenue ledger
+              </Link>
+              <Link className="rounded-xl border border-slate-200 px-3 py-2 font-semibold hover:bg-slate-50" href="/admin/enterprise-finance/expenditure">
+                Expenditure
               </Link>
               <Link className="rounded-xl border border-slate-200 px-3 py-2 font-semibold hover:bg-slate-50" href="/admin/enterprise-finance/payroll">
-                Payroll placeholder
+                Payroll & arrears
               </Link>
               <Link className="rounded-xl border border-slate-200 px-3 py-2 font-semibold hover:bg-slate-50" href="/admin/enterprise-finance/commission">
-                Commission placeholder
+                Commission
               </Link>
               <Link className="rounded-xl border border-slate-200 px-3 py-2 font-semibold hover:bg-slate-50" href="/admin/enterprise-finance/shareholders">
-                Shareholders placeholder
+                Shareholders
               </Link>
             </div>
           </div>
@@ -623,11 +653,11 @@ export default function EnterpriseFinanceCommandCentrePage() {
                   onChange={(event) => setForm((current) => ({ ...current, category: event.target.value }))}
                   className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-normal text-slate-900 outline-none transition focus:border-slate-400"
                 >
-                  <option value="manual_revenue">Manual revenue</option>
-                  <option value="investment_inflow">Investment inflow</option>
+                  <option value="operating_revenue">Operating revenue</option>
+                  <option value="investment">Investment inflow</option>
                   <option value="capital_contribution">Capital contribution</option>
-                  <option value="shareholder_contribution">Shareholder contribution</option>
-                  <option value="company_debt">Company debt / loan inflow</option>
+                  <option value="grant">Grant / funding</option>
+                  <option value="founder_loan">Company debt / founder loan</option>
                   <option value="other">Other</option>
                 </select>
               </label>
@@ -911,4 +941,3 @@ export default function EnterpriseFinanceCommandCentrePage() {
 </main>
   );
 }
-
