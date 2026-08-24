@@ -32,11 +32,17 @@ export async function GET(req: NextRequest) {
 
     const upstream = `${base}/api/shop?${url.searchParams.toString()}`;
 
+    const uid = String(req.headers.get('x-uid') || req.headers.get('x-user-id') || req.headers.get('x-ambulant-user-id') || '').trim();
+    if (!uid) {
+      return NextResponse.json({ ok: false, error: 'Clinician identity required.' }, { status: 401 });
+    }
+
     const res = await fetch(upstream, {
       cache: 'no-store',
       headers: {
         accept: 'application/json',
         'x-role': 'clinician',
+        'x-uid': uid,
       },
     });
 

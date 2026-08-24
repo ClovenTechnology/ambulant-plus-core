@@ -6,13 +6,21 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 function getUidFromReq(req: NextRequest) {
-  const h = req.headers.get('x-uid');
-  return h ? String(h) : '';
+  return String(
+    req.headers.get('x-uid') ||
+      req.headers.get('x-user-id') ||
+      req.headers.get('x-ambulant-user-id') ||
+      '',
+  ).trim();
 }
 
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const uid = getUidFromReq(req);
+
+  if (!uid) {
+    return NextResponse.json({ ok: false, error: 'Clinician identity required.' }, { status: 401 });
+  }
 
   const payload = { ...body, channel: 'clinician' };
 

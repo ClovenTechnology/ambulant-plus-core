@@ -17,7 +17,12 @@ export const ENTERPRISE_MEDIA_IMAGE_TYPES = [
   'image/webp',
 ] as const;
 
-export type EnterpriseMediaKind = 'opportunity-image' | 'staff-avatar' | 'staff-id-template';
+export type EnterpriseMediaKind =
+  | 'opportunity-image'
+  | 'staff-avatar'
+  | 'staff-id-template'
+  | 'shop-product-image'
+  | 'shop-variant-image';
 
 const MANAGED_REF_PREFIX = 'managed://ambulant-enterprise-media/';
 
@@ -191,6 +196,12 @@ export function managedEnterpriseMediaKind(value: unknown): EnterpriseMediaKind 
   }
   if (objectKey.startsWith('enterprise-media/staff-id-template/')) {
     return 'staff-id-template';
+  }
+  if (objectKey.startsWith('enterprise-media/shop-product-image/')) {
+    return 'shop-product-image';
+  }
+  if (objectKey.startsWith('enterprise-media/shop-variant-image/')) {
+    return 'shop-variant-image';
   }
   return null;
 }

@@ -1,35 +1,53 @@
-// apps/api-gateway/app/api/settings/shop/route.ts
+import { timingSafeEqual } from 'node:crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
-import * as nodeCrypto from 'node:crypto';
+import {
+  normalizeShopBuyerTypes,
+  SHOP_BUYER_TYPES,
+  SHOP_CHANNELS,
+  type ShopAuthorityBuyerType,
+  type ShopAuthorityChannel,
+  validateShopPublication,
+} from '@/src/lib/shop-authority';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-type Channel = 'PATIENT' | 'CLINICIAN' | 'MEDREACH' | 'CAREPORT';
-
-const CHANNELS: Channel[] = ['PATIENT', 'CLINICIAN', 'MEDREACH', 'CAREPORT'];
 const FALLBACK_IMAGE = '/images/shop/_placeholder.png';
 
-function isChannel(x: any): x is Channel {
-  return typeof x === 'string' && CHANNELS.includes(x as any);
+function json(body: unknown, status = 200) {
+  return NextResponse.json(body, {
+    status,
+    headers: { 'cache-control': 'no-store' },
+  });
 }
 
-function toBool(v: any, def = false) {
-  return typeof v === 'boolean' ? v : def;
+function requireAdminKey(req: NextRequest) {
+  const expected = String(process.env.API_GATEWAY_ADMIN_KEY || '');
+  const received = String(req.headers.get('x-admin-key') || '');
+  if (!expected) return json({ ok: false, error: 'shop_admin_key_not_configured' }, 503);
+  const a = Buffer.from(expected);
+  const b = Buffer.from(received);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return json({ ok: false, error: 'shop_admin_required' }, 403);
+  }
+  return null;
 }
 
-function toInt(v: any, def = 0) {
-  const n = Number(v);
-  return Number.isFinite(n) ? Math.round(n) : def;
+function toInt(value: unknown, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.round(n) : fallback;
 }
 
-function toStr(v: any, def = '') {
-  return typeof v === 'string' ? v : def;
+function toStringArray(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(value.map((item) => String(item || '').trim()).filter(Boolean)),
+  );
 }
 
-function cleanSlug(s: string) {
-  return s
+function cleanSlug(value: unknown) {
+  return String(value || '')
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
@@ -37,399 +55,513 @@ function cleanSlug(s: string) {
     .replace(/^-|-$/g, '');
 }
 
-function cleanStringArray(v: any): string[] {
-  if (!Array.isArray(v)) return [];
-  return v.map((x) => String(x || '').trim()).filter(Boolean);
+function normalizeChannels(value: unknown): ShopAuthorityChannel[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(
+    new Set(
+      value
+        .map((item) => String(item || '').trim().toUpperCase())
+        .filter((item) => SHOP_CHANNELS.includes(item as any)) as ShopAuthorityChannel[],
+    ),
+  );
 }
 
-function cleanImages(v: any): string[] {
-  const arr = cleanStringArray(v);
-  // ensure unique
-  return Array.from(new Set(arr));
+function publicationError(input: {
+  active: boolean;
+  channels: ShopAuthorityChannel[];
+  buyerTypes: ShopAuthorityBuyerType[];
+  allowInheritance?: boolean;
+}) {
+  if (input.allowInheritance && !input.channels.length && !input.buyerTypes.length) {
+    return null;
+  }
+  if (!input.active && !input.channels.length && !input.buyerTypes.length) {
+    return null;
+  }
+  const validation = validateShopPublication({
+    channels: input.channels,
+    buyerTypes: input.buyerTypes,
+  });
+  return validation.ok ? null : validation.errors;
 }
 
-function nowId(prefix: string) {
-  const h = nodeCrypto.randomBytes(6).toString('hex');
-  return `${prefix}-${h}`;
+async function setProductChannels(tx: any, productId: string, channels: ShopAuthorityChannel[]) {
+  await tx.shopProductChannel.deleteMany({ where: { productId } });
+  if (channels.length) {
+    await tx.shopProductChannel.createMany({
+      data: channels.map((channel) => ({ productId, channel })),
+      skipDuplicates: true,
+    });
+  }
 }
 
-/**
- * NOTE: This route assumes the following prisma models exist (you already use them):
- * - shopProduct
- * - shopVariant
- * - shopProductChannel  (productId, channel)
- * - shopVariantChannel  (variantId, channel)
- * - shopInventoryMovement (variantId, delta, reason, note)
- *
- * If your join-table model names differ, rename prisma.* calls accordingly.
- */
-
-async function setProductChannels(tx: any, productId: string, channels: Channel[] | null) {
-  // If channels null => leave unchanged
-  if (channels == null) return;
-
-  await tx.shopProductChannel.deleteMany({ where: { productId } }).catch(() => {});
-  if (channels.length === 0) return; // empty => visible to all (because your /api/shop treats no rows as allow-all)
-
-  await tx.shopProductChannel.createMany({
-    data: channels.map((c) => ({ productId, channel: c })),
-    skipDuplicates: true,
-  }).catch(() => {});
+async function setProductBuyers(tx: any, productId: string, buyerTypes: ShopAuthorityBuyerType[]) {
+  await tx.shopProductBuyerEligibility.deleteMany({ where: { productId } });
+  if (buyerTypes.length) {
+    await tx.shopProductBuyerEligibility.createMany({
+      data: buyerTypes.map((buyerType) => ({ productId, buyerType })),
+      skipDuplicates: true,
+    });
+  }
 }
 
-async function setVariantChannels(tx: any, variantId: string, channels: Channel[] | null) {
-  if (channels == null) return;
-
-  await tx.shopVariantChannel.deleteMany({ where: { variantId } }).catch(() => {});
-  if (channels.length === 0) return;
-
-  await tx.shopVariantChannel.createMany({
-    data: channels.map((c) => ({ variantId, channel: c })),
-    skipDuplicates: true,
-  }).catch(() => {});
+async function setVariantChannels(tx: any, variantId: string, channels: ShopAuthorityChannel[]) {
+  await tx.shopVariantChannel.deleteMany({ where: { variantId } });
+  if (channels.length) {
+    await tx.shopVariantChannel.createMany({
+      data: channels.map((channel) => ({ variantId, channel })),
+      skipDuplicates: true,
+    });
+  }
 }
 
-function pickPrice(base?: number | null, sale?: number | null) {
-  const s = Number(sale ?? 0);
-  if (Number.isFinite(s) && s > 0) return s;
-  const b = Number(base ?? 0);
-  if (Number.isFinite(b) && b > 0) return b;
-  return 0;
+async function setVariantBuyers(tx: any, variantId: string, buyerTypes: ShopAuthorityBuyerType[]) {
+  await tx.shopVariantBuyerEligibility.deleteMany({ where: { variantId } });
+  if (buyerTypes.length) {
+    await tx.shopVariantBuyerEligibility.createMany({
+      data: buyerTypes.map((buyerType) => ({ variantId, buyerType })),
+      skipDuplicates: true,
+    });
+  }
+}
+
+function price(base?: number | null, sale?: number | null) {
+  const saleValue = Number(sale ?? 0);
+  if (saleValue > 0) return saleValue;
+  return Math.max(0, Number(base ?? 0));
 }
 
 export async function GET(req: NextRequest) {
-  const url = new URL(req.url);
-  const includeInactive = url.searchParams.get('includeInactive') === '1';
+  const denied = requireAdminKey(req);
+  if (denied) return denied;
 
-  const products = await prisma.shopProduct.findMany({
-    where: includeInactive ? {} : { active: true },
-    orderBy: { updatedAt: 'desc' },
-    include: {
-      channels: true,
-      variants: {
-        include: { channels: true },
-        orderBy: { label: 'asc' },
+  try {
+    const includeInactive = new URL(req.url).searchParams.get('includeInactive') !== '0';
+    const products = await prisma.shopProduct.findMany({
+      where: includeInactive ? {} : { active: true },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        channels: true,
+        buyerEligibility: true,
+        variants: {
+          include: {
+            channels: true,
+            buyerEligibility: true,
+          },
+          orderBy: { label: 'asc' },
+        },
       },
-    },
-  });
+    });
 
-  const items = products.map((p: any) => {
-    const imgs = (p.images || []).filter(Boolean);
-    const imageUrl = p.fallbackImage || imgs[0] || FALLBACK_IMAGE;
+    const items = products.map((product: any) => {
+      const images = (product.images || []).filter(Boolean);
+      const fallback = product.fallbackImage || images[0] || FALLBACK_IMAGE;
+      return {
+        ...product,
+        images,
+        fallbackImage: product.fallbackImage || '',
+        priceZar: price(product.unitAmountZar, product.saleAmountZar),
+        channels: (product.channels || []).map((row: any) => row.channel),
+        buyerTypes: (product.buyerEligibility || []).map((row: any) => row.buyerType),
+        published: Boolean(
+          product.active &&
+            product.channels?.length &&
+            product.buyerEligibility?.length,
+        ),
+        displayImage: fallback,
+        variants: (product.variants || []).map((variant: any) => ({
+          ...variant,
+          priceZar: price(variant.unitAmountZar, variant.saleUnitAmountZar),
+          channels: (variant.channels || []).map((row: any) => row.channel),
+          buyerTypes: (variant.buyerEligibility || []).map((row: any) => row.buyerType),
+          inheritsProductPublication:
+            !variant.channels?.length && !variant.buyerEligibility?.length,
+        })),
+      };
+    });
 
-    const basePrice = pickPrice(p.unitAmountZar, p.saleAmountZar);
-
-    return {
-      id: p.id,
-      slug: p.slug,
-      name: p.name,
-      description: p.description || '',
-      type: p.type || 'merch',
-      collection: p.collection || null, // optional (MERCH/DUECARE/etc)
-      tags: p.tags || [],
-      images: imgs.length ? imgs : [imageUrl],
-      fallbackImage: p.fallbackImage || '',
-      active: !!p.active,
-      allowBackorder: !!p.allowBackorder,
-      maxQtyPerOrder: p.maxQtyPerOrder ?? null,
-      unitAmountZar: p.unitAmountZar ?? 0,
-      saleAmountZar: p.saleAmountZar ?? null,
-      priceZar: basePrice,
-      channels: (p.channels || []).map((c: any) => c.channel),
-      updatedAt: p.updatedAt,
-      variants: (p.variants || []).map((v: any) => {
-        const allowBackorder = v.allowBackorder ?? p.allowBackorder;
-
-        const inStockFlag = v.inStock !== false;
-        const qtyKnown = typeof v.stockQty === 'number';
-        const qtyOk = !qtyKnown || (v.stockQty as number) > 0;
-
-        return {
-          id: v.id,
-          productId: v.productId,
-          sku: v.sku || '',
-          label: v.label || '',
-          active: !!v.active,
-          imageUrl: v.imageUrl || '',
-          unitAmountZar: v.unitAmountZar ?? 0,
-          saleUnitAmountZar: v.saleUnitAmountZar ?? null,
-          priceZar: pickPrice(v.unitAmountZar, v.saleUnitAmountZar),
-          inStock: (inStockFlag && qtyOk) || allowBackorder,
-          stockQty: v.stockQty ?? null,
-          allowBackorder: !!allowBackorder,
-          channels: (v.channels || []).map((c: any) => c.channel),
-          updatedAt: v.updatedAt,
-        };
-      }),
-    };
-  });
-
-  return NextResponse.json({ ok: true, channels: CHANNELS, items });
+    return json({
+      ok: true,
+      channels: SHOP_CHANNELS,
+      buyerTypes: SHOP_BUYER_TYPES,
+      publicationSemantics: {
+        productNoChannels: 'UNPUBLISHED',
+        productNoBuyerTypes: 'INELIGIBLE',
+        variantNoOverrides: 'INHERIT_PRODUCT',
+      },
+      items,
+    });
+  } catch (error: any) {
+    console.error('[shop settings] GET failed', error);
+    return json({ ok: false, error: error?.message || 'shop_settings_list_failed' }, 500);
+  }
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json().catch(() => ({}));
-  const kind = String(body.kind || '');
+  const denied = requireAdminKey(req);
+  if (denied) return denied;
 
-  // ---- Create Product ----
-  if (kind === 'product') {
-    const name = toStr(body.name).trim();
-    if (!name) return NextResponse.json({ error: 'Missing name' }, { status: 400 });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const kind = String(body.kind || '').trim().toLowerCase();
 
-    const slug = cleanSlug(toStr(body.slug || name));
-    if (!slug) return NextResponse.json({ error: 'Bad slug' }, { status: 400 });
+    if (kind === 'product') {
+      const name = String(body.name || '').trim();
+      const slug = cleanSlug(body.slug || name);
+      if (!name || !slug) return json({ ok: false, error: 'product_name_and_slug_required' }, 400);
 
-    const channels = (Array.isArray(body.channels) ? body.channels : [])
-      .filter(isChannel) as Channel[];
+      const active = body.active === undefined ? false : Boolean(body.active);
+      const channels = normalizeChannels(body.channels);
+      const buyerTypes = normalizeShopBuyerTypes(body.buyerTypes);
+      const errors = publicationError({ active, channels, buyerTypes });
+      if (errors) return json({ ok: false, error: 'invalid_shop_publication', details: errors }, 400);
 
-    const data: any = {
-      id: body.id ? String(body.id) : nowId('sp'),
-      slug,
-      name,
-      description: toStr(body.description, ''),
-      type: toStr(body.type, 'merch'),
-      collection: body.collection ?? undefined, // optional field in schema
-      tags: cleanStringArray(body.tags),
-      images: cleanImages(body.images),
-      fallbackImage: toStr(body.fallbackImage, ''),
-      active: toBool(body.active, true),
-      allowBackorder: toBool(body.allowBackorder, false),
-      maxQtyPerOrder: body.maxQtyPerOrder == null ? null : toInt(body.maxQtyPerOrder, 5),
-      unitAmountZar: toInt(body.unitAmountZar, 0),
-      saleAmountZar: body.saleAmountZar == null ? null : toInt(body.saleAmountZar, 0),
-      currency: 'ZAR', // optional if you store it
-    };
-
-    const out = await prisma.$transaction(async (tx) => {
-      const created = await tx.shopProduct.create({ data });
-      await setProductChannels(tx, created.id, channels);
-      return created;
-    });
-
-    return NextResponse.json({ ok: true, product: out });
-  }
-
-  // ---- Create Variant ----
-  if (kind === 'variant') {
-    const productId = String(body.productId || '');
-    if (!productId) return NextResponse.json({ error: 'Missing productId' }, { status: 400 });
-
-    const sku = toStr(body.sku).trim();
-    const label = toStr(body.label).trim();
-    if (!sku || !label) return NextResponse.json({ error: 'Missing sku/label' }, { status: 400 });
-
-    const channels = (Array.isArray(body.channels) ? body.channels : [])
-      .filter(isChannel) as Channel[];
-
-    const unitAmountZar = toInt(body.unitAmountZar, 0);
-
-    const data: any = {
-      id: body.id ? String(body.id) : nowId('sv'),
-      productId,
-      sku,
-      label,
-      active: toBool(body.active, true),
-      imageUrl: toStr(body.imageUrl, ''),
-      unitAmountZar,
-      saleUnitAmountZar: body.saleUnitAmountZar == null ? null : toInt(body.saleUnitAmountZar, 0),
-      inStock: toBool(body.inStock, true),
-      stockQty: body.stockQty == null ? null : toInt(body.stockQty, 0),
-      allowBackorder: body.allowBackorder == null ? null : toBool(body.allowBackorder, false),
-      currency: 'ZAR', // optional if you store it
-    };
-
-    const out = await prisma.$transaction(async (tx) => {
-      const created = await tx.shopVariant.create({ data });
-      await setVariantChannels(tx, created.id, channels);
-
-      // If stock is set on creation, record movement as "seed"/"init"
-      if (data.stockQty != null) {
-        await tx.shopInventoryMovement.create({
+      const product = await prisma.$transaction(async (tx: any) => {
+        const created = await tx.shopProduct.create({
           data: {
-            variantId: created.id,
-            delta: data.stockQty,
-            reason: 'init',
-            note: `create_variant:${created.id}`,
+            slug,
+            name,
+            description: String(body.description || '').trim() || null,
+            type: String(body.type || 'merch').trim() || 'merch',
+            tags: toStringArray(body.tags),
+            images: toStringArray(body.images),
+            fallbackImage: String(body.fallbackImage || '').trim() || null,
+            active,
+            unitAmountZar:
+              body.unitAmountZar === null || body.unitAmountZar === undefined
+                ? null
+                : Math.max(0, toInt(body.unitAmountZar)),
+            saleAmountZar:
+              body.saleAmountZar === null || body.saleAmountZar === undefined
+                ? null
+                : Math.max(0, toInt(body.saleAmountZar)),
+            allowBackorder: Boolean(body.allowBackorder),
+            maxQtyPerOrder: Math.min(99, Math.max(1, toInt(body.maxQtyPerOrder, 99))),
+            meta:
+              body.meta && typeof body.meta === 'object' && !Array.isArray(body.meta)
+                ? body.meta
+                : null,
           },
-        }).catch(() => {});
+        });
+        await setProductChannels(tx, created.id, channels);
+        await setProductBuyers(tx, created.id, buyerTypes);
+        return created;
+      });
+
+      return json({ ok: true, product }, 201);
+    }
+
+    if (kind === 'variant') {
+      const productId = String(body.productId || '').trim();
+      const sku = String(body.sku || '').trim();
+      const label = String(body.label || '').trim();
+      if (!productId || !sku || !label) {
+        return json({ ok: false, error: 'productId_sku_label_required' }, 400);
       }
 
-      return created;
-    });
+      const active = body.active === undefined ? true : Boolean(body.active);
+      const channels = normalizeChannels(body.channels);
+      const buyerTypes = normalizeShopBuyerTypes(body.buyerTypes);
+      const errors = publicationError({
+        active,
+        channels,
+        buyerTypes,
+        allowInheritance: true,
+      });
+      if (errors) return json({ ok: false, error: 'invalid_variant_publication', details: errors }, 400);
 
-    return NextResponse.json({ ok: true, variant: out });
+      const stockQty =
+        body.stockQty === null || body.stockQty === undefined
+          ? null
+          : Math.max(0, toInt(body.stockQty));
+
+      const variant = await prisma.$transaction(async (tx: any) => {
+        const created = await tx.shopVariant.create({
+          data: {
+            productId,
+            sku,
+            label,
+            active,
+            unitAmountZar: Math.max(0, toInt(body.unitAmountZar)),
+            saleUnitAmountZar:
+              body.saleUnitAmountZar === null || body.saleUnitAmountZar === undefined
+                ? null
+                : Math.max(0, toInt(body.saleUnitAmountZar)),
+            imageUrl: String(body.imageUrl || '').trim() || null,
+            inStock: body.inStock === undefined ? true : Boolean(body.inStock),
+            stockQty,
+            allowBackorder:
+              body.allowBackorder === null || body.allowBackorder === undefined
+                ? null
+                : Boolean(body.allowBackorder),
+            meta:
+              body.meta && typeof body.meta === 'object' && !Array.isArray(body.meta)
+                ? body.meta
+                : null,
+          },
+        });
+        await setVariantChannels(tx, created.id, channels);
+        await setVariantBuyers(tx, created.id, buyerTypes);
+        if (stockQty !== null && stockQty !== 0) {
+          await tx.shopInventoryMovement.create({
+            data: {
+              variantId: created.id,
+              delta: stockQty,
+              reason: 'initial_stock',
+              note: `commerce_studio:create_variant:${created.id}`,
+            },
+          });
+        }
+        return created;
+      });
+
+      return json({ ok: true, variant }, 201);
+    }
+
+    return json({ ok: false, error: 'unsupported_shop_create_kind' }, 400);
+  } catch (error: any) {
+    console.error('[shop settings] POST failed', error);
+    const message = String(error?.message || '');
+    if (message.includes('Unique constraint')) {
+      return json({ ok: false, error: 'shop_product_or_sku_already_exists' }, 409);
+    }
+    return json({ ok: false, error: message || 'shop_settings_create_failed' }, 500);
   }
-
-  return NextResponse.json({ error: 'Unsupported kind' }, { status: 400 });
 }
 
 export async function PATCH(req: NextRequest) {
-  const body = await req.json().catch(() => ({}));
-  const kind = String(body.kind || '');
+  const denied = requireAdminKey(req);
+  if (denied) return denied;
 
-  // ---- Update Product ----
-  if (kind === 'product') {
-    const id = String(body.id || '');
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const kind = String(body.kind || '').trim().toLowerCase();
 
-    const channels = body.channels == null
-      ? null
-      : (Array.isArray(body.channels) ? body.channels : []).filter(isChannel) as Channel[];
+    if (kind === 'product') {
+      const id = String(body.id || '').trim();
+      if (!id) return json({ ok: false, error: 'product_id_required' }, 400);
 
-    const data: any = {
-      slug: body.slug != null ? cleanSlug(String(body.slug)) : undefined,
-      name: body.name != null ? String(body.name) : undefined,
-      description: body.description != null ? String(body.description) : undefined,
-      type: body.type != null ? String(body.type) : undefined,
-      collection: body.collection !== undefined ? body.collection : undefined,
-      tags: body.tags != null ? cleanStringArray(body.tags) : undefined,
-      images: body.images != null ? cleanImages(body.images) : undefined,
-      fallbackImage: body.fallbackImage != null ? String(body.fallbackImage) : undefined,
-      active: body.active != null ? !!body.active : undefined,
-      allowBackorder: body.allowBackorder != null ? !!body.allowBackorder : undefined,
-      maxQtyPerOrder: body.maxQtyPerOrder !== undefined
-        ? (body.maxQtyPerOrder == null ? null : toInt(body.maxQtyPerOrder, 5))
-        : undefined,
-      unitAmountZar: body.unitAmountZar != null ? toInt(body.unitAmountZar, 0) : undefined,
-      saleAmountZar: body.saleAmountZar !== undefined
-        ? (body.saleAmountZar == null ? null : toInt(body.saleAmountZar, 0))
-        : undefined,
-    };
+      const existing = await prisma.shopProduct.findUnique({
+        where: { id },
+        include: { channels: true, buyerEligibility: true },
+      });
+      if (!existing) return json({ ok: false, error: 'product_not_found' }, 404);
 
-    const out = await prisma.$transaction(async (tx) => {
-      const updated = await tx.shopProduct.update({ where: { id }, data });
-      await setProductChannels(tx, id, channels);
-      return updated;
-    });
+      const active = body.active === undefined ? existing.active : Boolean(body.active);
+      const channels =
+        body.channels === undefined
+          ? existing.channels.map((row: any) => row.channel)
+          : normalizeChannels(body.channels);
+      const buyerTypes =
+        body.buyerTypes === undefined
+          ? existing.buyerEligibility.map((row: any) => row.buyerType)
+          : normalizeShopBuyerTypes(body.buyerTypes);
+      const errors = publicationError({ active, channels, buyerTypes });
+      if (errors) return json({ ok: false, error: 'invalid_shop_publication', details: errors }, 400);
 
-    return NextResponse.json({ ok: true, product: out });
-  }
-
-  // ---- Update Variant ----
-  if (kind === 'variant') {
-    const id = String(body.id || '');
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-
-    const channels = body.channels == null
-      ? null
-      : (Array.isArray(body.channels) ? body.channels : []).filter(isChannel) as Channel[];
-
-    const data: any = {
-      sku: body.sku != null ? String(body.sku) : undefined,
-      label: body.label != null ? String(body.label) : undefined,
-      active: body.active != null ? !!body.active : undefined,
-      imageUrl: body.imageUrl != null ? String(body.imageUrl) : undefined,
-      unitAmountZar: body.unitAmountZar != null ? toInt(body.unitAmountZar, 0) : undefined,
-      saleUnitAmountZar: body.saleUnitAmountZar !== undefined
-        ? (body.saleUnitAmountZar == null ? null : toInt(body.saleUnitAmountZar, 0))
-        : undefined,
-      inStock: body.inStock != null ? !!body.inStock : undefined,
-      allowBackorder: body.allowBackorder !== undefined
-        ? (body.allowBackorder == null ? null : !!body.allowBackorder)
-        : undefined,
-      // stockQty handled via stock_adjust to keep movements
-    };
-
-    const out = await prisma.$transaction(async (tx) => {
-      const updated = await tx.shopVariant.update({ where: { id }, data });
-      await setVariantChannels(tx, id, channels);
-      return updated;
-    });
-
-    return NextResponse.json({ ok: true, variant: out });
-  }
-
-  // ---- Stock adjust (keeps inventory movements consistent) ----
-  if (kind === 'variant_stock_adjust') {
-    const variantId = String(body.variantId || body.id || '');
-    if (!variantId) return NextResponse.json({ error: 'Missing variantId' }, { status: 400 });
-
-    const mode = String(body.mode || 'set'); // 'set' | 'delta'
-    const reason = toStr(body.reason, 'admin_adjust');
-    const note = body.note != null ? String(body.note) : '';
-
-    return NextResponse.json(
-      await prisma.$transaction(async (tx) => {
-        const v = await tx.shopVariant.findUnique({ where: { id: variantId }, include: { product: true } });
-        if (!v) return { ok: false, error: 'variant_not_found' };
-
-        const current = v.stockQty == null ? null : Math.max(0, Number(v.stockQty));
-        const allowBackorder = (v.allowBackorder ?? v.product?.allowBackorder) ? true : false;
-
-        if (current == null) {
-          // not tracked
-          return { ok: true, info: 'stock_untracked' };
-        }
-
-        let delta = 0;
-        if (mode === 'delta') {
-          delta = toInt(body.delta, 0);
-        } else {
-          const next = Math.max(0, toInt(body.value, current));
-          delta = next - current;
-        }
-
-        const nextQty = Math.max(0, current + delta);
-
-        await tx.shopVariant.update({
-          where: { id: variantId },
+      const product = await prisma.$transaction(async (tx: any) => {
+        const updated = await tx.shopProduct.update({
+          where: { id },
           data: {
-            stockQty: nextQty,
-            inStock: allowBackorder ? v.inStock : nextQty > 0,
+            ...(body.slug !== undefined ? { slug: cleanSlug(body.slug) } : {}),
+            ...(body.name !== undefined ? { name: String(body.name || '').trim() } : {}),
+            ...(body.description !== undefined
+              ? { description: String(body.description || '').trim() || null }
+              : {}),
+            ...(body.type !== undefined ? { type: String(body.type || 'merch').trim() } : {}),
+            ...(body.tags !== undefined ? { tags: toStringArray(body.tags) } : {}),
+            ...(body.images !== undefined ? { images: toStringArray(body.images) } : {}),
+            ...(body.fallbackImage !== undefined
+              ? { fallbackImage: String(body.fallbackImage || '').trim() || null }
+              : {}),
+            active,
+            ...(body.unitAmountZar !== undefined
+              ? {
+                  unitAmountZar:
+                    body.unitAmountZar === null
+                      ? null
+                      : Math.max(0, toInt(body.unitAmountZar)),
+                }
+              : {}),
+            ...(body.saleAmountZar !== undefined
+              ? {
+                  saleAmountZar:
+                    body.saleAmountZar === null
+                      ? null
+                      : Math.max(0, toInt(body.saleAmountZar)),
+                }
+              : {}),
+            ...(body.allowBackorder !== undefined
+              ? { allowBackorder: Boolean(body.allowBackorder) }
+              : {}),
+            ...(body.maxQtyPerOrder !== undefined
+              ? {
+                  maxQtyPerOrder: Math.min(
+                    99,
+                    Math.max(1, toInt(body.maxQtyPerOrder, 99)),
+                  ),
+                }
+              : {}),
           },
         });
+        if (body.channels !== undefined) await setProductChannels(tx, id, channels);
+        if (body.buyerTypes !== undefined) await setProductBuyers(tx, id, buyerTypes);
+        return updated;
+      });
 
-        if (delta !== 0) {
-          await tx.shopInventoryMovement.create({
-            data: { variantId, delta, reason, note },
-          }).catch(() => {});
-        }
+      return json({ ok: true, product });
+    }
 
-        return { ok: true, variantId, from: current, to: nextQty, delta };
-      }),
-      { status: 200 }
-    );
+    if (kind === 'variant') {
+      const id = String(body.id || '').trim();
+      if (!id) return json({ ok: false, error: 'variant_id_required' }, 400);
+
+      const existing = await prisma.shopVariant.findUnique({
+        where: { id },
+        include: { channels: true, buyerEligibility: true },
+      });
+      if (!existing) return json({ ok: false, error: 'variant_not_found' }, 404);
+
+      const active = body.active === undefined ? existing.active : Boolean(body.active);
+      const channels =
+        body.channels === undefined
+          ? existing.channels.map((row: any) => row.channel)
+          : normalizeChannels(body.channels);
+      const buyerTypes =
+        body.buyerTypes === undefined
+          ? existing.buyerEligibility.map((row: any) => row.buyerType)
+          : normalizeShopBuyerTypes(body.buyerTypes);
+      const errors = publicationError({
+        active,
+        channels,
+        buyerTypes,
+        allowInheritance: true,
+      });
+      if (errors) return json({ ok: false, error: 'invalid_variant_publication', details: errors }, 400);
+
+      const variant = await prisma.$transaction(async (tx: any) => {
+        const updated = await tx.shopVariant.update({
+          where: { id },
+          data: {
+            ...(body.sku !== undefined ? { sku: String(body.sku || '').trim() } : {}),
+            ...(body.label !== undefined ? { label: String(body.label || '').trim() } : {}),
+            active,
+            ...(body.unitAmountZar !== undefined
+              ? { unitAmountZar: Math.max(0, toInt(body.unitAmountZar)) }
+              : {}),
+            ...(body.saleUnitAmountZar !== undefined
+              ? {
+                  saleUnitAmountZar:
+                    body.saleUnitAmountZar === null
+                      ? null
+                      : Math.max(0, toInt(body.saleUnitAmountZar)),
+                }
+              : {}),
+            ...(body.imageUrl !== undefined
+              ? { imageUrl: String(body.imageUrl || '').trim() || null }
+              : {}),
+            ...(body.inStock !== undefined ? { inStock: Boolean(body.inStock) } : {}),
+            ...(body.allowBackorder !== undefined
+              ? {
+                  allowBackorder:
+                    body.allowBackorder === null ? null : Boolean(body.allowBackorder),
+                }
+              : {}),
+          },
+        });
+        if (body.channels !== undefined) await setVariantChannels(tx, id, channels);
+        if (body.buyerTypes !== undefined) await setVariantBuyers(tx, id, buyerTypes);
+        return updated;
+      });
+
+      return json({ ok: true, variant });
+    }
+
+    if (kind === 'variant_stock_adjust') {
+      const variantId = String(body.variantId || body.id || '').trim();
+      if (!variantId) return json({ ok: false, error: 'variant_id_required' }, 400);
+      const mode = String(body.mode || 'delta').trim().toLowerCase();
+
+      const result = await prisma.$transaction(async (tx: any) => {
+        const variant = await tx.shopVariant.findUnique({
+          where: { id: variantId },
+          include: { product: true },
+        });
+        if (!variant) throw new Error('variant_not_found');
+        if (variant.stockQty === null) throw new Error('variant_stock_not_tracked');
+
+        const current = Math.max(0, Number(variant.stockQty || 0));
+        const next =
+          mode === 'set'
+            ? Math.max(0, toInt(body.value, current))
+            : Math.max(0, current + toInt(body.delta, 0));
+        const delta = next - current;
+        if (!delta) return { variant, movement: null };
+
+        const allowBackorder = variant.allowBackorder ?? variant.product.allowBackorder;
+        const updated = await tx.shopVariant.update({
+          where: { id: variantId },
+          data: {
+            stockQty: next,
+            inStock: allowBackorder ? variant.inStock : next > 0,
+          },
+        });
+        const movement = await tx.shopInventoryMovement.create({
+          data: {
+            variantId,
+            delta,
+            reason: String(body.reason || 'admin_adjust').trim(),
+            note: String(body.note || '').trim() || null,
+          },
+        });
+        return { variant: updated, movement };
+      });
+
+      return json({ ok: true, ...result });
+    }
+
+    return json({ ok: false, error: 'unsupported_shop_update_kind' }, 400);
+  } catch (error: any) {
+    const message = String(error?.message || '');
+    if (message === 'variant_not_found') return json({ ok: false, error: message }, 404);
+    if (message === 'variant_stock_not_tracked') return json({ ok: false, error: message }, 409);
+    console.error('[shop settings] PATCH failed', error);
+    return json({ ok: false, error: message || 'shop_settings_update_failed' }, 500);
   }
-
-  return NextResponse.json({ error: 'Unsupported kind' }, { status: 400 });
 }
 
 export async function DELETE(req: NextRequest) {
-  const body = await req.json().catch(() => ({}));
-  const kind = String(body.kind || '');
+  const denied = requireAdminKey(req);
+  if (denied) return denied;
 
-  if (kind === 'variant') {
-    const id = String(body.id || '');
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
+  try {
+    const body = await req.json().catch(() => ({}));
+    const kind = String(body.kind || '').trim().toLowerCase();
+    const id = String(body.id || '').trim();
+    if (!id) return json({ ok: false, error: 'id_required' }, 400);
 
-    await prisma.$transaction(async (tx) => {
-      await tx.shopVariantChannel.deleteMany({ where: { variantId: id } }).catch(() => {});
-      await tx.shopInventoryMovement.deleteMany({ where: { variantId: id } }).catch(() => {});
-      await tx.shopVariant.delete({ where: { id } });
-    });
-
-    return NextResponse.json({ ok: true });
-  }
-
-  if (kind === 'product') {
-    const id = String(body.id || '');
-    if (!id) return NextResponse.json({ error: 'Missing id' }, { status: 400 });
-
-    await prisma.$transaction(async (tx) => {
-      const variants = await tx.shopVariant.findMany({ where: { productId: id }, select: { id: true } });
-
-      for (const v of variants) {
-        await tx.shopVariantChannel.deleteMany({ where: { variantId: v.id } }).catch(() => {});
-        await tx.shopInventoryMovement.deleteMany({ where: { variantId: v.id } }).catch(() => {});
+    if (kind === 'variant') {
+      await prisma.shopVariant.delete({ where: { id } });
+      return json({ ok: true });
+    }
+    if (kind === 'product') {
+      const orderItem = await prisma.shopOrderItem.findFirst({
+        where: { productId: id },
+        select: { id: true },
+      });
+      if (orderItem) {
+        return json({
+          ok: false,
+          error: 'product_has_order_history_deactivate_instead',
+        }, 409);
       }
+      await prisma.shopProduct.delete({ where: { id } });
+      return json({ ok: true });
+    }
 
-      await tx.shopVariant.deleteMany({ where: { productId: id } }).catch(() => {});
-      await tx.shopProductChannel.deleteMany({ where: { productId: id } }).catch(() => {});
-      await tx.shopProduct.delete({ where: { id } });
-    });
-
-    return NextResponse.json({ ok: true });
+    return json({ ok: false, error: 'unsupported_shop_delete_kind' }, 400);
+  } catch (error: any) {
+    console.error('[shop settings] DELETE failed', error);
+    return json({ ok: false, error: error?.message || 'shop_settings_delete_failed' }, 500);
   }
-
-  return NextResponse.json({ error: 'Unsupported kind' }, { status: 400 });
 }

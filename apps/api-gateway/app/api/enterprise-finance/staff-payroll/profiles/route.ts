@@ -9,11 +9,14 @@ import {
   routeError,
   text,
 } from '@/src/enterprise-finance/access-envelope';
+import {
+  createStandaloneWorkforcePayrollProfile,
+  ensureWorkforceMemberForPayrollProfile,
+  normalizeEngagementType,
+} from '@/src/lib/workforce';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-// A5_K_D_C_ENTERPRISE_FINANCE_STAFF_PAYROLL_PROFILES_ROUTE
 
 export async function GET(req: NextRequest) {
   try {
@@ -36,8 +39,6 @@ export async function GET(req: NextRequest) {
     if (employmentType) where.employmentType = employmentType;
     if (approvalStatus) where.approvalStatus = approvalStatus;
 
-    // This is intentionally capped at 500: the Admin surface needs canonical Staff
-    // identity enrichment before filtering, but must not turn into an unbounded export.
     const baseItems = await db.staffPayrollProfile.findMany({
       where,
       orderBy: [{ updatedAt: 'desc' }],
@@ -48,13 +49,20 @@ export async function GET(req: NextRequest) {
       new Set(
         baseItems
           .map((item: any) => String(item.staffUserId || '').trim())
+          .filter((value: string) => value && !value.startsWith('workforce:')),
+      ),
+    );
+    const workforceIds = Array.from(
+      new Set(
+        baseItems
+          .map((item: any) => String(item.workforceMemberId || '').trim())
           .filter(Boolean),
       ),
     );
 
-    const [staffRows, bankRows] = staffUserIds.length
-      ? await Promise.all([
-          db.adminUserProfile.findMany({
+    const [staffRows, bankRows, workforceRows] = await Promise.all([
+      staffUserIds.length
+        ? db.adminUserProfile.findMany({
             where: { userId: { in: staffUserIds } },
             select: {
               id: true,
@@ -69,22 +77,20 @@ export async function GET(req: NextRequest) {
                   id: true,
                   name: true,
                   roles: {
-                    select: {
-                      role: { select: { id: true, name: true } },
-                    },
+                    select: { role: { select: { id: true, name: true } } },
                   },
                 },
               },
               roles: {
-                select: {
-                  role: { select: { id: true, name: true } },
-                },
+                select: { role: { select: { id: true, name: true } } },
               },
             },
-          }),
-          db.staffBankAccount.findMany({
+          })
+        : [],
+      baseItems.length
+        ? db.staffBankAccount.findMany({
             where: {
-              staffUserId: { in: staffUserIds },
+              staffUserId: { in: baseItems.map((item: any) => item.staffUserId) },
               active: true,
             },
             orderBy: [{ isPrimary: 'desc' }, { updatedAt: 'desc' }],
@@ -98,24 +104,29 @@ export async function GET(req: NextRequest) {
               verifiedAt: true,
               isPrimary: true,
             },
-          }),
-        ])
-      : [[], []];
+          })
+        : [],
+      workforceIds.length
+        ? db.workforceMember.findMany({ where: { id: { in: workforceIds } } })
+        : [],
+    ]);
 
     const staffByUserId = new Map<string, any>(
-      staffRows.map((row: any) => [String(row.userId), row] as [string, any]),
+      staffRows.map((row: any) => [String(row.userId), row]),
+    );
+    const workforceById = new Map<string, any>(
+      workforceRows.map((row: any) => [String(row.id), row]),
     );
 
     const bankByUserId = new Map<string, any>();
     for (const row of bankRows) {
       const key = String(row.staffUserId || '');
-      if (!bankByUserId.has(key)) {
-        bankByUserId.set(key, row);
-      }
+      if (!bankByUserId.has(key)) bankByUserId.set(key, row);
     }
 
     const enriched = baseItems.map((item: any) => {
       const staff = staffByUserId.get(String(item.staffUserId || ''));
+      const workforce = workforceById.get(String(item.workforceMemberId || ''));
       const bank = bankByUserId.get(String(item.staffUserId || ''));
       const designationRoles =
         staff?.designation?.roles?.map((entry: any) => entry.role?.name).filter(Boolean) || [];
@@ -126,15 +137,31 @@ export async function GET(req: NextRequest) {
       return {
         ...item,
         payrollProfileId: item.id,
-        staffProfileId: staff?.id || null,
-        staffIdentifier: staff?.staffIdentifier || null,
-        staffName: staff?.name || item.staffDisplayName || item.staffEmail || item.staffUserId,
-        staffEmail: staff?.email || item.staffEmail || null,
-        staffLifecycleState: staff?.lifecycleState || null,
+        workforceMember: workforce || null,
+        engagementType:
+          workforce?.engagementType || normalizeEngagementType(item.employmentType),
+        hasAdminLogin: Boolean(staff),
+        staffProfileId: staff?.id || workforce?.adminStaffProfileId || null,
+        staffIdentifier:
+          staff?.staffIdentifier || workforce?.workforceNumber || null,
+        staffName:
+          staff?.name ||
+          workforce?.displayName ||
+          item.staffDisplayName ||
+          item.staffEmail ||
+          item.staffUserId,
+        staffEmail:
+          staff?.email || workforce?.email || item.staffEmail || null,
+        staffLifecycleState: staff?.lifecycleState || workforce?.status || null,
         departmentName: staff?.department?.name || null,
         designationName: staff?.designation?.name || null,
         roles,
-        role: roles.join(', ') || item.staffRole || staff?.designation?.name || null,
+        role:
+          roles.join(', ') ||
+          item.staffRole ||
+          staff?.designation?.name ||
+          workforce?.engagementType ||
+          null,
         bankAccountId: bank?.id || null,
         bankName: bank?.bankName || null,
         bankAccountMasked: bank?.accountNumberMasked || null,
@@ -151,12 +178,14 @@ export async function GET(req: NextRequest) {
             item.staffEmail,
             item.staffIdentifier,
             item.staffProfileId,
+            item.workforceMemberId,
             item.staffUserId,
             item.payrollNumber,
             item.employerReference,
             item.departmentName,
             item.designationName,
             item.role,
+            item.engagementType,
             item.bankName,
             item.bankAccountMasked,
             item.payrollStatus,
@@ -173,12 +202,21 @@ export async function GET(req: NextRequest) {
       ok: true,
       envelope: access.envelope,
       items: filtered.slice(0, limit),
+      engagementTypes: [
+        'PERMANENT',
+        'FIXED_TERM',
+        'TEMPORARY',
+        'CASUAL',
+        'CONTRACTOR',
+        'INTERN',
+        'COMMISSION_ONLY',
+      ],
       meta: {
         count: Math.min(filtered.length, limit),
         matched: filtered.length,
         scanned: baseItems.length,
         limit,
-        canonicalStaffEnrichment: true,
+        canonicalWorkforceIdentity: true,
       },
     });
   } catch (error: any) {
@@ -194,13 +232,58 @@ export async function POST(req: NextRequest) {
     const db: any = prisma;
     const body = await req.json().catch(() => ({}));
     const staffUserId = text(body.staffUserId, 180);
+    const displayName = text(body.staffDisplayName || body.displayName, 240);
+    const actorUserId = access.envelope.actor.userId;
+    const startDate = body.startDate ? new Date(body.startDate) : null;
+    const endDate = body.endDate ? new Date(body.endDate) : null;
 
-    if (!staffUserId) return json({ ok: false, error: 'staffUserId_required' }, 400);
+    if (!staffUserId) {
+      if (!displayName) {
+        return json({
+          ok: false,
+          error: 'staffUserId_or_standalone_workforce_display_name_required',
+        }, 400);
+      }
+
+      const created = await createStandaloneWorkforcePayrollProfile({
+        displayName,
+        email: text(body.staffEmail || body.email, 240) || null,
+        phone: text(body.phone, 80) || null,
+        engagementType: text(body.engagementType || body.employmentType || 'CASUAL', 80),
+        country: text(body.country || 'ZA', 2).toUpperCase(),
+        currency: text(body.currency || 'ZAR', 3).toUpperCase(),
+        startDate,
+        endDate,
+        baseSalaryCents: asCents(body.baseSalaryCents),
+        hourlyRateCents: asCents(body.hourlyRateCents),
+        payFrequency: text(body.payFrequency || 'monthly', 80),
+        commissionEligible: Boolean(body.commissionEligible),
+        commissionMode: text(body.commissionMode || 'none', 80),
+        actorUserId,
+        profileMeta: asObject(body.profileMeta),
+        payrollMeta: asObject(body.payrollMeta),
+      });
+
+      await auditEnterpriseFinance('standalone_workforce_payroll_profile_created', req, {
+        model: 'StaffPayrollProfile',
+        subjectId: created.payrollProfile.id,
+        staffUserId: created.payrollProfile.staffUserId,
+        workforceMemberId: created.workforce.id,
+        engagementType: created.workforce.engagementType,
+      });
+
+      return json({
+        ok: true,
+        envelope: access.envelope,
+        item: created.payrollProfile,
+        workforceMember: created.workforce,
+      });
+    }
 
     const item = await db.staffPayrollProfile.create({
       data: {
         staffUserId,
-        staffDisplayName: text(body.staffDisplayName || body.displayName, 240) || null,
+        staffDisplayName: displayName || null,
         staffEmail: text(body.staffEmail || body.email, 240) || null,
         staffRole: text(body.staffRole || body.role, 120) || null,
         departmentId: text(body.departmentId, 180) || null,
@@ -217,8 +300,8 @@ export async function POST(req: NextRequest) {
         taxNumber: text(body.taxNumber, 180) || null,
         payrollNumber: text(body.payrollNumber, 180) || null,
         employerReference: text(body.employerReference, 180) || null,
-        startDate: body.startDate ? new Date(body.startDate) : null,
-        endDate: body.endDate ? new Date(body.endDate) : null,
+        startDate,
+        endDate,
         profileMeta: asObject(body.profileMeta),
         payrollMeta: asObject(body.payrollMeta),
         approvalStatus: text(body.approvalStatus || 'pending', 80),
@@ -227,13 +310,21 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    const workforce = await ensureWorkforceMemberForPayrollProfile(item, actorUserId);
+
     await auditEnterpriseFinance('staff_payroll_profile_created', req, {
       model: 'StaffPayrollProfile',
       subjectId: item.id,
       staffUserId,
+      workforceMemberId: workforce.id,
     });
 
-    return json({ ok: true, envelope: access.envelope, item });
+    return json({
+      ok: true,
+      envelope: access.envelope,
+      item: { ...item, workforceMemberId: workforce.id },
+      workforceMember: workforce,
+    });
   } catch (error: any) {
     return routeError(error, 'enterprise_finance_payroll_profile_create_failed');
   }

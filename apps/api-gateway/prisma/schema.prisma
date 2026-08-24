@@ -3991,6 +3991,7 @@ model ShopProduct {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
   channels       ShopProductChannel[]
+  buyerEligibility ShopProductBuyerEligibility[]
   variants       ShopVariant[]
 
   @@index([orgId])
@@ -4017,6 +4018,7 @@ model ShopVariant {
   movements         ShopInventoryMovement[]
   product           ShopProduct             @relation(fields: [productId], references: [id], onDelete: Cascade)
   channels          ShopVariantChannel[]
+  buyerEligibility  ShopVariantBuyerEligibility[]
 
   @@index([productId])
   @@index([orgId])
@@ -4046,6 +4048,33 @@ model ShopVariantChannel {
   @@unique([variantId, channel])
   @@index([channel])
   @@index([orgId])
+}
+
+
+model ShopProductBuyerEligibility {
+  id        String        @id @default(cuid())
+  productId String
+  buyerType ShopBuyerType
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  product ShopProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, buyerType])
+  @@index([buyerType])
+}
+
+model ShopVariantBuyerEligibility {
+  id        String        @id @default(cuid())
+  variantId String
+  buyerType ShopBuyerType
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  variant ShopVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, buyerType])
+  @@index([buyerType])
 }
 
 model ShopInventoryMovement {
@@ -6135,6 +6164,15 @@ enum SurgicalPriority {
   routine
   urgent
   emergency
+}
+
+enum ShopBuyerType {
+  PATIENT
+  CLINICIAN
+  PHARMACY
+  DELIVERY_RIDER
+  LABORATORY
+  PHLEBOTOMIST
 }
 
 enum ShopChannel {
@@ -8524,7 +8562,7 @@ model CarePortPharmacySkuGlobalProductMap {
 }
 
 // ============================================================
-// A5-K-C-B â€” Enterprise Finance Schema Foundation
+// A5-K-C-B — Enterprise Finance Schema Foundation
 // A5_K_C_B_ENTERPRISE_FINANCE_SCHEMA_FOUNDATION
 // ============================================================
 // This schema foundation separates:
@@ -8537,9 +8575,38 @@ model CarePortPharmacySkuGlobalProductMap {
 // relations so this foundation can be introduced without disturbing
 // existing auth/user/provider models while the operational APIs are built.
 
+
+model WorkforceMember {
+  id                  String @id @default(cuid())
+  workforceNumber     String? @unique @db.VarChar(120)
+  displayName         String
+  email               String?
+  phone               String?
+  engagementType      String @default("PERMANENT") @db.VarChar(80)
+  status              String @default("ACTIVE") @db.VarChar(80)
+
+  platformUserId      String? @unique
+  adminStaffProfileId String? @unique
+  country             String @default("ZA") @db.VarChar(2)
+  currency            String @default("ZAR") @db.VarChar(3)
+  startDate           DateTime?
+  endDate             DateTime?
+
+  meta            Json?
+  createdByUserId String?
+  updatedByUserId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([displayName])
+  @@index([email])
+  @@index([engagementType, status])
+}
+
 model StaffPayrollProfile {
   id               String  @id @default(cuid())
   staffUserId      String
+  workforceMemberId String? @unique
   staffDisplayName String?
   staffEmail       String?
   staffRole        String? @db.VarChar(120)
@@ -8575,11 +8642,123 @@ model StaffPayrollProfile {
   updatedAt DateTime @updatedAt
 
   @@index([staffUserId])
+  @@index([workforceMemberId])
   @@index([staffEmail])
   @@index([employmentType])
   @@index([payrollStatus])
   @@index([approvalStatus])
   @@index([departmentId, designationId])
+}
+
+
+model StaffCompensationHistory {
+  id               String   @id @default(cuid())
+  staffUserId      String
+  payrollProfileId String
+  staffProfileId   String?
+  sourceFingerprint String   @unique
+  sourceType       String   @default("payroll_profile") @db.VarChar(120)
+  sourceId         String?
+  changeType       String?  @db.VarChar(80)
+
+  effectiveFrom DateTime
+  effectiveTo   DateTime?
+
+  compensationType      String @default("salary") @db.VarChar(80)
+  baseSalaryCents       Int    @default(0)
+  hourlyRateCents       Int    @default(0)
+  defaultHoursPerPeriod Decimal? @db.Decimal(10, 2)
+  payFrequency          String @default("monthly") @db.VarChar(80)
+  currency              String @default("ZAR") @db.VarChar(3)
+
+  lockedAt       DateTime?
+  lockedByUserId String?
+  notes          String?
+  meta           Json?
+  createdByUserId String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([staffUserId, effectiveFrom])
+  @@index([payrollProfileId, effectiveFrom])
+  @@index([staffProfileId, effectiveFrom])
+  @@index([sourceType, sourceId])
+}
+
+model StaffPayrollEntitlement {
+  id               String @id @default(cuid())
+  staffUserId      String
+  payrollProfileId String
+  payrollPeriodId  String
+
+  periodStartsAt DateTime
+  periodEndsAt   DateTime
+
+  grossEntitlementCents      Int @default(0)
+  amountHistoricallySettledCents Int @default(0)
+  postReconciliationPaidCents Int @default(0)
+  remainingCents             Int @default(0)
+  currency                   String @default("ZAR") @db.VarChar(3)
+  settlementState            String @default("UNPAID") @db.VarChar(80)
+  calculationStatus          String @default("CALCULATED") @db.VarChar(80)
+  calculationVersion         Int @default(1)
+
+  prorationMeta Json?
+  warningMeta   Json?
+  lockedAt       DateTime?
+  lockedByUserId String?
+  generatedByUserId String?
+  generatedAt    DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([staffUserId, payrollPeriodId])
+  @@index([payrollProfileId, periodStartsAt])
+  @@index([settlementState])
+  @@index([lockedAt])
+}
+
+model StaffPayrollEntitlementSegment {
+  id                    String @id @default(cuid())
+  entitlementId         String
+  compensationHistoryId String?
+  effectiveFrom         DateTime
+  effectiveTo           DateTime
+  salaryRateCents       Int @default(0)
+  grossEntitlementCents Int @default(0)
+  eligibleDayCount      Int @default(0)
+  periodDayCount        Int @default(0)
+  prorationFactor       Decimal @default(0) @db.Decimal(14, 10)
+  meta                  Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@index([entitlementId, effectiveFrom])
+  @@index([compensationHistoryId])
+}
+
+model StaffPayrollHistoricalReconciliation {
+  id               String @id @default(cuid())
+  entitlementId    String @unique
+  staffUserId      String
+  payrollProfileId String
+  settlementState  String @db.VarChar(80)
+  amountHistoricallySettledCents Int @default(0)
+  reference        String?
+  note             String?
+  sourceType       String @default("legacy_onboarding") @db.VarChar(120)
+  effectiveAt      DateTime?
+  lockedAt         DateTime?
+  lockedByUserId   String?
+  recordedByUserId String?
+  meta             Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([staffUserId])
+  @@index([payrollProfileId])
+  @@index([settlementState])
+  @@index([lockedAt])
 }
 
 model StaffBankAccount {
@@ -8939,6 +9118,7 @@ model CommissionEvent {
   sourceType  String  @db.VarChar(120)
   sourceId    String
   staffUserId String?
+  workforceMemberId String?
 
   eventStatus String   @default("pending_review") @db.VarChar(80)
   occurredAt  DateTime @default(now())
@@ -8948,14 +9128,16 @@ model CommissionEvent {
   currency                  String @default("ZAR") @db.VarChar(3)
 
   policyId        String?
+  dedupeKey       String?  @unique
   module          String?  @db.VarChar(80)
   attributionMeta Json?
   sourceMeta      Json?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  @@unique([sourceType, sourceId, staffUserId])
+  @@index([sourceType, sourceId, staffUserId])
   @@index([staffUserId])
+  @@index([workforceMemberId])
   @@index([sourceType])
   @@index([eventStatus])
   @@index([occurredAt])
@@ -8965,6 +9147,7 @@ model CommissionAward {
   id                String  @id @default(cuid())
   commissionEventId String?
   staffUserId       String
+  workforceMemberId String?
 
   status                String @default("draft") @db.VarChar(80)
   calculatedAmountCents Int    @default(0)
@@ -8987,6 +9170,7 @@ model CommissionAward {
   updatedAt DateTime @updatedAt
 
   @@index([staffUserId])
+  @@index([workforceMemberId])
   @@index([commissionEventId])
   @@index([status])
   @@index([payrollPeriodId])
@@ -9011,10 +9195,13 @@ model RevenueLedgerEntry {
 
   grossAmountCents        Int    @default(0)
   refundAmountCents       Int    @default(0)
-  providerFeeCents        Int    @default(0)
-  platformFeeCents        Int    @default(0)
-  netPlatformRevenueCents Int    @default(0)
-  amountReceivedCents     Int    @default(0)
+  providerFeeCents             Int    @default(0)
+  providerFeeVatCents          Int    @default(0)
+  otherSettlementDeductionCents Int  @default(0)
+  platformFeeCents             Int    @default(0)
+  netSettlementCents           Int    @default(0)
+  netPlatformRevenueCents      Int    @default(0)
+  amountReceivedCents          Int    @default(0)
   currency                String @default("ZAR") @db.VarChar(3)
 
   recognitionStatus  String    @default("pending") @db.VarChar(80)
@@ -9055,6 +9242,9 @@ model FinanceReportSnapshot {
   netPlatformRevenueCents Int @default(0)
   manualInflowCents       Int @default(0)
   investmentInflowCents   Int @default(0)
+  financingInflowCents    Int @default(0)
+  providerFeeCents        Int @default(0)
+  netSettlementCents      Int @default(0)
   contractorPayableCents  Int @default(0)
   payrollLiabilityCents   Int @default(0)
   salaryArrearsCents      Int @default(0)
@@ -9390,6 +9580,7 @@ model CompanyValuationSnapshot {
 
   methodology             String?
   notes                   String?
+  documentObjectKey       String?
   valuationMeta           Json?
   publishedToShareholders Boolean @default(false)
 
@@ -9473,6 +9664,7 @@ model AnnualReturn {
 
   reportSnapshotId      String?
   documentUrl           String?
+  documentObjectKey     String?
   annualReturnMeta      Json?
   visibleToShareholders Boolean @default(false)
 
@@ -9494,6 +9686,7 @@ model BoardResolution {
   effectiveDate  DateTime?
   summary        String?
   documentUrl    String?
+  documentObjectKey String?
 
   visibleToShareholders Boolean   @default(false)
   passedByUserId        String?
@@ -9520,6 +9713,7 @@ model AGMNotice {
   virtualJoinUrl String?
   agenda         String?
   documentUrl    String?
+  documentObjectKey String?
 
   visibleToShareholders Boolean   @default(false)
   publishedAt           DateTime?

@@ -170,24 +170,97 @@ export async function POST(req: NextRequest) {
     const items = Array.isArray(body?.items) ? body.items : [];
     if (!items.length) return NextResponse.json({ ok: false, error: 'No items.' }, { status: 400 });
 
+    // Wallet checkout must use the same canonical Ambulant+ Shop authority as
+    // card checkout. Never trust client-supplied prices or unpublished items.
+    const catalogResponse = await fetch(`${apigwBase()}/api/shop?channel=PATIENT`, {
+      cache: 'no-store',
+      headers: {
+        accept: 'application/json',
+        'x-uid': uid,
+      },
+    });
+    const catalog = await catalogResponse.json().catch(() => null);
+    if (!catalogResponse.ok || !catalog?.ok || !Array.isArray(catalog?.items)) {
+      return NextResponse.json(
+        { ok: false, error: catalog?.error || 'Unable to validate shop catalogue.' },
+        { status: catalogResponse.status || 502 },
+      );
+    }
+
+    const productById = new Map<string, any>(
+      catalog.items.map((product: any) => [String(product.id), product]),
+    );
+
     const shippingZar = Math.max(0, clampInt(body?.shippingZar, 0));
     const discountZar = Math.max(0, clampInt(body?.discountZar, 0));
 
     let subtotalZar = 0;
-    const cleanItems = items.map((it: any) => {
-      const quantity = Math.max(1, clampInt(it?.quantity, 1));
-      const unitAmountZar = Math.max(0, clampInt(it?.unitAmountZar, 0));
-      subtotalZar += unitAmountZar * quantity;
+    const cleanItems: any[] = [];
 
-      return {
-        productId: String(it?.productId || 'unknown'),
-        variantId: it?.variantId ? String(it.variantId) : null,
-        sku: it?.sku ? String(it.sku) : null,
-        name: String(it?.name || 'Item'),
+    for (const it of items) {
+      const productId = String(it?.productId || '');
+      const product = productById.get(productId);
+      if (!product) {
+        return NextResponse.json(
+          { ok: false, error: 'A cart item is not published or is not eligible for this patient.' },
+          { status: 403 },
+        );
+      }
+
+      const quantity = Math.max(1, clampInt(it?.quantity, 1));
+      if (quantity > Number(product.maxQtyPerOrder || 99)) {
+        return NextResponse.json(
+          { ok: false, error: `Quantity exceeds the maximum for ${product.name}.` },
+          { status: 400 },
+        );
+      }
+
+      const variantId = it?.variantId ? String(it.variantId) : null;
+      let sku: string | null = null;
+      let name = String(product.name || 'Item');
+      let unitAmountZar = Math.max(0, clampInt(product.priceZar, 0));
+
+      if (Array.isArray(product.variants) && product.variants.length) {
+        if (!variantId) {
+          return NextResponse.json(
+            { ok: false, error: `Choose a variant for ${product.name}.` },
+            { status: 400 },
+          );
+        }
+        const variant = product.variants.find((candidate: any) => String(candidate.id) === variantId);
+        if (!variant || variant.inStock === false) {
+          return NextResponse.json(
+            { ok: false, error: 'Selected variant is unavailable.' },
+            { status: 409 },
+          );
+        }
+        sku = variant.sku ? String(variant.sku) : null;
+        name = `${name} — ${String(variant.label || sku || 'Variant')}`;
+        unitAmountZar = Math.max(0, clampInt(variant.priceZar, 0));
+      } else if (variantId) {
+        return NextResponse.json(
+          { ok: false, error: 'This product does not use variants.' },
+          { status: 400 },
+        );
+      }
+
+      if (unitAmountZar <= 0) {
+        return NextResponse.json(
+          { ok: false, error: `Invalid canonical price for ${product.name}.` },
+          { status: 409 },
+        );
+      }
+
+      subtotalZar += unitAmountZar * quantity;
+      cleanItems.push({
+        productId,
+        variantId,
+        sku,
+        name,
         unitAmountZar,
         quantity,
-      };
-    });
+      });
+    }
 
     const totalZar = Math.max(0, subtotalZar + shippingZar - discountZar);
     if (totalZar <= 0) return NextResponse.json({ ok: false, error: 'Invalid total.' }, { status: 400 });

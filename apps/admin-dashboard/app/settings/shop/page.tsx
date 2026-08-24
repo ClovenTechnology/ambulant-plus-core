@@ -1,761 +1,1046 @@
-// apps/admin-dashboard/app/settings/shop/page.tsx
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { uploadManagedImage } from '@/lib/managed-image-upload';
 
-type ShopChannel = 'CLINICIAN' | 'PATIENT' | 'MEDREACH' | 'CAREPORT';
+type ShopChannel = 'PATIENT' | 'CLINICIAN' | 'CAREPORT' | 'MEDREACH';
+type BuyerType =
+  | 'PATIENT'
+  | 'CLINICIAN'
+  | 'PHARMACY'
+  | 'DELIVERY_RIDER'
+  | 'LABORATORY'
+  | 'PHLEBOTOMIST';
 
-const CHANNELS: ShopChannel[] = ['CLINICIAN', 'PATIENT', 'MEDREACH', 'CAREPORT'];
-
-type ProductChannelRow = { channel: ShopChannel };
-type VariantChannelRow = { channel: ShopChannel };
-
-type ShopVariant = {
-  id: string;
-  productId: string;
+type Variant = {
+  id?: string;
+  productId?: string;
   sku: string;
   label: string;
   active: boolean;
   unitAmountZar: number;
-  saleUnitAmountZar?: number | null;
+  saleUnitAmountZar: number | null;
   imageUrl?: string | null;
   inStock: boolean;
-  stockQty?: number | null;
-  allowBackorder?: boolean | null;
-  channels?: VariantChannelRow[];
+  stockQty: number | null;
+  allowBackorder: boolean | null;
+  channels: ShopChannel[];
+  buyerTypes: BuyerType[];
+  inheritsProductPublication?: boolean;
 };
 
-type ShopProduct = {
-  id: string;
+type Product = {
+  id?: string;
   slug: string;
   name: string;
-  description?: string | null;
+  description: string;
   type: string;
   tags: string[];
   images: string[];
   fallbackImage?: string | null;
   active: boolean;
-  unitAmountZar?: number | null;
-  saleAmountZar?: number | null;
+  unitAmountZar: number | null;
+  saleAmountZar: number | null;
   allowBackorder: boolean;
   maxQtyPerOrder: number;
-  channels?: ProductChannelRow[];
-  variants: ShopVariant[];
+  channels: ShopChannel[];
+  buyerTypes: BuyerType[];
+  published?: boolean;
+  variants: Variant[];
 };
 
-function formatZar(n: number) {
-  return `R ${Math.round(n).toString()}`;
+const CHANNELS: ShopChannel[] = ['PATIENT', 'CLINICIAN', 'CAREPORT', 'MEDREACH'];
+const BUYER_TYPES: BuyerType[] = [
+  'PATIENT',
+  'CLINICIAN',
+  'PHARMACY',
+  'DELIVERY_RIDER',
+  'LABORATORY',
+  'PHLEBOTOMIST',
+];
+
+const BUYERS_BY_CHANNEL: Record<ShopChannel, BuyerType[]> = {
+  PATIENT: ['PATIENT'],
+  CLINICIAN: ['CLINICIAN'],
+  CAREPORT: ['PHARMACY', 'DELIVERY_RIDER'],
+  MEDREACH: ['LABORATORY', 'PHLEBOTOMIST'],
+};
+
+const blankProduct = (): Product => ({
+  slug: '',
+  name: '',
+  description: '',
+  type: 'merch',
+  tags: [],
+  images: [],
+  fallbackImage: null,
+  active: false,
+  unitAmountZar: null,
+  saleAmountZar: null,
+  allowBackorder: false,
+  maxQtyPerOrder: 99,
+  channels: [],
+  buyerTypes: [],
+  variants: [],
+});
+
+function blankVariant(productId: string): Variant {
+  return {
+    productId,
+    sku: '',
+    label: '',
+    active: true,
+    unitAmountZar: 0,
+    saleUnitAmountZar: null,
+    imageUrl: null,
+    inStock: true,
+    stockQty: 0,
+    allowBackorder: null,
+    channels: [],
+    buyerTypes: [],
+  };
 }
 
-function channelsToSet(rows?: { channel: string }[]) {
-  return new Set((rows || []).map((r) => r.channel));
+function money(value: number | null | undefined) {
+  return `R${Number(value || 0).toLocaleString('en-ZA')}`;
 }
 
-export default function AdminShopSettingsPage() {
-  const [items, setItems] = useState<ShopProduct[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+function asCsv(value: string[]) {
+  return value.join(', ');
+}
 
-  const [q, setQ] = useState('');
+function fromCsv(value: string) {
+  return value
+    .split(',')
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function toggle<T extends string>(items: T[], value: T) {
+  return items.includes(value)
+    ? items.filter((item) => item !== value)
+    : [...items, value];
+}
+
+function publicationWarnings(product: Pick<Product, 'active' | 'channels' | 'buyerTypes'>) {
+  if (!product.active) return [];
+  const warnings: string[] = [];
+  if (!product.channels.length) warnings.push('Choose at least one channel before publishing.');
+  for (const channel of product.channels) {
+    if (!product.buyerTypes.some((buyer) => BUYERS_BY_CHANNEL[channel].includes(buyer))) {
+      warnings.push(`${channel} needs at least one matching buyer type.`);
+    }
+  }
+  return warnings;
+}
+
+async function readJson(response: Response) {
+  const text = await response.text();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { ok: false, error: text };
+  }
+}
+
+export default function CommerceStudioPage() {
+  const [items, setItems] = useState<Product[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<Product>(blankProduct());
+  const [variantDraft, setVariantDraft] = useState<Variant | null>(null);
+  const [query, setQuery] = useState('');
+  const [busy, setBusy] = useState('');
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
 
   const selected = useMemo(
-    () => items.find((x) => x.id === selectedId) || null,
-    [items, selectedId]
+    () => items.find((item) => item.id === selectedId) || null,
+    [items, selectedId],
   );
 
   const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return items;
-    return items.filter((p) => {
-      const hay = [
-        p.slug,
-        p.name,
-        p.description || '',
-        p.type,
-        (p.tags || []).join(' '),
-        (p.variants || []).map((v) => `${v.sku} ${v.label}`).join(' '),
+    const q = query.trim().toLowerCase();
+    if (!q) return items;
+    return items.filter((item) =>
+      [
+        item.name,
+        item.slug,
+        item.description,
+        item.type,
+        ...item.tags,
+        ...item.variants.flatMap((variant) => [variant.sku, variant.label]),
       ]
         .join(' ')
-        .toLowerCase();
-      return hay.includes(s);
-    });
-  }, [items, q]);
+        .toLowerCase()
+        .includes(q),
+    );
+  }, [items, query]);
 
-  async function load() {
-    try {
-      setLoading(true);
-      setError(null);
-      const res = await fetch('/api/settings/shop', { cache: 'no-store' });
-      const js = await res.json();
-      if (!res.ok) throw new Error(js?.error || 'Failed to load shop settings');
-      setItems(js.items || []);
-      setSelectedId((prev) => prev || (js.items?.[0]?.id ?? null));
-    } catch (e: any) {
-      setError(e?.message || 'Load failed');
-    } finally {
-      setLoading(false);
+  async function load(preferredId?: string | null) {
+    setError('');
+    const response = await fetch('/api/settings/shop?includeInactive=1', {
+      cache: 'no-store',
+    });
+    const json = await readJson(response);
+    if (!response.ok || !json?.ok) {
+      throw new Error(json?.error || 'Unable to load Commerce Studio.');
+    }
+    const next = (json.items || []) as Product[];
+    setItems(next);
+    const id =
+      preferredId && next.some((item) => item.id === preferredId)
+        ? preferredId
+        : selectedId && next.some((item) => item.id === selectedId)
+          ? selectedId
+          : next[0]?.id || null;
+    setSelectedId(id);
+    if (id) {
+      const product = next.find((item) => item.id === id);
+      if (product) setDraft({ ...product });
+    } else {
+      setDraft(blankProduct());
     }
   }
 
   useEffect(() => {
-    load();
+    load().catch((err) => setError(err.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function op(payload: any) {
-    const res = await fetch('/api/settings/shop', {
-      method: 'POST',
+  useEffect(() => {
+    if (selected) setDraft({ ...selected });
+  }, [selected]);
+
+  async function mutate(method: 'POST' | 'PATCH' | 'DELETE', payload: any) {
+    const response = await fetch('/api/settings/shop', {
+      method,
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    const js = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(js?.error || 'Operation failed');
-    return js;
+    const json = await readJson(response);
+    if (!response.ok || !json?.ok) {
+      const details = Array.isArray(json?.details) ? ` ${json.details.join(' ')}` : '';
+      throw new Error((json?.error || 'Commerce operation failed.') + details);
+    }
+    return json;
   }
 
-  // ---------- Product editing ----------
-  const [pDraft, setPDraft] = useState<Partial<ShopProduct>>({});
-  useEffect(() => {
-    if (!selected) return;
-    setPDraft({
-      id: selected.id,
-      slug: selected.slug,
-      name: selected.name,
-      description: selected.description || '',
-      type: selected.type,
-      tags: selected.tags || [],
-      images: selected.images || [],
-      fallbackImage: selected.fallbackImage || '',
-      active: selected.active,
-      unitAmountZar: selected.unitAmountZar ?? null,
-      saleAmountZar: selected.saleAmountZar ?? null,
-      allowBackorder: selected.allowBackorder,
-      maxQtyPerOrder: selected.maxQtyPerOrder,
-      channels: selected.channels || [],
-    });
-  }, [selectedId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const pChannelSet = useMemo(() => channelsToSet(pDraft.channels as any), [pDraft.channels]);
-
-  function toggleProductChannel(ch: ShopChannel) {
-    const set = new Set(pChannelSet);
-    if (set.has(ch)) set.delete(ch);
-    else set.add(ch);
-
-    // IMPORTANT: empty channels means "ALL"
-    setPDraft((d) => ({
-      ...d,
-      channels: Array.from(set).map((x) => ({ channel: x as ShopChannel })) as any,
-    }));
+  function newProduct() {
+    setSelectedId(null);
+    setDraft(blankProduct());
+    setVariantDraft(null);
+    setMessage('');
+    setError('');
   }
 
-  async function saveProduct() {
-    if (!pDraft.slug || !pDraft.name) {
-      setError('Product slug and name are required');
+  function chooseProduct(product: Product) {
+    setSelectedId(product.id || null);
+    setDraft({ ...product });
+    setVariantDraft(null);
+    setMessage('');
+    setError('');
+  }
+
+  async function saveProduct(publish?: boolean) {
+    const nextDraft = publish === undefined ? draft : { ...draft, active: publish };
+    const warnings = publicationWarnings(nextDraft);
+    if (warnings.length) {
+      setError(warnings.join(' '));
       return;
     }
-    try {
-      setBusy('saveProduct');
-      setError(null);
+    if (!nextDraft.name.trim()) {
+      setError('Product name is required.');
+      return;
+    }
 
-      await op({
-        op: 'upsertProduct',
-        product: {
-          ...pDraft,
-          tags:
-            typeof pDraft.tags === 'string'
-              ? String(pDraft.tags).split(',').map((x) => x.trim()).filter(Boolean)
-              : pDraft.tags,
-          images:
-            typeof pDraft.images === 'string'
-              ? String(pDraft.images).split(',').map((x) => x.trim()).filter(Boolean)
-              : pDraft.images,
-          channels: (pDraft.channels as any)?.map((x: any) => x.channel) ?? [],
-        },
+    setBusy('product');
+    setError('');
+    setMessage('');
+    try {
+      const payload = {
+        kind: 'product',
+        slug: nextDraft.slug,
+        name: nextDraft.name,
+        description: nextDraft.description,
+        type: nextDraft.type,
+        tags: nextDraft.tags,
+        images: nextDraft.images,
+        fallbackImage: nextDraft.fallbackImage,
+        active: nextDraft.active,
+        unitAmountZar: nextDraft.unitAmountZar,
+        saleAmountZar: nextDraft.saleAmountZar,
+        allowBackorder: nextDraft.allowBackorder,
+        maxQtyPerOrder: nextDraft.maxQtyPerOrder,
+        channels: nextDraft.channels,
+        buyerTypes: nextDraft.buyerTypes,
+      };
+      const json = nextDraft.id
+        ? await mutate('PATCH', { ...payload, id: nextDraft.id })
+        : await mutate('POST', payload);
+      const id = nextDraft.id || json.product?.id;
+      setMessage(nextDraft.active ? 'Product published.' : 'Draft saved.');
+      await load(id);
+    } catch (err: any) {
+      setError(err.message || 'Unable to save product.');
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function uploadProductImage(file: File) {
+    if (!draft.id) {
+      setError('Save the product draft before uploading media.');
+      return;
+    }
+    setBusy('product-image');
+    setError('');
+    try {
+      await uploadManagedImage({
+        file,
+        presignUrl: '/api/settings/shop/media/presign',
+        confirmUrl: '/api/settings/shop/media/confirm',
+        confirmBody: { targetKind: 'product', targetId: draft.id },
       });
-
-      await load();
-    } catch (e: any) {
-      setError(e?.message || 'Save product failed');
+      setMessage('Product image uploaded.');
+      await load(draft.id);
+    } catch (err: any) {
+      setError(err.message || 'Image upload failed.');
     } finally {
-      setBusy(null);
+      setBusy('');
     }
   }
 
-  async function setActive(kind: 'product' | 'variant', id: string, active: boolean) {
-    try {
-      setBusy(`${kind}:${id}`);
-      setError(null);
-      await op({ op: 'setActive', kind, id, active });
-      await load();
-    } catch (e: any) {
-      setError(e?.message || 'Update failed');
-    } finally {
-      setBusy(null);
+  function applyChannel(channel: ShopChannel) {
+    const channels = toggle(draft.channels, channel);
+    let buyerTypes = [...draft.buyerTypes];
+    if (channels.includes(channel)) {
+      const defaults = BUYERS_BY_CHANNEL[channel];
+      if (defaults.length === 1 && !buyerTypes.includes(defaults[0])) {
+        buyerTypes.push(defaults[0]);
+      }
+    } else {
+      const stillNeeded = new Set(channels.flatMap((value) => BUYERS_BY_CHANNEL[value]));
+      buyerTypes = buyerTypes.filter((buyer) => stillNeeded.has(buyer));
     }
+    setDraft((current) => ({ ...current, channels, buyerTypes }));
   }
 
-  // ---------- Variant editing ----------
-  const [vDraft, setVDraft] = useState<Partial<ShopVariant> | null>(null);
-
-  function startNewVariant() {
-    if (!selected) return;
-    setVDraft({
-      productId: selected.id,
-      sku: '',
-      label: '',
-      active: true,
-      unitAmountZar: 0,
-      saleUnitAmountZar: null,
-      inStock: true,
-      stockQty: 0,
-      allowBackorder: null,
-      channels: [],
-    });
-  }
-
-  function editVariant(v: ShopVariant) {
-    setVDraft({
-      ...v,
-      channels: v.channels || [],
-      stockQty: v.stockQty ?? null,
-      saleUnitAmountZar: v.saleUnitAmountZar ?? null,
-      allowBackorder: v.allowBackorder ?? null,
-    });
-  }
-
-  const vChannelSet = useMemo(() => channelsToSet((vDraft?.channels as any) || []), [vDraft?.channels]);
-
-  function toggleVariantChannel(ch: ShopChannel) {
-    if (!vDraft) return;
-    const set = new Set(vChannelSet);
-    if (set.has(ch)) set.delete(ch);
-    else set.add(ch);
-    setVDraft((d) =>
-      d
-        ? ({
-            ...d,
-            channels: Array.from(set).map((x) => ({ channel: x as ShopChannel })) as any,
-          } as any)
-        : d
-    );
+  function startVariant(variant?: Variant) {
+    if (!draft.id) return;
+    setVariantDraft(variant ? { ...variant } : blankVariant(draft.id));
   }
 
   async function saveVariant() {
-    if (!vDraft || !selected) return;
-    if (!vDraft.sku || !vDraft.label) {
-      setError('Variant SKU and label are required');
+    if (!variantDraft || !draft.id) return;
+    if (!variantDraft.sku.trim() || !variantDraft.label.trim()) {
+      setError('Variant SKU and label are required.');
       return;
     }
+
+    setBusy('variant');
+    setError('');
     try {
-      setBusy('saveVariant');
-      setError(null);
-
-      await op({
-        op: 'upsertVariant',
-        variant: {
-          ...vDraft,
-          productId: selected.id,
-          unitAmountZar: Number(vDraft.unitAmountZar || 0),
-          saleUnitAmountZar:
-            vDraft.saleUnitAmountZar === null || vDraft.saleUnitAmountZar === undefined || vDraft.saleUnitAmountZar === ('' as any)
-              ? null
-              : Number(vDraft.saleUnitAmountZar),
-          stockQty:
-            vDraft.stockQty === null || vDraft.stockQty === undefined || vDraft.stockQty === ('' as any)
-              ? null
-              : Number(vDraft.stockQty),
-          channels: (vDraft.channels as any)?.map((x: any) => x.channel) ?? [],
-        },
-      });
-
-      setVDraft(null);
-      await load();
-    } catch (e: any) {
-      setError(e?.message || 'Save variant failed');
+      const payload = {
+        kind: 'variant',
+        productId: draft.id,
+        sku: variantDraft.sku,
+        label: variantDraft.label,
+        active: variantDraft.active,
+        unitAmountZar: variantDraft.unitAmountZar,
+        saleUnitAmountZar: variantDraft.saleUnitAmountZar,
+        imageUrl: variantDraft.imageUrl,
+        inStock: variantDraft.inStock,
+        stockQty: variantDraft.stockQty,
+        allowBackorder: variantDraft.allowBackorder,
+        channels: variantDraft.channels,
+        buyerTypes: variantDraft.buyerTypes,
+      };
+      if (variantDraft.id) {
+        await mutate('PATCH', { ...payload, id: variantDraft.id });
+      } else {
+        await mutate('POST', payload);
+      }
+      setVariantDraft(null);
+      setMessage('SKU saved.');
+      await load(draft.id);
+    } catch (err: any) {
+      setError(err.message || 'Unable to save SKU.');
     } finally {
-      setBusy(null);
+      setBusy('');
     }
   }
 
-  // ---------- Stock adjust ----------
-  const [stockDelta, setStockDelta] = useState<number>(0);
-  const [stockReason, setStockReason] = useState<string>('Restock');
-  const [stockVariantId, setStockVariantId] = useState<string>('');
-
-  async function adjustStock() {
-    if (!stockVariantId) {
-      setError('Select a variant to adjust');
+  async function uploadVariantImage(file: File) {
+    if (!variantDraft?.id) {
+      setError('Save the SKU before uploading its image.');
       return;
     }
-    if (!Number.isFinite(stockDelta) || stockDelta === 0) {
-      setError('Stock delta must be a non-zero number');
-      return;
-    }
+    setBusy('variant-image');
+    setError('');
     try {
-      setBusy('adjustStock');
-      setError(null);
-      await op({
-        op: 'adjustStock',
-        variantId: stockVariantId,
-        delta: Math.floor(stockDelta),
-        reason: stockReason,
+      await uploadManagedImage({
+        file,
+        presignUrl: '/api/settings/shop/media/presign',
+        confirmUrl: '/api/settings/shop/media/confirm',
+        confirmBody: {
+          targetKind: 'variant',
+          targetId: variantDraft.id,
+        },
       });
-      setStockDelta(0);
-      await load();
-    } catch (e: any) {
-      setError(e?.message || 'Adjust stock failed');
+      setMessage('SKU image uploaded.');
+      await load(draft.id);
+      setVariantDraft(null);
+    } catch (err: any) {
+      setError(err.message || 'Image upload failed.');
     } finally {
-      setBusy(null);
+      setBusy('');
+    }
+  }
+
+  async function adjustStock(variant: Variant, delta: number) {
+    if (!variant.id || !delta) return;
+    setBusy(`stock:${variant.id}`);
+    setError('');
+    try {
+      await mutate('PATCH', {
+        kind: 'variant_stock_adjust',
+        variantId: variant.id,
+        mode: 'delta',
+        delta,
+        reason: delta > 0 ? 'restock' : 'manual_reduction',
+        note: 'Commerce Studio stock adjustment',
+      });
+      await load(draft.id);
+    } catch (err: any) {
+      setError(err.message || 'Stock adjustment failed.');
+    } finally {
+      setBusy('');
     }
   }
 
   return (
-    <div className="p-6 space-y-4">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <main className="space-y-5 p-6">
+      <header className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <h1 className="text-xl font-semibold">Shop Inventory</h1>
-          <p className="text-sm text-gray-500">
-            Products, SKUs, channel visibility, and stock control — one source of truth.
+          <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">
+            Ambulant+ owned commerce authority
+          </div>
+          <h1 className="mt-1 text-2xl font-semibold text-slate-950">
+            Commerce Studio
+          </h1>
+          <p className="mt-1 max-w-3xl text-sm text-slate-600">
+            One source of truth for Ambulant+-owned products, SKUs, managed media,
+            platform stock, pricing, channel publication and eligible buyer types.
+            Pharmacy-owned inventory and MedReach lab/test catalogues remain separate.
           </p>
         </div>
-
-        <div className="w-full sm:w-96">
-          <input
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search products, tags, SKUs..."
-            className="w-full border rounded-full px-4 py-2 text-sm bg-white"
-          />
-        </div>
+        <button
+          type="button"
+          onClick={newProduct}
+          className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+        >
+          New product
+        </button>
       </header>
 
-      {error && <div className="text-sm text-red-600">{error}</div>}
+      {error ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </div>
+      ) : null}
+      {message ? (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          {message}
+        </div>
+      ) : null}
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left: Product list */}
-        <div className="lg:col-span-4 border rounded-xl bg-white">
-          <div className="p-3 border-b flex items-center justify-between">
-            <div className="text-sm font-medium">Products</div>
-            <div className="text-xs text-gray-500">{filtered.length}</div>
+      <div className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
+        <section className="overflow-hidden rounded-2xl border bg-white">
+          <div className="border-b p-4">
+            <input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search products, tags or SKU"
+              className="w-full rounded-lg border px-3 py-2 text-sm"
+            />
           </div>
-
-          <div className="max-h-[70vh] overflow-auto">
-            {loading ? (
-              <div className="p-4 text-sm text-gray-500">Loading…</div>
-            ) : filtered.length ? (
-              filtered.map((p) => (
+          <div className="max-h-[75vh] overflow-auto">
+            {filtered.length ? (
+              filtered.map((product) => (
                 <button
-                  key={p.id}
-                  onClick={() => setSelectedId(p.id)}
-                  className={[
-                    'w-full text-left px-4 py-3 border-b hover:bg-gray-50',
-                    selectedId === p.id ? 'bg-gray-50' : '',
-                  ].join(' ')}
+                  type="button"
+                  key={product.id}
+                  onClick={() => chooseProduct(product)}
+                  className={`w-full border-b px-4 py-3 text-left hover:bg-slate-50 ${
+                    product.id === selectedId ? 'bg-slate-50' : ''
+                  }`}
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <div className="text-sm font-medium">{p.name}</div>
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="font-medium text-slate-900">{product.name}</span>
                     <span
-                      className={[
-                        'text-[11px] px-2 py-0.5 rounded-full border',
-                        p.active
-                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          : 'bg-gray-100 text-gray-600 border-gray-200',
-                      ].join(' ')}
+                      className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                        product.published
+                          ? 'bg-emerald-100 text-emerald-800'
+                          : 'bg-slate-100 text-slate-600'
+                      }`}
                     >
-                      {p.active ? 'Active' : 'Inactive'}
+                      {product.published ? 'Published' : 'Draft'}
                     </span>
                   </div>
-                  <div className="text-xs text-gray-500 mt-1">{p.slug}</div>
-                  <div className="text-xs text-gray-600 mt-1 line-clamp-2">
-                    {p.description || '—'}
+                  <div className="mt-1 text-xs text-slate-500">{product.slug}</div>
+                  <div className="mt-2 flex flex-wrap gap-1">
+                    {product.channels.map((channel) => (
+                      <span
+                        key={channel}
+                        className="rounded border px-1.5 py-0.5 text-[10px] text-slate-600"
+                      >
+                        {channel}
+                      </span>
+                    ))}
                   </div>
                 </button>
               ))
             ) : (
-              <div className="p-4 text-sm text-gray-500">No products found.</div>
+              <div className="p-5 text-sm text-slate-500">
+                No canonical products yet. Create the first Ambulant+ product here.
+              </div>
             )}
           </div>
-        </div>
+        </section>
 
-        {/* Right: Editor */}
-        <div className="lg:col-span-8 space-y-4">
-          {!selected ? (
-            <div className="border rounded-xl bg-white p-6 text-sm text-gray-600">
-              Select a product to edit.
-            </div>
-          ) : (
-            <>
-              {/* Product editor */}
-              <div className="border rounded-xl bg-white">
-                <div className="p-4 border-b flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold">Product Settings</div>
-                    <div className="text-xs text-gray-500">
-                      Visibility: select channels (empty means ALL).
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setActive('product', selected.id, !selected.active)}
-                      disabled={busy === `product:${selected.id}`}
-                      className="text-xs px-3 py-1.5 rounded-full border bg-white hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      {selected.active ? 'Deactivate' : 'Activate'}
-                    </button>
-
-                    <button
-                      onClick={saveProduct}
-                      disabled={busy === 'saveProduct'}
-                      className="text-xs px-4 py-1.5 rounded-full bg-gray-900 text-white hover:bg-black disabled:opacity-50"
-                    >
-                      {busy === 'saveProduct' ? 'Saving…' : 'Save'}
-                    </button>
-                  </div>
-                </div>
-
-                <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-xs text-gray-600">Slug</label>
-                    <input
-                      value={String(pDraft.slug || '')}
-                      onChange={(e) => setPDraft((d) => ({ ...d, slug: e.target.value }))}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-600">Name</label>
-                    <input
-                      value={String(pDraft.name || '')}
-                      onChange={(e) => setPDraft((d) => ({ ...d, name: e.target.value }))}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="text-xs text-gray-600">Description</label>
-                    <textarea
-                      value={String(pDraft.description || '')}
-                      onChange={(e) => setPDraft((d) => ({ ...d, description: e.target.value }))}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm min-h-[80px]"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-600">Tags (comma separated)</label>
-                    <input
-                      value={Array.isArray(pDraft.tags) ? pDraft.tags.join(', ') : String(pDraft.tags || '')}
-                      onChange={(e) => setPDraft((d) => ({ ...d, tags: e.target.value as any }))}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-600">Images (comma separated URLs)</label>
-                    <input
-                      value={Array.isArray(pDraft.images) ? pDraft.images.join(', ') : String(pDraft.images || '')}
-                      onChange={(e) => setPDraft((d) => ({ ...d, images: e.target.value as any }))}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-600">Allow backorder</label>
-                    <div className="mt-2 flex items-center gap-2">
-                      <input
-                        type="checkbox"
-                        checked={Boolean(pDraft.allowBackorder)}
-                        onChange={(e) => setPDraft((d) => ({ ...d, allowBackorder: e.target.checked }))}
-                      />
-                      <span className="text-sm text-gray-700">Enabled</span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-600">Max qty/order</label>
-                    <input
-                      type="number"
-                      value={Number(pDraft.maxQtyPerOrder || 99)}
-                      onChange={(e) => setPDraft((d) => ({ ...d, maxQtyPerOrder: Number(e.target.value) }))}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                      min={1}
-                      max={99}
-                    />
-                  </div>
-
-                  <div className="md:col-span-2">
-                    <label className="text-xs text-gray-600">Channel visibility (empty = ALL)</label>
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      {CHANNELS.map((c) => {
-                        const on = pChannelSet.has(c);
-                        return (
-                          <button
-                            key={c}
-                            type="button"
-                            onClick={() => toggleProductChannel(c)}
-                            className={[
-                              'text-xs px-3 py-1.5 rounded-full border',
-                              on ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200',
-                            ].join(' ')}
-                          >
-                            {c}
-                          </button>
-                        );
-                      })}
-                      <span className="text-xs text-gray-500 self-center">
-                        Tip: leave ALL off to expose everywhere.
-                      </span>
-                    </div>
-                  </div>
-                </div>
+        <section className="space-y-5">
+          <div className="rounded-2xl border bg-white p-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  {draft.id ? 'Product authority' : 'New product'}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Zero channel rows means unpublished. There is no implicit “all channels” mode.
+                </p>
               </div>
-
-              {/* Variants list + editor */}
-              <div className="border rounded-xl bg-white">
-                <div className="p-4 border-b flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-semibold">Variants (SKUs)</div>
-                    <div className="text-xs text-gray-500">
-                      Decide visibility per SKU if needed (inherit from product if empty).
-                    </div>
-                  </div>
-
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={busy === 'product'}
+                  onClick={() => saveProduct(false)}
+                  className="rounded-lg border px-3 py-2 text-sm font-medium"
+                >
+                  Save draft
+                </button>
+                <button
+                  type="button"
+                  disabled={busy === 'product'}
+                  onClick={() => saveProduct(true)}
+                  className="rounded-lg bg-slate-950 px-3 py-2 text-sm font-semibold text-white"
+                >
+                  Publish
+                </button>
+                {draft.id && draft.active ? (
                   <button
-                    onClick={startNewVariant}
-                    className="text-xs px-4 py-1.5 rounded-full bg-blue-600 text-white hover:bg-blue-700"
+                    type="button"
+                    disabled={busy === 'product'}
+                    onClick={() => saveProduct(false)}
+                    className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900"
                   >
-                    + New SKU
+                    Unpublish
                   </button>
-                </div>
-
-                <div className="p-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    {selected.variants.length ? (
-                      selected.variants.map((v) => (
-                        <div key={v.id} className="border rounded-lg p-3">
-                          <div className="flex items-center justify-between">
-                            <div className="text-sm font-medium">{v.label}</div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xs text-gray-600">{formatZar(v.unitAmountZar)}</span>
-                              <button
-                                onClick={() => setActive('variant', v.id, !v.active)}
-                                disabled={busy === `variant:${v.id}`}
-                                className="text-[11px] px-2 py-1 rounded-full border bg-white hover:bg-gray-50 disabled:opacity-50"
-                              >
-                                {v.active ? 'Deactivate' : 'Activate'}
-                              </button>
-                              <button
-                                onClick={() => editVariant(v)}
-                                className="text-[11px] px-2 py-1 rounded-full border bg-white hover:bg-gray-50"
-                              >
-                                Edit
-                              </button>
-                            </div>
-                          </div>
-                          <div className="text-xs text-gray-500 mt-1">SKU: {v.sku}</div>
-                          <div className="text-xs text-gray-600 mt-1">
-                            Stock: {v.stockQty === null || v.stockQty === undefined ? 'Untracked' : v.stockQty}
-                            {v.allowBackorder ? ' • Backorder OK' : ''}
-                          </div>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-sm text-gray-500">No variants yet.</div>
-                    )}
-                  </div>
-
-                  <div className="border rounded-lg p-3">
-                    <div className="text-sm font-medium">Variant Editor</div>
-                    <div className="text-xs text-gray-500 mb-3">Create/update SKU, price and stock.</div>
-
-                    {!vDraft ? (
-                      <div className="text-sm text-gray-500">Select a variant or create a new SKU.</div>
-                    ) : (
-                      <div className="space-y-2">
-                        <div>
-                          <label className="text-xs text-gray-600">SKU</label>
-                          <input
-                            value={String(vDraft.sku || '')}
-                            onChange={(e) => setVDraft((d) => (d ? { ...d, sku: e.target.value } : d))}
-                            className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="text-xs text-gray-600">Label</label>
-                          <input
-                            value={String(vDraft.label || '')}
-                            onChange={(e) => setVDraft((d) => (d ? { ...d, label: e.target.value } : d))}
-                            className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-xs text-gray-600">Price (ZAR)</label>
-                            <input
-                              type="number"
-                              value={Number(vDraft.unitAmountZar || 0)}
-                              onChange={(e) => setVDraft((d) => (d ? { ...d, unitAmountZar: Number(e.target.value) } : d))}
-                              className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                              min={1}
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-gray-600">Sale price (optional)</label>
-                            <input
-                              type="number"
-                              value={vDraft.saleUnitAmountZar === null || vDraft.saleUnitAmountZar === undefined ? '' : Number(vDraft.saleUnitAmountZar)}
-                              onChange={(e) => setVDraft((d) => (d ? { ...d, saleUnitAmountZar: e.target.value === '' ? null : Number(e.target.value) } : d))}
-                              className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                              min={0}
-                            />
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-xs text-gray-600">Stock qty (null = untracked)</label>
-                            <input
-                              type="number"
-                              value={vDraft.stockQty === null || vDraft.stockQty === undefined ? '' : Number(vDraft.stockQty)}
-                              onChange={(e) => setVDraft((d) => (d ? { ...d, stockQty: e.target.value === '' ? null : Number(e.target.value) } : d))}
-                              className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-xs text-gray-600">Allow backorder (null=inherits)</label>
-                            <select
-                              value={vDraft.allowBackorder === null || vDraft.allowBackorder === undefined ? 'inherit' : vDraft.allowBackorder ? 'true' : 'false'}
-                              onChange={(e) =>
-                                setVDraft((d) =>
-                                  d
-                                    ? {
-                                        ...d,
-                                        allowBackorder:
-                                          e.target.value === 'inherit'
-                                            ? null
-                                            : e.target.value === 'true',
-                                      }
-                                    : d
-                                )
-                              }
-                              className="mt-1 w-full border rounded-md px-3 py-2 text-sm bg-white"
-                            >
-                              <option value="inherit">Inherit</option>
-                              <option value="true">True</option>
-                              <option value="false">False</option>
-                            </select>
-                          </div>
-                        </div>
-
-                        <div>
-                          <label className="text-xs text-gray-600">Channel visibility (empty = inherit product)</label>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            {CHANNELS.map((c) => {
-                              const on = vChannelSet.has(c);
-                              return (
-                                <button
-                                  key={c}
-                                  type="button"
-                                  onClick={() => toggleVariantChannel(c)}
-                                  className={[
-                                    'text-xs px-3 py-1.5 rounded-full border',
-                                    on ? 'bg-gray-900 text-white border-gray-900' : 'bg-white text-gray-700 border-gray-200',
-                                  ].join(' ')}
-                                >
-                                  {c}
-                                </button>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center gap-2 pt-2">
-                          <button
-                            onClick={saveVariant}
-                            disabled={busy === 'saveVariant'}
-                            className="text-xs px-4 py-2 rounded-full bg-gray-900 text-white hover:bg-black disabled:opacity-50"
-                          >
-                            {busy === 'saveVariant' ? 'Saving…' : 'Save SKU'}
-                          </button>
-
-                          <button
-                            onClick={() => setVDraft(null)}
-                            className="text-xs px-4 py-2 rounded-full border bg-white hover:bg-gray-50"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
+                ) : null}
               </div>
+            </div>
 
-              {/* Stock adjust */}
-              <div className="border rounded-xl bg-white">
-                <div className="p-4 border-b">
-                  <div className="text-sm font-semibold">Quick Stock Adjust</div>
-                  <div className="text-xs text-gray-500">
-                    Creates an inventory movement log and updates stockQty safely.
-                  </div>
-                </div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <label className="text-sm text-slate-700">
+                Name
+                <input
+                  value={draft.name}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, name: event.target.value }))
+                  }
+                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="text-sm text-slate-700">
+                Slug
+                <input
+                  value={draft.slug}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, slug: event.target.value }))
+                  }
+                  placeholder="auto-generated from name if blank"
+                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="md:col-span-2 text-sm text-slate-700">
+                Description
+                <textarea
+                  value={draft.description}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      description: event.target.value,
+                    }))
+                  }
+                  className="mt-1 min-h-24 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="text-sm text-slate-700">
+                Product type
+                <input
+                  value={draft.type}
+                  onChange={(event) =>
+                    setDraft((current) => ({ ...current, type: event.target.value }))
+                  }
+                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="text-sm text-slate-700">
+                Tags
+                <input
+                  value={asCsv(draft.tags)}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      tags: fromCsv(event.target.value),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="text-sm text-slate-700">
+                Base price (ZAR)
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.unitAmountZar ?? ''}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      unitAmountZar:
+                        event.target.value === '' ? null : Number(event.target.value),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="text-sm text-slate-700">
+                Sale price (ZAR)
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.saleAmountZar ?? ''}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      saleAmountZar:
+                        event.target.value === '' ? null : Number(event.target.value),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="text-sm text-slate-700">
+                Maximum quantity per order
+                <input
+                  type="number"
+                  min={1}
+                  max={99}
+                  value={draft.maxQtyPerOrder}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      maxQtyPerOrder: Number(event.target.value),
+                    }))
+                  }
+                  className="mt-1 w-full rounded-lg border px-3 py-2"
+                />
+              </label>
+              <label className="flex items-center gap-2 pt-6 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={draft.allowBackorder}
+                  onChange={(event) =>
+                    setDraft((current) => ({
+                      ...current,
+                      allowBackorder: event.target.checked,
+                    }))
+                  }
+                />
+                Allow backorder
+              </label>
+            </div>
 
-                <div className="p-4 grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <div className="md:col-span-2">
-                    <label className="text-xs text-gray-600">Variant</label>
-                    <select
-                      value={stockVariantId}
-                      onChange={(e) => setStockVariantId(e.target.value)}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm bg-white"
-                    >
-                      <option value="">Select SKU</option>
-                      {selected.variants.map((v) => (
-                        <option key={v.id} value={v.id}>
-                          {v.sku} — {v.label} (qty: {v.stockQty === null || v.stockQty === undefined ? 'untracked' : v.stockQty})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-600">Delta</label>
-                    <input
-                      type="number"
-                      value={stockDelta}
-                      onChange={(e) => setStockDelta(Number(e.target.value))}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-xs text-gray-600">Reason</label>
-                    <input
-                      value={stockReason}
-                      onChange={(e) => setStockReason(e.target.value)}
-                      className="mt-1 w-full border rounded-md px-3 py-2 text-sm"
-                    />
-                  </div>
-
-                  <div className="md:col-span-4">
+            <div className="mt-5 grid gap-5 lg:grid-cols-2">
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Publication channels</h3>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {CHANNELS.map((channel) => (
                     <button
-                      onClick={adjustStock}
-                      disabled={busy === 'adjustStock'}
-                      className="text-xs px-5 py-2 rounded-full bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      type="button"
+                      key={channel}
+                      onClick={() => applyChannel(channel)}
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                        draft.channels.includes(channel)
+                          ? 'border-slate-900 bg-slate-900 text-white'
+                          : 'bg-white text-slate-700'
+                      }`}
                     >
-                      {busy === 'adjustStock' ? 'Applying…' : 'Apply Stock Change'}
+                      {channel}
                     </button>
-                  </div>
+                  ))}
                 </div>
               </div>
-            </>
-          )}
-        </div>
+              <div>
+                <h3 className="text-sm font-semibold text-slate-900">Eligible buyer types</h3>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {BUYER_TYPES.map((buyer) => (
+                    <button
+                      type="button"
+                      key={buyer}
+                      onClick={() =>
+                        setDraft((current) => ({
+                          ...current,
+                          buyerTypes: toggle(current.buyerTypes, buyer),
+                        }))
+                      }
+                      className={`rounded-full border px-3 py-1.5 text-xs font-medium ${
+                        draft.buyerTypes.includes(buyer)
+                          ? 'border-slate-900 bg-slate-900 text-white'
+                          : 'bg-white text-slate-700'
+                      }`}
+                    >
+                      {buyer}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-xl border border-dashed p-4">
+              <div className="text-sm font-semibold text-slate-900">Managed product media</div>
+              <p className="mt-1 text-xs text-slate-500">
+                Upload JPEG, PNG or WebP. Media is stored in managed object storage; base64 is not persisted.
+              </p>
+              <input
+                className="mt-3 text-sm"
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                disabled={!draft.id || busy === 'product-image'}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) uploadProductImage(file);
+                  event.currentTarget.value = '';
+                }}
+              />
+              {draft.images.length ? (
+                <div className="mt-2 space-y-1 text-xs text-slate-500">
+                  {draft.images.map((image) => (
+                    <div key={image} className="truncate">{image}</div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {draft.id ? (
+            <div className="rounded-2xl border bg-white p-5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h2 className="text-lg font-semibold text-slate-950">SKUs / variants</h2>
+                  <p className="text-xs text-slate-500">
+                    Variant publication inherits the product unless an explicit override is supplied.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => startVariant()}
+                  className="rounded-lg border px-3 py-2 text-sm font-medium"
+                >
+                  New SKU
+                </button>
+              </div>
+
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead>
+                    <tr className="border-b text-left text-xs uppercase tracking-wide text-slate-500">
+                      <th className="py-2 pr-4">SKU</th>
+                      <th className="py-2 pr-4">Variant</th>
+                      <th className="py-2 pr-4">Price</th>
+                      <th className="py-2 pr-4">Stock</th>
+                      <th className="py-2 pr-4">Publication</th>
+                      <th className="py-2">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {draft.variants.map((variant) => (
+                      <tr key={variant.id} className="border-b last:border-0">
+                        <td className="py-3 pr-4 font-mono text-xs">{variant.sku}</td>
+                        <td className="py-3 pr-4">{variant.label}</td>
+                        <td className="py-3 pr-4">{money(variant.saleUnitAmountZar || variant.unitAmountZar)}</td>
+                        <td className="py-3 pr-4">
+                          {variant.stockQty === null ? 'Untracked' : variant.stockQty}
+                        </td>
+                        <td className="py-3 pr-4 text-xs text-slate-600">
+                          {variant.inheritsProductPublication
+                            ? 'Inherits product'
+                            : `${variant.channels.join(', ')} · ${variant.buyerTypes.join(', ')}`}
+                        </td>
+                        <td className="py-3">
+                          <div className="flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startVariant(variant)}
+                              className="rounded border px-2 py-1 text-xs"
+                            >
+                              Edit
+                            </button>
+                            {variant.stockQty !== null ? (
+                              <>
+                                <button
+                                  type="button"
+                                  disabled={busy === `stock:${variant.id}`}
+                                  onClick={() => adjustStock(variant, 1)}
+                                  className="rounded border px-2 py-1 text-xs"
+                                >
+                                  +1
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={busy === `stock:${variant.id}`}
+                                  onClick={() => adjustStock(variant, -1)}
+                                  className="rounded border px-2 py-1 text-xs"
+                                >
+                                  −1
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {!draft.variants.length ? (
+                      <tr>
+                        <td colSpan={6} className="py-5 text-sm text-slate-500">
+                          No SKUs yet.
+                        </td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : null}
+
+          {variantDraft ? (
+            <div className="rounded-2xl border bg-white p-5">
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold">
+                  {variantDraft.id ? 'Edit SKU' : 'New SKU'}
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setVariantDraft(null)}
+                  className="text-sm text-slate-500"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-4 md:grid-cols-2">
+                <label className="text-sm">
+                  SKU
+                  <input
+                    value={variantDraft.sku}
+                    onChange={(event) =>
+                      setVariantDraft((current) =>
+                        current ? { ...current, sku: event.target.value } : current,
+                      )
+                    }
+                    className="mt-1 w-full rounded-lg border px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm">
+                  Label
+                  <input
+                    value={variantDraft.label}
+                    onChange={(event) =>
+                      setVariantDraft((current) =>
+                        current ? { ...current, label: event.target.value } : current,
+                      )
+                    }
+                    className="mt-1 w-full rounded-lg border px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm">
+                  Price (ZAR)
+                  <input
+                    type="number"
+                    min={0}
+                    value={variantDraft.unitAmountZar}
+                    onChange={(event) =>
+                      setVariantDraft((current) =>
+                        current
+                          ? { ...current, unitAmountZar: Number(event.target.value) }
+                          : current,
+                      )
+                    }
+                    className="mt-1 w-full rounded-lg border px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm">
+                  Sale price (ZAR)
+                  <input
+                    type="number"
+                    min={0}
+                    value={variantDraft.saleUnitAmountZar ?? ''}
+                    onChange={(event) =>
+                      setVariantDraft((current) =>
+                        current
+                          ? {
+                              ...current,
+                              saleUnitAmountZar:
+                                event.target.value === ''
+                                  ? null
+                                  : Number(event.target.value),
+                            }
+                          : current,
+                      )
+                    }
+                    className="mt-1 w-full rounded-lg border px-3 py-2"
+                  />
+                </label>
+                <label className="text-sm">
+                  Initial/tracked stock
+                  <input
+                    type="number"
+                    min={0}
+                    value={variantDraft.stockQty ?? ''}
+                    onChange={(event) =>
+                      setVariantDraft((current) =>
+                        current
+                          ? {
+                              ...current,
+                              stockQty:
+                                event.target.value === ''
+                                  ? null
+                                  : Number(event.target.value),
+                            }
+                          : current,
+                      )
+                    }
+                    disabled={Boolean(variantDraft.id)}
+                    className="mt-1 w-full rounded-lg border px-3 py-2 disabled:bg-slate-50"
+                  />
+                </label>
+                <label className="flex items-center gap-2 pt-6 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={variantDraft.active}
+                    onChange={(event) =>
+                      setVariantDraft((current) =>
+                        current ? { ...current, active: event.target.checked } : current,
+                      )
+                    }
+                  />
+                  Active
+                </label>
+              </div>
+
+              <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                <div>
+                  <div className="text-sm font-semibold">Optional channel override</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {CHANNELS.map((channel) => (
+                      <button
+                        type="button"
+                        key={channel}
+                        onClick={() =>
+                          setVariantDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  channels: toggle(current.channels, channel),
+                                }
+                              : current,
+                          )
+                        }
+                        className={`rounded-full border px-3 py-1 text-xs ${
+                          variantDraft.channels.includes(channel)
+                            ? 'bg-slate-900 text-white'
+                            : ''
+                        }`}
+                      >
+                        {channel}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold">Optional buyer override</div>
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {BUYER_TYPES.map((buyer) => (
+                      <button
+                        type="button"
+                        key={buyer}
+                        onClick={() =>
+                          setVariantDraft((current) =>
+                            current
+                              ? {
+                                  ...current,
+                                  buyerTypes: toggle(current.buyerTypes, buyer),
+                                }
+                              : current,
+                          )
+                        }
+                        className={`rounded-full border px-3 py-1 text-xs ${
+                          variantDraft.buyerTypes.includes(buyer)
+                            ? 'bg-slate-900 text-white'
+                            : ''
+                        }`}
+                      >
+                        {buyer}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">
+                    Leave both override groups empty to inherit the product authority.
+                  </p>
+                </div>
+              </div>
+
+              {variantDraft.id ? (
+                <div className="mt-4 rounded-xl border border-dashed p-4">
+                  <div className="text-sm font-semibold">Managed SKU image</div>
+                  <input
+                    className="mt-2 text-sm"
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    disabled={busy === 'variant-image'}
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) uploadVariantImage(file);
+                      event.currentTarget.value = '';
+                    }}
+                  />
+                </div>
+              ) : null}
+
+              <div className="mt-5 flex justify-end">
+                <button
+                  type="button"
+                  disabled={busy === 'variant'}
+                  onClick={saveVariant}
+                  className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white"
+                >
+                  Save SKU
+                </button>
+              </div>
+            </div>
+          ) : null}
+        </section>
       </div>
-    </div>
+    </main>
   );
 }

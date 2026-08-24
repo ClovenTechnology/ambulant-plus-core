@@ -1,7 +1,6 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import {
-  asCents,
   asObject,
   auditEnterpriseFinance,
   dateRangeWhere,
@@ -11,11 +10,14 @@ import {
   routeError,
   text,
 } from '@/src/enterprise-finance/access-envelope';
+import {
+  calculateRevenueAmounts,
+  normalizeRevenueCategory,
+  REVENUE_INFLOW_CATEGORIES,
+} from '@/src/lib/enterprise-finance-revenue';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-// A5_K_D_C_ENTERPRISE_FINANCE_REVENUE_LEDGER_ROUTE
 
 export async function GET(req: NextRequest) {
   try {
@@ -60,35 +62,58 @@ export async function POST(req: NextRequest) {
 
     const db: any = prisma;
     const body = await req.json().catch(() => ({}));
+    const inflowCategory = normalizeRevenueCategory(
+      body.inflowCategory ?? body.category ?? 'operating_revenue',
+    );
 
-    const grossAmountCents = asCents(body.grossAmountCents ?? body.amountCents ?? body.amount);
-    if (grossAmountCents <= 0) return json({ ok: false, error: 'positive_amount_required' }, 400);
+    if (!inflowCategory) {
+      return json({
+        ok: false,
+        error: 'unsupported_inflow_category',
+        allowedCategories: REVENUE_INFLOW_CATEGORIES,
+      }, 400);
+    }
+
+    const amounts = calculateRevenueAmounts({
+      grossAmountCents: body.grossAmountCents ?? body.amountCents ?? body.amount,
+      refundAmountCents: body.refundAmountCents,
+      providerFeeCents: body.providerFeeCents,
+      providerFeeVatCents: body.providerFeeVatCents,
+      otherSettlementDeductionCents: body.otherSettlementDeductionCents,
+      category: inflowCategory,
+    });
+
+    if (amounts.grossAmountCents <= 0) {
+      return json({ ok: false, error: 'positive_gross_amount_required' }, 400);
+    }
 
     const entry = await db.revenueLedgerEntry.create({
       data: {
         entryType: text(body.entryType || 'manual_entry', 100),
-        inflowCategory: text(body.inflowCategory || 'operating_revenue', 100),
+        inflowCategory,
         module: text(body.module, 80) || null,
         sourceType: text(body.sourceType || 'manual', 120) || null,
         sourceId: text(body.sourceId, 180) || null,
         externalReference: text(body.externalReference || body.reference, 180) || null,
-        paymentProvider: text(body.paymentProvider, 80) || null,
+        paymentProvider: text(body.paymentProvider || body.provider, 80) || null,
+        providerEventId:
+          text(body.providerEventId || body.providerTransactionReference, 240) || null,
         description: text(body.description || body.note, 1000) || null,
-        counterpartyName: text(body.counterpartyName, 240) || null,
+        counterpartyName:
+          text(body.counterpartyName || body.counterparty, 240) || null,
         counterpartyEmail: text(body.counterpartyEmail, 240) || null,
-        grossAmountCents,
-        refundAmountCents: asCents(body.refundAmountCents),
-        providerFeeCents: asCents(body.providerFeeCents),
-        platformFeeCents: asCents(body.platformFeeCents),
-        netPlatformRevenueCents: asCents(body.netPlatformRevenueCents ?? grossAmountCents),
-        amountReceivedCents: asCents(body.amountReceivedCents ?? grossAmountCents),
+        ...amounts,
+        platformFeeCents: Number.isFinite(Number(body.platformFeeCents))
+          ? Math.max(0, Math.round(Number(body.platformFeeCents)))
+          : 0,
         currency: text(body.currency || 'ZAR', 3).toUpperCase(),
         recognitionStatus: text(body.recognitionStatus || 'recognised', 80),
         paymentStatus: text(body.paymentStatus || 'received', 80),
         occurredAt: body.occurredAt ? new Date(body.occurredAt) : new Date(),
         recognisedAt: body.recognisedAt ? new Date(body.recognisedAt) : new Date(),
         reconciledAt: body.reconciledAt ? new Date(body.reconciledAt) : null,
-        reconciledByUserId: text(body.reconciledByUserId || access.envelope.actor.userId, 180) || null,
+        reconciledByUserId:
+          text(body.reconciledByUserId || access.envelope.actor.userId, 180) || null,
         manualEntry: true,
         createdByUserId: access.envelope.actor.userId,
         approvedByUserId: text(body.approvedByUserId, 180) || null,
@@ -101,11 +126,15 @@ export async function POST(req: NextRequest) {
       model: 'RevenueLedgerEntry',
       subjectId: entry.id,
       inflowCategory: entry.inflowCategory,
-      amountCents: entry.grossAmountCents,
+      grossAmountCents: entry.grossAmountCents,
+      netSettlementCents: entry.netSettlementCents,
     });
 
     return json({ ok: true, envelope: access.envelope, item: entry });
   } catch (error: any) {
+    if (String(error?.message || '') === 'settlement_deductions_exceed_gross_amount') {
+      return json({ ok: false, error: error.message }, 400);
+    }
     return routeError(error, 'enterprise_finance_revenue_ledger_create_failed');
   }
 }

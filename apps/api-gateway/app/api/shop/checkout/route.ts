@@ -1,26 +1,18 @@
 // apps/api-gateway/app/api/shop/checkout/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
+import {
+  buyerUidFromHeaders,
+  eligibilityAllows,
+  normalizeShopChannel,
+  publicationAllows,
+  resolveBuyerTypes,
+} from '@/src/lib/shop-authority';
 
 export const runtime = 'nodejs';
 
-type ChannelQ = 'clinician' | 'patient' | 'medreach' | 'careport' | 'admin-dashboard';
-
-function toChannelEnum(ch: ChannelQ) {
-  switch (ch) {
-    case 'clinician':
-      return 'CLINICIAN';
-    case 'patient':
-      return 'PATIENT';
-    case 'medreach':
-      return 'MEDREACH';
-    case 'careport':
-      return 'CAREPORT';
-    case 'admin-dashboard':
-      // If your enum doesn’t have ADMIN, keep it as PATIENT or CLINICIAN.
-      // But ideally add ADMIN to prisma enum for shop channels.
-      return 'ADMIN' as any;
-  }
+function normalizedChannel(value: unknown) {
+  return normalizeShopChannel(value || 'PATIENT');
 }
 
 function pickPrice(base?: number | null, sale?: number | null) {
@@ -99,8 +91,10 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
 
-    const channelQ = (body.channel || 'patient') as ChannelQ;
-    const channel = toChannelEnum(channelQ);
+    const channel = normalizedChannel(body.channel);
+    if (!channel) {
+      return NextResponse.json({ ok: false, error: 'Invalid shop channel' }, { status: 400 });
+    }
 
     const items = Array.isArray(body.items) ? body.items : [];
     if (!items.length) return NextResponse.json({ ok: false, error: 'No items' }, { status: 400 });
@@ -112,14 +106,26 @@ export async function POST(req: NextRequest) {
     }
 
     // ✅ buyer-scoped order history guarantee
-    const buyerUid = getBuyerUid(req, body);
+    const trustedBuyerUid = buyerUidFromHeaders(req.headers);
+    const buyerUid =
+      trustedBuyerUid || (channel === 'PATIENT' ? getBuyerUid(req, body) : '');
     if (!buyerUid) {
       return NextResponse.json(
         {
           ok: false,
-          error: 'Missing buyerUid. Send x-uid header (recommended) or include buyerUid / metadata.buyerUid.',
+          error: channel === 'PATIENT'
+            ? 'Missing buyer identity.'
+            : 'Trusted forwarded buyer identity is required for this shop channel.',
         },
         { status: 400 }
+      );
+    }
+
+    const buyerTypes = await resolveBuyerTypes(prisma as any, channel, buyerUid);
+    if (channel !== 'PATIENT' && !buyerTypes.length) {
+      return NextResponse.json(
+        { ok: false, error: 'Buyer is not eligible for this partner shop', channel },
+        { status: 403 },
       );
     }
 
@@ -148,11 +154,31 @@ export async function POST(req: NextRequest) {
         where: { id: productId },
         include: {
           channels: true,
-          variants: { include: { channels: true } },
+          buyerEligibility: true,
+          variants: { include: { channels: true, buyerEligibility: true } },
         },
       });
       if (!product || !product.active) {
         return NextResponse.json({ ok: false, error: `Product not found/disabled: ${productId}` }, { status: 404 });
+      }
+
+      if (!publicationAllows(product.channels as any, channel)) {
+        return NextResponse.json(
+          { ok: false, error: 'Product is not published to this channel' },
+          { status: 403 },
+        );
+      }
+      if (!eligibilityAllows((product as any).buyerEligibility, buyerTypes)) {
+        return NextResponse.json(
+          { ok: false, error: 'Buyer is not eligible for this product' },
+          { status: 403 },
+        );
+      }
+      if (quantity > Number(product.maxQtyPerOrder || 99)) {
+        return NextResponse.json(
+          { ok: false, error: 'Quantity exceeds product maximum per order' },
+          { status: 400 },
+        );
       }
 
       let unitAmountZar = 0;
@@ -162,6 +188,23 @@ export async function POST(req: NextRequest) {
       if (variantId) {
         const v = product.variants.find((x) => x.id === variantId);
         if (!v || !v.active) return NextResponse.json({ ok: false, error: 'Variant not found/disabled' }, { status: 404 });
+
+        const variantChannels = v.channels?.length ? v.channels : product.channels;
+        const variantBuyers = (v as any).buyerEligibility?.length
+          ? (v as any).buyerEligibility
+          : (product as any).buyerEligibility;
+        if (!publicationAllows(variantChannels as any, channel)) {
+          return NextResponse.json(
+            { ok: false, error: 'Variant is not published to this channel' },
+            { status: 403 },
+          );
+        }
+        if (!eligibilityAllows(variantBuyers, buyerTypes)) {
+          return NextResponse.json(
+            { ok: false, error: 'Buyer is not eligible for this variant' },
+            { status: 403 },
+          );
+        }
 
         unitAmountZar = pickPrice(v.unitAmountZar, v.saleUnitAmountZar);
         sku = v.sku;
@@ -216,7 +259,7 @@ export async function POST(req: NextRequest) {
           buyerUid, // ✅ GUARANTEE
           cancelUrl,
           successUrl,
-          channel: channelQ,
+          channel,
           metadata: body.metadata ?? {},
         },
         items: {
@@ -243,7 +286,7 @@ export async function POST(req: NextRequest) {
       metadata: {
         orderId: order.id,
         buyerUid, // ✅ ALSO in provider metadata
-        channel: channelQ,
+        channel,
         cancelUrl,
         successUrl,
         ...((body.metadata ?? {}) as any),
