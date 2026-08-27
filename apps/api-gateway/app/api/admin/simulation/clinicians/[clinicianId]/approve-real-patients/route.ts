@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
 import { verifyAdminRequest } from '../../../../utils/auth';
-import {
-  resolveClinicianOnboardingEntitlements,
-} from '@/src/clinicians/onboarding/entitlements';
+import { resolveClinicianOnboardingEntitlements } from '@/src/clinicians/onboarding/entitlements';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,300 +18,116 @@ function json(body: any, status = 200) {
     },
   });
 }
-
-function asRecord(value: any): Record<string, any> {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+function record(value: unknown): Record<string, any> {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 }
-
-function cleanStr(value: unknown, max = 240) {
-  return String(value ?? '').trim().slice(0, max);
+function clean(value: unknown, max = 240) { return String(value ?? '').trim().slice(0, max); }
+function sessionNumber(meta: unknown, reason?: string | null): number | null {
+  const m = record(meta); const direct = Number(m.sessionNumber);
+  if (Number.isInteger(direct) && direct >= 1 && direct <= 99) return direct;
+  const text = clean(reason || m.reason, 500);
+  const match = text.match(/(?:session|consultation)\s+(\d+)(?:\s*(?:of|\/)\s*3)?/i) || text.match(/\b(\d+)\s*\/\s*3\b/);
+  const n = match ? Number(match[1]) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= 99 ? n : null;
 }
+export async function OPTIONS() { return new NextResponse(null, { status: 204 }); }
 
-function sessionNumber(meta: any, reason?: string | null): number | null {
-  const m = asRecord(meta);
-
-  const direct = Number(m.sessionNumber);
-  if (Number.isFinite(direct) && direct >= 1 && direct <= 99) {
-    return Math.trunc(direct);
-  }
-
-  const text = String(reason || m.reason || '').trim();
-  const match =
-    text.match(/(?:session|consultation)\s+(\d+)(?:\s*(?:of|\/)\s*3)?/i) ||
-    text.match(/\b(\d+)\s*\/\s*3\b/);
-
-  const fromReason = match ? Number(match[1]) : NaN;
-  return Number.isFinite(fromReason) && fromReason >= 1 && fromReason <= 99
-    ? Math.trunc(fromReason)
-    : null;
-}
-
-function simulationCompleted(meta: any): boolean {
-  const m = asRecord(meta);
-  const checklist = asRecord(m.simulationChecklist);
-
-  return Boolean(
-    m.completedAt ||
-      m.simulationCompletedAt ||
-      checklist.completedAt ||
-      checklist.completed === true ||
-      checklist.adminMarkedComplete === true,
-  );
-}
-
-function canApproveRealPatients(adminCheck: any) {
-  if (adminCheck?.ok === false) return false;
-
-  const role = String(
-    adminCheck?.role ??
-      adminCheck?.user?.role ??
-      adminCheck?.claims?.role ??
-      '',
-  ).toLowerCase();
-
-  if (!role) return true;
-
-  return [
-    'admin',
-    'super_admin',
-    'owner',
-    'operations',
-    'ops',
-    'training',
-    'training_lead',
-  ].some((allowed) => role.includes(allowed));
-}
-
-function actorId(adminCheck: any, req: NextRequest) {
-  return cleanStr(
-    adminCheck?.uid ??
-      adminCheck?.userId ??
-      adminCheck?.user?.id ??
-      req.headers.get('x-uid') ??
-      'admin-dashboard',
-    120,
-  );
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 204,
-    headers: {
-      'access-control-allow-origin': '*',
-      'access-control-allow-methods': 'POST,OPTIONS',
-      'access-control-allow-headers':
-        'content-type,authorization,cookie,x-uid,x-role,x-org-id,x-ambulant-identity',
-    },
-  });
-}
-
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { clinicianId: string } },
-) {
+export async function POST(req: NextRequest, { params }: { params: { clinicianId: string } }) {
   try {
-    const adminCheck = await verifyAdminRequest(req as any);
+    const admin = await verifyAdminRequest(req as any);
+    if (!admin.ok) return admin.response;
 
-    if ((adminCheck as any)?.ok === false) {
-      return (adminCheck as any).response;
-    }
-
-    if (!canApproveRealPatients(adminCheck)) {
-      return json({ ok: false, error: 'admin_required' }, 403);
-    }
-
-    const clinicianId = cleanStr(params.clinicianId, 160);
-
-    if (!clinicianId) {
-      return json({ ok: false, error: 'clinicianId_required' }, 400);
-    }
-
+    const clinicianId = clean(params.clinicianId, 160);
+    if (!clinicianId) return json({ ok: false, error: 'clinicianId_required' }, 400);
     const body = await req.json().catch(() => ({} as any));
-    const note = cleanStr(body?.note, 700);
-    const now = new Date().toISOString();
-    const adminUid = actorId(adminCheck, req);
+    const note = clean(body?.note, 700);
+    const actor = clean(req.headers.get('x-uid'), 160) || 'admin';
 
     const clinician = await prisma.clinicianProfile.findUnique({
       where: { id: clinicianId },
       select: {
-        id: true,
-        displayName: true,
-        email: true,
-        status: true,
-        trainingCompleted: true,
-        disabled: true,
-        archived: true,
-        meta: true,
+        id: true, displayName: true, email: true, status: true, trainingCompleted: true,
+        disabled: true, archived: true, meta: true,
       },
     });
+    if (!clinician) return json({ ok: false, error: 'clinician_not_found' }, 404);
+    if (!clinician.trainingCompleted) return json({ ok: false, error: 'training_not_completed' }, 409);
 
-    if (!clinician) {
-      return json({ ok: false, error: 'clinician_not_found' }, 404);
-    }
-
-    if (clinician.trainingCompleted !== true) {
-      return json(
-        {
-          ok: false,
-          error: 'training_not_completed',
-          message: 'Clinician training must be completed before real-patient approval.',
+    const onboarding = await prisma.clinicianOnboarding.findUnique({ where: { clinicianId } });
+    const entitlements = await resolveClinicianOnboardingEntitlements(prisma, clinicianId, onboarding);
+    if (!entitlements.practiceActivation) {
+      return json({
+        ok: false,
+        error: 'commercial_practice_activation_not_granted',
+        message: 'The effective Admin-configured onboarding pathway does not grant practice activation.',
+        entitlements: {
+          pathwayKey: entitlements.pathwayKey,
+          privileges: entitlements.privileges,
+          paymentState: entitlements.paymentState,
         },
-        409,
-      );
+      }, 409);
     }
 
-    const onboarding =
-      await prisma.clinicianOnboarding
-        .findUnique({
-          where: {
-            clinicianId,
-          },
-        });
-
-    const entitlements =
-      await resolveClinicianOnboardingEntitlements(
-        prisma,
-        clinicianId,
-        onboarding,
-      );
-
-    if (
-      !entitlements.practiceActivation
-    ) {
-      return json(
-        {
-          ok: false,
-          error:
-            'commercial_practice_activation_not_granted',
-          message:
-            'The effective Admin-configured onboarding pathway does not grant practice activation.',
-          entitlements: {
-            pathwayKey:
-              entitlements.pathwayKey,
-            privileges:
-              entitlements.privileges,
-            paymentState:
-              entitlements.paymentState,
-          },
-        },
-        409,
-      );
-    }
-
-    const simulationRows = await prisma.appointment.findMany({
-      where: {
-        clinicianId,
-        bookingSource: 'admin_simulation',
-      },
-      select: {
-        id: true,
-        reason: true,
-        meta: true,
-      },
+    const rows = await prisma.appointment.findMany({
+      where: { clinicianId, bookingSource: 'admin_simulation' },
+      select: { id: true, reason: true, status: true, meta: true },
     });
-
-    const completedNumbers = new Set<number>();
-    let completedRows = 0;
-
-    for (const row of simulationRows) {
-      const meta = asRecord(row.meta);
-      if (!simulationCompleted(meta)) continue;
-
-      completedRows += 1;
-
-      const n = sessionNumber(meta, row.reason);
-      if (n) completedNumbers.add(n);
+    const passed = new Set<number>();
+    for (const row of rows) {
+      const meta = record(row.meta);
+      const assessment = record(meta.simulationAssessment);
+      if (assessment.status !== 'finalized' || assessment.outcome !== 'PASS') continue;
+      const n = sessionNumber(meta, row.reason); if (n) passed.add(n);
+    }
+    if (passed.size < 3) {
+      return json({
+        ok: false,
+        error: 'three_distinct_finalized_passes_required',
+        requiredSessions: 3,
+        passedCount: passed.size,
+        passedSessionNumbers: [...passed].sort((a, b) => a - b),
+      }, 409);
     }
 
-    const completedCount = Math.max(completedNumbers.size, completedRows);
-
-    if (completedCount < 3) {
-      return json(
-        {
-          ok: false,
-          error: 'simulation_incomplete',
-          requiredSessions: 3,
-          completedCount,
-          message: 'Three completed supervised simulation sessions are required before real-patient approval.',
-        },
-        409,
-      );
-    }
-
-    const meta = asRecord(clinician.meta);
-    const realPatientApproval = asRecord(meta.realPatientApproval);
-
+    const now = new Date().toISOString();
+    const currentMeta = record(clinician.meta);
+    const currentApproval = record(currentMeta.realPatientApproval);
+    const passedSessionNumbers = [...passed].sort((a, b) => a - b);
     const nextMeta = {
-      ...meta,
+      ...currentMeta,
       simulationCompleted: true,
-      simulationCompletedAt:
-        typeof meta.simulationCompletedAt === 'string' ? meta.simulationCompletedAt : now,
+      simulationCompletedAt: currentMeta.simulationCompletedAt || now,
       adminFinalApproved: true,
-      realPatientApprovedAt:
-        typeof meta.realPatientApprovedAt === 'string' ? meta.realPatientApprovedAt : now,
+      realPatientApprovedAt: currentMeta.realPatientApprovedAt || now,
       realPatientApproval: {
-        ...realPatientApproval,
+        ...currentApproval,
         approved: true,
-        approvedAt:
-          typeof realPatientApproval.approvedAt === 'string'
-            ? realPatientApproval.approvedAt
-            : now,
-        approvedByAdminId: realPatientApproval.approvedByAdminId || adminUid,
-        note: note || realPatientApproval.note || null,
+        approvedAt: currentApproval.approvedAt || now,
+        approvedByAdminId: currentApproval.approvedByAdminId || actor,
+        source: 'simulation_control',
+        requiredPasses: 3,
+        passedSessionNumbers,
+        note: note || currentApproval.note || null,
       },
     };
-
     const updated = await prisma.clinicianProfile.update({
-      where: { id: clinician.id },
-      data: {
-        status: 'active',
-        disabled: false,
-        archived: false,
-        trainingCompleted: true,
-        meta: nextMeta,
-      },
-      select: {
-        id: true,
-        displayName: true,
-        email: true,
-        status: true,
-        trainingCompleted: true,
-        disabled: true,
-        archived: true,
-        meta: true,
-        updatedAt: true,
-      },
+      where: { id: clinicianId },
+      data: { status: 'active', disabled: false, archived: false, trainingCompleted: true, meta: nextMeta },
+      select: { id: true, displayName: true, email: true, status: true, trainingCompleted: true, disabled: true, archived: true, meta: true, updatedAt: true },
     });
-
     return json({
       ok: true,
-      clinicianId: updated.id,
-      visibleToPatients:
-        String(updated.status || '').toLowerCase() === 'active' &&
-        updated.disabled !== true &&
-        updated.archived !== true,
+      clinicianId,
+      visibleToPatients: String(updated.status || '').toLowerCase() === 'active' && !updated.disabled && !updated.archived,
       realPatientApprovedAt: nextMeta.realPatientApproval.approvedAt,
       requiredSessions: 3,
-      completedCount,
-      entitlements: {
-        pathwayKey:
-          entitlements.pathwayKey,
-        privileges:
-          entitlements.privileges,
-        paymentState:
-          entitlements.paymentState,
-      },
+      passedCount: passed.size,
+      passedSessionNumbers,
+      entitlements: { pathwayKey: entitlements.pathwayKey, privileges: entitlements.privileges, paymentState: entitlements.paymentState },
       clinician: updated,
     });
-  } catch (err: any) {
-    console.error('[api-gateway][admin][simulation][approve-real-patients] error', err);
-
-    return json(
-      {
-        ok: false,
-        error: String(err?.message || 'approve_real_patients_failed'),
-      },
-      500,
-    );
+  } catch (error: any) {
+    console.error('[api-gateway][admin][simulation][approve-real-patients]', error);
+    return json({ ok: false, error: clean(error?.message, 300) || 'approve_real_patients_failed' }, error?.status || 500);
   }
 }

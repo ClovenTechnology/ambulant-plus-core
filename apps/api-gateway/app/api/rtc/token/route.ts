@@ -394,7 +394,7 @@ export async function POST(req: NextRequest) {
       ...(audience ? { audience } : {}),
     });
 
-    // Flexible claim mapping (so you donâ€™t brick older tokens if you rename keys)
+    // Flexible claim mapping (so you don├óÔé¼Ôäót brick older tokens if you rename keys)
     const uid = pickClaim(payload, ['uid', 'sub', 'userId', 'u']);
     const roomId = pickClaim(payload, ['roomId', 'rid', 'room', 'r']);
     const visitId = pickClaim(payload, ['visitId', 'vid', 'visit', 'v']);
@@ -495,10 +495,45 @@ export async function POST(req: NextRequest) {
     // Import here to keep route resilient in build graph
     const { AccessToken } = await import('livekit-server-sdk');
 
-    // Permissions by role (tweak as you like)
-    const canPublish = role !== 'observer';
+    // Observer media authority is derived from the canonical simulation appointment.
+    // A browser cannot promote itself from Observe to Coach.
+    let simulationSupervisorMode: 'OBSERVE' | 'COACH' | null = null;
+    if (role === 'observer') {
+      const visit = await prisma.televisit.findUnique({
+        where: { id: visitId },
+        select: { appointmentId: true },
+      });
+      if (visit?.appointmentId) {
+        const appointment = await prisma.appointment.findUnique({
+          where: { id: visit.appointmentId },
+          select: { bookingSource: true, meta: true },
+        });
+        const meta =
+          appointment?.meta && typeof appointment.meta === 'object' && !Array.isArray(appointment.meta)
+            ? (appointment.meta as any)
+            : {};
+        const supervisor =
+          meta?.simulationSupervisor && typeof meta.simulationSupervisor === 'object'
+            ? meta.simulationSupervisor
+            : {};
+        if (
+          appointment?.bookingSource === 'admin_simulation' &&
+          String(supervisor?.partyId || '').trim() === uid
+        ) {
+          simulationSupervisorMode =
+            String(supervisor?.mode || '').trim().toUpperCase() === 'COACH'
+              ? 'COACH'
+              : 'OBSERVE';
+        }
+      }
+    }
+
+    const observerMicrophone =
+      role === 'observer' && simulationSupervisorMode === 'COACH';
+    const canPublish = role !== 'observer' || observerMicrophone;
     const canPublishData = role !== 'observer';
     const canSubscribe = true;
+    const observerPublishSources = observerMicrophone ? [2] : [];
 
     const participantMetadata = buildParticipantMetadata(body, {
 
@@ -541,6 +576,9 @@ export async function POST(req: NextRequest) {
 
 
         authRole: role,
+        ...(simulationSupervisorMode
+          ? { simulationSupervisorMode, simulationMediaMicrophone: observerMicrophone ? 'true' : 'false' }
+          : {}),
 
 
         ...(participantMetadata.encounterId ? { encounterId: String(participantMetadata.encounterId) } : {}),
@@ -563,6 +601,7 @@ export async function POST(req: NextRequest) {
       canPublish,
       canPublishData,
       canSubscribe,
+      ...(role === 'observer' ? { canPublishSources: observerPublishSources as any } : {}),
     });
 
     const rtcToken = await at.toJwt();

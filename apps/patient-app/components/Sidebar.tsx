@@ -66,7 +66,7 @@ const CORE: Item[] = [
   { href: '/clinicians', label: 'Clinicians', icon: Stethoscope },
   { href: '/practices', label: 'Clinics & hospitals', icon: Building2 },
   { href: '/televisit', label: 'Televisit', icon: Video },
-  { href: '/training', label: 'Training invitations', icon: Video },
+  { href: '/training', label: 'Training & simulation', icon: Video },
 ];
 
 const GROUPS: Group[] = [

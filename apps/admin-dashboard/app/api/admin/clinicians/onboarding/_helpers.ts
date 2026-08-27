@@ -345,3 +345,53 @@ export async function bestEffortNotifyDispatch(payload: any) {
     return { ok: false, ignored: false, reason: e?.message || 'notify_failed' };
   }
 }
+
+export async function forwardAdminSessionRequest(
+  req: NextRequest,
+  path: string,
+  options?: { method?: 'GET' | 'POST' | 'PATCH'; body?: any },
+) {
+  const caller = await requireAdminCaller(req);
+  if (!caller.ok) return caller.response;
+
+  const gateway = gatewayBaseFromEnv();
+  const incoming = new URL(req.url);
+  const upstream = new URL(path.startsWith('/') ? path : `/${path}`, `${gateway}/`);
+  if ((options?.method || req.method) === 'GET') {
+    incoming.searchParams.forEach((value, key) => upstream.searchParams.append(key, value));
+  }
+
+  const headers = new Headers({
+    accept: 'application/json',
+    'cache-control': 'no-store',
+    'x-admin-origin': req.nextUrl.origin,
+    'x-uid': caller.userId,
+    'x-role': 'admin',
+  });
+  const cookie = req.headers.get('cookie');
+  const authorization = req.headers.get('authorization');
+  const orgId = req.headers.get('x-org-id');
+  if (cookie) headers.set('cookie', cookie);
+  if (authorization) headers.set('authorization', authorization);
+  if (orgId) headers.set('x-org-id', orgId);
+
+  const method = options?.method || (req.method as 'GET' | 'POST' | 'PATCH');
+  const body = method === 'GET' ? undefined : JSON.stringify(options?.body ?? {});
+  if (body) headers.set('content-type', 'application/json');
+
+  let response: Response;
+  try {
+    response = await fetch(upstream.toString(), { method, headers, body, cache: 'no-store' });
+  } catch {
+    return NextResponse.json({ ok: false, error: 'simulation_gateway_unavailable' }, { status: 503 });
+  }
+
+  const text = await response.text().catch(() => '');
+  return new NextResponse(text || JSON.stringify({ ok: response.ok }), {
+    status: response.status,
+    headers: {
+      'content-type': response.headers.get('content-type') || 'application/json',
+      'cache-control': 'no-store',
+    },
+  });
+}

@@ -201,6 +201,7 @@ export default function AdminSidebar() {
         { href: '/admin/training', label: 'Training control', icon: CalendarDays, requires: ['medical','hr','manageRoles'] },
         { href: '/admin/calendar', label: 'Training calendar', icon: CalendarDays, requires: ['medical','hr','manageRoles'] },
         { href: '/admin/clinicians/onboarding', label: 'Clinician onboarding', icon: Stethoscope, requires: ['medical','hr','manageRoles','finance'] },
+        { href: '/admin/simulation', label: 'Simulation control', icon: ClipboardCheck, requires: ['medical','hr','manageRoles'] },
         { href: '/admin/staff', label: 'Staff directory', icon: Users, requires: ['staff.directory.read','staff.manage','staff.hr.read','staff.hr.manage','hr','hr:read','hr:manage','manageRoles'] },
         { href: '/admin/communications', label: 'Communications', icon: Users, requires: ['communications.use'] },
         { href: '/admin/recruitment', label: 'Recruitment', icon: Briefcase, requires: ['recruitment.templates.read','recruitment.templates.manage','recruitment.settings.manage','applications.onboarding.manage','staff.hr.read','staff.hr.manage','hr','hr:read','hr:manage','manageRoles'] },

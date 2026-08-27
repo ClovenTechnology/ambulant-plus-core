@@ -193,6 +193,13 @@ export default async function AdminClinicianOnboardingPage() {
           >
             Calendar
           </Link>
+          <Link
+            href="/admin/simulation"
+            className="rounded border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-800 hover:bg-indigo-100"
+            title="Open governed simulation management"
+          >
+            Simulation Control
+          </Link>
 
           <div className="text-right text-xs text-gray-500">
             Signed in as {session.user?.email || 'admin'}

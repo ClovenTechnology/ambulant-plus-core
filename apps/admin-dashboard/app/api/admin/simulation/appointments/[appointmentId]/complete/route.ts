@@ -1,33 +1,17 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
-import { readJson, forwardToGateway } from '../../../../clinicians/onboarding/_helpers';
+import { NextRequest, NextResponse } from 'next/server';
+import { requireAdminCaller } from '../../../../clinicians/onboarding/_helpers';
 
 export const runtime = 'edge';
-
-function cleanStr(value: unknown, max = 240) {
-  return String(value ?? '').trim().slice(0, max);
-}
-
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { appointmentId: string } },
-) {
-  const appointmentId = cleanStr(params.appointmentId, 160);
-
-  if (!appointmentId) {
-    return NextResponse.json(
-      { ok: false, error: 'appointmentId_required' },
-      { status: 400 },
-    );
-  }
-
-  const body = await readJson(req);
-
-  return forwardToGateway(
-    req,
-    `/api/admin/simulation/appointments/${encodeURIComponent(appointmentId)}/complete`,
+export async function POST(req: NextRequest, { params }: { params: { appointmentId: string } }) {
+  const caller = await requireAdminCaller(req);
+  if (!caller.ok) return caller.response;
+  return NextResponse.json(
     {
-      clinicianId: cleanStr(body?.clinicianId, 120) || undefined,
-      note: cleanStr(body?.note, 500) || undefined,
+      ok: false,
+      error: 'assessment_required',
+      appointmentId: params.appointmentId,
+      message: 'Legacy mark-complete is disabled. Finalize the supervisor assessment in Simulation Control.',
     },
+    { status: 409, headers: { 'cache-control': 'no-store' } },
   );
 }

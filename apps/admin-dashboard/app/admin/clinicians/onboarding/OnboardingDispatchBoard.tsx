@@ -1307,145 +1307,26 @@ setBusyId(schedRow.clinicianId);
                   </div>
                 </div>
 
-                <div className="rounded-lg border bg-white p-2">
-                  <div className="mb-1 flex items-center justify-between gap-2">
-                    <div className="text-[11px] font-semibold text-gray-800">Simulation sessions</div>
-                    <span className="text-[10px] text-gray-500">{simulationCount}/{simulationRequiredCount}</span>
-                  </div>
-
-                  <div className="mb-2 flex items-center gap-2 text-[10px] text-gray-600">
-                    <span>Created</span>
-                    <div className="h-1.5 w-20 rounded-full bg-gray-100">
-                      <div
-                        className="h-1.5 rounded-full bg-slate-800"
-                        style={{
-                          width:
-                            String(Math.min(100, (simulationCount / simulationRequiredCount) * 100)) + '%',
-                        }}
-                      />
+                <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <div className="text-[11px] font-semibold text-indigo-950">Simulation readiness</div>
+                      <div className="mt-1 text-[10px] leading-relaxed text-indigo-800">
+                        Simulation scheduling, fresh admissions, supervision and the seven-domain assessment are governed in Simulation Control.
+                      </div>
                     </div>
-                    <span>{simulationCount}/{simulationRequiredCount}</span>
-                  </div>
-
-                  <div className="mb-2 flex items-center justify-between gap-2 text-[10px] text-gray-600">
-                    <span>
-                      Completed {simulationCompletedCount}/{simulationRequiredCount}
+                    <span className="rounded-full bg-white px-2 py-1 text-[10px] font-black text-indigo-700">
+                      {simulationCompletedCount}/{simulationRequiredCount} PASS
                     </span>
-                    <button
-                      type="button"
-                      disabled={isBusy}
-                      onClick={() => loadSimulationStatus(row.clinicianId)}
-                      className="rounded border bg-white px-2 py-0.5 text-[10px] text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Refresh progress
-                    </button>
                   </div>
-
-                  {simulationState?.statusError && (
-                    <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[10px] text-amber-800">
-                      Progress sync failed: {simulationState.statusError}
-                    </div>
-                  )}
-
-                  <div className="flex flex-col gap-1">
-                    {latestSimulationSession?.appointmentId && !latestSimulationSession.completed && (
-                      <button
-                        type="button"
-                        disabled={isBusy}
-                        onClick={() =>
-                          handleMarkSimulationComplete(
-                            row,
-                            latestSimulationSession.appointmentId,
-                          )
-                        }
-                        className="rounded border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
-                      >
-                        Mark latest complete
-                      </button>
-                    )}
-
-                    {realPatientApproved ? (
-                      <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-1 text-[11px] font-medium text-emerald-800">
-                        Approved for real patients
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        disabled={isBusy || !finalApprovalReady}
-                        onClick={() => handleApproveRealPatients(row)}
-                        className="rounded border border-blue-200 bg-blue-50 px-3 py-1 text-[11px] font-medium text-blue-800 hover:bg-blue-100 disabled:opacity-50"
-                        title={
-                          finalApprovalReady
-                            ? 'Approve clinician for real-patient marketplace visibility'
-                            : 'Complete 3/3 supervised simulations before real-patient approval'
-                        }
-                      >
-                        Approve for real patients
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      disabled={isBusy || !simulationReady}
-                      onClick={() => handleCreateSimulationSession(row, nextSimulationSession)}
-                      className="rounded bg-slate-900 px-3 py-1 text-[11px] font-medium text-white hover:bg-slate-800 disabled:opacity-50"
-                      title={
-                        simulationReady
-                          ? 'Create an additional supervised simulation televisit when more practice or review is needed'
-                          : 'Training must be completed before simulation sessions can be created'
-                      }
-                    >
-                      {simulationCount >= simulationRequiredCount
-                        ? 'Add extra session ' + nextSimulationSession
-                        : 'Create session ' + nextSimulationSession + '/' + simulationRequiredCount}
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isBusy || !simulationState?.latest?.join?.clinician?.url}
-                      onClick={() =>
-                        copySimulationUrl(
-                          simulationState?.latest?.join?.clinician?.url,
-                          'Clinician',
-                        )
-                      }
-                      className="rounded border bg-white px-3 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Copy clinician join URL
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isBusy || !simulationState?.latest?.join?.testPatient?.url}
-                      onClick={() =>
-                        copySimulationUrl(
-                          simulationState?.latest?.join?.testPatient?.url,
-                          'Simulation patient',
-                        )
-                      }
-                      className="rounded border bg-white px-3 py-1 text-[11px] font-medium text-gray-800 hover:bg-gray-50 disabled:opacity-50"
-                    >
-                      Copy simulation patient URL
-                    </button>
-
-                    {(simulationState?.latest?.televisit?.roomId || latestSimulationSession?.roomId) && (
-                      <div className="mt-1 break-all rounded border bg-slate-50 px-2 py-1 text-[10px] text-gray-600">
-                        Room: {simulationState?.latest?.televisit?.roomId || latestSimulationSession?.roomId}
-                      </div>
-                    )}
-
-                    {latestSimulationSession && (
-                      <div className="mt-1 rounded border bg-slate-50 px-2 py-1 text-[10px] text-gray-600">
-                        Latest session: {latestSimulationSession.sessionNumber || '—'} · {latestSimulationSession.status || 'unknown'}
-                      </div>
-                    )}
-
-                    {!simulationReady && (
-                      <div className="text-[10px] text-amber-700">
-                        Complete training before creating simulation sessions.
-                      </div>
-                    )}
-                  </div>
+                  <a
+                    href={`/admin/simulation?clinicianId=${encodeURIComponent(row.clinicianId)}`}
+                    className={`mt-3 block rounded bg-slate-950 px-3 py-2 text-center text-[11px] font-semibold text-white hover:bg-slate-800 ${!simulationReady ? 'pointer-events-none opacity-50' : ''}`}
+                    title={simulationReady ? 'Open governed Simulation Control' : 'Training must be completed first'}
+                  >
+                    Open Simulation Control
+                  </a>
+                  {!simulationReady ? <div className="mt-2 text-[10px] text-amber-700">Complete training before scheduling simulations.</div> : null}
                 </div>
                 <div className="rounded-lg border bg-white p-2">
                   <div className="mb-1 text-[11px] font-semibold text-gray-800">Dispatch actions</div>

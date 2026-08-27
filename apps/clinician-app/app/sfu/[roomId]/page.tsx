@@ -1,4 +1,4 @@
-﻿// apps/clinician-app/app/sfu/[roomId]/page.tsx
+// apps/clinician-app/app/sfu/[roomId]/page.tsx
 'use client';
 
 import type * as React from 'react';
@@ -224,7 +224,7 @@ type ClinicianRtcMintArgs = {
   roomId: string;
   visitId: string;
   uid: string;
-  role: 'clinician';
+  role: 'clinician' | 'observer';
   joinToken: string;
   identity: string;
 };
@@ -463,6 +463,17 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const { roomId } = params;
   const searchParams = useSearchParams() as any;
   const wsUrl = process.env.NEXT_PUBLIC_LIVEKIT_URL as string | undefined;
+  const simulationParticipantRole =
+    String(searchParams.get('participantRole') || searchParams.get('role') || 'clinician')
+      .trim()
+      .toLowerCase() === 'observer'
+      ? 'observer'
+      : 'clinician';
+  const isSimulationObserver = simulationParticipantRole === 'observer';
+  const simulationSupervisorMode =
+    String(searchParams.get('supervisorMode') || '').trim().toUpperCase() === 'COACH'
+      ? 'COACH'
+      : 'OBSERVE';
 
   // Centralized patient context (profile / meds / allergies)
   const {
@@ -1506,7 +1517,12 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
     setSessionError(null);
 
     try {
-      const uid = getOrCreateUid('clinician');
+      const requestedParticipantId =
+        String(searchParams.get('participantId') || searchParams.get('uid') || '').trim();
+      const uid =
+        isSimulationObserver && requestedParticipantId
+          ? requestedParticipantId
+          : getOrCreateUid('clinician');
       const visitId =
         searchParams.get('visitId') || searchParams.get('visit') || searchParams.get('v') || roomId;
 
@@ -1527,7 +1543,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         roomId,
         visitId,
         uid,
-        role: 'clinician',
+        role: simulationParticipantRole,
         joinToken,
         identity: uid,
 });
@@ -1555,15 +1571,25 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
       setState('connected');
 
       try {
-        await r.localParticipant.setMicrophoneEnabled(true);
-        await r.localParticipant.setCameraEnabled(true);
-        setMicOn(true);
-        setCamOn(true);
+        if (isSimulationObserver) {
+          const coachMic = simulationSupervisorMode === 'COACH';
+          await r.localParticipant.setCameraEnabled(false);
+          await r.localParticipant.setMicrophoneEnabled(coachMic);
+          setCamOn(false);
+          setMicOn(coachMic);
+        } else {
+          await r.localParticipant.setMicrophoneEnabled(true);
+          await r.localParticipant.setCameraEnabled(true);
+          setMicOn(true);
+          setCamOn(true);
+        }
       } catch {
         // media may fail; keep connected
       }
 
-      await checkInAndStartSession(roomId);
+      if (!isSimulationObserver) {
+        await checkInAndStartSession(roomId);
+      }
 
       setQuality(r.localParticipant.connectionQuality);
 
@@ -1581,12 +1607,12 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
     }
   }, [wsUrl, pushToast,
     setRoster,
-    audit, roomId, searchParams, attachRoomEvents, detachRoomEvents, checkInAndStartSession]);
+    audit, roomId, searchParams, attachRoomEvents, detachRoomEvents, checkInAndStartSession, isSimulationObserver, simulationParticipantRole, simulationSupervisorMode]);
 
 
   // A6-R3-E1G: publish clinician room presence only while LiveKit is connected.
   useEffect(() => {
-    if (state !== 'connected') return;
+    if (state !== 'connected' || isSimulationObserver) return;
 
     const visitId =
       searchParams.get('visitId') ||
@@ -1639,7 +1665,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [appointmentId, roomId, searchParams, state]);
+  }, [appointmentId, roomId, searchParams, state, isSimulationObserver]);
 
   const leave = useCallback(async () => {
     manualLeaveRef.current = true;
@@ -1797,12 +1823,20 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
 
   // Mic/cam toggles
   const toggleMic = () => {
+    if (isSimulationObserver && simulationSupervisorMode !== 'COACH') {
+      pushToast('Observe mode is subscribe-only.', 'info');
+      return;
+    }
     const next = !micOn;
     setMicOn(next);
     roomRef.current?.localParticipant.setMicrophoneEnabled(next).catch(() => {});
     pushToast(next ? 'Microphone on.' : 'Microphone off.', 'info');
   };
   const toggleCam = () => {
+    if (isSimulationObserver) {
+      pushToast('Supervisor camera publishing is disabled.', 'info');
+      return;
+    }
     const next = !camOn;
     setCamOn(next);
     roomRef.current?.localParticipant.setCameraEnabled(next).catch(() => {});

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import PatientSimulationSessions from './PatientSimulationSessions';
 
 type Invitation = {
   assignmentId: string;
@@ -28,6 +29,7 @@ export default function PatientTrainingInvitations() {
   const [consents, setConsents] = useState<Record<string, { participation: boolean; audioVideo: boolean; iomt: boolean; recording: boolean }>>({});
   const [busy, setBusy] = useState('');
   const [notice, setNotice] = useState<{ tone: 'ok' | 'err'; text: string } | null>(null);
+  const [surface, setSurface] = useState<'training' | 'simulation'>('simulation');
 
   const load = useCallback(async () => {
     const response = await fetch('/api/training/invitations', { cache: 'no-store' });
@@ -104,6 +106,14 @@ export default function PatientTrainingInvitations() {
   }
 
   return (
+    <div className="space-y-4">
+      <div className="inline-flex rounded-2xl border bg-white p-1 shadow-sm">
+        <button type="button" onClick={() => setSurface('simulation')} className={`rounded-xl px-4 py-2 text-sm font-black ${surface === 'simulation' ? 'bg-slate-950 text-white' : 'text-slate-600'}`}>Simulation</button>
+        <button type="button" onClick={() => setSurface('training')} className={`rounded-xl px-4 py-2 text-sm font-black ${surface === 'training' ? 'bg-slate-950 text-white' : 'text-slate-600'}`}>Training invitations</button>
+      </div>
+      {surface === 'simulation' ? (
+        <PatientSimulationSessions />
+      ) : (
     <section className="space-y-4">
       {notice ? <div className={`rounded-2xl border p-4 text-sm ${notice.tone === 'ok' ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-rose-200 bg-rose-50 text-rose-900'}`}>{notice.text}</div> : null}
       {items.length ? items.map((item) => {
@@ -130,5 +140,7 @@ export default function PatientTrainingInvitations() {
         );
       }) : <div className="rounded-3xl border border-dashed bg-white p-10 text-center text-slate-600">You do not currently have a training invitation.</div>}
     </section>
+      )}
+    </div>
   );
 }

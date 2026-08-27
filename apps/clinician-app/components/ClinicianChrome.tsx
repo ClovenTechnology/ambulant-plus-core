@@ -1,4 +1,4 @@
-﻿// apps/clinician-app/components/ClinicianChrome.tsx
+// apps/clinician-app/components/ClinicianChrome.tsx
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -191,6 +191,10 @@ export default function ClinicianChrome({ children }: { children: React.ReactNod
             <span className="text-black/20">•</span>
             <Link className="hover:text-black" href="/calendar">
               Calendar
+            </Link>
+            <span className="text-gray-300">•</span>
+            <Link className="hover:text-black" href="/simulation">
+              Simulation
             </Link>
             <span className="text-black/20">•</span>
             <Link className="hover:text-black" href="/patients">

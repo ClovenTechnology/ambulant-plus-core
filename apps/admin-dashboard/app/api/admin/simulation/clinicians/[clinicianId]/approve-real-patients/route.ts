@@ -1,32 +1,13 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
-import { readJson, forwardToGateway } from '../../../../clinicians/onboarding/_helpers';
+import { NextRequest, NextResponse } from 'next/server';
+import { readJson, forwardAdminSessionRequest } from '../../../../clinicians/onboarding/_helpers';
 
 export const runtime = 'edge';
-
-function cleanStr(value: unknown, max = 240) {
-  return String(value ?? '').trim().slice(0, max);
-}
-
-export async function POST(
-  req: NextRequest,
-  { params }: { params: { clinicianId: string } },
-) {
-  const clinicianId = cleanStr(params.clinicianId, 160);
-
-  if (!clinicianId) {
-    return NextResponse.json(
-      { ok: false, error: 'clinicianId_required' },
-      { status: 400 },
-    );
-  }
-
-  const body = await readJson(req);
-
-  return forwardToGateway(
+export async function POST(req: NextRequest, { params }: { params: { clinicianId: string } }) {
+  const clinicianId = String(params.clinicianId || '').trim();
+  if (!clinicianId) return NextResponse.json({ ok: false, error: 'clinicianId_required' }, { status: 400 });
+  return forwardAdminSessionRequest(
     req,
     `/api/admin/simulation/clinicians/${encodeURIComponent(clinicianId)}/approve-real-patients`,
-    {
-      note: cleanStr(body?.note, 700) || undefined,
-    },
+    { method: 'POST', body: await readJson(req) },
   );
 }
