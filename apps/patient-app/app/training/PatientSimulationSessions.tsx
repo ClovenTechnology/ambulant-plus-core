@@ -45,11 +45,18 @@ export default function PatientSimulationSessions() {
       const query = new URLSearchParams({
         appointmentId: a.appointmentId,
         visitId: a.visitId,
+        patientId: a.patientId || '',
+        patientName: a.patientName || '',
         participantId: a.participantId,
+        uid: a.participantId,
         participantRole: 'patient',
+        role: 'patient',
+        joinToken: a.token,
+        jt: a.token,
         simulation: '1',
+        simulationActor: 'patient',
       });
-      window.location.assign(`/lobby?${query.toString()}`);
+      window.location.assign(`/sfu/${encodeURIComponent(a.roomId)}?${query.toString()}`);
     } catch (error: any) {
       setNotice({ tone: 'err', text: human(error?.message) });
       setBusy('');

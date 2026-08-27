@@ -49,6 +49,28 @@ function isPublicPath(pathname: string) {
   );
 }
 
+function isSimulationSupervisorAdmission(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+  if (!pathname.startsWith('/sfu/')) return false;
+
+  const params = request.nextUrl.searchParams;
+  const simulation = params.get('simulation') === '1';
+  const actor = String(params.get('simulationActor') || '').trim().toLowerCase();
+  const role = String(params.get('participantRole') || params.get('role') || '').trim().toLowerCase();
+  const joinToken = String(params.get('joinToken') || params.get('jt') || '').trim();
+  const participantId = String(params.get('participantId') || params.get('uid') || '').trim();
+  const appointmentId = String(params.get('appointmentId') || '').trim();
+  const visitId = String(params.get('visitId') || '').trim();
+
+  return (
+    simulation &&
+    actor === 'supervisor' &&
+    role === 'observer' &&
+    joinToken.split('.').length === 3 &&
+    Boolean(participantId && appointmentId && visitId)
+  );
+}
+
 function decodeBase64Url(
   value: string,
 ) {
@@ -285,6 +307,15 @@ export async function middleware(
 
   if (isPublicPath(pathname)) {
     return NextResponse.next();
+  }
+
+  // Simulation supervisors are admitted by a fresh, signed participant-scoped
+  // join capability issued from the authenticated Admin control plane. They
+  // must not be forced through clinician authentication or impersonation.
+  if (isSimulationSupervisorAdmission(request)) {
+    const response = NextResponse.next();
+    response.headers.set('cache-control', 'no-store, max-age=0');
+    return response;
   }
 
   const session =

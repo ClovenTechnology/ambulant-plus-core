@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import { Loader2, ShieldAlert } from 'lucide-react';
 
 import InboxBell from '@/components/InboxBell';
@@ -24,6 +24,40 @@ function isExcludedPath(pathname?: string | null) {
   const p = pathname || '';
   return CHROME_EXCLUDED_PREFIXES.some(
     (prefix) => p === prefix || p.startsWith(prefix + '/'),
+  );
+}
+
+function isSimulationSupervisorAdmission(
+  pathname: string | null,
+  searchParams: ReturnType<typeof useSearchParams>,
+) {
+  const p = pathname || '';
+  if (!p.startsWith('/sfu/')) return false;
+
+  const simulation = searchParams?.get('simulation') === '1';
+  const actor = String(searchParams?.get('simulationActor') || '').trim().toLowerCase();
+  const role = String(
+    searchParams?.get('participantRole') ||
+    searchParams?.get('role') ||
+    '',
+  ).trim().toLowerCase();
+  const joinToken = String(
+    searchParams?.get('joinToken') ||
+    searchParams?.get('jt') ||
+    '',
+  ).trim();
+  const participantId = String(
+    searchParams?.get('participantId') ||
+    searchParams?.get('uid') ||
+    '',
+  ).trim();
+
+  return (
+    simulation &&
+    actor === 'supervisor' &&
+    role === 'observer' &&
+    joinToken.split('.').length === 3 &&
+    Boolean(participantId)
   );
 }
 
@@ -57,7 +91,15 @@ type GateState =
 
 export default function ClinicianChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const hideChrome = useMemo(() => isExcludedPath(pathname), [pathname]);
+  const searchParams = useSearchParams();
+  const supervisorAdmission = useMemo(
+    () => isSimulationSupervisorAdmission(pathname, searchParams),
+    [pathname, searchParams],
+  );
+  const hideChrome = useMemo(
+    () => isExcludedPath(pathname) || supervisorAdmission,
+    [pathname, supervisorAdmission],
+  );
   const [gate, setGate] = useState<GateState>({ status: 'checking' });
 
   useEffect(() => {

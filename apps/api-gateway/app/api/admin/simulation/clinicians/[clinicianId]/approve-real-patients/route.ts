@@ -22,6 +22,21 @@ function record(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, any> : {};
 }
 function clean(value: unknown, max = 240) { return String(value ?? '').trim().slice(0, max); }
+function participants(meta: unknown): any[] {
+  const value = record(meta).participants;
+  return Array.isArray(value) ? value.filter(Boolean) : [];
+}
+function clinicianParticipates(row: any, clinicianId: string) {
+  if (clean(row?.clinicianId, 160) === clinicianId) return true;
+  return participants(row?.meta).some((item: any) => clean(item?.clinicianId, 160) === clinicianId);
+}
+function assessmentFor(row: any, clinicianId: string) {
+  const meta = record(row?.meta);
+  const mapped = record(record(meta.simulationAssessments)[clinicianId]);
+  if (mapped.status) return mapped;
+  if (clean(row?.clinicianId, 160) === clinicianId) return record(meta.simulationAssessment);
+  return {};
+}
 function sessionNumber(meta: unknown, reason?: string | null): number | null {
   const m = record(meta); const direct = Number(m.sessionNumber);
   if (Number.isInteger(direct) && direct >= 1 && direct <= 99) return direct;
@@ -68,16 +83,16 @@ export async function POST(req: NextRequest, { params }: { params: { clinicianId
       }, 409);
     }
 
-    const rows = await prisma.appointment.findMany({
-      where: { clinicianId, bookingSource: 'admin_simulation' },
-      select: { id: true, reason: true, status: true, meta: true },
+    const rowsAll = await prisma.appointment.findMany({
+      where: { bookingSource: 'admin_simulation' },
+      select: { id: true, clinicianId: true, reason: true, status: true, meta: true },
     });
+    const rows = rowsAll.filter((row: any) => clinicianParticipates(row, clinicianId));
     const passed = new Set<number>();
     for (const row of rows) {
-      const meta = record(row.meta);
-      const assessment = record(meta.simulationAssessment);
+      const assessment = assessmentFor(row, clinicianId);
       if (assessment.status !== 'finalized' || assessment.outcome !== 'PASS') continue;
-      const n = sessionNumber(meta, row.reason); if (n) passed.add(n);
+      const n = sessionNumber(row.meta, row.reason); if (n) passed.add(n);
     }
     if (passed.size < 3) {
       return json({

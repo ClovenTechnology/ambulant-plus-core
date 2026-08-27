@@ -124,9 +124,25 @@ function sessionNumberOf(meta: unknown, reason?: string | null) {
 function assessmentOf(meta: unknown) {
   return record(record(meta).simulationAssessment);
 }
-function finalizedPass(meta: unknown) {
-  const assessment = assessmentOf(meta);
+function assessmentsOf(meta: unknown) {
+  return record(record(meta).simulationAssessments);
+}
+function assessmentFor(meta: unknown, clinicianId?: string | null, leadClinicianId?: string | null) {
+  const target = clean(clinicianId, 160);
+  if (target) {
+    const keyed = record(assessmentsOf(meta)[target]);
+    if (keyed.status) return keyed;
+  }
+  if (!target || !leadClinicianId || target === clean(leadClinicianId, 160)) return assessmentOf(meta);
+  return {};
+}
+function finalizedPassFor(meta: unknown, clinicianId?: string | null, leadClinicianId?: string | null) {
+  const assessment = assessmentFor(meta, clinicianId, leadClinicianId);
   return assessment.status === 'finalized' && assessment.outcome === 'PASS';
+}
+function hasFinalizedAssessment(meta: unknown) {
+  if (assessmentOf(meta).status === 'finalized') return true;
+  return Object.values(assessmentsOf(meta)).some((value) => record(value).status === 'finalized');
 }
 function supervisorOf(meta: unknown) {
   return record(record(meta).simulationSupervisor);
@@ -134,10 +150,52 @@ function supervisorOf(meta: unknown) {
 function participantsOf(meta: unknown) {
   return array(record(meta).participants).filter((item) => item && typeof item === 'object');
 }
-function sessionView(row: any) {
+function clinicianParticipants(meta: unknown, leadClinicianId?: string | null) {
+  const participants = participantsOf(meta)
+    .filter((item) => clean(item?.clinicianId, 160))
+    .map((item) => ({
+      id: clean(item.clinicianId, 160),
+      clinicianId: clean(item.clinicianId, 160),
+      partyId: clean(item.partyId, 240),
+      role: clean(item.role, 80).toUpperCase() || 'TRAINEE',
+      name: optional(item.name, 180),
+      specialty: optional(item.specialty, 180),
+      required: item.required !== false,
+    }));
+  const lead = clean(leadClinicianId, 160);
+  if (lead && !participants.some((item) => item.clinicianId === lead)) {
+    participants.unshift({
+      id: lead,
+      clinicianId: lead,
+      partyId: `clin-${lead}`,
+      role: 'LEAD_CLINICIAN',
+      name: null,
+      specialty: null,
+      required: true,
+    });
+  }
+  return participants;
+}
+function clinicianParticipates(row: any, clinicianId: string) {
+  const target = clean(clinicianId, 160);
+  if (!target) return false;
+  if (clean(row?.clinicianId, 160) === target) return true;
+  return clinicianParticipants(row?.meta, row?.clinicianId).some((item) => item.clinicianId === target);
+}
+function clinicianIdsFor(row: any) {
+  return Array.from(new Set(
+    clinicianParticipants(row?.meta, row?.clinicianId)
+      .map((item) => item.clinicianId)
+      .filter(Boolean),
+  ));
+}
+function sessionView(row: any, focusClinicianId?: string | null) {
   const meta = record(row.meta);
-  const assessment = assessmentOf(meta);
+  const focus = clean(focusClinicianId, 160) || clean(row.clinicianId, 160);
+  const assessment = assessmentFor(meta, focus, row.clinicianId);
   const supervisor = supervisorOf(meta);
+  const clinicians = clinicianParticipants(meta, row.clinicianId);
+  const assessments = assessmentsOf(meta);
   return {
     appointmentId: row.id,
     encounterId: row.encounterId,
@@ -159,6 +217,13 @@ function sessionView(row: any) {
     expectedIoMTs: array(meta.expectedIoMTs).map((v) => clean(v, 120)).filter(Boolean),
     schedulingMode: meta.schedulingMode === 'custom' ? 'custom' : 'availability',
     customSchedulingReason: optional(meta.customSchedulingReason, 500),
+    leadClinicianId: row.clinicianId,
+    clinicians,
+    cohort: {
+      enabled: clinicians.length > 1,
+      clinicianIds: clinicians.map((item) => item.clinicianId),
+      leadClinicianId: row.clinicianId,
+    },
     supervisor: {
       id: optional(supervisor.id, 160),
       userId: optional(supervisor.userId, 160),
@@ -167,6 +232,7 @@ function sessionView(row: any) {
       email: optional(supervisor.email, 240),
       mode: normalizeMode(supervisor.mode),
     },
+    assessmentClinicianId: focus || null,
     assessment: assessment.status
       ? {
           status: assessment.status,
@@ -180,7 +246,28 @@ function sessionView(row: any) {
           assessedByUserId: assessment.assessedByUserId || null,
         }
       : null,
-    passed: finalizedPass(meta),
+    assessments: Object.fromEntries(
+      clinicians.map((item) => {
+        const value = assessmentFor(meta, item.clinicianId, row.clinicianId);
+        return [
+          item.clinicianId,
+          value.status
+            ? {
+                status: value.status,
+                outcome: value.outcome || null,
+                domains: record(value.domains),
+                strengths: value.strengths || '',
+                developmentPoints: value.developmentPoints || '',
+                summary: value.summary || '',
+                recommendation: value.recommendation || '',
+                finalizedAt: value.finalizedAt || null,
+                assessedByUserId: value.assessedByUserId || null,
+              }
+            : null,
+        ];
+      }),
+    ),
+    passed: finalizedPassFor(meta, focus, row.clinicianId),
     joinWindow: {
       opensAt: meta.joinOpensAt || null,
       closesAt: meta.joinClosesAt || null,
@@ -241,10 +328,10 @@ async function supervisorByRef(ref: string) {
   });
 }
 
-function participantMatch(row: any, args: { clinicianId: string; patientId: string; supervisorUserId: string }) {
+function participantMatch(row: any, args: { clinicianIds: string[]; patientId: string; supervisorUserId: string }) {
   const supervisor = supervisorOf(row.meta);
   return (
-    clean(row.clinicianId, 160) === args.clinicianId ||
+    args.clinicianIds.some((clinicianId) => clinicianParticipates(row, clinicianId)) ||
     clean(row.patientId, 160) === args.patientId ||
     clean(row.subjectPatientId, 160) === args.patientId ||
     clean(supervisor.userId, 160) === args.supervisorUserId
@@ -254,7 +341,7 @@ function participantMatch(row: any, args: { clinicianId: string; patientId: stri
 async function findActiveOverlap(args: {
   startsAt: Date;
   endsAt: Date;
-  clinicianId: string;
+  clinicianIds: string[];
   patientId: string;
   supervisorUserId: string;
   excludeAppointmentId?: string | null;
@@ -334,6 +421,9 @@ function joinPath(args: {
   roomId: string;
   visitId: string;
   appointmentId: string;
+  encounterId?: string | null;
+  patientId?: string | null;
+  patientName?: string | null;
   participantId: string;
   token: string;
   mode: SupervisorMode;
@@ -348,8 +438,12 @@ function joinPath(args: {
     joinToken: args.token,
     jt: args.token,
     simulation: '1',
+    simulationActor: 'supervisor',
     supervisorMode: args.mode,
   });
+  if (args.encounterId) query.set('encounterId', args.encounterId);
+  if (args.patientId) query.set('patientId', args.patientId);
+  if (args.patientName) query.set('patientName', args.patientName);
   return `/sfu/${encodeURIComponent(args.roomId)}?${query.toString()}`;
 }
 
@@ -422,11 +516,8 @@ export async function GET(req: NextRequest) {
       return json({ ok: true, slots: result.slots, meta: result.meta });
     }
 
-    const where: any = { bookingSource: 'admin_simulation' };
-    if (clinicianId) where.clinicianId = clinicianId;
-
-    const rows = await (prisma as any).appointment.findMany({
-      where,
+    const rowsAll = await (prisma as any).appointment.findMany({
+      where: { bookingSource: 'admin_simulation' },
       orderBy: [{ startsAt: 'asc' }, { createdAt: 'asc' }],
       select: {
         id: true, encounterId: true, caseId: true, clinicianId: true, patientId: true,
@@ -434,7 +525,10 @@ export async function GET(req: NextRequest) {
         status: true, paymentStatus: true, bookingSource: true, createdAt: true, updatedAt: true, meta: true,
       },
     });
-    const sessions = rows.map(sessionView);
+    const rows = clinicianId
+      ? rowsAll.filter((row: any) => clinicianParticipates(row, clinicianId))
+      : rowsAll;
+    const sessions = rows.map((row: any) => sessionView(row, clinicianId || row.clinicianId));
     const passedNumbers = new Set(
       sessions.filter((item: any) => item.passed && item.sessionNumber).map((item: any) => item.sessionNumber),
     );
@@ -482,7 +576,11 @@ export async function POST(req: NextRequest) {
       if (!appointmentId) return json({ ok: false, error: 'appointmentId_required' }, 400);
       const appointment = await (prisma as any).appointment.findUnique({
         where: { id: appointmentId },
-        select: { id: true, roomId: true, status: true, startsAt: true, endsAt: true, bookingSource: true, meta: true, orgId: true },
+        select: {
+          id: true, encounterId: true, patientId: true, subjectPatientId: true,
+          roomId: true, status: true, startsAt: true, endsAt: true,
+          bookingSource: true, meta: true, orgId: true,
+        },
       });
       if (!appointment || appointment.bookingSource !== 'admin_simulation') return json({ ok: false, error: 'simulation_not_found' }, 404);
       if (statusClosed(appointment.status)) return json({ ok: false, error: 'simulation_closed' }, 409);
@@ -506,7 +604,17 @@ export async function POST(req: NextRequest) {
       const ticket = await upsertTicket(visit.id, partyId, ttl, 'observer' as any, req as any);
       if (!ticket?.token) return json({ ok: false, error: 'supervisor_admission_not_issued' }, 500);
       const mode = normalizeMode(supervisor.mode);
-      const path = joinPath({ roomId: visit.roomId, visitId: visit.id, appointmentId, participantId: partyId, token: ticket.token, mode });
+      const path = joinPath({
+        roomId: visit.roomId,
+        visitId: visit.id,
+        appointmentId,
+        encounterId: clean(appointment.encounterId, 160),
+        patientId: clean(appointment.subjectPatientId || appointment.patientId, 160),
+        patientName: optional(record(appointment.meta).patientDisplayName, 180),
+        participantId: partyId,
+        token: ticket.token,
+        mode,
+      });
       return json({
         ok: true,
         admission: {
@@ -518,20 +626,42 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const clinicianRef = clean(body.clinicianId, 160);
+    const requestedClinicianRefs = Array.from(new Set(
+      [
+        clean(body.leadClinicianId || body.clinicianId, 160),
+        ...array(body.clinicianIds).map((value) => clean(value, 160)),
+      ].filter(Boolean),
+    ));
+    const leadClinicianRef = clean(body.leadClinicianId || body.clinicianId || requestedClinicianRefs[0], 160);
     const sessionNumber = int(body.sessionNumber, 1, 99);
     const startsAt = date(body.startsAt);
     const durationMinutes = int(body.durationMinutes, 10, 120);
-    if (!clinicianRef) return json({ ok: false, error: 'clinicianId_required' }, 400);
+    if (!leadClinicianRef || !requestedClinicianRefs.length) return json({ ok: false, error: 'clinicianId_required' }, 400);
     if (!sessionNumber) return json({ ok: false, error: 'sessionNumber_required' }, 400);
     if (!startsAt) return json({ ok: false, error: 'startsAt_required' }, 400);
     if (!durationMinutes) return json({ ok: false, error: 'durationMinutes_required' }, 400);
     if (startsAt <= new Date()) return json({ ok: false, error: 'startsAt_must_be_future' }, 409);
 
-    const clinician = await clinicianByRef(clinicianRef);
-    if (!clinician) return json({ ok: false, error: 'clinician_not_found' }, 404);
-    if (clinician.disabled || clinician.archived) return json({ ok: false, error: 'clinician_not_active' }, 409);
-    if (!clinician.trainingCompleted) return json({ ok: false, error: 'training_not_completed' }, 409);
+    const resolvedClinicians = await Promise.all(
+      requestedClinicianRefs.map(async (ref) => ({ ref, clinician: await clinicianByRef(ref) })),
+    );
+    const missingClinician = resolvedClinicians.find((item) => !item.clinician);
+    if (missingClinician) return json({ ok: false, error: 'clinician_not_found', clinicianRef: missingClinician.ref }, 404);
+
+    const clinicianMap = new Map<string, any>();
+    for (const item of resolvedClinicians) {
+      if (item.clinician?.id) clinicianMap.set(item.clinician.id, item.clinician);
+    }
+    const clinicians = Array.from(clinicianMap.values());
+    const leadResolved = await clinicianByRef(leadClinicianRef);
+    const clinician = leadResolved?.id ? clinicianMap.get(leadResolved.id) : null;
+    if (!clinician) return json({ ok: false, error: 'lead_clinician_must_be_selected' }, 400);
+
+    for (const item of clinicians) {
+      if (item.disabled || item.archived) return json({ ok: false, error: 'clinician_not_active', clinicianId: item.id }, 409);
+      if (!item.trainingCompleted) return json({ ok: false, error: 'training_not_completed', clinicianId: item.id }, 409);
+    }
+    const clinicianIds = clinicians.map((item) => clean(item.id, 160)).filter(Boolean);
 
     const patient = await resolveSimulationPatient(body);
     if (!patient) return json({ ok: false, error: 'canonical_simulation_patient_required' }, 409);
@@ -541,24 +671,36 @@ export async function POST(req: NextRequest) {
     if (String(supervisor.lifecycleState || '').toUpperCase() !== 'ACTIVE') return json({ ok: false, error: 'supervisor_not_active' }, 409);
 
     const existingSessions = await (prisma as any).appointment.findMany({
-      where: { clinicianId: clinician.id, bookingSource: 'admin_simulation' },
-      select: { id: true, reason: true, status: true, meta: true },
+      where: { bookingSource: 'admin_simulation' },
+      select: { id: true, clinicianId: true, reason: true, status: true, meta: true },
     });
-    const duplicate = existingSessions.find((row: any) => {
-      if (sessionNumberOf(row.meta, row.reason) !== sessionNumber) return false;
-      return !statusClosed(row.status) || finalizedPass(row.meta);
-    });
-    if (duplicate) return json({ ok: false, error: 'simulation_session_number_conflict', appointmentId: duplicate.id }, 409);
+    for (const clinicianId of clinicianIds) {
+      const duplicate = existingSessions.find((row: any) => {
+        if (!clinicianParticipates(row, clinicianId)) return false;
+        if (sessionNumberOf(row.meta, row.reason) !== sessionNumber) return false;
+        return !statusClosed(row.status) || finalizedPassFor(row.meta, clinicianId, row.clinicianId);
+      });
+      if (duplicate) {
+        return json({
+          ok: false,
+          error: 'simulation_session_number_conflict',
+          appointmentId: duplicate.id,
+          clinicianId,
+        }, 409);
+      }
+    }
 
     const endsAt = addMinutes(startsAt, durationMinutes);
     const schedulingMode = normalizeSchedulingMode(body.schedulingMode);
     const customSchedulingReason = optional(body.customSchedulingReason, 500);
-    await validateSchedule({
-      clinicianId: clinician.id, startsAt, endsAt, schedulingMode,
-      customReason: customSchedulingReason,
-    });
+    for (const clinicianId of clinicianIds) {
+      await validateSchedule({
+        clinicianId, startsAt, endsAt, schedulingMode,
+        customReason: customSchedulingReason,
+      });
+    }
     const collision = await findActiveOverlap({
-      startsAt, endsAt, clinicianId: clinician.id, patientId: patient.id,
+      startsAt, endsAt, clinicianIds, patientId: patient.id,
       supervisorUserId: supervisor.userId,
     });
     if (collision) {
@@ -573,7 +715,6 @@ export async function POST(req: NextRequest) {
     const encounterId = uid('sim-enc');
     const caseId = uid('sim-case');
     const roomId = `simulation-${clinician.id.slice(-8)}-${Date.now()}`;
-    const clinicianPartyId = `clin-${clinician.id}`;
     const patientPartyId = `pat-${patient.id}`;
     const supervisorPartyId = `sup-${supervisor.userId}`;
     const joinOpensAt = addMinutes(startsAt, -JOIN_OPEN_MIN);
@@ -615,13 +756,27 @@ export async function POST(req: NextRequest) {
         email: supervisor.email,
         mode: supervisorMode,
       },
+      simulationCohort: {
+        enabled: clinicians.length > 1,
+        leadClinicianId: clinician.id,
+        clinicianIds,
+      },
       participants: [
-        {
-          partyId: clinicianPartyId, role: 'LEAD_CLINICIAN', clinicianId: clinician.id,
-          name: clinician.displayName || 'Clinician', specialty: clinician.specialty || null,
-          required: true, source: 'implicit',
-          access: { canJoinTelevisit: true, canViewHealth: true, canBookAppointments: false },
-        },
+        ...clinicians.map((item) => ({
+          partyId: `clin-${item.id}`,
+          role: item.id === clinician.id ? 'LEAD_CLINICIAN' : 'TRAINEE',
+          clinicianId: item.id,
+          clinicianUserId: item.userId || null,
+          name: item.displayName || item.email || 'Clinician',
+          specialty: item.specialty || null,
+          required: true,
+          source: item.id === clinician.id ? 'lead' : 'cohort',
+          access: {
+            canJoinTelevisit: true,
+            canViewHealth: true,
+            canBookAppointments: false,
+          },
+        })),
         {
           partyId: patientPartyId, role: 'PRIMARY_PATIENT', patientId: patient.id,
           name: patientName, required: true, source: 'requested',
@@ -655,7 +810,13 @@ export async function POST(req: NextRequest) {
         data: {
           id: encounterId, caseId, patientId: patient.id, clinicianId: clinician.id,
           visitMode: 'TELEVISIT', status: 'simulation_scheduled', orgId,
-          summaryPayload: { simulation: true, source: 'admin.simulation', sessionNumber },
+          summaryPayload: {
+            simulation: true,
+            source: 'admin.simulation',
+            sessionNumber,
+            leadClinicianId: clinician.id,
+            clinicianIds,
+          },
         },
       });
       const appointment = await tx.appointment.create({
@@ -685,14 +846,18 @@ export async function POST(req: NextRequest) {
     await audit({
       appointmentId, action: 'simulation_appointment_created', actorUserId: actor, reason, orgId,
       afterJson: {
-        clinicianId: clinician.id, patientId: patient.id, supervisorUserId: supervisor.userId,
+        clinicianId: clinician.id, leadClinicianId: clinician.id, clinicianIds,
+        patientId: patient.id, supervisorUserId: supervisor.userId,
         supervisorMode, sessionNumber, startsAt: startsAt.toISOString(), endsAt: endsAt.toISOString(),
       },
     });
 
     return json({
       ok: true,
-      appointment: sessionView({ ...created.appointment, createdAt: new Date(), updatedAt: new Date() }),
+      appointment: sessionView(
+        { ...created.appointment, createdAt: new Date(), updatedAt: new Date() },
+        clinician.id,
+      ),
       televisit: {
         id: created.televisit.id, roomId: created.televisit.roomId,
         joinOpensAt: created.televisit.joinOpensAt, joinClosesAt: created.televisit.joinClosesAt,
@@ -730,8 +895,8 @@ export async function PATCH(req: NextRequest) {
     });
     if (!appointment || appointment.bookingSource !== 'admin_simulation') return json({ ok: false, error: 'simulation_not_found' }, 404);
     const currentMeta = record(appointment.meta);
-    const currentAssessment = assessmentOf(currentMeta);
     const currentSupervisor = supervisorOf(currentMeta);
+    const currentClinicianIds = clinicianIdsFor(appointment);
     const actor = adminUid(req);
     const visit = await (prisma as any).televisit.findFirst({ where: { appointmentId }, orderBy: { createdAt: 'desc' } });
     if (!visit) return json({ ok: false, error: 'televisit_not_found' }, 404);
@@ -739,6 +904,11 @@ export async function PATCH(req: NextRequest) {
     if (action === 'save_assessment' || action === 'finalize_assessment') {
       if (![clean(currentSupervisor.userId, 160), clean(currentSupervisor.id, 160)].includes(actor)) return json({ ok: false, error: 'assigned_supervisor_required' }, 403);
       if (statusClosed(appointment.status)) return json({ ok: false, error: 'simulation_closed' }, 409);
+      const assessmentClinicianId = clean(body.clinicianId, 160) || clean(appointment.clinicianId, 160);
+      if (!currentClinicianIds.includes(assessmentClinicianId)) {
+        return json({ ok: false, error: 'simulation_clinician_not_participating' }, 409);
+      }
+      const currentAssessment = assessmentFor(currentMeta, assessmentClinicianId, appointment.clinicianId);
       if (currentAssessment.status === 'finalized') return json({ ok: false, error: 'assessment_already_finalized' }, 409);
       const input = record(body.assessment);
       const domainsInput = record(input.domains);
@@ -769,14 +939,30 @@ export async function PATCH(req: NextRequest) {
         updatedAt: new Date().toISOString(),
         finalizedAt: finalize ? new Date().toISOString() : null,
       };
-      const nextMeta = { ...currentMeta, simulationAssessment: assessment };
+      const nextAssessments = {
+        ...assessmentsOf(currentMeta),
+        [assessmentClinicianId]: assessment,
+      };
+      const nextMeta = {
+        ...currentMeta,
+        simulationAssessments: nextAssessments,
+        ...(assessmentClinicianId === clean(appointment.clinicianId, 160)
+          ? { simulationAssessment: assessment }
+          : {}),
+      };
       await (prisma as any).appointment.update({ where: { id: appointmentId }, data: { meta: nextMeta } });
-      await audit({ appointmentId, action: finalize ? 'simulation_assessment_finalized' : 'simulation_assessment_saved', actorUserId: actor, orgId: appointment.orgId, afterJson: assessment });
-      return json({ ok: true, assessment });
+      await audit({
+        appointmentId,
+        action: finalize ? 'simulation_assessment_finalized' : 'simulation_assessment_saved',
+        actorUserId: actor,
+        orgId: appointment.orgId,
+        afterJson: { clinicianId: assessmentClinicianId, assessment },
+      });
+      return json({ ok: true, clinicianId: assessmentClinicianId, assessment });
     }
 
     if (statusClosed(appointment.status)) return json({ ok: false, error: 'simulation_closed' }, 409);
-    if (currentAssessment.status === 'finalized') return json({ ok: false, error: 'finalized_simulation_locked' }, 409);
+    if (hasFinalizedAssessment(currentMeta)) return json({ ok: false, error: 'finalized_simulation_locked' }, 409);
 
     if (action === 'cancel' || action === 'no_show') {
       const now = new Date();
@@ -803,12 +989,14 @@ export async function PATCH(req: NextRequest) {
       const endsAt = addMinutes(startsAt, durationMinutes);
       const schedulingMode = normalizeSchedulingMode(body.schedulingMode ?? currentMeta.schedulingMode);
       const customSchedulingReason = optional(body.customSchedulingReason ?? currentMeta.customSchedulingReason, 500);
-      await validateSchedule({
-        clinicianId: appointment.clinicianId, startsAt, endsAt, schedulingMode,
-        customReason: customSchedulingReason, excludeAppointmentId: appointmentId,
-      });
+      for (const clinicianId of currentClinicianIds) {
+        await validateSchedule({
+          clinicianId, startsAt, endsAt, schedulingMode,
+          customReason: customSchedulingReason, excludeAppointmentId: appointmentId,
+        });
+      }
       const conflict = await findActiveOverlap({
-        startsAt, endsAt, clinicianId: appointment.clinicianId,
+        startsAt, endsAt, clinicianIds: currentClinicianIds,
         patientId: appointment.subjectPatientId || appointment.patientId,
         supervisorUserId: clean(currentSupervisor.userId, 160), excludeAppointmentId: appointmentId,
       });
@@ -839,9 +1027,16 @@ export async function PATCH(req: NextRequest) {
       const minutes = int(body.extensionMinutes, 5, 60);
       if (!minutes) return json({ ok: false, error: 'extensionMinutes_required' }, 400);
       const endsAt = addMinutes(new Date(appointment.endsAt), minutes);
-      await validateExtendedAvailability({ clinicianId: appointment.clinicianId, startsAt: new Date(appointment.startsAt), endsAt, excludeAppointmentId: appointmentId });
+      for (const clinicianId of currentClinicianIds) {
+        await validateExtendedAvailability({
+          clinicianId,
+          startsAt: new Date(appointment.startsAt),
+          endsAt,
+          excludeAppointmentId: appointmentId,
+        });
+      }
       const conflict = await findActiveOverlap({
-        startsAt: new Date(appointment.startsAt), endsAt, clinicianId: appointment.clinicianId,
+        startsAt: new Date(appointment.startsAt), endsAt, clinicianIds: currentClinicianIds,
         patientId: appointment.subjectPatientId || appointment.patientId,
         supervisorUserId: clean(currentSupervisor.userId, 160), excludeAppointmentId: appointmentId,
       });

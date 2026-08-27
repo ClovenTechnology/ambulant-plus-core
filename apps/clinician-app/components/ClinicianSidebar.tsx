@@ -10,6 +10,7 @@ import {
   Sun,
   CalendarDays,
   Calendar,
+  GraduationCap,
   Users,
   Building2,
   LayoutGrid,
@@ -99,6 +100,7 @@ export default function ClinicianSidebar() {
               { href: '/today', label: 'Today', icon: Sun },
               { href: '/appointments', label: 'Appointments', icon: CalendarDays },
               { href: '/calendar', label: 'Calendar', icon: Calendar },
+              { href: '/simulation', label: 'Simulation', icon: GraduationCap },
               { href: '/patients', label: 'Patients', icon: Users },
 
               // âœ… requested additions

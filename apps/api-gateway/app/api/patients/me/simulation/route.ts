@@ -41,6 +41,19 @@ export async function POST(req: NextRequest) {
     const partyId = clean(participant?.partyId, 240) || `pat-${patient.id}`;
     await (prisma as any).televisitJoinTicket.updateMany({ where: { visitId: visit.id, uid: partyId, role: 'patient', revokedAt: null }, data: { revokedAt: now } });
     const ttl = Math.max(60, Math.min(900, Math.floor((visit.joinClosesAt.getTime() - now.getTime()) / 1000))); const ticket = await upsertTicket(visit.id, partyId, ttl, 'patient' as any, req as any); if (!ticket?.token) return json({ ok: false, error: 'patient_admission_not_issued' }, 500);
-    return json({ ok: true, admission: { token: ticket.token, expiresAt: ticket.expiresAt, visitId: visit.id, roomId: visit.roomId, appointmentId, participantId: partyId, participantRole: 'patient' } });
+    return json({
+      ok: true,
+      admission: {
+        token: ticket.token,
+        expiresAt: ticket.expiresAt,
+        visitId: visit.id,
+        roomId: visit.roomId,
+        appointmentId,
+        patientId: patient.id,
+        patientName: patient.name || 'Simulation patient',
+        participantId: partyId,
+        participantRole: 'patient',
+      },
+    });
   } catch (error: any) { return json({ ok: false, error: clean(error?.message, 300) || 'simulation_admission_failed' }, error?.status || 500); }
 }
