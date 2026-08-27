@@ -3,7 +3,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname } from 'next/navigation';
 import { Loader2, ShieldAlert } from 'lucide-react';
 
 import InboxBell from '@/components/InboxBell';
@@ -29,27 +29,33 @@ function isExcludedPath(pathname?: string | null) {
 
 function isSimulationSupervisorAdmission(
   pathname: string | null,
-  searchParams: ReturnType<typeof useSearchParams>,
+  searchParams: URLSearchParams,
 ) {
   const p = pathname || '';
   if (!p.startsWith('/sfu/')) return false;
 
-  const simulation = searchParams?.get('simulation') === '1';
-  const actor = String(searchParams?.get('simulationActor') || '').trim().toLowerCase();
+  const simulation = searchParams.get('simulation') === '1';
+  const actor = String(searchParams.get('simulationActor') || '').trim().toLowerCase();
   const role = String(
-    searchParams?.get('participantRole') ||
-    searchParams?.get('role') ||
+    searchParams.get('participantRole') ||
+    searchParams.get('role') ||
     '',
   ).trim().toLowerCase();
   const joinToken = String(
-    searchParams?.get('joinToken') ||
-    searchParams?.get('jt') ||
+    searchParams.get('joinToken') ||
+    searchParams.get('jt') ||
     '',
   ).trim();
   const participantId = String(
-    searchParams?.get('participantId') ||
-    searchParams?.get('uid') ||
+    searchParams.get('participantId') ||
+    searchParams.get('uid') ||
     '',
+  ).trim();
+  const appointmentId = String(
+    searchParams.get('appointmentId') || '',
+  ).trim();
+  const visitId = String(
+    searchParams.get('visitId') || '',
   ).trim();
 
   return (
@@ -57,7 +63,7 @@ function isSimulationSupervisorAdmission(
     actor === 'supervisor' &&
     role === 'observer' &&
     joinToken.split('.').length === 3 &&
-    Boolean(participantId)
+    Boolean(participantId && appointmentId && visitId)
   );
 }
 
@@ -83,6 +89,16 @@ function loginUrl(next?: string | null) {
   return `/auth/login?${qs.toString()}`;
 }
 
+function currentRelativeUrl(pathname?: string | null) {
+  const base = safeNext(pathname);
+
+  if (typeof window === 'undefined') {
+    return base;
+  }
+
+  return safeNext(`${base}${window.location.search || ''}`);
+}
+
 type GateState =
   | { status: 'checking' }
   | { status: 'allowed' }
@@ -91,22 +107,46 @@ type GateState =
 
 export default function ClinicianChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
-  const supervisorAdmission = useMemo(
-    () => isSimulationSupervisorAdmission(pathname, searchParams),
-    [pathname, searchParams],
+  const excludedPath = useMemo(
+    () => isExcludedPath(pathname),
+    [pathname],
   );
-  const hideChrome = useMemo(
-    () => isExcludedPath(pathname) || supervisorAdmission,
-    [pathname, supervisorAdmission],
-  );
+  const [routeContext, setRouteContext] = useState({
+    ready: false,
+    supervisorAdmission: false,
+  });
+  const hideChrome = excludedPath || routeContext.supervisorAdmission;
   const [gate, setGate] = useState<GateState>({ status: 'checking' });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const searchParams = new URLSearchParams(window.location.search);
+
+    setRouteContext({
+      ready: true,
+      supervisorAdmission: isSimulationSupervisorAdmission(
+        pathname,
+        searchParams,
+      ),
+    });
+  }, [pathname]);
 
   useEffect(() => {
     let cancelled = false;
 
     async function checkAccess() {
-      if (hideChrome) {
+      if (excludedPath) {
+        setGate({ status: 'allowed' });
+        return;
+      }
+
+      if (!routeContext.ready) {
+        setGate({ status: 'checking' });
+        return;
+      }
+
+      if (routeContext.supervisorAdmission) {
         setGate({ status: 'allowed' });
         return;
       }
@@ -127,7 +167,7 @@ export default function ClinicianChrome({ children }: { children: React.ReactNod
 
         if (res.status === 401 || res.status === 403 || !data?.ok) {
           setGate({ status: 'redirecting', message: 'Redirecting to sign in…' });
-          window.location.replace(loginUrl(pathname));
+          window.location.replace(loginUrl(currentRelativeUrl(pathname)));
           return;
         }
 
@@ -152,7 +192,7 @@ export default function ClinicianChrome({ children }: { children: React.ReactNod
           window.location.replace(
             trainingUrl({
               clinicianId: clinicianId ? String(clinicianId) : null,
-              next: pathname,
+              next: currentRelativeUrl(pathname),
             }),
           );
           return;
@@ -168,7 +208,7 @@ export default function ClinicianChrome({ children }: { children: React.ReactNod
         });
 
         window.setTimeout(() => {
-          window.location.replace(loginUrl(pathname));
+          window.location.replace(loginUrl(currentRelativeUrl(pathname)));
         }, 900);
       }
     }
@@ -178,7 +218,7 @@ export default function ClinicianChrome({ children }: { children: React.ReactNod
     return () => {
       cancelled = true;
     };
-  }, [hideChrome, pathname]);
+  }, [excludedPath, pathname, routeContext.ready, routeContext.supervisorAdmission]);
 
   if (gate.status !== 'allowed') {
     return (
