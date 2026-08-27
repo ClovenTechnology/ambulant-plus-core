@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto';
 import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/src/lib/db';
+import { readIdentity } from '@/src/lib/identity';
 import { upsertTicket } from '@/src/lib/join';
 import {
   AvailabilityError,
@@ -578,7 +579,8 @@ export async function POST(req: NextRequest) {
     const joinOpensAt = addMinutes(startsAt, -JOIN_OPEN_MIN);
     const joinClosesAt = addMinutes(endsAt, JOIN_LATE_MIN);
     const actor = adminUid(req);
-    const orgId = optional(req.headers.get('x-org-id'), 120) || optional(body.orgId, 120) || '';
+    const identityOrgId = optional(readIdentity(req.headers).orgId, 120);
+    const orgId = identityOrgId || optional(process.env.DEFAULT_ORG_ID, 120) || 'org-default';
     const reason = optional(body.reason, 500) ||
       (sessionNumber <= REQUIRED_PASSES
         ? `Supervised simulation consultation ${sessionNumber}/${REQUIRED_PASSES}`
