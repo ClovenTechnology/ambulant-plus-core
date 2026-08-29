@@ -15,6 +15,7 @@ type Props = {
   qualityLabel: string;
   consentGiven: boolean;
   onConsentChange: (v: boolean) => void;
+  consentDisabled?: boolean;
   policyUrl: string;
   dense: boolean;
   leftCollapsed: boolean;
@@ -148,6 +149,7 @@ export default function PatientSfuHeader(props: Props) {
     qualityLabel,
     consentGiven,
     onConsentChange,
+    consentDisabled = false,
     policyUrl,
     dense,
     leftCollapsed,
@@ -168,10 +170,10 @@ export default function PatientSfuHeader(props: Props) {
 
   return (
     <div className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/80">
-      <header className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-3 px-4 py-3">
-        <div className="min-w-0">
+      <header className="mx-auto flex w-full max-w-[1600px] flex-col gap-3 px-4 py-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 w-full lg:flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="truncate text-lg font-semibold text-slate-900 md:text-xl">
+            <h1 className="min-w-0 flex-1 truncate text-base font-semibold text-slate-900 sm:text-lg md:text-xl">
               Patient Console — Room {roomId}
             </h1>
 
@@ -190,7 +192,7 @@ export default function PatientSfuHeader(props: Props) {
           <RosterChips roster={roster} />
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:shrink-0 lg:justify-end">
           <IconBtn
             title={leftCollapsed ? 'Show left pane' : 'Hide left pane'}
             aria-label={leftCollapsed ? 'Show left pane' : 'Hide left pane'}
@@ -221,30 +223,41 @@ export default function PatientSfuHeader(props: Props) {
             <span className="text-sm">{rightCollapsed ? '⟪' : '⟫'}</span>
           </IconBtn>
 
-          <div className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs md:flex">
-            <label className="inline-flex items-center gap-2">
-              <input
-                type="checkbox"
-                checked={consentGiven}
-                onChange={(e) => onConsentChange(e.target.checked)}
-              />
-              <span className="text-slate-700">
-                I consent to this Televisit and recording if enabled.
-              </span>
-            </label>
+          {state !== 'connected' && state !== 'reconnecting' ? (
+            <div className="hidden items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs md:flex">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={consentGiven}
+                  disabled={consentDisabled}
+                  onChange={(e) => onConsentChange(e.target.checked)}
+                />
+                <span className="text-slate-700">
+                  I consent to this consultation and required camera, microphone, device and vital-sign sharing.
+                </span>
+              </label>
+              <Link
+                href={policyUrl}
+                target="_blank"
+                className="font-medium text-blue-700 underline"
+              >
+                Policy
+              </Link>
+            </div>
+          ) : (
             <Link
               href={policyUrl}
               target="_blank"
-              className="font-medium text-blue-700 underline"
+              className="hidden rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 md:inline-flex"
             >
-              Policy
+              Consultation consent recorded · Policy
             </Link>
-          </div>
+          )}
 
           {state !== 'connected' ? (
             <button
               onClick={onJoin}
-              disabled={!consentGiven}
+              disabled={!consentGiven || consentDisabled}
               className="rounded-full border border-blue-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 shadow-sm hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50"
             >
               Join

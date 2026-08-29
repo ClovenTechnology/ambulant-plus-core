@@ -402,6 +402,12 @@ export default function LegalWorkspace() {
     useState('');
 
   const [
+    creatingNewVersion,
+    setCreatingNewVersion,
+  ] =
+    useState(false);
+
+  const [
     loading,
     setLoading,
   ] =
@@ -586,7 +592,8 @@ export default function LegalWorkspace() {
     useMemo(
       () => {
         if (
-          !selectedDocument
+          !selectedDocument ||
+          creatingNewVersion
         ) {
           return null;
         }
@@ -607,11 +614,16 @@ export default function LegalWorkspace() {
       [
         selectedDocument,
         selectedVersionId,
+        creatingNewVersion,
       ],
     );
 
   useEffect(
     () => {
+      if (creatingNewVersion) {
+        return;
+      }
+
       if (
         !selectedVersion
       ) {
@@ -655,6 +667,7 @@ export default function LegalWorkspace() {
     },
     [
       selectedVersion?.id,
+      creatingNewVersion,
     ],
   );
 
@@ -909,27 +922,44 @@ export default function LegalWorkspace() {
       return;
     }
 
-    await action(
-      {
-        action:
-          'create_version',
-        documentId:
-          selectedDocument.id,
-        versionLabel:
-          versionLabel ||
-          null,
-        locale:
-          'en-ZA',
-        contentFormat:
-          'markdown',
-        content,
-        changeSummary:
-          changeSummary ||
-          null,
-      },
-      'A new immutable draft version was created.',
-      selectedDocument.id,
-    );
+    const responseBody =
+      await action(
+        {
+          action:
+            'create_version',
+          documentId:
+            selectedDocument.id,
+          versionLabel:
+            versionLabel ||
+            null,
+          locale:
+            'en-ZA',
+          contentFormat:
+            'markdown',
+          content,
+          changeSummary:
+            changeSummary ||
+            null,
+        },
+        'A new immutable draft version was created.',
+        selectedDocument.id,
+      );
+
+    if (!responseBody) {
+      return;
+    }
+
+    if (responseBody?.result?.created === false) {
+      setCreatingNewVersion(true);
+      setSelectedVersionId('');
+      setNotice({
+        tone: 'err',
+        text: 'This governed content is byte-identical to an existing immutable version. Update the version/effective-date wording or make the intended Legal revision before creating the new version.',
+      });
+      return;
+    }
+
+    setCreatingNewVersion(false);
   }
 
   async function saveDraft() {
@@ -1245,6 +1275,7 @@ export default function LegalWorkspace() {
                     type="button"
                     key={document.id}
                     onClick={() => {
+                      setCreatingNewVersion(false);
                       setSelectedDocumentId(document.id);
                       setSelectedVersionId(document.versions?.[0]?.id || '');
                     }}
@@ -1371,7 +1402,10 @@ export default function LegalWorkspace() {
                           <button
                             type="button"
                             key={version.id}
-                            onClick={() => setSelectedVersionId(version.id)}
+                            onClick={() => {
+                              setCreatingNewVersion(false);
+                              setSelectedVersionId(version.id);
+                            }}
                             className={[
                               'w-full rounded-xl border p-3 text-left transition',
                               selectedVersion?.id === version.id
@@ -1409,10 +1443,16 @@ export default function LegalWorkspace() {
                     <button
                       type="button"
                       onClick={() => {
+                        const sourceVersion = selectedVersion;
+                        setCreatingNewVersion(true);
                         setSelectedVersionId('');
-                        setContent('');
+                        setContent(sourceVersion?.content || '');
                         setVersionLabel('');
-                        setChangeSummary('');
+                        setChangeSummary(
+                          sourceVersion
+                            ? `New version based on v${sourceVersion.versionNumber}`
+                            : '',
+                        );
                       }}
                       className="mt-4 w-full rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm font-semibold text-indigo-800 transition hover:bg-indigo-100"
                     >
@@ -1434,6 +1474,11 @@ export default function LegalWorkspace() {
                             Lawyer-approved wording belongs here rather than in
                             product source code.
                           </p>
+                          {creatingNewVersion ? (
+                            <p className="mt-2 rounded-xl border border-indigo-100 bg-indigo-50 px-3 py-2 text-xs leading-5 text-indigo-800">
+                              New-draft mode is active. Historical versions remain immutable. The previous wording has been copied as a starting point; update the version/effective-date wording or other intended Legal content before creating v{(selectedDocument.versions?.[0]?.versionNumber || 0) + 1}.
+                            </p>
+                          ) : null}
                         </div>
 
                         {selectedVersion ? (

@@ -679,7 +679,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, rightTab, pip } =
     ui;
-  const rightPanelsOpen = true;
+  const [rightPanelsOpen, setRightPanelsOpen] = useState(true);
 
   // keep latest toggles in a ref for clean control handling (prevents duplicate toasts)
   const togglesRef = useRef({
@@ -2705,6 +2705,8 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                 <div className="text-sm font-semibold text-gray-800">SOAP, Insights, History</div>
               </div>
 
+              <div className="px-2 text-[11px] text-slate-500">Only the active tab occupies this workspace. Room Chat and Bedside Monitor are grouped under Sub.</div>
+
               <div className="shadow-sm bg-white rounded">
                 <div className="flex items-center justify-between p-1">
                   <Tabs<RightTab>
@@ -2720,12 +2722,12 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                   />
                   <button
                     className="ml-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                    onClick={() => setUi('rightCollapsed', rightPanelsOpen)}
-                    aria-pressed={rightPanelsOpen}
-                    aria-label={rightPanelsOpen ? 'Hide right panels' : 'Show right panels'}
-                    title={rightPanelsOpen ? 'Hide right panels' : 'Show right panels'}
+                    onClick={() => setRightPanelsOpen((open) => !open)}
+                    aria-expanded={rightPanelsOpen}
+                    aria-label={rightPanelsOpen ? 'Collapse active workspace' : 'Expand active workspace'}
+                    title={rightPanelsOpen ? 'Collapse active workspace' : 'Expand active workspace'}
                   >
-                    {rightPanelsOpen ? 'Hide panels' : 'Show panels'}
+                    {rightPanelsOpen ? 'Collapse' : 'Expand'}
                   </button>
                 </div>
               </div>
@@ -3126,98 +3128,102 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                 </>
               </Collapse>
 
-              <Card
-                title={
-                  <span>
-                    Room Chat{' '}
-                    {unread > 0 ? (
-                      <span className="ml-1 inline-flex items-center justify-center text-[11px] leading-none px-1.5 py-0.5 rounded-full bg-red-600 text-white">
-                        {unread}
-                      </span>
-                    ) : null}
-                  </span>
-                }
-                dense={dense}
-                gradient
-                toolbar={
-                  <CollapseBtn
-                    open={chatVisible}
-                    onClick={() => {
-                      setUi('chatVisible', !chatVisible);
-                      if (!chatVisible) setUnread(0);
-                    }}
-                  />
-                }
-              >
-                <Collapse open={chatVisible}>
-                  <div
-                    ref={chatBoxRef}
-                    className="h-40 overflow-auto border rounded p-2 text-sm bg-white"
-                    role="log"
-                    aria-live="polite"
-                    aria-relevant="additions"
-                    onFocus={() => setUnread(0)}
-                  >
-                    {chat.map((c, i) => (
-                      <div key={i} className="mb-1 flex items-baseline gap-2">
-                        <span className="text-gray-500 font-mono">{c.from}:</span>
-                        <span>{c.text}</span>
-                        <span className="ml-auto text-[11px] text-gray-400">{new Date().toLocaleTimeString()}</span>
-                      </div>
-                    ))}
-                    {chat.length === 0 && (
-                      <div className="text-gray-400 text-sm italic flex items-center gap-2">
-                        <span aria-hidden>💬</span>
-                        No messages yet
-                      </div>
-                    )}
-                  </div>
-                  <div className="mt-2 flex gap-2 items-start">
-                    <textarea
-                      value={msg}
-                      onChange={(e) => setMsg(e.target.value)}
-                      onKeyDown={onChatKey}
-                      rows={2}
-                      className="border rounded px-2 py-1 text-sm flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 resize-y"
-                      placeholder={
-                        state === 'connected'
-                          ? 'Type message... (Enter to send, Shift+Enter for newline)'
-                          : 'Join the room to send messages'
-                      }
-                      aria-label="Type chat message"
-                      disabled={state !== 'connected'}
-                    />
-                    <button
-                      onClick={() => {
-                        if (!msgSending) sendMsg();
-                      }}
-                      disabled={msgSending || state !== 'connected' || !msg.trim()}
-                      title={state === 'connected' ? 'Send message' : 'Join to send messages'}
-                      className="px-3 py-1.5 border rounded bg-blue-50 hover:bg-blue-100 disabled:opacity-50"
-                    >
-                      Send
-                    </button>
-                  </div>
-                  {typingNote && <div className="mt-1 text-xs text-gray-600">{typingNote}</div>}
-                </Collapse>
-              </Card>
-
-              <section ref={vitalsGraphHolder.ref}>
+              {rightTab === 'soap' && rightPanelsOpen ? (
+                <>
                 <Card
-                  title="Bedside Monitor (live)"
+                  title={
+                    <span>
+                      Room Chat{' '}
+                      {unread > 0 ? (
+                        <span className="ml-1 inline-flex items-center justify-center text-[11px] leading-none px-1.5 py-0.5 rounded-full bg-red-600 text-white">
+                          {unread}
+                        </span>
+                      ) : null}
+                    </span>
+                  }
                   dense={dense}
                   gradient
-                  toolbar={<CollapseBtn open={rightIomtOpen} onClick={() => setRightIomtOpen((v) => !v)} />}
+                  toolbar={
+                    <CollapseBtn
+                      open={chatVisible}
+                      onClick={() => {
+                        setUi('chatVisible', !chatVisible);
+                        if (!chatVisible) setUnread(0);
+                      }}
+                    />
+                  }
                 >
-                  <Collapse open={rightIomtOpen}>
-                    {vitalsGraphHolder.mounted ? (
-                      <ClinicianVitalsPanel room={room} defaultCollapsed={false} maxPoints={240} showDockBadge={false} />
-                    ) : (
-                      <Skeleton height="h-40" />
-                    )}
+                  <Collapse open={chatVisible}>
+                    <div
+                      ref={chatBoxRef}
+                      className="h-40 overflow-auto border rounded p-2 text-sm bg-white"
+                      role="log"
+                      aria-live="polite"
+                      aria-relevant="additions"
+                      onFocus={() => setUnread(0)}
+                    >
+                      {chat.map((c, i) => (
+                        <div key={i} className="mb-1 flex items-baseline gap-2">
+                          <span className="text-gray-500 font-mono">{c.from}:</span>
+                          <span>{c.text}</span>
+                          <span className="ml-auto text-[11px] text-gray-400">{new Date().toLocaleTimeString()}</span>
+                        </div>
+                      ))}
+                      {chat.length === 0 && (
+                        <div className="text-gray-400 text-sm italic flex items-center gap-2">
+                          <span aria-hidden>💬</span>
+                          No messages yet
+                        </div>
+                      )}
+                    </div>
+                    <div className="mt-2 flex gap-2 items-start">
+                      <textarea
+                        value={msg}
+                        onChange={(e) => setMsg(e.target.value)}
+                        onKeyDown={onChatKey}
+                        rows={2}
+                        className="border rounded px-2 py-1 text-sm flex-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 resize-y"
+                        placeholder={
+                          state === 'connected'
+                            ? 'Type message... (Enter to send, Shift+Enter for newline)'
+                            : 'Join the room to send messages'
+                        }
+                        aria-label="Type chat message"
+                        disabled={state !== 'connected'}
+                      />
+                      <button
+                        onClick={() => {
+                          if (!msgSending) sendMsg();
+                        }}
+                        disabled={msgSending || state !== 'connected' || !msg.trim()}
+                        title={state === 'connected' ? 'Send message' : 'Join to send messages'}
+                        className="px-3 py-1.5 border rounded bg-blue-50 hover:bg-blue-100 disabled:opacity-50"
+                      >
+                        Send
+                      </button>
+                    </div>
+                    {typingNote && <div className="mt-1 text-xs text-gray-600">{typingNote}</div>}
                   </Collapse>
                 </Card>
-              </section>
+
+                <section ref={vitalsGraphHolder.ref}>
+                  <Card
+                    title="Bedside Monitor (live)"
+                    dense={dense}
+                    gradient
+                    toolbar={<CollapseBtn open={rightIomtOpen} onClick={() => setRightIomtOpen((v) => !v)} />}
+                  >
+                    <Collapse open={rightIomtOpen}>
+                      {vitalsGraphHolder.mounted ? (
+                        <ClinicianVitalsPanel room={room} defaultCollapsed={false} maxPoints={240} showDockBadge={false} />
+                      ) : (
+                        <Skeleton height="h-40" />
+                      )}
+                    </Collapse>
+                  </Card>
+                </section>
+                </>
+              ) : null}
             </div>
           )}
         </div>

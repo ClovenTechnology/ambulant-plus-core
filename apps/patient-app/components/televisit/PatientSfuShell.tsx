@@ -251,7 +251,9 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   const identity = useMemo(() => `patient-${getUid()}`, []);
   const [consentGiven, setConsentGiven] = useState(false);
   const [recordingConsentGiven, setRecordingConsentGiven] = useState(false);
-  const policyUrl = '/policy/televisit.pdf';
+  const policyUrl = '/policy/televisit';
+  const [policyAvailable, setPolicyAvailable] = useState<boolean | null>(null);
+  const [policyVersionLabel, setPolicyVersionLabel] = useState<string | null>(null);
 
   const [dense, setDense] = useState(false);
   const [leftCollapsed, setLeftCollapsed] = useState(false);
@@ -261,6 +263,36 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   const [room, setRoom] = useState<Room | null>(null);
   const roomRef = useRef<Room | null>(null);
   const [roster, setRoster] = useState<RoomParty[]>([]);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function hydrateTelevisitPolicy() {
+      try {
+        const response = await fetch(
+          '/api/legal/published?key=PATIENT_TELEVISIT_CONSENT&application=patient-app&surface=televisit-consent',
+          { cache: 'no-store', credentials: 'include' },
+        );
+        const body = await response.json().catch(() => null);
+        const document = response.ok && body?.ok && Array.isArray(body?.documents) ? body.documents[0] : null;
+        if (!alive) return;
+        setPolicyAvailable(Boolean(document?.version?.id));
+        setPolicyVersionLabel(
+          document?.version?.versionLabel ||
+          (document?.version?.versionNumber ? `v${document.version.versionNumber}` : null),
+        );
+      } catch {
+        if (!alive) return;
+        setPolicyAvailable(false);
+        setPolicyVersionLabel(null);
+      }
+    }
+
+    void hydrateTelevisitPolicy();
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -985,6 +1017,11 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   );
 
   const join = useCallback(async () => {
+    if (policyAvailable !== true) {
+      toast.error?.('The Patient Televisit consent notice is not currently published. Please try again after Legal publication.');
+      return;
+    }
+
     if (!consentGiven) {
       toast.error?.('Please consent to this consultation before joining.');
       return;
@@ -1059,7 +1096,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
       setState('disconnected');
       toast.error?.(err instanceof Error ? err.message : 'Failed to join room.');
     }
-  }, [appointmentId, consentGiven, roomId, search, sessionCtx.appointmentId, state, toast, wireRoomEvents, wsUrl]);
+  }, [appointmentId, consentGiven, policyAvailable, roomId, search, sessionCtx.appointmentId, state, toast, wireRoomEvents, wsUrl]);
 
 
   // A6-R3-E1G: publish patient room presence only while LiveKit is connected.
@@ -1346,6 +1383,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
         qualityLabel={qualityLabel}
         consentGiven={consentGiven}
         onConsentChange={setConsentGiven}
+        consentDisabled={policyAvailable !== true}
         policyUrl={policyUrl}
         dense={dense}
         leftCollapsed={leftCollapsed}
@@ -1417,14 +1455,15 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
       ) : null}
 
       <div className={`mx-auto min-h-0 w-full max-w-[1800px] flex-1 overflow-hidden px-4 ${dense ? 'py-2' : 'py-3'}`}>
-        {!presentation ? (
+        {!presentation && state !== 'connected' && state !== 'reconnecting' ? (
           <section className="mb-3 rounded-3xl border border-blue-100 bg-blue-50/80 p-3 shadow-sm lg:hidden">
             <label className="flex items-start gap-3 text-sm leading-6 text-slate-700">
               <input
                 type="checkbox"
                 checked={consentGiven}
+                disabled={policyAvailable !== true}
                 onChange={(event) => setConsentGiven(event.target.checked)}
-                className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
               />
               <span>
                 I consent to this consultation, including camera, microphone, connected-device and vital-sign sharing required for the session.{' '}
@@ -1438,6 +1477,15 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
                 </a>
               </span>
             </label>
+            {policyAvailable !== true ? (
+              <div className="mt-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-medium text-rose-800">
+                {policyAvailable === null
+                  ? 'Checking the governed Patient Televisit consent notice…'
+                  : 'The governed Patient Televisit consent notice is not currently published. Joining is disabled until Legal publishes an active version.'}
+              </div>
+            ) : policyVersionLabel ? (
+              <div className="mt-2 text-[11px] font-medium text-blue-800">Governed consent: {policyVersionLabel}</div>
+            ) : null}
             <label className="mt-2 flex items-start gap-3 border-t border-blue-100 pt-2 text-sm leading-6 text-slate-700">
               <input
                 type="checkbox"
@@ -1455,6 +1503,28 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
               <span>
                 Optional: I separately consent to local-device recording if the consultation supports it. No routine cloud recording is implied.
               </span>
+            </label>
+          </section>
+        ) : null}
+
+        {!presentation && (state === 'connected' || state === 'reconnecting') ? (
+          <section className="mb-2 flex flex-wrap items-center gap-2 rounded-2xl border border-emerald-100 bg-emerald-50/80 px-3 py-2 text-xs text-emerald-900 lg:hidden">
+            <span className="font-semibold">Consultation consent recorded</span>
+            <a href={policyUrl} target="_blank" rel="noreferrer" className="font-semibold text-blue-700 underline">Policy</a>
+            <label className="ml-auto inline-flex items-center gap-2">
+              <input
+                type="checkbox"
+                checked={recordingConsentGiven}
+                onChange={(event) => {
+                  const next = event.target.checked;
+                  setRecordingConsentGiven(next);
+                  if (!next && isRecording) {
+                    setIsRecording(false);
+                    void publishControl('recording', false);
+                  }
+                }}
+              />
+              <span>Recording consent</span>
             </label>
           </section>
         ) : null}
