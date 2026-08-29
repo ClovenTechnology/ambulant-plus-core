@@ -1,22 +1,19 @@
 /* eslint-disable @typescript-eslint/ban-ts-comment */
-import type { Readable } from 'stream';
-
-// ---------- Types ----------
 export type ICD10Entry = {
-  code: string;               // e.g. "J20.9"
-  title: string;              // e.g. "Acute bronchitis, unspecified"
-  synonyms?: string[];        // extra search terms
-  includes?: string[];        // ICD-10 includes (optional)
-  excludes?: string[];        // ICD-10 excludes (optional)
-  chapter?: string;           // "Chapter X: Diseases of the respiratory system"
-  parent?: string;            // parent category code
+  code: string;
+  title: string;
+  synonyms?: string[];
+  includes?: string[];
+  excludes?: string[];
+  chapter?: string;
+  parent?: string;
 };
 
 export type ICD10SearchOptions = {
-  limit?: number;             // default 25
-  fuzzy?: boolean;            // default true
-  minScore?: number;          // default 2
-  includeParents?: boolean;   // default true (returns parent categories too)
+  limit?: number;
+  fuzzy?: boolean;
+  minScore?: number;
+  includeParents?: boolean;
 };
 
 export type ICD10SearchHit = {
@@ -27,226 +24,187 @@ export type ICD10SearchHit = {
   entry: ICD10Entry;
 };
 
-// ---------- In-memory store + configuration ----------
-let _icd10Data: ICD10Entry[] = [];
-
-/**
- * Inject/replace the full ICD-10 dataset in memory (server-only recommended).
- * Use this at API startup after loading from file or DB.
- */
-export function setICD10Data(data: ICD10Entry[]) {
-  if (!Array.isArray(data)) throw new Error('setICD10Data: data must be an array');
-  _icd10Data = data;
-}
-
-/**
- * Returns the current dataset (mainly for testing).
- */
-export function getICD10Data(): ICD10Entry[] {
-  return _icd10Data;
-}
-
-// ---------- Robust loaders (server-side) ----------
-/**
- * Load gzipped JSON array of ICD10Entry (e.g., packages/clinical-codes/data/icd10.min.json.gz).
- * Only works in Node (server). No-ops on the client.
- */
-export async function loadICD10FromGzip(filePath: string): Promise<void> {
-  if (typeof window !== 'undefined') return; // client: skip
-  // Lazy import to avoid bundling 'fs'/'zlib' in client builds
-  // @ts-ignore
-  const fs = await import('node:fs');
-  // @ts-ignore
-  const zlib = await import('node:zlib');
-  // @ts-ignore
-  const { promisify } = await import('node:util');
-  const gunzip = promisify(zlib.gunzip);
-
-  const buf: Buffer = await fs.promises.readFile(filePath);
-  const json = await gunzip(buf);
-  const list = JSON.parse(json.toString('utf8')) as ICD10Entry[];
-  setICD10Data(list);
-}
-
-/**
- * Load plain JSON (ungzipped). Server-side helper.
- */
-export async function loadICD10FromJson(filePath: string): Promise<void> {
-  if (typeof window !== 'undefined') return;
-  // @ts-ignore
-  const fs = await import('node:fs');
-  const raw = await fs.promises.readFile(filePath, 'utf8');
-  const list = JSON.parse(raw) as ICD10Entry[];
-  setICD10Data(list);
-}
-
-// ---------- Search helpers ----------
-const ABBREVIATIONS: Record<string, string[]> = {
-  // common clinical abbreviations → expanded tokens
-  'htn': ['hypertension'],
-  'dm': ['diabetes'],
-  't2dm': ['type 2 diabetes', 'type ii diabetes'],
-  't1dm': ['type 1 diabetes', 'type i diabetes'],
-  'copd': ['chronic obstructive pulmonary disease'],
-  'ckd': ['chronic kidney disease'],
-  'hf': ['heart failure'],
-  'mi': ['myocardial infarction'],
-  'uti': ['urinary tract infection'],
-  'uri': ['upper respiratory infection', 'upper respiratory tract infection'],
-  'lbp': ['low back pain'],
-  'tb': ['tuberculosis'],
-  'hiv': ['human immunodeficiency virus', 'hiv disease'],
-  'pud': ['peptic ulcer disease'],
-  'pna': ['pneumonia'],
+type IndexedEntry = {
+  entry: ICD10Entry;
+  code: string;
+  title: string;
+  synonyms: string[];
+  includes: string[];
+  excludes: string[];
 };
 
-function normalize(s: string): string {
-  return s
+let _icd10Data: ICD10Entry[] = [];
+let _index: IndexedEntry[] = [];
+let _prefix = new Map<string, number[]>();
+
+const ABBREVIATIONS: Record<string, string[]> = {
+  htn: ['hypertension'],
+  dm: ['diabetes'],
+  t2dm: ['type 2 diabetes', 'type ii diabetes'],
+  t1dm: ['type 1 diabetes', 'type i diabetes'],
+  copd: ['chronic obstructive pulmonary disease'],
+  ckd: ['chronic kidney disease'],
+  hf: ['heart failure'],
+  mi: ['myocardial infarction'],
+  uti: ['urinary tract infection'],
+  uri: ['upper respiratory infection', 'upper respiratory tract infection'],
+  lbp: ['low back pain'],
+  tb: ['tuberculosis'],
+  hiv: ['human immunodeficiency virus', 'hiv disease'],
+  pud: ['peptic ulcer disease'],
+  pna: ['pneumonia'],
+};
+
+function normalize(value: unknown) {
+  return String(value ?? '')
     .toLowerCase()
     .normalize('NFKD')
-    .replace(/[\u0300-\u036f]/g, '')    // strip diacritics
-    .replace(/[^a-z0-9\s\.]/g, ' ')     // keep letters/numbers/dots
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9\s.]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function tokenize(q: string): string[] {
-  const n = normalize(q);
-  const raw = n.split(' ').filter(Boolean);
-  const expanded: string[] = [];
-  for (const t of raw) {
-    expanded.push(t);
-    const add = ABBREVIATIONS[t];
-    if (add) expanded.push(...add.map(normalize));
-  }
-  return Array.from(new Set(expanded)); // unique
+function unique(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)));
 }
 
-function scoreAgainst(hay: string, phrase: string, tokens: string[]): number {
-  let score = 0;
-
-  // Exact code or phrase boosts
-  if (hay === phrase) score += 50;
-  if (hay.startsWith(phrase)) score += 40;
-  if (hay.includes(phrase)) score += 30;
-
-  // Token coverage
-  let covered = 0;
-  for (const t of tokens) {
-    if (!t) continue;
-    if (hay.includes(t)) covered++;
-    // small prefix bias
-    if (hay.startsWith(t)) score += 2;
+function tokensFor(query: string) {
+  const raw = normalize(query).split(' ').filter(Boolean);
+  const expanded = [...raw];
+  for (const token of raw) {
+    const extra = ABBREVIATIONS[token];
+    if (extra) expanded.push(...extra.map(normalize));
   }
-  score += covered * 4;
+  return unique(expanded);
+}
 
-  // Shorter matches get a tiny bonus
-  if (hay.length < 20 && phrase.length > 2 && hay.startsWith(phrase)) score += 4;
+function prefixKeys(value: string) {
+  const words = normalize(value).split(/[\s.]+/).filter(Boolean);
+  const keys = new Set<string>();
+  for (const word of words) {
+    if (word.length >= 2) keys.add(word.slice(0, 2));
+    if (word.length >= 3) keys.add(word.slice(0, 3));
+  }
+  return keys;
+}
 
+function rebuildIndex() {
+  _index = _icd10Data.map((entry) => ({
+    entry,
+    code: normalize(entry.code),
+    title: normalize(entry.title),
+    synonyms: (entry.synonyms || []).map(normalize).filter(Boolean),
+    includes: (entry.includes || []).map(normalize).filter(Boolean),
+    excludes: (entry.excludes || []).map(normalize).filter(Boolean),
+  }));
+
+  const prefix = new Map<string, number[]>();
+  _index.forEach((row, index) => {
+    const values = [
+      row.entry.code,
+      row.entry.title,
+      ...(row.entry.synonyms || []),
+      ...(row.entry.includes || []),
+    ];
+    const keys = new Set<string>();
+    values.forEach((value) => prefixKeys(value).forEach((key) => keys.add(key)));
+    keys.forEach((key) => {
+      const current = prefix.get(key);
+      if (current) current.push(index);
+      else prefix.set(key, [index]);
+    });
+  });
+  _prefix = prefix;
+}
+
+export function setICD10Data(data: ICD10Entry[]) {
+  if (!Array.isArray(data)) throw new Error('setICD10Data: data must be an array');
+  _icd10Data = data
+    .filter((row) => row && String(row.code || '').trim() && String(row.title || '').trim())
+    .map((row) => ({ ...row, code: String(row.code).trim(), title: String(row.title).trim() }));
+  rebuildIndex();
+}
+
+export function getICD10Data(): ICD10Entry[] {
+  return _icd10Data;
+}
+
+export async function loadICD10FromGzip(filePath: string): Promise<void> {
+  if (typeof window !== 'undefined') return;
+  const fs = await import('node:fs');
+  const zlib = await import('node:zlib');
+  const { promisify } = await import('node:util');
+  const gunzip = promisify(zlib.gunzip);
+  const buf: Buffer = await fs.promises.readFile(filePath);
+  const json = await gunzip(buf);
+  setICD10Data(JSON.parse(json.toString('utf8')) as ICD10Entry[]);
+}
+
+export async function loadICD10FromJson(filePath: string): Promise<void> {
+  if (typeof window !== 'undefined') return;
+  const fs = await import('node:fs');
+  setICD10Data(JSON.parse(await fs.promises.readFile(filePath, 'utf8')) as ICD10Entry[]);
+}
+
+function fieldScore(hay: string, phrase: string, tokens: string[]) {
+  if (!hay) return 0;
+  let score = 0;
+  if (hay === phrase) score += 100;
+  else if (hay.startsWith(phrase)) score += 70;
+  else if (phrase.length >= 3 && hay.includes(phrase)) score += 45;
+
+  let tokenHits = 0;
+  for (const token of tokens) {
+    if (hay === token) score += 18;
+    if (hay.startsWith(token)) score += 10;
+    if (hay.includes(token)) tokenHits += 1;
+  }
+  score += tokenHits * 6;
   return score;
 }
 
-function bestFieldScore(entry: ICD10Entry, qPhrase: string, qTokens: string[]) {
-  const fields: Array<{ val?: string | string[]; key: ICD10SearchHit['matchIn'] }> = [
-    { val: entry.code, key: 'code' },
-    { val: entry.title, key: 'title' },
-    { val: entry.synonyms, key: 'synonyms' },
-    { val: entry.includes, key: 'includes' },
-    { val: entry.excludes, key: 'excludes' },
-  ];
-
-  let best: { score: number; where: ICD10SearchHit['matchIn'] } = { score: 0, where: 'title' };
-
-  for (const f of fields) {
-    if (!f.val) continue;
-    if (Array.isArray(f.val)) {
-      for (const s of f.val) {
-        const sc = scoreAgainst(normalize(s), qPhrase, qTokens);
-        if (sc > best.score) best = { score: sc, where: f.key };
-      }
-    } else {
-      const sc = scoreAgainst(normalize(f.val), qPhrase, qTokens);
-      if (sc > best.score) best = { score: sc, where: f.key };
-    }
-  }
-  return best;
-}
-
-// ---------- Public search ----------
 export function searchICD10(query: string, opts: ICD10SearchOptions = {}): ICD10SearchHit[] {
-  const { limit = 25, fuzzy = true, minScore = 2, includeParents = true } = opts;
-
+  const { limit = 25, minScore = 2, includeParents = true } = opts;
   const phrase = normalize(query);
-  const tokens = tokenize(query);
-  const out: ICD10SearchHit[] = [];
-
   if (!phrase) return [];
 
-  const data = includeParents ? _icd10Data : _icd10Data.filter(e => !e.code || !/^[A-Z]\d{2}$/.test(e.code)); // simple parent filter
+  const qTokens = tokensFor(query);
+  const compact = phrase.replace(/[^a-z0-9]/g, '');
+  const prefixKey = compact.slice(0, compact.length >= 3 ? 3 : 2);
+  const candidateIndexes =
+    prefixKey.length >= 2 && (_prefix.get(prefixKey)?.length || 0) >= 5
+      ? _prefix.get(prefixKey)!
+      : _index.map((_, index) => index);
 
-  for (const entry of data) {
-    // quick path: code exact or startsWith
-    const codeN = normalize(entry.code);
-    if (codeN === phrase) {
-      out.push({ code: entry.code, title: entry.title, score: 999, matchIn: 'code', entry });
-      continue;
-    }
-    if (codeN.startsWith(phrase)) {
-      out.push({ code: entry.code, title: entry.title, score: 200, matchIn: 'code', entry });
-      continue;
-    }
+  const hits: ICD10SearchHit[] = [];
+  for (const index of candidateIndexes) {
+    const row = _index[index];
+    if (!row) continue;
 
-    // weighted field scoring
-    const { score, where } = bestFieldScore(entry, phrase, tokens);
-    if (score >= minScore) {
-      out.push({ code: entry.code, title: entry.title, score, matchIn: where, entry });
-    }
+    const scored: Array<[ICD10SearchHit['matchIn'], number]> = [
+      ['code', fieldScore(row.code, phrase, qTokens) + (row.code.startsWith(phrase) ? 30 : 0)],
+      ['title', fieldScore(row.title, phrase, qTokens)],
+      ['synonyms', Math.max(0, ...row.synonyms.map((v) => fieldScore(v, phrase, qTokens)))],
+      ['includes', Math.max(0, ...row.includes.map((v) => fieldScore(v, phrase, qTokens)))],
+      ['excludes', Math.max(0, ...row.excludes.map((v) => fieldScore(v, phrase, qTokens)))],
+    ];
+
+    scored.sort((a, b) => b[1] - a[1]);
+    const [matchIn, score] = scored[0];
+    if (score < minScore) continue;
+    if (!includeParents && row.entry.parent == null && row.entry.code.length <= 3) continue;
+
+    hits.push({
+      code: row.entry.code,
+      title: row.entry.title,
+      score,
+      matchIn,
+      entry: row.entry,
+    });
   }
 
-  // Optional: simple fuzzy (very light) — prefix drop of last char if long token
-  if (fuzzy && out.length < limit && phrase.length >= 5) {
-    const fuzzyPhrase = phrase.slice(0, -1);
-    for (const entry of data) {
-      const hay = normalize(`${entry.code} ${entry.title} ${(entry.synonyms || []).join(' ')}`);
-      if (hay.includes(fuzzyPhrase)) {
-        const base = bestFieldScore(entry, fuzzyPhrase, tokens);
-        const bonus = Math.max(0, 10 - (phrase.length - fuzzyPhrase.length));
-        const sc = base.score + bonus;
-        if (sc >= minScore) out.push({ code: entry.code, title: entry.title, score: sc, matchIn: 'title', entry });
-      }
-    }
-  }
-
-  // Deduplicate by code (keep best score)
-  const byCode = new Map<string, ICD10SearchHit>();
-  for (const hit of out) {
-    const prev = byCode.get(hit.code);
-    if (!prev || hit.score > prev.score) byCode.set(hit.code, hit);
-  }
-
-  return Array.from(byCode.values())
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit);
-}
-
-// ---------- Embedded fallback seed (small; real use: load full dataset) ----------
-if (_icd10Data.length === 0) {
-  // A compact starter set; replace with full dataset via loadICD10FromGzip() or setICD10Data().
-  setICD10Data([
-    { code: 'J20.9', title: 'Acute bronchitis, unspecified', synonyms: ['bronchitis acute', 'acute tracheobronchitis'] },
-    { code: 'J44.9', title: 'Chronic obstructive pulmonary disease, unspecified', synonyms: ['copd', 'chronic obstructive lung disease'] },
-    { code: 'I10',   title: 'Essential (primary) hypertension', synonyms: ['hypertension', 'htn', 'high blood pressure'] },
-    { code: 'E11.9', title: 'Type 2 diabetes mellitus without complications', synonyms: ['t2dm', 'diabetes type 2'] },
-    { code: 'E10.9', title: 'Type 1 diabetes mellitus without complications', synonyms: ['t1dm', 'diabetes type 1'] },
-    { code: 'N39.0', title: 'Urinary tract infection, site not specified', synonyms: ['uti'] },
-    { code: 'J18.9', title: 'Pneumonia, unspecified organism', synonyms: ['pna', 'pneumonia'] },
-    { code: 'M54.5', title: 'Low back pain', synonyms: ['lbp'] },
-    { code: 'B20',   title: 'Human immunodeficiency virus [HIV] disease', synonyms: ['hiv'] },
-    { code: 'A15.0', title: 'Tuberculosis of lung, confirmed by sputum microscopy with or without culture', synonyms: ['tb', 'pulmonary tuberculosis'] },
-    { code: 'I21.9', title: 'Acute myocardial infarction, unspecified', synonyms: ['mi', 'heart attack'] },
-    { code: 'K27.9', title: 'Peptic ulcer, site unspecified, unspecified as acute or chronic, without hemorrhage or perforation', synonyms: ['pud'] },
-    { code: 'J06.9', title: 'Acute upper respiratory infection, unspecified', synonyms: ['uri', 'urti'] },
-    { code: 'N18.9', title: 'Chronic kidney disease, unspecified', synonyms: ['ckd'] },
-    { code: 'I50.9', title: 'Heart failure, unspecified', synonyms: ['hf', 'congestive heart failure'] },
-  ]);
+  return hits
+    .sort((a, b) => b.score - a.score || a.code.localeCompare(b.code))
+    .slice(0, Math.max(1, Math.min(limit, 100)));
 }

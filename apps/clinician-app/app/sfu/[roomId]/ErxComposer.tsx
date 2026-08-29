@@ -104,6 +104,8 @@ type ErxComposerProps = {
   clinicianId: string;
   patientAllergies: PatientAllergyBrief[] | null;
   allergiesFromLive: boolean;
+  simulation?: boolean;
+  currentMedicationNames?: string[];
   icd10Suggestions?: string[];
   onToast: (body: string, kind?: ToastKind, title?: string) => void;
   onAudit: (action: string, extra?: Record<string, unknown>) => void;
@@ -122,6 +124,8 @@ export default function ErxComposer({
   clinicianId,
   patientAllergies,
   allergiesFromLive,
+  simulation = false,
+  currentMedicationNames = [],
   icd10Suggestions,
   onToast,
   onAudit,
@@ -210,6 +214,34 @@ export default function ErxComposer({
       return Number.isFinite(t) && t >= cutoff;
     });
   }, [patientAllergies]);
+
+
+  const currentMedicationSet = useMemo(
+    () =>
+      new Set(
+        currentMedicationNames
+          .map((name) => normalizeForMatch(name))
+          .filter(Boolean),
+      ),
+    [currentMedicationNames],
+  );
+
+  function currentMedicationMatch(drug: string) {
+    const normalized = normalizeForMatch(drug);
+    if (!normalized) return null;
+
+    for (const current of currentMedicationSet) {
+      if (
+        normalized === current ||
+        normalized.includes(current) ||
+        current.includes(normalized)
+      ) {
+        return current;
+      }
+    }
+
+    return null;
+  }
 
 
   useEffect(() => {
@@ -367,6 +399,26 @@ export default function ErxComposer({
       return;
     }
 
+    if (simulation) {
+      const simulatedId = `sim-erx-${Date.now()}`;
+      setErxResult({
+        id: simulatedId,
+        status: 'SIMULATION DRAFT',
+        dispenseCode: 'NOT FOR DISPENSING',
+      });
+      onToast(
+        'Simulation eRx finalized locally. No pharmacy, laboratory, payer, or production patient record was updated.',
+        'success',
+        'Simulation eRx'
+      );
+      onAudit('erx.simulation.finalize', {
+        rxCount: medsToSend.length,
+        labCount: labsToSend.length,
+        simulatedId,
+      });
+      return;
+    }
+
     setErxSubmitting(true);
     try {
       const payload = {
@@ -473,6 +525,12 @@ export default function ErxComposer({
   };
 
   const sendClaimToPayer = async () => {
+    if (simulation) {
+      onToast('Claims are disabled in simulation.', 'warning', 'Simulation — no claim');
+      onAudit('claim.simulation.blocked', { encounterId });
+      return;
+    }
+
     const medsToSend = rxRows.filter((r) => r.drug && r.drug.trim().length > 0);
     const labsToSend = erxLabs;
 
@@ -593,12 +651,12 @@ export default function ErxComposer({
             onClick={sendErx}
             disabled={erxSubmitting || operational?.canPrescribe === false}
           >
-            {erxSubmitting ? 'Sending…' : 'Send eRx'}
+            {erxSubmitting ? 'Sending…' : simulation ? 'Finalize simulated eRx' : 'Send eRx'}
           </button>
           <button
             className="text-xs px-2 py-1 border rounded disabled:opacity-60"
             onClick={sendClaimToPayer}
-            disabled={claimSubmitting}
+            disabled={claimSubmitting || simulation}
           >
             {claimSubmitting ? 'Sending claim…' : 'Send Claim'}
           </button>
@@ -647,6 +705,12 @@ export default function ErxComposer({
       ) : null}
 
 
+      {simulation ? (
+        <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-900">
+          SIMULATION — NOT FOR DISPENSING / NOT FOR CLINICAL FULFILMENT. Finalizing here does not dispatch to CarePort, MedReach, a payer, or the production patient record.
+        </div>
+      ) : null}
+
       <div className="text-xs text-gray-500 mb-2">
         Add one or more drugs and optional lab tests. This screen authors the encounter record only. Marketplace initiation and payment selection must happen in the patient app.
       </div>
@@ -666,6 +730,16 @@ export default function ErxComposer({
               setRxRows((all) => all.map((y, j) => (j === i ? row : y)))
             }
           />
+
+          {currentMedicationMatch(r.drug) ? (
+            <div className="inline-flex w-fit rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800">
+              Currently recorded medication
+            </div>
+          ) : r.drug.trim() ? (
+            <div className="inline-flex w-fit rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600">
+              No current-medication match
+            </div>
+          ) : null}
 
           <div className="grid md:grid-cols-6 gap-2">
             <input

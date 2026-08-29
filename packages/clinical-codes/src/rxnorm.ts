@@ -18,7 +18,17 @@ export type RxNormEntry = {
   score?: number;
 };
 
+type IndexedRxNorm = {
+  entry: RxNormEntry;
+  display: string;
+  name: string;
+  synonyms: string[];
+  ingredients: string[];
+};
+
 let RXNORM: RxNormEntry[] | null = null;
+let INDEX: IndexedRxNorm[] | null = null;
+let PREFIX = new Map<string, number[]>();
 
 const TTY_WEIGHT: Record<string, number> = {
   IN: 1.0,
@@ -41,90 +51,82 @@ function isGenericEntry(e: RxNormEntry) {
 }
 
 function norm(value: unknown) {
-  return String(value || '').normalize('NFKD').replace(/\p{Diacritic}/gu, '').toLowerCase();
+  return String(value || '')
+    .normalize('NFKD')
+    .replace(/\p{Diacritic}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
 }
 
-function words(value: unknown) {
-  return norm(value).split(/[^a-z0-9]+/).filter(Boolean);
+function tokenise(value: unknown) {
+  return norm(value).split(' ').filter(Boolean);
 }
 
-function scoreEntry(e: RxNormEntry, q: string): number {
-  const name = displayName(e);
-  if (!name) return 0;
+function rebuildIndex() {
+  const rows = RXNORM || [];
+  INDEX = rows.map((entry) => {
+    const display = displayName(entry);
+    return {
+      entry,
+      display,
+      name: norm(display),
+      synonyms: (entry.synonyms || []).map(norm).filter(Boolean),
+      ingredients: (entry.ingredients || []).map(norm).filter(Boolean),
+    };
+  });
 
-  const ttyW = TTY_WEIGHT[e.tty] ?? 0.5;
-  const genericW = isGenericEntry(e) ? 1.0 : 0.85;
-  let score = 0.2 * ttyW * genericW;
-
-  const qn = norm(q);
-  const inName = norm(name);
-
-  if (inName === qn) score += 3.0;
-  if (inName.startsWith(qn)) score += 1.5;
-  if (inName.includes(qn) && qn.length >= 3) score += 0.8;
-
-  const qWords = words(q);
-  const nWords = words(name);
-  const hits = qWords.filter((w) => nWords.includes(w)).length;
-  score += hits * 0.6;
-
-  if (e.synonyms?.length) {
-    for (const s of e.synonyms) {
-      const sn = norm(s);
-      if (sn === qn) score += 1.0;
-      else if (sn.startsWith(qn)) score += 0.5;
-      else if (sn.includes(qn) && qn.length >= 3) score += 0.25;
-    }
-  }
-
-  if (e.ingredients?.length) {
-    const iHits = e.ingredients.map(norm).filter((w) => qWords.includes(w)).length;
-    score += iHits * 0.4;
-  }
-
-  if (e.doseForm && qWords.includes(norm(e.doseForm))) score += 0.2;
-
-  if (e.strength) {
-    const sn = norm(e.strength);
-    if (qn.includes(sn) || sn.includes(qn)) score += 0.3;
-  }
-
-  return score;
+  const prefix = new Map<string, number[]>();
+  INDEX.forEach((row, index) => {
+    const keys = new Set<string>();
+    [row.name, ...row.synonyms, ...row.ingredients].forEach((text) => {
+      tokenise(text).forEach((word) => {
+        if (word.length >= 2) keys.add(word.slice(0, 2));
+        if (word.length >= 3) keys.add(word.slice(0, 3));
+      });
+    });
+    keys.forEach((key) => {
+      const current = prefix.get(key);
+      if (current) current.push(index);
+      else prefix.set(key, [index]);
+    });
+  });
+  PREFIX = prefix;
 }
 
 function candidateDataPaths() {
   const envDir = process.env.CLINICAL_CODES_DATA_DIR;
   return [
-    envDir ? path.resolve(envDir, 'rxnorm.min.json.gz') : null,
-    path.resolve(__dirname, '..', 'data', 'rxnorm.min.json.gz'),
-    path.resolve(process.cwd(), 'packages', 'clinical-codes', 'data', 'rxnorm.min.json.gz'),
-    path.resolve(process.cwd(), '..', '..', 'packages', 'clinical-codes', 'data', 'rxnorm.min.json.gz'),
-    path.resolve(process.cwd(), 'data', 'rxnorm.min.json.gz'),
-  ].filter(Boolean) as string[];
+    envDir ? path.join(envDir, 'rxnorm.min.json.gz') : '',
+    path.resolve(process.cwd(), '../../packages/clinical-codes/data/rxnorm.min.json.gz'),
+    path.resolve(process.cwd(), 'packages/clinical-codes/data/rxnorm.min.json.gz'),
+    path.resolve(process.cwd(), 'data/rxnorm.min.json.gz'),
+  ].filter(Boolean);
 }
 
 export function setRxNormData(rows: RxNormEntry[]) {
-  RXNORM = rows ?? [];
+  RXNORM = Array.isArray(rows) ? rows : [];
+  rebuildIndex();
 }
 
 export async function ensureRxNormLoaded(): Promise<number> {
   if (RXNORM) return RXNORM.length;
 
-  for (const file of candidateDataPaths()) {
+  for (const candidate of candidateDataPaths()) {
     try {
-      if (!fs.existsSync(file)) continue;
-      const gz = fs.readFileSync(file);
-      const raw = zlib.gunzipSync(gz).toString('utf8');
-      const rows = JSON.parse(raw) as RxNormEntry[];
-      RXNORM = Array.isArray(rows) ? rows : [];
-      return RXNORM.length;
-    } catch (err) {
-      console.warn('[rxnorm] Failed candidate data load:', file, err);
+      if (!fs.existsSync(candidate)) continue;
+      const gz = await fs.promises.readFile(candidate);
+      const rows = JSON.parse(zlib.gunzipSync(gz).toString('utf8')) as RxNormEntry[];
+      setRxNormData(rows);
+      return rows.length;
+    } catch {
+      // Try the next candidate.
     }
   }
 
-  RXNORM = [];
-  return RXNORM.length;
+  setRxNormData([]);
+  return 0;
 }
 
 export type SearchRxNormOptions = {
@@ -132,35 +134,59 @@ export type SearchRxNormOptions = {
   preferGeneric?: boolean;
 };
 
-export async function searchRxNorm(query: string, opts: SearchRxNormOptions = {}) {
-  const { limit = 20, preferGeneric = true } = opts;
-  if (!query?.trim()) return [];
+function scoreRow(row: IndexedRxNorm, query: string, preferGeneric: boolean) {
+  const q = norm(query);
+  const qWords = tokenise(q);
+  const e = row.entry;
+  const ttyW = TTY_WEIGHT[e.tty] ?? 0.5;
+  const genericW = preferGeneric && isGenericEntry(e) ? 1.3 : 1;
 
-  await ensureRxNormLoaded();
-  const data = RXNORM ?? [];
+  let score = ttyW * genericW;
+  if (row.name === q) score += 100;
+  else if (row.name.startsWith(q)) score += 60;
+  else if (q.length >= 3 && row.name.includes(q)) score += 35;
 
-  let rows = data
-    .map((e) => ({
-      ...e,
-      name: displayName(e),
-      generic: isGenericEntry(e),
-      score: scoreEntry(e, query),
-    }))
-    .filter((e) => e.score > 0.2);
-
-  if (preferGeneric) {
-    rows = rows.map((r) => ({ ...r, score: r.score * (r.generic === false ? 0.92 : 1.0) }));
+  for (const token of qWords) {
+    if (row.name.split(' ').includes(token)) score += 12;
+    else if (row.name.includes(token)) score += 5;
   }
 
-  rows.sort((a, b) => {
-    const byScore = b.score - a.score;
-    if (byScore) return byScore;
+  for (const synonym of row.synonyms) {
+    if (synonym === q) score += 45;
+    else if (synonym.startsWith(q)) score += 25;
+    else if (q.length >= 3 && synonym.includes(q)) score += 12;
+  }
 
-    const byTty = (TTY_WEIGHT[b.tty] ?? 0.5) - (TTY_WEIGHT[a.tty] ?? 0.5);
-    if (byTty) return byTty;
+  for (const ingredient of row.ingredients) {
+    if (ingredient === q) score += 25;
+    else if (ingredient.startsWith(q)) score += 15;
+    else if (qWords.some((word) => ingredient.includes(word))) score += 7;
+  }
 
-    return displayName(a).length - displayName(b).length;
-  });
+  if (e.strength && q.includes(norm(e.strength))) score += 5;
+  if (e.doseForm && q.includes(norm(e.doseForm))) score += 3;
+  return score;
+}
 
-  return rows.slice(0, limit);
+export async function searchRxNorm(query: string, opts: SearchRxNormOptions = {}) {
+  await ensureRxNormLoaded();
+  const q = norm(query);
+  if (q.length < 2 || !INDEX?.length) return [];
+
+  const { limit = 20, preferGeneric = true } = opts;
+  const compact = q.replace(/[^a-z0-9]/g, '');
+  const prefixKey = compact.slice(0, compact.length >= 3 ? 3 : 2);
+  const candidateIndexes =
+    prefixKey.length >= 2 && (PREFIX.get(prefixKey)?.length || 0) >= 5
+      ? PREFIX.get(prefixKey)!
+      : INDEX.map((_, index) => index);
+
+  return candidateIndexes
+    .map((index) => {
+      const row = INDEX![index];
+      return { ...row.entry, name: row.display, score: scoreRow(row, q, preferGeneric) };
+    })
+    .filter((row) => Number(row.score || 0) > 0)
+    .sort((a, b) => Number(b.score || 0) - Number(a.score || 0))
+    .slice(0, Math.max(1, Math.min(limit, 100)));
 }

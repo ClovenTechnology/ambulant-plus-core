@@ -1,5 +1,7 @@
 // apps/clinician-app/app/api/encounters/[id]/erx/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import { authErrorResponse, requireClinicianAuth } from '@/src/lib/clinician-auth';
+import { createTrustedClinicianIdentityHeader } from '@/src/lib/clinician-session';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,17 +67,17 @@ function optionalString(value: unknown, max = 4000) {
   return valueClean ? valueClean : undefined;
 }
 
-function forwardHeaders(req: NextRequest) {
+function forwardHeaders(req: NextRequest, trustedIdentity: string) {
   const headers = new Headers();
-
-  for (const name of FORWARD_HEADER_ALLOWLIST) {
-    const value = req.headers.get(name);
-    if (value) headers.set(name, value);
-  }
-
+  const authorization = req.headers.get('authorization');
+  if (authorization) headers.set('authorization', authorization);
+  headers.set('x-ambulant-identity', trustedIdentity);
   headers.set('accept', 'application/json');
   headers.set('content-type', 'application/json');
-
+  const requestId = req.headers.get('x-request-id');
+  const correlationId = req.headers.get('x-correlation-id');
+  if (requestId) headers.set('x-request-id', requestId);
+  if (correlationId) headers.set('x-correlation-id', correlationId);
   return headers;
 }
 
@@ -220,6 +222,22 @@ export async function POST(
 ) {
   const encounterId = clean(params.id, 120);
 
+  const auth = await requireClinicianAuth(req, { allowAdmin: false, allowAdminStaff: false });
+  if (!auth.ok) return authErrorResponse(auth);
+  if (auth.role !== 'clinician') {
+    return NextResponse.json({ ok: false, error: 'clinician_required' }, { status: 403 });
+  }
+
+  let trustedIdentity: string;
+  try {
+    trustedIdentity = createTrustedClinicianIdentityHeader(req);
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, error: String(error?.message || 'identity_bridge_failed') },
+      { status: Number(error?.status || 500), headers: { 'cache-control': 'no-store' } },
+    );
+  }
+
   if (!encounterId) {
     return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
   }
@@ -244,7 +262,7 @@ export async function POST(
   try {
     const upstream = await fetch(upstreamUrl, {
       method: 'POST',
-      headers: forwardHeaders(req),
+      headers: forwardHeaders(req, trustedIdentity),
       body: JSON.stringify(payload),
       cache: 'no-store',
     });
@@ -268,6 +286,22 @@ export async function GET(
 ) {
   const encounterId = clean(params.id, 120);
 
+  const auth = await requireClinicianAuth(req, { allowAdmin: false, allowAdminStaff: false });
+  if (!auth.ok) return authErrorResponse(auth);
+  if (auth.role !== 'clinician') {
+    return NextResponse.json({ ok: false, error: 'clinician_required' }, { status: 403 });
+  }
+
+  let trustedIdentity: string;
+  try {
+    trustedIdentity = createTrustedClinicianIdentityHeader(req);
+  } catch (error: any) {
+    return NextResponse.json(
+      { ok: false, error: String(error?.message || 'identity_bridge_failed') },
+      { status: Number(error?.status || 500), headers: { 'cache-control': 'no-store' } },
+    );
+  }
+
   if (!encounterId) {
     return NextResponse.json({ ok: false, error: 'encounter_id_required' }, { status: 400 });
   }
@@ -277,7 +311,7 @@ export async function GET(
   try {
     const upstream = await fetch(upstreamUrl, {
       method: 'GET',
-      headers: forwardHeaders(req),
+      headers: forwardHeaders(req, trustedIdentity),
       cache: 'no-store',
     });
 

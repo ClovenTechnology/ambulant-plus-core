@@ -36,8 +36,6 @@ import { TextBlock } from '@/components/shared/TextBlock';
 import { Card, Tabs, Collapse, Icon, Skeleton } from '@/components/ui';
 import { CollapseBtn } from '@/components/ui/CollapseBtn';
 
-import RecordingBanner from '@/components/RecordingBanner';
-
 import { useAutocomplete, icdSearch } from '@/src/hooks/useAutocomplete';
 import type { ICD10Hit } from '@/src/hooks/useAutocomplete';
 import { useUiPrefs } from '@/hooks/useUiPrefs';
@@ -474,6 +472,8 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     String(searchParams.get('supervisorMode') || '').trim().toUpperCase() === 'COACH'
       ? 'COACH'
       : 'OBSERVE';
+
+  const isSimulationSession = searchParams.get('simulation') === '1' || roomId.startsWith('simulation-');
 
   // Centralized patient context (profile / meds / allergies)
   const {
@@ -2320,8 +2320,8 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
   // =========================
 
   return (
-    <div className="min-h-screen bg-slate-50" data-density={dense ? 'compact' : 'comfort'}>
-      <header className="sticky top-0 z-40 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-slate-50" data-density={dense ? 'compact' : 'comfort'}>
+      <header className="z-40 flex shrink-0 items-center justify-between gap-3 border-b border-slate-200 bg-white/95 px-4 py-3 shadow-sm backdrop-blur supports-[backdrop-filter]:bg-white/85">
         <div className="flex items-center gap-4">
           <div className="flex flex-col">
             <div className="flex items-center gap-4">
@@ -2571,24 +2571,16 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
         </div>
       )}
 
-      <RecordingBanner
-        active={isRecording}
-        onDismiss={() => {
-          setIsRecording(false);
-          publishControl('recording', false);
-        }}
-      />
-
       <div
-        className={`transition-all duration-300 container mx-auto ${dense ? 'px-3 py-3' : 'px-4 py-6'} ${
-          presentation ? 'max-w-[1400px]' : ''
+        className={`container mx-auto min-h-0 flex-1 overflow-hidden transition-all duration-300 ${dense ? 'px-3 py-2' : 'px-4 py-3'} ${
+          presentation ? 'max-w-[1400px]' : 'max-w-[1800px]'
         }`}
       >
-        <div className={`grid md:gap-6 gap-3 transition-[grid-template-columns] duration-300 ${gridCols}`}>
+        <div className={`grid h-full min-h-0 md:gap-4 gap-3 transition-[grid-template-columns] duration-300 ${gridCols}`}>
           {!presentation && showLeftColumn && (
-            <div className="flex flex-col space-y-4">
+            <div className="min-h-0 overflow-y-auto pr-1 flex flex-col space-y-4">
               {!videoIsUndocked && dockToLeft && (
-                <div className="sticky top-4 z-20" ref={videoCardRef}>
+                <div className="z-20 shrink-0" ref={videoCardRef}>
                   {VideoDockNode}
                 </div>
               )}
@@ -2693,22 +2685,22 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             </div>
           )}
 
-          <div className="flex flex-col space-y-4">
+          <div className="min-h-0 overflow-y-auto flex flex-col space-y-4">
             {!presentation && !videoIsUndocked && !dockToLeft && (
-              <div className="sticky top-4 z-20" ref={videoCardRef}>
+              <div className="z-20 shrink-0" ref={videoCardRef}>
                 {VideoDockNode}
               </div>
             )}
 
             {presentation && (
-              <div className="sticky top-4 z-20" ref={videoCardRef}>
+              <div className="z-20 shrink-0" ref={videoCardRef}>
                 {VideoDockNode}
               </div>
             )}
           </div>
 
           {!presentation && !rightCollapsed && (
-            <div className="flex flex-col space-y-4">
+            <div className="min-h-0 overflow-y-auto pl-1 flex flex-col space-y-4">
               <div className="px-2">
                 <div className="text-sm font-semibold text-gray-800">SOAP, Insights, History</div>
               </div>
@@ -3049,6 +3041,19 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                       clinicianId={clinicianIdParam}
                       patientAllergies={patientAllergies}
                       allergiesFromLive={allergiesFromLive}
+                      simulation={isSimulationSession}
+                      currentMedicationNames={activeMeds
+                        .map((med: any) =>
+                          String(
+                            med?.name ||
+                            med?.medication ||
+                            med?.drug ||
+                            med?.display ||
+                            med?.medicationName ||
+                            ''
+                          ).trim()
+                        )
+                        .filter(Boolean)}
                       icd10Suggestions={ICD10_SUGGESTIONS}
                       onToast={pushToast}
                       onAudit={audit}
@@ -3162,7 +3167,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                     ))}
                     {chat.length === 0 && (
                       <div className="text-gray-400 text-sm italic flex items-center gap-2">
-                        <span aria-hidden>ðŸ’¬</span>
+                        <span aria-hidden>💬</span>
                         No messages yet
                       </div>
                     )}

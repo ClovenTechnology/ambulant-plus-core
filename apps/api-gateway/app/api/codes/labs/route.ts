@@ -102,12 +102,12 @@ export async function GET(req: NextRequest) {
 
     if (q.length < 2) return NextResponse.json({ ok: true, items: [] });
 
+    const startedAt = performance.now();
+    const fallbackItems = searchLabTests(q, { limit });
     const providerItems = await searchActiveProviderLabTests(q, limit).catch((err) => {
       console.warn('[codes/labs] provider catalogue search failed', err);
       return [];
     });
-
-    const fallbackItems = searchLabTests(q, { limit });
     const seen = new Set(providerItems.map((item: any) => String(item.code || item.name).toLowerCase()));
 
     const merged = [
@@ -120,16 +120,30 @@ export async function GET(req: NextRequest) {
       }),
     ].slice(0, limit);
 
-    return NextResponse.json({
-      ok: true,
-      items: merged,
-      catalogue: {
-        country: 'ZA',
-        source: providerItems.length ? 'medreach_provider_catalogue_plus_seed' : 'local_sa_lab_seed',
-        providerBacked: providerItems.length > 0,
-        providerComplete: providerItems.length > 0,
+    const timingMs = Math.round((performance.now() - startedAt) * 10) / 10;
+
+    return NextResponse.json(
+      {
+        ok: true,
+        items: merged,
+        timingMs,
+        catalogue: {
+          country: 'ZA',
+          source: providerItems.length ? 'medreach_provider_catalogue_plus_seed' : 'local_sa_lab_seed',
+          providerBacked: providerItems.length > 0,
+          providerComplete: providerItems.length > 0,
+          coding: providerItems.some((item: any) => item.codeSystem === 'loinc')
+            ? 'LOINC_PLUS_LOCAL'
+            : 'LOCAL_WITH_LOINC_WHEN_AVAILABLE',
+        },
       },
-    });
+      {
+        headers: {
+          'cache-control': 'private, max-age=30, stale-while-revalidate=120',
+          'server-timing': `labs;dur=${timingMs}`,
+        },
+      },
+    );
   } catch (err: any) {
     return NextResponse.json(
       { ok: false, error: err?.message || 'lab_search_failed', items: [] },

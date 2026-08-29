@@ -250,6 +250,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
 
   const identity = useMemo(() => `patient-${getUid()}`, []);
   const [consentGiven, setConsentGiven] = useState(false);
+  const [recordingConsentGiven, setRecordingConsentGiven] = useState(false);
   const policyUrl = '/policy/televisit.pdf';
 
   const [dense, setDense] = useState(false);
@@ -984,6 +985,11 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   );
 
   const join = useCallback(async () => {
+    if (!consentGiven) {
+      toast.error?.('Please consent to this consultation before joining.');
+      return;
+    }
+
     if (!wsUrl) {
       toast.error?.('Missing NEXT_PUBLIC_LIVEKIT_URL');
       return;
@@ -1053,7 +1059,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
       setState('disconnected');
       toast.error?.(err instanceof Error ? err.message : 'Failed to join room.');
     }
-  }, [appointmentId, roomId, search, sessionCtx.appointmentId, state, toast, wireRoomEvents, wsUrl]);
+  }, [appointmentId, consentGiven, roomId, search, sessionCtx.appointmentId, state, toast, wireRoomEvents, wsUrl]);
 
 
   // A6-R3-E1G: publish patient room presence only while LiveKit is connected.
@@ -1259,9 +1265,13 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
 
   const toggleRecording = useCallback(async () => {
     const next = !isRecording;
+    if (next && !recordingConsentGiven) {
+      toast.info?.('Recording requires separate explicit consent. Enable recording consent first.');
+      return;
+    }
     setIsRecording(next);
     await publishControl('recording', next);
-  }, [isRecording, publishControl]);
+  }, [isRecording, publishControl, recordingConsentGiven, toast]);
 
   const toggleScreenShare = useCallback(async () => {
     const r = roomRef.current;
@@ -1283,8 +1293,8 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   }, [handRaised, publishControl]);
 
   const toggleBlur = useCallback(() => {
-    setBlurOn((prev) => !prev);
-    toast.info?.('Background blur remains a staged client-side enhancement.');
+    setBlurOn(false);
+    toast.info?.('Background blur is unavailable until the published camera-track processor is active.');
   }, [toast]);
 
   const exportAllergies = useCallback(async () => {
@@ -1328,7 +1338,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
           : 'lg:grid-cols-[1.1fr_1.9fr_1.2fr]';
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-slate-50">
       <PatientSfuHeader
         roomId={roomId}
         state={state}
@@ -1406,7 +1416,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
         />
       ) : null}
 
-      <div className={`mx-auto w-full max-w-[1600px] px-4 ${dense ? 'py-3' : 'py-5'}`}>
+      <div className={`mx-auto min-h-0 w-full max-w-[1800px] flex-1 overflow-hidden px-4 ${dense ? 'py-2' : 'py-3'}`}>
         {!presentation ? (
           <section className="mb-3 rounded-3xl border border-blue-100 bg-blue-50/80 p-3 shadow-sm lg:hidden">
             <label className="flex items-start gap-3 text-sm leading-6 text-slate-700">
@@ -1417,7 +1427,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
                 className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
               />
               <span>
-                I consent to this Televisit and recording if enabled.{' '}
+                I consent to this consultation, including camera, microphone, connected-device and vital-sign sharing required for the session.{' '}
                 <a
                   href={policyUrl}
                   target="_blank"
@@ -1428,10 +1438,28 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
                 </a>
               </span>
             </label>
+            <label className="mt-2 flex items-start gap-3 border-t border-blue-100 pt-2 text-sm leading-6 text-slate-700">
+              <input
+                type="checkbox"
+                checked={recordingConsentGiven}
+                onChange={(event) => {
+                  const next = event.target.checked;
+                  setRecordingConsentGiven(next);
+                  if (!next && isRecording) {
+                    setIsRecording(false);
+                    void publishControl('recording', false);
+                  }
+                }}
+                className="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"
+              />
+              <span>
+                Optional: I separately consent to local-device recording if the consultation supports it. No routine cloud recording is implied.
+              </span>
+            </label>
           </section>
         ) : null}
 
-        <div className={`grid gap-4 ${gridCols}`}>
+        <div className={`grid h-full min-h-0 gap-4 ${gridCols}`}>
           {!isMobileLayout && !presentation && !leftCollapsed ? (
             <PatientLeftPane
               appt={appt}
@@ -1442,9 +1470,9 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
             />
           ) : null}
 
-          <div className="flex flex-col gap-4">
+          <div className="min-h-0 overflow-y-auto flex flex-col gap-4">
             {!videoFloating ? (
-              <div className="sticky top-[92px] z-20 lg:top-4">
+              <div className="z-20 shrink-0">
                 <PatientVideoStage
           trainingRoom={experience === 'training' ? room : null}
                   presentation={presentation}
