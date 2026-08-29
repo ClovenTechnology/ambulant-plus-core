@@ -254,6 +254,15 @@ export default function PatientVideoStage({
           </div>
         ) : null}
 
+        {showOverlay ? (
+          <HoloVitalsOverlay
+            visible={showOverlay}
+            vitals={hudVitals}
+            devices={hudDevices}
+            corner="tr"
+          />
+        ) : null}
+
         <div
           className={`absolute bottom-4 left-1/2 z-10 flex -translate-x-1/2 gap-2 rounded-full bg-white/85 px-2 py-2 shadow backdrop-blur ${controlsOpacity} transition-opacity duration-200`}
         >
@@ -360,15 +369,6 @@ export default function PatientVideoStage({
       ) : null}
 
 
-
-      {showOverlay ? (
-        <HoloVitalsOverlay
-          visible={showOverlay}
-          vitals={hudVitals}
-          devices={hudDevices}
-          corner="tr"
-        />
-      ) : null}
     </>
   );
 }

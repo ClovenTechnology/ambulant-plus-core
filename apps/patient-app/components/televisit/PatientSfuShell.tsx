@@ -342,7 +342,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   const [showVitals, setShowVitals] = useState(true);
   const [captionsOn, setCaptionsOn] = useState(false);
   const [captionTranscript, setCaptionTranscript] = useState<CaptionTranscriptEvent[]>([]);
-  const [showOverlay, setShowOverlay] = useState(true);
+  const [showOverlay, setShowOverlay] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [screenOn, setScreenOn] = useState(false);
   const [handRaised, setHandRaised] = useState(false);
@@ -1531,16 +1531,18 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
 
         <div className={`grid h-full min-h-0 gap-4 ${gridCols}`}>
           {!isMobileLayout && !presentation && !leftCollapsed ? (
-            <PatientLeftPane
-              appt={appt}
-              roomId={roomId}
-              encounterId={encounterId}
-              dense={dense}
-              embeddedIoMT={renderIomtPane()}
-            />
+            <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pr-1">
+              <PatientLeftPane
+                appt={appt}
+                roomId={roomId}
+                encounterId={encounterId}
+                dense={dense}
+                embeddedIoMT={renderIomtPane()}
+              />
+            </div>
           ) : null}
 
-          <div className="min-h-0 overflow-y-auto flex flex-col gap-4">
+          <div className="min-h-0 min-w-0 overflow-hidden flex flex-col gap-4">
             {!videoFloating ? (
               <div className="z-20 shrink-0">
                 <PatientVideoStage
@@ -1587,7 +1589,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
             ) : null}
 
             {isMobileLayout && !presentation ? (
-              <section className="rounded-3xl border border-slate-200 bg-white shadow-sm lg:hidden">
+              <section className="min-h-0 flex-1 overflow-y-auto overscroll-contain rounded-3xl border border-slate-200 bg-white shadow-sm lg:hidden">
                 <div className="border-b border-slate-100 px-4 py-3">
                   <div className="text-sm font-semibold text-slate-900">Consultation tools</div>
                   <div className="text-xs text-slate-500">
@@ -1789,25 +1791,27 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
           </div>
 
           {!isMobileLayout && !presentation && !rightCollapsed ? (
-            <PatientRightPane
-              dense={dense}
-              tab={rightTab}
-              onChangeTab={setRightTab}
-              open={rightOpen}
-              onToggleOpen={() => setRightOpen((v) => !v)}
-              roster={roster}
-              allergies={allergies}
-              allergiesLoading={allergiesLoading}
-              onRefreshAllergies={loadAllergies}
-              onExportAllergies={exportAllergies}
-              currentMeds={currentMeds}
-              adherencePct={adherencePct}
-              historyEntries={historyEntries}
-              inbox={inbox}
-              onRefreshInbox={loadInbox}
-              uploads={uploads}
-              onUploadFiles={onUploadFiles}
-            />
+            <div className="min-h-0 min-w-0 overflow-y-auto overflow-x-hidden overscroll-contain pl-1">
+              <PatientRightPane
+                dense={dense}
+                tab={rightTab}
+                onChangeTab={setRightTab}
+                open={rightOpen}
+                onToggleOpen={() => setRightOpen((v) => !v)}
+                roster={roster}
+                allergies={allergies}
+                allergiesLoading={allergiesLoading}
+                onRefreshAllergies={loadAllergies}
+                onExportAllergies={exportAllergies}
+                currentMeds={currentMeds}
+                adherencePct={adherencePct}
+                historyEntries={historyEntries}
+                inbox={inbox}
+                onRefreshInbox={loadInbox}
+                uploads={uploads}
+                onUploadFiles={onUploadFiles}
+              />
+            </div>
           ) : null}
         </div>
       </div>

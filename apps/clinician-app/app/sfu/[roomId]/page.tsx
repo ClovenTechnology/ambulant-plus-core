@@ -680,6 +680,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
   const { presentation, dense, leftCollapsed, rightCollapsed, chatVisible, rightTab, pip } =
     ui;
   const [rightPanelsOpen, setRightPanelsOpen] = useState(true);
+  const rightWorkspaceScrollRef = useRef<HTMLDivElement | null>(null);
 
   // keep latest toggles in a ref for clean control handling (prevents duplicate toasts)
   const togglesRef = useRef({
@@ -2685,7 +2686,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
             </div>
           )}
 
-          <div className="min-h-0 overflow-y-auto flex flex-col space-y-4">
+          <div className="min-h-0 overflow-hidden flex flex-col space-y-4">
             {!presentation && !videoIsUndocked && !dockToLeft && (
               <div className="z-20 shrink-0" ref={videoCardRef}>
                 {VideoDockNode}
@@ -2700,44 +2701,83 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
           </div>
 
           {!presentation && !rightCollapsed && (
-            <div className="min-h-0 overflow-y-auto pl-1 flex flex-col space-y-4">
-              <div className="px-2">
-                <div className="text-sm font-semibold text-gray-800">SOAP, Insights, History</div>
-              </div>
+            <div className="min-h-0 min-w-0 overflow-hidden pl-1 flex flex-col">
+              <div className="shrink-0 space-y-2 pb-2">
+                <div className="px-2">
+                  <div className="text-sm font-semibold text-gray-800">SOAP, Insights, History</div>
+                </div>
 
-              <div className="px-2 text-[11px] text-slate-500">Only the active tab occupies this workspace. Room Chat and Bedside Monitor are grouped under Sub.</div>
+                <div className="px-2 text-[11px] text-slate-500">
+                  Keep the video dock stationary while this clinical workspace scrolls independently. Room Chat and Bedside Monitor are grouped under Sub.
+                </div>
 
-              <div className="shadow-sm bg-white rounded">
-                <div className="flex items-center justify-between p-1">
-                  <Tabs<RightTab>
-                    active={rightTab as RightTab}
-                    onChange={(key) => setUi('rightTab', key as any)}
-                    items={[
-                      { key: 'soap', label: 'Sub' },
-                      { key: 'erx', label: 'eRx' },
-                      { key: 'conclusions', label: 'Conclusions' },
-                      { key: 'insight', label: 'Insight' },
-                      { key: 'history', label: 'History' },
-                    ]}
-                  />
-                  <button
-                    className="ml-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
-                    onClick={() => setRightPanelsOpen((open) => !open)}
-                    aria-expanded={rightPanelsOpen}
-                    aria-label={rightPanelsOpen ? 'Collapse active workspace' : 'Expand active workspace'}
-                    title={rightPanelsOpen ? 'Collapse active workspace' : 'Expand active workspace'}
-                  >
-                    {rightPanelsOpen ? 'Collapse' : 'Expand'}
-                  </button>
+                <div className="overflow-x-auto rounded bg-white shadow-sm">
+                  <div className="flex min-w-max items-center justify-between p-1">
+                    <Tabs<RightTab>
+                      active={rightTab as RightTab}
+                      onChange={(key) => {
+                        setUi('rightTab', key as any);
+                        setRightPanelsOpen(true);
+                        window.requestAnimationFrame(() => {
+                          rightWorkspaceScrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+                        });
+                      }}
+                      items={[
+                        { key: 'soap', label: 'Sub' },
+                        { key: 'erx', label: 'eRx' },
+                        { key: 'conclusions', label: 'Conclusions' },
+                        { key: 'insight', label: 'Insight' },
+                        { key: 'history', label: 'History' },
+                      ]}
+                    />
+                    <button
+                      className="ml-2 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
+                      onClick={() => setRightPanelsOpen((open) => !open)}
+                      aria-expanded={rightPanelsOpen}
+                      aria-label={rightPanelsOpen ? 'Collapse active workspace' : 'Expand active workspace'}
+                      title={rightPanelsOpen ? 'Collapse active workspace' : 'Expand active workspace'}
+                    >
+                      {rightPanelsOpen ? 'Collapse' : 'Expand'}
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <Collapse open={rightPanelsOpen}>
+              <div
+                ref={rightWorkspaceScrollRef}
+                className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-auto overscroll-contain pr-1 pb-4"
+              >
+                <div className="space-y-4">
+                  <Collapse open={rightPanelsOpen}>
                 <>
                   {rightTab === 'soap' && (
                     <Card title="Clerk Desk" dense={dense} gradient>
                       <div className="text-xs text-gray-500 mb-2">
-                        Quickly capture symptoms, allergies, HPI and codes. Free text always allowed.
+                        Capture the core consultation narrative first, then use coding, medicines and transcript assistance as supporting tools.
+                      </div>
+
+                      <div className="mb-3 space-y-2 rounded-xl border border-slate-200 bg-white p-3">
+                        <div className="text-xs font-semibold uppercase tracking-[0.08em] text-slate-600">Core consultation notes</div>
+                      <TextBlock
+                        label="Presenting Complaints"
+                        value={soap.a}
+                        onChange={(v) => setSoap({ ...soap, a: v })}
+                        dictation
+                      />
+                      <TextBlock
+                        label="History of Present Illness (HPI)"
+                        value={soap.p}
+                        onChange={(v) => setSoap({ ...soap, p: v })}
+                        multiline
+                        dictation
+                      />
+                      <TextBlock
+                        label="Patient Education"
+                        value={patientEducation}
+                        onChange={setPatientEducation}
+                        multiline
+                        dictation
+                      />
                       </div>
 
                       <div className="mb-3 rounded-xl border border-sky-100 bg-sky-50/70 p-3">
@@ -3009,26 +3049,6 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                         )}
                       </div>
 
-                      <TextBlock
-                        label="Presenting Complaints"
-                        value={soap.a}
-                        onChange={(v) => setSoap({ ...soap, a: v })}
-                        dictation
-                      />
-                      <TextBlock
-                        label="History of Present Illness (HPI)"
-                        value={soap.p}
-                        onChange={(v) => setSoap({ ...soap, p: v })}
-                        multiline
-                        dictation
-                      />
-                      <TextBlock
-                        label="Patient Education"
-                        value={patientEducation}
-                        onChange={setPatientEducation}
-                        multiline
-                        dictation
-                      />
                     </Card>
                   )}
 
@@ -3224,6 +3244,8 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                 </section>
                 </>
               ) : null}
+                </div>
+              </div>
             </div>
           )}
         </div>

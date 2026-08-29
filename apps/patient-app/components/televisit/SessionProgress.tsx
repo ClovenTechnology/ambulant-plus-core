@@ -78,6 +78,8 @@ export default function SessionProgress({
     };
   }, [actualStartAt, durationMin, now, scheduledStartAt]);
 
+  if (!data.ready) return null;
+
   const tone =
     data.state === 'overtime'
       ? 'bg-rose-500'

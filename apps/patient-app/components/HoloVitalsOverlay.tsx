@@ -1,7 +1,6 @@
 'use client';
 
 import React, { useMemo } from 'react';
-import { motion } from 'framer-motion';
 
 type Vital = { t: string; type: string; value: number; unit?: string };
 type Device = { id: string; vendor?: string; model?: string; lastSeenAt?: string };
@@ -32,19 +31,21 @@ export default function HoloVitalsOverlay({
   if (!visible) return null;
 
   const cornerPos = {
-    tl: 'top-3 left-3',
-    tr: 'top-3 right-3',
-    bl: 'bottom-3 left-3',
-    br: 'bottom-3 right-3',
+    tl: 'top-14 left-3',
+    tr: 'top-14 right-3',
+    bl: 'bottom-20 left-3',
+    br: 'bottom-20 right-3',
   }[corner];
 
   function presenceBadge(d: Device) {
-    if (!d.lastSeenAt)
-      return <span className="text-cyan-400 text-[11px]">⚪ Idle</span>;
+    if (!d.lastSeenAt) {
+      return <span className="text-[10px] font-medium text-slate-300">Idle</span>;
+    }
+
     const online = Date.now() - new Date(d.lastSeenAt).getTime() <= 60_000;
     return (
-      <span className="text-[11px] font-medium text-cyan-200">
-        {online ? '🟢 Online' : '⚪ Idle'} · {new Date(d.lastSeenAt).toLocaleTimeString()}
+      <span className={cx('text-[10px] font-semibold', online ? 'text-emerald-300' : 'text-slate-300')}>
+        {online ? 'Online' : 'Idle'}
       </span>
     );
   }
@@ -52,63 +53,52 @@ export default function HoloVitalsOverlay({
   return (
     <div
       className={cx(
-        'pointer-events-none fixed z-40',
+        'pointer-events-none absolute z-20 w-[min(78%,340px)] overflow-hidden',
         cornerPos,
-        'glass neon holo-grid',
-        'rounded-xl shadow-lg backdrop-blur bg-white/10 border border-white/20'
+        'rounded-2xl border border-white/70 bg-slate-950/90 shadow-xl backdrop-blur-md',
       )}
-      style={{ minWidth: 260 }}
+      aria-label="Live vitals overlay"
     >
-      <div className="px-3 py-2 flex justify-between items-center">
-        <div className="text-[11px] uppercase tracking-wider text-cyan-300/80">Vitals HUD</div>
-        <div className="text-[10px] text-cyan-200/60">overlay · synced</div>
+      <div className="flex items-center justify-between gap-3 border-b border-white/10 px-3 py-2">
+        <div>
+          <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-white">Live vitals</div>
+          <div className="text-[10px] text-slate-300">Optional consultation overlay</div>
+        </div>
+        <div className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-medium text-slate-200">
+          {latest.length > 0 ? `${latest.length} reading${latest.length === 1 ? '' : 's'}` : 'Waiting'}
+        </div>
       </div>
 
-      {/* Device badges row */}
-      {devices.length > 0 && (
-        <div className="px-3 flex flex-wrap gap-2">
+      {devices.length > 0 ? (
+        <div className="flex flex-wrap gap-1.5 px-3 pt-2">
           {devices.map((d) => (
             <div
               key={d.id}
-              className="flex items-center gap-2 px-2 py-1 rounded bg-cyan-900/20 text-cyan-200 text-xs border border-cyan-400/20"
+              className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/10 px-2 py-1 text-[10px] text-slate-100"
             >
-              <span>{d.vendor || '—'} {d.model || ''}</span>
+              <span className="max-w-[140px] truncate">{d.vendor || 'Device'} {d.model || ''}</span>
               {presenceBadge(d)}
             </div>
           ))}
         </div>
-      )}
+      ) : null}
 
-      {/* Vitals with pulsating neon rings */}
-      <div className="grid grid-cols-2 gap-2 p-3">
+      <div className="grid grid-cols-2 gap-1.5 p-2">
         {latest.length === 0 ? (
-          <div className="col-span-2 text-xs text-cyan-200/70">Waiting for live vitals…</div>
+          <div className="col-span-2 rounded-xl bg-white/95 px-3 py-2 text-xs font-medium text-slate-700">
+            Waiting for live readings…
+          </div>
         ) : (
-          latest.map((v, i) => {
-            // Only pulse based on heart rate
-            const isHeartRate = v.type.toLowerCase().includes('heart');
-            const pulseDuration = isHeartRate && typeof v.value === 'number' ? 60 / v.value : 1.5;
-
-            return (
-              <motion.div
-                key={i}
-                className="relative rounded-lg px-2 py-1.5 bg-cyan-900/10 ring-1 ring-cyan-400/20 flex flex-col gap-0.5"
-                animate={{ scale: [1, 1.05, 1] }}
-                transition={{ repeat: Infinity, duration: pulseDuration, ease: 'easeInOut' }}
-              >
-                <div className="absolute inset-0 rounded-lg border-2 border-cyan-400 opacity-30 animate-pulse" 
-                     style={{ animationDuration: `${pulseDuration}s` }} />
-                <div className="text-[10px] text-cyan-300/70 leading-none z-10 relative">{v.type}</div>
-                <div className="text-cyan-100 font-semibold text-sm leading-tight z-10 relative">
-                  {v.value}
-                  {v.unit ? <span className="text-cyan-300/70 text-[10px] ml-1">{v.unit}</span> : null}
-                </div>
-                <div className="text-[10px] text-cyan-300/50 leading-none z-10 relative">
-                  {new Date(v.t).toLocaleTimeString()}
-                </div>
-              </motion.div>
-            );
-          })
+          latest.map((v, i) => (
+            <div key={`${v.type}-${i}`} className="rounded-xl bg-white/95 px-2.5 py-2 shadow-sm">
+              <div className="truncate text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500">{v.type}</div>
+              <div className="mt-0.5 text-base font-bold leading-tight text-slate-950">
+                {v.value}
+                {v.unit ? <span className="ml-1 text-[10px] font-semibold text-slate-500">{v.unit}</span> : null}
+              </div>
+              <div className="mt-0.5 text-[10px] text-slate-400">{new Date(v.t).toLocaleTimeString()}</div>
+            </div>
+          ))
         )}
       </div>
     </div>

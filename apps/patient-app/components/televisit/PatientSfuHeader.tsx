@@ -273,13 +273,15 @@ export default function PatientSfuHeader(props: Props) {
         </div>
       </header>
 
-      <div className="mx-auto w-full max-w-[1600px] px-4 pb-3">
-        <SessionProgress
-          scheduledStartAt={scheduledStartAt}
-          actualStartAt={actualStartAt}
-          durationMin={durationMin}
-        />
-      </div>
+      {state !== 'connected' && state !== 'reconnecting' ? (
+        <div className="mx-auto w-full max-w-[1600px] px-4 pb-3">
+          <SessionProgress
+            scheduledStartAt={scheduledStartAt}
+            actualStartAt={actualStartAt}
+            durationMin={durationMin}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }
