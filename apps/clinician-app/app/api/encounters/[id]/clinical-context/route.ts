@@ -24,23 +24,25 @@ function gatewayBase() {
     .replace(/\/+$/, '');
 }
 
-export async function GET() {
-  return NextResponse.json(
-    { ok: true, service: 'InsightCore governed gateway proxy', fallback: false },
-    { headers: { 'cache-control': 'no-store' } },
-  );
+function clean(value: unknown, max = 240) {
+  return String(value ?? '').trim().slice(0, max);
 }
 
-export async function POST(req: NextRequest) {
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { id: string } },
+) {
   const auth = await requireClinicianAuth(req, {
-    allowAdmin: false,
-    allowAdminStaff: false,
+    allowAdmin: true,
+    allowAdminStaff: true,
   });
   if (!auth.ok) return authErrorResponse(auth);
-  if (auth.role !== 'clinician') {
+
+  const encounterId = clean(params.id, 120);
+  if (!encounterId) {
     return NextResponse.json(
-      { ok: false, error: 'clinician_required' },
-      { status: 403, headers: { 'cache-control': 'no-store' } },
+      { ok: false, error: 'encounter_id_required' },
+      { status: 400, headers: { 'cache-control': 'no-store' } },
     );
   }
 
@@ -49,7 +51,7 @@ export async function POST(req: NextRequest) {
     trustedIdentity = createTrustedClinicianIdentityHeader(req);
   } catch (error: any) {
     return NextResponse.json(
-      { ok: false, error: String(error?.message || 'identity_bridge_failed') },
+      { ok: false, error: clean(error?.message, 500) || 'identity_bridge_failed' },
       {
         status: Number(error?.status || 500),
         headers: { 'cache-control': 'no-store' },
@@ -57,29 +59,35 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const body = await req.text();
-  if (!body.trim()) {
-    return NextResponse.json(
-      { ok: false, error: 'analysis_payload_required' },
-      { status: 400, headers: { 'cache-control': 'no-store' } },
-    );
+  const target = new URL(
+    `/api/encounters/${encodeURIComponent(encounterId)}/clinical-context`,
+    gatewayBase(),
+  );
+
+  for (const key of ['appointmentId', 'roomId']) {
+    const value = req.nextUrl.searchParams.get(key);
+    if (value) target.searchParams.set(key, value);
   }
 
   try {
-    const upstream = await fetch(`${gatewayBase()}/api/insight/ingest`, {
-      method: 'POST',
+    const upstream = await fetch(target, {
+      method: 'GET',
       headers: {
         accept: 'application/json',
-        'content-type': 'application/json',
         'x-ambulant-identity': trustedIdentity,
+        ...(req.headers.get('x-request-id')
+          ? { 'x-request-id': String(req.headers.get('x-request-id')) }
+          : {}),
+        ...(req.headers.get('x-correlation-id')
+          ? { 'x-correlation-id': String(req.headers.get('x-correlation-id')) }
+          : {}),
       },
-      body,
       cache: 'no-store',
     });
 
     const payload = await upstream.json().catch(() => ({
       ok: false,
-      error: `insight_gateway_${upstream.status}`,
+      error: `clinical_context_upstream_${upstream.status}`,
     }));
 
     return NextResponse.json(payload, {
@@ -90,8 +98,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       {
         ok: false,
-        error: 'insight_gateway_unreachable',
-        message: String(error?.message || 'InsightCore gateway unavailable'),
+        error: 'clinical_context_gateway_unreachable',
+        message: clean(error?.message, 500),
       },
       { status: 502, headers: { 'cache-control': 'no-store' } },
     );

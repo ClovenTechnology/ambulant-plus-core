@@ -16,6 +16,7 @@ type Coding = {
 type MedicationDto = {
   coding: Coding[];
   formText?: string;
+  strengthText?: string;
   doseText?: string;
   routeText?: string;
   frequencyText?: string;
@@ -27,6 +28,7 @@ type MedicationDto = {
 
 type LabDto = {
   testText: string;
+  testCoding?: Coding;
   priority?: 'Routine' | 'Urgent' | 'Stat';
   specimenText?: string;
   icd10?: Coding;
@@ -134,6 +136,7 @@ function medicationSnapshot(med: MedicationDto, authoredAt: string) {
       ? { system: primary.system, code: primary.code, display: primary.display }
       : null,
     formText: optionalString(med.formText, 200),
+    strengthText: optionalString(med.strengthText, 200),
     doseText: optionalString(med.doseText, 200),
     routeText: optionalString(med.routeText, 120),
     frequencyText: optionalString(med.frequencyText, 200),
@@ -166,6 +169,13 @@ function medicationSigDisplay(med: MedicationDto) {
 function labSnapshot(lab: LabDto, authoredAt: string) {
   return {
     testText: optionalString(lab.testText, 500) || 'Lab order',
+    testCoding: lab.testCoding
+      ? {
+          system: optionalString(lab.testCoding.system, 120),
+          code: optionalString(lab.testCoding.code, 120),
+          display: optionalString(lab.testCoding.display, 500),
+        }
+      : null,
     priority: optionalString(lab.priority, 40) || 'Routine',
     specimenText: optionalString(lab.specimenText, 200),
     note: optionalString(lab.note, 2000),

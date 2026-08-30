@@ -38,11 +38,6 @@ export function InsightPanel({
             </ul>
           )}
           {insight.notes && <p className="text-gray-600">{insight.notes}</p>}
-          <div className="flex gap-2 pt-1">
-            <button className="px-2 py-1 border rounded text-xs">Accept</button>
-            <button className="px-2 py-1 border rounded text-xs">Adjust</button>
-            <button className="px-2 py-1 border rounded text-xs">Decline</button>
-          </div>
         </div>
       ) : (
         <div className="text-sm text-gray-600">Run analysis to get AI-assisted goals & notes.</div>

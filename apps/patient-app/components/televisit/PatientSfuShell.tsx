@@ -373,11 +373,10 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
   const [allergies, setAllergies] = useState<Allergy[]>([]);
   const [allergiesLoading, setAllergiesLoading] = useState(false);
 
-  const [currentMeds] = useState<string[]>([
-    'Metformin 500 mg PO BID',
-    'Atorvastatin 20 mg PO QHS',
-  ]);
-  const [adherencePct] = useState(88);
+  // Do not inject demo medication/adherence data into a real consultation.
+  // Longitudinal patient medication hydration is handled by the governed record surfaces.
+  const [currentMeds] = useState<string[]>([]);
+  const [adherencePct] = useState(0);
 
   const [historyEntries] = useState<HistoryEntry[]>([]);
   const [inbox, setInbox] = useState<InboxItem[]>([]);
@@ -473,29 +472,42 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
     [localParticipantRole, localParticipantDisplay],
   );
 
+  const [localHudVitals, setLocalHudVitals] = useState<
+    Array<{ t: string; type: string; value: number; unit?: string }>
+  >([]);
+
   const { samples } = useVitalsSSE(roomId, 240);
 
-  const hudVitals = useMemo(
-    () =>
-      samples.slice(-12).map((s) => ({
-        t: new Date(s.t).toISOString(),
-        type: s.type,
-        value: s.value,
-        unit:
-          s.type === 'hr'
-            ? 'bpm'
-            : s.type === 'spo2'
-              ? '%'
-              : s.type === 'temp' || s.type === 'tempC'
-                ? '°C'
-                : s.type.startsWith('bp_')
-                  ? 'mmHg'
-                  : s.type === 'glucose'
-                    ? 'mg/dL'
-                    : undefined,
-      })),
-    [samples],
-  );
+  const hudVitals = useMemo(() => {
+    const remote = samples.slice(-24).map((s) => ({
+      t: new Date(s.t).toISOString(),
+      type: s.type,
+      value: s.value,
+      unit:
+        s.type === 'hr'
+          ? 'bpm'
+          : s.type === 'spo2'
+            ? '%'
+            : s.type === 'temp' || s.type === 'tempC'
+              ? '°C'
+              : s.type.startsWith('bp_')
+                ? 'mmHg'
+                : s.type === 'glucose'
+                  ? 'mg/dL'
+                  : undefined,
+    }));
+
+    const seen = new Set<string>();
+    return [...remote, ...localHudVitals]
+      .sort((a, b) => Date.parse(a.t) - Date.parse(b.t))
+      .filter((sample) => {
+        const key = `${sample.type}|${sample.t}|${sample.value}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .slice(-12);
+  }, [samples, localHudVitals]);
 
   const hudDevices = useMemo(
     () => [
@@ -695,6 +707,24 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
         packet.tempC = num(payload.celsius, payload.temp, payload.temperature, payload.value);
       } else if (kind === 'glu') {
         packet.glucose = num(payload.glucose, payload.value, payload.mmolL, payload.mgDl, payload.mg_dl);
+      }
+
+      const localSamples: Array<{ t: string; type: string; value: number; unit?: string }> = [];
+      const addLocal = (type: string, value: unknown, unit?: string) => {
+        if (typeof value === 'number' && Number.isFinite(value)) {
+          localSamples.push({ t: new Date(ts).toISOString(), type, value, unit });
+        }
+      };
+
+      addLocal('hr', packet.hr, 'bpm');
+      addLocal('spo2', packet.spo2, '%');
+      addLocal('tempC', packet.tempC, '°C');
+      addLocal('bp_sys', packet.sys, 'mmHg');
+      addLocal('bp_dia', packet.dia, 'mmHg');
+      addLocal('glucose', packet.glucose, 'mg/dL');
+
+      if (localSamples.length) {
+        setLocalHudVitals((current) => [...current, ...localSamples].slice(-24));
       }
 
       await publishJson('vitals', packet);
@@ -1703,7 +1733,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
             ) : null}
 
             {!isMobileLayout && !presentation ? (
-              <section className="hidden rounded-3xl border border-slate-200 bg-white shadow-sm lg:block">
+              <section className="hidden min-h-0 flex-1 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm lg:flex lg:flex-col">
               <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
                 <div>
                   <div className="text-sm font-semibold text-slate-900">Consultation chat</div>
@@ -1716,7 +1746,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
                 </span>
               </div>
 
-              <div className="max-h-72 space-y-3 overflow-y-auto px-4 py-3">
+              <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
                 {patientChatMessages.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-slate-200 bg-slate-50 px-3 py-4 text-sm text-slate-500">
                     No chat messages yet. Messages from the clinician will appear here.
@@ -1757,7 +1787,7 @@ function InnerPatientSfuShell({ params, experience = 'consultation' }: Props) {
                 <div ref={patientChatEndRef} />
               </div>
 
-              <div className="border-t border-slate-100 p-3">
+              <div className="shrink-0 border-t border-slate-100 p-3">
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <textarea
                     className="min-h-[44px] flex-1 resize-none rounded-2xl border border-slate-200 px-3 py-2 text-sm outline-none focus:border-slate-400"

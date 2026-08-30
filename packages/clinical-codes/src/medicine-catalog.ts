@@ -18,6 +18,10 @@ export type MedicineCatalogItem = {
   source: 'local_sa_seed' | 'rxnorm' | 'formulary';
   country: 'ZA' | 'US' | 'GLOBAL';
   prescriptionRequired?: boolean;
+  strength?: string;
+  doseForm?: string;
+  route?: string;
+  packSize?: string;
   score?: number;
 };
 
@@ -130,6 +134,9 @@ export async function searchMedicines(query: string, opts: SearchMedicineOptions
       codes: rxcui ? [{ system: 'rxnorm' as const, code: rxcui, display: label }] : [],
       source: 'rxnorm' as const,
       country: 'GLOBAL' as const,
+      strength: row.strength ? String(row.strength) : undefined,
+      doseForm: row.doseForm ? String(row.doseForm) : undefined,
+      route: (row as any).route ? String((row as any).route) : undefined,
       score: Number(row.score || 0),
     };
   }).filter((entry) => entry.label);

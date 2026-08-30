@@ -28,6 +28,8 @@ export type SoapState = {
 
 type RxRow = {
   drug: string;
+  strength: string;
+  form: string;
   dose: string;
   route: string;
   freq: string;
@@ -36,6 +38,7 @@ type RxRow = {
   refills: number;
   notes?: string;
   rxcui?: string;
+  nappi?: string;
   sigSuggestions?: string[];
 };
 
@@ -45,10 +48,14 @@ type LabRow = {
   specimen: string;
   icd: string;
   instructions?: string;
+  catalogCode?: string;
+  catalogSystem?: string;
 };
 
 export type ErxSummaryMed = {
   drug: string;
+  strength?: string;
+  form?: string;
   dose?: string;
   route?: string;
   freq?: string;
@@ -59,6 +66,8 @@ export type ErxSummaryLab = {
   priority?: string;
   specimen?: string;
   icd?: string;
+  code?: string;
+  codeSystem?: string;
 };
 export type ErxSummary = {
   meds: ErxSummaryMed[];
@@ -104,6 +113,7 @@ type ErxComposerProps = {
   clinicianId: string;
   patientAllergies: PatientAllergyBrief[] | null;
   allergiesFromLive: boolean;
+  allergyContextAvailable?: boolean;
   simulation?: boolean;
   currentMedicationNames?: string[];
   icd10Suggestions?: string[];
@@ -124,6 +134,7 @@ export default function ErxComposer({
   clinicianId,
   patientAllergies,
   allergiesFromLive,
+  allergyContextAvailable = false,
   simulation = false,
   currentMedicationNames = [],
   icd10Suggestions,
@@ -132,7 +143,7 @@ export default function ErxComposer({
   onSummaryChange,
 }: ErxComposerProps) {
   const [rxRows, setRxRows] = useState<RxRow[]>([
-    { drug: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0 },
+    { drug: '', strength: '', form: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0 },
   ]);
   const [labRows, setLabRows] = useState<LabRow[]>([
     { test: '', priority: '', specimen: '', icd: '', instructions: '' },
@@ -284,6 +295,8 @@ export default function ErxComposer({
       .filter((r) => (r.drug || '').trim())
       .map<ErxSummaryMed>((r) => ({
         drug: r.drug,
+        strength: r.strength || undefined,
+        form: r.form || undefined,
         dose: r.dose || undefined,
         route: r.route || undefined,
         freq: r.freq || undefined,
@@ -294,6 +307,8 @@ export default function ErxComposer({
       priority: l.priority || undefined,
       specimen: l.specimen || undefined,
       icd: l.icd || undefined,
+      code: l.catalogCode || undefined,
+      codeSystem: l.catalogSystem || undefined,
     }));
     onSummaryChange({ meds, labs });
   }, [rxRows, erxLabs, onSummaryChange]);
@@ -301,7 +316,7 @@ export default function ErxComposer({
   const addRxRow = () =>
     setRxRows((r) => [
       ...r,
-      { drug: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0 },
+      { drug: '', strength: '', form: '', dose: '', route: '', freq: '', duration: '', qty: '', refills: 0 },
     ]);
   const removeRxRow = (i: number) =>
     setRxRows((r) => r.filter((_, j) => j !== i));
@@ -377,6 +392,16 @@ export default function ErxComposer({
         'warning',
         'Nothing to send'
       );
+      return;
+    }
+
+    if (!simulation && medsToSend.length > 0 && !allergyContextAvailable) {
+      onToast(
+        'Prescription blocked because the patient allergy record could not be verified. Refresh authorised patient context before prescribing.',
+        'error',
+        'Allergy context unavailable',
+      );
+      onAudit('erx.send.blocked', { reason: 'ALLERGY_CONTEXT_UNAVAILABLE' });
       return;
     }
 
@@ -637,7 +662,6 @@ export default function ErxComposer({
     ? icd10Suggestions
     : LOCAL_ICD10_SUGGESTIONS;
 
-  const labTestAuto = useAutocomplete<LabTestHit>(labTestSearch);
 
   return (
     <Card
@@ -698,6 +722,13 @@ export default function ErxComposer({
         </div>
       ) : null}
 
+      {!simulation && !allergyContextAvailable ? (
+        <div className="mb-2 rounded border border-rose-300 bg-rose-50 px-2 py-2 text-[11px] text-rose-900">
+          <div className="font-semibold">Allergy verification unavailable</div>
+          <div className="mt-1">Medication prescribing is fail-closed until the authorised allergy record is available. Lab ordering remains available.</div>
+        </div>
+      ) : null}
+
       {operational?.canPrescribe === false ? (
         <div className="mb-2 rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-900">
           Prescribing is currently disabled for this clinician profile.
@@ -741,10 +772,30 @@ export default function ErxComposer({
             </div>
           ) : null}
 
-          <div className="grid md:grid-cols-6 gap-2">
+          <div className="grid md:grid-cols-8 gap-2">
             <input
               className="border rounded px-2 py-1"
-              placeholder="Dose"
+              placeholder="Strength (e.g. 500 mg)"
+              value={r.strength}
+              onChange={(e) =>
+                setRxRows((x) =>
+                  x.map((y, j) => (j === i ? { ...y, strength: e.target.value } : y))
+                )
+              }
+            />
+            <input
+              className="border rounded px-2 py-1"
+              placeholder="Form (tablet, capsule…)"
+              value={r.form}
+              onChange={(e) =>
+                setRxRows((x) =>
+                  x.map((y, j) => (j === i ? { ...y, form: e.target.value } : y))
+                )
+              }
+            />
+            <input
+              className="border rounded px-2 py-1"
+              placeholder="Dose (e.g. 1 tablet)"
               value={r.dose}
               onChange={(e) =>
                 setRxRows((x) =>
@@ -882,30 +933,13 @@ export default function ErxComposer({
         Test name on its own line; then Priority, Specimen, ICD-10 on one row; optional instructions below.
       </div>
 
-      <datalist id="lab-test-catalog-suggest">
-        {(labTestAuto.opts as LabTestHit[]).map((hit) => (
-          <option
-            key={hit.code || hit.id || hit.name}
-            value={hit.name}
-            label={[hit.category, hit.specimen].filter(Boolean).join(' · ')}
-          />
-        ))}
-      </datalist>
-
       {labRows.map((r, i) => (
         <div key={i} className="mt-2 space-y-2 border rounded p-2 bg-white">
-          <input
-            className="border rounded px-2 py-1 w-full"
-            placeholder="Test name (e.g. FBC, U&E, HbA1c, CRP)"
-            list="lab-test-catalog-suggest"
-            value={r.test}
-            onChange={(e) => {
-              const value = e.target.value;
-              labTestAuto.setQ(value);
-              setLabRows((x) =>
-                x.map((y, j) => (j === i ? { ...y, test: value } : y))
-              );
-            }}
+          <LabTestInput
+            row={r}
+            onChange={(row) =>
+              setLabRows((all) => all.map((item, index) => (index === i ? row : item)))
+            }
           />
           <div className="grid md:grid-cols-4 gap-2 items-center">
             <select
@@ -1035,10 +1069,20 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
     const base: RxRow = {
       ...row,
       drug: label,
-      rxcui: hit.rxcui,
-      dose: row.dose || (hit as any).strength || row.dose,
+      rxcui: hit.rxcui || (hit as any).rxnorm,
+      nappi: (hit as any).nappi || row.nappi,
+      strength: row.strength || (hit as any).strength || '',
+      form: row.form || (hit as any).doseForm || (hit as any).dosageForm || '',
+      dose: row.dose,
       route: row.route || (hit as any).route || row.route,
-      notes: row.notes || (hit.rxcui ? `RxCUI:${hit.rxcui}` : row.notes),
+      notes:
+        row.notes ||
+        [
+          (hit as any).nappi ? `NAPPI:${(hit as any).nappi}` : '',
+          (hit.rxcui || (hit as any).rxnorm) ? `RxCUI:${hit.rxcui || (hit as any).rxnorm}` : '',
+        ]
+          .filter(Boolean)
+          .join(' | '),
     };
     onChange(base);
     auto.setQ(label);
@@ -1060,7 +1104,7 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
     auto.setQ(v);
     setOpen(true);
     setActive(-1);
-    onChange({ ...row, drug: v, rxcui: undefined, sigSuggestions: [] });
+    onChange({ ...row, drug: v, rxcui: undefined, nappi: undefined, strength: '', form: '', sigSuggestions: [] });
   };
 
   return (
@@ -1179,6 +1223,117 @@ function RxDrugInput({ row, onChange }: RxDrugInputProps) {
           })}
         </ul>
       )}
+    </div>
+  );
+}
+
+/* ---------- Laboratory catalogue combobox ---------- */
+
+type LabTestInputProps = {
+  row: LabRow;
+  onChange: (row: LabRow) => void;
+};
+
+function LabTestInput({ row, onChange }: LabTestInputProps) {
+  const auto = useAutocomplete<LabTestHit>(labTestSearch);
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(-1);
+  const options = auto.opts as LabTestHit[];
+
+  const select = (hit: LabTestHit) => {
+    const name = String(hit.name || hit.label || '').trim();
+    const specimen = String(hit.specimen || '').trim();
+    onChange({
+      ...row,
+      test: name,
+      specimen: row.specimen || specimen,
+      catalogCode: String(hit.code || hit.id || '').trim() || undefined,
+      catalogSystem: String(hit.codeSystem || 'local_sa_lab_catalog').trim(),
+    });
+    auto.setQ(name);
+    setOpen(false);
+    setActive(-1);
+  };
+
+  return (
+    <div className="relative">
+      <input
+        className="border rounded px-2 py-1 w-full"
+        role="combobox"
+        aria-expanded={open}
+        aria-controls="lab-test-listbox"
+        aria-autocomplete="list"
+        placeholder="Test name (e.g. FBC, U&E, HbA1c, CRP)"
+        value={auto.q || row.test}
+        onChange={(event) => {
+          const value = event.target.value;
+          auto.setQ(value);
+          onChange({
+            ...row,
+            test: value,
+            catalogCode: undefined,
+            catalogSystem: undefined,
+          });
+          setOpen(true);
+          setActive(-1);
+        }}
+        onFocus={() => {
+          if (options.length) setOpen(true);
+        }}
+        onKeyDown={(event) => {
+          if (!options.length) return;
+          if (event.key === 'ArrowDown') {
+            event.preventDefault();
+            setOpen(true);
+            setActive((value) => Math.min(options.length - 1, value + 1));
+          } else if (event.key === 'ArrowUp') {
+            event.preventDefault();
+            setActive((value) => Math.max(0, value - 1));
+          } else if (event.key === 'Enter' && open && active >= 0) {
+            event.preventDefault();
+            select(options[active]);
+          } else if (event.key === 'Escape') {
+            setOpen(false);
+          }
+        }}
+        onBlur={() => window.setTimeout(() => setOpen(false), 120)}
+        autoComplete="off"
+      />
+
+      {row.catalogCode ? (
+        <div className="mt-1 text-[11px] text-slate-500">
+          Catalogue: <span className="font-mono">{row.catalogSystem}:{row.catalogCode}</span>
+          {row.specimen ? ` · specimen ${row.specimen}` : ''}
+        </div>
+      ) : null}
+
+      {open && options.length ? (
+        <ul
+          id="lab-test-listbox"
+          role="listbox"
+          className="absolute z-30 mt-1 max-h-64 w-full overflow-auto rounded border bg-white shadow text-sm"
+        >
+          {options.map((hit, index) => (
+            <li key={`${hit.code || hit.id || hit.name}-${index}`}>
+              <button
+                type="button"
+                role="option"
+                aria-selected={index === active}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => select(hit)}
+                className={`w-full px-2 py-2 text-left ${index === active ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+              >
+                <div className="font-medium text-slate-900">{hit.name || hit.label}</div>
+                <div className="text-[11px] text-slate-500">
+                  {[hit.codeSystem && hit.code ? `${hit.codeSystem}:${hit.code}` : null, hit.category, hit.specimen]
+                    .filter(Boolean)
+                    .join(' · ')}
+                </div>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

@@ -292,9 +292,11 @@ export default function PatientRightPane({
 
               <Card className="p-4">
                 <div className="text-sm font-semibold text-slate-900">Current medication</div>
-                <div className="mt-2 text-sm text-slate-600">
-                  Current adherence snapshot: <b>{pillAdherencePct}%</b>
-                </div>
+                {currentMeds.length > 0 ? (
+                  <div className="mt-2 text-sm text-slate-600">
+                    Current adherence snapshot: <b>{pillAdherencePct}%</b>
+                  </div>
+                ) : null}
 
                 <div className="mt-3 space-y-2">
                   {currentMeds.length === 0 ? (

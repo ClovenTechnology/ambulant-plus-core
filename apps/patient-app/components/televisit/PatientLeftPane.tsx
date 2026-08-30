@@ -58,7 +58,6 @@ function Field({
 
 export default function PatientLeftPane({
   appt,
-  roomId,
   encounterId,
   dense,
   embeddedIoMT,
@@ -136,34 +135,19 @@ export default function PatientLeftPane({
         <Collapse open={accessOpen}>
           <div className="space-y-3">
             <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-3 text-sm text-indigo-900">
-              This session is now extraction-ready for multiparty Televisit: observers, dependants,
-              invited clinicians, and roster-aware preflight can be layered here cleanly.
+              Stay in this consultation while care is in progress. Do not share the room URL. Support-person access will use a participant-scoped invitation rather than a navigation-away family link.
             </div>
 
-            <div className="grid gap-2">
+            {encounterId ? (
               <Link
-                href="/family"
-                className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                href={`/encounters/${encodeURIComponent(encounterId)}`}
+                target="_blank"
+                rel="noreferrer"
+                className="block rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
-                Open Family & Friends
+                Open encounter summary in a new tab
               </Link>
-
-              <Link
-                href={`/appointments?roomId=${encodeURIComponent(roomId)}`}
-                className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-              >
-                Back to appointments
-              </Link>
-
-              {encounterId ? (
-                <Link
-                  href={`/encounters/${encodeURIComponent(encounterId)}`}
-                  className="rounded-2xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Open encounter summary
-                </Link>
-              ) : null}
-            </div>
+            ) : null}
           </div>
         </Collapse>
       </Card>

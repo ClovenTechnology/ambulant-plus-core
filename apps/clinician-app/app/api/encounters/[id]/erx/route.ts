@@ -127,25 +127,29 @@ function textCoding(value: unknown): Coding[] {
 }
 
 function normalizeMedication(raw: AnyRecord) {
+  const explicitCoding: Coding[] = [];
+
+  const nappi = optionalString(raw?.nappi || raw?.nappiCode, 120);
+  const rxcui = optionalString(raw?.rxcui || raw?.rxnorm || raw?.rxNorm, 120);
+  const display = optionalString(raw?.drug || raw?.name || raw?.display, 500) || nappi || rxcui || 'Medication';
+
+  if (nappi) explicitCoding.push({ system: 'nappi', code: nappi, display });
+  if (rxcui) explicitCoding.push({ system: 'rxnorm', code: rxcui, display });
+
   const coding = Array.isArray(raw?.coding)
     ? raw.coding
     : Array.isArray(raw?.codings)
       ? raw.codings
-      : raw?.rxcui
-        ? [
-            {
-              system: 'rxnorm',
-              code: clean(raw.rxcui, 120),
-              display: optionalString(raw.drug || raw.name || raw.display, 500) || clean(raw.rxcui, 120),
-            },
-          ]
+      : explicitCoding.length
+        ? explicitCoding
         : textCoding(raw?.drug || raw?.name || raw?.display);
 
   const quantityText = optionalString(raw?.quantity?.text, 200) || optionalString(raw?.qty, 200);
 
   return {
     coding,
-    formText: optionalString(raw?.formText || raw?.form, 120),
+    formText: optionalString(raw?.formText || raw?.form || raw?.doseForm, 120),
+    strengthText: optionalString(raw?.strengthText || raw?.strength, 200),
     doseText: optionalString(raw?.doseText || raw?.dose, 200),
     routeText: optionalString(raw?.routeText || raw?.route, 120),
     frequencyText: optionalString(raw?.frequencyText || raw?.freq || raw?.frequency, 200),
@@ -178,8 +182,15 @@ function normalizeLab(raw: AnyRecord) {
           }
         : undefined;
 
+  const testText = optionalString(raw?.testText || raw?.test || raw?.name, 500) || 'Lab order';
+  const testCode = optionalString(raw?.catalogCode || raw?.testCode || raw?.code, 120);
+  const testSystem = optionalString(raw?.catalogSystem || raw?.testSystem || raw?.codeSystem, 120);
+
   return {
-    testText: optionalString(raw?.testText || raw?.test || raw?.name, 500) || 'Lab order',
+    testText,
+    testCoding: testCode
+      ? { system: testSystem || 'local_sa_lab_catalog', code: testCode, display: testText }
+      : undefined,
     priority: optionalString(raw?.priority, 40) || 'Routine',
     specimenText: optionalString(raw?.specimenText || raw?.specimen, 200),
     icd10,

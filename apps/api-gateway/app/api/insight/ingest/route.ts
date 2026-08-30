@@ -1,5 +1,9 @@
 // apps/api-gateway/app/api/insight/ingest/route.ts
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  readIdentity,
+  requireTrustedIdentityInProduction,
+} from '@/src/lib/identity';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,6 +36,25 @@ function resolveInsightCoreKey() {
 }
 
 export async function POST(req: NextRequest) {
+  const who = readIdentity(req.headers);
+
+  try {
+    requireTrustedIdentityInProduction(req.headers, who);
+  } catch {
+    return NextResponse.json(
+      { ok: false, error: 'unauthorized' },
+      { status: 401, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+
+  const role = String(who.role || '').toLowerCase();
+  if (!who.uid || !['clinician', 'admin', 'admin_staff', 'system'].includes(role)) {
+    return NextResponse.json(
+      { ok: false, error: 'forbidden' },
+      { status: who.uid ? 403 : 401, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+
   const core = resolveInsightCoreBase();
 
   if (!core) {
@@ -47,8 +70,17 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json().catch(() => ({}));
   const key = resolveInsightCoreKey();
+  const auth = key ? `Bearer ${key}` : undefined;
 
-  const auth = req.headers.get('authorization') || (key ? `Bearer ${key}` : undefined);
+  const payload = {
+    ...((body && typeof body === 'object' && !Array.isArray(body)) ? body : {}),
+    _ambulant: {
+      actorRole: role,
+      actorRefId: who.actorRefId || who.uid,
+      requestedAt: new Date().toISOString(),
+      clinicianReviewRequired: true,
+    },
+  };
 
   const r = await fetch(`${core}/ingest`, {
     method: 'POST',
@@ -56,7 +88,7 @@ export async function POST(req: NextRequest) {
       'content-type': 'application/json',
       ...(auth ? { authorization: auth } : {}),
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
     cache: 'no-store',
   });
 

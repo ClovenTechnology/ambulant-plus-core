@@ -57,17 +57,9 @@ import ErxComposer, { type ErxSummary, type SoapState } from './ErxComposer';
 import InsightPane from './InsightPane';
 import ReferralPanel from './ReferralPanel';
 import { usePatientContext, type PatientAllergyBrief } from './patientContext';
+import LongitudinalHistory from './LongitudinalHistory';
 import ClinicianRosterChips from './ClinicianRosterChips';
 import InviteSpecialistDrawer from './InviteSpecialistDrawer';
-
-// History sections
-import CasesHistory from '@/components/cases';
-import ConditionsHistory from '@/components/conditions';
-import MedicationsHistory from '@/components/medications';
-import AllergiesHistory from '@/components/allergies';
-import OperationsHistory from '@/components/operations';
-import VaccinationsHistory from '@/components/vaccinations';
-import LabsHistory from '@/components/labs';
 
 import {
   TOPIC_ROSTER,
@@ -485,6 +477,10 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     allergiesError,
     allergiesLoading,
     allergiesFromLive,
+    patientConditions,
+    clinicalContext,
+    contextStatus,
+    contextError,
     patientId,
     patientName,
     encounterId,
@@ -540,7 +536,10 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
 
   // Derived allergy views
   const allergySummary = useMemo(() => {
-    if (!patientAllergies || patientAllergies.length === 0) return 'No allergies recorded';
+    if (allergiesError || contextStatus === 'unavailable' || patientAllergies === null) {
+      return 'Allergy information unavailable — do not assume no known allergies';
+    }
+    if (patientAllergies.length === 0) return 'No allergies recorded in the verified feed';
     const top = patientAllergies
       .filter((a) => (a.status ?? '').toLowerCase() !== 'entered-in-error')
       .slice(0, 3)
@@ -553,7 +552,7 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     const more =
       patientAllergies.length > top.length ? ` +${patientAllergies.length - top.length} more` : '';
     return base + more;
-  }, [patientAllergies]);
+  }, [patientAllergies, allergiesError, contextStatus]);
 
   const allergyCounts = useMemo(() => {
     const list = patientAllergies || [];
@@ -570,6 +569,16 @@ export default function SFURoomClinician({ params }: { params: { roomId: string 
     () => (patientMeds || []).filter((m) => (m.status || '').toLowerCase() === 'active' || !m.status),
     [patientMeds]
   );
+
+  const conditionCounts = useMemo(() => {
+    const list = patientConditions || [];
+    const active = list.filter((item) => {
+      const state = String(item.state || item.status || '').toLowerCase();
+      return state === 'active' || state.includes('active') || state.includes('current');
+    }).length;
+    const historical = Math.max(0, list.length - active);
+    return { total: list.length, active, historical };
+  }, [patientConditions]);
 
   // ------------------ Room & connection state ------------------
   const [room, setRoom] = useState<Room | null>(null);
@@ -2622,15 +2631,34 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                       <Field
                         label="Allergies"
                         value={
-                          !patientAllergies || patientAllergies.length === 0
-                            ? 'No allergies recorded'
-                            : `${allergySummary} · ${allergyCounts.total} total, ${allergyCounts.active} active, ${allergyCounts.resolved} resolved`
+                          allergiesError || patientAllergies === null
+                            ? allergySummary
+                            : patientAllergies.length === 0
+                              ? allergySummary
+                              : `${allergySummary} · ${allergyCounts.total} total, ${allergyCounts.active} active, ${allergyCounts.resolved} resolved`
                         }
                       />
 
                       <Field
                         label="Active Medications"
-                        value={activeMeds.length ? `${activeMeds.length} active on file` : 'None recorded'}
+                        value={
+                          medsError || patientMeds === null
+                            ? 'Medication information unavailable — do not assume none'
+                            : activeMeds.length
+                              ? `${activeMeds.length} active on file`
+                              : 'No active medications recorded in the verified feed'
+                        }
+                      />
+
+                      <Field
+                        label="Conditions"
+                        value={
+                          contextStatus === 'unavailable' || patientConditions === null
+                            ? 'Condition information unavailable — do not assume none'
+                            : conditionCounts.total
+                              ? `${conditionCounts.active} active · ${conditionCounts.historical} historical/resolved`
+                              : 'No conditions recorded in the verified feed'
+                        }
                       />
 
                       <Field label="Case Name" value={appt.reason} bold />
@@ -2667,7 +2695,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                           aria-label="Live vital signs from connected devices"
                         >
                           <Tile label="HR" value={`${num2(vitals.hr)} bpm`} />
-                          <Tile label="SpO\u2082" value={`${num2(vitals.spo2)} %`} />
+                          <Tile label={'SpO\u2082'} value={`${num2(vitals.spo2)} %`} />
                           <Tile label="Temp" value={`${num2(vitals.tempC)} °C`} />
                           <Tile label="RR" value={`${num2(vitals.rr)} /min`} />
                           <Tile label="BP" value={fmtBP(vitals.sys, vitals.dia)} />
@@ -2780,70 +2808,7 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                       />
                       </div>
 
-                      <div className="mb-3 rounded-xl border border-sky-100 bg-sky-50/70 p-3">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <div>
-                            <div className="text-xs font-semibold text-sky-900">Transcript-assisted note draft</div>
-                            <div className="mt-0.5 text-[11px] leading-relaxed text-sky-700">
-                              Generates append-only suggestions from persisted final transcript segments. Review each item before adding it to SOAP.
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={generateTranscriptNoteDraft}
-                            disabled={transcriptDraftLoading || !encounterId}
-                            className="rounded-full border border-sky-200 bg-white px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
-                            title="Generate note suggestions from transcript"
-                          >
-                            {transcriptDraftLoading ? 'Reviewing...' : 'Generate note suggestions from transcript'}
-                          </button>
-                        </div>
 
-                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-700">
-                          <span className="rounded-full bg-white/80 px-2 py-0.5">Local live segments: {captionTranscript.length}</span>
-                          <span className="rounded-full bg-white/80 px-2 py-0.5">Mode: review required</span>
-                          <span className="rounded-full bg-white/80 px-2 py-0.5">Action: append only</span>
-                        </div>
-
-                        {transcriptDraftError ? (
-                          <div className="mt-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700">
-                            {transcriptDraftError}
-                          </div>
-                        ) : null}
-
-                        {transcriptNoteSuggestions.length > 0 ? (
-                          <div className="mt-3 space-y-2">
-                            {transcriptNoteSuggestions.map((suggestion) => (
-                              <div
-                                key={suggestion.id}
-                                className="rounded-lg border border-sky-100 bg-white p-2 shadow-sm"
-                              >
-                                <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-sky-800">
-                                      {noteSuggestionLabel(String(suggestion.section || 'history'))}
-                                    </span>
-                                    {suggestion.applied ? (
-                                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Applied</span>
-                                    ) : null}
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => applyTranscriptSuggestion(suggestion)}
-                                    disabled={!!suggestion.applied}
-                                    className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    {suggestion.applied ? 'Added' : 'Append to SOAP'}
-                                  </button>
-                                </div>
-                                <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
-                                  {suggestion.suggestedText}
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
 
                       <div className="mb-2 border rounded bg-white">
                         <div className="flex items-center justify-between px-2 py-1">
@@ -2884,8 +2849,12 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                                   </li>
                                 ))}
                               </ul>
+                            ) : medsError || patientMeds === null ? (
+                              <div className="rounded border border-amber-200 bg-amber-50 px-2 py-2 text-sm text-amber-900">
+                                Medication information is unavailable. Do not interpret this as “no medications”.
+                              </div>
                             ) : currentMedsList.length === 0 ? (
-                              <div className="text-sm text-gray-600 italic">No medications recorded yet.</div>
+                              <div className="text-sm text-gray-600 italic">No medications recorded in the verified feed.</div>
                             ) : (
                               <ul className="list-disc pl-5 text-sm text-gray-800">
                                 {currentMedsList.map((m, i) => (
@@ -3049,6 +3018,72 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                         )}
                       </div>
 
+                      <div className="mt-4 rounded-xl border border-sky-100 bg-sky-50/70 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div>
+                            <div className="text-xs font-semibold text-sky-900">Transcript-assisted note draft</div>
+                            <div className="mt-0.5 text-[11px] leading-relaxed text-sky-700">
+                              Uses persisted final transcript segments when transcription is available. Captions/Overlay only affect display; muted or unpublished audio cannot be captured. Nothing is added to the clinical record until you review and append it.
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={generateTranscriptNoteDraft}
+                            disabled={transcriptDraftLoading || !encounterId}
+                            className="rounded-full border border-sky-200 bg-white px-3 py-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+                            title="Generate note suggestions from transcript"
+                          >
+                            {transcriptDraftLoading ? 'Reviewing...' : 'Generate note suggestions from transcript'}
+                          </button>
+                        </div>
+
+                        <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-sky-700">
+                          <span className="rounded-full bg-white/80 px-2 py-0.5">Local live segments: {captionTranscript.length}</span>
+                          <span className="rounded-full bg-white/80 px-2 py-0.5">Mode: review required</span>
+                          <span className="rounded-full bg-white/80 px-2 py-0.5">Action: append only</span>
+                          <span className="rounded-full bg-white/80 px-2 py-0.5">Position: review after core notes</span>
+                        </div>
+
+                        {transcriptDraftError ? (
+                          <div className="mt-2 rounded border border-rose-200 bg-rose-50 px-2 py-1 text-xs text-rose-700">
+                            {transcriptDraftError}
+                          </div>
+                        ) : null}
+
+                        {transcriptNoteSuggestions.length > 0 ? (
+                          <div className="mt-3 space-y-2">
+                            {transcriptNoteSuggestions.map((suggestion) => (
+                              <div
+                                key={suggestion.id}
+                                className="rounded-lg border border-sky-100 bg-white p-2 shadow-sm"
+                              >
+                                <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <span className="rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-sky-800">
+                                      {noteSuggestionLabel(String(suggestion.section || 'history'))}
+                                    </span>
+                                    {suggestion.applied ? (
+                                      <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700">Applied</span>
+                                    ) : null}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => applyTranscriptSuggestion(suggestion)}
+                                    disabled={!!suggestion.applied}
+                                    className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    {suggestion.applied ? 'Added' : 'Append to SOAP'}
+                                  </button>
+                                </div>
+                                <div className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700">
+                                  {suggestion.suggestedText}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+
                     </Card>
                   )}
 
@@ -3063,6 +3098,10 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                       clinicianId={clinicianIdParam}
                       patientAllergies={patientAllergies}
                       allergiesFromLive={allergiesFromLive}
+                      allergyContextAvailable={
+                        isSimulationSession ||
+                        (contextStatus === 'ready' && !allergiesError && patientAllergies !== null)
+                      }
                       simulation={isSimulationSession}
                       currentMedicationNames={activeMeds
                         .map((med: any) =>
@@ -3121,6 +3160,10 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                       profile={profile}
                       appt={{ reason: appt.reason, clinicianName: appt.clinicianName, patientName: appt.patientName }}
                       patientAllergies={patientAllergies}
+                      patientMeds={patientMeds}
+                      clinicalContext={clinicalContext}
+                      contextStatus={contextStatus}
+                      contextError={contextError}
                       onChangeSoap={(next) => setSoap(next)}
                       onChangePatientEducation={setPatientEducation}
                       onToast={pushToast}
@@ -3134,15 +3177,11 @@ const detachRoomEventsRef = useRef<null | (() => void)>(null);
                         Longitudinal view of the patient: cases, chronic conditions, medications, allergies, labs,
                         vaccinations and procedures.
                       </div>
-                      <div className="space-y-3">
-                        <CasesHistory patientId={profile.id} defaultOpen />
-                        <ConditionsHistory patientId={profile.id} defaultOpen />
-                        <MedicationsHistory patientId={profile.id} defaultOpen />
-                        <AllergiesHistory patientId={profile.id} />
-                        <LabsHistory patientId={profile.id} />
-                        <OperationsHistory patientId={profile.id} />
-                        <VaccinationsHistory patientId={profile.id} />
-                      </div>
+                      <LongitudinalHistory
+                        context={clinicalContext}
+                        status={contextStatus}
+                        error={contextError}
+                      />
                     </Card>
                   )}
                 </>
